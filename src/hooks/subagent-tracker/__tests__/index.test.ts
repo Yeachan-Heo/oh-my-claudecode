@@ -1529,5 +1529,142 @@ describe("subagent-tracker", () => {
       expect(agent?.status).toBe("failed");
       expect(agent?.worktree_evidence?.kind).toBe("not_git");
     });
+
+    it("derives lifecycle success from abnormal classification across all surfaces (issue #3663 B2)", () => {
+      // B2: output-marker-inferred abnormal termination (SDK omits `success`)
+      // must mark failed EVERYWHERE: tracking status + counters, replay
+      // agent_stop success, and mission board — not just record evidence.
+      const repoDir = makeGitRepo();
+      writeFileSync(join(repoDir, "tracked.txt"), "modified\n");
+
+      processSubagentStart({
+        session_id: "sess-b2-marker",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-b2-marker",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "stall mid-stream",
+      });
+      flushPendingWrites();
+
+      processSubagentStop({
+        session_id: "sess-b2-marker",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-b2-marker",
+        // No `success` field: the SDK omits it on API-error terminations.
+        output: "API Error: Response stalled mid-stream",
+      });
+      flushPendingWrites();
+
+      const state = readTrackingState(repoDir, "sess-b2-marker");
+      const agent = state.agents.find((a) => a.agent_id === "ag-b2-marker");
+      // Tracking status + counters derive from the same classification.
+      expect(agent?.status).toBe("failed");
+      expect(state.total_failed).toBe(1);
+      expect(state.total_completed).toBe(0);
+
+      // Replay surface carries the same failure.
+      const replayStop = readReplayEvents(repoDir, "sess-b2-marker").find(
+        (e) => e.event === "agent_stop" && e.agent === "ag-b2-marker".substring(0, 7),
+      );
+      expect(replayStop?.success).toBe(false);
+      expect(getReplaySummary(repoDir, "sess-b2-marker").agents_failed).toBe(1);
+      expect(getReplaySummary(repoDir, "sess-b2-marker").dirty_worktrees).toBe(1);
+
+      // Mission board reflects the failure too.
+      const mission = readMissionBoardState(repoDir, "sess-b2-marker")?.missions.find((m) =>
+        m.id.startsWith("session:sess-b2-marker:"),
+      );
+      const missionAgent = mission?.agents.find((a) => a.ownership === "ag-b2-marker");
+      expect(missionAgent?.status).toBe("blocked");
+      expect(mission?.taskCounts.failed).toBe(0); // mission failed is derived from blocked status
+    });
+
+    it("clears stale dirty-worktree evidence on agent-id reuse to running (issue #3663 B4)", () => {
+      // B4: a reused agent ID must not retain dirty evidence from a previous
+      // abnormal termination. After restart, a NORMAL stop must not surface
+      // stale dirty state/counts.
+      const repoDir = makeGitRepo();
+      writeFileSync(join(repoDir, "tracked.txt"), "modified\n");
+
+      processSubagentStart({
+        session_id: "sess-b4-reuse",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-reused-1",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "first run",
+      });
+      flushPendingWrites();
+
+      // Abnormal termination leaves dirty evidence on the closed entry.
+      processSubagentStop({
+        session_id: "sess-b4-reuse",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-reused-1",
+        output: "Agent terminated early due to an API error",
+        success: false,
+      });
+      flushPendingWrites();
+      expect(
+        readTrackingState(repoDir, "sess-b4-reuse").agents.find((a) => a.agent_id === "ag-reused-1")
+          ?.worktree_evidence?.kind,
+      ).toBe("dirty");
+
+      // Clean the worktree, then restart the SAME agent id.
+      writeFileSync(join(repoDir, "tracked.txt"), "seed\n");
+      git(repoDir, ["checkout", "--", "tracked.txt"]);
+      processSubagentStart({
+        session_id: "sess-b4-reuse",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStart" as const,
+        agent_id: "ag-reused-1",
+        agent_type: "oh-my-claudecode:executor",
+        prompt: "second run",
+      });
+      flushPendingWrites();
+      expect(
+        readTrackingState(repoDir, "sess-b4-reuse").agents.find((a) => a.agent_id === "ag-reused-1")
+          ?.worktree_evidence,
+      ).toBeUndefined();
+
+      // Normal stop after restart: no stale evidence, no dirty count.
+      processSubagentStop({
+        session_id: "sess-b4-reuse",
+        transcript_path: join(repoDir, "transcript.jsonl"),
+        cwd: repoDir,
+        permission_mode: "default",
+        hook_event_name: "SubagentStop" as const,
+        agent_id: "ag-reused-1",
+        output: "completed normally",
+      });
+      flushPendingWrites();
+
+      const state = readTrackingState(repoDir, "sess-b4-reuse");
+      const agent = state.agents.find((a) => a.agent_id === "ag-reused-1");
+      expect(agent?.status).toBe("completed");
+      expect(agent?.worktree_evidence).toBeUndefined();
+      expect(state.total_failed).toBe(1); // from the first abnormal lifecycle
+      expect(state.total_completed).toBe(1); // from the second normal lifecycle
+      expect(getReplaySummary(repoDir, "sess-b4-reuse").dirty_worktrees).toBe(1);
+      const replayStops = readReplayEvents(repoDir, "sess-b4-reuse").filter(
+        (e) => e.event === "agent_stop" && e.agent === "ag-reused-1".substring(0, 7),
+      );
+      expect(replayStops).toHaveLength(2);
+      // The normal stop carries NO dirty evidence.
+      expect(replayStops[1].dirty_worktree).toBeUndefined();
+    });
   });
 });

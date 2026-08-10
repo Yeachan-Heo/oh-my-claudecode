@@ -140,6 +140,27 @@ describe('session-replay', () => {
       expect(summary.files_touched).toContain('src/test.ts');
     });
 
+    it('counts dirty worktrees for synthetic/unmatched stops too (issue #3663 B3)', () => {
+      // B3: a synthetic native-fork stop that carried dirty-worktree evidence
+      // must increment the dirty counter even though it is excluded from
+      // completed/failed counters.
+      appendReplayEvent(testDir, 'synthetic-dirty', {
+        agent: 'native-',
+        event: 'agent_stop',
+        agent_type: 'untracked-native-fork',
+        success: true,
+        synthetic: true,
+        telemetry_status: 'unmatched_stop',
+        dirty_worktree: { tracked: 2, untracked: 1, ignored: 0, worktree_root: '/tmp/wt', truncated: false },
+      });
+
+      const summary = getReplaySummary(testDir, 'synthetic-dirty');
+      expect(summary.agents_untracked_stops).toBe(1);
+      expect(summary.agents_completed).toBe(0);
+      expect(summary.agents_failed).toBe(0);
+      expect(summary.dirty_worktrees).toBe(1);
+    });
+
     it('should detect bottlenecks', () => {
       // Create events with slow tool
       appendReplayEvent(testDir, 'bottleneck-test', { agent: 'a1', event: 'tool_end', tool: 'Bash', duration_ms: 5000 });

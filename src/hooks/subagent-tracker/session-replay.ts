@@ -408,15 +408,20 @@ export function getReplaySummary(directory: string, sessionId: string): ReplaySu
         }
         break;
       case 'agent_stop':
+        // B2 (#3663): a dirty worktree implies an abnormal stop by
+        // construction (dirty evidence is only attached to abnormal
+        // terminations), so a synthetic/unmatched stop carrying dirty
+        // evidence must still count toward dirty_worktrees even though it is
+        // excluded from completed/failed counters.
+        if (event.dirty_worktree) {
+          summary.dirty_worktrees = (summary.dirty_worktrees || 0) + 1;
+        }
         if (event.synthetic || event.telemetry_status === 'unmatched_stop') {
           summary.agents_untracked_stops = (summary.agents_untracked_stops || 0) + 1;
           break;
         }
         if (event.success) summary.agents_completed++;
         else summary.agents_failed++;
-        if (event.dirty_worktree) {
-          summary.dirty_worktrees = (summary.dirty_worktrees || 0) + 1;
-        }
         if (event.agent_type && event.duration_ms) {
           const stats = agentTypeStats.get(event.agent_type);
           if (stats) stats.total_ms += event.duration_ms;

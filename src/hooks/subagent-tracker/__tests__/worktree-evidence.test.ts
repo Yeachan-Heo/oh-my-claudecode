@@ -106,6 +106,29 @@ describe("collectWorktreeDirtyEvidence", () => {
     expect(evidence.ignoredCount).toBe(1);
   });
 
+  it("enumerates nested untracked directories with --untracked-files=all (issue #3663 B1)", () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    // `git status --porcelain` (without --untracked-files=all) collapses a
+    // nested untracked directory to a single "dir/" line. The collector must
+    // enumerate every file so the counts and bounded entries reflect the real
+    // at-risk work.
+    const nested = join(repo, "src", "deep", "nested");
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(join(nested, "a.ts"), "a\n");
+    writeFileSync(join(nested, "b.ts"), "b\n");
+    writeFileSync(join(nested, "c.ts"), "c\n");
+
+    const evidence = collectWorktreeDirtyEvidence(repo);
+    expect(evidence.kind).toBe("dirty");
+    expect(evidence.untrackedCount).toBe(3);
+    expect(evidence.trackedCount).toBe(0);
+    expect(evidence.entries).toContain("src/deep/nested/a.ts");
+    expect(evidence.entries).toContain("src/deep/nested/b.ts");
+    expect(evidence.entries).toContain("src/deep/nested/c.ts");
+    expect(evidence.truncated).toBe(false);
+  });
+
   it("combines tracked, untracked, and ignored counts", () => {
     const repo = makeTempDir();
     initRepo(repo);
@@ -182,6 +205,26 @@ describe("collectWorktreeDirtyEvidence", () => {
     expect(evidence.truncated).toBe(true);
   });
 
+  it("bounds hundreds of nested untracked files with truncation (issue #3663 B1)", () => {
+    const repo = makeTempDir();
+    initRepo(repo);
+    // With --untracked-files=all every nested file is enumerated; hundreds of
+    // them must be counted fully but only the bounded prefix kept as entries.
+    for (let d = 0; d < 12; d++) {
+      const dir = join(repo, "deep", `d${d}`);
+      mkdirSync(dir, { recursive: true });
+      for (let f = 0; f < 30; f++) {
+        writeFileSync(join(dir, `f${f}.txt`), `content\n`);
+      }
+    }
+
+    const evidence = collectWorktreeDirtyEvidence(repo);
+    expect(evidence.kind).toBe("dirty");
+    expect(evidence.untrackedCount).toBe(360);
+    expect(evidence.entries.length).toBe(MAX_EVIDENCE_ENTRIES);
+    expect(evidence.truncated).toBe(true);
+  });
+
   it("never mutates the repository while collecting evidence", () => {
     const repo = makeTempDir();
     initRepo(repo);
@@ -207,6 +250,34 @@ describe("collectWorktreeDirtyEvidence", () => {
     expect(() =>
       collectWorktreeDirtyEvidence(repo, { gitCommand: "/nonexistent/git" }),
     ).not.toThrow();
+  });
+
+  it("respects a shared bounded git deadline (issue #3663 B5)", () => {
+    // B5: the total git wall-time must be capped by the shared deadline even
+    // when a single git call would otherwise run far longer. Use a
+    // script-provided fake git that sleeps longer than the tiny deadline; the
+    // collector must degrade fail-open to git_unavailable instead of throwing
+    // or overrunning.
+    const repo = makeTempDir();
+    initRepo(repo);
+    const fakeGit = join(repo, "slow-git.sh");
+    writeFileSync(
+      fakeGit,
+      `#!/bin/sh\nsleep 2\nexit 1\n`,
+      { mode: 0o755 },
+    );
+
+    const startedAt = Date.now();
+    const evidence = collectWorktreeDirtyEvidence(repo, {
+      gitCommand: fakeGit,
+      timeoutMs: 2000,
+      deadlineMs: 120,
+    });
+    const elapsed = Date.now() - startedAt;
+
+    expect(evidence.kind).toBe("git_unavailable");
+    expect(elapsed).toBeLessThan(1500);
+    expect(() => evidence).not.toThrow();
   });
 });
 

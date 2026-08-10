@@ -12,6 +12,9 @@
  * Safety contract:
  *  - READ-ONLY: never stages, commits, stashes, resets, or removes anything.
  *  - BOUNDED: path lists are capped and file CONTENT is never read or emitted.
+ *  - BUDGETED: total git wall-time is capped by a shared bounded deadline
+ *    (EVIDENCE_DEADLINE_MS) well below the SubagentStop hook timeout so durable
+ *    state writes can never be starved by evidence collection (issue #3663 B5).
  *  - FAIL-CLOSED: any git failure degrades to a structured non-dirty kind and
  *    never throws out of the hook boundary.
  *  - NO AUTO-COMMIT: checkpointing agent work is deliberately left to the
@@ -27,6 +30,17 @@ import { join } from "node:path";
 export const MAX_EVIDENCE_ENTRIES = 20;
 export const GIT_TIMEOUT_MS = 2500;
 export const MAX_EVIDENCE_PATH_LENGTH = 200;
+/**
+ * Shared bounded deadline for ALL evidence-collection git work (issue #3663
+ * B5). The SubagentStop hook is declared at 5s in hooks/hooks.json; run.cjs
+ * enforces a 500ms cushion and kills the child fail-open at that boundary, so
+ * any durable state write after evidence collection would be lost. Keep the
+ * total collector budget comfortably below the hook budget: 4s across every
+ * git call leaves ~600ms for the state lock/write/replay to complete before
+ * the 4.5s runner deadline, while preserving the fail-open design (a timeout
+ * degrades to a non-dirty evidence kind, never a thrown hook).
+ */
+export const EVIDENCE_DEADLINE_MS = 4000;
 
 /** Kinds of evidence a stop hook can produce (never throws). */
 export type WorktreeEvidenceKind =
@@ -61,6 +75,8 @@ export interface WorktreeEvidenceOptions {
   gitCommand?: string;
   /** Per-call git timeout in ms (test seam). Defaults to GIT_TIMEOUT_MS. */
   timeoutMs?: number;
+  /** Total budget in ms for ALL git work (test seam). Defaults to EVIDENCE_DEADLINE_MS. */
+  deadlineMs?: number;
 }
 
 /** Markers of abnormal agent termination inside a stop `output` summary. */
@@ -91,12 +107,18 @@ function runGit(
   cwd: string,
   args: string[],
   opts: WorktreeEvidenceOptions,
+  remainingMs: number,
 ): string {
   const git = opts.gitCommand || "git";
-  const timeoutMs = opts.timeoutMs ?? GIT_TIMEOUT_MS;
+  const timeoutMs = Math.max(
+    1,
+    Math.min(opts.timeoutMs ?? GIT_TIMEOUT_MS, remainingMs),
+  );
   // GIT_TERMINAL_PROMPT=0 prevents credential prompts from hanging the hook;
   // GIT_OPTIONAL_LOCKS=0 keeps `git status` from taking optional index locks
-  // (read-only, no contention with a concurrent coordinator).
+  // (read-only, no contention with a concurrent coordinator). The per-call
+  // timeout is clamped to the remaining shared deadline so the SUM of all git
+  // calls can never exceed the collector budget (issue #3663 B5).
   return execFileSync(git, args, {
     cwd,
     encoding: "utf-8",
@@ -151,12 +173,19 @@ const empty = (): WorktreeDirtyEvidence => ({
 
 /**
  * Collect bounded dirty-worktree evidence for a directory. READ-ONLY and
- * fail-closed: never throws, never mutates the repository.
+ * fail-closed: never throws, never mutates the repository. Total git wall-time
+ * is capped by the shared EVIDENCE_DEADLINE_MS budget (issue #3663 B5) so
+ * durable state writes after collection can never be starved by the collector.
  */
 export function collectWorktreeDirtyEvidence(
   cwd: string,
   opts: WorktreeEvidenceOptions = {},
 ): WorktreeDirtyEvidence {
+  const startedAt = Date.now();
+  const deadlineMs = opts.deadlineMs ?? EVIDENCE_DEADLINE_MS;
+  const remaining = (): number =>
+    Math.max(0, deadlineMs - (Date.now() - startedAt));
+
   try {
     if (!existsSync(cwd)) {
       return { ...empty(), kind: "cwd_missing", error: "cwd_missing" };
@@ -164,7 +193,7 @@ export function collectWorktreeDirtyEvidence(
 
     let toplevel: string;
     try {
-      toplevel = runGit(cwd, ["rev-parse", "--show-toplevel"], opts).trim();
+      toplevel = runGit(cwd, ["rev-parse", "--show-toplevel"], opts, remaining()).trim();
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code === "ENOENT") {
@@ -174,7 +203,15 @@ export function collectWorktreeDirtyEvidence(
           error: `git_unavailable:${String(code)}`,
         };
       }
-      return { ...empty(), kind: "not_git", error: "not_git" };
+      // ETIMEDOUT means the shared bounded deadline (B5) fired — git is
+      // present but the budget was exhausted; never misreport that as a
+      // non-repository directory.
+      const isTimeout = code === "ETIMEDOUT";
+      return {
+        ...empty(),
+        kind: isTimeout ? "git_unavailable" : "not_git",
+        error: isTimeout ? "git_unavailable:deadline" : "not_git",
+      };
     }
     if (!toplevel) return { ...empty(), kind: "not_git", error: "not_git" };
 
@@ -182,11 +219,19 @@ export function collectWorktreeDirtyEvidence(
 
     // Two bounded read-only calls: regular status (tracked+untracked) and
     // ignored status (informational — ignored files are not at-risk work).
-    const status = runGit(toplevel, ["status", "--porcelain"], opts);
+    // Each call's timeout is clamped to the remaining shared deadline so the
+    // sum of every git call stays under EVIDENCE_DEADLINE_MS.
+    const status = runGit(
+      toplevel,
+      ["status", "--porcelain", "--untracked-files=all"],
+      opts,
+      remaining(),
+    );
     const ignoredStatus = runGit(
       toplevel,
       ["status", "--porcelain", "--ignored=matching"],
       opts,
+      remaining(),
     );
 
     const tracked: string[] = [];
