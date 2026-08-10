@@ -612,6 +612,111 @@ OMC Ultrawork = "특수부대 작전 반"
       for (const scriptPath of [templatePath, pluginPath]) {
         expect(contextOf(runIn(scriptPath, `ralph-multi-disabled-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'))).not.toContain('ralph-loop');
       }
+
+      // Q. Plugin enablement is resolved across Claude Code settings scopes, not
+      //    just the user config: project `.claude/settings.json` and
+      //    `.claude/settings.local.json` override the user scope.
+      const projectSettingsPath = join(projectDir, '.claude', 'settings.json');
+      const projectLocalSettingsPath = join(projectDir, '.claude', 'settings.local.json');
+      const writeProjectSettings = (path: string, content: unknown) => {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify(content, null, 2));
+      };
+      writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+
+      // Q1. Project scope disables what the user scope enables -> silent, on both
+      //     the single-skill and the multi-skill path.
+      writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-proj-off-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+        expect(contextOf(runIn(scriptPath, `ralph-proj-off-multi-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'))).not.toContain('ralph-loop');
+      }
+
+      // Q2. `.claude/settings.local.json` outranks `.claude/settings.json`.
+      writeProjectSettings(projectLocalSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-proj-local-on-${basename(scriptPath)}`))).toContain('ralph-loop');
+      }
+      rmSync(projectLocalSettingsPath, { force: true });
+
+      // Q3. Project-only enablement is honored even when the user scope is absent.
+      rmSync(settingsPath, { force: true });
+      writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-proj-only-${basename(scriptPath)}`))).toContain('ralph-loop');
+      }
+
+      // Q4. A project scope that never mentions the plugin is transparent: the
+      //     user scope still decides.
+      writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+      writeProjectSettings(projectSettingsPath, { permissions: { allow: [] } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-proj-silent-${basename(scriptPath)}`))).toContain('ralph-loop');
+      }
+
+      // Q5. Malformed project settings fail closed.
+      mkdirSync(dirname(projectSettingsPath), { recursive: true });
+      writeFileSync(projectSettingsPath, '{ not json');
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-proj-malformed-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+      rmSync(projectSettingsPath, { force: true });
+
+      // Q6. Privacy: an enabled project scope produces the notice without ever
+      //     echoing settings paths or settings content into the context.
+      writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const context = contextOf(runIn(scriptPath, `ralph-proj-privacy-${basename(scriptPath)}`));
+        expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+        expect(context).not.toContain('enabledPlugins');
+        expect(context).not.toContain('settings.local.json');
+        expect(context).not.toContain(projectSettingsPath);
+        expect(context).not.toContain(registryPath);
+      }
+      rmSync(projectSettingsPath, { force: true });
+
+      // Q7. Path safety: the payload cwd is caller-supplied, so only an absolute
+      //     path may be used as a project root. A relative fragment must never be
+      //     joined onto the hook process cwd to read settings from an arbitrary
+      //     directory.
+      const sandboxCwd = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-sandbox-'));
+      try {
+        writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+        writeProjectSettings(
+          join(sandboxCwd, 'evil', '.claude', 'settings.json'),
+          { enabledPlugins: { 'ralph-loop@claude-plugins-official': false } },
+        );
+        const runFromSandbox = (scriptPath: string, sessionId: string, payloadCwd: string) => JSON.parse(
+          execFileSync('node', [scriptPath], {
+            cwd: sandboxCwd,
+            env: {
+              ...process.env,
+              HOME: fakeHome,
+              XDG_CONFIG_HOME: join(fakeHome, '.xdg'),
+              CLAUDE_CONFIG_DIR: configDir,
+            },
+            input: JSON.stringify({
+              prompt: '/ralph fix the parser',
+              cwd: payloadCwd,
+              directory: payloadCwd,
+              session_id: sessionId,
+            }),
+            encoding: 'utf-8',
+          }),
+        ) as { hookSpecificOutput?: { additionalContext?: string } };
+
+        for (const scriptPath of [templatePath, pluginPath]) {
+          // Relative payload cwd is rejected -> the user scope still decides.
+          expect(contextOf(runFromSandbox(scriptPath, `ralph-relcwd-${basename(scriptPath)}`, 'evil'))).toContain('ralph-loop');
+          // Traversal fragments are equally rejected.
+          expect(contextOf(runFromSandbox(scriptPath, `ralph-traversal-${basename(scriptPath)}`, join('..', basename(sandboxCwd), 'evil')))).toContain('ralph-loop');
+          // Control: the very same directory as an absolute path IS honored,
+          // proving the assertions above are not vacuous.
+          expect(contextOf(runFromSandbox(scriptPath, `ralph-abscwd-${basename(scriptPath)}`, join(sandboxCwd, 'evil')))).not.toContain('ralph-loop');
+        }
+      } finally {
+        rmSync(sandboxCwd, { recursive: true, force: true });
+      }
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });

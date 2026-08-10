@@ -44,11 +44,21 @@ installer's `hasEnabledOmcPlugin` semantics (`src/installer/index.ts`):
    The registry's own `enabled` flag is **deliberately not consulted**: it does
    not authoritatively encode enablement (a plugin disabled through canonical
    settings can still carry `enabled: true`, and vice versa).
-2. **ENABLED** — `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` lists the plugin
-   in the canonical `enabledPlugins` field (legacy `plugins` field accepted for
-   backward compatibility), either as an array of plugin ids or as a map whose
-   value is not `false`. Missing, malformed, or field-less settings.json is
-   treated as **not enabled**, exactly like the installer.
+2. **ENABLED** — the effective Claude Code settings for the *active project*
+   enable the plugin. Scopes are consulted highest-precedence-first, exactly as
+   Claude Code resolves settings: `<project>/.claude/settings.local.json`,
+   `<project>/.claude/settings.json`, then
+   `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json`. The first scope that mentions
+   the official id decides; scopes that never mention it are transparent. Within
+   a file, the canonical `enabledPlugins` field decides (legacy `plugins` field
+   accepted for backward compatibility), either as an array of plugin ids or as
+   a map whose value is not `false`. Missing, malformed, or field-less settings
+   are treated as **not enabled**, exactly like the installer.
+
+   The project root comes from the hook payload's `cwd`/`directory`, which is
+   caller-supplied: only an absolute path is accepted, so a relative or
+   traversal fragment can never be joined onto the hook process cwd to read
+   settings from an arbitrary directory (it falls back to the hook's own cwd).
 
 Never open any SKILL.md / command body / payload — the only file-existence
 probe is `existsSync` on `commands/ralph-loop.md`.
@@ -97,9 +107,17 @@ today.
   | P. multi-skill routing (`/ralph ultrawork`) | notice present (no multi-skill bypass) |
   | P2. multi-skill routing without ralph | silent |
   | P3. multi-skill routing, official disabled | silent |
+  | Q1. project `.claude/settings.json` disables, user enables | silent (project wins, single + multi-skill) |
+  | Q2. project `settings.local.json` enables, project `settings.json` disables | notice present (local wins) |
+  | Q3. project enables, user scope absent | notice present |
+  | Q4. project scope never mentions the plugin | user scope still decides |
+  | Q5. malformed project settings | silent (fail closed) |
+  | Q6. privacy: notice carries no settings path or settings content | notice present, no path/field leakage |
+  | Q7. relative / traversal payload cwd | ignored (absolute-only), same dir as absolute path IS honored |
 - `/ralph` routing and the full invocation text are unchanged except the note.
 - Suites: `hook-templates.test.ts` 18/18, `keyword-detector-script.test.ts`
-  53/53, `skills.test.ts` 53/53, `npm run lint` (0 errors) + `tsc --noEmit` clean.
+  101/101, `src/installer/__tests__` + keyword-detector suites 411/411,
+  `npm run lint` (0 errors) + `tsc --noEmit` clean.
 
 ## Option comparison: notice (implemented) vs rename/alias
 

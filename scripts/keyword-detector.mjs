@@ -24,7 +24,7 @@
  */
 
 import { writeFileSync, readFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
@@ -1290,11 +1290,14 @@ function isTeamEnabled() {
  *    own `enabled` flag is deliberately NOT consulted: it does not
  *    authoritatively encode enablement (a plugin disabled through canonical
  *    settings can still carry `enabled: true`, and vice versa).
- * 2. ENABLED: `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json` lists the
- *    plugin in the canonical `enabledPlugins` field (legacy `plugins` field
- *    accepted for backward compatibility), as an array of plugin ids or a
- *    map whose value is not `false`. Missing or malformed settings.json is
- *    treated as not enabled, exactly like the installer.
+ * 2. ENABLED: the official id is enabled by the effective Claude Code settings
+ *    for the active project, resolved highest-precedence-first across
+ *    `<project>/.claude/settings.local.json`, `<project>/.claude/settings.json`
+ *    and `[$CLAUDE_CONFIG_DIR|~/.claude]/settings.json`. Within a file the
+ *    canonical `enabledPlugins` field decides (legacy `plugins` field accepted
+ *    for backward compatibility), as an array of plugin ids or a map whose
+ *    value is not `false`. Missing or malformed settings are treated as not
+ *    enabled, exactly like the installer.
  *
  * Both signals match the FULL plugin id exactly, marketplace suffix included.
  * The suffix is never stripped, so a same-named community plugin
@@ -1330,31 +1333,59 @@ function officialRalphLoopEnablementIn(field) {
   return null;
 }
 
-function isOfficialRalphLoopEnabledInSettings(settings) {
-  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return false;
+function officialRalphLoopEnablementInSettings(settings) {
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return null;
   // Canonical `enabledPlugins` wins outright when it mentions the official id;
   // the legacy `plugins` field only decides when canonical is silent about it.
   for (const field of [settings.enabledPlugins, settings.plugins]) {
     const verdict = officialRalphLoopEnablementIn(field);
     if (verdict !== null) return verdict;
   }
+  return null;
+}
+
+/**
+ * A hook payload's cwd is caller-supplied. Only an absolute path is a usable
+ * project root; anything else would silently resolve a caller-controlled
+ * fragment against the hook process cwd, so it is rejected in favour of the
+ * hook's own cwd.
+ */
+function resolveSettingsProjectRoot(directory) {
+  return typeof directory === 'string' && directory.length > 0 && isAbsolute(directory)
+    ? directory
+    : process.cwd();
+}
+
+/**
+ * Claude Code resolves `enabledPlugins` across settings scopes, so a project may
+ * enable a plugin the user scope never mentions, or disable one the user scope
+ * enables. Highest precedence first; the first scope that mentions the official
+ * id decides, scopes that never mention it are transparent, and a malformed
+ * file fails closed (no notice).
+ */
+function isOfficialRalphLoopEnabledForProject(directory) {
+  const projectRoot = resolveSettingsProjectRoot(directory);
+  const settingsPaths = [
+    join(projectRoot, '.claude', 'settings.local.json'),
+    join(projectRoot, '.claude', 'settings.json'),
+    join(getClaudeConfigDir(), 'settings.json'),
+  ];
+  for (const settingsPath of settingsPaths) {
+    if (!existsSync(settingsPath)) continue;
+    let settings;
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+    } catch {
+      return false;
+    }
+    const verdict = officialRalphLoopEnablementInSettings(settings);
+    if (verdict !== null) return verdict;
+  }
   return false;
 }
 
-function isOfficialRalphLoopEnabledInSettingsFile() {
-  const settingsPath = join(getClaudeConfigDir(), 'settings.json');
-  if (!existsSync(settingsPath)) return false;
-  let settings;
-  try {
-    settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-  } catch {
-    return false;
-  }
-  return isOfficialRalphLoopEnabledInSettings(settings);
-}
-
-function findOfficialRalphLoopNotice() {
-  if (!isOfficialRalphLoopEnabledInSettingsFile()) {
+function findOfficialRalphLoopNotice(directory) {
+  if (!isOfficialRalphLoopEnabledForProject(directory)) {
     return '';
   }
 
@@ -1510,14 +1541,14 @@ function loadDisabledKeywords(directory) {
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
-function createSkillInvocation(skillName, originalPrompt, args = '') {
+function createSkillInvocation(skillName, originalPrompt, args = '', directory = '') {
   const argsSection = args ? `
 Arguments: ${args}` : '';
   const skillPath = resolveSkillPath(skillName);
   const pathStatus = existsSync(skillPath)
     ? `Read fallback: open ${skillPath} and follow its SKILL.md instructions.`
     : `Read fallback: locate skills/${skillName}/SKILL.md in the active oh-my-claudecode plugin/install and follow it.`;
-  const ralphLoopNotice = skillName === 'ralph' ? findOfficialRalphLoopNotice() : '';
+  const ralphLoopNotice = skillName === 'ralph' ? findOfficialRalphLoopNotice(directory) : '';
 
   return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]
 
@@ -1536,10 +1567,10 @@ IMPORTANT: Start the ${skillName} workflow immediately. If the slash invocation 
 /**
  * Create multi-skill invocation message for combined keywords
  */
-function createMultiSkillInvocation(skills, originalPrompt) {
+function createMultiSkillInvocation(skills, originalPrompt, directory = '') {
   if (skills.length === 0) return '';
   if (skills.length === 1) {
-    return createSkillInvocation(skills[0].name, originalPrompt, skills[0].args);
+    return createSkillInvocation(skills[0].name, originalPrompt, skills[0].args, directory);
   }
 
   const skillBlocks = skills.map((s, i) => {
@@ -1555,7 +1586,7 @@ ${pathStatus}`;
   // Multi-skill routing (e.g. `/ralph ultrawork`) must carry the same
   // disambiguation notice as the single-skill path, or it becomes a bypass.
   const ralphLoopNotice = skills.some((s) => s.name === 'ralph')
-    ? findOfficialRalphLoopNotice()
+    ? findOfficialRalphLoopNotice(directory)
     : '';
 
   return `[MAGIC KEYWORDS DETECTED: ${skills.map(s => s.name.toUpperCase()).join(', ')}]
@@ -1570,18 +1601,6 @@ User request (compact echo; original prompt remains authoritative):
 ${compactHookText(originalPrompt)}
 
 IMPORTANT: Complete ALL skills listed above in order. Start with the first skill IMMEDIATELY.`;
-}
-
-/**
- * Create combined output for multiple skill matches
- */
-function createCombinedOutput(skillMatches, originalPrompt) {
-  const parts = [];
-  if (skillMatches.length > 0) {
-    parts.push('## Section 1: Skill Invocations\n\n' + createMultiSkillInvocation(skillMatches, originalPrompt));
-  }
-  const allNames = skillMatches.map(m => m.name.toUpperCase());
-  return `[MAGIC KEYWORDS DETECTED: ${allNames.join(', ')}]\n\n${parts.join('\n\n---\n\n')}\n\nIMPORTANT: Complete ALL sections above in order.`;
 }
 
 /**
@@ -1707,7 +1726,7 @@ async function main() {
         `[RALPLAN INIT]\n` +
         `Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
         `ralplan state has been initialized immediately and marked awaiting confirmation so the stop hook will not block this startup path.\n\n` +
-        createSkillInvocation('ralplan', prompt)
+        createSkillInvocation('ralplan', prompt, '', directory)
       )));
       return;
     }
@@ -1891,11 +1910,11 @@ async function main() {
         });
 
         if (isTeamFollowup) {
-          console.log(JSON.stringify(createHookOutput(createSkillInvocation('team', prompt))));
+          console.log(JSON.stringify(createHookOutput(createSkillInvocation('team', prompt, '', directory))));
           return;
         }
         if (isRalphFollowup) {
-          console.log(JSON.stringify(createHookOutput(createSkillInvocation('ralph', prompt))));
+          console.log(JSON.stringify(createHookOutput(createSkillInvocation('ralph', prompt, '', directory))));
           return;
         }
 
@@ -1929,7 +1948,7 @@ async function main() {
 
     // Route cancellation without mutating state; the cancel workflow commits the primary mode first.
     if (resolved.length > 0 && resolved[0].name === 'cancel') {
-      console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt))));
+      console.log(JSON.stringify(createHookOutput(createSkillInvocation('cancel', prompt, '', directory))));
       return;
     }
 
@@ -1972,7 +1991,7 @@ async function main() {
     }
 
     if (resolved.length > 0) {
-      additionalContextParts.push(createMultiSkillInvocation(resolved, prompt));
+      additionalContextParts.push(createMultiSkillInvocation(resolved, prompt, directory));
     }
 
     if (additionalContextParts.length > 0) {
