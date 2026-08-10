@@ -180,8 +180,9 @@ const SKILL_AGENT_NAMESPACE_PREFIXES = ['oh-my-claudecode:', 'omc:'];
 const SKILL_IDENTIFIER_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 function splitAgentNamespace(subagentType) {
+  const folded = subagentType.toLowerCase();
   for (const prefix of SKILL_AGENT_NAMESPACE_PREFIXES) {
-    if (subagentType.startsWith(prefix)) {
+    if (folded.startsWith(prefix.toLowerCase())) {
       return { name: subagentType.slice(prefix.length), namespaced: true };
     }
   }
@@ -282,7 +283,9 @@ function isSkininthegamebrosUser() {
  * suggested as invocable, even when their directory exists on disk.
  */
 function isSkillVisibleToUser(skillName) {
-  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName) || isSkininthegamebrosUser();
+  // Case-fold before the Set lookup: identifiers are matched case-insensitively
+  // while filesystem lookup is case-insensitive on Windows/macOS.
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName.toLowerCase()) || isSkininthegamebrosUser();
 }
 
 let cachedCanonicalSkillRegistry = null;
@@ -353,21 +356,25 @@ function buildCanonicalSkillRegistry() {
 function resolveBundledSkill(subagentType, directory) {
   const { name, namespaced } = splitAgentNamespace(subagentType);
   if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
+  // Case-fold once, before every check: registry, alias, visibility, and
+  // filesystem lookups must agree even on case-insensitive filesystems
+  // (Windows/macOS), where a case-variant identifier resolves the same dir.
+  const foldedName = name.toLowerCase();
   // A real agent definition wins over a skill with the same name.
-  if (agentDefinitionExists(name, directory, namespaced)) return null;
+  if (agentDefinitionExists(foldedName, directory, namespaced)) return null;
   // Canonical registry first: covers primaries and aliases (incl. collisions
   // like learner -> skillify, cancel-ralph -> cancel).
-  const canonicalPrimary = buildCanonicalSkillRegistry().get(name.toLowerCase());
+  const canonicalPrimary = buildCanonicalSkillRegistry().get(foldedName);
   if (canonicalPrimary) return { primary: canonicalPrimary };
   // Directory shortcut fallback only for names the canonical registry does not
   // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
   // Fail closed: a directory that is hidden from this user must never be
   // suggested as an invocable bundled skill, even though it exists on disk.
-  if (!isSkillVisibleToUser(name)) return null;
+  if (!isSkillVisibleToUser(foldedName)) return null;
   for (const skillsDir of getPluginSkillsDirs()) {
-    const directPath = join(skillsDir, name, 'SKILL.md');
+    const directPath = join(skillsDir, foldedName, 'SKILL.md');
     if (existsSync(directPath)) {
-      let primary = name;
+      let primary = foldedName;
       try {
         const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
         if (parsed.primary) primary = parsed.primary;
@@ -402,7 +409,8 @@ function evaluateSkillAsAgentCall(toolName, toolInput, directory) {
   // review), so the recovery must be unambiguous regardless of the caller's
   // input namespace form.
   const skillIdentifier = `oh-my-claudecode:${skill.primary}`;
-  const queriedName = name === skill.primary
+  const isPrimaryMatch = name.toLowerCase() === skill.primary.toLowerCase();
+  const queriedName = isPrimaryMatch
     ? `"${subagentType}"`
     : `"${subagentType}" (alias of "${skill.primary}")`;
   const reason =

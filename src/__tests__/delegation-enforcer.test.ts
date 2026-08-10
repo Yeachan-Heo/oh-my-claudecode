@@ -285,6 +285,28 @@ describe('delegation-enforcer', () => {
         expect(visible!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
         expect(hidden!.message).not.toContain('Skill(skill=');
       });
+
+      it('case-folds identifiers before visibility and resolution (Windows/macOS semantics, issue #3667)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        const hiddenMixedCase = thrownFor('oh-my-claudecode:Remember');
+        expect(hiddenMixedCase!.message).not.toContain('Skill(skill=');
+
+        const visibleMixedCase = thrownFor('oh-my-claudecode:Plan');
+        expect(visibleMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+
+        const aliasMixedCase = thrownFor('oh-my-claudecode:LEARNER');
+        expect(aliasMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:skillify")');
+      });
+
+      it('case-folds the namespace prefix and hidden skills for USER_TYPE=ant', () => {
+        process.env.USER_TYPE = 'ant';
+        clearSkillsCache();
+        const hiddenMixedCase = thrownFor('oh-my-claudecode:Remember');
+        expect(hiddenMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:remember")');
+        const omcPrefix = thrownFor('OMC:ai-slop-cleaner');
+        expect(omcPrefix!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      });
     });
 
     it('logs warning only when OMC_DEBUG=true', () => {

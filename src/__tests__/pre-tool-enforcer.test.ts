@@ -2681,4 +2681,95 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     expect(denyReason(visible)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
     expect((hidden.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
   });
+  describe('case-insensitive identifier folding (Windows/macOS semantics, issue #3667)', () => {
+    it('does NOT suggest a runtime-hidden skill when a case-variant identifier resolves its directory (case-insensitive-faithful harness)', () => {
+      // Simulate a case-insensitive filesystem: the plugin root holds the
+      // hidden skill at the case-variant path `skills/Remember/SKILL.md`,
+      // exactly as a case-insensitive fs would resolve `skills/remember`.
+      const pluginRoot = join(tempDir, 'ci-plugin');
+      mkdirSync(join(pluginRoot, 'skills', 'Remember'), { recursive: true });
+      writeFileSync(
+        join(pluginRoot, 'skills', 'Remember', 'SKILL.md'),
+        '---\nname: remember\n---\nhidden skill body\n',
+      );
+
+      const run = (subagentType: string, env: Record<string, string>) =>
+        runPreToolEnforcerWithEnv(
+          {
+            tool_name: 'Task',
+            cwd: tempDir,
+            session_id: 'session-3667-ci',
+            transcript_path: '',
+            toolInput: { subagent_type: subagentType, description: 'd', prompt: 'p' },
+          },
+          { CLAUDE_PLUGIN_ROOT: pluginRoot, USER_TYPE: '', ...env },
+        );
+
+      const nonAnt = run('oh-my-claudecode:Remember', {});
+      const nonAntLower = run('oh-my-claudecode:remember', {});
+      const ant = run('oh-my-claudecode:Remember', { USER_TYPE: 'ant' });
+
+      expect((nonAnt.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+      expect(JSON.stringify(nonAnt)).not.toContain('[SKILL vs AGENT]');
+      expect((nonAntLower.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+      // Canonical lowercase output spelling is preserved for the entitled user.
+      expect((ant.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(ant)).toContain('Skill(skill="oh-my-claudecode:remember")');
+    });
+
+    it.each([
+      ['oh-my-claudecode:Plan', 'oh-my-claudecode:omc-plan'],
+      ['oh-my-claudecode:LEARNER', 'oh-my-claudecode:skillify'],
+      ['oh-my-claudecode:AI-Slop-Cleaner', 'oh-my-claudecode:ai-slop-cleaner'],
+      ['oh-my-claudecode:Cancel-Ralph', 'oh-my-claudecode:cancel'],
+      ['oh-my-claudecode:PSM', 'oh-my-claudecode:project-session-manager'],
+    ])('denies mixed-case %s with the canonical namespaced identifier %s', (input, expected) => {
+      const output = runTask(input, 'Task', {}, { USER_TYPE: '' });
+      const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+      expect(hookOutput.permissionDecision).toBe('deny');
+      expect(denyReason(output)).toContain(`Skill(skill="${expected}")`);
+    });
+
+    it.each(['Remember', 'VERIFY', 'Debug'])(
+      'does NOT suggest the mixed-case runtime-hidden %s skill for a non-ant user',
+      (hiddenSkill) => {
+        const output = runTask(`oh-my-claudecode:${hiddenSkill}`, 'Task', {}, { USER_TYPE: '' });
+        expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+        expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+      },
+    );
+
+    it('recognizes case-variant namespace aliases (OMC: / OH-MY-CLAUDECODE:)', () => {
+      const omcUpper = runTask('OMC:ai-slop-cleaner', 'Task', {}, { USER_TYPE: '' });
+      const fullUpper = runTask('OH-MY-CLAUDECODE:Remember', 'Task', {}, { USER_TYPE: '' });
+
+      expect((omcUpper.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(omcUpper)).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      // Hidden skill with a case-variant full namespace still fails closed.
+      expect((fullUpper.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+    });
+
+    it('applies case folding before explicit-model and force-inherit routing', () => {
+      const withModel = runTask('oh-my-claudecode:Plan', 'Task', { model: 'sonnet' }, { USER_TYPE: '' });
+      expect((withModel.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(withModel)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+
+      const forceInheritVisible = runTask(
+        'oh-my-claudecode:Plan',
+        'Task',
+        {},
+        { USER_TYPE: '', OMC_ROUTING_FORCE_INHERIT: 'true' },
+      );
+      expect((forceInheritVisible.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(forceInheritVisible)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+
+      const forceInheritHidden = runTask(
+        'oh-my-claudecode:Remember',
+        'Task',
+        {},
+        { USER_TYPE: '', OMC_ROUTING_FORCE_INHERIT: 'true' },
+      );
+      expect((forceInheritHidden.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+    });
+  });
 });

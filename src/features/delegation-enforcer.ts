@@ -171,7 +171,9 @@ const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
  * suggested as invocable, even when their directory exists on disk.
  */
 function isSkillVisibleToUser(skillName: string): boolean {
-  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName) || isSkininthegamebrosUser();
+  // Case-fold before the Set lookup: identifiers are matched case-insensitively
+  // while filesystem lookup is case-insensitive on Windows/macOS.
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName.toLowerCase()) || isSkininthegamebrosUser();
 }
 
 /**
@@ -186,19 +188,29 @@ function isSkillVisibleToUser(skillName: string): boolean {
  * Exact match only — no fuzzy substitution.
  */
 function resolveBundledSkillPrimary(agentType: string): string | null {
+  // Strip the OMC namespace aliases case-insensitively, then case-fold once
+  // before every check: registry, alias, visibility, and filesystem lookups
+  // must agree even on case-insensitive filesystems (Windows/macOS), where a
+  // case-variant identifier resolves the same directory.
+  const foldedInput = agentType.toLowerCase();
+  const stripped = foldedInput.startsWith('oh-my-claudecode:')
+    ? foldedInput.slice('oh-my-claudecode:'.length)
+    : foldedInput.startsWith('omc:')
+      ? foldedInput.slice('omc:'.length)
+      : foldedInput;
   const skills = createBuiltinSkills();
-  const match = skills.find((s) => s.name.toLowerCase() === agentType.toLowerCase());
+  const match = skills.find((s) => s.name.toLowerCase() === stripped);
   if (match) {
     return match.aliasOf ?? match.name;
   }
   // Fail closed before the directory shortcut: a hidden skill directory must
   // never be recommended as an invocable bundled skill.
-  if (!isSkillVisibleToUser(agentType)) {
+  if (!isSkillVisibleToUser(stripped)) {
     return null;
   }
   // Directory shortcut parity with the hook: names that exist as skill
   // directories but are not canonical claims (e.g. plan -> omc-plan).
-  const directPath = join(getSkillsDir(), agentType, 'SKILL.md');
+  const directPath = join(getSkillsDir(), stripped, 'SKILL.md');
   if (!existsSync(directPath)) {
     return null;
   }
@@ -214,7 +226,7 @@ function resolveBundledSkillPrimary(agentType: string): string | null {
   } catch {
     // Fall through to the directory name.
   }
-  return agentType;
+  return stripped;
 }
 
 /**
