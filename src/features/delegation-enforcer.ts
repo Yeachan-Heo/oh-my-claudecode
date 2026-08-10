@@ -151,8 +151,8 @@ function canonicalizeSubagentType(subagentType: string): string {
  * mistake the failure for a typo and substitute a closest-match agent.
  * Exact match only — no fuzzy substitution.
  */
-function skillInvocationHint(agentType: string): string | null {
-  const primary = resolveBundledSkillPrimary(agentType);
+function skillInvocationHint(agentType: string, originalSubagentType?: string): string | null {
+  const primary = resolveBundledSkillPrimary(agentType, originalSubagentType);
   if (!primary) {
     return null;
   }
@@ -187,7 +187,10 @@ function isSkillVisibleToUser(skillName: string): boolean {
  * skills (`remember`, `verify`, `debug` for non-skininthegamebros users).
  * Exact match only — no fuzzy substitution.
  */
-function resolveBundledSkillPrimary(agentType: string): string | null {
+function resolveBundledSkillPrimary(
+  agentType: string,
+  originalSubagentType?: string,
+): string | null {
   // Strip the OMC namespace aliases case-insensitively, then case-fold once
   // before every check: registry, alias, visibility, and filesystem lookups
   // must agree even on case-insensitive filesystems (Windows/macOS), where a
@@ -202,6 +205,15 @@ function resolveBundledSkillPrimary(agentType: string): string | null {
   const match = skills.find((s) => s.name.toLowerCase() === stripped);
   if (match) {
     return match.aliasOf ?? match.name;
+  }
+  // Bare (un-namespaced) identifiers stop here: the directory shortcut is
+  // reserved for the pinned plugin namespace so native/session-defined agents
+  // (e.g. Claude Code's built-in `Plan` vs the skills/plan dir registering
+  // omc-plan) are never mistaken for skills (issue #3667 P1, JS/TS parity).
+  const wasNamespaced = typeof originalSubagentType === 'string'
+    && /^(?:oh-my-claudecode|omc):/i.test(originalSubagentType.trim());
+  if (!wasNamespaced) {
+    return null;
   }
   // Fail closed before the directory shortcut: a hidden skill directory must
   // never be recommended as an invocable bundled skill.
@@ -241,10 +253,25 @@ function resolveBundledSkillPrimary(agentType: string): string | null {
  */
 export function enforceModel(agentInput: AgentInput): EnforcementResult {
   const canonicalSubagentType = canonicalizeSubagentType(agentInput.subagent_type);
+  const agentType = canonicalSubagentType.replace(/^oh-my-claudecode:/, '');
+
+  // Validate the agent BEFORE any routing early-return so the unknown-agent
+  // error and Skill-tool guidance fire even when an explicit model or
+  // forceInherit would otherwise short-circuit (issue #3667 P2).
+  const config = getCachedConfig();
+  const agentDefs = getAgentDefinitions({ config });
+  const agentDef = agentDefs[agentType];
+  if (!agentDef) {
+    const hint = skillInvocationHint(agentType, agentInput.subagent_type);
+    throw new Error(
+      hint
+        ? `Unknown agent type: ${agentType} (from ${agentInput.subagent_type}) —${hint}.`
+        : `Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`,
+    );
+  }
 
   // If forceInherit is enabled, skip model injection entirely so agents
   // inherit the user's Claude Code model setting (issue #1135)
-  const config = getCachedConfig();
   if (config.routing?.forceInherit) {
     const { model: _existing, ...rest } = agentInput;
     const cleanedInput: AgentInput = { ...(rest as AgentInput), subagent_type: canonicalSubagentType };
@@ -267,19 +294,6 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
       injected: false,
       model: normalizedModel,
     };
-  }
-
-  const agentType = canonicalSubagentType.replace(/^oh-my-claudecode:/, '');
-  const agentDefs = getAgentDefinitions({ config });
-  const agentDef = agentDefs[agentType];
-
-  if (!agentDef) {
-    const hint = skillInvocationHint(agentType);
-    throw new Error(
-      hint
-        ? `Unknown agent type: ${agentType} (from ${agentInput.subagent_type}) —${hint}.`
-        : `Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`,
-    );
   }
 
   if (!agentDef.model) {

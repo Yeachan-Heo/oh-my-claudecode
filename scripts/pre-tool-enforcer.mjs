@@ -350,8 +350,17 @@ function buildCanonicalSkillRegistry() {
  * Canonical registry precedence wins before any directory shortcut: a name
  * claimed as a deprecated alias (e.g. `learner` owned by `skillify`) resolves
  * to its canonical primary even when a directory with the same name exists
- * (skills/learner). The directory shortcut only serves names that exist as
- * skill directories but are not canonical claims (e.g. `plan` -> `omc-plan`).
+ * (skills/learner).
+ *
+ * Bare (un-namespaced) identifiers are denied ONLY on canonical registry
+ * claims. The directory shortcut would otherwise mistake legitimate runtime
+ * agents for skills: Claude Code's built-in `Plan` agent and session-defined
+ * agents are not visible to file-based plugin/project/user agent discovery,
+ * yet `skills/plan` exists (registering `omc-plan`). Bare names therefore
+ * never consult the directory shortcut; explicitly namespaced identifiers
+ * (`oh-my-claudecode:` / `omc:`) are pinned to the OMC plugin namespace and
+ * keep the full canonical + shortcut resolution (e.g. `oh-my-claudecode:plan`
+ * -> `omc-plan`).
  */
 function resolveBundledSkill(subagentType, directory) {
   const { name, namespaced } = splitAgentNamespace(subagentType);
@@ -366,6 +375,10 @@ function resolveBundledSkill(subagentType, directory) {
   // like learner -> skillify, cancel-ralph -> cancel).
   const canonicalPrimary = buildCanonicalSkillRegistry().get(foldedName);
   if (canonicalPrimary) return { primary: canonicalPrimary };
+  // Bare identifiers stop here: the directory shortcut is reserved for the
+  // pinned plugin namespace so native/session-defined agents (e.g. `Plan`)
+  // are never denied (issue #3667 P1).
+  if (!namespaced) return null;
   // Directory shortcut fallback only for names the canonical registry does not
   // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
   // Fail closed: a directory that is hidden from this user must never be

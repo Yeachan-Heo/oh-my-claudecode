@@ -307,6 +307,55 @@ describe('delegation-enforcer', () => {
         const omcPrefix = thrownFor('OMC:ai-slop-cleaner');
         expect(omcPrefix!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
       });
+      it('preserves bare native identifiers (no Skill guidance for plan/general-purpose, issue #3667 P1)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        for (const bare of ['plan', 'Plan', 'general-purpose']) {
+          const thrown = thrownFor(bare);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain('Unknown agent type');
+          expect(thrown!.message).not.toContain('Skill(skill=');
+        }
+      });
+
+      it('validates skill names even with an explicit model (issue #3667 P2)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        let thrown: Error | undefined;
+        try {
+          enforceModel({
+            description: 't',
+            prompt: 'p',
+            subagent_type: 'oh-my-claudecode:ai-slop-cleaner',
+            model: 'sonnet',
+          });
+        } catch (error) {
+          thrown = error as Error;
+        }
+        expect(thrown).toBeDefined();
+        expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      });
+
+      it('validates skill names under force-inherit routing (issue #3667 P2)', () => {
+        delete process.env.USER_TYPE;
+        process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+        clearSkillsCache();
+        let thrown: Error | undefined;
+        try {
+          enforceModel({ description: 't', prompt: 'p', subagent_type: 'oh-my-claudecode:ai-slop-cleaner' });
+        } catch (error) {
+          thrown = error as Error;
+        }
+        expect(thrown).toBeDefined();
+        expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+        delete process.env.OMC_ROUTING_FORCE_INHERIT;
+      });
+
+      it('keeps valid agents passing validation with an explicit model', () => {
+        const result = enforceModel({ description: 't', prompt: 'p', subagent_type: 'executor', model: 'haiku' });
+        expect(result.modifiedInput.model).toBe('haiku');
+        expect(result.injected).toBe(false);
+      });
     });
 
     it('logs warning only when OMC_DEBUG=true', () => {
