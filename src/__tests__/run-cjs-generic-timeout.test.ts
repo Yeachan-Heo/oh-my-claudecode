@@ -47,6 +47,80 @@ describe('run.cjs generic hook timeout supervisor', () => {
     expect(runCjs.resolveGenericTimeoutMs(manifestHook)).toBe(2500);
   });
 
+  it('uses the source-owned supervisor only for Windows generic hooks', () => {
+    expect(runCjs.resolveGenericChildCommand(HUNG_PARENT, ['argument'], 'win32')).toEqual([
+      RUN_CJS_PATH,
+      '--generic-child-supervisor',
+      HUNG_PARENT,
+      'argument',
+    ]);
+    expect(runCjs.resolveGenericChildCommand(HUNG_PARENT, ['argument'], 'linux')).toEqual([
+      HUNG_PARENT,
+      'argument',
+    ]);
+  });
+
+  it('releases the Windows supervisor IPC channel after an inner timeout', () => {
+    let disconnected = 0;
+    let unreferenced = 0;
+    runCjs.releaseGenericChild({
+      connected: true,
+      disconnect: () => { disconnected += 1; },
+      unref: () => { unreferenced += 1; },
+    });
+    expect(disconnected).toBe(1);
+    expect(unreferenced).toBe(1);
+  });
+
+  it('reaps the supervised hook tree when its IPC parent disappears', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-supervisor-parent-death-'));
+    const pidfile = join(directory, 'grandchild.pid');
+    let grandchildPid: number | undefined;
+    const supervisor = spawn(process.execPath, [RUN_CJS_PATH, '--generic-child-supervisor', HUNG_PARENT], {
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      detached: true,
+      env: { ...process.env, OMC_TEST_PIDFILE: pidfile },
+    });
+    try {
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline && !existsSync(pidfile)) {
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+      expect(existsSync(pidfile)).toBe(true);
+      grandchildPid = Number(readFileSync(pidfile, 'utf8'));
+      expect(grandchildPid).toBeGreaterThan(0);
+
+      const supervisorExit = new Promise<void>(resolve => supervisor.once('exit', () => resolve()));
+      supervisor.disconnect();
+      await waitForDeath(grandchildPid);
+      await Promise.race([
+        supervisorExit,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('supervisor did not exit after IPC disconnect')), 5000)),
+      ]);
+    } finally {
+      killIfAlive(grandchildPid);
+      try { supervisor.kill('SIGKILL'); } catch { /* already gone */ }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves normal child completion through the supervisor', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-supervisor-normal-exit-'));
+    const fixture = join(directory, 'numeric-exit.cjs');
+    writeFileSync(fixture, 'process.exit(3);');
+    const supervisor = spawn(process.execPath, [RUN_CJS_PATH, '--generic-child-supervisor', fixture], {
+      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      detached: process.platform !== 'win32',
+    });
+    try {
+      const code = await new Promise<number | null>(resolve => supervisor.once('exit', resolve));
+      expect(code).toBe(3);
+    } finally {
+      try { supervisor.kill('SIGKILL'); } catch { /* already gone */ }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('reaps a timed-out generic hook and its POSIX grandchild', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-hung-generic-'));
     const pidfile = join(directory, 'grandchild.pid');

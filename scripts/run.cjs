@@ -273,9 +273,7 @@ function reapTree(child, childIdentity) {
   // before killing its process group. If the PID was reused by the OS after
   // the child exited, processIdentityMatches returns false and we skip the
   // kill entirely, relying on child.unref() for fail-open exit.
-  if (childIdentity && !processIdentityMatches(child.pid, childIdentity)) {
-    return;
-  }
+  if (childIdentity && !processIdentityMatches(child.pid, childIdentity)) return;
   if (process.platform === 'win32') {
     // Fire-and-forget: a slow, denied, or missing taskkill must not block the
     // runner past the outer hooks.json budget. The runner still exits fail-open
@@ -306,16 +304,60 @@ function reapTree(child, childIdentity) {
 }
 
 const RUNNER_TERMINATION_SIGNALS = ['SIGTERM', 'SIGINT', 'SIGHUP'];
+function resolveGenericChildCommand(targetPath, extraArgs, platform = process.platform) {
+  return platform === 'win32'
+    ? [__filename, '--generic-child-supervisor', targetPath, ...extraArgs]
+    : [targetPath, ...extraArgs];
+}
+
+function releaseGenericChild(child) {
+  try {
+    if (child.connected) child.disconnect();
+  } catch {
+    // The child may already have exited or closed its IPC channel.
+  }
+  try { child.unref(); } catch { /* handle already released */ }
+}
+
+function superviseGenericChild(targetPath, extraArgs) {
+  let terminal = false;
+  const child = spawn(process.execPath, [targetPath, ...extraArgs], {
+    stdio: 'inherit',
+    env: process.env,
+    windowsHide: true,
+    detached: process.platform !== 'win32',
+  });
+  const childIdentity = child.pid ? captureProcessStartIdentity(child.pid) : null;
+  const finish = (status) => {
+    if (terminal) return;
+    terminal = true;
+    process.exitCode = status;
+    if (process.connected) process.disconnect();
+  };
+
+  // The supervisor is a detached Windows child of run.cjs. Its IPC channel is
+  // closed by the OS even when run.cjs is externally terminated without JS
+  // cleanup, so it can reap only the hook tree that it created.
+  process.once('disconnect', () => {
+    if (terminal) return;
+    terminal = true;
+    reapTree(child, childIdentity);
+    try { child.unref(); } catch { /* handle already released */ }
+  });
+  child.once('exit', code => finish(typeof code === 'number' ? code : 0));
+  child.once('error', () => finish(0));
+}
+
 
 function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
   return new Promise(resolve => {
     let terminal = false;
     let timer;
-    const child = spawn(process.execPath, [targetPath, ...extraArgs], {
-      stdio: 'inherit',
+    const child = spawn(process.execPath, resolveGenericChildCommand(targetPath, extraArgs), {
+      stdio: process.platform === 'win32' ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
       env: process.env,
       windowsHide: true,
-      detached: process.platform !== 'win32',
+      detached: true,
     });
     // Capture the durable start identity immediately so reapTree can reject
     // a PID that was reused after the child exited.
@@ -350,8 +392,9 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
       reapTree(child, childIdentity);
       // The runner MUST exit fail-open even if the tree reap did not (or could
       // not) complete — the core #3493 symptom is run.cjs parents living for
-      // tens of minutes. unref() releases the child handle from the event loop.
-      try { child.unref(); } catch { /* handle already released */ }
+      // tens of minutes. Closing the Windows IPC channel also tells the
+      // supervisor to reap the hook tree if taskkill did not complete.
+      releaseGenericChild(child);
       writeTimeoutDiagnostic(targetPath, manifestHook, timeoutMs);
       resolve(0);
     }, timeoutMs);
@@ -460,34 +503,38 @@ async function runWorker(targetPath, manifestHook, timeoutMs) {
 
 if (require.main === module) {
   const target = process.argv[2];
-  if (!target) {
+  if (target === '--generic-child-supervisor') {
+    const supervisedTarget = process.argv[3];
+    if (supervisedTarget) superviseGenericChild(supervisedTarget, process.argv.slice(4));
+    else process.exitCode = 0;
+  } else if (!target) {
     process.exit(0);
-  }
-
-  const resolution = resolveTarget(target);
-  if (!resolution) {
-    process.exitCode = 0;
   } else {
-    const extraArgs = process.argv.slice(3);
-    const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
-    if (workerManifestHook) {
-      const workerTimeoutMs = resolveTrustedPromptWorkerTimeoutMs(resolution.targetPath, workerManifestHook, resolution.trustedPluginRoot);
-      runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
-        process.exitCode = status;
-      });
+    const resolution = resolveTarget(target);
+    if (!resolution) {
+      process.exitCode = 0;
     } else {
-      const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
-      if (sessionEndManifestHook) {
-        const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), 300);
-        runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
+      const extraArgs = process.argv.slice(3);
+      const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
+      if (workerManifestHook) {
+        const workerTimeoutMs = resolveTrustedPromptWorkerTimeoutMs(resolution.targetPath, workerManifestHook, resolution.trustedPluginRoot);
+        runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
           process.exitCode = status;
         });
       } else {
-      const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
-      const timeoutMs = resolveGenericTimeoutMs(manifestHook);
-      runGenericChild(resolution.targetPath, extraArgs, timeoutMs, manifestHook).then(status => {
-        process.exitCode = status;
-      });
+        const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
+        if (sessionEndManifestHook) {
+          const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), 300);
+          runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
+            process.exitCode = status;
+          });
+        } else {
+          const manifestHook = resolveHookTimeoutMs(resolution.targetPath, extraArgs);
+          const timeoutMs = resolveGenericTimeoutMs(manifestHook);
+          runGenericChild(resolution.targetPath, extraArgs, timeoutMs, manifestHook).then(status => {
+            process.exitCode = status;
+          });
+        }
       }
     }
   }
@@ -500,6 +547,8 @@ module.exports = {
   resolveHookTimeoutMs,
   resolveGenericTimeoutMs,
   runGenericChild,
+  resolveGenericChildCommand,
+  releaseGenericChild,
   DEFAULT_GENERIC_TIMEOUT_MS,
   resolveTrustedSessionEndTarget,
 };
