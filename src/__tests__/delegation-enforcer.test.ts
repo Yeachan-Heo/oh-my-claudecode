@@ -546,6 +546,14 @@ describe('delegation-enforcer', () => {
     it('throws error for unknown agent', () => {
       expect(() => getModelForAgent('unknown')).toThrow('Unknown agent type');
     });
+
+    it('guides namespaced bundled skills to the canonical Skill invocation (issue #3667 P2)', () => {
+      for (const skillType of ['oh-my-claudecode:plan', 'omc:plan']) {
+        expect(() => getModelForAgent(skillType)).toThrow(
+          'Skill(skill="oh-my-claudecode:omc-plan")',
+        );
+      }
+    });
   });
 
   describe('deprecated alias routing', () => {

@@ -407,7 +407,7 @@ export function getModelForAgent(agentType: string): string {
   const agentDef = agentDefs[normalizedType];
 
   if (!agentDef) {
-    const hint = skillInvocationHint(normalizedType);
+    const hint = skillInvocationHint(normalizedType, agentType);
     throw new Error(hint ? `Unknown agent type: ${normalizedType} —${hint}.` : `Unknown agent type: ${normalizedType}`);
   }
 
