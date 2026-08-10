@@ -17,6 +17,7 @@ import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
+import { createBuiltinSkills } from './builtin-skills/index.js';
 import type { PluginConfig } from '../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,25 @@ function canonicalizeSubagentType(subagentType: string): string {
   const canonicalAgentType = normalizeDelegationRole(rawAgentType);
   return hasPrefix ? `oh-my-claudecode:${canonicalAgentType}` : canonicalAgentType;
 }
+/**
+ * Bundled-skill guidance for an unknown agent identifier (issue #3667).
+ *
+ * Task/Agent subagent_type identifiers and bundled skills share the
+ * `oh-my-claudecode:` namespace. When an identifier resolves to a bundled
+ * skill rather than an agent, the error names the Skill tool and the correct
+ * identifier instead of a generic "Unknown agent type", so the caller cannot
+ * mistake the failure for a typo and substitute a closest-match agent.
+ * Exact match only — no fuzzy substitution.
+ */
+function skillInvocationHint(agentType: string): string | null {
+  const skills = createBuiltinSkills();
+  const match = skills.find((s) => s.name.toLowerCase() === agentType.toLowerCase());
+  if (!match) {
+    return null;
+  }
+  const primary = match.aliasOf ?? match.name;
+  return ` "${agentType}" is a bundled Skill, not an agent — invoke it with the Skill tool (Skill(skill="${primary}")) instead of Task/Agent subagent_type, and do NOT substitute a similarly-named agent`;
+}
 
 /**
  * Enforce model parameter for an agent delegation call
@@ -183,7 +203,12 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   const agentDef = agentDefs[agentType];
 
   if (!agentDef) {
-    throw new Error(`Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`);
+    const hint = skillInvocationHint(agentType);
+    throw new Error(
+      hint
+        ? `Unknown agent type: ${agentType} (from ${agentInput.subagent_type}) —${hint}.`
+        : `Unknown agent type: ${agentType} (from ${agentInput.subagent_type})`,
+    );
   }
 
   if (!agentDef.model) {
@@ -297,7 +322,8 @@ export function getModelForAgent(agentType: string): string {
   const agentDef = agentDefs[normalizedType];
 
   if (!agentDef) {
-    throw new Error(`Unknown agent type: ${normalizedType}`);
+    const hint = skillInvocationHint(normalizedType);
+    throw new Error(hint ? `Unknown agent type: ${normalizedType} —${hint}.` : `Unknown agent type: ${normalizedType}`);
   }
 
   if (!agentDef.model) {

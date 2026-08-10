@@ -149,6 +149,47 @@ describe('delegation-enforcer', () => {
 
       expect(() => enforceModel(input)).toThrow('Unknown agent type');
     });
+    it('throws error for a bundled skill name with Skill-tool guidance (issue #3667)', () => {
+      const input: AgentInput = {
+        description: 'Deslop changed files',
+        prompt: 'Run the cleaner',
+        subagent_type: 'oh-my-claudecode:ai-slop-cleaner'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Unknown agent type');
+      expect(thrown!.message).toContain('ai-slop-cleaner');
+      expect(thrown!.message).toContain('Skill');
+      expect(thrown!.message).toContain('Skill(skill="ai-slop-cleaner")');
+      expect(thrown!.message).toContain('do NOT substitute a similarly-named agent');
+    });
+
+    it('does not add Skill guidance for genuinely unknown agents (no closest-match substitution)', () => {
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'oh-my-claudecode:ai-slop-cleanr'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Unknown agent type');
+      expect(thrown!.message).not.toContain('Skill');
+      expect(thrown!.message).not.toContain('closest match');
+    });
 
     it('logs warning only when OMC_DEBUG=true', () => {
       const input: AgentInput = {

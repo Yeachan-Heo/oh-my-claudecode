@@ -2432,3 +2432,192 @@ describe('pre-tool-enforcer agents.<name>.model injection (issue #3242)', () => 
     expect(updatedModel(throttled)).toBe('sonnet');
   });
 });
+describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-enforcer-skill-agent-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function runTask(
+    subagentType: unknown,
+    toolName = 'Task',
+    extraInput: Record<string, unknown> = {},
+    env: Record<string, string> = {},
+  ): Record<string, unknown> {
+    return runPreToolEnforcerWithEnv(
+      {
+        tool_name: toolName,
+        cwd: tempDir,
+        session_id: 'session-3667',
+        transcript_path: '',
+        toolInput: {
+          subagent_type: subagentType,
+          description: 'Some task',
+          prompt: 'Do something',
+          ...extraInput,
+        },
+      },
+      env,
+    );
+  }
+
+  function denyReason(output: Record<string, unknown>): string {
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+    return String(hookOutput.permissionDecisionReason ?? '');
+  }
+
+  it('denies Task call whose subagent_type names a bundled skill (oh-my-claudecode:ai-slop-cleaner)', () => {
+    const output = runTask('oh-my-claudecode:ai-slop-cleaner');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(hookOutput.permissionDecisionReason as string).toContain('[SKILL vs AGENT]');
+    expect(hookOutput.permissionDecisionReason as string).toContain('ai-slop-cleaner');
+    // Names the correct tool and identifier — no generic "Agent type not found".
+    expect(hookOutput.permissionDecisionReason as string).toContain(
+      'Skill(skill="oh-my-claudecode:ai-slop-cleaner")',
+    );
+    // Forbids closest-match substitution (code-simplifier is the attractive wrong answer).
+    expect(hookOutput.permissionDecisionReason as string).toContain('closest match');
+    expect(hookOutput.permissionDecisionReason as string).not.toContain('code-simplifier');
+  });
+
+  it('denies Agent call with a bare bundled skill identifier', () => {
+    const output = runTask('ai-slop-cleaner', 'Agent');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('Skill(skill="ai-slop-cleaner")');
+  });
+
+  it('recognizes the omc: namespace alias and suggests the canonical oh-my-claudecode: identifier', () => {
+    const output = runTask('omc:ai-slop-cleaner');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+  });
+
+  it('denies skill-as-agent even when an explicit model is present (guard precedes model routing)', () => {
+    const output = runTask('oh-my-claudecode:ai-slop-cleaner', 'Task', { model: 'sonnet' });
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('[SKILL vs AGENT]');
+  });
+
+  it('denies skill-as-agent even under force-inherit routing', () => {
+    const output = runTask('oh-my-claudecode:ai-slop-cleaner', 'Task', {}, { OMC_ROUTING_FORCE_INHERIT: 'true' });
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('[SKILL vs AGENT]');
+  });
+
+  it('maps a skill alias to its primary name in the Skill-tool identifier', () => {
+    const output = runTask('oh-my-claudecode:cancel-ralph');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('alias of "cancel"');
+    expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:cancel")');
+  });
+
+  it('recognizes the renamed plan skill dir through its registered name omc-plan', () => {
+    const output = runTask('oh-my-claudecode:plan');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('omc-plan');
+    expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+  });
+
+  it('does NOT deny a real agent identifier (code-simplifier passes through)', () => {
+    const output = runTask('oh-my-claudecode:code-simplifier');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBeUndefined();
+    expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+  });
+
+  it('does NOT deny a genuinely unknown agent identifier', () => {
+    const output = runTask('oh-my-claudecode:nonexistent-agent-xyz');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBeUndefined();
+    expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+  });
+
+  it('does NOT fuzzy-match a typo to a skill (no unsafe closest-match substitution)', () => {
+    const output = runTask('oh-my-claudecode:ai-slop-cleanr');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBeUndefined();
+    expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+  });
+
+  it('lets a plugin agent with the same name as a skill win the collision (namespaced call)', () => {
+    const pluginRoot = join(tempDir, 'plugin');
+    mkdirSync(join(pluginRoot, 'agents'), { recursive: true });
+    mkdirSync(join(pluginRoot, 'skills', 'wiki'), { recursive: true });
+    writeFileSync(join(pluginRoot, 'agents', 'wiki.md'), '---\nname: wiki\n---\nagent body\n');
+    writeFileSync(join(pluginRoot, 'skills', 'wiki', 'SKILL.md'), '---\nname: wiki\n---\nskill body\n');
+
+    const output = runPreToolEnforcerWithEnv(
+      {
+        tool_name: 'Task',
+        cwd: tempDir,
+        session_id: 'session-3667-collision',
+        transcript_path: '',
+        toolInput: {
+          subagent_type: 'oh-my-claudecode:wiki',
+          description: 'Some task',
+          prompt: 'Do something',
+        },
+      },
+      { CLAUDE_PLUGIN_ROOT: pluginRoot },
+    );
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBeUndefined();
+    expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+  });
+
+  it('lets a project agent with the same name as a skill win the collision (bare call)', () => {
+    mkdirSync(join(tempDir, '.claude', 'agents'), { recursive: true });
+    writeFileSync(join(tempDir, '.claude', 'agents', 'wiki.md'), '---\nname: wiki\n---\nagent body\n');
+
+    const output = runTask('wiki');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(output.continue).toBe(true);
+    expect(hookOutput.permissionDecision).toBeUndefined();
+    expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+  });
+
+  it('denies a bare bundled skill name when no agent definition resolves it anywhere', () => {
+    // tempDir has no .claude/agents and no user-config agents; wiki resolves only as a skill.
+    const output = runTask('wiki');
+    const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+
+    expect(hookOutput.permissionDecision).toBe('deny');
+    expect(denyReason(output)).toContain('Skill(skill="wiki")');
+  });
+
+  it('does NOT deny non-string or empty subagent_type values', () => {
+    const numeric = runTask(42 as unknown as string);
+    const empty = runTask('   ');
+    expect(numeric.hookSpecificOutput as Record<string, unknown>).not.toHaveProperty('permissionDecision');
+    expect(empty.hookSpecificOutput as Record<string, unknown>).not.toHaveProperty('permissionDecision');
+  });
+});

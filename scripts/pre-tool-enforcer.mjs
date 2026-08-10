@@ -164,6 +164,173 @@ function readAgentDefinitionModel(subagentType) {
     return null;
   }
 }
+// ---------------------------------------------------------------------------
+// Skill vs agent namespace guard (issue #3667)
+//
+// Task/Agent subagent_type identifiers and bundled skills share the same
+// `oh-my-claudecode:` namespace, so a caller can hand a skill name to
+// Task(subagent_type=...) and receive only Claude Code's generic native
+// "Agent type not found". OMC owns both registries (agents/*.md and
+// skills/*/SKILL.md), so the PreToolUse hook denies the call BEFORE the
+// native boundary with an error that names the Skill tool and the exact
+// identifier, and forbids closest-match substitution.
+// ---------------------------------------------------------------------------
+
+const SKILL_AGENT_NAMESPACE_PREFIXES = ['oh-my-claudecode:', 'omc:'];
+const SKILL_IDENTIFIER_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function splitAgentNamespace(subagentType) {
+  for (const prefix of SKILL_AGENT_NAMESPACE_PREFIXES) {
+    if (subagentType.startsWith(prefix)) {
+      return { name: subagentType.slice(prefix.length), namespaced: true };
+    }
+  }
+  return { name: subagentType, namespaced: false };
+}
+
+function getPluginAgentDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  return pluginRoot ? [join(pluginRoot, 'agents'), scriptAgentsDir] : [scriptAgentsDir];
+}
+
+function getPluginSkillsDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptSkillsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+  return pluginRoot ? [join(pluginRoot, 'skills'), scriptSkillsDir] : [scriptSkillsDir];
+}
+
+/**
+ * Whether an agent definition resolves for the given identifier.
+ * Namespaced identifiers (oh-my-claudecode:X / omc:X) resolve only against
+ * plugin agents; bare identifiers resolve through the full native chain
+ * (plugin, project .claude/agents, user config agents). A real agent always
+ * wins over a bundled skill with the same name (collision rule).
+ */
+function agentDefinitionExists(agentType, directory, namespaced) {
+  const agentDirs = getPluginAgentDirs();
+  if (!namespaced) {
+    agentDirs.push(join(directory, '.claude', 'agents'));
+    agentDirs.push(join(getClaudeConfigDir(), 'agents'));
+  }
+  return agentDirs.some((agentsDir) => existsSync(join(agentsDir, `${agentType}.md`)));
+}
+
+/**
+ * Extract the primary `name` and full identifier set (name + aliases) from a
+ * bundled SKILL.md YAML frontmatter block. Mirrors readAgentDefinitionModel's
+ * frontmatter extraction: only the first `--- ... ---` block is inspected, so
+ * `name:` lines in the skill body cannot create false matches.
+ */
+function parseSkillFrontmatterIdentifiers(content) {
+  const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+  if (!fmMatch) return { names: new Set(), primary: null };
+  const fm = fmMatch[1];
+  const nameMatch = fm.match(/^name:\s*(\S+)/m);
+  const primary = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, '') : null;
+  const names = new Set();
+  if (primary) names.add(primary.toLowerCase());
+  const aliasMatch = fm.match(/^aliases:\s*(.+)$/m);
+  if (aliasMatch) {
+    const raw = aliasMatch[1].trim();
+    const tokens = raw.startsWith('[')
+      ? raw.slice(1, raw.indexOf(']') === -1 ? raw.length : raw.indexOf(']')).split(',')
+      : [raw.split(/\s+/)[0]];
+    for (const token of tokens) {
+      const clean = token.trim().replace(/^["']|["']$/g, '').toLowerCase();
+      if (clean) names.add(clean);
+    }
+  }
+  return { names, primary };
+}
+
+/**
+ * Resolve a Task/Agent subagent_type against the bundled skill registry.
+ * Returns { primary } when the identifier names a bundled skill (exact match
+ * only — no fuzzy/closest-match substitution), or null otherwise.
+ */
+function resolveBundledSkill(subagentType, directory) {
+  const { name, namespaced } = splitAgentNamespace(subagentType);
+  if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
+  // A real agent definition wins over a skill with the same name.
+  if (agentDefinitionExists(name, directory, namespaced)) return null;
+  // Fast path: the identifier names a skill directory directly.
+  for (const skillsDir of getPluginSkillsDirs()) {
+    const directPath = join(skillsDir, name, 'SKILL.md');
+    if (existsSync(directPath)) {
+      let primary = name;
+      try {
+        const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
+        if (parsed.primary) primary = parsed.primary;
+      } catch {
+        // Keep the directory name when the file cannot be parsed.
+      }
+      return { primary };
+    }
+  }
+  // Full scan: matches alias names and renamed skill dirs (e.g. plan -> omc-plan).
+  for (const skillsDir of getPluginSkillsDirs()) {
+    let entries = [];
+    try {
+      entries = readdirSync(skillsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const skillPath = join(skillsDir, entry.name, 'SKILL.md');
+      if (!existsSync(skillPath)) continue;
+      let parsed;
+      try {
+        parsed = parseSkillFrontmatterIdentifiers(readFileSync(skillPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+      if (parsed.names.has(name.toLowerCase())) {
+        return { primary: parsed.primary || entry.name };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Preflight contract for #3667: when a Task/Agent call names a bundled skill
+ * as its subagent_type, deny the call with a precise, non-substitutable error
+ * that names the Skill tool and the correct identifier.
+ */
+function evaluateSkillAsAgentCall(toolName, toolInput, directory) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSubagentType = toolInput.subagent_type;
+  if (typeof rawSubagentType !== 'string') return null;
+  const subagentType = rawSubagentType.trim();
+  if (subagentType.length === 0) return null;
+
+  const skill = resolveBundledSkill(subagentType, directory);
+  if (!skill) return null;
+
+  const { name, namespaced } = splitAgentNamespace(subagentType);
+  // Mirror the caller's namespace form, but always use the canonical OMC
+  // plugin namespace (`oh-my-claudecode:`) for the suggested identifier.
+  const skillIdentifier = namespaced ? `oh-my-claudecode:${skill.primary}` : skill.primary;
+  const queriedName = name === skill.primary
+    ? `"${subagentType}"`
+    : `"${subagentType}" (alias of "${skill.primary}")`;
+  const reason =
+    `[SKILL vs AGENT] ${queriedName} is a Skill, not an agent. ` +
+    `Do NOT call it via ${toolName}(subagent_type=...) — that subagent type does not exist, ` +
+    `and Claude Code will fail the call with a generic "Agent type not found". ` +
+    `Use the Skill tool instead: Skill(skill="${skillIdentifier}"). ` +
+    `Do NOT substitute a similarly-named agent as a "closest match".`;
+  return {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
+}
 
 
 const SLOP_RISK_TOOL_NAMES = new Set([
@@ -1435,6 +1602,14 @@ async function main() {
     //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
+      // Skill vs agent namespace guard (issue #3667): deny BEFORE the native
+      // boundary when a bundled skill name is passed as subagent_type, with an
+      // error that names the Skill tool and the correct identifier.
+      const skillAgentDeny = evaluateSkillAsAgentCall(toolName, toolInput, directory);
+      if (skillAgentDeny) {
+        console.log(JSON.stringify(skillAgentDeny));
+        return;
+      }
       const toolModel = toolInput.model;
       if (isForceInheritEnabled()) {
         // Check both vars: if either carries [1m] the session model is unsafe for sub-agents.

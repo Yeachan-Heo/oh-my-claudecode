@@ -127,6 +127,7 @@ Fires immediately before Claude uses a tool.
 | `pre-tool-enforcer.mjs` | Validates rules before tool use | 3s |
 
 Runs on all tool calls (`matcher: "*"`). Enforces agent permission restrictions (e.g., blocking Write/Edit for read-only agents).
+Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667): instead of Claude Code's generic native "Agent type not found", the hook returns a precise error naming the Skill tool and the correct identifier, and forbids closest-match agent substitution.
 
 ### PermissionRequest
 
