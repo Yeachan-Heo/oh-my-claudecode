@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { KEYWORD_DETECTOR_SCRIPT_NODE } from '../hooks.js';
@@ -313,6 +313,152 @@ OMC Ultrawork = "특수부대 작전 반"
       rmSync(emptyXdg, { recursive: true, force: true });
       rmSync(disabledDir, { recursive: true, force: true });
       rmSync(controlDir, { recursive: true, force: true });
+    }
+  });
+
+  it('disambiguates bare ralph when the official ralph-loop plugin is installed (#3668)', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+    const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+
+    const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-home-'));
+    const projectDir = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-project-'));
+    const officialRoot = join(fakeHome, '.claude', 'plugins', 'cache', 'claude-plugins-official', 'ralph-loop', '1.0.0');
+    const omcRoot = join(fakeHome, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.15.4');
+    const registryPath = join(fakeHome, '.claude', 'plugins', 'installed_plugins.json');
+    const runIn = (scriptPath: string, sessionId: string, prompt = '/ralph fix the parser') => JSON.parse(
+      execFileSync('node', [scriptPath], {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          XDG_CONFIG_HOME: join(fakeHome, '.xdg'),
+          CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+        },
+        input: JSON.stringify({
+          prompt,
+          cwd: projectDir,
+          directory: projectDir,
+          session_id: sessionId,
+        }),
+        encoding: 'utf-8',
+      }),
+    ) as { continue?: boolean; suppressOutput?: boolean; hookSpecificOutput?: { additionalContext?: string } };
+
+    const contextOf = (result: { continue?: boolean; hookSpecificOutput?: { additionalContext?: string } }) =>
+      result.hookSpecificOutput?.additionalContext ?? '';
+    const writeRegistry = (plugins: Record<string, unknown[]>) => {
+      mkdirSync(dirname(registryPath), { recursive: true });
+      writeFileSync(registryPath, JSON.stringify({ version: 2, plugins }, null, 2));
+    };
+    try {
+      mkdirSync(join(officialRoot, 'commands'), { recursive: true });
+      writeFileSync(join(officialRoot, 'commands', 'ralph-loop.md'), '# official ralph-loop\n');
+      mkdirSync(join(omcRoot, 'skills', 'ralph'), { recursive: true });
+      writeFileSync(join(omcRoot, 'skills', 'ralph', 'SKILL.md'), '---\nname: ralph\n---\nOMC ralph\n');
+
+      // A. Both installed and enabled -> the notice fires exactly once per invocation
+      //    (this hook output is per UserPromptSubmit; the session dedup lives in the
+      //    Claude Code slash pipeline, so the assert is "notice present when enabled").
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': [{ installPath: officialRoot, version: '1.0.0', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const context = contextOf(runIn(scriptPath, `ralph-both-${basename(scriptPath)}`));
+        expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+        expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+        expect(context).toContain('use `/ralph-loop` for the official plugin');
+        expect(context).toContain('ralph-loop');
+      }
+
+      // B. Official plugin absent -> stay silent, same ralph routing.
+      writeRegistry({
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-absent-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // C. Official plugin disabled -> stay silent (installed but turned off).
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': [{ installPath: officialRoot, version: '1.0.0', enabled: false }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-disabled-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // D. Registry points at an install whose command payload is missing -> silent,
+      //    proving we never fabricate a notice from registry metadata alone.
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': [{ installPath: join(officialRoot, '..', '9.9.9'), version: '9.9.9', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-missing-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // E. A community plugin merely named like ralph-loop is not the official one.
+      writeRegistry({
+        'my-ralph-loop@community': [{ installPath: officialRoot, version: '1.0.0', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-lookalike-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // F. No registry at all -> silent.
+      rmSync(registryPath, { recursive: true, force: true });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(contextOf(runIn(scriptPath, `ralph-noreg-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+      }
+
+      // G. Non-ralph skills never carry the notice even when the official plugin is installed.
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': [{ installPath: officialRoot, version: '1.0.0', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const result = JSON.parse(
+          execFileSync('node', [scriptPath], {
+            cwd: packageRoot,
+            env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: join(fakeHome, '.xdg'), CLAUDE_CONFIG_DIR: join(fakeHome, '.claude') },
+            input: JSON.stringify({ prompt: 'autopilot build me a CLI', cwd: projectDir, directory: projectDir, session_id: `autopilot-${basename(scriptPath)}` }),
+            encoding: 'utf-8',
+          }),
+        ) as { continue?: boolean; hookSpecificOutput?: { additionalContext?: string } };
+        expect(result.hookSpecificOutput?.additionalContext ?? '').not.toContain('ralph-loop');
+      }
+
+      // H. The official `/ralph-loop` command never routes to OMC's ralph and never
+      //    carries the notice (it is the other plugin's surface, not an alias).
+      writeRegistry({
+        'ralph-loop@claude-plugins-official': [{ installPath: officialRoot, version: '1.0.0', enabled: true }],
+        'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+      });
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const result = JSON.parse(
+          execFileSync('node', [scriptPath], {
+            cwd: packageRoot,
+            env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: join(fakeHome, '.xdg'), CLAUDE_CONFIG_DIR: join(fakeHome, '.claude') },
+            input: JSON.stringify({ prompt: '/ralph-loop fix the parser', cwd: projectDir, directory: projectDir, session_id: `ralphloop-cmd-${basename(scriptPath)}` }),
+            encoding: 'utf-8',
+          }),
+        ) as { continue?: boolean; suppressOutput?: boolean; hookSpecificOutput?: { additionalContext?: string } };
+        expect(result).toEqual({ continue: true, suppressOutput: true });
+      }
+
+      // I. An omc-aliased `/omc-ralph` invocation still routes to OMC's ralph and
+      //    carries the notice when the official plugin is installed (the alias is
+      //    OMC's surface, so the disambiguation note still applies).
+      for (const scriptPath of [templatePath, pluginPath]) {
+        const context = contextOf(runIn(scriptPath, `omcralph-${basename(scriptPath)}`, '/omc-ralph fix the parser'));
+        expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+        expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+      }
+    } finally {
+      rmSync(fakeHome, { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
     }
   });
 });

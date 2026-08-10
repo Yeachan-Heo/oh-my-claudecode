@@ -1103,12 +1103,15 @@ Arguments: ${args}` : '';
   const pathStatus = existsSync(skillPath)
     ? `Read fallback: open ${skillPath} and follow its SKILL.md instructions.`
     : `Read fallback: locate skills/${skillName}/SKILL.md in the active oh-my-claudecode plugin/install and follow it.`;
+  const ralphLoopNotice = skillName === 'ralph' ? findOfficialRalphLoopNotice() : '';
 
   return `[MAGIC KEYWORD: ${skillName.toUpperCase()}]
 
 Skill routing detected: ${skillName}
 Preferred invocation: /oh-my-claudecode:${skillName}${args ? ` ${args}` : ''}
-${pathStatus}${argsSection}
+${pathStatus}${argsSection}${ralphLoopNotice ? `
+
+${ralphLoopNotice}` : ''}
 
 User request (compact echo; original prompt remains authoritative):
 ${compactHookText(originalPrompt)}
@@ -1222,6 +1225,64 @@ function isTeamEnabled() {
     }
     return false;
   } catch { return false; }
+}
+
+/**
+ * Detect an installed official Anthropic `ralph-loop` plugin that exposes a
+ * `/ralph-loop` command, without scanning any plugin payloads.
+ *
+ * Reads only the machine-readable plugin registry
+ * `[$CLAUDE_CONFIG_DIR|~/.claude]/plugins/installed_plugins.json` (the same
+ * file OMC already uses for plugin-cache bookkeeping) and checks for the
+ * existence of the plugin's command file. No SKILL.md body, command body, or
+ * private payload is ever read. The official plugin's registry id is
+ * `ralph-loop@claude-plugins-official`; lookalike ids that merely contain
+ * "ralph" (e.g. a user skill directory named ralph-loop) are not treated as
+ * the official plugin.
+ *
+ * Returns a short notice string, or '' when the official plugin is not
+ * installed. A disabled registry entry (`enabled: false`) is treated as not
+ * installed so the notice does not nag about plugins the user turned off.
+ */
+function findOfficialRalphLoopNotice() {
+  const installedPluginsPath = join(getClaudeConfigDir(), 'plugins', 'installed_plugins.json');
+  if (!existsSync(installedPluginsPath)) {
+    return '';
+  }
+
+  let registry;
+  try {
+    registry = JSON.parse(readFileSync(installedPluginsPath, 'utf-8'));
+  } catch {
+    return '';
+  }
+  if (!registry || typeof registry !== 'object' || Array.isArray(registry)) {
+    return '';
+  }
+
+  const plugins = registry.plugins ?? registry;
+  if (!plugins || typeof plugins !== 'object' || Array.isArray(plugins)) {
+    return '';
+  }
+
+  const officialId = 'ralph-loop@claude-plugins-official';
+  const entries = plugins[officialId];
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return '';
+  }
+
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.enabled === false) continue;
+    const installPath = entry.installPath;
+    if (typeof installPath !== 'string' || installPath.length === 0) continue;
+    const commandFile = join(installPath, 'commands', 'ralph-loop.md');
+    if (existsSync(commandFile)) {
+      return 'Note: the official Anthropic `ralph-loop` plugin is also installed. `/ralph` runs OMC\'s ralph; use `/ralph-loop` for the official plugin.';
+    }
+  }
+
+  return '';
 }
 
 // Read the OMC JSONC config the way src/config/loader.ts does, inlined so the
