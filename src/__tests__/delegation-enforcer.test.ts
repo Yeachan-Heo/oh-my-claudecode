@@ -190,6 +190,43 @@ describe('delegation-enforcer', () => {
       expect(thrown!.message).not.toContain('Skill');
       expect(thrown!.message).not.toContain('closest match');
     });
+    it('resolves the learner directory/canonical collision to skillify in the guidance (issue #3667)', () => {
+      const input: AgentInput = {
+        description: 'Learner task',
+        prompt: 'Run it',
+        subagent_type: 'oh-my-claudecode:learner'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      // Canonical registry precedence: skillify owns the deprecated alias.
+      expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:skillify")');
+      expect(thrown!.message).not.toContain('Skill(skill="oh-my-claudecode:learner")');
+    });
+
+    it('resolves the dir-only plan name to omc-plan in the guidance (hook parity)', () => {
+      const input: AgentInput = {
+        description: 'Plan task',
+        prompt: 'Run it',
+        subagent_type: 'oh-my-claudecode:plan'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+    });
 
     it('logs warning only when OMC_DEBUG=true', () => {
       const input: AgentInput = {

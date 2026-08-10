@@ -2540,6 +2540,31 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     expect(denyReason(output)).toContain('omc-plan');
     expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
   });
+  it('resolves the learner directory/canonical collision to skillify (canonical precedence over directory shortcut)', () => {
+    // skills/learner/SKILL.md exists, but the canonical registry claims
+    // `learner` as a deprecated alias owned by skillify (skillify sorts first).
+    const namespaced = runTask('oh-my-claudecode:learner');
+    const bare = runTask('learner');
+    const owner = runTask('oh-my-claudecode:skillify');
+
+    for (const output of [namespaced, bare, owner]) {
+      const hookOutput = output.hookSpecificOutput as Record<string, unknown>;
+      expect(hookOutput.permissionDecision).toBe('deny');
+      expect(denyReason(output)).toContain('Skill(skill="oh-my-claudecode:skillify")');
+    }
+    expect(denyReason(namespaced)).not.toContain('Skill(skill="oh-my-claudecode:learner")');
+    expect(denyReason(bare)).not.toContain('Skill(skill="oh-my-claudecode:learner")');
+  });
+
+  it('resolves the understanding-gate and psm alias claims to their canonical owners', () => {
+    const gate = runTask('oh-my-claudecode:understanding-gate');
+    const psm = runTask('oh-my-claudecode:psm');
+
+    expect((gate.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+    expect(denyReason(gate)).toContain('Skill(skill="oh-my-claudecode:merge-readiness")');
+    expect((psm.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+    expect(denyReason(psm)).toContain('Skill(skill="oh-my-claudecode:project-session-manager")');
+  });
 
   it('does NOT deny a real agent identifier (code-simplifier passes through)', () => {
     const output = runTask('oh-my-claudecode:code-simplifier');

@@ -13,11 +13,13 @@
  * Claude-specific tier names (sonnet/opus/haiku) that the provider won't recognize.
  */
 
+import { existsSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
-import { createBuiltinSkills } from './builtin-skills/index.js';
+import { createBuiltinSkills, getSkillsDir } from './builtin-skills/skills.js';
 import type { PluginConfig } from '../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -149,13 +151,47 @@ function canonicalizeSubagentType(subagentType: string): string {
  * Exact match only — no fuzzy substitution.
  */
 function skillInvocationHint(agentType: string): string | null {
-  const skills = createBuiltinSkills();
-  const match = skills.find((s) => s.name.toLowerCase() === agentType.toLowerCase());
-  if (!match) {
+  const primary = resolveBundledSkillPrimary(agentType);
+  if (!primary) {
     return null;
   }
-  const primary = match.aliasOf ?? match.name;
   return ` "${agentType}" is a bundled Skill, not an agent — invoke it with the Skill tool (Skill(skill="oh-my-claudecode:${primary}")) instead of Task/Agent subagent_type, and do NOT substitute a similarly-named agent`;
+}
+
+/**
+ * Resolve the canonical primary name for a bundled-skill identifier, mirroring
+ * the PreToolUse hook's resolution order (issue #3667): canonical registry
+ * precedence wins before any directory shortcut. `learner` therefore resolves
+ * to its canonical owner `skillify` (deprecated alias claimed before the
+ * legacy skills/learner directory), while dir-only names such as `plan` fall
+ * back to their registered name (`omc-plan`). Exact match only — no fuzzy
+ * substitution.
+ */
+function resolveBundledSkillPrimary(agentType: string): string | null {
+  const skills = createBuiltinSkills();
+  const match = skills.find((s) => s.name.toLowerCase() === agentType.toLowerCase());
+  if (match) {
+    return match.aliasOf ?? match.name;
+  }
+  // Directory shortcut parity with the hook: names that exist as skill
+  // directories but are not canonical claims (e.g. plan -> omc-plan).
+  const directPath = join(getSkillsDir(), agentType, 'SKILL.md');
+  if (!existsSync(directPath)) {
+    return null;
+  }
+  try {
+    const content = readFileSync(directPath, 'utf-8').replace(/^\uFEFF/, '');
+    const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+    if (fmMatch) {
+      const nameMatch = fmMatch[1].match(/^name:\s*(\S+)/m);
+      if (nameMatch) {
+        return nameMatch[1].trim().replace(/^["']|["']$/g, '');
+      }
+    }
+  } catch {
+    // Fall through to the directory name.
+  }
+  return agentType;
 }
 
 /**

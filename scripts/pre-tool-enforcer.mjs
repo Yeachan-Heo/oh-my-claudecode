@@ -217,58 +217,72 @@ function agentDefinitionExists(agentType, directory, namespaced) {
 }
 
 /**
- * Extract the primary `name` and full identifier set (name + aliases) from a
- * bundled SKILL.md YAML frontmatter block. Mirrors readAgentDefinitionModel's
- * frontmatter extraction: only the first `--- ... ---` block is inspected, so
- * `name:` lines in the skill body cannot create false matches.
+ * Extract the primary `name` and raw alias list from a bundled SKILL.md YAML
+ * frontmatter block. Mirrors readAgentDefinitionModel's frontmatter
+ * extraction: only the first `--- ... ---` block is inspected, so `name:`
+ * lines in the skill body cannot create false matches.
  */
 function parseSkillFrontmatterIdentifiers(content) {
   const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
-  if (!fmMatch) return { names: new Set(), primary: null };
+  if (!fmMatch) return { aliases: [], primary: null };
   const fm = fmMatch[1];
   const nameMatch = fm.match(/^name:\s*(\S+)/m);
   const primary = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, '') : null;
-  const names = new Set();
-  if (primary) names.add(primary.toLowerCase());
   const aliasMatch = fm.match(/^aliases:\s*(.+)$/m);
+  const aliases = [];
   if (aliasMatch) {
     const raw = aliasMatch[1].trim();
     const tokens = raw.startsWith('[')
       ? raw.slice(1, raw.indexOf(']') === -1 ? raw.length : raw.indexOf(']')).split(',')
       : [raw.split(/\s+/)[0]];
     for (const token of tokens) {
-      const clean = token.trim().replace(/^["']|["']$/g, '').toLowerCase();
-      if (clean) names.add(clean);
+      const clean = token.trim().replace(/^["']|["']$/g, '');
+      if (clean) aliases.push(clean);
     }
   }
-  return { names, primary };
+  return { aliases, primary };
 }
 
 /**
- * Resolve a Task/Agent subagent_type against the bundled skill registry.
- * Returns { primary } when the identifier names a bundled skill (exact match
- * only — no fuzzy/closest-match substitution), or null otherwise.
+ * Claude Code native command names that must not be shadowed by OMC skill
+ * short names. Mirrors src/features/builtin-skills/skills.ts:CC_NATIVE_COMMANDS
+ * and toSafeSkillName (plan -> omc-plan).
  */
-function resolveBundledSkill(subagentType, directory) {
-  const { name, namespaced } = splitAgentNamespace(subagentType);
-  if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
-  // A real agent definition wins over a skill with the same name.
-  if (agentDefinitionExists(name, directory, namespaced)) return null;
-  // Fast path: the identifier names a skill directory directly.
-  for (const skillsDir of getPluginSkillsDirs()) {
-    const directPath = join(skillsDir, name, 'SKILL.md');
-    if (existsSync(directPath)) {
-      let primary = name;
-      try {
-        const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
-        if (parsed.primary) primary = parsed.primary;
-      } catch {
-        // Keep the directory name when the file cannot be parsed.
-      }
-      return { primary };
-    }
-  }
-  // Full scan: matches alias names and renamed skill dirs (e.g. plan -> omc-plan).
+const CC_NATIVE_SKILL_COMMANDS = new Set([
+  'review',
+  'plan',
+  'security-review',
+  'init',
+  'doctor',
+  'help',
+  'config',
+  'clear',
+  'compact',
+  'memory',
+]);
+
+function toSafeSkillName(name) {
+  const normalized = name.trim();
+  return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
+}
+
+let cachedCanonicalSkillRegistry = null;
+
+/**
+ * Build the canonical bundled-skill registry exactly like the runtime loader
+ * (src/features/builtin-skills/skills.ts loadSkillsFromDirectory +
+ * loadSkillFromFile):
+ * - `skillify` sorts first so it claims its deprecated alias `learner` before
+ *   the legacy skills/learner directory is seen;
+ * - primary names and aliases are normalized with toSafeSkillName;
+ * - the first claim of a name wins (seenNames dedup), so a directory whose
+ *   name is claimed as another skill's alias is not registered under its own
+ *   name.
+ * Returns Map<lowercaseName, primaryName>.
+ */
+function buildCanonicalSkillRegistry() {
+  if (cachedCanonicalSkillRegistry) return cachedCanonicalSkillRegistry;
+  const registry = new Map();
   for (const skillsDir of getPluginSkillsDirs()) {
     let entries = [];
     try {
@@ -276,6 +290,11 @@ function resolveBundledSkill(subagentType, directory) {
     } catch {
       continue;
     }
+    entries.sort((a, b) => {
+      if (a.name === 'skillify') return -1;
+      if (b.name === 'skillify') return 1;
+      return a.name.localeCompare(b.name);
+    });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const skillPath = join(skillsDir, entry.name, 'SKILL.md');
@@ -286,9 +305,52 @@ function resolveBundledSkill(subagentType, directory) {
       } catch {
         continue;
       }
-      if (parsed.names.has(name.toLowerCase())) {
-        return { primary: parsed.primary || entry.name };
+      const primary = toSafeSkillName(parsed.primary || entry.name);
+      const allNames = [primary, ...parsed.aliases.map(toSafeSkillName)];
+      for (const candidate of allNames) {
+        const key = candidate.toLowerCase();
+        if (registry.has(key)) continue;
+        registry.set(key, primary);
       }
+    }
+  }
+  cachedCanonicalSkillRegistry = registry;
+  return registry;
+}
+
+/**
+ * Resolve a Task/Agent subagent_type against the bundled skill registry.
+ * Returns { primary } when the identifier names a bundled skill (exact match
+ * only — no fuzzy/closest-match substitution), or null otherwise.
+ *
+ * Canonical registry precedence wins before any directory shortcut: a name
+ * claimed as a deprecated alias (e.g. `learner` owned by `skillify`) resolves
+ * to its canonical primary even when a directory with the same name exists
+ * (skills/learner). The directory shortcut only serves names that exist as
+ * skill directories but are not canonical claims (e.g. `plan` -> `omc-plan`).
+ */
+function resolveBundledSkill(subagentType, directory) {
+  const { name, namespaced } = splitAgentNamespace(subagentType);
+  if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
+  // A real agent definition wins over a skill with the same name.
+  if (agentDefinitionExists(name, directory, namespaced)) return null;
+  // Canonical registry first: covers primaries and aliases (incl. collisions
+  // like learner -> skillify, cancel-ralph -> cancel).
+  const canonicalPrimary = buildCanonicalSkillRegistry().get(name.toLowerCase());
+  if (canonicalPrimary) return { primary: canonicalPrimary };
+  // Directory shortcut fallback only for names the canonical registry does not
+  // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
+  for (const skillsDir of getPluginSkillsDirs()) {
+    const directPath = join(skillsDir, name, 'SKILL.md');
+    if (existsSync(directPath)) {
+      let primary = name;
+      try {
+        const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
+        if (parsed.primary) primary = parsed.primary;
+      } catch {
+        // Keep the directory name when the file cannot be parsed.
+      }
+      return { primary: toSafeSkillName(primary) };
     }
   }
   return null;
