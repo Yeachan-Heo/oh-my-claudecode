@@ -212,6 +212,14 @@ export function safeRmSync(dirPath: string): boolean {
  * purge from another session). */
 const RELINK_ATTEMPTS = 3;
 
+/** Suffix for the directory a stale version is moved to while its redirect
+ * symlink is placed. Includes the pid so concurrent purges cannot collide. */
+const ASIDE_SUFFIX = '.omc-stale-';
+
+/** Matches the aside suffix so an interrupted relink can be recognised and
+ * repaired instead of being mistaken for a plugin version. */
+const ASIDE_SUFFIX_RE = /\.omc-stale-\d+$/;
+
 /**
  * Replace a stale version directory with a symlink to `target`, without ever
  * leaving the path missing.
@@ -227,7 +235,7 @@ const RELINK_ATTEMPTS = 3;
  */
 function relinkStaleVersionDir(versionDir: string, target: string): void {
   const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
-  const asideDir = `${versionDir}.omc-stale-${process.pid}`;
+  const asideDir = `${versionDir}${ASIDE_SUFFIX}${process.pid}`;
 
   safeRmSync(asideDir);
   renameSync(versionDir, asideDir);
@@ -265,6 +273,10 @@ export interface PurgeCacheResult {
   symlinked: number;
   /** Paths that were converted to symlinks */
   symlinkPaths: string[];
+  /** Number of version directories restored from an interrupted relink */
+  restored: number;
+  /** Version paths that were restored from an interrupted relink */
+  restoredPaths: string[];
   /** Errors encountered (non-fatal) */
   errors: string[];
 }
@@ -307,7 +319,7 @@ function compareSemverDesc(a: string, b: string): number {
 }
 
 export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: boolean }): PurgeCacheResult {
-  const result: PurgeCacheResult = { removed: 0, removedPaths: [], symlinked: 0, symlinkPaths: [], errors: [] };
+  const result: PurgeCacheResult = { removed: 0, removedPaths: [], symlinked: 0, symlinkPaths: [], restored: 0, restoredPaths: [], errors: [] };
 
   const configDir = getClaudeConfigDir();
   const pluginsDir = join(configDir, 'plugins');
@@ -375,6 +387,31 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
 
       for (const version of versions) {
         const versionDir = join(pluginDir, version);
+
+        // An aside directory means a previous relink was interrupted between
+        // moving the stale dir out of the way and placing the symlink.  Repair
+        // it here rather than treating it as a version of its own: restore it
+        // if the version path it came from is now missing (that path is what
+        // CLAUDE_PLUGIN_ROOT points at), otherwise it is leftover litter.
+        const aside = ASIDE_SUFFIX_RE.exec(version);
+        if (aside) {
+          const originalDir = join(pluginDir, version.slice(0, aside.index));
+          try {
+            if (existsSync(originalDir)) {
+              safeRmSync(versionDir);
+            } else {
+              renameSync(versionDir, originalDir);
+              result.restored++;
+              result.restoredPaths.push(originalDir);
+            }
+          } catch (err) {
+            result.errors.push(
+              `Failed to reconcile interrupted relink ${versionDir}: ${err instanceof Error ? err.message : err}`,
+            );
+          }
+          continue;
+        }
+
         const normalised = stripTrailing(versionDir);
 
         // Check if this version or any of its subdirectories are referenced
@@ -419,6 +456,12 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
             );
           }
         } else {
+          // No active sibling exists, so there is nothing to redirect to and a
+          // symlink is not possible — deletion is the only cleanup path, and
+          // keeping the directory forever was rejected in 9bfd910e ("would
+          // accumulate real dirs indefinitely").  A session pinned here is
+          // therefore protected only by the grace period, whose mtime signal
+          // does not track liveness; that is tracked separately in #3688.
           if (safeRmSync(versionDir)) {
             result.removed++;
             result.removedPaths.push(versionDir);

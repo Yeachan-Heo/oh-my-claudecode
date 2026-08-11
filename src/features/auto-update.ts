@@ -1034,10 +1034,15 @@ export function reconcileUpdateRuntime(options?: { verbose?: boolean; skipGraceP
     if (purgeResult.removed > 0 && options?.verbose) {
       console.log(`[omc] Purged ${purgeResult.removed} stale plugin cache version(s)`);
     }
-    if (purgeResult.errors.length > 0 && options?.verbose) {
-      for (const err of purgeResult.errors) {
-        console.warn(`[omc] Cache purge warning: ${err}`);
-      }
+    if (purgeResult.restored > 0 && options?.verbose) {
+      console.log(`[omc] Restored ${purgeResult.restored} plugin cache version(s) from an interrupted relink`);
+    }
+    // Always surface purge errors, even without --verbose: a failed relink can
+    // leave a version path that live sessions still resolve through, so a silent
+    // warning here reads as a successful update while hooks are broken.
+    // Kept non-fatal — reconciliation must not fail on best-effort cleanup.
+    for (const err of purgeResult.errors) {
+      console.warn(`[omc] Cache purge warning: ${err}`);
     }
   } catch {
     // Cache purge is best-effort; never block reconciliation

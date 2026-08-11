@@ -438,6 +438,82 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(mockedRenameSync).toHaveBeenLastCalledWith(asideDir, staleVersion);
   });
 
+  // --- regression: an interrupted relink is repaired, not mistaken for a version ---
+
+  /** Cache where a previous relink died after moving 4.15.6 aside. */
+  function setupInterruptedRelink(originalExists: boolean) {
+    const cacheDir = '/mock/.claude/plugins/cache';
+    const activeVersion = join(cacheDir, 'omc/oh-my-claudecode/4.15.10');
+    const originalDir = join(cacheDir, 'omc/oh-my-claudecode/4.15.6');
+    const asideDir = `${originalDir}.omc-stale-999`;
+
+    mockedExistsSync.mockImplementation((p) => {
+      const ps = String(p);
+      if (ps.includes('installed_plugins.json')) return true;
+      if (ps === cacheDir) return true;
+      if (ps === activeVersion || ps === asideDir) return true;
+      if (ps === originalDir) return originalExists;
+      return false;
+    });
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: {
+        'oh-my-claudecode@omc': [{ installPath: activeVersion, version: '4.15.10' }],
+      },
+    }));
+    mockedReaddirSync.mockImplementation((p, _opts?) => {
+      const ps = String(p);
+      if (ps === cacheDir) return [dirent('omc')] as any;
+      if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
+      if (ps.endsWith('oh-my-claudecode')) {
+        const entries = [dirent('4.15.6.omc-stale-999'), dirent('4.15.10')];
+        if (originalExists) entries.unshift(dirent('4.15.6'));
+        return entries as any;
+      }
+      return [] as any;
+    });
+    return { activeVersion, originalDir, asideDir };
+  }
+
+  it('restores the version path from an aside dir left by an interrupted relink', () => {
+    // The pinned path is gone and its aside copy survived — move it back so
+    // CLAUDE_PLUGIN_ROOT resolves again.
+    const { originalDir, asideDir } = setupInterruptedRelink(false);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(1);
+    expect(result.restoredPaths).toEqual([originalDir]);
+    expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
+    // The aside dir must never be demoted or deleted as if it were a version
+    expect(mockedSymlinkSync).not.toHaveBeenCalledWith(expect.anything(), asideDir, expect.anything());
+    expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+  });
+
+  it('discards an aside dir as litter when the version path already exists', () => {
+    // The relink completed; the aside copy is leftover and carries no state.
+    const { originalDir, asideDir } = setupInterruptedRelink(true);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(0);
+    expect(mockedRmSync).toHaveBeenCalledWith(asideDir, { recursive: true, force: true });
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(asideDir, originalDir);
+  });
+
+  it('never treats an aside dir as a plugin version when picking a symlink target', () => {
+    // compareSemverDesc must not see ".omc-stale-999" as a version candidate.
+    const { activeVersion } = setupInterruptedRelink(true);
+
+    purgeStalePluginCacheVersions();
+
+    for (const call of mockedSymlinkSync.mock.calls) {
+      expect(String(call[0])).toBe(activeVersion);
+      expect(String(call[1])).not.toContain('.omc-stale-');
+    }
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining('.omc-stale-999'), activeVersion);
+  });
+
   it('deletes stale version dir when no active version exists in namespace', () => {
     // When the active installPath is outside the plugin namespace there is no
     // live version to redirect to, so deletion (original behaviour) applies.
