@@ -584,9 +584,110 @@ describe('purgeStalePluginCacheVersions', () => {
 
     expect(result.restored).toBe(1);
     expect(result.restoredPaths).toEqual([originalDir]);
-    expect(mockedRmSync).toHaveBeenCalledWith(originalDir, { recursive: true, force: true });
     expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
     expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+  });
+
+  it('clears the squatter and retries when it blocks the restore rename', () => {
+    const { originalDir, asideDir } = setupInterruptedRelink('squatter');
+    let attempts = 0;
+    mockedRenameSync.mockImplementation(((_from: any, to: any) => {
+      if (String(to) === originalDir) {
+        attempts++;
+        if (attempts === 1) throw fsError('ENOTEMPTY');
+      }
+      return undefined;
+    }) as any);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(attempts).toBe(2);
+    expect(mockedRmSync).toHaveBeenCalledWith(originalDir, { recursive: true, force: true });
+    expect(result.restored).toBe(1);
+    expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
+    // The restored version is then demoted normally, which is the intended
+    // follow-up: it is stale and an active sibling exists.
+    expect(result.symlinked).toBe(1);
+  });
+
+  it('leaves an aside dir alone while its owning purge is still running', () => {
+    // A live owner means the swap is in flight.  Restoring its backup here would
+    // make the owner's own EEXIST retry delete the real directory.
+    const { originalDir, asideDir } = setupInterruptedRelink('missing');
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(0);
+    expect(result.errors).toEqual([]);
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(asideDir, originalDir);
+    expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+    killSpy.mockRestore();
+  });
+
+  it('reconciles aside entries before relinking a squatter that shares their name', () => {
+    // Filesystem order can put the squatter first.  Relinking it first would
+    // clear the aside backup before anyone knows the symlink can be placed.
+    const cacheDir = '/mock/.claude/plugins/cache';
+    const activeVersion = join(cacheDir, 'omc/oh-my-claudecode/4.15.10');
+    const originalDir = join(cacheDir, 'omc/oh-my-claudecode/4.15.6');
+    const asideDir = `${originalDir}.omc-stale-999`;
+
+    mockedLstatSync.mockImplementation((p) => (String(p) === originalDir ? dirStats() : dirStats()));
+    mockedExistsSync.mockImplementation((p) => {
+      const ps = String(p);
+      if (ps.includes('installed_plugins.json')) return true;
+      return ps === cacheDir || ps === originalDir || ps === activeVersion || ps === asideDir;
+    });
+    mockedReadFileSync.mockReturnValue(JSON.stringify({
+      version: 2,
+      plugins: { 'oh-my-claudecode@omc': [{ installPath: activeVersion, version: '4.15.10' }] },
+    }));
+    mockedReaddirSync.mockImplementation((p, opts?: any) => {
+      const ps = String(p);
+      if (ps === cacheDir) return [dirent('omc')] as any;
+      if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
+      // squatter listed FIRST, aside second — the order that used to lose data
+      if (ps.endsWith('oh-my-claudecode')) {
+        return [dirent('4.15.6'), dirent('4.15.6.omc-stale-999'), dirent('4.15.10')] as any;
+      }
+      if (ps === originalDir && !opts?.withFileTypes) return ['.DS_Store'] as any;
+      return [] as any;
+    });
+
+    const order: string[] = [];
+    mockedRenameSync.mockImplementation(((from: any, to: any) => {
+      order.push(`rename ${String(from).split('/').pop()} -> ${String(to).split('/').pop()}`);
+      return undefined;
+    }) as any);
+    mockedSymlinkSync.mockImplementation(((_t: any, at: any) => {
+      order.push(`symlink at ${String(at).split('/').pop()}`);
+      return undefined;
+    }) as any);
+
+    const result = purgeStalePluginCacheVersions();
+
+    // The backup is restored before the squatter is ever relinked
+    expect(order[0]).toBe('rename 4.15.6.omc-stale-999 -> 4.15.6');
+    expect(result.restored).toBe(1);
+    // And the aside copy is never discarded
+    expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+  });
+
+  it('treats a dangling redirect symlink as unusable so the backup wins', () => {
+    const { originalDir, asideDir } = setupInterruptedRelink('redirect');
+    // lstat says symlink, but the target no longer resolves
+    mockedExistsSync.mockImplementation((p) => {
+      const ps = String(p);
+      if (ps === originalDir) return false;
+      if (ps.includes('installed_plugins.json')) return true;
+      return ps.includes('cache') && !ps.endsWith('4.15.6');
+    });
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(1);
+    expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
   });
 
   it('discards the aside copy when the redirect symlink is already in place', () => {

@@ -217,30 +217,21 @@ const RELINK_ATTEMPTS = 3;
 const ASIDE_SUFFIX = '.omc-stale-';
 
 /** Matches the aside suffix so an interrupted relink can be recognised and
- * repaired instead of being mistaken for a plugin version. */
-const ASIDE_SUFFIX_RE = /\.omc-stale-\d+$/;
+ * repaired instead of being mistaken for a plugin version. Group 1 is the pid
+ * of the purge that created it. */
+const ASIDE_SUFFIX_RE = /\.omc-stale-(\d+)$/;
 
 /**
- * Replace a stale version directory with a symlink to `target`, without ever
- * leaving the path missing.
- *
- * `rename()` cannot swap a directory for a symlink (POSIX requires both sides
- * to be the same type), so the stale directory is moved aside first and only
- * discarded once the symlink is in place. If the symlink cannot be created —
- * something re-created the path inside the window — the stale directory is
- * restored, keeping `CLAUDE_PLUGIN_ROOT` pinned sessions alive.
- *
- * Invariant: on return the path is either the redirect symlink or the original
- * directory. It is never an empty directory and never absent.
- */
-/**
- * True when `path` can serve as a plugin root: a redirect symlink, or a
+ * True when `path` can serve as a plugin root: a live redirect symlink, or a
  * directory that still holds payload.
  *
  * An empty directory — or one holding only dotfiles, such as the `.DS_Store`
  * Finder writes the moment it walks the path — is a squatter created inside a
  * lost relink window, not a usable version. Treating it as usable is what makes
  * a recovery discard the only intact copy.
+ *
+ * A dangling symlink is not usable either: `existsSync` follows the link, so a
+ * redirect whose target has since been removed is correctly rejected.
  */
 function isUsableVersionPath(path: string): boolean {
   let stats;
@@ -249,12 +240,29 @@ function isUsableVersionPath(path: string): boolean {
   } catch {
     return false;
   }
-  if (stats.isSymbolicLink()) return true;
+  if (stats.isSymbolicLink()) return existsSync(path);
   if (!stats.isDirectory()) return false;
   try {
     return readdirSync(path).some(entry => !entry.startsWith('.'));
   } catch {
     return false;
+  }
+}
+
+/**
+ * True when the purge that created an aside directory is still running, i.e.
+ * the backup belongs to a swap in flight and must not be touched.
+ *
+ * Signal 0 does not deliver anything; it only probes. `EPERM` means the process
+ * exists but is not ours to signal, which still counts as alive.
+ */
+function isAsideOwnerAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 
@@ -267,42 +275,74 @@ function isUsableVersionPath(path: string): boolean {
  * leave the original stranded at its aside path while a squatter holds the
  * pinned path — the exact failure this helper exists to prevent.
  */
-function placeClearingSquatters(path: string, place: () => void): boolean {
+function placeClearingSquatters(path: string, place: () => void): { ok: true } | { ok: false; last: unknown } {
+  let last: unknown;
   for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
     try {
       place();
-      return true;
+      return { ok: true };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw err;
+      last = err;
       safeRmSync(path);
     }
   }
-  return false;
+  return { ok: false, last };
 }
 
+function describeError(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (code) return code;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Replace a stale version directory with a symlink to `target`, without ever
+ * leaving the path missing.
+ *
+ * `rename()` cannot swap a directory for a symlink (POSIX requires both sides to
+ * be the same type), so the stale directory is moved aside first and only
+ * discarded once the symlink is in place. If the symlink cannot be created —
+ * something re-created the path inside the window — the stale directory is moved
+ * back, keeping `CLAUDE_PLUGIN_ROOT`-pinned sessions alive.
+ *
+ * Invariant: on return the path is either the redirect symlink or the original
+ * directory. It is never an empty directory and never absent.
+ */
 function relinkStaleVersionDir(versionDir: string, target: string): void {
   const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
   const asideDir = `${versionDir}${ASIDE_SUFFIX}${process.pid}`;
 
+  // Never overwrite an intact backup: it is the only copy of some version, and
+  // clearing it here is how the earlier revision could destroy one. Aside
+  // entries are reconciled before normal versions, so reaching this with a
+  // usable backup in place means another purge owns it.
+  if (isUsableVersionPath(asideDir)) {
+    throw new Error(`an intact backup already occupies ${asideDir}`);
+  }
   safeRmSync(asideDir);
   renameSync(versionDir, asideDir);
 
   let failure: unknown;
   try {
-    if (placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType))) {
+    const placed = placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType));
+    if (placed.ok) {
       safeRmSync(asideDir);
       return;
     }
-    failure = new Error(`could not place redirect symlink after ${RELINK_ATTEMPTS} attempts`);
+    failure = new Error(
+      `could not place redirect symlink after ${RELINK_ATTEMPTS} attempts (${describeError(placed.last)})`,
+    );
   } catch (err) {
     // Not a contended path (EPERM, EACCES, …) — restore and report as-is.
     failure = err;
   }
 
-  if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir))) {
+  if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir)).ok) {
     throw new Error(
-      `could not place redirect symlink and could not restore the original: it is left at ${asideDir}`,
+      `could not place redirect symlink (${describeError(failure)}) and could not restore the ` +
+      `original: it is left at ${asideDir}`,
     );
   }
   throw failure;
@@ -432,39 +472,54 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
           .map(d => d.name);
       } catch { continue; }
 
+      // Reconcile interrupted relinks BEFORE walking normal versions.  Entries
+      // arrive in filesystem order, so a squatter at `4.15.6` could otherwise be
+      // relinked first — and that relink clears `4.15.6.omc-stale-<pid>`, the
+      // only intact backup, before anyone knows the new symlink can be placed.
+      const asideEntries: { versionDir: string; originalDir: string; ownerPid: number }[] = [];
+      const plainVersions: string[] = [];
       for (const version of versions) {
-        const versionDir = join(pluginDir, version);
-
-        // An aside directory means a previous relink was interrupted between
-        // moving the stale dir out of the way and placing the symlink.  Repair
-        // it here rather than treating it as a version of its own: restore it
-        // if the version path it came from is now missing (that path is what
-        // CLAUDE_PLUGIN_ROOT points at), otherwise it is leftover litter.
         const aside = ASIDE_SUFFIX_RE.exec(version);
         if (aside) {
-          const originalDir = join(pluginDir, version.slice(0, aside.index));
-          try {
-            if (isUsableVersionPath(originalDir)) {
-              // The redirect landed, or the version was reinstalled — the aside
-              // copy carries nothing the live path does not already have.
-              safeRmSync(versionDir);
-            } else {
-              // The path is missing, or holds only a squatter created inside the
-              // lost window.  The aside copy is the sole intact version, so it
-              // wins: clear the squatter and move it back.
-              safeRmSync(originalDir);
-              renameSync(versionDir, originalDir);
-              result.restored++;
-              result.restoredPaths.push(originalDir);
-            }
-          } catch (err) {
-            result.errors.push(
-              `Failed to reconcile interrupted relink ${versionDir}: ${err instanceof Error ? err.message : err}`,
-            );
-          }
-          continue;
+          asideEntries.push({
+            versionDir: join(pluginDir, version),
+            originalDir: join(pluginDir, version.slice(0, aside.index)),
+            ownerPid: Number(aside[1]),
+          });
+        } else {
+          plainVersions.push(version);
         }
+      }
 
+      for (const { versionDir, originalDir, ownerPid } of asideEntries) {
+        // A live owner means the swap is in flight, not interrupted.  Stealing
+        // its backup would make the owner's retry delete the real directory.
+        if (isAsideOwnerAlive(ownerPid)) continue;
+        try {
+          if (isUsableVersionPath(originalDir)) {
+            // The redirect landed, or the version was reinstalled — the aside
+            // copy carries nothing the live path does not already have.
+            safeRmSync(versionDir);
+          } else {
+            // The path is missing, or holds only a squatter created inside the
+            // lost window.  The aside copy is the sole intact version, so it
+            // wins: clear the squatter and move it back, retrying if the
+            // squatter comes back while we do.
+            if (!placeClearingSquatters(originalDir, () => renameSync(versionDir, originalDir)).ok) {
+              throw new Error(`could not restore it over the path after ${RELINK_ATTEMPTS} attempts`);
+            }
+            result.restored++;
+            result.restoredPaths.push(originalDir);
+          }
+        } catch (err) {
+          result.errors.push(
+            `Failed to reconcile interrupted relink ${versionDir}: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      }
+
+      for (const version of plainVersions) {
+        const versionDir = join(pluginDir, version);
         const normalised = stripTrailing(versionDir);
 
         // Check if this version or any of its subdirectories are referenced
