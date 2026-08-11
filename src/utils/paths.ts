@@ -6,7 +6,7 @@
  * (which work universally) and handle platform-specific directory conventions.
  */
 
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './config-dir.js';
@@ -258,8 +258,12 @@ function isUsableVersionPath(path: string): boolean {
   } catch {
     return false;
   }
-  if (stats.isSymbolicLink()) return existsSync(path);
-  if (!stats.isDirectory()) return false;
+  // A plain file at a version path is never a root; anything else gets the same
+  // payload check.  `existsSync` follows symlinks, so one expression covers a
+  // real directory, a redirect to a real root (usable), a redirect to some other
+  // directory (not usable — the runner validates the resolved root), and a
+  // dangling redirect (not usable).
+  if (!stats.isDirectory() && !stats.isSymbolicLink()) return false;
   return PLUGIN_ROOT_REQUIREMENTS.every(required => existsSync(join(path, required)));
 }
 
@@ -335,7 +339,17 @@ const OCCUPIED_CODES = new Set(
  * leave the original stranded at its aside path while a squatter holds the
  * pinned path — the exact failure this helper exists to prevent.
  */
-function placeClearingSquatters(path: string, place: () => void): { ok: true } | { ok: false; last: unknown } {
+function placeClearingSquatters(
+  path: string,
+  place: () => void,
+  /** Directory the path must sit directly inside. Clearing anything else — a
+   * parent, a sibling namespace — would delete versions this operation has no
+   * business touching, so the guard refuses rather than trusting the caller. */
+  containedIn: string,
+): { ok: true } | { ok: false; last: unknown } {
+  if (stripTrailing(dirname(path)) !== stripTrailing(containedIn)) {
+    return { ok: false, last: new Error(`refusing to clear ${path}: not a child of ${containedIn}`) };
+  }
   let last: unknown;
   for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
     try {
@@ -373,6 +387,7 @@ function describeError(err: unknown): string {
 function relinkStaleVersionDir(versionDir: string, target: string): void {
   const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
   const asideDir = `${versionDir}${ASIDE_SUFFIX}${process.pid}`;
+  const pluginDir = dirname(versionDir);
 
   // Never overwrite an intact backup: it is the only copy of some version, and
   // clearing it here is how the earlier revision could destroy one. Aside
@@ -386,7 +401,7 @@ function relinkStaleVersionDir(versionDir: string, target: string): void {
 
   let failure: unknown;
   try {
-    const placed = placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType));
+    const placed = placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType), pluginDir);
     if (placed.ok) {
       safeRmSync(asideDir);
       return;
@@ -399,7 +414,7 @@ function relinkStaleVersionDir(versionDir: string, target: string): void {
     failure = err;
   }
 
-  if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir)).ok) {
+  if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir), pluginDir).ok) {
     throw new Error(
       `could not place redirect symlink (${describeError(failure)}) and could not restore the ` +
       `original: it is left at ${asideDir}`,
@@ -547,13 +562,19 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
       const plainVersions: string[] = [];
       for (const version of versions) {
         const aside = ASIDE_SUFFIX_RE.exec(version);
-        if (aside) {
+        // A bare `.omc-stale-<pid>` carries no version to restore to: the prefix
+        // would be empty and the "original" path would resolve to the plugin
+        // namespace itself.  Renaming the entry over its own parent reports
+        // ENOTEMPTY, which the placement helper reads as an occupied path and
+        // clears recursively — taking the active version and every sibling with
+        // it.  An entry we cannot attribute is left alone, not acted on.
+        if (aside && aside.index > 0) {
           asideEntries.push({
             versionDir: join(pluginDir, version),
             originalDir: join(pluginDir, version.slice(0, aside.index)),
             ownerPid: Number(aside[1]),
           });
-        } else {
+        } else if (!aside) {
           plainVersions.push(version);
         }
       }
@@ -581,7 +602,7 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
             // lost window.  The aside copy is the sole intact version, so it
             // wins: clear the squatter and move it back, retrying if the
             // squatter comes back while we do.
-            if (!placeClearingSquatters(originalDir, () => renameSync(versionDir, originalDir)).ok) {
+            if (!placeClearingSquatters(originalDir, () => renameSync(versionDir, originalDir), pluginDir).ok) {
               throw new Error(`could not restore it over the path after ${RELINK_ATTEMPTS} attempts`);
             }
             result.restored++;

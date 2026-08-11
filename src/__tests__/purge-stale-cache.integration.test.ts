@@ -221,6 +221,66 @@ describe('purgeStalePluginCacheVersions on a real filesystem', () => {
     expect(existsSync(aside)).toBe(false);
   });
 
+  it('never destroys the namespace for an aside entry with no version prefix', () => {
+    // A bare `.omc-stale-<pid>` has an empty prefix, so the "original" path is the
+    // plugin namespace itself.  Renaming the entry over its own parent reports
+    // ENOTEMPTY, which the placement helper would read as an occupied path and
+    // clear recursively — taking the active version and every sibling with it.
+    const stale = writeVersion(STALE);
+    makeStale(stale);
+    const orphan = join(pluginDir, '.omc-stale-999994');
+    mkdirSync(join(orphan, 'scripts'), { recursive: true });
+    writeFileSync(join(orphan, 'scripts', 'run.cjs'), '//\n');
+    makeStale(orphan);
+
+    const result = purgeStalePluginCacheVersions();
+
+    // The namespace and the active version survive — this is the whole assertion
+    expect(existsSync(pluginDir)).toBe(true);
+    expect(hookResolves(ACTIVE)).toBe(true);
+    expect(readdirSync(pluginDir)).toContain(ACTIVE);
+    // The unattributable entry is left alone rather than acted on
+    expect(existsSync(orphan)).toBe(true);
+    expect(result.restored).toBe(0);
+  });
+
+  it('keeps the backup when the path redirects to a directory that is not a plugin root', () => {
+    // existsSync only proves the link resolves.  The runner validates the
+    // resolved root, so a redirect into some unrelated directory cannot run
+    // hooks and must not count as a reason to discard the backup.
+    const elsewhere = join(configDir, 'not-a-plugin');
+    mkdirSync(join(elsewhere, 'random'), { recursive: true });
+
+    const stale = writeVersion(STALE);
+    const aside = `${stale}.omc-stale-999993`;
+    renameSync(stale, aside);
+    symlinkSync(elsewhere, stale, 'dir');
+    expect(existsSync(stale)).toBe(true);       // the link resolves…
+    expect(hookResolves(STALE)).toBe(false);    // …but it is not a root
+    makeStale(aside);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(1);
+    expect(hookResolves(STALE)).toBe(true);
+    expect(existsSync(aside)).toBe(false);
+  });
+
+  it('discards the backup when the path redirects to a real plugin root', () => {
+    // The counter-case: a completed redirect is usable and the backup is litter.
+    const stale = writeVersion(STALE);
+    const aside = `${stale}.omc-stale-999992`;
+    renameSync(stale, aside);
+    symlinkSync(join(pluginDir, ACTIVE), stale, 'dir');
+    makeStale(aside);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(0);
+    expect(existsSync(aside)).toBe(false);
+    expect(hookResolves(STALE)).toBe(true);     // resolves through the redirect
+  });
+
   it('deletes a stale version outright when no active sibling exists', () => {
     const orphanPlugin = join(configDir, 'plugins', 'cache', 'omc', 'other-plugin');
     const orphan = join(orphanPlugin, '1.0.0');

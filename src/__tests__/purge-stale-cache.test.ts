@@ -548,7 +548,10 @@ describe('purgeStalePluginCacheVersions', () => {
       // squatter cases deliberately do not, which is the whole point of the
       // marker check replacing the old "any non-dotfile" heuristic.
       if (ps.startsWith(`${activeVersion}/`) || ps.startsWith(`${asideDir}/`)) return true;
-      if (ps.startsWith(`${originalDir}/`)) return occupant === 'payload';
+      // Marker probes under the version path.  existsSync follows symlinks, so a
+      // completed redirect resolves to the active version and shows its markers;
+      // a squatter or a dangling link shows nothing.
+      if (ps.startsWith(`${originalDir}/`)) return occupant === 'payload' || occupant === 'redirect';
       return false;
     });
     mockedReadFileSync.mockReturnValue(JSON.stringify({
@@ -703,9 +706,11 @@ describe('purgeStalePluginCacheVersions', () => {
     const { originalDir, asideDir } = setupInterruptedRelink('redirect');
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
-      if (ps === originalDir) return false;   // dangling: follows the link
+      // Dangling: existsSync follows the link, so neither the path itself nor any
+      // marker probe through it resolves.
+      if (ps === originalDir || ps.startsWith(`${originalDir}/`)) return false;
       if (ps.includes('installed_plugins.json')) return true;
-      return ps.includes('cache') && !ps.endsWith('4.15.6');
+      return ps.includes('cache');
     });
     let danglingPresent = true;
     mockedUnlinkSync.mockImplementation(((p: any) => {
