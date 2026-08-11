@@ -68,7 +68,24 @@ function hookResolves(version: string): boolean {
     && existsSync(join(root, 'scripts'));
 }
 
+/**
+ * Make process liveness deterministic: this process is alive, every other pid is
+ * gone.  The fixtures bake a pid into the aside directory name, and whether that
+ * pid happens to exist on the host is not ours to assume — worse, a pid owned by
+ * another user reports EPERM, which counts as alive, so a low pid on a CI runner
+ * would silently turn the interrupted-relink cases into in-flight ones.
+ */
+function stubOwnerLiveness() {
+  vi.spyOn(process, 'kill').mockImplementation(((pid: number) => {
+    if (pid === process.pid) return true;
+    const err = new Error('ESRCH') as NodeJS.ErrnoException;
+    err.code = 'ESRCH';
+    throw err;
+  }) as unknown as typeof process.kill);
+}
+
 beforeEach(() => {
+  stubOwnerLiveness();
   configDir = mkdtempSync(join(tmpdir(), 'omc-purge-real-'));
   pluginDir = join(configDir, 'plugins', 'cache', PLUGIN);
   mkdirSync(pluginDir, { recursive: true });
@@ -77,6 +94,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(configDir, { recursive: true, force: true });
 });
 

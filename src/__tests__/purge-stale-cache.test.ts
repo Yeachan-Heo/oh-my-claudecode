@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { join } from 'path';
 
 vi.mock('fs', async () => {
@@ -51,6 +51,23 @@ function fsError(code: string): NodeJS.ErrnoException {
   return err;
 }
 
+/** Pid the fixtures use for an owner that has exited. */
+const DEAD_OWNER_PID = 999997;
+
+/**
+ * Make process liveness deterministic: this process is alive, every other pid is
+ * gone. Without it the fixtures depend on whether the host happens to be running
+ * something at the pid baked into the directory name — and a pid owned by another
+ * user reports EPERM, which isAsideOwnerAlive counts as alive, so a low pid on a
+ * CI runner would silently flip the dead-owner cases into in-flight ones.
+ */
+function stubOwnerLiveness() {
+  return vi.spyOn(process, 'kill').mockImplementation(((pid: number) => {
+    if (pid === process.pid) return true;
+    throw fsError('ESRCH');
+  }) as unknown as typeof process.kill);
+}
+
 function dirent(name: string): { name: string; isDirectory: () => boolean } {
   return { name, isDirectory: () => true };
 }
@@ -79,6 +96,11 @@ describe('purgeStalePluginCacheVersions', () => {
     mockedRmSync.mockImplementation(() => undefined);
     mockedUnlinkSync.mockImplementation(() => undefined);
     mockedLstatSync.mockImplementation(() => dirStats());
+    stubOwnerLiveness();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('returns early when installed_plugins.json does not exist', () => {
@@ -527,7 +549,7 @@ describe('purgeStalePluginCacheVersions', () => {
     const cacheDir = '/mock/.claude/plugins/cache';
     const activeVersion = join(cacheDir, 'omc/oh-my-claudecode/4.15.10');
     const originalDir = join(cacheDir, 'omc/oh-my-claudecode/4.15.6');
-    const asideDir = `${originalDir}.omc-stale-999`;
+    const asideDir = `${originalDir}.omc-stale-${DEAD_OWNER_PID}`;
     const originalExists = occupant !== 'missing';
 
     mockedLstatSync.mockImplementation((p) => {
@@ -565,7 +587,7 @@ describe('purgeStalePluginCacheVersions', () => {
       if (ps === cacheDir) return [dirent('omc')] as any;
       if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
       if (ps.endsWith('oh-my-claudecode')) {
-        const entries = [dirent('4.15.6.omc-stale-999'), dirent('4.15.10')];
+        const entries = [dirent(`4.15.6.omc-stale-${DEAD_OWNER_PID}`), dirent('4.15.10')];
         if (originalExists) entries.unshift(dirent('4.15.6'));
         return entries as any;
       }
@@ -632,8 +654,9 @@ describe('purgeStalePluginCacheVersions', () => {
   it('leaves an aside dir alone while its owning purge is still running', () => {
     // A live owner means the swap is in flight.  Restoring its backup here would
     // make the owner's own EEXIST retry delete the real directory.
+    // The fixture's owner pid is the dead one, so force this case to look live.
     const { originalDir, asideDir } = setupInterruptedRelink('missing');
-    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((() => true) as unknown as typeof process.kill);
 
     const result = purgeStalePluginCacheVersions();
 
@@ -655,7 +678,7 @@ describe('purgeStalePluginCacheVersions', () => {
     const cacheDir = '/mock/.claude/plugins/cache';
     const activeVersion = join(cacheDir, 'omc/oh-my-claudecode/4.15.10');
     const originalDir = join(cacheDir, 'omc/oh-my-claudecode/4.15.6');
-    const asideDir = `${originalDir}.omc-stale-999`;
+    const asideDir = `${originalDir}.omc-stale-${DEAD_OWNER_PID}`;
 
     mockedLstatSync.mockImplementation((p) => (String(p) === originalDir ? dirStats() : dirStats()));
     mockedExistsSync.mockImplementation((p) => {
@@ -673,7 +696,7 @@ describe('purgeStalePluginCacheVersions', () => {
       if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
       // squatter listed FIRST, aside second — the order that used to lose data
       if (ps.endsWith('oh-my-claudecode')) {
-        return [dirent('4.15.6'), dirent('4.15.6.omc-stale-999'), dirent('4.15.10')] as any;
+        return [dirent('4.15.6'), dirent(`4.15.6.omc-stale-${DEAD_OWNER_PID}`), dirent('4.15.10')] as any;
       }
       if (ps === originalDir && !opts?.withFileTypes) return ['.DS_Store'] as any;
       return [] as any;
@@ -692,7 +715,7 @@ describe('purgeStalePluginCacheVersions', () => {
     const result = purgeStalePluginCacheVersions();
 
     // The backup is restored before the squatter is ever relinked
-    expect(order[0]).toBe('rename 4.15.6.omc-stale-999 -> 4.15.6');
+    expect(order[0]).toBe(`rename 4.15.6.omc-stale-${DEAD_OWNER_PID} -> 4.15.6`);
     expect(result.restored).toBe(1);
     // And the aside copy is never discarded
     expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
@@ -752,7 +775,7 @@ describe('purgeStalePluginCacheVersions', () => {
   });
 
   it('never treats an aside dir as a plugin version when picking a symlink target', () => {
-    // compareSemverDesc must not see ".omc-stale-999" as a version candidate.
+    // compareSemverDesc must not see the aside suffix as a version candidate.
     const { activeVersion } = setupInterruptedRelink('redirect');
 
     purgeStalePluginCacheVersions();
@@ -761,7 +784,7 @@ describe('purgeStalePluginCacheVersions', () => {
       expect(String(call[0])).toBe(activeVersion);
       expect(String(call[1])).not.toContain('.omc-stale-');
     }
-    expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining('.omc-stale-999'), activeVersion);
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining(`.omc-stale-${DEAD_OWNER_PID}`), activeVersion);
   });
 
   it('deletes stale version dir when no active version exists in namespace', () => {
