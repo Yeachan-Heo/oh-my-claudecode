@@ -9,6 +9,7 @@ vi.mock('fs', async () => {
     readFileSync: vi.fn(),
     readdirSync: vi.fn(),
     statSync: vi.fn(),
+    lstatSync: vi.fn(),
     rmSync: vi.fn(),
     unlinkSync: vi.fn(),
     renameSync: vi.fn(),
@@ -20,7 +21,7 @@ vi.mock('../utils/config-dir.js', () => ({
   getClaudeConfigDir: vi.fn(() => '/mock/.claude'),
 }));
 
-import { existsSync, readFileSync, readdirSync, statSync, rmSync, renameSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 
 const mockedExistsSync = vi.mocked(existsSync);
@@ -29,7 +30,18 @@ const mockedReaddirSync = vi.mocked(readdirSync);
 const mockedStatSync = vi.mocked(statSync);
 const mockedRmSync = vi.mocked(rmSync);
 const mockedRenameSync = vi.mocked(renameSync);
+const mockedLstatSync = vi.mocked(lstatSync);
 const mockedSymlinkSync = vi.mocked(symlinkSync);
+
+/** lstat result for a real directory. */
+function dirStats() {
+  return { isSymbolicLink: () => false, isDirectory: () => true } as unknown as ReturnType<typeof lstatSync>;
+}
+
+/** lstat result for a redirect symlink. */
+function symlinkStats() {
+  return { isSymbolicLink: () => true, isDirectory: () => false } as unknown as ReturnType<typeof lstatSync>;
+}
 
 /** Node error with a specific errno code, for simulating fs races. */
 function fsError(code: string): NodeJS.ErrnoException {
@@ -58,6 +70,13 @@ describe('purgeStalePluginCacheVersions', () => {
     vi.clearAllMocks();
     // Default: statSync returns stale timestamps
     mockedStatSync.mockReturnValue(staleStats());
+    // clearAllMocks() keeps implementations, so a test that makes an fs call
+    // throw would leak into whichever test runs next.  Restore benign defaults
+    // here so the file passes under --sequence.shuffle too.
+    mockedRenameSync.mockImplementation(() => undefined);
+    mockedSymlinkSync.mockImplementation(() => undefined);
+    mockedRmSync.mockImplementation(() => undefined);
+    mockedLstatSync.mockImplementation(() => dirStats());
   });
 
   it('returns early when installed_plugins.json does not exist', () => {
@@ -424,6 +443,51 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(mockedRenameSync).toHaveBeenLastCalledWith(asideDir, staleVersion);
   });
 
+  it('retries the rollback when the squatter also blocks the restore', () => {
+    // The race that produced EEXIST on the symlink can re-take the path between
+    // the final clear and the restore rename.  If the rollback is not retried the
+    // original is stranded at the aside path while the squatter holds the pinned
+    // path — the failure this helper exists to prevent.
+    const { staleVersion } = setupRelinkScenario();
+    mockedSymlinkSync.mockImplementation(() => { throw fsError('EEXIST'); });
+    let restoreAttempts = 0;
+    mockedRenameSync.mockImplementation(((from: any, to: any) => {
+      if (String(to) === staleVersion) {
+        restoreAttempts++;
+        if (restoreAttempts === 1) throw fsError('ENOTEMPTY');
+      }
+      return undefined;
+    }) as any);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(restoreAttempts).toBeGreaterThan(1);
+    // Restore eventually succeeded, so the original is back at the pinned path
+    const restores = mockedRenameSync.mock.calls.filter(c => String(c[1]) === staleVersion);
+    expect(String(restores[restores.length - 1][0])).toContain(`${staleVersion}.omc-stale-`);
+    // The reported error is the symlink failure, not a lost original
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).not.toContain('could not restore');
+  });
+
+  it('reports the original as stranded when neither symlink nor restore can be placed', () => {
+    // Worst case: the squatter wins every attempt on both halves.  The error must
+    // say where the original went instead of silently reporting a symlink failure.
+    const { staleVersion } = setupRelinkScenario();
+    mockedSymlinkSync.mockImplementation(() => { throw fsError('EEXIST'); });
+    mockedRenameSync.mockImplementation(((_from: any, to: any) => {
+      if (String(to) === staleVersion) throw fsError('ENOTEMPTY');
+      return undefined;
+    }) as any);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.symlinked).toBe(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('could not restore the original');
+    expect(result.errors[0]).toContain('.omc-stale-');
+  });
+
   it('restores the stale dir when symlink fails with a non-EEXIST error', () => {
     // EPERM/EACCES must not be retried, but must still roll back.
     const { staleVersion } = setupRelinkScenario();
@@ -440,12 +504,28 @@ describe('purgeStalePluginCacheVersions', () => {
 
   // --- regression: an interrupted relink is repaired, not mistaken for a version ---
 
-  /** Cache where a previous relink died after moving 4.15.6 aside. */
-  function setupInterruptedRelink(originalExists: boolean) {
+  /**
+   * Cache where a previous relink died after moving 4.15.6 aside.
+   * `occupant` describes what now sits at the original version path:
+   *   'missing'  — nothing (the plain interrupted case)
+   *   'squatter' — an empty dir holding only .DS_Store (a lost race)
+   *   'redirect' — the symlink, i.e. the relink actually completed
+   *   'payload'  — a real reinstalled version directory
+   */
+  function setupInterruptedRelink(occupant: 'missing' | 'squatter' | 'redirect' | 'payload') {
     const cacheDir = '/mock/.claude/plugins/cache';
     const activeVersion = join(cacheDir, 'omc/oh-my-claudecode/4.15.10');
     const originalDir = join(cacheDir, 'omc/oh-my-claudecode/4.15.6');
     const asideDir = `${originalDir}.omc-stale-999`;
+    const originalExists = occupant !== 'missing';
+
+    mockedLstatSync.mockImplementation((p) => {
+      if (String(p) === originalDir) {
+        if (occupant === 'missing') throw fsError('ENOENT');
+        return occupant === 'redirect' ? symlinkStats() : dirStats();
+      }
+      return dirStats();
+    });
 
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
@@ -461,7 +541,7 @@ describe('purgeStalePluginCacheVersions', () => {
         'oh-my-claudecode@omc': [{ installPath: activeVersion, version: '4.15.10' }],
       },
     }));
-    mockedReaddirSync.mockImplementation((p, _opts?) => {
+    mockedReaddirSync.mockImplementation((p, opts?: any) => {
       const ps = String(p);
       if (ps === cacheDir) return [dirent('omc')] as any;
       if (ps.endsWith('omc')) return [dirent('oh-my-claudecode')] as any;
@@ -469,6 +549,10 @@ describe('purgeStalePluginCacheVersions', () => {
         const entries = [dirent('4.15.6.omc-stale-999'), dirent('4.15.10')];
         if (originalExists) entries.unshift(dirent('4.15.6'));
         return entries as any;
+      }
+      // isUsableVersionPath reads the occupant's entries (no withFileTypes)
+      if (ps === originalDir && !opts?.withFileTypes) {
+        return (occupant === 'payload' ? ['scripts', 'package.json'] : ['.DS_Store']) as any;
       }
       return [] as any;
     });
@@ -478,7 +562,7 @@ describe('purgeStalePluginCacheVersions', () => {
   it('restores the version path from an aside dir left by an interrupted relink', () => {
     // The pinned path is gone and its aside copy survived — move it back so
     // CLAUDE_PLUGIN_ROOT resolves again.
-    const { originalDir, asideDir } = setupInterruptedRelink(false);
+    const { originalDir, asideDir } = setupInterruptedRelink('missing');
 
     const result = purgeStalePluginCacheVersions();
 
@@ -490,9 +574,33 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
   });
 
-  it('discards an aside dir as litter when the version path already exists', () => {
-    // The relink completed; the aside copy is leftover and carries no state.
-    const { originalDir, asideDir } = setupInterruptedRelink(true);
+  it('keeps the aside copy when the version path holds only a squatter', () => {
+    // A dir containing nothing but .DS_Store is the squatter that caused the
+    // EEXIST, not a completed redirect.  Deleting the aside here would throw
+    // away the only intact copy and leave pinned sessions broken.
+    const { originalDir, asideDir } = setupInterruptedRelink('squatter');
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(1);
+    expect(result.restoredPaths).toEqual([originalDir]);
+    expect(mockedRmSync).toHaveBeenCalledWith(originalDir, { recursive: true, force: true });
+    expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
+    expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+  });
+
+  it('discards the aside copy when the redirect symlink is already in place', () => {
+    const { originalDir, asideDir } = setupInterruptedRelink('redirect');
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(0);
+    expect(mockedRmSync).toHaveBeenCalledWith(asideDir, { recursive: true, force: true });
+    expect(mockedRenameSync).not.toHaveBeenCalledWith(asideDir, originalDir);
+  });
+
+  it('discards the aside copy when the version was reinstalled with payload', () => {
+    const { originalDir, asideDir } = setupInterruptedRelink('payload');
 
     const result = purgeStalePluginCacheVersions();
 
@@ -503,7 +611,7 @@ describe('purgeStalePluginCacheVersions', () => {
 
   it('never treats an aside dir as a plugin version when picking a symlink target', () => {
     // compareSemverDesc must not see ".omc-stale-999" as a version candidate.
-    const { activeVersion } = setupInterruptedRelink(true);
+    const { activeVersion } = setupInterruptedRelink('redirect');
 
     purgeStalePluginCacheVersions();
 

@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './config-dir.js';
 
@@ -233,6 +233,54 @@ const ASIDE_SUFFIX_RE = /\.omc-stale-\d+$/;
  * Invariant: on return the path is either the redirect symlink or the original
  * directory. It is never an empty directory and never absent.
  */
+/**
+ * True when `path` can serve as a plugin root: a redirect symlink, or a
+ * directory that still holds payload.
+ *
+ * An empty directory — or one holding only dotfiles, such as the `.DS_Store`
+ * Finder writes the moment it walks the path — is a squatter created inside a
+ * lost relink window, not a usable version. Treating it as usable is what makes
+ * a recovery discard the only intact copy.
+ */
+function isUsableVersionPath(path: string): boolean {
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch {
+    return false;
+  }
+  if (stats.isSymbolicLink()) return true;
+  if (!stats.isDirectory()) return false;
+  try {
+    return readdirSync(path).some(entry => !entry.startsWith('.'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run `place` at `path`, clearing whatever occupies it and retrying when the
+ * path is taken. Returns false once the attempts are exhausted.
+ *
+ * Both halves of a relink need this: the symlink placement and the rollback
+ * that restores the original directory. A rollback that is not retried can
+ * leave the original stranded at its aside path while a squatter holds the
+ * pinned path — the exact failure this helper exists to prevent.
+ */
+function placeClearingSquatters(path: string, place: () => void): boolean {
+  for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
+    try {
+      place();
+      return true;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw err;
+      safeRmSync(path);
+    }
+  }
+  return false;
+}
+
 function relinkStaleVersionDir(versionDir: string, target: string): void {
   const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
   const asideDir = `${versionDir}${ASIDE_SUFFIX}${process.pid}`;
@@ -240,25 +288,24 @@ function relinkStaleVersionDir(versionDir: string, target: string): void {
   safeRmSync(asideDir);
   renameSync(versionDir, asideDir);
 
-  for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
-    try {
-      symlinkSync(target, versionDir, symlinkType);
+  let failure: unknown;
+  try {
+    if (placeClearingSquatters(versionDir, () => symlinkSync(target, versionDir, symlinkType))) {
       safeRmSync(asideDir);
       return;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-        safeRmSync(versionDir);
-        renameSync(asideDir, versionDir);
-        throw err;
-      }
-      // Something occupied the path; clear it and retry.
-      safeRmSync(versionDir);
     }
+    failure = new Error(`could not place redirect symlink after ${RELINK_ATTEMPTS} attempts`);
+  } catch (err) {
+    // Not a contended path (EPERM, EACCES, …) — restore and report as-is.
+    failure = err;
   }
 
-  safeRmSync(versionDir);
-  renameSync(asideDir, versionDir);
-  throw new Error(`could not place redirect symlink after ${RELINK_ATTEMPTS} attempts`);
+  if (!placeClearingSquatters(versionDir, () => renameSync(asideDir, versionDir))) {
+    throw new Error(
+      `could not place redirect symlink and could not restore the original: it is left at ${asideDir}`,
+    );
+  }
+  throw failure;
 }
 
 /**
@@ -397,9 +444,15 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
         if (aside) {
           const originalDir = join(pluginDir, version.slice(0, aside.index));
           try {
-            if (existsSync(originalDir)) {
+            if (isUsableVersionPath(originalDir)) {
+              // The redirect landed, or the version was reinstalled — the aside
+              // copy carries nothing the live path does not already have.
               safeRmSync(versionDir);
             } else {
+              // The path is missing, or holds only a squatter created inside the
+              // lost window.  The aside copy is the sole intact version, so it
+              // wins: clear the squatter and move it back.
+              safeRmSync(originalDir);
               renameSync(versionDir, originalDir);
               result.restored++;
               result.restoredPaths.push(originalDir);
