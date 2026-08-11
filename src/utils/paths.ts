@@ -267,6 +267,41 @@ function isAsideOwnerAlive(pid: number): boolean {
 }
 
 /**
+ * Remove whatever occupies `path`, including a symlink whose target is gone.
+ *
+ * `safeRmSync` guards on `existsSync`, which follows the link — so a dangling
+ * redirect reports false and is left in place, and every retry then fails the
+ * same way. `lstatSync` sees the link itself.
+ */
+function removePathEntry(path: string): boolean {
+  let stats;
+  try {
+    stats = lstatSync(path);
+  } catch {
+    return false;
+  }
+  try {
+    if (stats.isDirectory()) {
+      rmSync(path, { recursive: true, force: true });
+    } else {
+      unlinkSync(path);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Errno values that mean "something else is at this path", per POSIX rename(2)
+ * and symlink(2). Verified on macOS/APFS:
+ *   symlink over any existing entry        → EEXIST
+ *   rename(dir → non-empty dir)            → ENOTEMPTY
+ *   rename(dir → symlink, live or dangling)→ ENOTDIR
+ *   rename(dir → empty dir)                → succeeds
+ */
+const OCCUPIED_CODES = new Set(['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR']);
+
+/**
  * Run `place` at `path`, clearing whatever occupies it and retrying when the
  * path is taken. Returns false once the attempts are exhausted.
  *
@@ -283,9 +318,9 @@ function placeClearingSquatters(path: string, place: () => void): { ok: true } |
       return { ok: true };
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code;
-      if (code !== 'EEXIST' && code !== 'ENOTEMPTY') throw err;
+      if (!code || !OCCUPIED_CODES.has(code)) throw err;
       last = err;
-      safeRmSync(path);
+      removePathEntry(path);
     }
   }
   return { ok: false, last };
@@ -321,7 +356,7 @@ function relinkStaleVersionDir(versionDir: string, target: string): void {
   if (isUsableVersionPath(asideDir)) {
     throw new Error(`an intact backup already occupies ${asideDir}`);
   }
-  safeRmSync(asideDir);
+  removePathEntry(asideDir);
   renameSync(versionDir, asideDir);
 
   let failure: unknown;
@@ -364,6 +399,10 @@ export interface PurgeCacheResult {
   restored: number;
   /** Version paths that were restored from an interrupted relink */
   restoredPaths: string[];
+  /** Number of backups left in place because their owning purge is still running */
+  skipped: number;
+  /** Backup paths left to their live owner, with the version path they belong to */
+  skippedPaths: string[];
   /** Errors encountered (non-fatal) */
   errors: string[];
 }
@@ -406,7 +445,10 @@ function compareSemverDesc(a: string, b: string): number {
 }
 
 export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: boolean }): PurgeCacheResult {
-  const result: PurgeCacheResult = { removed: 0, removedPaths: [], symlinked: 0, symlinkPaths: [], restored: 0, restoredPaths: [], errors: [] };
+  const result: PurgeCacheResult = {
+    removed: 0, removedPaths: [], symlinked: 0, symlinkPaths: [],
+    restored: 0, restoredPaths: [], skipped: 0, skippedPaths: [], errors: [],
+  };
 
   const configDir = getClaudeConfigDir();
   const pluginsDir = join(configDir, 'plugins');
@@ -494,7 +536,16 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
       for (const { versionDir, originalDir, ownerPid } of asideEntries) {
         // A live owner means the swap is in flight, not interrupted.  Stealing
         // its backup would make the owner's retry delete the real directory.
-        if (isAsideOwnerAlive(ownerPid)) continue;
+        //
+        // Record it rather than returning silently: while the owner runs, the
+        // version path is legitimately unusable, but if that pid was recycled by
+        // an unrelated process the backup is never reclaimed and the pinned path
+        // stays broken with nothing to show for it.
+        if (isAsideOwnerAlive(ownerPid)) {
+          result.skipped++;
+          result.skippedPaths.push(`${versionDir} (owner pid ${ownerPid} still running)`);
+          continue;
+        }
         try {
           if (isUsableVersionPath(originalDir)) {
             // The redirect landed, or the version was reinstalled — the aside

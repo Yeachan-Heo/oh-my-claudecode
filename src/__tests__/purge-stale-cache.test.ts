@@ -21,7 +21,7 @@ vi.mock('../utils/config-dir.js', () => ({
   getClaudeConfigDir: vi.fn(() => '/mock/.claude'),
 }));
 
-import { existsSync, readFileSync, readdirSync, statSync, lstatSync, rmSync, renameSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, lstatSync, rmSync, renameSync, symlinkSync, unlinkSync } from 'fs';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 
 const mockedExistsSync = vi.mocked(existsSync);
@@ -31,6 +31,7 @@ const mockedStatSync = vi.mocked(statSync);
 const mockedRmSync = vi.mocked(rmSync);
 const mockedRenameSync = vi.mocked(renameSync);
 const mockedLstatSync = vi.mocked(lstatSync);
+const mockedUnlinkSync = vi.mocked(unlinkSync);
 const mockedSymlinkSync = vi.mocked(symlinkSync);
 
 /** lstat result for a real directory. */
@@ -76,6 +77,7 @@ describe('purgeStalePluginCacheVersions', () => {
     mockedRenameSync.mockImplementation(() => undefined);
     mockedSymlinkSync.mockImplementation(() => undefined);
     mockedRmSync.mockImplementation(() => undefined);
+    mockedUnlinkSync.mockImplementation(() => undefined);
     mockedLstatSync.mockImplementation(() => dirStats());
   });
 
@@ -622,6 +624,11 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(result.errors).toEqual([]);
     expect(mockedRenameSync).not.toHaveBeenCalledWith(asideDir, originalDir);
     expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
+    // Skipping must be visible: if that pid was recycled, nothing else would
+    // ever reclaim the backup and the pinned path would stay broken silently.
+    expect(result.skipped).toBe(1);
+    expect(result.skippedPaths[0]).toContain(asideDir);
+    expect(result.skippedPaths[0]).toContain('still running');
     killSpy.mockRestore();
   });
 
@@ -674,18 +681,33 @@ describe('purgeStalePluginCacheVersions', () => {
     expect(mockedRmSync).not.toHaveBeenCalledWith(asideDir, expect.anything());
   });
 
-  it('treats a dangling redirect symlink as unusable so the backup wins', () => {
+  it('clears a dangling redirect symlink and restores the backup over it', () => {
+    // lstat reports a symlink but the target is gone, so the path is unusable.
+    // On a real filesystem renaming a directory over a symlink raises ENOTDIR
+    // (verified on APFS), and existsSync-based removal cannot clear a dangling
+    // link — both are modelled here; the integration test proves the real thing.
     const { originalDir, asideDir } = setupInterruptedRelink('redirect');
-    // lstat says symlink, but the target no longer resolves
     mockedExistsSync.mockImplementation((p) => {
       const ps = String(p);
-      if (ps === originalDir) return false;
+      if (ps === originalDir) return false;   // dangling: follows the link
       if (ps.includes('installed_plugins.json')) return true;
       return ps.includes('cache') && !ps.endsWith('4.15.6');
     });
+    let danglingPresent = true;
+    mockedUnlinkSync.mockImplementation(((p: any) => {
+      if (String(p) === originalDir) danglingPresent = false;
+      return undefined;
+    }) as any);
+    mockedRenameSync.mockImplementation(((_from: any, to: any) => {
+      if (String(to) === originalDir && danglingPresent) throw fsError('ENOTDIR');
+      return undefined;
+    }) as any);
 
     const result = purgeStalePluginCacheVersions();
 
+    // The link is unlinked (not rmSync'd — existsSync cannot see it) and the
+    // rename then succeeds on the retry.
+    expect(mockedUnlinkSync).toHaveBeenCalledWith(originalDir);
     expect(result.restored).toBe(1);
     expect(mockedRenameSync).toHaveBeenCalledWith(asideDir, originalDir);
   });
