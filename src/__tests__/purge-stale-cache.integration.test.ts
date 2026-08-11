@@ -125,6 +125,49 @@ describe('purgeStalePluginCacheVersions on a real filesystem', () => {
     expect(hookResolves(STALE)).toBe(true);
   });
 
+  it('keeps the backup when the recreated path holds junk that is not payload', () => {
+    // The old "any non-dotfile entry" heuristic accepted these as a usable
+    // version, discarded the backup, and left pinned sessions resolving into a
+    // directory the hook runner cannot load.  Windows sprinkles desktop.ini and
+    // Thumbs.db; an interrupted extraction leaves a partial scripts/.
+    for (const junk of [['desktop.ini'], ['Thumbs.db'], ['scripts', 'partial.txt']]) {
+      rmSync(pluginDir, { recursive: true, force: true });
+      mkdirSync(pluginDir, { recursive: true });
+      writeVersion(ACTIVE);
+      installedPlugins();
+
+      const stale = writeVersion(STALE);
+      const aside = `${stale}.omc-stale-999996`;
+      renameSync(stale, aside);
+      mkdirSync(join(stale, ...junk.slice(0, -1)), { recursive: true });
+      writeFileSync(join(stale, ...junk), 'x');
+      makeStale(aside);
+
+      const result = purgeStalePluginCacheVersions();
+
+      expect(result.restored, junk.join('/')).toBe(1);
+      expect(hookResolves(STALE), junk.join('/')).toBe(true);
+      expect(existsSync(aside), junk.join('/')).toBe(false);
+    }
+  });
+
+  it('discards the backup when the path carries real plugin payload', () => {
+    // The counter-case: a genuine reinstall must win over an older backup.
+    const stale = writeVersion(STALE);
+    const aside = `${stale}.omc-stale-999995`;
+    renameSync(stale, aside);
+    writeVersion(STALE);                       // reinstalled, has scripts/run.cjs
+    mkdirSync(join(pluginDir, STALE, 'hooks'), { recursive: true });
+    writeFileSync(join(pluginDir, STALE, 'hooks', 'hooks.json'), '{}');
+    makeStale(aside);
+
+    const result = purgeStalePluginCacheVersions();
+
+    expect(result.restored).toBe(0);
+    expect(existsSync(aside)).toBe(false);
+    expect(hookResolves(STALE)).toBe(true);
+  });
+
   it('leaves a backup alone while its owning purge is still running', () => {
     const stale = writeVersion(STALE);
     const aside = `${stale}.omc-stale-${process.pid}`;   // this process is alive
@@ -178,7 +221,7 @@ describe('invariant across every cache shape', () => {
   // skip.  Invariant — if payload existed anywhere before the purge, then after
   // it either the pinned path resolves, or an intact backup survives AND the
   // result says so (as an error, or as a backup left to its running owner).
-  const OCCUPANTS = ['missing', 'empty-dir', 'dotfile-only', 'payload', 'live-symlink', 'dangling-link', 'file'] as const;
+  const OCCUPANTS = ['missing', 'empty-dir', 'dotfile-only', 'junk-only', 'partial-scripts', 'payload', 'live-symlink', 'dangling-link', 'file'] as const;
   const BACKUPS = ['none', 'payload-dead', 'payload-live', 'empty-dead', 'dotfile-dead'] as const;
   const DEAD_PID = 999997;
 
@@ -186,6 +229,8 @@ describe('invariant across every cache shape', () => {
     const V = join(pluginDir, STALE);
     if (occupant === 'empty-dir') mkdirSync(V, { recursive: true });
     else if (occupant === 'dotfile-only') { mkdirSync(V, { recursive: true }); writeFileSync(join(V, '.DS_Store'), 'x'); }
+    else if (occupant === 'junk-only') { mkdirSync(V, { recursive: true }); writeFileSync(join(V, 'desktop.ini'), 'x'); }
+    else if (occupant === 'partial-scripts') { mkdirSync(join(V, 'scripts'), { recursive: true }); writeFileSync(join(V, 'scripts', 'partial.txt'), 'x'); }
     else if (occupant === 'payload') writeVersion(STALE);
     else if (occupant === 'live-symlink') symlinkSync(join(pluginDir, ACTIVE), V, 'dir');
     else if (occupant === 'dangling-link') symlinkSync(join(pluginDir, 'gone-away'), V, 'dir');

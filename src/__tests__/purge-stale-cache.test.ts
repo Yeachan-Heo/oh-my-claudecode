@@ -390,7 +390,16 @@ describe('purgeStalePluginCacheVersions', () => {
       if (ps.includes('installed_plugins.json')) return true;
       if (ps === cacheDir) return true;
       if (ps === staleVersion || ps === activeVersion) return true;
-      return ps.includes('.omc-stale-');
+      // isUsableVersionPath probes plugin-root markers; both real versions have them
+      if (ps.startsWith(`${staleVersion}/`) || ps.startsWith(`${activeVersion}/`)) return true;
+      // A fresh relink starts with no aside path — if one appeared to exist and
+      // to carry markers, relinkStaleVersionDir would refuse to overwrite it.
+      return false;
+    });
+    // …and lstat must agree, or isUsableVersionPath would treat it as a directory
+    mockedLstatSync.mockImplementation((p) => {
+      if (String(p).includes('.omc-stale-')) throw fsError('ENOENT');
+      return dirStats();
     });
     mockedReadFileSync.mockReturnValue(JSON.stringify({
       version: 2,
@@ -535,6 +544,11 @@ describe('purgeStalePluginCacheVersions', () => {
       if (ps === cacheDir) return true;
       if (ps === activeVersion || ps === asideDir) return true;
       if (ps === originalDir) return originalExists;
+      // Plugin-root markers: only a real payload directory carries them.  The
+      // squatter cases deliberately do not, which is the whole point of the
+      // marker check replacing the old "any non-dotfile" heuristic.
+      if (ps.startsWith(`${activeVersion}/`) || ps.startsWith(`${asideDir}/`)) return true;
+      if (ps.startsWith(`${originalDir}/`)) return occupant === 'payload';
       return false;
     });
     mockedReadFileSync.mockReturnValue(JSON.stringify({

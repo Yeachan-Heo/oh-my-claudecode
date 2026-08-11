@@ -222,13 +222,23 @@ const ASIDE_SUFFIX = '.omc-stale-';
 const ASIDE_SUFFIX_RE = /\.omc-stale-(\d+)$/;
 
 /**
+ * Entry points a plugin root has to expose for a pinned session to keep working.
+ * Taken from an installed cache copy, not guessed: `hooks/hooks.json` is what
+ * Claude Code reads to wire the hooks, and the hook commands run through
+ * `scripts/run.cjs`. Either one present means real payload.
+ */
+const PLUGIN_ROOT_MARKERS = ['hooks/hooks.json', 'scripts/run.cjs', '.claude-plugin/plugin.json'];
+
+/**
  * True when `path` can serve as a plugin root: a live redirect symlink, or a
- * directory that still holds payload.
+ * directory that actually carries plugin payload.
  *
- * An empty directory — or one holding only dotfiles, such as the `.DS_Store`
- * Finder writes the moment it walks the path — is a squatter created inside a
- * lost relink window, not a usable version. Treating it as usable is what makes
- * a recovery discard the only intact copy.
+ * Presence is not enough, and neither is "holds a non-dotfile". A directory left
+ * by a lost relink window can hold `.DS_Store` (Finder writes it the moment it
+ * walks the path), `desktop.ini`/`Thumbs.db` on Windows, or a half-extracted
+ * `scripts/` — none of which a pinned session can load. Treating those as usable
+ * is what makes a recovery discard the only intact copy. The manifest also lives
+ * under a dotted directory, so a dotfile check gets it wrong in both directions.
  *
  * A dangling symlink is not usable either: `existsSync` follows the link, so a
  * redirect whose target has since been removed is correctly rejected.
@@ -242,11 +252,7 @@ function isUsableVersionPath(path: string): boolean {
   }
   if (stats.isSymbolicLink()) return existsSync(path);
   if (!stats.isDirectory()) return false;
-  try {
-    return readdirSync(path).some(entry => !entry.startsWith('.'));
-  } catch {
-    return false;
-  }
+  return PLUGIN_ROOT_MARKERS.some(marker => existsSync(join(path, marker)));
 }
 
 /**
@@ -298,8 +304,19 @@ function removePathEntry(path: string): boolean {
  *   rename(dir → non-empty dir)            → ENOTEMPTY
  *   rename(dir → symlink, live or dangling)→ ENOTDIR
  *   rename(dir → empty dir)                → succeeds
+ *
+ * Windows reports a collision as EPERM/EACCES rather than ENOTEMPTY, so those
+ * are added there only. They stay out on POSIX, where they mean the caller
+ * genuinely lacks permission and clearing the path would be the wrong response.
+ * Retrying is still safe under either reading: removePathEntry() fails on a path
+ * we cannot write, the attempts drain, and the caller reports instead of
+ * silently dropping anything.
  */
-const OCCUPIED_CODES = new Set(['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR']);
+const OCCUPIED_CODES = new Set(
+  process.platform === 'win32'
+    ? ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR', 'EPERM', 'EACCES']
+    : ['EEXIST', 'ENOTEMPTY', 'ENOTDIR', 'EISDIR'],
+);
 
 /**
  * Run `place` at `path`, clearing whatever occupies it and retrying when the
