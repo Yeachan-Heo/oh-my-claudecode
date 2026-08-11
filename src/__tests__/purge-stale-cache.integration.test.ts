@@ -287,7 +287,12 @@ describe('invariant across every cache shape', () => {
   });
 });
 
-describe('syscall semantics this implementation relies on', () => {
+// POSIX only. Windows reports a rename collision as EPERM/EACCES and needs a
+// privilege or developer mode for symlinkSync, so these exact codes are not the
+// contract there — OCCUPIED_CODES widens for win32 instead. This file is not in
+// the Windows CI allowlist in .github/workflows/ci.yml; the guard keeps it safe
+// if it is ever added.
+describe.skipIf(process.platform === 'win32')('syscall semantics this implementation relies on', () => {
   let root: string;
   beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'omc-posix-')); });
   afterEach(() => { rmSync(root, { recursive: true, force: true }); });
