@@ -7,7 +7,7 @@
  */
 
 import { join } from 'path';
-import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, rmSync, symlinkSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './config-dir.js';
 
@@ -207,6 +207,52 @@ export function safeRmSync(dirPath: string): boolean {
   }
 }
 
+/** How many times to retry placing the redirect symlink when the path is
+ * re-created underneath us (Finder `.DS_Store`, Spotlight, a concurrent
+ * purge from another session). */
+const RELINK_ATTEMPTS = 3;
+
+/**
+ * Replace a stale version directory with a symlink to `target`, without ever
+ * leaving the path missing.
+ *
+ * `rename()` cannot swap a directory for a symlink (POSIX requires both sides
+ * to be the same type), so the stale directory is moved aside first and only
+ * discarded once the symlink is in place. If the symlink cannot be created —
+ * something re-created the path inside the window — the stale directory is
+ * restored, keeping `CLAUDE_PLUGIN_ROOT` pinned sessions alive.
+ *
+ * Invariant: on return the path is either the redirect symlink or the original
+ * directory. It is never an empty directory and never absent.
+ */
+function relinkStaleVersionDir(versionDir: string, target: string): void {
+  const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
+  const asideDir = `${versionDir}.omc-stale-${process.pid}`;
+
+  safeRmSync(asideDir);
+  renameSync(versionDir, asideDir);
+
+  for (let attempt = 0; attempt < RELINK_ATTEMPTS; attempt++) {
+    try {
+      symlinkSync(target, versionDir, symlinkType);
+      safeRmSync(asideDir);
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
+        safeRmSync(versionDir);
+        renameSync(asideDir, versionDir);
+        throw err;
+      }
+      // Something occupied the path; clear it and retry.
+      safeRmSync(versionDir);
+    }
+  }
+
+  safeRmSync(versionDir);
+  renameSync(asideDir, versionDir);
+  throw new Error(`could not place redirect symlink after ${RELINK_ATTEMPTS} attempts`);
+}
+
 /**
  * Result of a plugin cache purge operation.
  */
@@ -363,16 +409,14 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
               b.split('/').pop() ?? b,
             ),
           )[0];
-          if (safeRmSync(versionDir)) {
-            try {
-              symlinkSync(target, versionDir, process.platform === 'win32' ? 'junction' : 'dir');
-              result.symlinked++;
-              result.symlinkPaths.push(versionDir);
-            } catch (err) {
-              result.errors.push(
-                `Failed to symlink ${versionDir} → ${target}: ${err instanceof Error ? err.message : err}`,
-              );
-            }
+          try {
+            relinkStaleVersionDir(versionDir, target);
+            result.symlinked++;
+            result.symlinkPaths.push(versionDir);
+          } catch (err) {
+            result.errors.push(
+              `Failed to symlink ${versionDir} → ${target}: ${err instanceof Error ? err.message : err}`,
+            );
           }
         } else {
           if (safeRmSync(versionDir)) {
