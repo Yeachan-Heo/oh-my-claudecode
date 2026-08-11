@@ -36,10 +36,13 @@ function makeStale(path: string) {
   utimesSync(path, old, old);
 }
 
+/** A complete plugin root — everything `isPluginRoot()` in scripts/run.cjs wants. */
 function writeVersion(version: string) {
   const dir = join(pluginDir, version);
   mkdirSync(join(dir, 'scripts'), { recursive: true });
   writeFileSync(join(dir, 'scripts', 'run.cjs'), `// ${version}\n`);
+  mkdirSync(join(dir, 'hooks'), { recursive: true });
+  writeFileSync(join(dir, 'hooks', 'hooks.json'), '{}\n');
   return dir;
 }
 
@@ -53,9 +56,16 @@ function installedPlugins() {
   );
 }
 
-/** A hook resolves through `version` when its entrypoint is readable there. */
+/**
+ * A hook resolves through `version` only when the path satisfies the runner's own
+ * check — `isPluginRoot()` in scripts/run.cjs, reproduced here so the assertions
+ * mean "a pinned session still works", not "some file exists".
+ */
 function hookResolves(version: string): boolean {
-  return existsSync(join(pluginDir, version, 'scripts', 'run.cjs'));
+  const root = join(pluginDir, version);
+  return existsSync(join(root, 'hooks', 'hooks.json'))
+    && existsSync(join(root, 'scripts', 'run.cjs'))
+    && existsSync(join(root, 'scripts'));
 }
 
 beforeEach(() => {
@@ -130,7 +140,17 @@ describe('purgeStalePluginCacheVersions on a real filesystem', () => {
     // version, discarded the backup, and left pinned sessions resolving into a
     // directory the hook runner cannot load.  Windows sprinkles desktop.ini and
     // Thumbs.db; an interrupted extraction leaves a partial scripts/.
-    for (const junk of [['desktop.ini'], ['Thumbs.db'], ['scripts', 'partial.txt']]) {
+    // The last three are partial roots: each satisfies one of the runner's
+    // requirements and none satisfies all of them, so none can run hooks.
+    const junkShapes: string[][] = [
+      ['desktop.ini'],
+      ['Thumbs.db'],
+      ['scripts', 'partial.txt'],
+      ['hooks', 'hooks.json'],
+      ['.claude-plugin', 'plugin.json'],
+      ['scripts', 'run.cjs'],
+    ];
+    for (const junk of junkShapes) {
       rmSync(pluginDir, { recursive: true, force: true });
       mkdirSync(pluginDir, { recursive: true });
       writeVersion(ACTIVE);
@@ -239,7 +259,14 @@ describe('invariant across every cache shape', () => {
     let aside: string | null = null;
     if (backup !== 'none') {
       aside = `${V}.omc-stale-${backup.endsWith('live') ? process.pid : DEAD_PID}`;
-      if (backup.startsWith('payload')) { mkdirSync(join(aside, 'scripts'), { recursive: true }); writeFileSync(join(aside, 'scripts', 'run.cjs'), '//\n'); }
+      if (backup.startsWith('payload')) {
+        // A backup this purge created came from a live version, so it is a
+        // complete root — the same shape writeVersion() produces.
+        mkdirSync(join(aside, 'scripts'), { recursive: true });
+        writeFileSync(join(aside, 'scripts', 'run.cjs'), '//\n');
+        mkdirSync(join(aside, 'hooks'), { recursive: true });
+        writeFileSync(join(aside, 'hooks', 'hooks.json'), '{}\n');
+      }
       else if (backup.startsWith('empty')) mkdirSync(aside, { recursive: true });
       else { mkdirSync(aside, { recursive: true }); writeFileSync(join(aside, '.DS_Store'), 'x'); }
     }
@@ -249,9 +276,15 @@ describe('invariant across every cache shape', () => {
     return { V, aside };
   }
 
+  /** A backup only counts as intact if it is a root the runner would load. */
+  const loadableRoot = (dir: string) =>
+    existsSync(join(dir, 'hooks', 'hooks.json'))
+    && existsSync(join(dir, 'scripts', 'run.cjs'))
+    && existsSync(join(dir, 'scripts'));
+
   const intactBackupSurvives = () =>
     readdirSync(pluginDir).filter(n => n.includes('.omc-stale-'))
-      .some(n => existsSync(join(pluginDir, n, 'scripts', 'run.cjs')));
+      .some(n => loadableRoot(join(pluginDir, n)));
 
   it('never ends with a broken pinned path and nothing to show for it', () => {
     const violations: string[] = [];
@@ -264,8 +297,9 @@ describe('invariant across every cache shape', () => {
         installedPlugins();
 
         const { V, aside } = shape(occupant, backup);
-        const hadPayload = existsSync(join(V, 'scripts', 'run.cjs'))
-          || (!!aside && existsSync(join(aside, 'scripts', 'run.cjs')));
+        // The invariant only binds when a loadable root existed to begin with:
+        // a shape that never had one cannot be expected to resolve afterwards.
+        const hadPayload = loadableRoot(V) || (!!aside && loadableRoot(aside));
 
         let result: ReturnType<typeof purgeStalePluginCacheVersions> | undefined;
         let threw: unknown = null;

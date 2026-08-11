@@ -222,23 +222,31 @@ const ASIDE_SUFFIX = '.omc-stale-';
 const ASIDE_SUFFIX_RE = /\.omc-stale-(\d+)$/;
 
 /**
- * Entry points a plugin root has to expose for a pinned session to keep working.
- * Taken from an installed cache copy, not guessed: `hooks/hooks.json` is what
- * Claude Code reads to wire the hooks, and the hook commands run through
- * `scripts/run.cjs`. Either one present means real payload.
+ * What a plugin root has to expose for a pinned session to keep working.
+ *
+ * This mirrors `isPluginRoot()` in `scripts/run.cjs` — the hook runner's own
+ * check — and must stay in step with it. The runner requires all of these, so a
+ * root missing any one cannot run hooks no matter what else it holds. Note that
+ * `.claude-plugin/plugin.json` is deliberately absent: the runner does not
+ * consult it, so a manifest-only directory is not a usable root.
  */
-const PLUGIN_ROOT_MARKERS = ['hooks/hooks.json', 'scripts/run.cjs', '.claude-plugin/plugin.json'];
+const PLUGIN_ROOT_REQUIREMENTS = [
+  join('hooks', 'hooks.json'),
+  join('scripts', 'run.cjs'),
+  'scripts',
+];
 
 /**
  * True when `path` can serve as a plugin root: a live redirect symlink, or a
  * directory that actually carries plugin payload.
  *
- * Presence is not enough, and neither is "holds a non-dotfile". A directory left
- * by a lost relink window can hold `.DS_Store` (Finder writes it the moment it
- * walks the path), `desktop.ini`/`Thumbs.db` on Windows, or a half-extracted
- * `scripts/` — none of which a pinned session can load. Treating those as usable
- * is what makes a recovery discard the only intact copy. The manifest also lives
- * under a dotted directory, so a dotfile check gets it wrong in both directions.
+ * Presence is not enough, and neither is "holds a non-dotfile", and neither is
+ * "holds one of the entry points". A directory left by a lost relink window can
+ * hold `.DS_Store` (Finder writes it the moment it walks the path),
+ * `desktop.ini`/`Thumbs.db` on Windows, a half-extracted `scripts/`, or a
+ * partially copied root with only the manifest or only `hooks/hooks.json` — none
+ * of which the hook runner will load. Treating any of those as usable is what
+ * makes a recovery discard the only intact copy.
  *
  * A dangling symlink is not usable either: `existsSync` follows the link, so a
  * redirect whose target has since been removed is correctly rejected.
@@ -252,7 +260,7 @@ function isUsableVersionPath(path: string): boolean {
   }
   if (stats.isSymbolicLink()) return existsSync(path);
   if (!stats.isDirectory()) return false;
-  return PLUGIN_ROOT_MARKERS.some(marker => existsSync(join(path, marker)));
+  return PLUGIN_ROOT_REQUIREMENTS.every(required => existsSync(join(path, required)));
 }
 
 /**
