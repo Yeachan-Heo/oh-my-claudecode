@@ -26,10 +26,10 @@ Direct writes OK for: `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, `AGE
 
 <skills>
 Invoke via `/oh-my-claudecode:<name>`. Trigger patterns auto-detect keywords.
-Tier-0 workflows include `autopilot`, `ultrawork`, `ralph`, `team`, and `ralplan`.
-Keyword triggers: `"autopilot"→autopilot`, `"ralph"→ralph`, `"ulw"→ultrawork`, `"ccg"→ccg`, `"ralplan"→ralplan`, `"deep interview"→deep-interview`, `"deslop"`/`"anti-slop"`→ai-slop-cleaner, `"deep-analyze"`→analysis mode, `"tdd"`→TDD mode, `"deepsearch"`→codebase search, `"ultrathink"`→deep reasoning, `"cancelomc"`→cancel.
-Team orchestration is explicit via `/team`.
-Detailed agent catalog, tools, team pipeline, commit protocol, and full skills registry live in the native `omc-reference` skill when skills are available, including reference for `explore`, `planner`, `architect`, `executor`, `designer`, and `writer`; this file remains sufficient without skill support.
+**Canonical workflows (Tier-0):** `plan` → `execute` → `review` → `verify`. Roles: `planner` → `executor` → `reviewer` → `verifier`. All other workflow names are bounded compatibility aliases (one concise warning/session; full mapping retained in diagnostics) or utility/internal specialist modules.
+Keyword triggers: `"autopilot"→autopilot` (alias→`execute`), `"ralph"→ralph` (alias→`execute`), `"ulw"→ultrawork` (alias→`execute`), `"ccg"→ccg` (tri-model via `ask`), `"ralplan"→ralplan` (alias→`plan`), `"deep interview"→deep-interview` (alias→`plan`), `"deslop"`/`"anti-slop"`→ai-slop-cleaner (→`review`, opt-in), `"deep-analyze"`→analysis mode, `"tdd"`→TDD mode, `"deepsearch"`→codebase search, `"ultrathink"`→deep reasoning, `"cancelomc"`→cancel. `autopilot`, `ultrawork`, `ralph`, `team`, `ralplan` remain documented for discoverability; canonical routing is `plan→execute→review→verify`. Team orchestration is explicit via `/team`.
+Alias warnings are concise/actionable and shown once per session by default; diagnostics retain the full alias→canonical mapping and telemetry. Automation may temporarily opt out via `OMC_ALIAS_WARNINGS=0` (bounded, migration-only). Release is maintainer-only `omc release` (see Migration Guide); `/release` remains only as a compatibility alias and never bypasses the release boundary.
+Detailed agent catalog, tools, team pipeline, commit protocol, and full skill registry live in the native `omc-reference` skill when skills are available, including reference for `explore`, `planner`, `architect`, `executor`, `designer`, and `writer`; this file remains sufficient without skill support. Specialists remain internal/routable modules (document-specialist, test-engineer, designer, etc.) — not Tier-0 workflows.
 </skills>
 
 <verification>
