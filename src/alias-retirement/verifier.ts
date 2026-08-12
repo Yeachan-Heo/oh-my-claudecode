@@ -156,12 +156,12 @@ function getPackageVersionFallback(): string {
           version?: string;
         };
         if (pkg.version) return pkg.version;
-      } catch {}
+      } catch { /* empty — no package.json at this level, try parent */ }
       const parent = dirname(dir);
       if (parent === dir) break;
       dir = parent;
     }
-  } catch {}
+  } catch { /* empty — no package.json found in any ancestor */ }
   return '0.0.0';
 }
 
