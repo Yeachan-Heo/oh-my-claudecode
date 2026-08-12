@@ -1732,105 +1732,21 @@
       ]
     },
     {
-      "pullNumber": 3690,
-      "targetRef": "main",
-      "mergeBaseSha": "10ad9ce5f8882e3c3856b4d349adb078bccdfa73",
-      "headSha": "4b33235381036f76fb918d75ce75417cbdf94b6a",
+      "pullNumber": 3651,
+      "targetRef": "dev",
+      "mergeBaseSha": "d2de51d1e1b5ad3914506ea25d334fb2c7d06fc8",
+      "headSha": "4fcb4d71e1407eba2fb62e355a41298e0364536b",
       "owner": "Yeachan-Heo",
-      "expiresAt": "2026-08-26T00:00:00.000Z",
+      "expiresAt": "2026-08-16T00:00:00.000Z",
       "generatedDelta": {
-        "count": 84,
-        "sha256": "32281aa849db09ae8d5b349bb6fc3b662386029aea2beec1ee9e2d8b6ab0dda5"
+        "count": 13,
+        "sha256": "4d03cecddffd6713c880a4c10d4357b1189f5e55e76c2b5f91abe1e3a442d23c"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/claude-md-coordinator.cjs",
-          "sha": "94f2910bdcfeb7b0ce5903a1dac83e1d9f388384",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/cli.cjs",
-          "sha": "4148a380b8724bb276c0138c204ecf5e30a92aed",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/mcp-server.cjs",
-          "sha": "bd75bdad5eb75d5baff95c234ae2575c011c22ba",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/runtime-cli.cjs",
-          "sha": "d11c4b7e92f14ebc922f8cf8f9bb4d7859b57ec6",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/team-bridge.cjs",
-          "sha": "337515fc68aa1bde951b9e2c6c5b9f38f72eda3e",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/team-mcp.cjs",
-          "sha": "7979d2172bae05cb7160e12007f17f7a077ecc18",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "bridge/team.js",
-          "sha": "296db74af1f1719561614649d856105aa468fdcd",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/__tests__/hud/usage-api.test.js",
-          "sha": "150d495f168f4b32eccb0a07a234acb349642f56",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/__tests__/hud/usage-api.test.js.map",
-          "sha": "2f8bec6d2c66c818cb9402468ed2009f1c448e49",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/commands/doctor-team-routing.js",
-          "sha": "dd0dff5073ffdc922c6d4403fee85cedc349cae4",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/commands/team.js",
-          "sha": "1f51214311b72bce8e7f77b5cd848091cde24f28",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/hud-watch.js",
-          "sha": "8d5566686195c2c734f46d050b87c24a09d18bd8",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/index.js",
-          "sha": "b1ea32f23128d1b7c9dd017156902d4446e9bb9e",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/launch.js",
-          "sha": "e01b363c5cdc3d4f28072ca612b49a2db200b7d6",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/cli/team.js",
-          "sha": "55951bd6a0ec70736ea14b007cbaf16a3d6d6123",
+          "sha": "9d2470ed1e8754493b478689a071ff74e2dfe14c",
           "previousFilename": null
         },
         {
@@ -1894,6 +1810,92 @@
           "previousFilename": null
         },
         {
+          "status": "added",
+          "filename": "dist/team/worker-launch-ack.d.ts",
+          "sha": "c1fb816da347e13bb6d3d048a28d39087310bea2",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/team/worker-launch-ack.js",
+          "sha": "2749a93fcd898afc9bb89b3df344fe450cc80e40",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 3660,
+      "targetRef": "dev",
+      "mergeBaseSha": "3c232b64ee10910ba50d450ff8ebbe883a59b2c6",
+      "headSha": "3a37a65d13973bcf0758f6a92d3dca54c0bca83d",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-17T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 54,
+        "sha256": "8c71fdafeffbd4398e81f4f681d7675c40de83b00ae1d645b925fbcd0fef1180"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "94f2910bdcfeb7b0ce5903a1dac83e1d9f388384",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "4148a380b8724bb276c0138c204ecf5e30a92aed",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "bd75bdad5eb75d5baff95c234ae2575c011c22ba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "d11c4b7e92f14ebc922f8cf8f9bb4d7859b57ec6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-bridge.cjs",
+          "sha": "337515fc68aa1bde951b9e2c6c5b9f38f72eda3e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "7979d2172bae05cb7160e12007f17f7a077ecc18",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "296db74af1f1719561614649d856105aa468fdcd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/team.js",
+          "sha": "1f51214311b72bce8e7f77b5cd848091cde24f28",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/hud-watch.js",
+          "sha": "8d5566686195c2c734f46d050b87c24a09d18bd8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.js",
+          "sha": "55951bd6a0ec70736ea14b007cbaf16a3d6d6123",
+          "previousFilename": null
+        },
+        {
           "status": "modified",
           "filename": "dist/hooks/rules-injector/finder.js",
           "sha": "27629a76a83f51c877c07075d13c5205fdc6b08b",
@@ -1931,86 +1933,8 @@
         },
         {
           "status": "modified",
-          "filename": "dist/hud/elements/limits.js",
-          "sha": "9fdb51c9d66ae0370f1ab05c6b966acdaa1be7e4",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/stdin.js",
-          "sha": "2b555b6d81d66909a62ce734fc6498f68ae38032",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/types.d.ts",
-          "sha": "4738afeac85def9d24c5560ebbe781175e2027ec",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/usage-api.d.ts",
-          "sha": "b754ba555a7236895ed225a3c2fa222104388ff0",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/usage-api.d.ts.map",
-          "sha": "d600fb14bb7fb471b1956d392b4ed1d09139d001",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/usage-api.js",
-          "sha": "cd1afac9f9bdb9f635f740cffe1d1d780100191a",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/hud/usage-api.js.map",
-          "sha": "f05b01a0254e78abb82c2b5e6c0b9ccf3d893341",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/installer/claude-md-transaction.d.ts",
-          "sha": "91f44678af2a904d691d7bd61fdad5eae478a923",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/installer/claude-md-transaction.js",
-          "sha": "8a3c29bd6cc3ee42a705c046418ebbf38234b9cb",
-          "previousFilename": null
-        },
-        {
-          "status": "added",
-          "filename": "dist/installer/historical-agent-ownership.d.ts",
-          "sha": "3902ec42a77d6fa6ebf1366a188c14af9e451a21",
-          "previousFilename": null
-        },
-        {
-          "status": "added",
-          "filename": "dist/installer/historical-agent-ownership.js",
-          "sha": "73dbb7342a1affb00a3d1f435fd178aae4816822",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/installer/index.d.ts",
-          "sha": "5fe1619f84ef538126c56080dd63a068052204c2",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
           "filename": "dist/installer/index.js",
           "sha": "3c9f473cbe2033ac3ec4016fe46530476bd7318e",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/installer/mcp-registry.js",
-          "sha": "99d3c36dbb897f4a4d2ed23abb8964c68af33e9b",
           "previousFilename": null
         },
         {
@@ -2029,18 +1953,6 @@
           "status": "modified",
           "filename": "dist/team/api-interop.js",
           "sha": "173fec2c28f37b0794c3d99ee825f448d2e0feb5",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/team/cli-detection.d.ts",
-          "sha": "e7e64318064ff081d64c46329431aa84d78c16e6",
-          "previousFilename": null
-        },
-        {
-          "status": "modified",
-          "filename": "dist/team/cli-detection.js",
-          "sha": "c888776f5dd23f0a8c308c232a8a6e8e3b603a96",
           "previousFilename": null
         },
         {
@@ -2200,13 +2112,13 @@
           "previousFilename": null
         },
         {
-          "status": "added",
+          "status": "modified",
           "filename": "dist/team/worker-launch-ack.d.ts",
           "sha": "5f0d995ffa2e3a042a5b3b8ef07fde7905fe585a",
           "previousFilename": null
         },
         {
-          "status": "added",
+          "status": "modified",
           "filename": "dist/team/worker-launch-ack.js",
           "sha": "f6cc07162d36711731f71b9c6bdc7de9df5d80bc",
           "previousFilename": null
@@ -2250,10 +2162,30 @@
       ]
     },
     {
+      "pullNumber": 3697,
+      "targetRef": "dev",
+      "mergeBaseSha": "9222cbc1c3e2783f7a04477875cbcf7ee13848ee",
+      "headSha": "7797f344d3ce798f7dba26aeec098831c0fdc7bd",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-19T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 1,
+        "sha256": "71d6133ba813c30c01d625fdeeab5f4caba8b99a3f1797cfa5c1952c9d4d0458"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "44b6d3aa729b2bf74f37571bbfbabf8a942b8bab",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 3692,
       "targetRef": "dev",
-      "mergeBaseSha": "edb97afb8f4d3764cdf83f45037ce03abcbbe26f",
-      "headSha": "f93f2bbce67c93d3a8cccd78798a9e809bfecbb3",
+      "mergeBaseSha": "cd82dff6f3efe9609144ed183e6ff2d13b6f043c",
+      "headSha": "976df90ac09b7e7bca649e978f929378872b8099",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-19T00:00:00.000Z",
       "generatedDelta": {
@@ -2265,46 +2197,6 @@
           "status": "modified",
           "filename": "bridge/claude-md-coordinator.cjs",
           "sha": "60b372ca868144e33a980e46588dd476d82dcd7d",
-          "previousFilename": null
-        }
-      ]
-    },
-    {
-      "pullNumber": 3716,
-      "targetRef": "dev",
-      "mergeBaseSha": "247df87a626451963fc811fb4352e673fce7c9d8",
-      "headSha": "3b73d5a33a7d02f53bf58e49ccfb9f763af14bd3",
-      "owner": "Yeachan-Heo",
-      "expiresAt": "2026-08-19T00:00:00.000Z",
-      "generatedDelta": {
-        "count": 1,
-        "sha256": "d8508c74e4efdaa946581a2396f04af538fd42f0f934bb7a09a407de895af89a"
-      },
-      "generatedFiles": [
-        {
-          "status": "modified",
-          "filename": "bridge/claude-md-coordinator.cjs",
-          "sha": "7f1474d768472f149442095443ac38ab6b524450",
-          "previousFilename": null
-        }
-      ]
-    },
-    {
-      "pullNumber": 3719,
-      "targetRef": "dev",
-      "mergeBaseSha": "626fd0baab2ca2d5676b8ebe2f83065642f7b835",
-      "headSha": "baee2d0bdd993eba8631af4d5b8b47bbb5cb88f6",
-      "owner": "Yeachan-Heo",
-      "expiresAt": "2026-08-19T00:00:00.000Z",
-      "generatedDelta": {
-        "count": 1,
-        "sha256": "37499548ff8a6f8831741742789e3ff8eb9722679b40ec2260863db193ef3de2"
-      },
-      "generatedFiles": [
-        {
-          "status": "modified",
-          "filename": "bridge/claude-md-coordinator.cjs",
-          "sha": "a2a81cac21ff359efc329bea81f4155a6c155f21",
           "previousFilename": null
         }
       ]
