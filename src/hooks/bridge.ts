@@ -85,6 +85,7 @@ import {
   type ActiveSkillSlot,
 } from "./skill-state/index.js";
 import { parseExplicitWorkflowSlashInvocation } from "./keyword-detector/index.js";
+import { resolveWorkflowInputWithWarning } from "../workflow/alias-resolver.js";
 import {
   ULTRATHINK_MESSAGE,
   SEARCH_MESSAGE,
@@ -1490,6 +1491,17 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     };
   }
   if (explicitSlash) {
+    // Alias resolver: route slash invocations through Tier-0 mapping, emit once/session warning, retain diagnostics/telemetry.
+    // For explicit slash, we record alias telemetry and optionally emit a concise actionable warning.
+    // The underlying skill name remains the alias for compatibility (no breaking invocation), but telemetry maps it.
+    try {
+      const aliasRes = resolveWorkflowInputWithWarning(explicitSlash.skill, sessionId ?? undefined, directory);
+      if (aliasRes.warningToEmit && aliasRes.canonical && aliasRes.canonical !== explicitSlash.skill.toLowerCase()) {
+        messages.push(aliasRes.warningToEmit);
+      }
+    } catch {
+      // never break slash flow on alias resolver failure
+    }
     seedWorkflowSlotForSkill(
       directory,
       explicitSlash.skill,
@@ -1612,6 +1624,25 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
   const sanitizedText = sanitizeForKeywordDetection(cleanedText);
   if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
     messages.push(PROMPT_TRANSLATION_MESSAGE);
+  }
+
+  // Alias resolver: concise actionable warning once/session, diagnostics retain full mapping.
+  // Telemetry/receipts are recorded inside resolveWorkflowInputWithWarning; explicit slash
+  // invocations are also covered via the invocation path below. For keyword-detected paths,
+  // emit at most one alias warning per detected keyword (deduped per session).
+  {
+    const aliasWarnings: string[] = [];
+    for (const kw of keywords) {
+      // normalize to resolver input form (keyword detector already lowercases)
+      const res = resolveWorkflowInputWithWarning(kw, sessionId ?? undefined, directory);
+      if (res.warningToEmit) aliasWarnings.push(res.warningToEmit);
+      // also handle explicit release via keyword-like "release" if ever surfaced as keyword — defensive
+    }
+    // Dedupe alias warnings across multiple keywords that map to same canonical
+    const uniqueAliasWarnings = [...new Set(aliasWarnings)];
+    for (const w of uniqueAliasWarnings) {
+      messages.push(w);
+    }
   }
 
   // Wake OpenClaw gateway for keyword-detector (non-blocking, fires for all prompts)
