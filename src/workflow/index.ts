@@ -1,7 +1,11 @@
 /**
- * Workflow public surface for issue #3706
- * Barrel re-exports the alias resolver seam. When #3703 lands, this
- * barrel re-exports the canonical registry as well and the alias-resolver
- * adapts via `resolveWorkflowAliasViaRegistry`.
+ * Workflow public surface.
+ *
+ * - alias-resolver: merged #3706 resolver (Tier-0 contract, alias routing,
+ *   once-per-session warnings, telemetry/receipts, retirement verifier).
+ * - registry / projections: #3703 canonical workflow registry, compatibility
+ *   policy, risk classes, Tier-0 roles, deterministic projection + drift check.
  */
 export * from './alias-resolver.js';
+export * from './registry.js';
+export * from './projections.js';
