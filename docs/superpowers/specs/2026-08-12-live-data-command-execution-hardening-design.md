@@ -51,7 +51,7 @@ The parser rejects:
 
 - empty commands;
 - unterminated quotes or a trailing escape;
-- unquoted `;`, `&&`, `||`, `|`, `<`, and `>`;
+- unquoted `;`, `&`, `&&`, `||`, `|`, `<`, and `>`;
 - CR, LF, NUL, and other ASCII control characters;
 - backtick command substitution;
 - `$(` command substitution outside single-quoted literal text.
