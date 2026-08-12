@@ -61,6 +61,33 @@ describe('pre-tool-use template source extension detection', () => {
     });
   });
 
+  describe('notice payload is bounded', () => {
+    it('truncates a long command and reports its real length', () => {
+      const filler = 'x'.repeat(500);
+      const command = `sed -i "s/${filler}/y/" src/app.ts`;
+      const output = runPreToolUseHook(command);
+      const additionalContext = (
+        output.hookSpecificOutput as { additionalContext?: string } | undefined
+      )?.additionalContext;
+
+      expect(additionalContext).toContain('Bash command may modify source files');
+      expect(additionalContext).toContain(`(${command.length} chars)`);
+      expect(additionalContext).not.toContain(filler);
+    });
+
+    it('leaves a short command intact', () => {
+      const command = 'sed -i s/a/b/ src/app.ts';
+      const additionalContext = (
+        runPreToolUseHook(command).hookSpecificOutput as
+          | { additionalContext?: string }
+          | undefined
+      )?.additionalContext;
+
+      expect(additionalContext).toContain(command);
+      expect(additionalContext).not.toContain('chars)');
+    });
+  });
+
   describe('real source writes still warn', () => {
     it.each([
       ['in-place sed', 'sed -i s/a/b/ src/app.ts'],

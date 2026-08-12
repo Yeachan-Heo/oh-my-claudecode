@@ -243,6 +243,17 @@ const FD_DUP_PATTERN = /\d+>&\d+/g;
 // performs the write can be the one touching a source file.
 const PIPELINE_SPLIT_PATTERN = /(?:&&|\|\||;|\|)/;
 
+// The notice stays in the transcript and is re-sent on every later turn, so a
+// heredoc or generated command would keep paying for its whole body.
+const NOTICE_COMMAND_MAX = 200;
+
+function summarizeCommand(command) {
+  const text = String(command || '');
+  return text.length > NOTICE_COMMAND_MAX
+    ? `${text.slice(0, NOTICE_COMMAND_MAX)}… (${text.length} chars)`
+    : text;
+}
+
 function checkBashCommand(command) {
   const probe = String(command || '')
     .replace(DEV_REDIRECT_PATTERN, ' ')
@@ -258,7 +269,7 @@ function checkBashCommand(command) {
     );
 
   if (offending) {
-    return `[DELEGATION NOTICE] Bash command may modify source files: ${command}
+    return `[DELEGATION NOTICE] Bash command may modify source files: ${summarizeCommand(command)}
 
 Recommended: Delegate to executor agent instead:
   Task(subagent_type="oh-my-claudecode:executor", model="sonnet", prompt="...")
