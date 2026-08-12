@@ -244,6 +244,21 @@ function resolveArguments(content: string, args: string): string {
   return content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)');
 }
 
+function hasLiveDataArgumentsPlaceholder(content: string): boolean {
+  return content.includes('$ARGUMENTS')
+    && content.split('\n').some((line) => /^\s*!/.test(line));
+}
+
+function validateLiveDataArguments(args: string): string | null {
+  for (const char of args) {
+    const code = char.charCodeAt(0);
+    if ((code < 32 && char !== '\t') || code === 127) {
+      return 'control character rejected';
+    }
+  }
+  return null;
+}
+
 function hasInvocationFlag(args: string, flag: string): boolean {
   const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp(`(^|\\s)${escaped}(?=\\s|$)`).test(args);
@@ -289,6 +304,12 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
   const displayArgs = isDeepInterviewAutoresearch
     ? stripInvocationFlag(args, '--autoresearch')
     : args;
+  const liveDataArgumentError = hasLiveDataArgumentsPlaceholder(cmd.content || '')
+    ? validateLiveDataArguments(displayArgs)
+    : null;
+  const renderedArgs = liveDataArgumentError
+    ? `[blocked: ${liveDataArgumentError}]`
+    : displayArgs;
 
   sections.push(`<command-name>/${cmd.name}</command-name>\n`);
 
@@ -296,8 +317,8 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
     sections.push(`**Description**: ${cmd.metadata.description}\n`);
   }
 
-  if (displayArgs) {
-    sections.push(`**Arguments**: ${displayArgs}\n`);
+  if (renderedArgs) {
+    sections.push(`**Arguments**: ${renderedArgs}\n`);
   }
 
   if (cmd.metadata.model) {
@@ -320,7 +341,9 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
 
   // Resolve arguments in content, then execute any live-data commands
   const resolvedContent = resolveArguments(cmd.content || '', displayArgs);
-  const baseContent = resolveLiveData(resolvedContent);
+  const baseContent = liveDataArgumentError
+    ? `<live-data command="$ARGUMENTS" error="true">blocked: ${liveDataArgumentError}</live-data>`
+    : resolveLiveData(resolvedContent);
   const injectedContent = cmd.scope === 'skill'
     ? renderBundledSkillBody(cmd.metadata.name, baseContent)
     : rewriteOmcCliInvocations(baseContent);
@@ -342,10 +365,10 @@ function formatCommandTemplate(cmd: CommandInfo, args: string): string {
       .join('\n\n')
   );
 
-  if (displayArgs && !cmd.content?.includes('$ARGUMENTS')) {
+  if (renderedArgs && !cmd.content?.includes('$ARGUMENTS')) {
     sections.push('\n\n---\n');
     sections.push('## User Request\n');
-    sections.push(displayArgs);
+    sections.push(renderedArgs);
   }
 
   return sections.join('\n');
