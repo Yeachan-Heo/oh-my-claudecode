@@ -41,7 +41,6 @@ const DIFF_FILE_HEADER_PATTERN = /^(?:diff --git|---|\+\+\+) [ab]\/(.+)/gm;
 const DIFF_HEADER_PREFIX_PATTERN = /^(?:diff --git|---|\+\+\+) [ab]\//;
 const SCRIPT_BEGIN_PATTERN = /^\s*!begin-script\s+(\S+)\s*$/;
 const SCRIPT_END_PATTERN = /^\s*!end-script\s*$/;
-const WHITESPACE_SPLIT_PATTERN = /\s/;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -61,6 +60,15 @@ interface SecurityPolicy {
 }
 
 type OutputFormat = "json" | "table" | "diff" | null;
+
+interface ParsedCommandInvocation {
+  executable: string;
+  args: string[];
+}
+
+type CommandParseResult =
+  | { ok: true; invocation: ParsedCommandInvocation }
+  | { ok: false; reason: string };
 
 // ─── Cache ───────────────────────────────────────────────────────────────────
 
@@ -129,6 +137,122 @@ export function clearCache(): void {
   onceCommands.clear();
 }
 
+function parseCommandInvocation(command: string): CommandParseResult {
+  let quote: "single" | "double" | null = null;
+  let escaped = false;
+  let tokenStarted = false;
+  let token = "";
+  const tokens: string[] = [];
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    const isUnquotedTabDelimiter = char === "\t" && quote === null && !escaped;
+
+    if ((char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) && !isUnquotedTabDelimiter) {
+      return { ok: false, reason: "control character rejected" };
+    }
+
+    if (escaped) {
+      token += char;
+      tokenStarted = true;
+      escaped = false;
+      continue;
+    }
+
+    if (quote === "single") {
+      if (char === "'") {
+        quote = null;
+      } else {
+        token += char;
+      }
+      tokenStarted = true;
+      continue;
+    }
+
+    if (quote === "double") {
+      if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        quote = null;
+      } else if (char === "`") {
+        return { ok: false, reason: "command substitution rejected" };
+      } else if (char === "$" && command[i + 1] === "(") {
+        return { ok: false, reason: "command substitution rejected" };
+      } else {
+        token += char;
+      }
+      tokenStarted = true;
+      continue;
+    }
+
+    if (char === " " || char === "\t") {
+      if (tokenStarted) {
+        tokens.push(token);
+        token = "";
+        tokenStarted = false;
+      }
+      continue;
+    }
+
+    if (char === "'") {
+      quote = "single";
+      tokenStarted = true;
+      continue;
+    }
+
+    if (char === '"') {
+      quote = "double";
+      tokenStarted = true;
+      continue;
+    }
+
+    if (char === "\\") {
+      escaped = true;
+      tokenStarted = true;
+      continue;
+    }
+
+    if (char === "`" || (char === "$" && command[i + 1] === "(")) {
+      return { ok: false, reason: "command substitution rejected" };
+    }
+
+    if (";&|<>".includes(char)) {
+      return { ok: false, reason: `shell operator rejected: ${char}` };
+    }
+
+    token += char;
+    tokenStarted = true;
+  }
+
+  if (escaped) {
+    return { ok: false, reason: "trailing escape" };
+  }
+
+  if (quote === "single") {
+    return { ok: false, reason: "unterminated single quote" };
+  }
+
+  if (quote === "double") {
+    return { ok: false, reason: "unterminated double quote" };
+  }
+
+  if (tokenStarted) {
+    tokens.push(token);
+  }
+
+  if (tokens.length === 0) {
+    return { ok: false, reason: "empty command" };
+  }
+
+  return {
+    ok: true,
+    invocation: {
+      executable: tokens[0],
+      args: tokens.slice(1),
+    },
+  };
+}
+
 // ─── Security ────────────────────────────────────────────────────────────────
 
 let cachedPolicy: SecurityPolicy | null = null;
@@ -162,9 +286,11 @@ export function resetSecurityPolicy(): void {
   policyLoadedFrom = null;
 }
 
-function checkSecurity(command: string): { allowed: boolean; reason?: string } {
+function checkSecurity(
+  command: string,
+  executable: string,
+): { allowed: boolean; reason?: string } {
   const policy = loadSecurityPolicy();
-  const cmdBase = command.split(WHITESPACE_SPLIT_PATTERN)[0];
 
   // Check denied patterns first (always enforced)
   if (policy.denied_patterns) {
@@ -185,8 +311,8 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
   }
 
   if (policy.denied_commands) {
-    if (policy.denied_commands.includes(cmdBase)) {
-      return { allowed: false, reason: `command '${cmdBase}' is denied` };
+    if (policy.denied_commands.includes(executable)) {
+      return { allowed: false, reason: `command '${executable}' is denied` };
     }
   }
 
@@ -208,7 +334,7 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
   let patternAllowed = false;
 
   if (policy.allowed_commands) {
-    baseAllowed = policy.allowed_commands.includes(cmdBase);
+    baseAllowed = policy.allowed_commands.includes(executable);
   }
 
   if (policy.allowed_patterns) {
@@ -233,7 +359,7 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
   if (!baseAllowed && !patternAllowed) {
     return {
       allowed: false,
-      reason: `command '${cmdBase}' not in allowlist`,
+      reason: `command '${executable}' not in allowlist`,
     };
   }
 
@@ -380,13 +506,17 @@ function checkIfBranch(pattern: string): boolean {
 
 // ─── Execution ───────────────────────────────────────────────────────────────
 
-function executeCommand(command: string): { stdout: string; error: boolean } {
+function executeCommand(
+  invocation: ParsedCommandInvocation,
+): { stdout: string; error: boolean } {
   try {
-    const stdout = execSync(command, {
+    const stdout = execFileSync(invocation.executable, invocation.args, {
+      shell: false,
       timeout: TIMEOUT_MS,
       maxBuffer: MAX_OUTPUT_BYTES + 1024,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
     });
 
     let output = stdout ?? "";
@@ -518,7 +648,7 @@ export function resolveLiveData(content: string): string {
       scriptLineSet.add(i);
     }
 
-    const security = checkSecurity(block.shell);
+    const security = checkSecurity(block.shell, block.shell);
     if (!security.allowed) {
       scriptReplacements.set(
         block.startLine,
@@ -570,8 +700,16 @@ export function resolveLiveData(content: string): string {
 
     const directive = parseDirective(line);
 
-    // Security check
-    const security = checkSecurity(directive.command);
+    const parsed = parseCommandInvocation(directive.command);
+    if (!parsed.ok) {
+      result.push(
+        `<live-data command="${escapeHtml(directive.command)}" error="true">blocked: ${escapeHtml(parsed.reason)}</live-data>`,
+      );
+      continue;
+    }
+
+    const invocation = parsed.invocation;
+    const security = checkSecurity(directive.command, invocation.executable);
     if (!security.allowed) {
       result.push(
         `<live-data command="${escapeHtml(directive.command)}" error="true">blocked: ${escapeHtml(security.reason ?? "")}</live-data>`,
@@ -586,7 +724,7 @@ export function resolveLiveData(content: string): string {
             `<live-data command="${escapeHtml(directive.command)}" skipped="true">condition not met: no files matching '${escapeHtml(directive.pattern!)}' modified</live-data>`,
           );
         } else {
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           result.push(formatOutput(directive.command, stdout, error, null));
         }
         break;
@@ -598,7 +736,7 @@ export function resolveLiveData(content: string): string {
             `<live-data command="${escapeHtml(directive.command)}" skipped="true">condition not met: branch does not match '${escapeHtml(directive.pattern!)}'</live-data>`,
           );
         } else {
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           result.push(formatOutput(directive.command, stdout, error, null));
         }
         break;
@@ -611,7 +749,7 @@ export function resolveLiveData(content: string): string {
           );
         } else {
           markCommandExecuted(directive.command);
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           result.push(formatOutput(directive.command, stdout, error, null));
         }
         break;
@@ -630,7 +768,7 @@ export function resolveLiveData(content: string): string {
             ).replace("<live-data", '<live-data cached="true"'),
           );
         } else {
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           setCache(directive.command, stdout, error, ttl);
           result.push(formatOutput(directive.command, stdout, error, null));
         }
@@ -650,7 +788,7 @@ export function resolveLiveData(content: string): string {
             ).replace("<live-data", '<live-data cached="true"'),
           );
         } else {
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           if (ttl > 0) setCache(directive.command, stdout, error, ttl);
           result.push(
             formatOutput(directive.command, stdout, error, directive.format!),
@@ -673,7 +811,7 @@ export function resolveLiveData(content: string): string {
             ).replace("<live-data", '<live-data cached="true"'),
           );
         } else {
-          const { stdout, error } = executeCommand(directive.command);
+          const { stdout, error } = executeCommand(invocation);
           if (ttl > 0) setCache(directive.command, stdout, error, ttl);
           result.push(formatOutput(directive.command, stdout, error, null));
         }
