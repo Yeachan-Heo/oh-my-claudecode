@@ -72,6 +72,12 @@ describe('Tier-0 contract docs consistency', () => {
     expect(claudeDoc).toContain('`test.skip`/`.only`, stub tests');
   });
 
+  it('owns final-claims verification guidance in the verification contract', () => {
+    expect(claudeDoc).toContain('<verification>\nVerify before claiming completion.');
+    expect(claudeDoc).not.toContain('verify outcomes before final claims');
+    expect(claudeDoc).toContain('Before concluding: zero pending tasks, tests passing, verifier evidence collected.');
+  });
+
   it('keeps install and update guidance aligned on canonical setup entrypoints', () => {
     const localPluginDoc = readProjectFile('docs', 'LOCAL_PLUGIN_INSTALL.md');
 
