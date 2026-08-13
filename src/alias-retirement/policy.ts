@@ -16,6 +16,7 @@ export const RETIREMENT_POLICY = {
   minDays: 90,
   minCanonicalShare: 0.95,
   requiredConsecutiveReleases: 2,
+  requiresZeroCriticalIntegrations: true,
   schemaVersion: 1,
 } as const;
 

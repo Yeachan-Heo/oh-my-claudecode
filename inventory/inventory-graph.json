@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "cdf63d07da950cf1cdecebc343868e1f6d836361",
-    "sourceSha256": "06862569d080eedab8f502ae692219d8d65174bd0fc45ec8e5e687b6b4323a9f",
+    "head": "c33655e0336a56740704f6c63a18e11eef463f18",
+    "sourceSha256": "bfc25ef1b4d1ae45b9e85df072b528dbdff1556857d841302360be46468e1db4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "cdf63d07da950cf1cdecebc343868e1f6d836361",
-  "sourceSha256": "06862569d080eedab8f502ae692219d8d65174bd0fc45ec8e5e687b6b4323a9f",
+  "head": "c33655e0336a56740704f6c63a18e11eef463f18",
+  "sourceSha256": "bfc25ef1b4d1ae45b9e85df072b528dbdff1556857d841302360be46468e1db4",
   "counts": {
     "public": {
       "skills": 41,
@@ -23,13 +23,13 @@
       "total": 95
     },
     "internal": {
-      "hookFiles": 294,
+      "hookFiles": 302,
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
       "templateHooks": 18,
-      "srcFiles": 1250,
-      "total": 1268
+      "srcFiles": 1266,
+      "total": 1284
     },
     "generated": {
       "distFiles": 4319,
@@ -37,14 +37,14 @@
       "total": 4328
     },
     "prompt": {
-      "promptLikeFiles": 40
+      "promptLikeFiles": 57
     },
     "skills": 41,
     "commands": 28,
-    "hookFiles": 294,
+    "hookFiles": 302,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 40
+    "promptLikeFiles": 57
   },
   "public": {
     "skills": [
@@ -354,6 +354,14 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/dispatcher.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/dispatcher.ts",
+      "src/hooks/registry/index.ts",
+      "src/hooks/registry/registry.ts",
+      "src/hooks/registry/shadow.ts",
+      "src/hooks/registry/types.ts",
       "src/hooks/rules-injector/constants.ts",
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
@@ -641,8 +649,17 @@
       "benchmarks/executor/prompts/deep-executor.md",
       "benchmarks/harsh-critic/prompts/harsh-critic.md",
       "docs/CLAUDE.md",
+      "docs/design/issue-3704-prompt-ssot/README.md",
+      "docs/design/issue-3704-prompt-ssot/measurements.json",
+      "generated/prompt-ssot/coordinator.md",
+      "generated/prompt-ssot/role-executor.md",
+      "generated/prompt-ssot/role-planner.md",
+      "generated/prompt-ssot/role-reviewer.md",
+      "generated/prompt-ssot/role-verifier.md",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-workflow-stage-prompts.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
@@ -652,6 +669,14 @@
       "src/__tests__/windows-prompt-hook-runner.test.ts",
       "src/agents/prompt-helpers.ts",
       "src/agents/prompt-sections/index.ts",
+      "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+      "src/agents/prompt-ssot/compose.ts",
+      "src/agents/prompt-ssot/digest.ts",
+      "src/agents/prompt-ssot/index.ts",
+      "src/agents/prompt-ssot/manifest.ts",
+      "src/agents/prompt-ssot/metrics.ts",
+      "src/agents/prompt-ssot/sections.ts",
+      "src/agents/prompt-ssot/types.ts",
       "src/features/model-routing/prompts/haiku.ts",
       "src/features/model-routing/prompts/index.ts",
       "src/features/model-routing/prompts/opus.ts",
@@ -680,6 +705,7 @@
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
       "scripts/build-mcp-server.mjs",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
       "scripts/build-skill-bridge.mjs",
       "scripts/build-team-server.mjs",
@@ -721,6 +747,7 @@
       "scripts/lib/stdin.mjs",
       "scripts/lib/workflow-profile-runtime.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "scripts/openclaw-gateway-demo.mjs",
       "scripts/permission-handler.mjs",
       "scripts/persistent-mode.cjs",
@@ -5308,6 +5335,14 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/dispatcher.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/dispatcher.ts",
+      "src/hooks/registry/index.ts",
+      "src/hooks/registry/registry.ts",
+      "src/hooks/registry/shadow.ts",
+      "src/hooks/registry/types.ts",
       "src/hooks/rules-injector/constants.ts",
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
@@ -5421,8 +5456,17 @@
       "benchmarks/executor/prompts/deep-executor.md",
       "benchmarks/harsh-critic/prompts/harsh-critic.md",
       "docs/CLAUDE.md",
+      "docs/design/issue-3704-prompt-ssot/README.md",
+      "docs/design/issue-3704-prompt-ssot/measurements.json",
+      "generated/prompt-ssot/coordinator.md",
+      "generated/prompt-ssot/role-executor.md",
+      "generated/prompt-ssot/role-planner.md",
+      "generated/prompt-ssot/role-reviewer.md",
+      "generated/prompt-ssot/role-verifier.md",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-workflow-stage-prompts.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
@@ -5432,6 +5476,14 @@
       "src/__tests__/windows-prompt-hook-runner.test.ts",
       "src/agents/prompt-helpers.ts",
       "src/agents/prompt-sections/index.ts",
+      "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+      "src/agents/prompt-ssot/compose.ts",
+      "src/agents/prompt-ssot/digest.ts",
+      "src/agents/prompt-ssot/index.ts",
+      "src/agents/prompt-ssot/manifest.ts",
+      "src/agents/prompt-ssot/metrics.ts",
+      "src/agents/prompt-ssot/sections.ts",
+      "src/agents/prompt-ssot/types.ts",
       "src/features/model-routing/prompts/haiku.ts",
       "src/features/model-routing/prompts/index.ts",
       "src/features/model-routing/prompts/opus.ts",
@@ -28256,6 +28308,11 @@
         "path": "docs/design/ISSUE-3703-WORKFLOW-REGISTRY.md"
       },
       {
+        "id": "docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md",
+        "kind": "other",
+        "path": "docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md"
+      },
+      {
         "id": "docs/design/SKILLS_2_0_ADAPTATION.md",
         "kind": "other",
         "path": "docs/design/SKILLS_2_0_ADAPTATION.md"
@@ -28269,6 +28326,16 @@
         "id": "docs/design/TIERED_AGENTS_V2.md",
         "kind": "other",
         "path": "docs/design/TIERED_AGENTS_V2.md"
+      },
+      {
+        "id": "docs/design/issue-3704-prompt-ssot/README.md",
+        "kind": "other",
+        "path": "docs/design/issue-3704-prompt-ssot/README.md"
+      },
+      {
+        "id": "docs/design/issue-3704-prompt-ssot/measurements.json",
+        "kind": "other",
+        "path": "docs/design/issue-3704-prompt-ssot/measurements.json"
       },
       {
         "id": "docs/design/project-session-manager.md",
@@ -28616,6 +28683,31 @@
         "path": "zod"
       },
       {
+        "id": "generated/prompt-ssot/coordinator.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/coordinator.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-executor.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-executor.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-planner.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-planner.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-reviewer.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-reviewer.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-verifier.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-verifier.md"
+      },
+      {
         "id": "geobench/oh-my-claudecode.yaml",
         "kind": "other",
         "path": "geobench/oh-my-claudecode.yaml"
@@ -28704,6 +28796,11 @@
         "id": "scripts/build-mcp-server.mjs",
         "kind": "script",
         "path": "scripts/build-mcp-server.mjs"
+      },
+      {
+        "id": "scripts/build-prompt-ssot.ts",
+        "kind": "script",
+        "path": "scripts/build-prompt-ssot.ts"
       },
       {
         "id": "scripts/build-runtime-cli.mjs",
@@ -28909,6 +29006,11 @@
         "id": "scripts/lib/workflow-stage-prompts.mjs",
         "kind": "script",
         "path": "scripts/lib/workflow-stage-prompts.mjs"
+      },
+      {
+        "id": "scripts/measure-prompt-ssot.ts",
+        "kind": "script",
+        "path": "scripts/measure-prompt-ssot.ts"
       },
       {
         "id": "scripts/openclaw-gateway-demo.mjs",
@@ -31046,6 +31148,46 @@
         "path": "src/agents/prompt-sections/index.ts"
       },
       {
+        "id": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/compose.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/compose.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/digest.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/digest.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/index.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/index.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/manifest.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/metrics.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/sections.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/sections.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/types.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/types.ts"
+      },
+      {
         "id": "src/agents/qa-tester.ts",
         "kind": "agent",
         "path": "src/agents/qa-tester.ts"
@@ -32909,6 +33051,46 @@
         "id": "src/hooks/recovery/types.ts",
         "kind": "hook",
         "path": "src/hooks/recovery/types.ts"
+      },
+      {
+        "id": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/dispatcher.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/__tests__/registry.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/registry.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/__tests__/shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/shadow.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/dispatcher.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/dispatcher.ts"
+      },
+      {
+        "id": "src/hooks/registry/index.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/index.ts"
+      },
+      {
+        "id": "src/hooks/registry/registry.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/registry.ts"
+      },
+      {
+        "id": "src/hooks/registry/shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/shadow.ts"
+      },
+      {
+        "id": "src/hooks/registry/types.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/types.ts"
       },
       {
         "id": "src/hooks/rules-injector/constants.ts",
@@ -36698,6 +36880,36 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/build-runtime-cli.mjs",
         "to": "external:esbuild",
         "kind": "imports"
@@ -37210,6 +37422,41 @@
       {
         "from": "scripts/lib/workflow-profile-runtime.mjs",
         "to": "scripts/lib/workflow-stage-prompts.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
         "kind": "imports"
       },
       {
@@ -44763,6 +45010,116 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/digest.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/manifest.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/metrics.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/sections.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/agents/qa-tester.ts",
         "to": "src/agents/types.ts",
         "kind": "type-imports"
@@ -49994,6 +50351,11 @@
       },
       {
         "from": "src/hooks/bridge.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/bridge.ts",
         "to": "src/hooks/session-end/index.ts",
         "kind": "imports"
       },
@@ -53525,6 +53887,176 @@
       {
         "from": "src/hooks/recovery/storage.ts",
         "to": "src/hooks/recovery/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/bridge.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/dispatcher.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/dispatcher.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/shadow.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/types.ts",
+        "to": "src/workflow/registry.ts",
         "kind": "type-imports"
       },
       {
@@ -68904,6 +69436,11 @@
       },
       {
         "from": "src/workflow/__tests__/registry.test.ts",
+        "to": "src/alias-retirement/policy.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/workflow/__tests__/registry.test.ts",
         "to": "src/workflow/alias-resolver.ts",
         "kind": "imports"
       },
@@ -68966,6 +69503,11 @@
         "from": "src/workflow/projections.ts",
         "to": "src/workflow/registry.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/workflow/registry.ts",
+        "to": "src/alias-retirement/policy.ts",
+        "kind": "imports"
       },
       {
         "from": "src/workflow/registry.ts",
@@ -69814,12 +70356,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6113,
-      "edgeCount": 6732,
-      "importEdgeCount": 5505,
+      "nodeCount": 6139,
+      "edgeCount": 6804,
+      "importEdgeCount": 5552,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "a7de0bd9513a39d16413002261c59a1870d5c7a93dcd876576e579dccf7adbd7",
-  "manifestSha256": "c9059d1f351b24be3161a4206e00495652d60094dd0051e04425efdcdf94f93f"
+  "inventorySha256": "0f8acccf384e40885119e02902ab8105c3a64896570d9ddb3e83dc4ffc209ced",
+  "manifestSha256": "4a0dbf0de3c5fcd96fe856d79416a07db5027eae5ded41eb22acbe50c4541a3a"
 }

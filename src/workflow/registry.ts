@@ -28,6 +28,7 @@ import {
   type AliasEntry,
   type AliasRegistryLookup,
 } from './alias-resolver.js';
+import { RETIREMENT_POLICY } from '../alias-retirement/policy.js';
 
 
 export const REGISTRY_SCHEMA_VERSION = 1;
@@ -78,27 +79,12 @@ export function failModeForRisk(riskClass: RiskClass): FailMode {
 
 // ---------------------------------------------------------------------------
 // Structured retirement evidence policy (owner decision 4)
+// Re-exported from the canonical source in src/alias-retirement/policy.ts.
 // ---------------------------------------------------------------------------
 
-export interface RetirementPolicy {
-  /** At least this many minor releases since the alias shipped... */
-  readonly minMinorReleases: number;
-  /** ...AND at least this many days; whichever condition is longer binds. */
-  readonly minDays: number;
-  /** Required canonical-use share over consecutive releases. */
-  readonly minCanonicalUseShare: number;
-  readonly consecutiveReleases: number;
-  /** Removal is blocked while any known critical integration uses the alias. */
-  readonly requiresZeroCriticalIntegrations: true;
-}
+export { RETIREMENT_POLICY };
 
-export const RETIREMENT_POLICY: RetirementPolicy = {
-  minMinorReleases: 2,
-  minDays: 90,
-  minCanonicalUseShare: 0.95,
-  consecutiveReleases: 2,
-  requiresZeroCriticalIntegrations: true,
-};
+export type RetirementPolicy = typeof RETIREMENT_POLICY;
 
 /** Human-readable milestone string attached to every removable alias. */
 export const REMOVAL_MILESTONE =

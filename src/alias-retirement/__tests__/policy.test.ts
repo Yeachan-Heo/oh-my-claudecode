@@ -18,6 +18,7 @@ describe('alias-retirement policy', () => {
     expect(RETIREMENT_POLICY.minDays).toBe(90);
     expect(RETIREMENT_POLICY.minCanonicalShare).toBe(0.95);
     expect(RETIREMENT_POLICY.requiredConsecutiveReleases).toBe(2);
+    expect(RETIREMENT_POLICY.requiresZeroCriticalIntegrations).toBe(true);
   });
 
   describe('parseVersion', () => {

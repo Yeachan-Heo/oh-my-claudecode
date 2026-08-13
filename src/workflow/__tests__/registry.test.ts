@@ -142,12 +142,17 @@ describe('workflow registry — retirement policy', () => {
     expect(RETIREMENT_POLICY).toEqual({
       minMinorReleases: 2,
       minDays: 90,
-      minCanonicalUseShare: 0.95,
-      consecutiveReleases: 2,
+      minCanonicalShare: 0.95,
+      requiredConsecutiveReleases: 2,
       requiresZeroCriticalIntegrations: true,
+      schemaVersion: 1,
     });
     expect(REMOVAL_MILESTONE).toContain('90 days');
     expect(REMOVAL_MILESTONE).toContain('95%');
+  });
+  it('re-exports the canonical RETIREMENT_POLICY from alias-retirement/policy.ts (single source of truth)', async () => {
+    const { RETIREMENT_POLICY: canonicalPolicy } = await import('../../alias-retirement/policy.js');
+    expect(RETIREMENT_POLICY).toBe(canonicalPolicy);
   });
 });
 

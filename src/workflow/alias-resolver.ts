@@ -612,66 +612,6 @@ export function clearAliasWarningsForTests(sessionId?: string, worktreeRoot?: st
 }
 
 // ---------------------------------------------------------------------------
-// Retirement verifier helper (executable mechanism; temporal condition recorded)
-// ---------------------------------------------------------------------------
-
-export interface RetirementCheckInput {
-  currentVersion: string; // e.g. "4.15.10"
-  aliasIntroducedVersion?: string; // version when alias was introduced
-  releaseDates?: Record<string, string>; // version -> ISO date
-  canonicalUsageShare?: number; // 0..1
-  consecutiveReleasesWithShare?: number;
-  hasKnownCriticalIntegrations: boolean;
-}
-
-export interface RetirementVerdict {
-  eligible: boolean;
-  remaining: string[];
-  receipts: AliasReceipts | null;
-}
-
-export function checkAliasRetirement(input: RetirementCheckInput, worktreeRoot?: string): RetirementVerdict {
-  const remaining: string[] = [];
-  // Policy: at least 2 minor releases AND 90 days, 95% canonical usage for 2 releases, zero known critical integrations
-  // We implement executable checks but do NOT falsely remove aliases here — this is the verifier.
-  if (input.hasKnownCriticalIntegrations) remaining.push('has known critical integrations — must be zero');
-
-  const share = input.canonicalUsageShare;
-  if (share === undefined || share < 0.95) remaining.push('canonical usage share < 95% (need ≥0.95 over 2 consecutive releases)');
-  if ((input.consecutiveReleasesWithShare ?? 0) < 2) remaining.push('need ≥95% canonical share for 2 consecutive releases');
-
-  // Temporal check: 90 days and 2 minor releases
-  if (input.aliasIntroducedVersion && input.releaseDates) {
-    const introduced = input.releaseDates[input.aliasIntroducedVersion];
-    if (introduced) {
-      const ageMs = Date.now() - new Date(introduced).getTime();
-      const ageDays = ageMs / (1000 * 60 * 60 * 24);
-      if (ageDays < 90) remaining.push(`alias age ${Math.floor(ageDays)}d < 90d minimum`);
-    } else {
-      remaining.push('unknown introduction date — cannot verify 90d condition');
-    }
-    // Minor version diff check is informational; we need at least 2 minor bumps
-    const parseMinor = (v: string) => {
-      const m = v.match(/^(\d+)\.(\d+)/);
-      if (!m) return null;
-      return { major: Number(m[1]), minor: Number(m[2]) };
-    };
-    const cur = parseMinor(input.currentVersion);
-    const intro = parseMinor(input.aliasIntroducedVersion);
-    if (cur && intro) {
-      const minorDiff = (cur.major - intro.major) * 1000 + (cur.minor - intro.minor); // rough
-      if (minorDiff < 2) remaining.push('need at least 2 minor releases since alias introduction');
-    }
-  } else {
-    remaining.push('temporal condition: need at least 2 minor releases AND 90 days — evidence not yet provided');
-  }
-
-  const receipts = (() => { try { return readUsageReceipts(worktreeRoot); } catch { return null; } })();
-
-  return { eligible: remaining.length === 0, remaining, receipts };
-}
-
-// ---------------------------------------------------------------------------
 // Hook integration helper (narrow seam for bridge/keyword-detector)
 // ---------------------------------------------------------------------------
 
