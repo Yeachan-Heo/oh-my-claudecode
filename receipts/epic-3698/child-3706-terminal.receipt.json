@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3706,
+  "createdAt": "2026-08-12T20:30:00Z",
+  "payload": {
+    "state": "merged",
+    "evidence": "PR #3715 merged 2026-08-12T15:09:53Z (merge 19759db14175bb1d0677711e4a4c949939da1a78); 14/14 checks SUCCESS at head f8067b4bce9bcab76cfaa83debd16577203982d8; issue #3706 CLOSED"
+  }
+}

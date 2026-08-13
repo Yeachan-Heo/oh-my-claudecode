@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3708,
+  "createdAt": "2026-08-13T03:50:00Z",
+  "payload": {
+    "state": "merged",
+    "evidence": "PR #3729 merged as commit 2256dce4d; 14/14 checks SUCCESS at head 433c13ad87973b603f67553268d8a98d7d7df0f9; issue #3708 CLOSED. Shipped dispatcher cutover by event family with advisory fail-open."
+  }
+}

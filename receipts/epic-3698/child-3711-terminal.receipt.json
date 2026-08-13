@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3711,
+  "createdAt": "2026-08-13T01:15:00Z",
+  "payload": {
+    "state": "merged",
+    "evidence": "PR #3723 merged 2026-08-13 (merge e8454839407818291f67d331e2bef69dbad0e032); 14/14 checks SUCCESS at head c0a842b943f5315bd52f27a47328891c16f95630; issue #3711 CLOSED. Shipped alias retirement verifier (src/alias-retirement/), closure inventory, policy, and registry modules. Dev head e84548394 is green (9 SUCCESS, 1 SKIPPED, 0 FAILURE)."
+  }
+}

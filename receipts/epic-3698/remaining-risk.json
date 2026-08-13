@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "epic": 3698,
+  "issue": 3712,
+  "generatedAt": "2026-08-13T03:55:00Z",
+  "policy": "Remaining risks must be named explicitly with severity, mitigation, and status; this register is the epic's remaining-risk evidence and is validated by scripts/verify-epic-3698-closure.mjs.",
+  "risks": [
+    {
+      "id": "R1-dependency-terminality",
+      "description": "All 10 child issues #3702-#3711 are terminal. The verifier mechanism is delivered as an evidence tool; epic closure requires the quantitative targets below to be met.",
+      "severity": "low",
+      "mitigation": "Terminal receipts exist for all 10/10 children. The verifier tracks metrics and alias-retirement status as honest non-closure evidence.",
+      "status": "mitigated"
+    },
+    {
+      "id": "R2-exact-head-ci-drift",
+      "description": "PRs #3724 (#3704) and #3725 (#3707) merged with CI / Test FAILURE at exact heads (inventory-graph-drift). The drift was resolved post-merge by #3711's closure inventory refresh. Current dev head 2256dce4d CI is running.",
+      "severity": "medium",
+      "mitigation": "CI evidence receipt excludes non-green PR heads; child-terminal receipts honestly record the CI failure. Dev head CI is verified via gh api check-runs.",
+      "status": "monitored"
+    },
+    {
+      "id": "R3-alias-retirement-window",
+      "description": "Alias retirement requires >= 2 minor releases AND >= 90 days, >= 95% canonical usage for 2 consecutive releases, and zero known critical integrations; no release has shipped since alias deprecation. #3711 shipped the executable verifier and closure inventory but retirement itself remains pending.",
+      "severity": "high",
+      "mitigation": "Verifier treats unsatisfied alias-usage receipts as pending and never authorizes removal; #3711's alias-retirement verifier (src/alias-retirement/) enforces the policy programmatically.",
+      "status": "monitored"
+    },
+    {
+      "id": "R4-metrics-not-at-target",
+      "description": "Current dev metrics at 2256dce4d (skills=41, commands=28, workflows=8, agents=18, hooks=302) do not meet epic targets (12-18 commands, 5-6 workflows). All 10 child issues merged without reducing public surface counts — the children shipped registries, SSOTs, dispatchers, and verifiers, but surface reduction itself depends on the alias retirement window (#3711's verifier gates removal). The verifier honestly reports this as FAIL.",
+      "severity": "medium",
+      "mitigation": "Metrics are measured reproducibly and evaluated against owning-child terminality. With all owners terminal and targets unmet, the verifier reports FAIL — this is honest evidence, not a mechanism defect.",
+      "status": "open"
+    },
+    {
+      "id": "R5-receipt-provenance",
+      "description": "Receipts are repo-committed JSON; a tampered or fabricated receipt would weaken closure evidence.",
+      "severity": "medium",
+      "mitigation": "Receipt schema is validated fail-closed; CI evidence is re-collectable from gh at exact head SHAs; metrics receipts carry measurementSha256 recomputable from the tree.",
+      "status": "mitigated"
+    },
+    {
+      "id": "R6-release-authority-boundary",
+      "description": "This verification lane must not become a backdoor release path: no tag/publish/main mutation is permitted without exact owner authority.",
+      "severity": "critical",
+      "mitigation": "releaseSecurityParity check fails if the change set touches release workflows, release scripts, .npmrc, or package.json version; collector/verifier scripts are read-only against GitHub and npm.",
+      "status": "mitigated"
+    }
+  ]
+}

@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f8985c7d9c97629a54010b9a8e724623789e53f8",
-    "sourceSha256": "268e8e5f0d44cd8a3b17cc70b03afff323c9f2c7fe1fc469ac2f9184b99a8cc9",
+    "head": "2c4755b8cdc791071712c935a2ed1d6e80c59655",
+    "sourceSha256": "2e943d7ca66db0db085e48f40dbe34964cdd36cb85cca19bf4dd1c16cd90fc48",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f8985c7d9c97629a54010b9a8e724623789e53f8",
-  "sourceSha256": "268e8e5f0d44cd8a3b17cc70b03afff323c9f2c7fe1fc469ac2f9184b99a8cc9",
+  "head": "2c4755b8cdc791071712c935a2ed1d6e80c59655",
+  "sourceSha256": "2e943d7ca66db0db085e48f40dbe34964cdd36cb85cca19bf4dd1c16cd90fc48",
   "counts": {
     "public": {
       "skills": 41,
@@ -722,6 +722,7 @@
       "scripts/ci/multirepo-patterns.yml",
       "scripts/cleanup-orphans.mjs",
       "scripts/code-simplifier.mjs",
+      "scripts/collect-epic-3698-ci-evidence.mjs",
       "scripts/compose-docs.mjs",
       "scripts/context-guard-stop.mjs",
       "scripts/context-safety.mjs",
@@ -799,6 +800,7 @@
       "scripts/test-session-injection.ts",
       "scripts/uninstall.sh",
       "scripts/verify-deliverables.mjs",
+      "scripts/verify-epic-3698-closure.mjs",
       "scripts/verify-generated-artifact-authorization.mjs",
       "scripts/wiki-pre-compact.mjs",
       "scripts/wiki-session-end.mjs",
@@ -28328,6 +28330,11 @@
         "path": "docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md"
       },
       {
+        "id": "docs/design/ISSUE-3712-RELEASE-VERIFICATION.md",
+        "kind": "other",
+        "path": "docs/design/ISSUE-3712-RELEASE-VERIFICATION.md"
+      },
+      {
         "id": "docs/design/SKILLS_2_0_ADAPTATION.md",
         "kind": "other",
         "path": "docs/design/SKILLS_2_0_ADAPTATION.md"
@@ -28783,6 +28790,81 @@
         "path": "package.json"
       },
       {
+        "id": "receipts/epic-3698/README.md",
+        "kind": "other",
+        "path": "receipts/epic-3698/README.md"
+      },
+      {
+        "id": "receipts/epic-3698/child-3702-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3702-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3703-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3703-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3704-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3704-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3705-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3705-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3706-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3706-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3707-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3707-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3708-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3708-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3709-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3709-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3710-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3710-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/child-3711-terminal.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/child-3711-terminal.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/ci-evidence-merged.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/ci-evidence-merged.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/install-verification-2026-08-12.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/install-verification-2026-08-12.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/metrics-2026-08-12.receipt.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/metrics-2026-08-12.receipt.json"
+      },
+      {
+        "id": "receipts/epic-3698/remaining-risk.json",
+        "kind": "other",
+        "path": "receipts/epic-3698/remaining-risk.json"
+      },
+      {
         "id": "research/hephaestus-vs-deep-executor-comparison.md",
         "kind": "other",
         "path": "research/hephaestus-vs-deep-executor-comparison.md"
@@ -28861,6 +28943,11 @@
         "id": "scripts/code-simplifier.mjs",
         "kind": "script",
         "path": "scripts/code-simplifier.mjs"
+      },
+      {
+        "id": "scripts/collect-epic-3698-ci-evidence.mjs",
+        "kind": "script",
+        "path": "scripts/collect-epic-3698-ci-evidence.mjs"
       },
       {
         "id": "scripts/compose-docs.mjs",
@@ -29246,6 +29333,11 @@
         "id": "scripts/verify-deliverables.mjs",
         "kind": "script",
         "path": "scripts/verify-deliverables.mjs"
+      },
+      {
+        "id": "scripts/verify-epic-3698-closure.mjs",
+        "kind": "script",
+        "path": "scripts/verify-epic-3698-closure.mjs"
       },
       {
         "id": "scripts/verify-generated-artifact-authorization.mjs",
@@ -36323,6 +36415,11 @@
         "path": "tests/integration/concurrent-ralph-sessions.test.ts"
       },
       {
+        "id": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "kind": "other",
+        "path": "tests/integration/epic-3698-closure-verifier.test.ts"
+      },
+      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -37102,6 +37199,16 @@
       {
         "from": "scripts/code-simplifier.mjs",
         "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/collect-epic-3698-ci-evidence.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/collect-epic-3698-ci-evidence.mjs",
+        "to": "external:node:fs",
         "kind": "imports"
       },
       {
@@ -38457,6 +38564,26 @@
       {
         "from": "scripts/verify-deliverables.mjs",
         "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-epic-3698-closure.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-epic-3698-closure.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-epic-3698-closure.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-epic-3698-closure.mjs",
+        "to": "external:node:path",
         "kind": "imports"
       },
       {
@@ -70320,6 +70447,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/epic-3698-closure-verifier.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -70591,12 +70748,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6150,
-      "edgeCount": 6837,
-      "importEdgeCount": 5582,
+      "nodeCount": 6169,
+      "edgeCount": 6849,
+      "importEdgeCount": 5594,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "2158f1ecd887f795f9aa68376dfd8912fdf1d086465a62914e369b0016143bd7",
-  "manifestSha256": "af14b85ae13b7b96e591cecbe1a434003324e70ca90ef92fdac4161121625b6a"
+  "inventorySha256": "86f563c6c5640312acf5d8661109d7f2e476dbb1a68c1364eafad49bbfb92eb3",
+  "manifestSha256": "09e99becff8b9e4c6641a7a7f7d317b5331d2a3226034782ed3fcb4d83a2ebe1"
 }
