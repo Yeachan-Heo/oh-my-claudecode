@@ -117,6 +117,10 @@ import type { SessionEndInput } from "./session-end/index.js";
 import type { StopContext } from "./todo-continuation/index.js";
 // Security: wrap untrusted file content to prevent prompt injection
 import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
+import {
+  isHookShadowEnabled,
+  runShadowObservation,
+} from "./registry/index.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
@@ -3099,7 +3103,7 @@ export function resetSkipHooksCache(): void {
  * Main hook processor
  * Routes to specific hook handler based on type
  */
-export async function processHook(
+async function processHookImpl(
   hookType: HookType,
   rawInput: HookInput,
 ): Promise<HookOutput> {
@@ -3335,6 +3339,34 @@ export async function processHook(
     console.error(`[hook-bridge] Error in ${hookType}:`, error);
     return { continue: true };
   }
+}
+
+/**
+ * Main hook processor (epic #3698, issue #3707).
+ *
+ * Thin wrapper over the legacy dispatcher: runs the legacy path unchanged,
+ * then records a shadow-mode registry/dispatcher observation. Shadow mode is
+ * gated behind OMC_HOOK_SHADOW (default off), is fully fail-open, and never
+ * alters the returned output. Rollback: remove this wrapper's shadow call.
+ */
+export async function processHook(
+  hookType: HookType,
+  rawInput: HookInput,
+): Promise<HookOutput> {
+  const legacyStarted = performance.now();
+  const output = await processHookImpl(hookType, rawInput);
+  if (isHookShadowEnabled()) {
+    try {
+      await runShadowObservation(
+        hookType,
+        output,
+        performance.now() - legacyStarted,
+      );
+    } catch {
+      // Shadow observation is advisory and must never change hook behavior.
+    }
+  }
+  return output;
 }
 
 /**

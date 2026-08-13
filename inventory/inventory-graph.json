@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "dc96e556c5ff68c515916e4ad1a869c43a1147ab",
-    "sourceSha256": "46259423b58ba99e68e23dd26a8b3a2a04b202c84fd5e857a867ab448c814615",
+    "head": "f40f09442d65bf90520ebcd6fc13cace929e8a00",
+    "sourceSha256": "2c8fe09d48b1f66ebdd37500865fece6f06b354d50c3ebd5ebca1c08d3af16cd",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "dc96e556c5ff68c515916e4ad1a869c43a1147ab",
-  "sourceSha256": "46259423b58ba99e68e23dd26a8b3a2a04b202c84fd5e857a867ab448c814615",
+  "head": "f40f09442d65bf90520ebcd6fc13cace929e8a00",
+  "sourceSha256": "2c8fe09d48b1f66ebdd37500865fece6f06b354d50c3ebd5ebca1c08d3af16cd",
   "counts": {
     "public": {
       "skills": 41,
@@ -23,13 +23,13 @@
       "total": 95
     },
     "internal": {
-      "hookFiles": 294,
+      "hookFiles": 302,
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
       "templateHooks": 18,
-      "srcFiles": 1240,
-      "total": 1258
+      "srcFiles": 1249,
+      "total": 1267
     },
     "generated": {
       "distFiles": 4319,
@@ -41,7 +41,7 @@
     },
     "skills": 41,
     "commands": 28,
-    "hookFiles": 294,
+    "hookFiles": 302,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 40
@@ -354,6 +354,14 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/dispatcher.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/dispatcher.ts",
+      "src/hooks/registry/index.ts",
+      "src/hooks/registry/registry.ts",
+      "src/hooks/registry/shadow.ts",
+      "src/hooks/registry/types.ts",
       "src/hooks/rules-injector/constants.ts",
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
@@ -5308,6 +5316,14 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/dispatcher.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/dispatcher.ts",
+      "src/hooks/registry/index.ts",
+      "src/hooks/registry/registry.ts",
+      "src/hooks/registry/shadow.ts",
+      "src/hooks/registry/types.ts",
       "src/hooks/rules-injector/constants.ts",
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
@@ -28256,6 +28272,11 @@
         "path": "docs/design/ISSUE-3703-WORKFLOW-REGISTRY.md"
       },
       {
+        "id": "docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md",
+        "kind": "other",
+        "path": "docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md"
+      },
+      {
         "id": "docs/design/SKILLS_2_0_ADAPTATION.md",
         "kind": "other",
         "path": "docs/design/SKILLS_2_0_ADAPTATION.md"
@@ -32861,6 +32882,46 @@
         "path": "src/hooks/recovery/types.ts"
       },
       {
+        "id": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/dispatcher.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/__tests__/registry.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/registry.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/__tests__/shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/shadow.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/dispatcher.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/dispatcher.ts"
+      },
+      {
+        "id": "src/hooks/registry/index.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/index.ts"
+      },
+      {
+        "id": "src/hooks/registry/registry.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/registry.ts"
+      },
+      {
+        "id": "src/hooks/registry/shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/shadow.ts"
+      },
+      {
+        "id": "src/hooks/registry/types.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/types.ts"
+      },
+      {
         "id": "src/hooks/rules-injector/constants.ts",
         "kind": "hook",
         "path": "src/hooks/rules-injector/constants.ts"
@@ -35854,6 +35915,11 @@
         "id": "src/workflow/registry.ts",
         "kind": "src",
         "path": "src/workflow/registry.ts"
+      },
+      {
+        "id": "src/workflow/warning.ts",
+        "kind": "src",
+        "path": "src/workflow/warning.ts"
       },
       {
         "id": "templates/deliverables.json",
@@ -49759,6 +49825,11 @@
       },
       {
         "from": "src/hooks/bridge.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/bridge.ts",
         "to": "src/hooks/session-end/index.ts",
         "kind": "imports"
       },
@@ -53290,6 +53361,176 @@
       {
         "from": "src/hooks/recovery/storage.ts",
         "to": "src/hooks/recovery/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/registry.test.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/bridge.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/shadow.test.ts",
+        "to": "src/hooks/registry/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/dispatcher.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/dispatcher.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/shadow.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/registry.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/dispatcher.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/registry.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/shadow.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/types.ts",
+        "to": "src/workflow/registry.ts",
         "kind": "type-imports"
       },
       {
@@ -68738,6 +68979,21 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/workflow/warning.ts",
+        "to": "src/workflow/alias-resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/workflow/warning.ts",
+        "to": "src/workflow/alias-resolver.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/workflow/warning.ts",
+        "to": "src/workflow/registry.ts",
+        "kind": "imports"
+      },
+      {
         "from": "templates/hooks/code-simplifier.mjs",
         "to": "external:child_process",
         "kind": "imports"
@@ -69579,12 +69835,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6103,
-      "edgeCount": 6695,
-      "importEdgeCount": 5478,
+      "nodeCount": 6113,
+      "edgeCount": 6733,
+      "importEdgeCount": 5500,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "ada7c0fd99be1f6cfb18276fcf55b207b2ef56d840e64fa25c547071d4db645b",
-  "manifestSha256": "6efe459291c9fb08e9bd28b6d4e01c7e1b72a659aa66e5b574f80e3bbdcaf59f"
+  "inventorySha256": "42d4790ea78cd7dd3a5b22996df8695160dec7bad9292e2dd2ab3000c6737815",
+  "manifestSha256": "a4bc5703ef5d604d5a88d402e4097ce5516d0615eaebfe20fba668ec9e5fc821"
 }
