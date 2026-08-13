@@ -142,7 +142,7 @@ const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   // Tier-0 canonical workflows
-  entry({ name: 'plan', kind: 'skill', tier: 0, decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Absorbs deep-interview and ralplan.' }),
+  entry({ name: 'plan', kind: 'skill', tier: 0, decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Tier-0 planning workflow.' }),
   entry({ name: 'execute', kind: 'skill', tier: 0, decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, declaredOnly: true, notes: 'Absorbs ultragoal, autopilot, ralph, ultrawork, ultrapilot, swarm, pipeline; optional team execution stays internal.' }),
   entry({ name: 'review', kind: 'skill', tier: 0, decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, declaredOnly: true, notes: 'Absorbs review routing incl. the merge-readiness advisory lane.' }),
   entry({ name: 'verify', kind: 'skill', tier: 0, decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Absorbs ultraqa / verification routing.' }),
@@ -160,8 +160,9 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'swarm', kind: 'skill', decision: 'merge', canonicalTarget: 'team', riskClass: 'advisory', owner: REGISTRY_OWNER, declaredOnly: true, removalMilestone: ALIAS_MILESTONE }),
   entry({ name: 'pipeline', kind: 'skill', decision: 'merge', canonicalTarget: 'execute', riskClass: 'advisory', owner: REGISTRY_OWNER, declaredOnly: true, removalMilestone: ALIAS_MILESTONE }),
   entry({ name: 'ultraqa', kind: 'skill', decision: 'merge', canonicalTarget: 'verify', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE }),
-  entry({ name: 'deep-interview', kind: 'skill', decision: 'merge', canonicalTarget: 'plan', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE }),
-  entry({ name: 'ralplan', kind: 'skill', decision: 'merge', canonicalTarget: 'plan', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE }),
+  // Owner direction: keep deep-interview and ralplan distinct (not aliases into plan)
+  entry({ name: 'deep-interview', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Requirements/elicitation workflow; kept distinct per owner — not an alias into plan.' }),
+  entry({ name: 'ralplan', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Consensus planning workflow; kept distinct per owner — not an alias into plan.' }),
   entry({ name: 'merge-readiness', kind: 'skill', decision: 'merge', canonicalTarget: 'review', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE, notes: 'Advisory review only; release hard checks stay separate and fail closed.' }),
   entry({ name: 'deep-dive', kind: 'skill', decision: 'merge', canonicalTarget: 'research', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE }),
   entry({ name: 'sciomc', kind: 'skill', decision: 'merge', canonicalTarget: 'research', riskClass: 'advisory', owner: REGISTRY_OWNER, removalMilestone: ALIAS_MILESTONE }),

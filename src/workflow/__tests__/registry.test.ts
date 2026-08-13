@@ -105,8 +105,11 @@ describe('workflow registry — aliases and classification', () => {
   });
 
   it('routes planning and verification modes into plan/verify', () => {
-    expect(resolveCanonical('ralplan', 'skill')?.name).toBe('plan');
-    expect(resolveCanonical('deep-interview', 'skill')?.name).toBe('plan');
+    // Owner keeps deep-interview and ralplan distinct (not aliases into plan)
+    expect(resolveCanonical('deep-interview', 'skill')?.name).toBe('deep-interview');
+    expect(getEntry('deep-interview', 'skill')?.decision).toBe('keep');
+    expect(resolveCanonical('ralplan', 'skill')?.name).toBe('ralplan');
+    expect(getEntry('ralplan', 'skill')?.decision).toBe('keep');
     expect(resolveCanonical('ultraqa', 'skill')?.name).toBe('verify');
     expect(resolveCanonical('merge-readiness', 'skill')?.name).toBe('review');
   });

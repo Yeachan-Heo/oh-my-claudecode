@@ -1,0 +1,7 @@
+{
+  "description": "Transaction phases guaranteed by src/installer/__tests__/claude-md-transaction.test.ts",
+  "phases": ["validation", "backup", "mutation", "rollback"],
+  "guards": ["exclusiveVerifiedBackup", "atomicWrite", "verifyCapturedRoot", "strictChildPath", "symlinkRefusal"],
+  "idempotentModes": ["local", "global-overwrite", "global-preserve"],
+  "rollbackTriggers": ["second operation failure", "root alias swap", "dangling symlink during rollback"]
+}

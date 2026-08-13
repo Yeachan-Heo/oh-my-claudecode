@@ -22,7 +22,17 @@ describe('npm package hook surface regression', () => {
     };
 
     expect(packageJson.scripts?.build).toMatch(
-      /npm run compose-docs && npm run build:claude-md-coordinator/,
+      /npm run compose-docs && npm run generate:prompt-projections && npm run build:claude-md-coordinator/,
+    );
+    expect(
+      packageJson.scripts?.build?.indexOf('npm run compose-docs'),
+    ).toBeLessThan(
+      packageJson.scripts?.build?.indexOf('npm run generate:prompt-projections') ?? -1,
+    );
+    expect(
+      packageJson.scripts?.build?.indexOf('npm run generate:prompt-projections'),
+    ).toBeLessThan(
+      packageJson.scripts?.build?.indexOf('npm run build:claude-md-coordinator') ?? -1,
     );
     for (const entrypoint of ['test', 'test:ui', 'test:run', 'test:coverage']) {
       expect(packageJson.scripts?.[entrypoint], entrypoint).not.toContain(
