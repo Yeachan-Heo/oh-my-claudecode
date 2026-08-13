@@ -30,7 +30,7 @@ import { getOmcRoot, resolveToWorktreeRoot } from '../lib/worktree-paths.js';
 // Tier-0 contract
 // ---------------------------------------------------------------------------
 
-export const TIER0_WORKFLOWS = ['plan', 'execute', 'review', 'verify'] as const;
+export const TIER0_WORKFLOWS = ['plan', 'deep-interview', 'ralplan', 'execute', 'review', 'verify'] as const;
 export type Tier0Workflow = (typeof TIER0_WORKFLOWS)[number];
 
 export type AliasTarget = Tier0Workflow | 'omc-release';
@@ -70,11 +70,9 @@ export const ALIAS_REGISTRY: readonly AliasEntry[] = [
   { alias: 'omc-teams', canonical: 'execute', tier0: 'execute', owner: 'workflow-registry', description: 'omc-teams command alias', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
 
   // ---- Workflow aliases → plan ----
-  { alias: 'ralplan', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'ralplan consensus planning', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
-  { alias: 'deep-interview', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'deep-interview requirements', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
-  { alias: 'deep-dive', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'deep-dive research', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
   { alias: 'sciomc', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'sciomc research', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
   { alias: 'autoresearch', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'autoresearch lane', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
+  { alias: 'deep-dive', canonical: 'plan', tier0: 'plan', owner: 'workflow-registry', description: 'deep-dive research', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
   { alias: 'ultragoal', canonical: 'execute', tier0: 'execute', owner: 'workflow-registry', description: 'ultragoal stages', removalMilestone: '≥2 minor +90d, ≥95% canonical', isWorkflowAlias: true },
 
   // ---- Workflow aliases → review ----

@@ -255,10 +255,17 @@ Read src/hooks/bridge.ts first.`,
         });
 
         expect(denied.continue).toBe(true);
-        expect((denied as unknown as Record<string, unknown>).hookSpecificOutput).toBeDefined();
-        const denyHook = (denied as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
-        expect(denyHook.permissionDecision).toBe('deny');
-        expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+        // Under #3708 cutover, ordinary injection (prompt prerequisites) is advisory:
+        // the dispatcher loosens it to a warning instead of a permissionDecision deny.
+        // Permission/release/security semantics remain hard, but this path is procedure.
+        const deniedAny = denied as unknown as Record<string, unknown>;
+        if (deniedAny.hookSpecificOutput !== undefined) {
+          const denyHook = deniedAny.hookSpecificOutput as Record<string, unknown>;
+          expect(denyHook.permissionDecision).toBe('deny');
+          expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+        } else {
+          expect(String(denied.message ?? '')).toContain('ADVISORY');
+        }
 
         const readStep = await processHook('pre-tool-use', {
           sessionId,

@@ -121,6 +121,11 @@ import {
   isHookShadowEnabled,
   runShadowObservation,
 } from "./registry/index.js";
+import {
+  isFamilyCutoverEnabled,
+  recordDispatchTelemetry,
+  shouldLoosenOrdinaryEnforcement,
+} from "./registry/cutover.js";
 
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
@@ -2398,7 +2403,11 @@ function processPreToolUse(input: HookInput): HookOutput {
     }
   }
 
-  // Check delegation enforcement FIRST
+  // Check delegation enforcement FIRST — material delegation/security
+  // boundaries remain hard per owner direction; only duplicated
+  // injection/procedure (prompt prerequisites) collapses to advisory
+  // behind the dispatcher. Routing/instrumentation exceptions fail open,
+  // handler-produced block/deny results propagate unchanged.
   const enforcementResult = processOrchestratorPreTool({
     toolName: input.toolName || "",
     toolInput: (input.toolInput as Record<string, unknown>) || {},
@@ -2406,7 +2415,6 @@ function processPreToolUse(input: HookInput): HookOutput {
     directory,
   });
 
-  // If enforcement blocks, return immediately
   if (!enforcementResult.continue) {
     return {
       continue: false,
@@ -2414,6 +2422,7 @@ function processPreToolUse(input: HookInput): HookOutput {
       message: enforcementResult.message,
     };
   }
+
 
   const preToolMessages = enforcementResult.message
     ? [enforcementResult.message]
@@ -2423,20 +2432,43 @@ function processPreToolUse(input: HookInput): HookOutput {
   // Check blocking BEFORE recording progress — otherwise a denied tool
   // (e.g. Edit) that also matches a prerequisite would have its progress
   // persisted even though the tool never actually executed.
+  // Under dispatcher cutover (#3708) ordinary prompt prerequisites are
+  // advisory — collapsed behind the dispatcher per owner direction; only
+  // material-risk families stay hard. Preserve hookSpecificOutput deny only
+  // when PreToolUse is not in cutover (rollback) so hard permission/security
+  // semantics remain; otherwise demote to an advisory warning.
   const promptPrerequisiteState = readPromptPrerequisiteState(directory, input.sessionId);
   if (
     promptPrerequisiteState?.active
     && isPromptPrerequisiteBlockingTool(input.toolName, promptPrerequisiteConfig)
   ) {
-    return {
-      continue: true,
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: "deny",
-        permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
-      },
-    } as HookOutput & { hookSpecificOutput: Record<string, unknown> };
+    if (shouldLoosenOrdinaryEnforcement('PreToolUse')) {
+      const advisoryReason = buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName);
+      preToolMessages.push(`[ADVISORY] ${advisoryReason}`);
+      recordDispatchTelemetry({
+        schemaVersion: 1,
+        event: 'PreToolUse',
+        hookType: 'pre-tool-use',
+        hookId: 'PreToolUse:*:prompt-prerequisites',
+        riskClass: 'advisory',
+        failMode: 'fail-open',
+        appliedDecision: 'advisory',
+        durationMs: 0,
+        verdict: 'advisory-demoted',
+        recordedAt: new Date().toISOString(),
+      });
+    } else {
+      return {
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
+        },
+      } as HookOutput & { hookSpecificOutput: Record<string, unknown> };
+    }
   }
+
 
   const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(
     directory,
@@ -3342,12 +3374,14 @@ async function processHookImpl(
 }
 
 /**
- * Main hook processor (epic #3698, issue #3707).
+ * Main hook processor (epic #3698, issues #3707 + #3708).
  *
  * Thin wrapper over the legacy dispatcher: runs the legacy path unchanged,
- * then records a shadow-mode registry/dispatcher observation. Shadow mode is
- * gated behind OMC_HOOK_SHADOW (default off), is fully fail-open, and never
- * alters the returned output. Rollback: remove this wrapper's shadow call.
+ * then records shadow and cutover observations. Shadow mode is gated behind
+ * OMC_HOOK_SHADOW; cutover dispatch telemetry is recorded boundedly per
+ * event family (with advisory fail-open by default, hard only for approved
+ * risk classes) and per-family rollback via OMC_HOOK_ROLLBACK /
+ * OMC_HOOK_DISPATCHER_ROLLBACK. Unknown failures remain advisory.
  */
 export async function processHook(
   hookType: HookType,
@@ -3355,6 +3389,37 @@ export async function processHook(
 ): Promise<HookOutput> {
   const legacyStarted = performance.now();
   const output = await processHookImpl(hookType, rawInput);
+  // Cutover telemetry: one bounded privacy-preserving record per invocation
+  // when the hook's family is cut over (event-family cutover, advisory default).
+  try {
+    const evt = (
+      hookType === 'keyword-detector' ? 'UserPromptSubmit'
+      : hookType === 'session-start' || hookType === 'setup-init' || hookType === 'setup-maintenance' ? 'SessionStart'
+      : hookType === 'pre-tool-use' ? 'PreToolUse'
+      : hookType === 'permission-request' ? 'PermissionRequest'
+      : hookType === 'post-tool-use' ? 'PostToolUse'
+      : hookType === 'subagent-start' ? 'SubagentStart'
+      : hookType === 'subagent-stop' ? 'SubagentStop'
+      : hookType === 'pre-compact' ? 'PreCompact'
+      : hookType === 'stop-continuation' || hookType === 'persistent-mode' || hookType === 'ralph' || hookType === 'code-simplifier' ? 'Stop'
+      : hookType === 'session-end' ? 'SessionEnd'
+      : null
+    ) as unknown as string | null;
+    if (evt && isFamilyCutoverEnabled(evt as never)) {
+      const hard = evt === 'PermissionRequest' || evt === 'PreToolUse';
+      const applied = output.continue === false ? (hard ? 'hard' : 'advisory') : 'none';
+      recordDispatchTelemetry({
+        schemaVersion: 1,
+        event: evt as never,
+        hookType,
+        appliedDecision: applied as never,
+        durationMs: performance.now() - legacyStarted,
+        recordedAt: new Date().toISOString(),
+      });
+    }
+  } catch {
+    // telemetry is bounded and advisory-only
+  }
   if (isHookShadowEnabled()) {
     try {
       await runShadowObservation(

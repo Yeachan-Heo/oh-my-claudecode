@@ -100,10 +100,20 @@ describe('alias-resolver — Tier-0 routing', () => {
     expect(resolveWorkflowAlias('ai-slop-cleaner').canonical).toBe('review');
   });
 
-  it('routes ralplan -> plan', () => {
-    expect(resolveWorkflowAlias('ralplan').canonical).toBe('plan');
-    expect(resolveWorkflowAlias('ralplan').tier0).toBe('plan');
+  it('ralplan is now Tier-0 (owner direction #3708)', () => {
+    const r = resolveWorkflowAlias('ralplan');
+    expect(r.canonical).toBe('ralplan');
+    expect(r.tier0).toBe('ralplan');
+    expect(r.isAlias).toBe(false);
   });
+
+  it('deep-interview is now Tier-0 (owner direction #3708)', () => {
+    const r = resolveWorkflowAlias('deep-interview');
+    expect(r.canonical).toBe('deep-interview');
+    expect(r.tier0).toBe('deep-interview');
+    expect(r.isAlias).toBe(false);
+  });
+
 
   it('routes ccg -> execute', () => {
     expect(resolveWorkflowAlias('ccg').canonical).toBe('execute');
@@ -132,8 +142,9 @@ describe('alias-resolver — Tier-0 routing', () => {
     expect(resolveWorkflowAlias('/ralph').canonical).toBe('execute');
     expect(resolveWorkflowAlias('/omc:autopilot').canonical).toBe('execute');
     expect(resolveWorkflowAlias('/oh-my-claudecode:ultrawork').canonical).toBe('execute');
-    expect(resolveWorkflowAlias('OMC:RALPLAN').canonical).toBe('plan');
+    expect(resolveWorkflowAlias('OMC:RALPLAN').canonical).toBe('ralplan');
   });
+
 
   it('unknown tokens pass through without alias flag', () => {
     const r = resolveWorkflowAlias('unknown-workflow-xyz');

@@ -21,12 +21,13 @@ import {
 } from '../registry.js';
 
 describe('workflow registry — Tier-0 contract', () => {
-  it('defines exactly four Tier-0 workflows: plan, execute, review, verify', () => {
-    expect([...TIER0_WORKFLOWS]).toEqual(['plan', 'execute', 'review', 'verify']);
+  it('defines exactly six Tier-0 workflows: plan, deep-interview, ralplan, execute, review, verify (owner direction #3708)', () => {
+    expect([...TIER0_WORKFLOWS]).toEqual(['plan', 'deep-interview', 'ralplan', 'execute', 'review', 'verify']);
     const tier0 = WORKFLOW_ENTRIES.filter((e) => e.tier === 0);
-    expect(tier0.map((e) => e.name).sort()).toEqual(['execute', 'plan', 'review', 'verify']);
+    expect(tier0.map((e) => e.name).sort()).toEqual(['deep-interview', 'execute', 'plan', 'ralplan', 'review', 'verify']);
     expect(tier0.every((e) => e.decision === 'keep' && e.kind === 'skill')).toBe(true);
   });
+
 
   it('defines exactly four Tier-0 roles: planner, executor, reviewer, verifier', () => {
     expect([...TIER0_ROLES]).toEqual(['planner', 'executor', 'reviewer', 'verifier']);
@@ -104,15 +105,18 @@ describe('workflow registry — aliases and classification', () => {
     expect(getEntry('team', 'skill')?.internalOnly).toBe(true);
   });
 
-  it('routes planning and verification modes into plan/verify', () => {
-    // Owner keeps deep-interview and ralplan distinct (not aliases into plan)
-    expect(resolveCanonical('deep-interview', 'skill')?.name).toBe('deep-interview');
+  it('routes planning and verification modes into plan/verify (deep-interview/ralplan are now Tier-0 #3708)', () => {
+    // Owner keeps deep-interview and ralplan distinct and independent Tier-0
     expect(getEntry('deep-interview', 'skill')?.decision).toBe('keep');
-    expect(resolveCanonical('ralplan', 'skill')?.name).toBe('ralplan');
+    expect(getEntry('deep-interview', 'skill')?.tier).toBe(0);
     expect(getEntry('ralplan', 'skill')?.decision).toBe('keep');
+    expect(getEntry('ralplan', 'skill')?.tier).toBe(0);
+    expect(resolveCanonical('deep-interview', 'skill')?.name).toBe('deep-interview');
+    expect(resolveCanonical('ralplan', 'skill')?.name).toBe('ralplan');
     expect(resolveCanonical('ultraqa', 'skill')?.name).toBe('verify');
     expect(resolveCanonical('merge-readiness', 'skill')?.name).toBe('review');
   });
+
 
   it('attaches a removal milestone to every removable alias', () => {
     for (const e of WORKFLOW_ENTRIES) {

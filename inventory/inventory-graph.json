@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e622a4f41b3708eea7ccd6c6e8070e9b6ed77715",
-    "sourceSha256": "fa677d665a59db0505dfc324a4ff9d827892ea2a8456566ac3a279333b06edf5",
+    "head": "f8985c7d9c97629a54010b9a8e724623789e53f8",
+    "sourceSha256": "268e8e5f0d44cd8a3b17cc70b03afff323c9f2c7fe1fc469ac2f9184b99a8cc9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e622a4f41b3708eea7ccd6c6e8070e9b6ed77715",
-  "sourceSha256": "fa677d665a59db0505dfc324a4ff9d827892ea2a8456566ac3a279333b06edf5",
+  "head": "f8985c7d9c97629a54010b9a8e724623789e53f8",
+  "sourceSha256": "268e8e5f0d44cd8a3b17cc70b03afff323c9f2c7fe1fc469ac2f9184b99a8cc9",
   "counts": {
     "public": {
       "skills": 41,
@@ -23,13 +23,13 @@
       "total": 95
     },
     "internal": {
-      "hookFiles": 302,
+      "hookFiles": 304,
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
       "templateHooks": 18,
-      "srcFiles": 1270,
-      "total": 1288
+      "srcFiles": 1272,
+      "total": 1290
     },
     "generated": {
       "distFiles": 4319,
@@ -41,7 +41,7 @@
     },
     "skills": 41,
     "commands": 28,
-    "hookFiles": 302,
+    "hookFiles": 304,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 62
@@ -354,9 +354,11 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/cutover.ts",
       "src/hooks/registry/dispatcher.ts",
       "src/hooks/registry/index.ts",
       "src/hooks/registry/registry.ts",
@@ -5341,9 +5343,11 @@
       "src/hooks/recovery/session-recovery.ts",
       "src/hooks/recovery/storage.ts",
       "src/hooks/recovery/types.ts",
+      "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
+      "src/hooks/registry/cutover.ts",
       "src/hooks/registry/dispatcher.ts",
       "src/hooks/registry/index.ts",
       "src/hooks/registry/registry.ts",
@@ -33069,6 +33073,11 @@
         "path": "src/hooks/recovery/types.ts"
       },
       {
+        "id": "src/hooks/registry/__tests__/cutover.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/__tests__/cutover.test.ts"
+      },
+      {
         "id": "src/hooks/registry/__tests__/dispatcher.test.ts",
         "kind": "hook",
         "path": "src/hooks/registry/__tests__/dispatcher.test.ts"
@@ -33082,6 +33091,11 @@
         "id": "src/hooks/registry/__tests__/shadow.test.ts",
         "kind": "hook",
         "path": "src/hooks/registry/__tests__/shadow.test.ts"
+      },
+      {
+        "id": "src/hooks/registry/cutover.ts",
+        "kind": "hook",
+        "path": "src/hooks/registry/cutover.ts"
       },
       {
         "id": "src/hooks/registry/dispatcher.ts",
@@ -50432,6 +50446,11 @@
       },
       {
         "from": "src/hooks/bridge.ts",
+        "to": "src/hooks/registry/cutover.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/bridge.ts",
         "to": "src/hooks/registry/index.ts",
         "kind": "imports"
       },
@@ -53971,6 +53990,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/registry/__tests__/cutover.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/cutover.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/cutover.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/cutover.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/__tests__/cutover.test.ts",
+        "to": "src/hooks/registry/cutover.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/registry/__tests__/dispatcher.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -54036,6 +54080,26 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/registry/cutover.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/cutover.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/registry/cutover.ts",
+        "to": "src/hooks/registry/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/cutover.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/registry/dispatcher.ts",
         "to": "src/hooks/registry/registry.ts",
         "kind": "imports"
@@ -54044,6 +54108,16 @@
         "from": "src/hooks/registry/dispatcher.ts",
         "to": "src/hooks/registry/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/cutover.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/registry/index.ts",
+        "to": "src/hooks/registry/cutover.ts",
+        "kind": "type-exports"
       },
       {
         "from": "src/hooks/registry/index.ts",
@@ -70517,12 +70591,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6148,
-      "edgeCount": 6825,
-      "importEdgeCount": 5573,
+      "nodeCount": 6150,
+      "edgeCount": 6837,
+      "importEdgeCount": 5582,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "fcfaffe5d6182694f4b8f6006bb88236da3a9720c22cc4b9a2a63a70df5099d5",
-  "manifestSha256": "75117d03b4c8314e171246e508d0aa2548b0887324811426871125403fdb4133"
+  "inventorySha256": "2158f1ecd887f795f9aa68376dfd8912fdf1d086465a62914e369b0016143bd7",
+  "manifestSha256": "af14b85ae13b7b96e591cecbe1a434003324e70ca90ef92fdac4161121625b6a"
 }
