@@ -23,9 +23,15 @@ const ALL_KEYS = [
   "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
   "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
   "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+  "CLAUDE_CODE_BEDROCK_FABLE_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL",
   "ANTHROPIC_DEFAULT_SONNET_MODEL",
   "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  "OMC_MODEL_ALIAS_HAIKU",
+  "OMC_MODEL_ALIAS_SONNET",
+  "OMC_MODEL_ALIAS_OPUS",
+  "OMC_MODEL_ALIAS_FABLE",
   "OMC_DELEGATION_ROUTING_ENABLED",
   "OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER",
 ] as const;
@@ -170,6 +176,44 @@ describe("loadConfig() — auto-forceInherit for non-standard providers", () => 
     expect(config.agents?.architect?.model).toBe("claude-opus-4-6-custom");
     expect(config.agents?.executor?.model).toBe("claude-sonnet-4-6-custom");
     expect(config.agents?.explore?.model).toBe("claude-haiku-4-5-custom");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Model alias env overrides (issue #1211, issue #3726)
+// ---------------------------------------------------------------------------
+describe("loadConfig() — model alias env overrides", () => {
+  let saved: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    saved = saveAndClear(ALL_KEYS);
+  });
+  afterEach(() => {
+    restore(saved);
+  });
+
+  it("reads OMC_MODEL_ALIAS_OPUS=fable into routing.modelAliases (issue #3726)", () => {
+    process.env.OMC_MODEL_ALIAS_OPUS = "fable";
+    const config = loadConfig();
+    expect(config.routing?.modelAliases?.opus).toBe("fable");
+  });
+
+  it("reads OMC_MODEL_ALIAS_FABLE into routing.modelAliases (issue #3726)", () => {
+    process.env.OMC_MODEL_ALIAS_FABLE = "opus";
+    const config = loadConfig();
+    expect(config.routing?.modelAliases?.fable).toBe("opus");
+  });
+
+  it("lowercases alias env values", () => {
+    process.env.OMC_MODEL_ALIAS_HAIKU = "SONNET";
+    const config = loadConfig();
+    expect(config.routing?.modelAliases?.haiku).toBe("sonnet");
+  });
+
+  it("preserves inherit as an alias target", () => {
+    process.env.OMC_MODEL_ALIAS_OPUS = "inherit";
+    const config = loadConfig();
+    expect(config.routing?.modelAliases?.opus).toBe("inherit");
   });
 });
 

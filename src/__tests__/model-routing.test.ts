@@ -687,6 +687,18 @@ describe('Router', () => {
       expect(decision.reasons[0]).toContain('Explicit model');
     });
 
+    it('should route explicit fable model to HIGH tier (issue #3726)', () => {
+      const context: RoutingContext = {
+        taskPrompt: 'Complex architectural task',
+        explicitModel: 'fable',
+      };
+      const decision = routeTask(context);
+
+      expect(decision.tier).toBe('HIGH');
+      expect(decision.modelType).toBe('fable');
+      expect(decision.reasons[0]).toContain('Explicit model');
+    });
+
     it('should respect agent overrides', () => {
       const context: RoutingContext = {
         taskPrompt: 'test',

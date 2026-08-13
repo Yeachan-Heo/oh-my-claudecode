@@ -633,7 +633,7 @@ describe('delegation-enforcer', () => {
 
   describe('modelAliases config override (issue #1211)', () => {
     const savedEnv: Record<string, string | undefined> = {};
-    const aliasEnvKeys = ['OMC_MODEL_ALIAS_HAIKU', 'OMC_MODEL_ALIAS_SONNET', 'OMC_MODEL_ALIAS_OPUS'];
+    const aliasEnvKeys = ['OMC_MODEL_ALIAS_HAIKU', 'OMC_MODEL_ALIAS_SONNET', 'OMC_MODEL_ALIAS_OPUS', 'OMC_MODEL_ALIAS_FABLE'];
 
     beforeEach(() => {
       for (const key of aliasEnvKeys) {
@@ -713,6 +713,18 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
       expect(result.model).toBe('inherit');
       expect(result.modifiedInput.model).toBeUndefined();
+    });
+
+    it('remaps opus agents to fable via env var (issue #3726)', () => {
+      process.env.OMC_MODEL_ALIAS_OPUS = 'fable';
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'architect' // architect defaults to opus
+      };
+      const result = enforceModel(input);
+      expect(result.model).toBe('fable');
+      expect(result.modifiedInput.model).toBe('fable');
     });
 
     it('remaps opus agents to inherit via env var', () => {

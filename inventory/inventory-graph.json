@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f40f09442d65bf90520ebcd6fc13cace929e8a00",
-    "sourceSha256": "2c8fe09d48b1f66ebdd37500865fece6f06b354d50c3ebd5ebca1c08d3af16cd",
+    "head": "94ace9d6b8d615dc45659aca170b49ba753a745d",
+    "sourceSha256": "71fbd9d0599eab7905379ee1d97d15f3e39fb9b4bd2eaaf3c6d5184a38db6cfb",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f40f09442d65bf90520ebcd6fc13cace929e8a00",
-  "sourceSha256": "2c8fe09d48b1f66ebdd37500865fece6f06b354d50c3ebd5ebca1c08d3af16cd",
+  "head": "94ace9d6b8d615dc45659aca170b49ba753a745d",
+  "sourceSha256": "71fbd9d0599eab7905379ee1d97d15f3e39fb9b4bd2eaaf3c6d5184a38db6cfb",
   "counts": {
     "public": {
       "skills": 41,
@@ -28,8 +28,8 @@
       "toolFiles": 56,
       "libFiles": 34,
       "templateHooks": 18,
-      "srcFiles": 1249,
-      "total": 1267
+      "srcFiles": 1257,
+      "total": 1275
     },
     "generated": {
       "distFiles": 4319,
@@ -37,14 +37,14 @@
       "total": 4328
     },
     "prompt": {
-      "promptLikeFiles": 40
+      "promptLikeFiles": 57
     },
     "skills": 41,
     "commands": 28,
     "hookFiles": 302,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 40
+    "promptLikeFiles": 57
   },
   "public": {
     "skills": [
@@ -649,8 +649,17 @@
       "benchmarks/executor/prompts/deep-executor.md",
       "benchmarks/harsh-critic/prompts/harsh-critic.md",
       "docs/CLAUDE.md",
+      "docs/design/issue-3704-prompt-ssot/README.md",
+      "docs/design/issue-3704-prompt-ssot/measurements.json",
+      "generated/prompt-ssot/coordinator.md",
+      "generated/prompt-ssot/role-executor.md",
+      "generated/prompt-ssot/role-planner.md",
+      "generated/prompt-ssot/role-reviewer.md",
+      "generated/prompt-ssot/role-verifier.md",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-workflow-stage-prompts.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
@@ -660,6 +669,14 @@
       "src/__tests__/windows-prompt-hook-runner.test.ts",
       "src/agents/prompt-helpers.ts",
       "src/agents/prompt-sections/index.ts",
+      "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+      "src/agents/prompt-ssot/compose.ts",
+      "src/agents/prompt-ssot/digest.ts",
+      "src/agents/prompt-ssot/index.ts",
+      "src/agents/prompt-ssot/manifest.ts",
+      "src/agents/prompt-ssot/metrics.ts",
+      "src/agents/prompt-ssot/sections.ts",
+      "src/agents/prompt-ssot/types.ts",
       "src/features/model-routing/prompts/haiku.ts",
       "src/features/model-routing/prompts/index.ts",
       "src/features/model-routing/prompts/opus.ts",
@@ -688,6 +705,7 @@
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
       "scripts/build-mcp-server.mjs",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
       "scripts/build-skill-bridge.mjs",
       "scripts/build-team-server.mjs",
@@ -729,6 +747,7 @@
       "scripts/lib/stdin.mjs",
       "scripts/lib/workflow-profile-runtime.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "scripts/openclaw-gateway-demo.mjs",
       "scripts/permission-handler.mjs",
       "scripts/persistent-mode.cjs",
@@ -5437,8 +5456,17 @@
       "benchmarks/executor/prompts/deep-executor.md",
       "benchmarks/harsh-critic/prompts/harsh-critic.md",
       "docs/CLAUDE.md",
+      "docs/design/issue-3704-prompt-ssot/README.md",
+      "docs/design/issue-3704-prompt-ssot/measurements.json",
+      "generated/prompt-ssot/coordinator.md",
+      "generated/prompt-ssot/role-executor.md",
+      "generated/prompt-ssot/role-planner.md",
+      "generated/prompt-ssot/role-reviewer.md",
+      "generated/prompt-ssot/role-verifier.md",
+      "scripts/build-prompt-ssot.ts",
       "scripts/build-workflow-stage-prompts.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
+      "scripts/measure-prompt-ssot.ts",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
@@ -5448,6 +5476,14 @@
       "src/__tests__/windows-prompt-hook-runner.test.ts",
       "src/agents/prompt-helpers.ts",
       "src/agents/prompt-sections/index.ts",
+      "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+      "src/agents/prompt-ssot/compose.ts",
+      "src/agents/prompt-ssot/digest.ts",
+      "src/agents/prompt-ssot/index.ts",
+      "src/agents/prompt-ssot/manifest.ts",
+      "src/agents/prompt-ssot/metrics.ts",
+      "src/agents/prompt-ssot/sections.ts",
+      "src/agents/prompt-ssot/types.ts",
       "src/features/model-routing/prompts/haiku.ts",
       "src/features/model-routing/prompts/index.ts",
       "src/features/model-routing/prompts/opus.ts",
@@ -28292,6 +28328,16 @@
         "path": "docs/design/TIERED_AGENTS_V2.md"
       },
       {
+        "id": "docs/design/issue-3704-prompt-ssot/README.md",
+        "kind": "other",
+        "path": "docs/design/issue-3704-prompt-ssot/README.md"
+      },
+      {
+        "id": "docs/design/issue-3704-prompt-ssot/measurements.json",
+        "kind": "other",
+        "path": "docs/design/issue-3704-prompt-ssot/measurements.json"
+      },
+      {
         "id": "docs/design/project-session-manager.md",
         "kind": "other",
         "path": "docs/design/project-session-manager.md"
@@ -28637,6 +28683,31 @@
         "path": "zod"
       },
       {
+        "id": "generated/prompt-ssot/coordinator.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/coordinator.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-executor.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-executor.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-planner.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-planner.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-reviewer.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-reviewer.md"
+      },
+      {
+        "id": "generated/prompt-ssot/role-verifier.md",
+        "kind": "prompt",
+        "path": "generated/prompt-ssot/role-verifier.md"
+      },
+      {
         "id": "geobench/oh-my-claudecode.yaml",
         "kind": "other",
         "path": "geobench/oh-my-claudecode.yaml"
@@ -28725,6 +28796,11 @@
         "id": "scripts/build-mcp-server.mjs",
         "kind": "script",
         "path": "scripts/build-mcp-server.mjs"
+      },
+      {
+        "id": "scripts/build-prompt-ssot.ts",
+        "kind": "script",
+        "path": "scripts/build-prompt-ssot.ts"
       },
       {
         "id": "scripts/build-runtime-cli.mjs",
@@ -28930,6 +29006,11 @@
         "id": "scripts/lib/workflow-stage-prompts.mjs",
         "kind": "script",
         "path": "scripts/lib/workflow-stage-prompts.mjs"
+      },
+      {
+        "id": "scripts/measure-prompt-ssot.ts",
+        "kind": "script",
+        "path": "scripts/measure-prompt-ssot.ts"
       },
       {
         "id": "scripts/openclaw-gateway-demo.mjs",
@@ -31065,6 +31146,46 @@
         "id": "src/agents/prompt-sections/index.ts",
         "kind": "src",
         "path": "src/agents/prompt-sections/index.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/compose.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/compose.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/digest.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/digest.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/index.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/index.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/manifest.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/metrics.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/sections.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/sections.ts"
+      },
+      {
+        "id": "src/agents/prompt-ssot/types.ts",
+        "kind": "src",
+        "path": "src/agents/prompt-ssot/types.ts"
       },
       {
         "id": "src/agents/qa-tester.ts",
@@ -36714,6 +36835,36 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/build-runtime-cli.mjs",
         "to": "external:esbuild",
         "kind": "imports"
@@ -37226,6 +37377,41 @@
       {
         "from": "scripts/lib/workflow-profile-runtime.mjs",
         "to": "scripts/lib/workflow-stage-prompts.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/measure-prompt-ssot.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
         "kind": "imports"
       },
       {
@@ -44776,6 +44962,116 @@
       {
         "from": "src/agents/prompt-sections/index.ts",
         "to": "src/agents/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/__tests__/prompt-ssot.test.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/compose.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/digest.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/compose.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/manifest.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/metrics.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/sections.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/index.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/manifest.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/metrics.ts",
+        "to": "src/agents/prompt-ssot/digest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/agents/prompt-ssot/sections.ts",
+        "to": "src/agents/prompt-ssot/types.ts",
         "kind": "type-imports"
       },
       {
@@ -69835,12 +70131,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6113,
-      "edgeCount": 6733,
-      "importEdgeCount": 5500,
+      "nodeCount": 6130,
+      "edgeCount": 6768,
+      "importEdgeCount": 5525,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "42d4790ea78cd7dd3a5b22996df8695160dec7bad9292e2dd2ab3000c6737815",
-  "manifestSha256": "a4bc5703ef5d604d5a88d402e4097ce5516d0615eaebfe20fba668ec9e5fc821"
+  "inventorySha256": "f0f0fa028fd37588d6bc7a7645407fb51df0b8ecd0aed5e2429ac76936eb173e",
+  "manifestSha256": "9b86535ea6642d36374de8f03180b5ccce5ca8af228b449b118a8d8d62574980"
 }

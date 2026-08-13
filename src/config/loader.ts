@@ -15,6 +15,7 @@ import type {
   ExternalModelsConfig,
   DelegationProvider,
   TeamRoleAssignmentSpec,
+  ModelType,
 } from "../shared/types.js";
 import {
   CANONICAL_TEAM_ROLES,
@@ -334,8 +335,8 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     }
   }
 
-  // Model alias overrides from environment (issue #1211)
-  const aliasKeys = ["HAIKU", "SONNET", "OPUS"] as const;
+  // Model alias overrides from environment (issue #1211, issue #3726)
+  const aliasKeys = ["HAIKU", "SONNET", "OPUS", "FABLE"] as const;
   const modelAliases: Record<string, string> = {};
   for (const key of aliasKeys) {
     const envVal = process.env[`OMC_MODEL_ALIAS_${key}`];
@@ -347,9 +348,8 @@ export function loadEnvConfig(): Partial<PluginConfig> {
   if (Object.keys(modelAliases).length > 0) {
     config.routing = {
       ...config.routing,
-      modelAliases: modelAliases as Record<
-        string,
-        "haiku" | "sonnet" | "opus" | "inherit"
+      modelAliases: modelAliases as Partial<
+        Record<"haiku" | "sonnet" | "opus" | "fable", ModelType>
       >,
     };
   }

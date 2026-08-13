@@ -4,8 +4,8 @@ import type { ModelType, AgentConfig, PluginConfig } from '../shared/types.js';
 describe('Type Tests', () => {
   describe('ModelType', () => {
     it('should accept valid model types', () => {
-      const validTypes: ModelType[] = ['sonnet', 'opus', 'haiku', 'inherit'];
-      expect(validTypes).toHaveLength(4);
+      const validTypes: ModelType[] = ['sonnet', 'opus', 'haiku', 'fable', 'inherit'];
+      expect(validTypes).toHaveLength(5);
     });
   });
 
