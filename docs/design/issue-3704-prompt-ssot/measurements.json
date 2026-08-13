@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "issue": 3704,
+  "epic": 3698,
+  "sourceRevision": "2026-08-13.1",
+  "measuredAt": "2026-08-13T00:34:53.300Z",
+  "baselineCorpus": [
+    "CLAUDE.md",
+    "docs/CLAUDE.md",
+    ".github/CLAUDE.md",
+    "agents/analyst.md",
+    "agents/architect.md",
+    "agents/code-reviewer.md",
+    "agents/code-simplifier.md",
+    "agents/critic.md",
+    "agents/debugger.md",
+    "agents/designer.md",
+    "agents/document-specialist.md",
+    "agents/executor.md",
+    "agents/explore.md",
+    "agents/git-master.md",
+    "agents/planner.md",
+    "agents/qa-tester.md",
+    "agents/scientist.md",
+    "agents/security-reviewer.md",
+    "agents/test-engineer.md",
+    "agents/tracer.md",
+    "agents/verifier.md",
+    "agents/writer.md"
+  ],
+  "baseline": {
+    "totalTokens": 23838,
+    "uniqueTokens": 3409,
+    "uniqueNGrams": 21384,
+    "repeatedClauseRatio": 1.1430489134994546,
+    "repeatedTokens": 19576
+  },
+  "ssot": {
+    "totalTokens": 899,
+    "uniqueTokens": 448,
+    "uniqueNGrams": 875,
+    "repeatedClauseRatio": 0.3025583982202447,
+    "repeatedTokens": 136
+  },
+  "repeatedTokenReduction": 0.9931,
+  "repeatedClauseRatioReduction": 0.8405,
+  "projectionDrift": {
+    "coordinator": 0,
+    "role-planner": 0,
+    "role-executor": 0,
+    "role-reviewer": 0,
+    "role-verifier": 0
+  },
+  "maxProjectionDrift": 0,
+  "targets": {
+    "repeatedTokenReductionMin": 0.35,
+    "maxProjectionDrift": 0.05
+  },
+  "pass": true
+}
