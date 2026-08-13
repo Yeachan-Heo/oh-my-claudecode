@@ -730,6 +730,7 @@ export {
   exportWisdomToNotepad,
   saveModeSummary,
   createCompactCheckpoint,
+  collectPlanRefs,
   formatCompactSummary as formatPreCompactSummary,
   isCompactionInProgress,
   getCompactionQueueDepth,
@@ -737,6 +738,16 @@ export {
   type CompactCheckpoint,
   type HookOutput as PreCompactHookOutput
 } from './pre-compact/index.js';
+
+export {
+  // PreCompact Restore (issue #3730)
+  findLatestCheckpointForRestore,
+  formatCheckpointRestoreContext,
+  markCheckpointRestored,
+  CHECKPOINT_MAX_AGE_MS,
+  CHECKPOINT_MAX_BYTES,
+  type RestoreCandidate
+} from './pre-compact/restore.js';
 
 export {
   // Permission Handler Hook

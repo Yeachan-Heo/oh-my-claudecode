@@ -374,7 +374,7 @@ function normalizeObservableCheck(candidate: unknown): ObservableCheck | null {
   return check;
 }
 
-function readPrdFromPath(prdPath: string): { prd?: PRD; error?: string } {
+export function readPrdFromPath(prdPath: string): { prd?: PRD; error?: string } {
   try {
     const content = readFileSync(prdPath, 'utf-8');
     const parsed = JSON.parse(content) as unknown;

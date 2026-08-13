@@ -905,6 +905,23 @@ async function main() {
     const messages = [];
     const userMessages = [];
 
+    // Restore the newest PreCompact checkpoint after compaction (issue #3730).
+    // Only fires when Claude Code signals the session resumed from compaction
+    // (source === 'compact'); never on startup, resume, or clear.
+    if (data.source === 'compact' && sessionId) {
+      try {
+        const { restorePreCompactCheckpoint } = await import(
+          pathToFileURL(join(__dirname, 'lib', 'precompact-restore.mjs')).href
+        );
+        const restored = restorePreCompactCheckpoint(omcRoot, sessionId);
+        if (restored) {
+          messages.push(`<session-restore>\n\n${restored.text}\n\n</session-restore>\n\n---\n`);
+        }
+      } catch {
+        // Restore is advisory: never break session start on a checkpoint error.
+      }
+    }
+
     // Fire sibling-retrofit warning once per session (lifted off getOmcRoot hot path)
     try {
       const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;

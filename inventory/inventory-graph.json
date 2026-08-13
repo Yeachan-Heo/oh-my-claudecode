@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2c4755b8cdc791071712c935a2ed1d6e80c59655",
-    "sourceSha256": "2e943d7ca66db0db085e48f40dbe34964cdd36cb85cca19bf4dd1c16cd90fc48",
+    "head": "cfc1ccc96cf85da8d092d3407783063f3c38a753",
+    "sourceSha256": "fc7369c5216244dc3e9fce70b4f3064934f140073aed10180be2e76a5c6c2b45",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2c4755b8cdc791071712c935a2ed1d6e80c59655",
-  "sourceSha256": "2e943d7ca66db0db085e48f40dbe34964cdd36cb85cca19bf4dd1c16cd90fc48",
+  "head": "cfc1ccc96cf85da8d092d3407783063f3c38a753",
+  "sourceSha256": "fc7369c5216244dc3e9fce70b4f3064934f140073aed10180be2e76a5c6c2b45",
   "counts": {
     "public": {
       "skills": 41,
@@ -23,13 +23,13 @@
       "total": 95
     },
     "internal": {
-      "hookFiles": 304,
+      "hookFiles": 306,
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
-      "templateHooks": 18,
-      "srcFiles": 1272,
-      "total": 1290
+      "templateHooks": 19,
+      "srcFiles": 1275,
+      "total": 1294
     },
     "generated": {
       "distFiles": 4319,
@@ -41,7 +41,7 @@
     },
     "skills": 41,
     "commands": 28,
-    "hookFiles": 304,
+    "hookFiles": 306,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 62
@@ -166,6 +166,7 @@
       "src/hooks/__tests__/codebase-map.test.ts",
       "src/hooks/__tests__/compaction-concurrency.test.ts",
       "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
+      "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
       "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
@@ -317,6 +318,7 @@
       "src/hooks/plugin-patterns/__tests__/index.test.ts",
       "src/hooks/plugin-patterns/index.ts",
       "src/hooks/pre-compact/index.ts",
+      "src/hooks/pre-compact/restore.ts",
       "src/hooks/preemptive-compaction/constants.ts",
       "src/hooks/preemptive-compaction/index.ts",
       "src/hooks/preemptive-compaction/types.ts",
@@ -630,6 +632,7 @@
       "templates/hooks/lib/cache-occupancy.mjs",
       "templates/hooks/lib/config-dir.mjs",
       "templates/hooks/lib/model-routing-override-message.mjs",
+      "templates/hooks/lib/precompact-restore.mjs",
       "templates/hooks/lib/state-root.mjs",
       "templates/hooks/lib/stdin.mjs",
       "templates/hooks/lib/workflow-profile-runtime.mjs",
@@ -751,6 +754,7 @@
       "scripts/lib/hud-wrapper-template.txt",
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
+      "scripts/lib/precompact-restore.mjs",
       "scripts/lib/state-root.cjs",
       "scripts/lib/state-root.mjs",
       "scripts/lib/stdin.mjs",
@@ -5157,6 +5161,7 @@
       "src/hooks/__tests__/codebase-map.test.ts",
       "src/hooks/__tests__/compaction-concurrency.test.ts",
       "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
+      "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
       "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
@@ -5308,6 +5313,7 @@
       "src/hooks/plugin-patterns/__tests__/index.test.ts",
       "src/hooks/plugin-patterns/index.ts",
       "src/hooks/pre-compact/index.ts",
+      "src/hooks/pre-compact/restore.ts",
       "src/hooks/preemptive-compaction/constants.ts",
       "src/hooks/preemptive-compaction/index.ts",
       "src/hooks/preemptive-compaction/types.ts",
@@ -29090,6 +29096,11 @@
         "path": "scripts/lib/pre-tool-enforcer-preflight.mjs"
       },
       {
+        "id": "scripts/lib/precompact-restore.mjs",
+        "kind": "script",
+        "path": "scripts/lib/precompact-restore.mjs"
+      },
+      {
         "id": "scripts/lib/state-root.cjs",
         "kind": "script",
         "path": "scripts/lib/state-root.cjs"
@@ -30960,6 +30971,11 @@
         "path": "src/__tests__/session-start-cache-cleanup.test.ts"
       },
       {
+        "id": "src/__tests__/session-start-precompact-restore.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-start-precompact-restore.test.ts"
+      },
+      {
         "id": "src/__tests__/session-start-script-context.test.ts",
         "kind": "src",
         "path": "src/__tests__/session-start-script-context.test.ts"
@@ -32225,6 +32241,11 @@
         "path": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts"
       },
       {
+        "id": "src/hooks/__tests__/precompact-restore.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/__tests__/precompact-restore.test.ts"
+      },
+      {
         "id": "src/hooks/__tests__/prompt-prerequisites.test.ts",
         "kind": "hook",
         "path": "src/hooks/__tests__/prompt-prerequisites.test.ts"
@@ -32978,6 +32999,11 @@
         "id": "src/hooks/pre-compact/index.ts",
         "kind": "hook",
         "path": "src/hooks/pre-compact/index.ts"
+      },
+      {
+        "id": "src/hooks/pre-compact/restore.ts",
+        "kind": "hook",
+        "path": "src/hooks/pre-compact/restore.ts"
       },
       {
         "id": "src/hooks/preemptive-compaction/constants.ts",
@@ -36270,6 +36296,11 @@
         "path": "templates/hooks/lib/model-routing-override-message.mjs"
       },
       {
+        "id": "templates/hooks/lib/precompact-restore.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/lib/precompact-restore.mjs"
+      },
+      {
         "id": "templates/hooks/lib/state-root.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/state-root.mjs"
@@ -37544,6 +37575,16 @@
       {
         "from": "scripts/lib/pre-tool-enforcer-preflight.mjs",
         "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/precompact-restore.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/precompact-restore.mjs",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -43812,6 +43853,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-precompact-restore.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/session-start-script-context.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -49127,6 +49198,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "src/hooks/pre-compact/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "src/hooks/pre-compact/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/__tests__/precompact-restore.test.ts",
+        "to": "src/hooks/pre-compact/restore.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/__tests__/prompt-prerequisites.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -51303,6 +51409,16 @@
       },
       {
         "from": "src/hooks/index.ts",
+        "to": "src/hooks/pre-compact/restore.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/index.ts",
+        "to": "src/hooks/pre-compact/restore.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/hooks/index.ts",
         "to": "src/hooks/preemptive-compaction/index.ts",
         "kind": "exports"
       },
@@ -53178,11 +53294,41 @@
       },
       {
         "from": "src/hooks/pre-compact/index.ts",
+        "to": "src/features/boulder-state/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/index.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/index.ts",
         "to": "src/lib/job-state-db.ts",
         "kind": "imports"
       },
       {
         "from": "src/hooks/pre-compact/index.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/restore.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/restore.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/restore.ts",
+        "to": "src/hooks/pre-compact/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/pre-compact/restore.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -70042,6 +70188,26 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/lib/precompact-restore.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/lib/precompact-restore.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/lib/precompact-restore.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/precompact-restore.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
         "from": "templates/hooks/lib/state-root.mjs",
         "to": "external:crypto",
         "kind": "imports"
@@ -70748,12 +70914,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6169,
-      "edgeCount": 6849,
-      "importEdgeCount": 5594,
+      "nodeCount": 6174,
+      "edgeCount": 6876,
+      "importEdgeCount": 5615,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "86f563c6c5640312acf5d8661109d7f2e476dbb1a68c1364eafad49bbfb92eb3",
-  "manifestSha256": "09e99becff8b9e4c6641a7a7f7d317b5331d2a3226034782ed3fcb4d83a2ebe1"
+  "inventorySha256": "32d2e17fbac06048b28f33016ba70977b91930114ee6033f48d5826d1afb3b64",
+  "manifestSha256": "616a7ecb0c09822d69d2ca8253f9dba21bdf91cf6ce8a0dd1a97fc0843f44b93"
 }

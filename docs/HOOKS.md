@@ -188,7 +188,7 @@ Fires immediately before context compaction.
 | `pre-compact.mjs` | Preserves state before compaction | 10s |
 | `project-memory-precompact.mjs` | Preserves project memory | 5s |
 
-Saves important state and memory before compaction runs because the context window is full.
+Saves important state and memory before compaction runs because the context window is full. The checkpoint captures active mode states, TODO counts, background job status, and durable plan anchors (PRD/boulder references). After compaction, the `SessionStart` hook (`source: "compact"`) restores the newest matching checkpoint into context so OMC-owned plan detail survives compaction (issue #3730).
 
 ### Stop
 
