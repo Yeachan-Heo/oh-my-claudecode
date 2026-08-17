@@ -33,7 +33,7 @@ import type {
   TeamSummaryPerformance,
 } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
-import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 
 // ---------------------------------------------------------------------------
@@ -358,7 +358,7 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
     worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config.max_workers ?? 0, 20),
+    max_workers: resolveMaxWorkers(config.max_workers),
   });
 }
 

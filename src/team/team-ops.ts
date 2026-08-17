@@ -15,7 +15,7 @@ import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { TeamPaths, absPath } from './state-paths.js';
-import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { normalizeTeamGovernance } from './governance.js';
 import { migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
@@ -255,7 +255,7 @@ function mergeTeamConfigSources(config: TeamConfig | null, manifest: TeamManifes
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
     worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config.max_workers ?? 0, 20),
+    max_workers: resolveMaxWorkers(config.max_workers),
   });
 }
 

@@ -484,6 +484,21 @@ describe('scaleUp duplicate worker guard', () => {
     expect(config.workers.map((worker) => worker.name)).toEqual(['worker-1', 'worker-2', 'worker-3']);
   });
 
+  it('rejects scale-up that would exceed a configured cap below the hard ceiling (#3744)', async () => {
+    config = makeConfig({ max_workers: 2, next_worker_index: 2 });
+
+    const result = await scaleUp('demo-team', 2, 'claude', [
+      { subject: 'demo-a', description: 'demo task' },
+      { subject: 'demo-b', description: 'demo task' },
+    ], cwd, { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
+
+    expect(result).toEqual({ ok: false, error: 'Cannot add 2 workers: would exceed max_workers (1 + 2 > 2)' });
+    expect(config.workers.map((worker) => worker.name)).toEqual(['worker-1']);
+    expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+    expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
+  });
+
   it('allows legacy session-only tmux_session configs while still validating the session before split-window', async () => {
     config = makeConfig({
       worker_count: 0,
