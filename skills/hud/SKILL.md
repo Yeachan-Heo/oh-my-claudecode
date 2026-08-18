@@ -187,6 +187,7 @@ You can manually edit the config file. Each option can be set individually - any
     "thinkingFormat": "text",
     "permissionStatus": false,
     "apiKeySource": false,
+    "organization": false,
     "profile": true,
     "promptTime": true,
     "sessionHealth": true,
@@ -209,6 +210,23 @@ You can manually edit the config file. Each option can be set individually - any
   }
 }
 ```
+
+### organization
+
+Shows the Claude account's organization, e.g. `org:Acme·team`. Off by default.
+
+```json
+{ "elements": { "organization": true } }
+```
+
+Claude Code does not send organization info on the statusline stdin, so the value
+is read from the local `.claude.json` the CLI writes at login
+(`$CLAUDE_CONFIG_DIR/.claude.json`, falling back to `~/.claude.json`). Only the
+organization *name* is read — never the account email or any UUID stored beside it.
+
+Renders nothing when no organization is on record (API-key auth or logged out).
+A trailing plan qualifier is collapsed to keep the token narrow:
+`"Acme (Team)"` renders as `org:Acme·team`.
 
 ### callCountsFormat
 

@@ -35,6 +35,7 @@ import { renderPromptTime } from "./elements/prompt-time.js";
 import { renderAutopilot } from "./elements/autopilot.js";
 import { renderCwd } from "./elements/cwd.js";
 import { renderHostname } from "./elements/hostname.js";
+import { renderOrganization } from "./elements/organization.js";
 import { renderGitRepo, renderGitBranch, renderGitStatus } from "./elements/git.js";
 import { renderMultiRepo } from "./elements/multi-repo.js";
 import { renderModel } from "./elements/model.js";
@@ -247,6 +248,11 @@ export async function render(
   if (enabledElements.hostname) {
     const hostnameElement = renderHostname();
     if (hostnameElement) rendered.set("hostname", hostnameElement);
+  }
+
+  if (enabledElements.organization) {
+    const organizationElement = renderOrganization();
+    if (organizationElement) rendered.set("organization", organizationElement);
   }
 
   if (enabledElements.cwd) {
