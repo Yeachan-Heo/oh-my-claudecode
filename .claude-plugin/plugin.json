@@ -33,6 +33,7 @@
     "./skills/local-build-reminder/",
     "./skills/merge-readiness/",
     "./skills/mcp-setup/",
+    "./skills/migration-guide/",
     "./skills/omc-doctor/",
     "./skills/omc-reference/",
     "./skills/omc-setup/",
