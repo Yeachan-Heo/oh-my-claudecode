@@ -38896,7 +38896,11 @@ function detectTeamMultiplexerContext(env2 = process.env) {
 function isUnixLikeOnWindows2() {
   return process.platform === "win32" && !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
 }
-async function applyMainVerticalLayout(teamTarget, options = {}) {
+async function applyMainVerticalLayout(teamTarget) {
+  try {
+    await tmuxExecAsync(["select-layout", "-t", teamTarget, "main-vertical"]);
+  } catch {
+  }
   try {
     const widthResult = await tmuxCmdAsync([
       "display-message",
@@ -38906,14 +38910,12 @@ async function applyMainVerticalLayout(teamTarget, options = {}) {
       "#{window_width}"
     ]);
     const width = parseInt(widthResult.stdout.trim(), 10);
-    if (!Number.isFinite(width) || width < 40) {
-      throw new Error(`team_layout_window_width_invalid:${widthResult.stdout.trim() || "empty"}`);
+    if (Number.isFinite(width) && width >= 40) {
+      const half = String(Math.floor(width / 2));
+      await tmuxExecAsync(["set-window-option", "-t", teamTarget, "main-pane-width", half]);
+      await tmuxExecAsync(["select-layout", "-t", teamTarget, "main-vertical"]);
     }
-    const half = String(Math.floor(width / 2));
-    await tmuxExecAsync(["set-window-option", "-t", teamTarget, "main-pane-width", half]);
-    await tmuxExecAsync(["select-layout", "-t", teamTarget, "main-vertical"]);
-  } catch (error2) {
-    if (options.required) throw error2;
+  } catch {
   }
 }
 function isCmuxContext() {
@@ -45448,24 +45450,6 @@ async function spawnV2Worker(opts) {
   })) throw new Error(`worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`);
   const ownership = ownershipResult.ownership;
   const paneId = ownership.paneId;
-  if (launchProvider === "tmux") {
-    try {
-      await applyMainVerticalLayout(opts.sessionName, { required: true });
-    } catch (error2) {
-      let cleaned = false;
-      try {
-        await killOwnedWorkerPane(ownership);
-        cleaned = await getWorkerPaneLiveness(paneId) === "dead";
-      } catch {
-      }
-      if (!cleaned) {
-        const cleanupError = new Error(`worker_layout_cleanup_unverified:${opts.workerName}:${paneId}`);
-        cleanupError.cause = error2;
-        throw cleanupError;
-      }
-      throw error2;
-    }
-  }
   const usePromptMode = isPromptModeAgent(opts.agentType);
   const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
   const outputFile = injectContract && opts.role ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName) : void 0;
@@ -45525,11 +45509,12 @@ async function spawnV2Worker(opts) {
     launchStateCwd: opts.cwd,
     launchContext: { kind: "initial" }
   };
-  const startupContext = await spawnOwnedWorkerInPane(
-    opts.sessionName,
-    ownership,
-    paneConfig
-  );
+  let startupContext;
+  try {
+    startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+  } catch (error2) {
+    throw error2;
+  }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
   const cleanupStartedLaunch = async (reason) => {
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(startupContext.attempt, reason, async () => {
@@ -45543,6 +45528,12 @@ async function spawnV2Worker(opts) {
     }).catch(() => false);
     if (!cleaned) throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
   };
+  try {
+    await applyMainVerticalLayout(opts.sessionName);
+  } catch (error2) {
+    await cleanupStartedLaunch("startup_layout_failed");
+    throw error2;
+  }
   const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(
     opts.teamName,
     opts.workerName,

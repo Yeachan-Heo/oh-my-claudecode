@@ -629,27 +629,6 @@ async function spawnV2Worker(opts) {
         throw new Error(`worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`);
     const ownership = ownershipResult.ownership;
     const paneId = ownership.paneId;
-    if (launchProvider === 'tmux') {
-        try {
-            await applyMainVerticalLayout(opts.sessionName, { required: true });
-        }
-        catch (error) {
-            let cleaned = false;
-            try {
-                await killOwnedWorkerPane(ownership);
-                cleaned = await getWorkerPaneLiveness(paneId) === 'dead';
-            }
-            catch {
-                // Preserve the layout failure unless pane cleanup cannot be verified.
-            }
-            if (!cleaned) {
-                const cleanupError = new Error(`worker_layout_cleanup_unverified:${opts.workerName}:${paneId}`);
-                cleanupError.cause = error;
-                throw cleanupError;
-            }
-            throw error;
-        }
-    }
     const usePromptMode = isPromptModeAgent(opts.agentType);
     const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
     const outputFile = injectContract && opts.role
@@ -698,7 +677,13 @@ async function spawnV2Worker(opts) {
         launchStateCwd: opts.cwd,
         launchContext: { kind: 'initial' },
     };
-    const startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+    let startupContext;
+    try {
+        startupContext = await spawnOwnedWorkerInPane(opts.sessionName, ownership, paneConfig);
+    }
+    catch (error) {
+        throw error;
+    }
     const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
         `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
     const cleanupStartedLaunch = async (reason) => {
@@ -716,6 +701,13 @@ async function spawnV2Worker(opts) {
         if (!cleaned)
             throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
     };
+    try {
+        await applyMainVerticalLayout(opts.sessionName);
+    }
+    catch (error) {
+        await cleanupStartedLaunch('startup_layout_failed');
+        throw error;
+    }
     const waitForCurrentEvidence = (attempts = 12) => waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, startupBaseline, startupContext.attempt.attempt_id, attempts);
     const fencedDispatch = await (async () => {
         try {
