@@ -421,6 +421,32 @@ function assertCompareBaseAndGetMergeBase(compare, expectedBaseSha) {
   return requiredSha(mergeBase.sha, 'compare response.merge_base_commit.sha');
 }
 
+function assertNonGeneratedAdvance(compare, ancestorSha, descendantSha, label) {
+  const response = requiredObject(compare, `${label} compare response`);
+  if (requiredObject(response.base_commit, `${label} compare response.base_commit`).sha !== ancestorSha ||
+      requiredObject(response.merge_base_commit, `${label} compare response.merge_base_commit`).sha !== ancestorSha) {
+    fail(`${label} is not a direct descendant of the authorized SHA`);
+  }
+  if (response.status !== 'ahead' ||
+      requiredNonNegativeInteger(response.behind_by, `${label} compare response.behind_by`) !== 0) {
+    fail(`${label} is not strictly ahead of the authorized SHA`);
+  }
+  const aheadBy = requiredPositiveInteger(response.ahead_by, `${label} compare response.ahead_by`);
+  if (aheadBy > 100 || requiredPositiveInteger(
+    response.total_commits,
+    `${label} compare response.total_commits`,
+  ) !== aheadBy) {
+    fail(`${label} compare is too large or inconsistent`);
+  }
+  if (!Array.isArray(response.commits) || response.commits.length !== aheadBy ||
+      requiredObject(response.commits.at(-1), `${label} compare final commit`).sha !== descendantSha) {
+    fail(`${label} compare head does not match the live SHA`);
+  }
+  const files = canonicalizeChangedFiles(response.files, `${label} compare files`);
+  if (files.length >= 300) fail(`${label} compare is too large to prove complete`);
+  if (files.some(recordTouchesGeneratedPath)) fail(`${label} changes generated files outside the authorized closure`);
+}
+
 function assertOwnerCommitSignature(commit, signature, headSha, owner) {
   const commitResponse = requiredObject(commit, 'head commit response');
   if (requiredSha(commitResponse.sha, 'head commit response.sha') !== headSha) {
@@ -467,6 +493,8 @@ export function authorizeGeneratedArtifactPullRequest({
   checkedOutBaseSha,
   livePull,
   compare,
+  authorizedHeadAdvance,
+  authorizedBaseAdvance,
   commit,
   signature,
   files,
@@ -513,16 +541,30 @@ export function authorizeGeneratedArtifactPullRequest({
   if (Date.parse(authorization.expiresAt) <= now.getTime()) {
     fail('generated-artifact authorization has expired');
   }
-  if (
-    authorization.targetRef !== eventData.baseRef ||
-    authorization.targetRef !== liveData.baseRef ||
-    authorization.headSha !== eventData.headSha ||
-    authorization.headSha !== liveData.headSha
-  ) {
+  if (authorization.targetRef !== eventData.baseRef || authorization.targetRef !== liveData.baseRef) {
     fail('generated changes do not match the authorized PR/target/head identity');
   }
+  if (authorization.headSha !== liveData.headSha) {
+    if (authorizedHeadAdvance === undefined) {
+      fail('generated changes do not match the authorized PR/target/head identity');
+    }
+    assertNonGeneratedAdvance(
+      authorizedHeadAdvance,
+      authorization.headSha,
+      liveData.headSha,
+      'authorized head advance',
+    );
+  }
   if (authorization.mergeBaseSha !== compareMergeBaseSha) {
-    fail('compare merge base does not match the authorized merge base SHA');
+    if (authorizedBaseAdvance === undefined) {
+      fail('compare merge base does not match the authorized merge base SHA');
+    }
+    assertNonGeneratedAdvance(
+      authorizedBaseAdvance,
+      authorization.mergeBaseSha,
+      compareMergeBaseSha,
+      'authorized merge-base advance',
+    );
   }
   if (
     eventData.headRepository !== trustedManifest.repository ||
@@ -691,6 +733,24 @@ export async function verifyLiveGeneratedArtifactAuthorization({
       `/compare/${encodeURIComponent(liveData.baseSha)}...${encodeURIComponent(liveData.headSha)}?per_page=1&page=1`,
     ),
   );
+  const authorization = trustedManifest.authorizations.find(entry => entry.pullNumber === eventData.pullNumber);
+  const compareMergeBaseSha = assertCompareBaseAndGetMergeBase(compare, liveData.baseSha);
+  const authorizedHeadAdvance = authorization && authorization.headSha !== liveData.headSha
+    ? await api.get(
+      apiPath(
+        trustedManifest.repository,
+        `/compare/${encodeURIComponent(authorization.headSha)}...${encodeURIComponent(liveData.headSha)}?per_page=100&page=1`,
+      ),
+    )
+    : undefined;
+  const authorizedBaseAdvance = authorization && authorization.mergeBaseSha !== compareMergeBaseSha
+    ? await api.get(
+      apiPath(
+        trustedManifest.repository,
+        `/compare/${encodeURIComponent(authorization.mergeBaseSha)}...${encodeURIComponent(compareMergeBaseSha)}?per_page=100&page=1`,
+      ),
+    )
+    : undefined;
   const commit = await api.get(apiPath(trustedManifest.repository, `/commits/${encodeURIComponent(liveData.headSha)}`));
 
   const { owner, name } = parseRepository(trustedManifest.repository);
@@ -716,6 +776,8 @@ export async function verifyLiveGeneratedArtifactAuthorization({
     checkedOutBaseSha,
     livePull,
     compare,
+    authorizedHeadAdvance,
+    authorizedBaseAdvance,
     commit,
     signature: graphResponse.data.repository.object,
     files,
