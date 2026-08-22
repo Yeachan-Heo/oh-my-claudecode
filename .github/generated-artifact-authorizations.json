@@ -1843,12 +1843,12 @@
       "pullNumber": 3749,
       "targetRef": "main",
       "mergeBaseSha": "94e71c3630acbfb4f26dee6df4b78af30bab1563",
-      "headSha": "9045c4dd796d78fabd87e3baa60a5e951e652dcd",
+      "headSha": "61398e62d0aff68ddeabe6dbd66eba6ae4e79f0a",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-29T00:00:00.000Z",
       "generatedDelta": {
-        "count": 1209,
-        "sha256": "16cb44d6561be47ee46756f110233a0d64c2a615b3d776d6ba6811a37fc46028"
+        "count": 1224,
+        "sha256": "3b72c9ab3ddf6a5dd2d1aedd84856242687856862a7fbcac9a764b75ac6bf143"
       },
       "generatedFiles": [
         {
@@ -2506,6 +2506,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/__tests__/package-dir-resolution-regression.test.js",
+          "sha": "9b4542b5ca04fdf650d278f92be15c2522953c48",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/package-dir-resolution-regression.test.js.map",
+          "sha": "c18e4fa6061879b257408609cb51e2b38c45b990",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/__tests__/plugin-shipping-surface.test.d.ts",
           "sha": "40accf3f69562564f3822a0cc3da7549b0f6cdae",
@@ -2914,6 +2926,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-cache-cleanup.test.js",
+          "sha": "4963628a3348fb38478bbf00be2da2d7c858aada",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-cache-cleanup.test.js.map",
+          "sha": "ef2484603e4a04bd30c5b9b0a617edc4b48aabd0",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.d.ts",
           "sha": "e3764db70a992e141b802c72bd1b95b041265cbd",
@@ -2928,13 +2952,13 @@
         {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.js",
-          "sha": "438b03f4ad3c33ebcf5505fad85831b23fc2e83a",
+          "sha": "5987d88855013f987b42840f837d9319c4b1a751",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.js.map",
-          "sha": "a6aa7e3979b3c84a6c2a01fa7b841932d24bb1f4",
+          "sha": "cd1c8b5fc25c6fdaaa6d4450b2c16242ef557844",
           "previousFilename": null
         },
         {
@@ -3067,6 +3091,18 @@
           "status": "modified",
           "filename": "dist/__tests__/tier0-contracts.test.js.map",
           "sha": "0793443c7585b8d411f7caef7e1edb583698684a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-docs-consistency.test.js",
+          "sha": "0880e4e346fe8b505e21a4902f16da1ceb755414",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-docs-consistency.test.js.map",
+          "sha": "4a7489960e779e755b8f13b20a288c86e93c69ae",
           "previousFilename": null
         },
         {
@@ -4374,13 +4410,13 @@
         {
           "status": "added",
           "filename": "dist/hooks/__tests__/precompact-restore.test.js",
-          "sha": "3a355c5bcd205f651d281faead0954f749890302",
+          "sha": "7283d17fd02928414b672a1e1be8308c06c17533",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/__tests__/precompact-restore.test.js.map",
-          "sha": "49d3b4a3aba68837a063cd579210b8d61a2e2c8c",
+          "sha": "85e5bf7717cd8cdc7a4ace725f9d3c4c3644f48e",
           "previousFilename": null
         },
         {
@@ -4985,6 +5021,18 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/cancel-race.test.js",
+          "sha": "a80ea75690b0fc332a00779ab1dd7db446181b1a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/cancel-race.test.js.map",
+          "sha": "1476d270a68fff64b279e9fa9205ebee62bbc1e1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js",
           "sha": "d0356dd7d3cc4429d09f376d8743570ea664e0e6",
           "previousFilename": null
@@ -5005,6 +5053,18 @@
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/idle-repo-state.test.js.map",
           "sha": "0388a773c947d3152327e9d4e76ecc88906f75ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/team-ralplan-stop.test.js",
+          "sha": "6a9f70ae1350d30102cdbb98d21304549295a615",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/team-ralplan-stop.test.js.map",
+          "sha": "4e528739c87cd65fb187f9e2b43d0e3a34d7a5c8",
           "previousFilename": null
         },
         {
@@ -5112,25 +5172,25 @@
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.d.ts",
-          "sha": "3f4cb663e8c4f5dadcae7acde50bf00d7a6c1681",
+          "sha": "d59c225e405cbf09bf7b765bb232122628a79717",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.d.ts.map",
-          "sha": "e12a727668a6203f087ddb5ac4fab4ea6c7391ab",
+          "sha": "63e1b6644b82bc602bf6e3f7b1d519a1a37df158",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.js",
-          "sha": "926cd46b4cad8f5aaaf021c2c1a7f50a41b28a38",
+          "sha": "44c754c5105873ca01fb07f665cc7e2dbd3495a1",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.js.map",
-          "sha": "a20e636d552be306b1507371cbfa25a53aff1198",
+          "sha": "6e5ae9e423354fbe6f13f4fc38050bee5cc298ce",
           "previousFilename": null
         },
         {
@@ -6372,13 +6432,13 @@
         {
           "status": "modified",
           "filename": "dist/installer/__tests__/hook-templates.test.js",
-          "sha": "5aeb701734a1ed686cee6268d1c5e2e38dbfd87e",
+          "sha": "f2fb195cc44b7cca8c8cff99b7294d485cfef38b",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/installer/__tests__/hook-templates.test.js.map",
-          "sha": "4d4e56bd553a2b56098037438512ba5664459dda",
+          "sha": "e7b923945ac8611dd1397e83db94823d49c14296",
           "previousFilename": null
         },
         {
@@ -8860,6 +8920,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/frontmatter.test.js",
+          "sha": "4a5cf35cb70543812a7083dc905e1cb458bc67b7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/frontmatter.test.js.map",
+          "sha": "7eb902ee8e5ab44509dff1daedade461372ed924",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/utils/__tests__/jsonc.test.d.ts",
           "sha": "c8c2b8d22f6263cfc5c8a2c26439181984d74b60",
@@ -8905,6 +8977,24 @@
           "status": "added",
           "filename": "dist/utils/cache-occupancy.js.map",
           "sha": "89aeba3271f08d243042a0f0564ec9d3f942e652",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.d.ts.map",
+          "sha": "db2ee6259828dbe5fab835ea27880001b2c36c19",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.js",
+          "sha": "aee3f71ffa00679c5d6f9cc84835f47ad36b6bb0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.js.map",
+          "sha": "415b52ecc1122f0f055a72cdd9e802d315476978",
           "previousFilename": null
         },
         {
