@@ -8,7 +8,9 @@ export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): T
  * Tmux panes run bash in this environment, not cmd.exe.
  */
 export declare function isUnixLikeOnWindows(): boolean;
-export declare function applyMainVerticalLayout(teamTarget: string): Promise<void>;
+export declare function applyMainVerticalLayout(teamTarget: string, options?: {
+    required?: boolean;
+}): Promise<void>;
 type MailboxOwnershipCommand = (args: string[]) => Promise<{
     stdout: string;
     stderr: string;

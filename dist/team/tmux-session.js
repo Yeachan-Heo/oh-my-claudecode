@@ -34,25 +34,22 @@ export function isUnixLikeOnWindows() {
     return process.platform === 'win32' &&
         !!(process.env.MSYSTEM || process.env.MINGW_PREFIX);
 }
-export async function applyMainVerticalLayout(teamTarget) {
-    try {
-        await tmuxExecAsync(['select-layout', '-t', teamTarget, 'main-vertical']);
-    }
-    catch {
-        // Layout may not apply if only 1 pane; ignore.
-    }
+export async function applyMainVerticalLayout(teamTarget, options = {}) {
     try {
         const widthResult = await tmuxCmdAsync([
             'display-message', '-p', '-t', teamTarget, '#{window_width}',
         ]);
         const width = parseInt(widthResult.stdout.trim(), 10);
-        if (Number.isFinite(width) && width >= 40) {
-            const half = String(Math.floor(width / 2));
-            await tmuxExecAsync(['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
-            await tmuxExecAsync(['select-layout', '-t', teamTarget, 'main-vertical']);
+        if (!Number.isFinite(width) || width < 40) {
+            throw new Error(`team_layout_window_width_invalid:${widthResult.stdout.trim() || 'empty'}`);
         }
+        const half = String(Math.floor(width / 2));
+        await tmuxExecAsync(['set-window-option', '-t', teamTarget, 'main-pane-width', half]);
+        await tmuxExecAsync(['select-layout', '-t', teamTarget, 'main-vertical']);
     }
-    catch {
+    catch (error) {
+        if (options.required)
+            throw error;
         /* ignore layout sizing errors */
     }
 }

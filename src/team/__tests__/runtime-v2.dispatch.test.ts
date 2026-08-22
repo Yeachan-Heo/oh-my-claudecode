@@ -369,7 +369,15 @@ describe('runtime v2 startup inbox dispatch', () => {
         }),
       }),
     );
-    expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session');
+    expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session', { required: true });
+    const layoutOrder = mocks.applyMainVerticalLayout.mock.invocationCallOrder[0];
+    const ownedSpawnOrder = mocks.spawnOwnedWorkerInPane.mock.invocationCallOrder[0];
+    const providerOrder = mocks.spawnWorkerInPane.mock.invocationCallOrder[0];
+    const inboxOrder = mocks.deliverStartupInbox.mock.invocationCallOrder[0];
+    expect(layoutOrder).toBeLessThan(ownedSpawnOrder);
+    expect(ownedSpawnOrder).toBeLessThan(providerOrder);
+    expect(layoutOrder).toBeLessThan(providerOrder);
+    expect(providerOrder).toBeLessThan(inboxOrder);
     const config = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf-8'));
     const manifest = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json'), 'utf-8'));
     expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
@@ -978,7 +986,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(persisted.workers[0].assigned_tasks).toEqual([]);
   });
 
-  it('retires the exact provider when layout fails after launch handoff', async () => {
+  it('cleans the owned pane before provider launch when required layout fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-layout-failure-'));
     mocks.applyMainVerticalLayout.mockRejectedValueOnce(new Error('layout failed'));
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -990,12 +998,11 @@ describe('runtime v2 startup inbox dispatch', () => {
       tasks: [{ subject: 'Dispatch test', description: 'Layout failure cleanup' }],
       cwd,
     })).rejects.toThrow('layout failed');
-    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
-      expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
-      'startup_layout_failed',
-      expect.any(Function),
-    );
-    expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
+    expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+    expect(mocks.spawnWorkerInPane).not.toHaveBeenCalled();
+    expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalled();
+    expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
 
   it('does not retain a torn-down worker pane as a future split target when startup readiness fails', async () => {
