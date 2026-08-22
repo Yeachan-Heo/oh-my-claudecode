@@ -11,6 +11,7 @@ const LIVE_BASE_SHA = '21a6e488ce12d79b9a22d37e1093ac8e79f21029';
 const HEAD_SHA = '10078ece166ad36332390ecbaab2d5e247852bbc';
 const MAIN_SHA = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const PULL_NUMBER = 3537;
+const FIXTURE_NOW = new Date('2026-08-01T00:00:00.000Z');
 const ROOT = process.cwd();
 const WORKFLOW_PATH = join(ROOT, '.github', 'workflows', 'generated-artifact-authorization.yml');
 const MANIFEST_PATH = join(ROOT, '.github', 'generated-artifact-authorizations.json');
@@ -49,6 +50,7 @@ type ApiFile = {
 };
 
 type MutableInput = {
+  now: Date;
   environment: {
     githubEventName: string;
     githubRepository: string;
@@ -88,7 +90,12 @@ type MutableInput = {
     merge_base_commit: { sha: string };
     files?: unknown;
   };
-  commit: { sha: string; commit: { verification: { verified: boolean } }; author: { login: string } };
+  commit: {
+    sha: string;
+    commit: { verification: { verified: boolean } };
+    author: { login: string };
+    committer: { login: string };
+  };
   signature: { oid: string; signature: { isValid: boolean; signer: { login: string } } };
   files: ApiFile[];
 };
@@ -103,6 +110,7 @@ type VerifierModule = {
     token: string;
     fetchImpl: typeof fetch;
     repositoryRoot: string;
+    now?: Date;
   }): Promise<unknown>;
   validateAuthorizationManifest(manifest: unknown): unknown;
   readDetachedCheckoutHead(repositoryRoot: string): string;
@@ -139,6 +147,7 @@ function apiFiles(records = exactAuthorization.generatedFiles): ApiFile[] {
 function authorizedInput(): MutableInput {
   const files = apiFiles();
   return {
+    now: new Date(FIXTURE_NOW),
     environment: {
       githubEventName: 'pull_request_target',
       githubRepository: REPOSITORY,
@@ -185,6 +194,7 @@ function authorizedInput(): MutableInput {
       sha: HEAD_SHA,
       commit: { verification: { verified: true } },
       author: { login: OWNER },
+      committer: { login: OWNER },
     },
     signature: {
       oid: HEAD_SHA,
@@ -248,6 +258,8 @@ describe('generated-artifact base trust root workflow', () => {
       [3539, 'dev'],
       [3541, 'dev'],
       [3690, 'main'],
+      [3692, 'dev'],
+      [3749, 'main'],
     ]);
     expect(manifest.authorizations.find(entry => entry.pullNumber === 3538)).toMatchObject({
       targetRef: 'dev',
@@ -491,6 +503,18 @@ describe('generated-artifact base-owned authorization decision', () => {
     expectDenied(input => {
       input.signature.signature.signer.login = 'attacker';
     }, 'signature signer');
+  });
+
+  it('accepts GitHub web-flow signatures only for matching GitHub-committed owner heads', () => {
+    const input = authorizedInput();
+    input.signature.signature.signer.login = 'web-flow';
+    input.commit.committer.login = 'web-flow';
+    expect(verifier.evaluateGeneratedArtifactAuthorization(input)).toMatchObject({ allowed: true });
+
+    expectDenied(candidate => {
+      candidate.signature.signature.signer.login = 'web-flow';
+      candidate.commit.committer.login = 'attacker';
+    }, 'web-flow signature does not match');
   });
 
   it('rejects missing base authorization and any generated closure or digest violation', () => {
@@ -759,6 +783,7 @@ describe('generated-artifact base-owned authorization decision', () => {
           token: 'test-token',
           fetchImpl,
           repositoryRoot: checkoutRoot,
+          now: input.now,
         }),
       ).resolves.toMatchObject({ requiresAuthorization: true, pullNumber: PULL_NUMBER });
       expect(requestedPaths).toContain(`/repos/${REPOSITORY}/commits/main`);
@@ -790,6 +815,7 @@ describe('generated-artifact base-owned authorization decision', () => {
           token: 'test-token',
           fetchImpl: raceFetch,
           repositoryRoot: checkoutRoot,
+          now: racedInput.now,
         }),
       ).rejects.toThrow('GITHUB_SHA does not match the current protected default-main commit SHA');
       expect(racePaths).toEqual([`/repos/${REPOSITORY}`, `/repos/${REPOSITORY}/commits/main`]);
@@ -822,6 +848,7 @@ describe('generated-artifact base-owned authorization decision', () => {
           token: 'test-token',
           fetchImpl,
           repositoryRoot: checkoutRoot,
+          now: input.now,
         }),
       ).rejects.toThrow('default branch is not main');
       expect(requestedPaths).toEqual([`/repos/${REPOSITORY}`]);
