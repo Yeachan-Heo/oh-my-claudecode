@@ -406,6 +406,35 @@ OMC automatically selects a model tier based on task complexity:
 | HIGH | opus | Architecture, deep analysis |
 | — | fable | Claude Fable 5 (above Opus); usable anywhere a tier alias is accepted |
 
+### Using a gateway provider (OrcaRouter)
+
+[OrcaRouter](https://www.orcarouter.ai) is a gateway that fronts models from
+OpenAI, Anthropic, Google, and more behind a single Anthropic-compatible
+endpoint, and adds gateway-level safety for AI agents. To run OMC against
+OrcaRouter instead of the Anthropic API, point Claude Code at it with the
+standard base-URL environment variables:
+
+```bash
+export ANTHROPIC_BASE_URL=https://api.orcarouter.ai   # no /v1 — Claude Code appends /v1/messages
+export ANTHROPIC_AUTH_TOKEN=sk-orca-...                # your OrcaRouter key
+export ANTHROPIC_API_KEY=                               # leave empty for OrcaRouter auth
+```
+
+OrcaRouter requires namespaced model IDs, so pin the tier defaults that OMC
+uses to pick models for delegated agents. Without these, sub-agent calls fall
+back to bare aliases (`sonnet`/`opus`/`haiku`) that OrcaRouter rejects:
+
+```bash
+export ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5
+export ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-5
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=anthropic/claude-haiku-4.5
+```
+
+With `ANTHROPIC_BASE_URL` set, OMC automatically enables `forceInherit`, so
+delegated agents inherit the session model and no bare Claude aliases are
+injected. OrcaRouter model IDs (`orcarouter/*`, `anthropic/*`) are treated as
+provider-specific and passed through unmodified.
+
 ### Session model vs delegated agents (Fable and other models)
 
 The model selected with `/model` applies to the main conversation loop only. Delegated agents (planner, architect, executor, and the rest of the catalog) run on the tier pinned in their agent definition — `opus`, `sonnet`, or `haiku` — regardless of the session model. OMC's hooks cannot observe the `/model` selection; they only see provider environment variables, which is why session-family inheritance is not automatic on standard Anthropic auth.

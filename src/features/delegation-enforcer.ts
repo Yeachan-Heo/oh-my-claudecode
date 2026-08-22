@@ -291,7 +291,8 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
 
   // If model is already specified, normalize it to CC-supported aliases
   // before passing through. Full IDs like 'claude-sonnet-5' cause 400
-  // errors on Bedrock/Vertex. (issue #1415)
+  // errors on Bedrock/Vertex, and OrcaRouter namespaced IDs (orcarouter/*,
+  // anthropic/*) are passed through as provider-specific. (issue #1415)
   if (agentInput.model) {
     const normalizedModel = normalizeToCcAlias(agentInput.model);
     return {

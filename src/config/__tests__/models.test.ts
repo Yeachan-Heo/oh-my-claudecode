@@ -245,6 +245,11 @@ describe('isNonClaudeProvider()', () => {
     expect(isNonClaudeProvider()).toBe(false);
   });
 
+  it('returns true when tier defaults target an OrcaRouter namespaced model', () => {
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'orcarouter/auto';
+    expect(isNonClaudeProvider()).toBe(true);
+  });
+
   it('returns false when no env vars are set', () => {
     expect(isNonClaudeProvider()).toBe(false);
   });

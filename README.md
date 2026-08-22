@@ -102,6 +102,23 @@ If you run OMC via `omc --plugin-dir <path>` or `claude --plugin-dir <path>`, ad
 autopilot: build a REST API for managing tasks
 ```
 
+**Gateway providers (OrcaRouter)**
+
+OMC works with any Anthropic-compatible gateway via `ANTHROPIC_BASE_URL`. To
+use [OrcaRouter](https://www.orcarouter.ai), set:
+
+```bash
+export ANTHROPIC_BASE_URL=https://api.orcarouter.ai
+export ANTHROPIC_AUTH_TOKEN=sk-orca-...
+export ANTHROPIC_API_KEY=          # leave empty for OrcaRouter auth
+export ANTHROPIC_DEFAULT_OPUS_MODEL=anthropic/claude-opus-5
+export ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-5
+export ANTHROPIC_DEFAULT_HAIKU_MODEL=anthropic/claude-haiku-4.5
+```
+
+OMC auto-enables `forceInherit` for custom base URLs, so delegated agents
+inherit the session model. See [Using a gateway provider](./docs/GETTING-STARTED.md#using-a-gateway-provider-orcarouter) for details.
+
 #### Named autopilot stage profiles (v1)
 
 Select a configured stage profile only through `/autopilot --workflow <name> <task>`:

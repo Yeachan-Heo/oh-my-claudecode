@@ -192,10 +192,10 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
         args.push('--bare');
       }
       if (model) {
-        // Provider-specific model IDs (Bedrock, Vertex) must be passed as-is.
-        // Normalizing them to aliases like "sonnet" causes Claude Code to expand
-        // them to Anthropic API names (claude-sonnet-5) which are invalid on
-        // these providers. (issue #1695)
+        // Provider-specific model IDs (Bedrock, Vertex, OrcaRouter) must be
+        // passed as-is. Normalizing them to aliases like "sonnet" causes Claude
+        // Code to expand them to Anthropic API names (claude-sonnet-5) which
+        // are invalid on these providers. (issue #1695)
         const resolved = isProviderSpecificModelId(model) ? model : normalizeToCcAlias(model);
         args.push('--model', resolved);
       }

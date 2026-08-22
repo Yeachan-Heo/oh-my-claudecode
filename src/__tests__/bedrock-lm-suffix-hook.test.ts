@@ -141,6 +141,13 @@ describe('isProviderSpecificModelId — Bedrock IDs used in OMC_SUBAGENT_MODEL g
     // But isSubagentSafeModelId combines both checks and rejects it
     expect(isSubagentSafeModelId('global.anthropic.claude-sonnet-4-6[1m]')).toBe(false);
   });
+
+  it('accepts OrcaRouter namespaced model IDs as provider-specific', () => {
+    // OrcaRouter is an Anthropic-compatible gateway that requires namespaced
+    // model IDs (e.g. orcarouter/auto). They must pass through unmangled.
+    expect(isProviderSpecificModelId('orcarouter/auto')).toBe(true);
+    expect(isSubagentSafeModelId('orcarouter/auto')).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

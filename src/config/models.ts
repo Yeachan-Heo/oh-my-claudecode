@@ -266,6 +266,7 @@ export function isBedrock(): boolean {
  *   - Bedrock prefixed: us.anthropic.claude-*, global.anthropic.claude-*, anthropic.claude-*
  *   - Bedrock ARN: arn:aws:bedrock:...
  *   - Vertex AI: vertex_ai/...
+ *   - OrcaRouter gateway: orcarouter/...
  *
  * These IDs must be passed through to the CLI as-is because normalizing them
  * to aliases like "sonnet" causes Claude Code to expand them to Anthropic API
@@ -282,6 +283,13 @@ export function isProviderSpecificModelId(modelId: string): boolean {
   }
   // Vertex AI prefixed format
   if (modelId.toLowerCase().startsWith('vertex_ai/')) {
+    return true;
+  }
+  // OrcaRouter gateway (Anthropic-compatible endpoint) uses namespaced model
+  // IDs like `anthropic/claude-opus-5`. They are valid on OrcaRouter but must
+  // never be normalized to a bare alias (sonnet/opus/haiku), which OrcaRouter
+  // rejects (it requires the full namespaced model id).
+  if (modelId.toLowerCase().startsWith('orcarouter/')) {
     return true;
   }
   return false;

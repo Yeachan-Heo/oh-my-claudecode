@@ -405,6 +405,12 @@ describe('model-contract', () => {
       expect(args).toContain('vertex_ai/claude-sonnet-4-6@20250514');
       expect(args).not.toContain('sonnet');
     });
+    it('passes OrcaRouter namespaced model ID through without normalization', () => {
+      const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'orcarouter/auto' });
+      expect(args).toContain('--model');
+      expect(args).toContain('orcarouter/auto');
+      expect(args).not.toContain('sonnet');
+    });
     it('does not normalize non-Claude models for codex/gemini agents', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4o' });
       expect(args).toContain('gpt-4o');
