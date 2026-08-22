@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve5.call(this, root, ref);
+      let _sch = resolve6.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve5(root, ref) {
+    function resolve6(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3640,7 +3640,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve5(baseURI, relativeURI, options) {
+    function resolve6(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse6(baseURI, schemelessOptions), parse6(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3898,7 +3898,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize3,
-      resolve: resolve5,
+      resolve: resolve6,
       resolveComponent,
       equal,
       serialize,
@@ -16760,7 +16760,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve5) => setTimeout(resolve5, pollInterval));
+        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -16777,7 +16777,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -16855,7 +16855,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve5(parseResult.data);
+            resolve6(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -17116,12 +17116,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve5, reject) => {
+    return new Promise((resolve6, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve5, interval);
+      const timeoutId = setTimeout(resolve6, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -17850,12 +17850,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve5) => {
+    return new Promise((resolve6) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve5();
+        resolve6();
       } else {
-        this._stdout.once("drain", resolve5);
+        this._stdout.once("drain", resolve6);
       }
     });
   }
@@ -17864,10 +17864,10 @@ var StdioServerTransport = class {
 // src/mcp/team-server.ts
 var import_node_crypto2 = require("node:crypto");
 var import_child_process5 = require("child_process");
-var import_path11 = require("path");
+var import_path12 = require("path");
 var import_url = require("url");
-var import_fs11 = require("fs");
-var import_promises3 = require("fs/promises");
+var import_fs12 = require("fs");
+var import_promises4 = require("fs/promises");
 
 // src/team/tmux-session.ts
 var import_fs5 = require("fs");
@@ -19122,6 +19122,9 @@ var import_crypto3 = require("crypto");
 var import_fs6 = require("fs");
 var import_path6 = require("path");
 
+// src/team/types.ts
+var DEFAULT_MAX_WORKERS = 20;
+
 // src/team/governance.ts
 var DEFAULT_TEAM_TRANSPORT_POLICY = {
   display_mode: "split_pane",
@@ -19136,6 +19139,10 @@ var DEFAULT_TEAM_GOVERNANCE = {
   one_team_per_leader_session: true,
   cleanup_requires_all_workers_inactive: true
 };
+function resolveMaxWorkers(configured) {
+  if (configured === void 0) return DEFAULT_MAX_WORKERS;
+  return Math.min(configured, DEFAULT_MAX_WORKERS);
+}
 function normalizeTeamTransportPolicy(policy) {
   return {
     display_mode: policy?.display_mode ?? DEFAULT_TEAM_TRANSPORT_POLICY.display_mode,
@@ -19299,6 +19306,9 @@ function isNonEmptyString(value) {
 function isSafeCounter(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
+function isValidPersistedMaxWorkers(value) {
+  return value === void 0 || isSafeCounter(value) && value >= 1;
+}
 function isTimestamp(value) {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -19334,7 +19344,7 @@ function isAllDeadRecovery(value) {
   return isRecord(value) && isTimestamp(value.detected_at) && isTimestamp(value.deadline_at) && isSafeCounter(value.state_revision);
 }
 function isTeamConfig(value, requireRevision, expectedTeamName) {
-  if (!isRecord(value) || !isNonEmptyString(value.name) || expectedTeamName !== void 0 && value.name !== expectedTeamName || !isNonEmptyString(value.agent_type) || value.task !== void 0 && typeof value.task !== "string" || value.worker_launch_mode !== void 0 && !["interactive", "prompt"].includes(value.worker_launch_mode) || !isSafeCounter(value.worker_count) || value.max_workers !== void 0 && !isSafeCounter(value.max_workers) || !Array.isArray(value.workers) || value.worker_count !== value.workers.length || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers) || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session) || value.next_task_id !== void 0 && !isSafeCounter(value.next_task_id) || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance) || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value) || !isOptionalRouting(value.resolved_routing)) return false;
+  if (!isRecord(value) || !isNonEmptyString(value.name) || expectedTeamName !== void 0 && value.name !== expectedTeamName || !isNonEmptyString(value.agent_type) || value.task !== void 0 && typeof value.task !== "string" || value.worker_launch_mode !== void 0 && !["interactive", "prompt"].includes(value.worker_launch_mode) || !isSafeCounter(value.worker_count) || !isValidPersistedMaxWorkers(value.max_workers) || !Array.isArray(value.workers) || value.worker_count !== value.workers.length || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers) || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session) || value.next_task_id !== void 0 && !isSafeCounter(value.next_task_id) || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance) || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value) || !isOptionalRouting(value.resolved_routing)) return false;
   if (requireRevision ? !isSafeCounter(value.state_revision) : value.state_revision !== void 0 && !isSafeCounter(value.state_revision)) return false;
   if (!requireRevision && Object.hasOwn(value, "state_revision")) return false;
   return (value.lifecycle_state === void 0 || ["active", "shutting_down", "stopped"].includes(value.lifecycle_state)) && (value.runtime_owner_epoch === void 0 || isOwnerEpoch(value.runtime_owner_epoch)) && (value.active_recovery === void 0 || isRecoveryAttempt(value.active_recovery)) && (value.last_recovery === void 0 || isRecoveryAttempt(value.last_recovery)) && (value.active_scale_up === void 0 || isScaleUpAttempt(value.active_scale_up)) && (value.active_scale_down === void 0 || isScaleDownAttempt(value.active_scale_down)) && (value.service_descriptor === void 0 || isServiceDescriptor(value.service_descriptor)) && (value.shutdown_attempt === void 0 || isShutdownAttempt(value.shutdown_attempt)) && (value.all_dead_recovery === void 0 || isAllDeadRecovery(value.all_dead_recovery)) && hasMatchingActiveFenceRevisions(value);
@@ -19408,7 +19418,7 @@ async function readTeamConfig(teamName, cwd) {
     workers: [...config2.workers ?? [], ...manifest.workers ?? []],
     worker_count: Math.max(config2.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config2.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config2.max_workers ?? 0, 20)
+    max_workers: resolveMaxWorkers(config2.max_workers)
   });
 }
 
@@ -20023,14 +20033,22 @@ function clearScopedTeamState(job) {
 }
 
 // src/utils/paths.ts
-var import_path10 = require("path");
-var import_fs10 = require("fs");
+var import_path11 = require("path");
+var import_fs11 = require("fs");
 var import_os3 = require("os");
+
+// src/utils/cache-occupancy.ts
+var import_fs10 = require("fs");
+var import_promises3 = require("fs/promises");
+var import_crypto4 = require("crypto");
+var import_path10 = require("path");
+
+// src/utils/paths.ts
 function getStateDir() {
   if (process.platform === "win32") {
-    return process.env.LOCALAPPDATA || (0, import_path10.join)((0, import_os3.homedir)(), "AppData", "Local");
+    return process.env.LOCALAPPDATA || (0, import_path11.join)((0, import_os3.homedir)(), "AppData", "Local");
   }
-  return process.env.XDG_STATE_HOME || (0, import_path10.join)((0, import_os3.homedir)(), ".local", "state");
+  return process.env.XDG_STATE_HOME || (0, import_path11.join)((0, import_os3.homedir)(), ".local", "state");
 }
 function prefersXdgOmcDirs() {
   return process.platform !== "win32" && process.platform !== "darwin";
@@ -20042,22 +20060,30 @@ function getUserHomeDir() {
   return process.env.HOME || (0, import_os3.homedir)();
 }
 function getLegacyOmcDir() {
-  return (0, import_path10.join)(getUserHomeDir(), ".omc");
+  return (0, import_path11.join)(getUserHomeDir(), ".omc");
 }
 function getGlobalOmcStateRoot() {
   const explicitRoot = process.env.OMC_HOME?.trim();
   if (explicitRoot) {
-    return (0, import_path10.join)(explicitRoot, "state");
+    return (0, import_path11.join)(explicitRoot, "state");
   }
   if (prefersXdgOmcDirs()) {
-    return (0, import_path10.join)(getStateDir(), "omc");
+    return (0, import_path11.join)(getStateDir(), "omc");
   }
-  return (0, import_path10.join)(getLegacyOmcDir(), "state");
+  return (0, import_path11.join)(getLegacyOmcDir(), "state");
 }
 function getGlobalOmcStatePath(...segments) {
-  return (0, import_path10.join)(getGlobalOmcStateRoot(), ...segments);
+  return (0, import_path11.join)(getGlobalOmcStateRoot(), ...segments);
 }
-var STALE_THRESHOLD_MS = 24 * 60 * 60 * 1e3;
+var PLUGIN_ROOT_REQUIREMENTS = [
+  (0, import_path11.join)("hooks", "hooks.json"),
+  (0, import_path11.join)("scripts", "run.cjs"),
+  "scripts"
+];
+var OCCUPIED_CODES = new Set(
+  process.platform === "win32" ? ["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR", "EPERM", "EACCES"] : ["EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"]
+);
+var STALE_THRESHOLD_MS = 10 * 60 * 1e3;
 
 // src/mcp/team-server.ts
 var import_meta = {};
@@ -20155,22 +20181,22 @@ function createDeprecatedCliOnlyEnvelopeWithArgs(toolName, args) {
 }
 function persistJob(jobId, job) {
   try {
-    if (!(0, import_fs11.existsSync)(OMC_JOBS_DIR)) (0, import_fs11.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
-    (0, import_fs11.writeFileSync)((0, import_path11.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
+    if (!(0, import_fs12.existsSync)(OMC_JOBS_DIR)) (0, import_fs12.mkdirSync)(OMC_JOBS_DIR, { recursive: true });
+    (0, import_fs12.writeFileSync)((0, import_path12.join)(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), "utf-8");
   } catch {
   }
 }
 function loadJobFromDisk(jobId) {
   try {
-    return JSON.parse((0, import_fs11.readFileSync)((0, import_path11.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
+    return JSON.parse((0, import_fs12.readFileSync)((0, import_path12.join)(OMC_JOBS_DIR, `${jobId}.json`), "utf-8"));
   } catch {
     return void 0;
   }
 }
 async function loadPaneIds(jobId) {
-  const p = (0, import_path11.join)(OMC_JOBS_DIR, `${jobId}-panes.json`);
+  const p = (0, import_path12.join)(OMC_JOBS_DIR, `${jobId}-panes.json`);
   try {
-    return JSON.parse(await (0, import_promises3.readFile)(p, "utf-8"));
+    return JSON.parse(await (0, import_promises4.readFile)(p, "utf-8"));
   } catch {
     return null;
   }
@@ -20258,7 +20284,7 @@ async function handleStart(args) {
   const input = startSchema.parse(args);
   validateTeamName(input.teamName);
   const jobId = `omc-${Date.now().toString(36)}${(0, import_node_crypto2.randomUUID)().slice(0, 8)}`;
-  const runtimeCliPath = (0, import_path11.join)(__ownDir, "runtime-cli.cjs");
+  const runtimeCliPath = (0, import_path12.join)(__ownDir, "runtime-cli.cjs");
   const job = { status: "running", startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
   omcTeamJobs.set(jobId, job);
   const child = (0, import_child_process5.spawn)(process.execPath, [runtimeCliPath], {

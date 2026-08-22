@@ -47,7 +47,49 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 **Deslop opt-out:** If `{{PROMPT}}` contains `--no-deslop`, skip the mandatory post-review deslop pass entirely. Use this only when the cleanup pass is intentionally out of scope for the run.
 
 **Reviewer selection:** Pass `--critic=architect`, `--critic=critic`, or `--critic=codex` in the Ralph prompt to choose the completion reviewer for that run. `architect` remains the default.
+
+**Stale-state detection & reconciliation (#3669):** If a PRD is left unfinished by an abnormal/non-Step 8 exit (crash, force-kill, cancel before `/oh-my-claudecode:cancel`, session end), Ralph surfaces an explicit `[STALE PRD WARNING]` at startup/resume, in the continuation context, and at session end — with unfinished counts, last-touched age, and stale-pointer signals (PRD `branchName` merged/gone). Completion is NEVER inferred from PR/branch/merge status alone; git state is a warning signal only. A story is auto-reconciled to `passes: true` ONLY when the PRD carries configured observable evidence and every check passes:
+
+```json
+{
+  "reconciliation": {
+    "staleAfterMs": 7200000,
+    "observableChecks": {
+      "US-001": [
+        { "type": "fileContains", "path": "src/landed.ts", "pattern": "LANDED_SYMBOL" },
+        { "type": "gitGrep", "ref": "origin/dev", "pattern": "LANDED_SYMBOL" }
+      ]
+    }
+  }
+}
+```
+
+Check types: `fileExists` / `fileContains` (working tree) and `gitGrep` (content at a ref — this is "verified by content on trunk", never PR status). Stories without configured checks are never auto-marked. Reconciled stories keep `architectVerified: false` and still require Step 7 reviewer verification before Step 8; every decision is appended to the `prd-reconciliation.jsonl` audit log and summarized in the story notes.
 </PRD_Mode>
+
+<PRD_Criterion_Amendments>
+Acceptance criteria are the PRD's completion authority: Step 4 verifies EACH active criterion and Step 7 reviews against them. A criterion can stop governing ONLY through the evidence-preserving amendment path — never by silent deletion or by "satisfying" a criterion measurement has refuted.
+
+When implementation proves a criterion empirically false (e.g. a count in the dispatching brief is wrong), amend it:
+
+1. **Replace** the refuted criterion with the measured correction, or **supersede** it when no replacement governs.
+2. Record the amendment in the story's `criterionAmendments` ledger. The original criterion text is retained verbatim (never rewritten or deleted) alongside:
+   - `kind`: `"replaced"` or `"superseded"`
+   - `original`: the verbatim refuted criterion (must still be active when the amendment is recorded)
+   - `replacement`: the corrected criterion (only for `replaced`)
+   - `reason`: why the original no longer governs
+   - `evidence`: the bounded measurement that refuted it (e.g. "enumerated 12 setters, not 16: ...")
+   - `authority`: who made the amendment (use the ralph session id)
+   - `timestamp`: ISO 8601 timestamp
+3. The completion check then verifies only the ACTIVE criteria; the ledger keeps the audit trail so reviewers see why the original no longer governs.
+
+Rules:
+- An amendment without bounded evidence, reason, authority, or timestamp is invalid — the PRD fails closed on read rather than being silently weakened.
+- An original that is still active cannot be amended; an original can be amended only once.
+- Programmatic path: `amendCriterion(dir, storyId, { original, replacement, reason, evidence, authority })` and `supersedeCriterion(dir, storyId, { original, reason, evidence, authority })`.
+- Hand-edited PRDs must preserve the same invariants; a contradictory ledger (original still active, or amended twice) makes the PRD invalid.
+- This is not a goal-weakening tool: it exists so that "the measurement disagrees with the plan" resolves toward the measurement without the loop losing its grip.
+</PRD_Criterion_Amendments>
 
 <Execution_Policy>
 
@@ -83,17 +125,18 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
    - Run long operations in background: Builds, installs, test suites use `run_in_background: true`
 
 4. **Verify the current story's acceptance criteria**:
-   a. For EACH acceptance criterion in the story, verify it is met with fresh evidence
+   a. For EACH active acceptance criterion in the story, verify it is met with fresh evidence
    b. Run relevant checks (test, build, lint, typecheck) and read the output
-   c. If any criterion is NOT met, continue working -- do NOT mark the story as complete
+   c. If implementation proves a criterion empirically FALSE (the measurement refutes it), do NOT mark the story complete and do NOT silently delete or weaken the criterion. Instead amend it through the evidence-preserving path described in `<PRD_Criterion_Amendments>`: replace or supersede it in the active criteria and append the original (verbatim) with `kind`, `reason`, `evidence`, `authority`, and `timestamp` to the story's `criterionAmendments` ledger. Then continue verifying the remaining ACTIVE criteria
+   d. If any active criterion is NOT met and NOT amended, continue working -- do NOT mark the story as complete
 
 5. **Mark story complete**:
-   a. When ALL acceptance criteria are verified, set `passes: true` for this story in the active PRD file
+   a. When ALL active acceptance criteria are verified, set `passes: true` for this story in the active PRD file
    b. Record progress in `progress.txt`: what was implemented, files changed, learnings for future iterations
    c. Add any discovered codebase patterns to `progress.txt`
 
 6. **Check PRD completion**:
-   a. Read the active PRD file -- are ALL stories marked `passes: true`?
+   a. Read the active PRD file -- are ALL stories marked `passes: true` (with no active criteria left unverified)?
    b. If NOT all complete, loop back to Step 2 (pick next story)
    c. If ALL complete, proceed to Step 7 (architect verification)
 
@@ -113,8 +156,7 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 
 7.5 **Mandatory Deslop Pass** (runs unconditionally after Step 7 approval, unless `{{PROMPT}}` contains `--no-deslop`):
 
-- **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("ai-slop-cleaner")`.** Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
-- **ai-slop-cleaner is a SKILL, not an agent.** Do NOT call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")` — that subagent type does not exist and the call will fail with "Agent type not found". If you see that error, retry with the Skill tool — do NOT substitute a similarly-named agent like `code-simplifier` as a "closest match".
+- **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`** — it is a Skill, not an agent. If you mistakenly call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")`, OMC's PreToolUse hook denies the call with the correct Skill-tool identifier; do not substitute a similarly-named agent. Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
 - Keep the scope bounded to the Ralph changed-file set; do not broaden the cleanup pass to unrelated files.
 - If the reviewer approved the implementation but the deslop pass introduces follow-up edits, keep those edits inside the same changed-file scope before proceeding.
 
@@ -138,7 +180,7 @@ By default, ralph operates in PRD mode. A scaffold `prd.json` is auto-generated 
 - Skip architect consultation for simple feature additions, well-tested changes, or time-critical verification
 - Proceed with architect agent verification alone -- never block on unavailable tools
 - Use `state_write` / `state_read` for ralph mode state persistence between iterations
-- **Skill vs agent invocation**: `ai-slop-cleaner` is a skill, invoke via `Skill("ai-slop-cleaner")`. `architect`, `critic`, `executor` etc. are agents, invoke via `Task(subagent_type="oh-my-claudecode:<name>")`. If you ever get "Agent type ... not found" for an `oh-my-claudecode:<name>` identifier, the item is a skill — retry with the Skill tool. Do NOT substitute a similarly-named agent as a "closest match".
+- **Skill vs agent invocation**: skills (e.g. `ai-slop-cleaner`) are invoked via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`; agents (e.g. `architect`, `critic`, `executor`) via `Task(subagent_type="oh-my-claudecode:<name>")`. OMC's PreToolUse hook denies a Task/Agent call whose `subagent_type` names a bundled skill and returns the correct Skill-tool identifier — do not substitute a similarly-named agent as a "closest match".
   </Tool_Usage>
 
 <Examples>
@@ -209,6 +251,32 @@ Keeping generic acceptance criteria:
 "prd.json created with criteria: Implementation is complete, Code compiles. Moving on to coding."
 Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD theater.
 </Bad>
+<Good>
+Evidence-preserving criterion amendment:
+```
+Criterion: "All 16 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE"
+
+Implementation enumerated the setters: 12 exist, not 16 (7 listed names are readers/asserters/doc-recipes).
+Two of those mis-classified readers are the ONLY affected files — the wrong count was hiding the answer.
+
+Active criteria become:
+  acceptanceCriteria: [
+    "All 12 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE"
+  ]
+  criterionAmendments: [
+    {
+      "kind": "replaced",
+      "original": "All 16 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+      "replacement": "All 12 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+      "reason": "The brief count was wrong: 7 listed names are readers/asserters/doc-recipes, not setters",
+      "evidence": "Enumerated setters via grep FDFT_WHALE_STREAM=1: 12 setters, 16 total matches",
+      "authority": "ses_<ralph-session-id>",
+      "timestamp": "2026-08-10T03:15:00.000Z"
+    }
+  ]
+```
+Why good: The falsified criterion stops governing, the measurement is preserved verbatim with proof/reason/authority/timestamp, and the loop keeps verifying the corrected criterion.
+</Good>
 </Examples>
 
 <Escalation_And_Stop_Conditions>
@@ -222,6 +290,7 @@ Why bad: Did not refine scaffold criteria into task-specific ones. This is PRD t
 
 <Final_Checklist>
 - [ ] All prd.json stories have `passes: true` (no incomplete stories)
+- [ ] Any refuted acceptance criterion was amended through the evidence ledger (original retained), not silently deleted
 - [ ] prd.json acceptance criteria are task-specific (not generic boilerplate)
 - [ ] All requirements from the original task are met (no scope reduction)
 - [ ] Zero pending or in_progress TODO items

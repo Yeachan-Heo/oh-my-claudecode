@@ -143,7 +143,9 @@ export declare function prunePluginDuplicateAgents(log: (msg: string) => void): 
  * that contain a SKILL.md with OMC frontmatter but are no longer shipped by
  * the current package version. User-created skills are preserved.
  */
-export declare function cleanupStaleSkills(log: (msg: string) => void): string[];
+export declare function cleanupStaleSkills(log: (msg: string) => void, options?: {
+    safeStandaloneNames?: boolean;
+}): string[];
 /**
  * Remove standalone skill directories that duplicate plugin-provided skills.
  *

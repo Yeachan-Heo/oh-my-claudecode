@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
-import { dirname, join } from 'path';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { KEYWORD_DETECTOR_SCRIPT_NODE } from '../hooks.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -22,13 +22,17 @@ function runKeywordHook(scriptPath, prompt) {
     }));
 }
 function runPreToolHook(scriptPath, command) {
+    return runPreToolPayload(scriptPath, {
+        tool_name: 'Bash',
+        tool_input: { command },
+    });
+}
+function runPreToolPayload(scriptPath, payload, env = {}) {
     return JSON.parse(execFileSync('node', [scriptPath], {
         cwd: packageRoot,
-        input: JSON.stringify({
-            tool_name: 'Bash',
-            tool_input: { command },
-        }),
+        input: JSON.stringify(payload),
         encoding: 'utf-8',
+        env: { ...process.env, ...env },
     }));
 }
 describe('keyword-detector packaged artifacts', () => {
@@ -63,7 +67,7 @@ describe('keyword-detector packaged artifacts', () => {
         const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
         const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
         for (const scriptPath of [templatePath, pluginPath]) {
-            const result = runKeywordHook(scriptPath, 'ralph execute and code review this change');
+            const result = runKeywordHook(scriptPath, 'ralph fix and code review this change');
             const context = JSON.stringify(result);
             expect(context).toContain('[MAGIC KEYWORD: RALPH]');
             expect(context).toContain('Preferred invocation: /oh-my-claudecode:ralph');
@@ -75,7 +79,7 @@ describe('keyword-detector packaged artifacts', () => {
     });
     it('keeps multi-skill keyword payloads under a compact budget', () => {
         const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
-        const result = runKeywordHook(pluginPath, 'ralph with ultrawork and ralplan this migration');
+        const result = runKeywordHook(pluginPath, 'ralph this with ultrawork and plan this migration');
         const context = JSON.stringify(result);
         expect(context).toContain('[MAGIC KEYWORDS DETECTED: RALPH, ULTRAWORK]');
         expect(context).toContain('Do not inline full SKILL.md files');
@@ -137,6 +141,48 @@ describe('keyword-detector packaged artifacts', () => {
             rmSync(fakeHome, { recursive: true, force: true });
         }
     });
+    it('preserves foreign shared-home state and every dead recovery generation during generic autopilot activation', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+        const projectA = mkdtempSync(join(tmpdir(), 'keyword-hook-project-a-'));
+        const projectB = mkdtempSync(join(tmpdir(), 'keyword-hook-project-b-'));
+        const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-home-'));
+        const emptyXdg = mkdtempSync(join(tmpdir(), 'keyword-hook-xdg-'));
+        const globalStatePath = join(fakeHome, '.omc', 'state', 'autopilot-state.json');
+        const foreignState = JSON.stringify({ active: true, project_path: projectB, sentinel: 'project-b' });
+        const deadTempPath = `${globalStatePath}.emergency-quarantine.00000000-0000-4000-8000-000000000001.payload.999999999.1.00000000-0000-4000-8000-000000000002.tmp`;
+        try {
+            execFileSync('git', ['init'], { cwd: projectA, stdio: 'pipe' });
+            mkdirSync(dirname(globalStatePath), { recursive: true });
+            writeFileSync(globalStatePath, foreignState);
+            writeFileSync(deadTempPath, foreignState);
+            execFileSync('node', [templatePath], {
+                cwd: packageRoot,
+                env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: emptyXdg, NODE_ENV: 'test' },
+                input: JSON.stringify({ prompt: 'autopilot fix the regression', directory: projectA, cwd: projectA, session_id: 'project-a-session' }),
+                encoding: 'utf-8',
+            });
+            expect(readFileSync(globalStatePath, 'utf-8')).toBe(foreignState);
+            expect(readFileSync(deadTempPath, 'utf-8')).toBe(foreignState);
+            expect(existsSync(join(projectA, '.omc', 'state', 'sessions', 'project-a-session', 'autopilot-state.json'))).toBe(true);
+            const malformedJournalPath = `${globalStatePath}.emergency-journal.json`;
+            writeFileSync(malformedJournalPath, '{not-json');
+            execFileSync('node', [templatePath], {
+                cwd: packageRoot,
+                env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: emptyXdg, NODE_ENV: 'test' },
+                input: JSON.stringify({ prompt: 'autopilot fix another regression', directory: projectA, cwd: projectA, session_id: 'project-a-session-2' }),
+                encoding: 'utf-8',
+            });
+            expect(readFileSync(globalStatePath, 'utf-8')).toBe(foreignState);
+            expect(readFileSync(deadTempPath, 'utf-8')).toBe(foreignState);
+            expect(readFileSync(malformedJournalPath, 'utf-8')).toBe('{not-json');
+        }
+        finally {
+            rmSync(projectA, { recursive: true, force: true });
+            rmSync(projectB, { recursive: true, force: true });
+            rmSync(fakeHome, { recursive: true, force: true });
+            rmSync(emptyXdg, { recursive: true, force: true });
+        }
+    });
     it('does not auto-trigger informational keyword questions in packaged artifacts', () => {
         const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
         const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
@@ -179,13 +225,436 @@ OMC Ultrawork = "특수부대 작전 반"
         const pluginAutopilotIssue = runKeywordHook(pluginPath, 'fix issue with autopilot in parser module');
         expect(JSON.stringify(templateAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
         expect(JSON.stringify(pluginAutopilotIssue)).toContain('[MAGIC KEYWORD: AUTOPILOT]');
-        const templateRalphProblem = runKeywordHook(templatePath, 'investigate problem with ralph state');
-        const pluginRalphProblem = runKeywordHook(pluginPath, 'investigate problem with ralph state');
+        const templateRalphProblem = runKeywordHook(templatePath, 'run ralph on parser state issue');
+        const pluginRalphProblem = runKeywordHook(pluginPath, 'run ralph on parser state issue');
         expect(JSON.stringify(templateRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
         expect(JSON.stringify(pluginRalphProblem)).toContain('[MAGIC KEYWORD: RALPH]');
     });
+    it('honors keywordDetector.disabled from .claude/omc.jsonc in both packaged artifacts', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+        const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+        // Isolate from any real user config at ~/.config/claude-omc/config.jsonc.
+        const emptyXdg = mkdtempSync(join(tmpdir(), 'keyword-hook-xdg-'));
+        const disabledDir = mkdtempSync(join(tmpdir(), 'keyword-hook-disabled-'));
+        const controlDir = mkdtempSync(join(tmpdir(), 'keyword-hook-control-'));
+        const runInDir = (scriptPath, prompt, dir) => JSON.parse(execFileSync('node', [scriptPath], {
+            cwd: packageRoot,
+            env: { ...process.env, XDG_CONFIG_HOME: emptyXdg },
+            input: JSON.stringify({ prompt, cwd: dir, directory: dir }),
+            encoding: 'utf-8',
+        }));
+        try {
+            mkdirSync(join(disabledDir, '.claude'), { recursive: true });
+            // Canonical JSONC shape from the #3421 review: comment + trailing commas.
+            writeFileSync(join(disabledDir, '.claude', 'omc.jsonc'), '{\n  // disable tdd auto-routing\n  "keywordDetector": { "disabled": ["tdd",], },\n}');
+            for (const scriptPath of [templatePath, pluginPath]) {
+                // Opt-out is honored: the shipped hook does not route the disabled keyword.
+                expect(runInDir(scriptPath, 'tdd implement password validation', disabledDir)).toEqual({
+                    continue: true,
+                    suppressOutput: true,
+                });
+                // Control: without the opt-out the same prompt still routes.
+                expect(JSON.stringify(runInDir(scriptPath, 'tdd implement password validation', controlDir))).toContain('[TDD MODE ACTIVATED]');
+            }
+        }
+        finally {
+            rmSync(emptyXdg, { recursive: true, force: true });
+            rmSync(disabledDir, { recursive: true, force: true });
+            rmSync(controlDir, { recursive: true, force: true });
+        }
+    });
+    it('disambiguates bare ralph when the official ralph-loop plugin is installed and enabled (#3668)', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'keyword-detector.mjs');
+        const pluginPath = join(packageRoot, 'scripts', 'keyword-detector.mjs');
+        const fakeHome = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-home-'));
+        const projectDir = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-project-'));
+        const configDir = join(fakeHome, '.claude');
+        const officialRoot = join(configDir, 'plugins', 'cache', 'claude-plugins-official', 'ralph-loop', '1.0.0');
+        const omcRoot = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '4.15.4');
+        const registryPath = join(configDir, 'plugins', 'installed_plugins.json');
+        const settingsPath = join(configDir, 'settings.json');
+        const runWithEnv = (scriptPath, sessionId, prompt, env) => JSON.parse(execFileSync('node', [scriptPath], {
+            cwd: packageRoot,
+            env: {
+                ...process.env,
+                HOME: fakeHome,
+                XDG_CONFIG_HOME: join(fakeHome, '.xdg'),
+                CLAUDE_CONFIG_DIR: configDir,
+                ...env,
+            },
+            input: JSON.stringify({
+                prompt,
+                cwd: projectDir,
+                directory: projectDir,
+                session_id: sessionId,
+            }),
+            encoding: 'utf-8',
+        }));
+        const runIn = (scriptPath, sessionId, prompt = '/ralph fix the parser') => runWithEnv(scriptPath, sessionId, prompt, {});
+        const contextOf = (result) => result.hookSpecificOutput?.additionalContext ?? '';
+        const writeRegistry = (plugins) => {
+            mkdirSync(dirname(registryPath), { recursive: true });
+            writeFileSync(registryPath, JSON.stringify({ version: 2, plugins }, null, 2));
+        };
+        const writeSettings = (content) => {
+            mkdirSync(dirname(settingsPath), { recursive: true });
+            writeFileSync(settingsPath, JSON.stringify(content, null, 2));
+        };
+        const officialEntry = (enabledFlag) => [
+            { installPath: officialRoot, version: '1.0.0', ...(enabledFlag === undefined ? {} : { enabled: enabledFlag }) },
+        ];
+        try {
+            mkdirSync(join(officialRoot, 'commands'), { recursive: true });
+            writeFileSync(join(officialRoot, 'commands', 'ralph-loop.md'), '# official ralph-loop\n');
+            mkdirSync(join(omcRoot, 'skills', 'ralph'), { recursive: true });
+            writeFileSync(join(omcRoot, 'skills', 'ralph', 'SKILL.md'), '---\nname: ralph\n---\nOMC ralph\n');
+            // A. Installed AND enabled via canonical settings.enabledPlugins map -> notice fires.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const context = contextOf(runIn(scriptPath, `ralph-both-${basename(scriptPath)}`));
+                expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+                expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+                expect(context).toContain('use `/ralph-loop` for the official plugin');
+                expect(context).toContain('ralph-loop');
+            }
+            // A2. enabledPlugins as an array of plugin id strings also enables the notice.
+            writeSettings({ enabledPlugins: ['ralph-loop@claude-plugins-official', 'other-plugin@foo'] });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-array-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            // B. Official plugin absent from registry (even though settings enables it) -> silent.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-absent-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // C. Installed but DISABLED in canonical settings (enabledPlugins: false) -> silent.
+            //    This is the Codex P2 fix: enablement comes from settings, not the registry flag.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-disabled-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // C2. Settings has neither field -> treated as not enabled (installer semantics).
+            writeSettings({ env: {}, model: 'opus' });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-noenable-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // D. Settings enables, registry entry present, but command payload missing -> silent,
+            //    proving we never fabricate a notice from metadata alone.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': [{ installPath: join(officialRoot, '..', '9.9.9'), version: '9.9.9', enabled: true }],
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-missing-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // E. A community plugin merely named like ralph-loop is not the official one
+            //    (settings-side lookalike must not enable the notice either).
+            writeSettings({ enabledPlugins: { 'my-ralph-loop@community': true } });
+            writeRegistry({
+                'my-ralph-loop@community': [{ installPath: officialRoot, version: '1.0.0', enabled: true }],
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-lookalike-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // F. Settings enables but no registry at all -> silent.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            rmSync(registryPath, { recursive: true, force: true });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-noreg-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // G. Non-ralph skills never carry the notice even when the official plugin is installed+enabled.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const result = JSON.parse(execFileSync('node', [scriptPath], {
+                    cwd: packageRoot,
+                    env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: join(fakeHome, '.xdg'), CLAUDE_CONFIG_DIR: configDir },
+                    input: JSON.stringify({ prompt: 'autopilot build me a CLI', cwd: projectDir, directory: projectDir, session_id: `autopilot-${basename(scriptPath)}` }),
+                    encoding: 'utf-8',
+                }));
+                expect(result.hookSpecificOutput?.additionalContext ?? '').not.toContain('ralph-loop');
+            }
+            // H. The official `/ralph-loop` command never routes to OMC's ralph and never
+            //    carries the notice (it is the other plugin's surface, not an alias).
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const result = JSON.parse(execFileSync('node', [scriptPath], {
+                    cwd: packageRoot,
+                    env: { ...process.env, HOME: fakeHome, XDG_CONFIG_HOME: join(fakeHome, '.xdg'), CLAUDE_CONFIG_DIR: configDir },
+                    input: JSON.stringify({ prompt: '/ralph-loop fix the parser', cwd: projectDir, directory: projectDir, session_id: `ralphloop-cmd-${basename(scriptPath)}` }),
+                    encoding: 'utf-8',
+                }));
+                expect(result).toEqual({ continue: true, suppressOutput: true });
+            }
+            // I. An omc-aliased `/omc-ralph` invocation still routes to OMC's ralph and
+            //    carries the notice when the official plugin is installed+enabled.
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const context = contextOf(runIn(scriptPath, `omcralph-${basename(scriptPath)}`, '/omc-ralph fix the parser'));
+                expect(context).toContain('[MAGIC KEYWORD: RALPH]');
+                expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+            }
+            // J. Registry flag disagreement: registry says enabled:false but canonical
+            //    settings says enabled -> the settings signal wins (registry is not
+            //    authoritative for enablement).
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(false),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-regflag-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            // K. Registry flag disagreement (reverse): registry says enabled:true but
+            //    settings.json is missing -> treated as not enabled (installer semantics).
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            rmSync(settingsPath, { recursive: true, force: true });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-nosettings-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // L. Legacy `plugins` map (pre-1.x field name) also enables the notice.
+            writeSettings({ plugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-legacy-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            // M. Malformed settings.json -> fail closed (not enabled), no notice.
+            mkdirSync(dirname(settingsPath), { recursive: true });
+            writeFileSync(settingsPath, '{ this is not valid json');
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-malformed-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // N. Config-root variant: settings lives at HOME/.claude and CLAUDE_CONFIG_DIR is
+            //    unset (HOME-derived root) -> the notice still resolves the same config root.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const result = runWithEnv(scriptPath, `ralph-homeroot-${basename(scriptPath)}`, '/ralph fix the parser', {
+                    CLAUDE_CONFIG_DIR: undefined,
+                });
+                expect(result.hookSpecificOutput?.additionalContext ?? '').toContain('ralph-loop');
+            }
+            // O. Same-named COMMUNITY plugin enabled while the official one is explicitly
+            //    disabled -> silent. Plugin ids are matched on the full id including the
+            //    marketplace suffix, so `ralph-loop@community` never stands in for the
+            //    official plugin (Codex P2: name-token matching allowed this bypass).
+            writeSettings({
+                enabledPlugins: {
+                    'ralph-loop@claude-plugins-official': false,
+                    'ralph-loop@community': true,
+                },
+            });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'ralph-loop@community': [{ installPath: officialRoot, version: '2.0.0', enabled: true }],
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-community-same-name-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // O2. Array form: only the same-named community id is enabled -> silent.
+            writeSettings({ enabledPlugins: ['ralph-loop@community', 'other-plugin@foo'] });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-community-array-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // O3. Bare, marketplace-less `ralph-loop` id is not the official id -> silent.
+            writeSettings({ enabledPlugins: { 'ralph-loop': true } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-bare-id-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // O4. Canonical `enabledPlugins` disabling the official plugin wins over a
+            //     stale legacy `plugins` entry that still enables it.
+            writeSettings({
+                enabledPlugins: { 'ralph-loop@claude-plugins-official': false },
+                plugins: { 'ralph-loop@claude-plugins-official': true },
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-canonical-wins-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            // P. Multi-skill routing (`ralph ultrawork`) carries the same notice as the
+            //    single-skill path; otherwise combining keywords bypasses disambiguation.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeRegistry({
+                'ralph-loop@claude-plugins-official': officialEntry(true),
+                'oh-my-claudecode@omc': [{ installPath: omcRoot, version: '4.15.4', enabled: true }],
+            });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const context = contextOf(runIn(scriptPath, `ralph-multi-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'));
+                expect(context).toContain('[MAGIC KEYWORDS DETECTED: RALPH, ULTRAWORK]');
+                expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+                expect(context).toContain('use `/ralph-loop` for the official plugin');
+            }
+            // P2. Multi-skill routing without ralph never carries the notice.
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const context = contextOf(runIn(scriptPath, `nonralph-multi-${basename(scriptPath)}`, 'autopilot and ultrawork this repo'));
+                expect(context).toContain('[MAGIC KEYWORDS DETECTED:');
+                expect(context).not.toContain('ralph-loop');
+            }
+            // P3. Multi-skill routing stays silent when the official plugin is disabled.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-multi-disabled-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'))).not.toContain('ralph-loop');
+            }
+            // Q. Plugin enablement is resolved across Claude Code settings scopes, not
+            //    just the user config: project `.claude/settings.json` and
+            //    `.claude/settings.local.json` override the user scope.
+            const projectSettingsPath = join(projectDir, '.claude', 'settings.json');
+            const projectLocalSettingsPath = join(projectDir, '.claude', 'settings.local.json');
+            const writeProjectSettings = (path, content) => {
+                mkdirSync(dirname(path), { recursive: true });
+                writeFileSync(path, JSON.stringify(content, null, 2));
+            };
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            // Q1. Project scope disables what the user scope enables -> silent, on both
+            //     the single-skill and the multi-skill path.
+            writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-proj-off-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+                expect(contextOf(runIn(scriptPath, `ralph-proj-off-multi-${basename(scriptPath)}`, '/ralph ultrawork fix the parser'))).not.toContain('ralph-loop');
+            }
+            // Q2. `.claude/settings.local.json` outranks `.claude/settings.json`.
+            writeProjectSettings(projectLocalSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-proj-local-on-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            rmSync(projectLocalSettingsPath, { force: true });
+            // Q3. Project-only enablement is honored even when the user scope is absent.
+            rmSync(settingsPath, { force: true });
+            writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-proj-only-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            // Q4. A project scope that never mentions the plugin is transparent: the
+            //     user scope still decides.
+            writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            writeProjectSettings(projectSettingsPath, { permissions: { allow: [] } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-proj-silent-${basename(scriptPath)}`))).toContain('ralph-loop');
+            }
+            // Q5. Malformed project settings fail closed.
+            mkdirSync(dirname(projectSettingsPath), { recursive: true });
+            writeFileSync(projectSettingsPath, '{ not json');
+            for (const scriptPath of [templatePath, pluginPath]) {
+                expect(contextOf(runIn(scriptPath, `ralph-proj-malformed-${basename(scriptPath)}`))).not.toContain('ralph-loop');
+            }
+            rmSync(projectSettingsPath, { force: true });
+            // Q6. Privacy: an enabled project scope produces the notice without ever
+            //     echoing settings paths or settings content into the context.
+            writeProjectSettings(projectSettingsPath, { enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+            for (const scriptPath of [templatePath, pluginPath]) {
+                const context = contextOf(runIn(scriptPath, `ralph-proj-privacy-${basename(scriptPath)}`));
+                expect(context).toContain('official Anthropic `ralph-loop` plugin is also installed');
+                expect(context).not.toContain('enabledPlugins');
+                expect(context).not.toContain('settings.local.json');
+                expect(context).not.toContain(projectSettingsPath);
+                expect(context).not.toContain(registryPath);
+            }
+            rmSync(projectSettingsPath, { force: true });
+            // Q7. Path safety: the payload cwd is caller-supplied, so only an absolute
+            //     path may be used as a project root. A relative fragment must never be
+            //     joined onto the hook process cwd to read settings from an arbitrary
+            //     directory.
+            const sandboxCwd = mkdtempSync(join(tmpdir(), 'keyword-hook-ralph-loop-sandbox-'));
+            try {
+                writeSettings({ enabledPlugins: { 'ralph-loop@claude-plugins-official': true } });
+                writeProjectSettings(join(sandboxCwd, 'evil', '.claude', 'settings.json'), { enabledPlugins: { 'ralph-loop@claude-plugins-official': false } });
+                const runFromSandbox = (scriptPath, sessionId, payloadCwd) => JSON.parse(execFileSync('node', [scriptPath], {
+                    cwd: sandboxCwd,
+                    env: {
+                        ...process.env,
+                        HOME: fakeHome,
+                        XDG_CONFIG_HOME: join(fakeHome, '.xdg'),
+                        CLAUDE_CONFIG_DIR: configDir,
+                    },
+                    input: JSON.stringify({
+                        prompt: '/ralph fix the parser',
+                        cwd: payloadCwd,
+                        directory: payloadCwd,
+                        session_id: sessionId,
+                    }),
+                    encoding: 'utf-8',
+                }));
+                for (const scriptPath of [templatePath, pluginPath]) {
+                    // Relative payload cwd is rejected -> the user scope still decides.
+                    expect(contextOf(runFromSandbox(scriptPath, `ralph-relcwd-${basename(scriptPath)}`, 'evil'))).toContain('ralph-loop');
+                    // Traversal fragments are equally rejected.
+                    expect(contextOf(runFromSandbox(scriptPath, `ralph-traversal-${basename(scriptPath)}`, join('..', basename(sandboxCwd), 'evil')))).toContain('ralph-loop');
+                    // Control: the very same directory as an absolute path IS honored,
+                    // proving the assertions above are not vacuous.
+                    expect(contextOf(runFromSandbox(scriptPath, `ralph-abscwd-${basename(scriptPath)}`, join(sandboxCwd, 'evil')))).not.toContain('ralph-loop');
+                }
+            }
+            finally {
+                rmSync(sandboxCwd, { recursive: true, force: true });
+            }
+        }
+        finally {
+            rmSync(fakeHome, { recursive: true, force: true });
+            rmSync(projectDir, { recursive: true, force: true });
+        }
+    });
 });
 describe('pre-tool-use packaged artifacts', () => {
+    it('keeps cache occupancy path identity aligned across template and runtime helpers', async () => {
+        const helperPaths = [
+            join(packageRoot, 'templates', 'hooks', 'lib', 'cache-occupancy.mjs'),
+            join(packageRoot, 'scripts', 'lib', 'cache-occupancy.mjs'),
+        ];
+        const helpers = await Promise.all(helperPaths.map(async (helperPath) => import(pathToFileURL(helperPath).href)));
+        const originalPlatform = process.platform;
+        const tempDir = mkdtempSync(join(tmpdir(), 'cache-occupancy-template-parity-'));
+        try {
+            for (const [index, helper] of helpers.entries()) {
+                const configDir = join(tempDir, `config-${index}`);
+                const pluginRoot = join(tempDir, `MiXeD-Plugin-${index}`, 'Version-1');
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+                expect(helper.pathIdentity(pluginRoot)).toBe(originalPlatform === 'win32' ? pluginRoot.toLowerCase() : pluginRoot);
+                expect(helper.publishCacheOccupancy(pluginRoot, configDir, process.pid)).toBe(true);
+                expect(helper.readOccupiedPluginRoots(configDir).roots).toEqual(new Set([
+                    originalPlatform === 'win32' ? pluginRoot.toLowerCase() : pluginRoot,
+                ]));
+                Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+                expect(helper.pathIdentity(pluginRoot)).toBe(pluginRoot.toLowerCase());
+                expect(helper.readOccupiedPluginRoots(configDir).roots).toEqual(new Set([pluginRoot.toLowerCase()]));
+            }
+        }
+        finally {
+            Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
     it('does not warn for .json commands just because .js is a substring', () => {
         const scriptPath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
         expect(runPreToolHook(scriptPath, 'cat settings.json > backup.txt')).toEqual({
@@ -193,6 +662,215 @@ describe('pre-tool-use packaged artifacts', () => {
             suppressOutput: true,
         });
         expect(JSON.stringify(runPreToolHook(scriptPath, 'cat app.js > backup.txt'))).toContain('Bash command may modify source files');
+    });
+    it('keeps the Skill-vs-Agent guard in parity with the runtime enforcer', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
+        const runtimePath = join(packageRoot, 'scripts', 'pre-tool-enforcer.mjs');
+        const tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-template-parity-'));
+        const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-template-home-'));
+        const env = {
+            CLAUDE_PLUGIN_ROOT: packageRoot,
+            CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+            HOME: fakeHome,
+            USER_TYPE: '',
+        };
+        try {
+            for (const scriptPath of [templatePath, runtimePath]) {
+                const denied = runPreToolPayload(scriptPath, {
+                    tool_name: 'Task',
+                    cwd: tempDir,
+                    directory: tempDir,
+                    tool_input: {
+                        subagent_type: 'OMC:AI-SLOP-CLEANER',
+                        description: 'Run the cleaner',
+                        prompt: 'Clean the changed files',
+                    },
+                }, env);
+                const deniedHook = denied.hookSpecificOutput;
+                const reason = String(deniedHook.permissionDecisionReason ?? '');
+                expect(denied.continue).toBe(true);
+                expect(deniedHook.permissionDecision).toBe('deny');
+                expect(reason).toContain('[SKILL vs AGENT]');
+                expect(reason).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+                expect(reason).toContain('closest match');
+                const allowed = runPreToolPayload(scriptPath, {
+                    tool_name: 'Agent',
+                    cwd: tempDir,
+                    directory: tempDir,
+                    tool_input: {
+                        subagent_type: 'oh-my-claudecode:code-simplifier',
+                        description: 'Simplify the change',
+                        prompt: 'Review and simplify the changed files',
+                    },
+                }, env);
+                expect(allowed.continue).toBe(true);
+                expect(allowed.hookSpecificOutput?.permissionDecision).toBeUndefined();
+                expect(JSON.stringify(allowed)).not.toContain('[SKILL vs AGENT]');
+            }
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+            rmSync(fakeHome, { recursive: true, force: true });
+        }
+    });
+    it('preserves real-agent precedence when a plugin agent collides with a skill', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
+        const runtimePath = join(packageRoot, 'scripts', 'pre-tool-enforcer.mjs');
+        const tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-template-collision-'));
+        const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-template-collision-home-'));
+        const pluginRoot = join(tempDir, 'plugin');
+        mkdirSync(join(pluginRoot, 'agents'), { recursive: true });
+        mkdirSync(join(pluginRoot, 'skills', 'wiki'), { recursive: true });
+        writeFileSync(join(pluginRoot, 'agents', 'wiki.md'), '---\nname: wiki\n---\nagent body\n');
+        writeFileSync(join(pluginRoot, 'skills', 'wiki', 'SKILL.md'), '---\nname: wiki\n---\nskill body\n');
+        const env = {
+            CLAUDE_PLUGIN_ROOT: pluginRoot,
+            CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+            HOME: fakeHome,
+            USER_TYPE: '',
+        };
+        try {
+            for (const scriptPath of [templatePath, runtimePath]) {
+                const output = runPreToolPayload(scriptPath, {
+                    tool_name: 'Task',
+                    cwd: tempDir,
+                    directory: tempDir,
+                    tool_input: {
+                        subagent_type: 'oh-my-claudecode:WIKI',
+                        description: 'Use the colliding agent',
+                        prompt: 'Run the agent',
+                    },
+                }, env);
+                expect(output.continue).toBe(true);
+                expect(output.hookSpecificOutput?.permissionDecision).toBeUndefined();
+                expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+            }
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+            rmSync(fakeHome, { recursive: true, force: true });
+        }
+    });
+    it('resolves bundled skills and installed agents from the standalone config layout', () => {
+        const sourceHookPath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
+        const sourceConfigHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'config-dir.mjs');
+        const sourceStdinHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'stdin.mjs');
+        const sourceStateRootHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'state-root.mjs');
+        const configDir = mkdtempSync(join(tmpdir(), 'pre-tool-installed-layout-'));
+        const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-installed-home-'));
+        const installedHookDir = join(configDir, 'hooks');
+        const installedHookPath = join(installedHookDir, 'pre-tool-use.mjs');
+        const installedSkillsDir = join(configDir, 'skills', 'ai-slop-cleaner');
+        const installedAgentsDir = join(configDir, 'agents');
+        mkdirSync(installedHookDir, { recursive: true });
+        copyFileSync(sourceHookPath, installedHookPath);
+        mkdirSync(join(installedHookDir, 'lib'), { recursive: true });
+        copyFileSync(sourceConfigHelperPath, join(installedHookDir, 'lib', 'config-dir.mjs'));
+        copyFileSync(sourceStdinHelperPath, join(installedHookDir, 'lib', 'stdin.mjs'));
+        copyFileSync(sourceStateRootHelperPath, join(installedHookDir, 'lib', 'state-root.mjs'));
+        mkdirSync(installedSkillsDir, { recursive: true });
+        writeFileSync(join(installedSkillsDir, 'SKILL.md'), '---\nname: ai-slop-cleaner\n---\nBundled skill.\n');
+        mkdirSync(installedAgentsDir, { recursive: true });
+        writeFileSync(join(installedAgentsDir, 'executor.md'), '---\nname: executor\n---\nInstalled agent.\n');
+        try {
+            const env = {
+                CLAUDE_CONFIG_DIR: configDir,
+                CLAUDE_PLUGIN_ROOT: undefined,
+                HOME: fakeHome,
+                USER_TYPE: '',
+            };
+            const denied = runPreToolPayload(installedHookPath, {
+                tool_name: 'Task',
+                cwd: configDir,
+                directory: configDir,
+                tool_input: {
+                    subagent_type: 'oh-my-claudecode:ai-slop-cleaner',
+                    description: 'Run the cleaner',
+                    prompt: 'Clean the changed files',
+                },
+            }, env);
+            const deniedHook = denied.hookSpecificOutput;
+            expect(denied.continue).toBe(true);
+            expect(deniedHook.permissionDecision).toBe('deny');
+            expect(String(deniedHook.permissionDecisionReason ?? '')).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+            const allowed = runPreToolPayload(installedHookPath, {
+                tool_name: 'Task',
+                cwd: configDir,
+                directory: configDir,
+                tool_input: {
+                    subagent_type: 'oh-my-claudecode:executor',
+                    description: 'Implement the change',
+                    prompt: 'Implement the requested change',
+                },
+            }, env);
+            expect(allowed.continue).toBe(true);
+            expect(allowed.hookSpecificOutput?.permissionDecision).toBeUndefined();
+            expect(JSON.stringify(allowed)).not.toContain('[SKILL vs AGENT]');
+        }
+        finally {
+            rmSync(configDir, { recursive: true, force: true });
+            rmSync(fakeHome, { recursive: true, force: true });
+        }
+    });
+});
+describe('atomic write packaged helpers', () => {
+    it.each([
+        ['plugin helper', join(packageRoot, 'scripts', 'lib', 'atomic-write.mjs')],
+        ['standalone hook helper', join(packageRoot, 'templates', 'hooks', 'lib', 'atomic-write.mjs')],
+    ])('allows its own recovery claim to converge while preserving foreign claim artifacts through the %s', async (_label, helperPath) => {
+        const tempDir = mkdtempSync(join(tmpdir(), 'atomic-write-recovery-claim-'));
+        const statePath = join(tempDir, '.omc', 'state', 'autopilot-state.json');
+        const claimPath = `${statePath}.emergency-recovery.claim`;
+        const projectPath = join(tempDir, 'project-a');
+        const state = JSON.stringify({ active: true, project_path: projectPath });
+        const foreignClaim = JSON.stringify({
+            version: 1,
+            pid: 424242,
+            processStart: '1',
+            createdAt: '2026-01-01T00:00:00.000Z',
+            nonce: '00000000-0000-4000-8000-000000000001',
+        });
+        const foreignClaimTemp = `${claimPath}.424242.1.00000000-0000-4000-8000-000000000001.tmp`;
+        try {
+            mkdirSync(dirname(statePath), { recursive: true });
+            writeFileSync(statePath, state);
+            const { recoverEmergencyStateFile } = await import(pathToFileURL(helperPath).href);
+            const authorizeState = (candidate) => candidate.project_path === projectPath;
+            expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(true);
+            expect(readFileSync(statePath, 'utf-8')).toBe(state);
+            expect(existsSync(claimPath)).toBe(false);
+            writeFileSync(claimPath, foreignClaim);
+            expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(false);
+            expect(readFileSync(claimPath, 'utf-8')).toBe(foreignClaim);
+            rmSync(claimPath);
+            writeFileSync(foreignClaimTemp, foreignClaim);
+            expect(recoverEmergencyStateFile(statePath, { authorizeState })).toBe(false);
+            expect(readFileSync(foreignClaimTemp, 'utf-8')).toBe(foreignClaim);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+});
+describe('workflow profile runtime packaged artifacts (#3487)', () => {
+    it('ships the same descriptor and stop-transition helper with plugin and standalone hook payloads', () => {
+        const templateHelper = readFileSync(join(packageRoot, 'templates', 'hooks', 'lib', 'workflow-profile-runtime.mjs'), 'utf-8');
+        const pluginHelper = readFileSync(join(packageRoot, 'scripts', 'lib', 'workflow-profile-runtime.mjs'), 'utf-8');
+        for (const contractTerm of ['selectWorkflowProfile', 'createWorkflowState', 'advanceWorkflowOnStop', 'profileHash', 'pipelineTracking', 'completionObservations']) {
+            expect(pluginHelper).toContain(contractTerm);
+            expect(templateHelper).toContain(contractTerm);
+        }
+    });
+    it('loads workflow profile transition helpers before running either persistent hook', () => {
+        for (const script of [
+            join(packageRoot, 'scripts', 'persistent-mode.mjs'),
+            join(packageRoot, 'templates', 'hooks', 'persistent-mode.mjs'),
+        ]) {
+            const payload = readFileSync(script, 'utf-8');
+            expect(payload).toContain('workflow-profile-runtime.mjs');
+            expect(payload).toContain('advanceWorkflowOnStop');
+            expect(payload).toContain('pipelineTracking?.trackingRevision');
+        }
     });
 });
 //# sourceMappingURL=hook-templates.test.js.map

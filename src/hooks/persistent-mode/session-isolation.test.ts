@@ -144,14 +144,17 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       state.project_path = tempDir;
       writeFileSync(join(sessionDir, "autopilot-state.json"), JSON.stringify(state));
       const signalPath = join(sessionDir, "cancel-signal-state.json");
-      const signal = (target_state_sha256?: string) => ({
-        active: true,
-        mode: "autopilot",
-        source: "state_clear",
-        requested_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 30_000).toISOString(),
-        ...(target_state_sha256 ? { target_state_sha256 } : {}),
-      });
+      const signal = (target_state_sha256?: string) => {
+        const requestedAt = Date.now();
+        return {
+          active: true,
+          mode: "autopilot",
+          source: "state_clear",
+          requested_at: new Date(requestedAt).toISOString(),
+          expires_at: new Date(requestedAt + 30_000).toISOString(),
+          ...(target_state_sha256 ? { target_state_sha256 } : {}),
+        };
+      };
 
       writeFileSync(signalPath, JSON.stringify(signal()));
       await expect(checkPersistentModes(sessionId, tempDir)).resolves.toMatchObject({
@@ -252,12 +255,13 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
       const statePath = join(sessionDir, 'autopilot-state.json');
       const signalPath = join(sessionDir, 'cancel-signal-state.json');
       writeFileSync(statePath, JSON.stringify(state));
+      const requestedAt = Date.now();
       writeFileSync(signalPath, JSON.stringify({
         active: true,
         mode: 'autopilot',
         source: 'state_clear',
-        requested_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 30_000).toISOString(),
+        requested_at: new Date(requestedAt).toISOString(),
+        expires_at: new Date(requestedAt + 30_000).toISOString(),
         target_state_sha256: createHash('sha256').update(JSON.stringify(state)).digest('hex'),
       }));
       writeFileSync(statePath, JSON.stringify(replace(state as unknown as Record<string, unknown>)));

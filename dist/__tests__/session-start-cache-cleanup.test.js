@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, lstatSync, readlinkSync, readdirSync } from 'fs';
-import { join } from 'path';
+import { join, relative } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from '../utils/cache-occupancy.js';
+import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 const SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'session-start.mjs');
 const NODE = process.execPath;
 /**
@@ -188,6 +190,70 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
         const v3Stat = lstatSync(join(fakeCacheBase, '4.4.3'));
         expect(v3Stat.isDirectory()).toBe(true);
         expect(v3Stat.isSymbolicLink()).toBe(false);
+    });
+    it('retains a mixed-case occupied root in source purge on simulated Windows', async () => {
+        const staleVersion = createFakeVersion('4.4.1');
+        const configDir = join(fakeHome, '.claude');
+        const installedFile = join(configDir, 'plugins', 'installed_plugins.json');
+        mkdirSync(join(configDir, 'plugins'), { recursive: true });
+        writeFileSync(installedFile, JSON.stringify({
+            version: 2,
+            // Keep the only cache version outside an active sibling namespace so the
+            // purge reaches its destructive no-sibling branch.
+            plugins: { 'other-plugin@other': [{ installPath: join(tmpDir, 'other-plugin', '1.0.0') }] },
+        }));
+        const mixedCaseRoot = staleVersion.replace('oh-my-claudecode', 'Oh-My-ClaudeCode');
+        const originalPlatform = process.platform;
+        const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = configDir;
+        try {
+            // Publish through the real occupancy writer so the record carries this
+            // process's live PID/start identity; only the path casing is simulated.
+            expect(await publishCacheOccupancy(mixedCaseRoot, configDir)).toBe(true);
+            Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+            const occupancy = readOccupiedPluginRoots(configDir);
+            expect(occupancy.unavailable).toBe(false);
+            expect(occupancy.roots).toContain(pathIdentity(staleVersion));
+            const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+            expect(result.removed).toBe(0);
+            expect(result.skippedPaths).toContain(staleVersion);
+            expect(lstatSync(staleVersion).isDirectory()).toBe(true);
+            expect(lstatSync(staleVersion).isSymbolicLink()).toBe(false);
+        }
+        finally {
+            Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            if (originalConfigDir === undefined)
+                delete process.env.CLAUDE_CONFIG_DIR;
+            else
+                process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+        }
+    });
+    it('preserves lexical install-path comparison on non-Windows source purge', () => {
+        const staleVersion = createFakeVersion('4.4.1');
+        const configDir = join(fakeHome, '.claude');
+        mkdirSync(join(configDir, 'plugins'), { recursive: true });
+        writeFileSync(join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+            version: 2,
+            // This resolves to staleVersion, but the historical non-Windows
+            // comparison intentionally treats the relative spelling lexically.
+            plugins: { 'other-plugin@other': [{ installPath: relative(process.cwd(), staleVersion) }] },
+        }));
+        const originalPlatform = process.platform;
+        const originalConfigDir = process.env.CLAUDE_CONFIG_DIR;
+        process.env.CLAUDE_CONFIG_DIR = configDir;
+        try {
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+            const result = purgeStalePluginCacheVersions({ skipGracePeriod: true });
+            expect(result.removed).toBe(1);
+            expect(result.removedPaths).toContain(staleVersion);
+        }
+        finally {
+            Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            if (originalConfigDir === undefined)
+                delete process.env.CLAUDE_CONFIG_DIR;
+            else
+                process.env.CLAUDE_CONFIG_DIR = originalConfigDir;
+        }
     });
 });
 //# sourceMappingURL=session-start-cache-cleanup.test.js.map

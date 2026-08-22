@@ -80,9 +80,33 @@ describe('omc ultragoal CLI', () => {
             expect(joined).toMatch(/Ultragoal aggregate-goal handoff/);
             expect(joined).toMatch(/invoke \/goal/);
             expect(joined).toMatch(/--claude-goal-json/);
+            expect(joined).toMatch(/does not satisfy the PreToolUse \/goal guard/);
             expect(joined).toMatch(/Complete first milestone/);
             expect(joined).not.toMatch(/\bomx\b/);
             expect(joined).not.toMatch(/get_goal|create_goal|update_goal/);
+        });
+    });
+    it('complete-goals positional id starts exactly the named pending goal', async () => {
+        await withTempCwd(async (cwd) => {
+            await ultragoalCommand(['create-goals', '--brief', 'brief', '--goal', 'First::first', '--goal', 'Second::second', '--goal', 'Third::third']);
+            captured.out.length = 0;
+            await ultragoalCommand(['complete-goals', 'G003-third', '--json']);
+            const result = JSON.parse(captured.out.join(''));
+            expect(result.goal.id).toBe('G003-third');
+            const plan = JSON.parse(await readFile(join(cwd, '.omc/ultragoal/goals.json'), 'utf-8'));
+            expect(plan.activeGoalId).toBe('G003-third');
+            expect(plan.goals.find((goal) => goal.id === 'G001-first')?.status).toBe('pending');
+            expect(plan.goals.find((goal) => goal.id === 'G003-third')?.attempt).toBe(1);
+        });
+    });
+    it('rejects an unknown positional id without mutating artifacts', async () => {
+        await withTempCwd(async (cwd) => {
+            await ultragoalCommand(['create-goals', '--brief', 'brief', '--goal', 'First::first', '--goal', 'Second::second']);
+            const before = await readFile(join(cwd, '.omc/ultragoal/goals.json'), 'utf-8');
+            await ultragoalCommand(['complete-goals', 'G999-missing']);
+            expect(process.exitCode).toBe(1);
+            expect(captured.err.join('\n')).toMatch(/Unknown ultragoal id: G999-missing/);
+            expect(await readFile(join(cwd, '.omc/ultragoal/goals.json'), 'utf-8')).toBe(before);
         });
     });
     it('checkpoint accepts a Claude /goal snapshot via inline JSON', async () => {

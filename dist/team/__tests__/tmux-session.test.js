@@ -112,8 +112,90 @@ describe('buildWorkerStartCommand', () => {
             cwd: 'C:\\repo'
         });
         expect(cmd).toBe('C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
-            '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1""');
+            '"C:\\Users\\tester\\AppData\\Local\\Programs\\claude\\claude.exe" "--agent-id" "worker-1"" & exit /b');
         expect(cmd).not.toContain('$env:OMC_TEAM_WORKER');
+    });
+    it('preserves POSIX argv-style exec while routing launch through the acknowledgement bootstrap', () => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue('linux');
+        vi.stubEnv('SHELL', '/bin/bash');
+        const cmd = buildWorkerStartCommand({
+            teamName: 't',
+            workerName: 'w',
+            envVars: { OMC_TEAM_WORKER: 't/w' },
+            launchBinary: '/opt/codex/bin/codex',
+            launchArgs: ['--label', 'worker one'],
+            cwd: '/tmp/team workspace',
+            provider: 'codex',
+            launchAttempt: {
+                schema_version: 1,
+                attempt_id: '11111111-1111-4111-8111-111111111111',
+                nonce: '22222222-2222-4222-8222-222222222222',
+                team_name: 't',
+                worker_name: 'w',
+                pane_id: '%2',
+                provider: 'codex',
+                created_at: '2026-01-01T00:00:00.000Z',
+                currentPath: '/tmp/current.json',
+                expectedPath: '/tmp/expected.json',
+                ackPath: '/tmp/ack.json',
+                decisionPath: '/tmp/decision.json',
+                startedPath: '/tmp/provider-started.json',
+                transportOwnerPath: '/tmp/transport-owner.json',
+                bootstrapDescriptorPath: '/tmp/bootstrap.json',
+                wrapperPath: '/tmp/launch.cmd',
+                transportCleanupCompletePath: '/tmp/transport-cleanup-complete.json',
+                runtimeCliPath: '/opt/omc/runtime-cli.cjs',
+            },
+        });
+        // Supervised POSIX launches reference the attempt-owned descriptor by path
+        // (issue #3655); the bootstrap spec itself must never travel inline.
+        expect(cmd).toContain("OMC_WORKER_LAUNCH_SPEC_FILE='/tmp/bootstrap.json'");
+        expect(cmd).not.toContain('OMC_WORKER_LAUNCH_SPEC=');
+        expect(cmd).toContain("exec \"$@\"");
+        expect(cmd).toContain("'--worker-launch'");
+        expect(cmd).toContain("'/opt/omc/runtime-cli.cjs'");
+    });
+    it('keeps provider percent/quote metacharacters out of the native Windows cmd command', () => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+        const cmd = buildWorkerStartCommand({
+            teamName: 't',
+            workerName: 'w',
+            envVars: { OMC_TEAM_WORKER: 't/w' },
+            launchBinary: 'C:\\Program Files\\Codex\\codex.exe',
+            launchArgs: ['--label', '100% ready %USERPROFILE%', '--title="quoted"'],
+            cwd: 'C:\\team workspace',
+            provider: 'codex',
+            launchAttempt: {
+                schema_version: 1,
+                attempt_id: '11111111-1111-4111-8111-111111111111',
+                nonce: '22222222-2222-4222-8222-222222222222',
+                team_name: 't',
+                worker_name: 'w',
+                pane_id: '%2',
+                provider: 'codex',
+                created_at: '2026-01-01T00:00:00.000Z',
+                currentPath: 'C:\\state\\current.json',
+                expectedPath: 'C:\\state\\expected.json',
+                ackPath: 'C:\\state\\ack.json',
+                decisionPath: 'C:\\state\\decision.json',
+                startedPath: 'C:\\state\\provider-started.json',
+                transportOwnerPath: 'C:\\state\\transport-owner.json',
+                bootstrapDescriptorPath: 'C:\\state\\bootstrap.json',
+                wrapperPath: 'C:\\state\\launch.cmd',
+                transportCleanupCompletePath: 'C:\\state\\transport-cleanup-complete.json',
+                runtimeCliPath: 'C:\\Program Files\\omc\\runtime-cli.cjs',
+            },
+        });
+        expect(cmd).toContain('C:\\Windows\\System32\\cmd.exe /d /s /c');
+        // Supervised launches deliver the attempt-owned descriptor by path; the
+        // bootstrap spec (and its percent/quote metacharacters) never travels in
+        // the command line or cmd environment (issue #3655).
+        expect(cmd).toContain('set "OMC_WORKER_LAUNCH_SPEC_FILE=C:\\state\\bootstrap.json"');
+        expect(cmd).not.toContain('OMC_WORKER_LAUNCH_SPEC_B64=');
+        expect(cmd).not.toContain('OMC_WORKER_LAUNCH_SPEC=');
+        expect(cmd).not.toContain('100% ready %USERPROFILE%');
+        expect(cmd).not.toContain('pane_id=%%2');
     });
     it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
@@ -160,6 +242,26 @@ describe('buildWorkerStartCommand', () => {
         expect(cmd).toContain('"--token=abc%%25"');
         expect(cmd).not.toContain('literal%USERPROFILE%token%25');
     });
+    it('base64-encodes recovery gate launch identities for native Windows cmd', () => {
+        vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+        const gate = { recoveryId: 'recovery-1', launchAttempt: { attempt_id: 'attempt-1', nonce: 'nonce-1', pane_id: '%2' } };
+        const cmd = buildWorkerStartCommand({
+            teamName: 't',
+            workerName: 'w',
+            envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(gate) },
+            launchBinary: 'C:\\Program Files\\nodejs\\node.exe',
+            launchArgs: ['C:\\omc\\runtime-cli.cjs', '--recovery-gate'],
+            cwd: 'C:\\repo',
+        });
+        const marker = 'set "OMC_RECOVERY_GATE_SPEC_B64=';
+        const encodedStart = cmd.indexOf(marker) + marker.length;
+        const encodedEnd = cmd.indexOf('" &&', encodedStart);
+        expect(JSON.parse(Buffer.from(cmd.slice(encodedStart, encodedEnd), 'base64').toString('utf8')))
+            .toMatchObject({ launchAttempt: { pane_id: '%2' } });
+        expect(cmd).not.toContain('OMC_RECOVERY_GATE_SPEC=');
+        expect(cmd).not.toContain('pane_id=%%2');
+    });
     it('does not cmd-escape percent signs on MSYS Windows worker startup', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
         vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
@@ -190,7 +292,7 @@ describe('buildWorkerStartCommand', () => {
             cwd: 'C:\\repo'
         });
         expect(cmd).toBe('C:\\Windows\\System32\\cmd.exe /d /s /c "set "OMC_TEAM_WORKER=team/worker-1" && ' +
-            '"C:\\Program Files\\OpenAI\\Codex\\codex.exe" "--full-auto""');
+            '"C:\\Program Files\\OpenAI\\Codex\\codex.exe" "--full-auto"" & exit /b');
     });
     it('keeps MSYS/Git Bash worker startup syntax even when psmux env is present', () => {
         vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
@@ -377,6 +479,16 @@ describe('pane readiness startup banners', () => {
             '⏵⏵ bypass permissions on (shift+tab to cycle)',
         ].join('\n');
         expect(paneLooksReady(capture)).toBe(false);
+    });
+    it('treats an exact directory trust selector as ready for legacy delivery', () => {
+        const capture = [
+            'Do you trust the contents of this directory?',
+            '› 1. Yes, continue',
+            '  2. No, quit',
+        ].join('\n');
+        expect(paneHasTrustPrompt(capture)).toBe(true);
+        expect(paneLooksReady(capture)).toBe(true);
+        expect(paneHasActiveTask(capture)).toBe(false);
     });
     it('detects Codex CLI hook-trust review screen as a trust prompt', () => {
         const capture = [

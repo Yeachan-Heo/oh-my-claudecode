@@ -321,10 +321,13 @@ describe('team pipeline standalone stop enforcement', () => {
             // Write cancel signal
             const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
             mkdirSync(stateDir, { recursive: true });
-            writeFileSync(join(stateDir, 'cancel-signal-state.json'), JSON.stringify({
-                requested_at: new Date().toISOString(),
-                expires_at: new Date(Date.now() + 30000).toISOString(),
-            }));
+            writeFileSync(join(stateDir, 'cancel-signal-state.json'), JSON.stringify((() => {
+                const requestedAt = Date.now();
+                return {
+                    requested_at: new Date(requestedAt).toISOString(),
+                    expires_at: new Date(requestedAt + 30_000).toISOString(),
+                };
+            })()));
             const result = await checkPersistentModes(sessionId, tempDir);
             expect(result.shouldBlock).toBe(false);
         }
@@ -703,10 +706,13 @@ describe('ralplan standalone stop enforcement', () => {
             // Write cancel signal — caught at top-level checkPersistentModes
             const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
             mkdirSync(stateDir, { recursive: true });
-            writeFileSync(join(stateDir, 'cancel-signal-state.json'), JSON.stringify({
-                requested_at: new Date().toISOString(),
-                expires_at: new Date(Date.now() + 30000).toISOString(),
-            }));
+            writeFileSync(join(stateDir, 'cancel-signal-state.json'), JSON.stringify((() => {
+                const requestedAt = Date.now();
+                return {
+                    requested_at: new Date(requestedAt).toISOString(),
+                    expires_at: new Date(requestedAt + 30_000).toISOString(),
+                };
+            })()));
             const result = await checkPersistentModes(sessionId, tempDir);
             expect(result.shouldBlock).toBe(false);
         }

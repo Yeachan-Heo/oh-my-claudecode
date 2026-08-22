@@ -27,6 +27,7 @@ import type {
   PendingPermission,
   LastRequestTokenUsage,
 } from "./types.js";
+import { classifyAgentSpawn, parseIncomingAgentWrapper } from "./agent-kind.js";
 
 // Performance constants
 // 4MB tail window: enough to catch the full tool_use → tool_result → task-notification
@@ -101,6 +102,7 @@ export async function parseTranscript(
   const result: TranscriptData = {
     agents: [],
     todos: [],
+    incomingMessages: [],
     lastActivatedSkill: undefined,
     toolCallCount: 0,
     agentCallCount: 0,
@@ -251,6 +253,7 @@ function cloneTranscriptData(result: TranscriptData): TranscriptData {
       endTime: cloneDate(agent.endTime),
     })),
     todos: result.todos.map((todo) => ({ ...todo })),
+    incomingMessages: result.incomingMessages?.map((message) => ({ ...message })),
     sessionStart: cloneDate(result.sessionStart),
     lastActivatedSkill: result.lastActivatedSkill
       ? {
@@ -468,7 +471,15 @@ function processEntry(
   // run_in_background, Explore/Plan/general-purpose, etc.) never transition
   // from "running" to "completed" in the HUD.
   if (typeof content === "string") {
-    if (content.includes("<task-notification>") || content.includes("<task_id>") || content.includes("<task-id>")) {
+    // Backward-compatible completion handling. Claude Code emits background
+    // completion as a `<task-notification>` envelope today; older transcripts
+    // carry the bare `<task_id>`/`<task-id>` tag sequence instead. Both must
+    // still transition the background agent to "completed".
+    if (
+      content.includes("<task-notification>") ||
+      content.includes("<task_id>") ||
+      content.includes("<task-id>")
+    ) {
       const taskOutput = parseTaskOutputResult(content);
       if (taskOutput && taskOutput.status === "completed") {
         // Prefer direct tool-use-id lookup (skips the backgroundAgentMap
@@ -488,6 +499,14 @@ function processEntry(
         }
       }
     }
+
+    // Classify the sender of an incoming agent wrapper (issue #3666) and
+    // record it with the payload redacted. Bare legacy tag sequences (no
+    // envelope) classify as nothing — they only carry completion signals.
+    const wrapper = parseIncomingAgentWrapper(content, entry.sessionId);
+    if (wrapper) {
+      result.incomingMessages?.push(wrapper);
+    }
     return;
   }
 
@@ -506,6 +525,17 @@ function processEntry(
       };
     }
 
+    // Incoming agent wrapper messages arrive as plain text blocks (teammate /
+    // peer messages are not tool results). tool_result blocks are deliberately
+    // excluded so an agent quoting a wrapper inside its output cannot spoof an
+    // incoming message (issue #3666).
+    if (block.type === "text") {
+      const text = (block as { text?: string }).text;
+      if (text) {
+        const wrapper = parseIncomingAgentWrapper(text, entry.sessionId);
+        if (wrapper) result.incomingMessages?.push(wrapper);
+      }
+    }
     // Track tool_use for Task (agents) and TodoWrite
     if (block.type === "tool_use" && block.id && block.name) {
       result.toolCallCount++;
@@ -518,6 +548,12 @@ function processEntry(
       ) {
         result.agentCallCount++;
         const input = block.input as TaskInput | undefined;
+        // Named Task/Agent spawns are teammates on the native agent team;
+        // unnamed spawns are anonymous subagents (issue #3666).
+        const spawn = classifyAgentSpawn({
+          hasName: Boolean(input?.name),
+          sessionId: entry.sessionId,
+        });
         const agentEntry: ActiveAgent = {
           id: block.id,
           type: input?.subagent_type ?? "unknown",
@@ -526,6 +562,8 @@ function processEntry(
           description: input?.description,
           status: "running",
           startTime: timestamp,
+          kind: spawn.kind,
+          spawnedBy: spawn.spawnedBy,
         };
 
         // Bounded agent map: evict oldest completed agents if at capacity

@@ -5,10 +5,9 @@
  * Performs EDA, statistical analysis, and generates actionable findings.
  *
  * Enables:
- * - Exploratory data analysis on CSV, JSON, Parquet files
- * - Statistical computations and hypothesis testing
- * - Data transformations and feature engineering
- * - Generating structured findings with evidence
+ * - Statistical analysis and hypothesis testing on in-memory data
+ * - Descriptive statistics with Python built-in functions
+ * - Generating structured findings with evidence markers
  */
 import type { AgentConfig, AgentPromptMetadata } from './types.js';
 export declare const SCIENTIST_PROMPT_METADATA: AgentPromptMetadata;

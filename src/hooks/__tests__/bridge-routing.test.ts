@@ -19,6 +19,7 @@ import {
   HookType,
 } from '../bridge.js';
 import { flushPendingWrites } from '../subagent-tracker/index.js';
+import { readDispatchTelemetryTail } from '../registry/cutover.js';
 
 function writeCanonicalTeamState(tempDir: string, sessionId: string, teamName: string, phase: string): void {
   const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', teamName);
@@ -255,10 +256,17 @@ Read src/hooks/bridge.ts first.`,
         });
 
         expect(denied.continue).toBe(true);
-        expect((denied as unknown as Record<string, unknown>).hookSpecificOutput).toBeDefined();
-        const denyHook = (denied as unknown as Record<string, unknown>).hookSpecificOutput as Record<string, unknown>;
-        expect(denyHook.permissionDecision).toBe('deny');
-        expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+        // Under #3708 cutover, ordinary injection (prompt prerequisites) is advisory:
+        // the dispatcher loosens it to a warning instead of a permissionDecision deny.
+        // Permission/release/security semantics remain hard, but this path is procedure.
+        const deniedAny = denied as unknown as Record<string, unknown>;
+        if (deniedAny.hookSpecificOutput !== undefined) {
+          const denyHook = deniedAny.hookSpecificOutput as Record<string, unknown>;
+          expect(denyHook.permissionDecision).toBe('deny');
+          expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+        } else {
+          expect(String(denied.message ?? '')).toContain('ADVISORY');
+        }
 
         const readStep = await processHook('pre-tool-use', {
           sessionId,
@@ -313,6 +321,101 @@ Read src/hooks/bridge.ts first.`,
 
       const result = await processHook('post-tool-use', input);
       expect(result.continue).toBe(true);
+    });
+
+    it('keeps cutover telemetry isolated to each hook project directory', async () => {
+      const projectDirs = [
+        mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-a-')),
+        mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-b-')),
+      ];
+      const previousStateDir = process.env.OMC_STATE_DIR;
+      delete process.env.OMC_STATE_DIR;
+
+      try {
+        for (const projectDir of projectDirs) {
+          execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+        }
+
+        for (const projectDir of projectDirs) {
+          const result = await processHook('post-tool-use', {
+            sessionId: 'telemetry-project-isolation',
+            toolName: 'Bash',
+            toolInput: { command: 'echo telemetry' },
+            toolOutput: 'done',
+            directory: projectDir,
+          });
+          expect(result.continue).toBe(true);
+        }
+
+        for (const projectDir of projectDirs) {
+          const records = readDispatchTelemetryTail(10, projectDir);
+          expect(records).toHaveLength(1);
+          expect(records[0]?.event).toBe('PostToolUse');
+        }
+      } finally {
+        if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+        else process.env.OMC_STATE_DIR = previousStateDir;
+        for (const projectDir of projectDirs) {
+          rmSync(projectDir, { recursive: true, force: true });
+        }
+      }
+    });
+
+    it('classifies protocol-level PreToolUse denies as hard with continue true', async () => {
+      const projectDir = mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-deny-'));
+      const previousStateDir = process.env.OMC_STATE_DIR;
+      const previousBedrock = process.env.CLAUDE_CODE_USE_BEDROCK;
+      const previousRouting = process.env.OMC_ROUTING_FORCE_INHERIT;
+      const previousDispatcher = process.env.OMC_HOOK_DISPATCHER;
+      const previousCutover = process.env.OMC_HOOK_CUTOVER;
+      const previousRollback = process.env.OMC_HOOK_ROLLBACK;
+      const previousDispatcherRollback = process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+      delete process.env.OMC_STATE_DIR;
+      delete process.env.OMC_HOOK_DISPATCHER;
+      delete process.env.OMC_HOOK_CUTOVER;
+      delete process.env.OMC_HOOK_ROLLBACK;
+      delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+      process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+      process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+
+      try {
+        execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+        const result = await processHook('pre-tool-use', {
+          sessionId: 'telemetry-hard-deny',
+          toolName: 'Task',
+          toolInput: {
+            description: 'hard deny telemetry',
+            prompt: 'exercise protocol deny classification',
+            subagent_type: 'oh-my-claudecode:executor',
+            model: 'sonnet',
+          },
+          directory: projectDir,
+        });
+
+        expect(result.continue).toBe(true);
+        const hookSpecificOutput = (result as unknown as Record<string, unknown>)
+          .hookSpecificOutput as Record<string, unknown>;
+        expect(hookSpecificOutput.permissionDecision).toBe('deny');
+
+        const records = readDispatchTelemetryTail(10, projectDir);
+        expect(records.at(-1)?.appliedDecision).toBe('hard');
+      } finally {
+        if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+        else process.env.OMC_STATE_DIR = previousStateDir;
+        if (previousBedrock === undefined) delete process.env.CLAUDE_CODE_USE_BEDROCK;
+        else process.env.CLAUDE_CODE_USE_BEDROCK = previousBedrock;
+        if (previousRouting === undefined) delete process.env.OMC_ROUTING_FORCE_INHERIT;
+        else process.env.OMC_ROUTING_FORCE_INHERIT = previousRouting;
+        if (previousDispatcher === undefined) delete process.env.OMC_HOOK_DISPATCHER;
+        else process.env.OMC_HOOK_DISPATCHER = previousDispatcher;
+        if (previousCutover === undefined) delete process.env.OMC_HOOK_CUTOVER;
+        else process.env.OMC_HOOK_CUTOVER = previousCutover;
+        if (previousRollback === undefined) delete process.env.OMC_HOOK_ROLLBACK;
+        else process.env.OMC_HOOK_ROLLBACK = previousRollback;
+        if (previousDispatcherRollback === undefined) delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+        else process.env.OMC_HOOK_DISPATCHER_ROLLBACK = previousDispatcherRollback;
+        rmSync(projectDir, { recursive: true, force: true });
+      }
     });
 
 

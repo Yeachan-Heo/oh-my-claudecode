@@ -17,6 +17,7 @@ import { validatePathSegment } from './paths.js';
 import { SessionLock, LockTimeoutError } from './session-lock.js';
 import { sendSocketRequest, SocketConnectionError, SocketTimeoutError, JsonRpcError } from './socket-client.js';
 import { ensureBridge, killBridgeWithEscalation, spawnBridgeServer } from './bridge-manager.js';
+import { PYTHON_REPL_SANDBOX_BOUNDARY } from './sandbox.js';
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -53,7 +54,7 @@ export const pythonReplSchema = z.object({
         .string()
         .optional()
         .describe('Human-readable label for this code execution. ' +
-        'Examples: "Load dataset", "Train model", "Generate plot"'),
+        'Examples: "Summarize response times", "Compare cohort means", "Recompute totals"'),
     executionTimeout: z
         .number()
         .positive()
@@ -474,7 +475,6 @@ export async function pythonReplHandler(input) {
                 '',
                 'Ensure you have a Python virtual environment:',
                 '  python -m venv .venv',
-                '  .venv/bin/pip install pandas numpy matplotlib',
             ].join('\n');
         }
         // Step 6: Dispatch to action handler
@@ -542,7 +542,7 @@ export const pythonReplTool = {
     description: 'Execute Python code in a persistent REPL environment. ' +
         'Variables and state persist between calls within the same session. ' +
         'Actions: execute (run code), interrupt (stop execution), reset (clear state), get_state (view memory/variables). ' +
-        'Supports scientific computing with pandas, numpy, matplotlib.',
+        PYTHON_REPL_SANDBOX_BOUNDARY,
     schema: pythonReplSchema.shape,
     handler: async (args) => {
         const output = await pythonReplHandler(args);

@@ -107,9 +107,9 @@ function buildCoordinatorFixture(pluginRoot: string, claudeMdContent: string, ve
       __OMC_COORDINATOR_SOURCE_SHA256__: JSON.stringify(createHash('sha256').update(claudeMdContent).digest('hex')),
     },
   });
-  mkdirSync(join(pluginRoot, 'skills', 'omc-reference'), { recursive: true });
-  writeFileSync(join(pluginRoot, 'skills', 'omc-reference', 'SKILL.md'), `---
-name: omc-reference
+  mkdirSync(join(pluginRoot, 'skills', 'wiki'), { recursive: true });
+  writeFileSync(join(pluginRoot, 'skills', 'wiki', 'SKILL.md'), `---
+name: wiki
 description: Test fixture reference skill
 user-invocable: false
 ---
@@ -187,8 +187,8 @@ describe('setup-claude-md.sh committed plugin shipping surface (issue #3476)', (
     expect(result.status).toBe(0);
     expect(readFileSync(join(fixture.projectRoot, '.claude', 'CLAUDE.md'), 'utf-8'))
       .toBe(readFileSync(join(fixture.pluginRoot, 'docs', 'CLAUDE.md'), 'utf-8'));
-    expect(readFileSync(join(fixture.projectRoot, '.claude', 'skills', 'omc-reference', 'SKILL.md'), 'utf-8'))
-      .toBe(readFileSync(join(fixture.pluginRoot, 'skills', 'omc-reference', 'SKILL.md'), 'utf-8'));
+    expect(readFileSync(join(fixture.projectRoot, '.claude', 'skills', 'wiki', 'SKILL.md'), 'utf-8'))
+      .toBe(readFileSync(join(fixture.pluginRoot, 'skills', 'wiki', 'SKILL.md'), 'utf-8'));
   });
 
   for (const scenario of ['missing', 'stale'] as const) {
@@ -279,7 +279,7 @@ Use the real docs file.
     expect(installed).toContain('<!-- OMC:VERSION:9.9.9 -->');
     expect(installed).toContain('# Canonical CLAUDE');
 
-    const installedSkillPath = join(fixture.projectRoot, '.claude', 'skills', 'omc-reference', 'SKILL.md');
+    const installedSkillPath = join(fixture.projectRoot, '.claude', 'skills', 'wiki', 'SKILL.md');
     expect(existsSync(installedSkillPath)).toBe(true);
     expect(readFileSync(installedSkillPath, 'utf-8')).toContain('# Test OMC Reference');
   });
@@ -699,7 +699,7 @@ Use the real docs file.
 
     expect(result.status).toBe(0);
     expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(true);
-    expect(existsSync(join(configDir, 'skills', 'omc-reference', 'SKILL.md'))).toBe(true);
+    expect(existsSync(join(configDir, 'skills', 'wiki', 'SKILL.md'))).toBe(true);
     expect(existsSync(join(configDir, 'hooks', 'keyword-detector.sh'))).toBe(true);
     expect(`${result.stdout}\n${result.stderr}`).toContain('Plugin verified');
     expect(`${result.stdout}\n${result.stderr}`).toContain('Preserved unverified legacy hook');
@@ -1436,4 +1436,191 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).toContain('<!-- OMC:VERSION:4.9.0 -->');
     expect(installed).not.toContain('<!-- OMC:VERSION:4.8.2 -->');
   });
+describe('setup-claude-md.sh Volta shim + re-exec loop regression (issue #3743)', () => {
+  // Reporter topology: the script runs from a non-cache checkout whose cache
+  // base holds no valid semver sibling, installed_plugins.json records an
+  // installPath in a different string grammar (Windows-style on Git Bash;
+  // double-slash here on POSIX), and a version-manager shim truncated the old
+  // multiline `node -e` program so `latest` resolved empty.
+  function createIssue3743Fixture() {
+    const root = mkdtempSync(join(tmpdir(), 'omc-3743-volta-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+    const checkoutRoot = join(root, 'checkout', 'oh-my-claudecode');
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
+
+    const canonical = `<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Issue 3743 fixture
+<!-- OMC:END -->
+`;
+    // Checkout copy: script location with NO semver siblings (latest == "").
+    mkdirSync(join(checkoutRoot, 'docs'), { recursive: true });
+    mkdirSync(join(checkoutRoot, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(checkoutRoot, 'scripts', 'setup-claude-md.sh'));
+    copyFileSync(CONFIG_DIR_HELPER, join(checkoutRoot, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(join(checkoutRoot, 'docs', 'CLAUDE.md'), canonical);
+    buildCoordinatorFixture(checkoutRoot, canonical);
+
+    return { root, cacheBase, projectRoot, homeRoot, checkoutRoot };
+  }
+
+  function writeInstalledPlugins(homeRoot: string, installPath: string) {
+    writeFileSync(
+      join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ plugins: { 'oh-my-claudecode@omc': [{ installPath, version: '9.9.9' }] } }),
+    );
+  }
+
+  function createVoltaShim(root: string) {
+    const shimDir = join(root, 'volta-shim');
+    mkdirSync(shimDir);
+    const shim = join(shimDir, 'node');
+    writeFileSync(
+      shim,
+      [
+        '#!/usr/bin/env bash',
+        '# Issue #3743 repro: version-manager shims can truncate `-e` args at',
+        '# the first newline; the truncated program runs empty and exits 0.',
+        'args=()',
+        'prev=""',
+        'for a in "$@"; do',
+        '  if [ "$prev" = "-e" ]; then',
+        `    a="\${a%%\$'\\n'*}"`,
+        '  fi',
+        '  args+=("$a")',
+        '  prev="$a"',
+        'done',
+        `exec ${JSON.stringify(process.execPath)} "\${args[@]}"`,
+        '',
+      ].join('\n'),
+    );
+    spawnSync('chmod', ['+x', shim]);
+    return shimDir;
+  }
+
+  it('terminates when installPath grammar differs but resolves to the same root', () => {
+    const fixture = createIssue3743Fixture();
+    // Double-slash variant of the checkout root: same physical directory,
+    // never string-equal — the Windows-vs-MSYS stand-in on POSIX.
+    const grammarMismatched = `${fixture.root}//checkout/oh-my-claudecode//`;
+    writeInstalledPlugins(fixture.homeRoot, grammarMismatched);
+
+    const result = spawnSync('bash', [join(fixture.checkoutRoot, 'scripts', 'setup-claude-md.sh'), 'local'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot, CLAUDE_CONFIG_DIR: join(fixture.homeRoot, '.claude') },
+      encoding: 'utf-8',
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(readFileSync(join(fixture.projectRoot, '.claude', 'CLAUDE.md'), 'utf-8')).toContain('9.9.9');
+  });
+
+  it('aborts with a loop error instead of re-execing forever when depth exceeds the bound', () => {
+    const fixture = createIssue3743Fixture();
+    // Distinct valid roots force re-exec; seeded depth trips the guard.
+    const activeRoot = fixture.checkoutRoot;
+    const mirrorRoot = join(fixture.root, 'mirror-root');
+    const canonicalMirror = `<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+# Issue 3743 mirror
+<!-- OMC:END -->
+`;
+    mkdirSync(join(mirrorRoot, 'docs'), { recursive: true });
+    mkdirSync(join(mirrorRoot, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(mirrorRoot, 'scripts', 'setup-claude-md.sh'));
+    copyFileSync(CONFIG_DIR_HELPER, join(mirrorRoot, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(join(mirrorRoot, 'docs', 'CLAUDE.md'), canonicalMirror);
+    buildCoordinatorFixture(mirrorRoot, canonicalMirror);
+    writeInstalledPlugins(fixture.homeRoot, mirrorRoot);
+
+    const result = spawnSync(
+      'bash',
+      [join(activeRoot, 'scripts', 'setup-claude-md.sh'), 'local'],
+      {
+        cwd: fixture.projectRoot,
+        env: {
+          ...process.env,
+          HOME: fixture.homeRoot,
+          CLAUDE_CONFIG_DIR: join(fixture.homeRoot, '.claude'),
+          OMC_SETUP_REEXEC_DEPTH: '2',
+        },
+        encoding: 'utf-8',
+        timeout: 10_000,
+      },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('setup re-exec loop detected');
+  });
+
+  it('resolves the newest version even when the node shim truncates multiline -e args', () => {
+    const fixture = createIssue3743Fixture();
+    const shimDir = createVoltaShim(fixture.root);
+    // Build a valid semver sibling so version selection runs through the shim.
+    const newerRoot = join(fixture.cacheBase, '9.9.10');
+    const canonicalNew = `<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.10 -->
+# Issue 3743 newer
+<!-- OMC:END -->
+`;
+    mkdirSync(join(newerRoot, 'docs'), { recursive: true });
+    mkdirSync(join(newerRoot, 'scripts', 'lib'), { recursive: true });
+    copyFileSync(SETUP_SCRIPT, join(newerRoot, 'scripts', 'setup-claude-md.sh'));
+    copyFileSync(CONFIG_DIR_HELPER, join(newerRoot, 'scripts', 'lib', 'config-dir.sh'));
+    writeFileSync(join(newerRoot, 'docs', 'CLAUDE.md'), canonicalNew);
+    buildCoordinatorFixture(newerRoot, canonicalNew, '9.9.10');
+    writeInstalledPlugins(fixture.homeRoot, join(fixture.cacheBase, '9.9.10'));
+
+    const result = spawnSync('bash', [join(fixture.checkoutRoot, 'scripts', 'setup-claude-md.sh'), 'local'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: join(fixture.homeRoot, '.claude'),
+        PATH: `${shimDir}:${process.env.PATH}`,
+      },
+      encoding: 'utf-8',
+      timeout: 10_000,
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(fixture.projectRoot, '.claude', 'CLAUDE.md'), 'utf-8')).toContain('9.9.10');
+  });
+
+  it('keeps every node -e program in the setup script newline-free', () => {
+    const source = readFileSync(SETUP_SCRIPT, 'utf-8');
+    // Extract each `node -e` invocation argument from the script source and
+    // assert the assembled program carries no raw newline bytes.
+    const occurrences = source.split('\n').filter(line => line.includes('node -e'));
+    expect(occurrences.length).toBeGreaterThan(0);
+    for (const line of occurrences) {
+      expect(line).not.toMatch(/node -e\s*'\s*$/);
+      expect(line).not.toMatch(/node -e\s*"\s*$/);
+    }
+    // The semver program is built by printf fragments; joining them must
+    // produce zero newlines. Run the real assembly through bash.
+    const harness = `
+      select_latest_semver() {
+        local semver_prog
+        semver_prog="$(printf '%s ' \\
+          'const fs = require("node:fs");' \\
+          'const versions = fs.readFileSync(0, "utf8");' \\
+          'process.stdout.write(versions.length + " bytes");'
+        )"
+        node -e "$semver_prog"
+      }
+      select_latest_semver
+    `;
+    const probe = spawnSync('bash', ['-c', harness], { encoding: 'utf-8' });
+    expect(probe.status).toBe(0);
+    expect(probe.stdout).toBe('0 bytes');
+  });
+});
 });

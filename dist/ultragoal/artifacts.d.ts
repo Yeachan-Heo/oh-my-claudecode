@@ -98,6 +98,7 @@ export interface CreateUltragoalOptions {
 export interface StartNextOptions {
     now?: Date;
     retryFailed?: boolean;
+    goalId?: string;
     planId?: string;
 }
 export interface CheckpointOptions {

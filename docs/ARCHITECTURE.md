@@ -338,7 +338,7 @@ Claude Code provides 11 lifecycle events. OMC registers hooks on these events:
 | `PostToolUseFailure` | After a tool fails | Error recovery handling |
 | `SubagentStart` | Subagent starts | Agent tracking |
 | `SubagentStop` | Subagent stops | Agent tracking, output verification |
-| `PreCompact` | Before context compaction | Preserve critical information, save project memory |
+| `PreCompact` | Before context compaction | Preserve critical information (modes, TODOs, plan anchors), save project memory; restored post-compact via SessionStart |
 | `Stop` | Claude is about to stop | Persistent mode enforcement, code simplification |
 | `SessionEnd` | Session ends | Session data cleanup |
 
@@ -367,7 +367,7 @@ Injected pattern meanings:
 
 **persistent-mode** — fires on `Stop`. When a persistent mode (ralph, ultrawork) is active, prevents Claude from stopping until work is verified complete.
 
-**pre-compact** — fires on `PreCompact`. Saves critical information to the notepad before the context window is compressed.
+**pre-compact** — fires on `PreCompact`. Saves critical information (active modes, TODOs, background jobs, and durable plan anchors: PRD/boulder references) to a checkpoint before the context window is compressed. The `SessionStart` hook restores the newest matching checkpoint when `source === "compact"`, so plan detail survives auto-compaction (issue #3730).
 
 **subagent-tracker** — fires on `SubagentStart` and `SubagentStop`. Tracks currently running agents; validates output on stop.
 

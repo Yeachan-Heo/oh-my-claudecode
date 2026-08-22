@@ -13,12 +13,12 @@ import { describe, it, expect } from "vitest";
 
 const REPO_ROOT = join(import.meta.dirname, "../..");
 
+// ralph / ultrawork / ultraqa were retired in 5.0.0; ultragoal carries the
+// long-running parallel lane that ralph used to cover.
 const SKILLS: Record<string, string> = {
-  ralph: "skills/ralph/SKILL.md",
-  ultrawork: "skills/ultrawork/SKILL.md",
   autopilot: "skills/autopilot/SKILL.md",
   team: "skills/team/SKILL.md",
-  ultraqa: "skills/ultraqa/SKILL.md",
+  ultragoal: "skills/ultragoal/SKILL.md",
   "self-improve": "skills/self-improve/SKILL.md",
 };
 

@@ -156,6 +156,30 @@ describe('zodToJsonSchema - Descriptions', () => {
         const prop = result.properties.mode;
         expect(prop.description).toBe('Access mode');
     });
+    it('should keep the description when .optional() wraps it', () => {
+        // `.optional().describe()` stores the description on the wrapper; dropping
+        // it would strip parameter docs from every optional tool argument.
+        const result = convertSchema({
+            executionLabel: z.string().optional().describe('Human-readable label'),
+        });
+        const prop = result.properties.executionLabel;
+        expect(prop).toEqual({ type: 'string', description: 'Human-readable label' });
+        expect(result.required).not.toContain('executionLabel');
+    });
+    it('should keep the description when .default() wraps it', () => {
+        const result = convertSchema({
+            timeout: z.number().positive().default(30).describe('Timeout in seconds'),
+        });
+        const prop = result.properties.timeout;
+        expect(prop).toEqual({ type: 'number', default: 30, description: 'Timeout in seconds' });
+    });
+    it('should keep an inner description when the wrapper has none', () => {
+        const result = convertSchema({
+            label: z.string().describe('Inner description').optional(),
+        });
+        const prop = result.properties.label;
+        expect(prop.description).toBe('Inner description');
+    });
 });
 // ============================================================================
 // Nested Objects

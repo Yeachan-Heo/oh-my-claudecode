@@ -13,6 +13,7 @@ const __dirname = dirname(__filename);
 const { getClaudeConfigDir, getUpdateCheckCachePath } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const configDir = getClaudeConfigDir();
 const { resolveSessionStatePathsForHook, resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
+const { publishCacheOccupancy } = await import(pathToFileURL(join(__dirname, 'lib', 'cache-occupancy.mjs')).href);
 
 // Import timeout-protected stdin reader (prevents hangs on Linux/Windows, see issue #240, #524)
 let readStdin;
@@ -536,8 +537,33 @@ async function main() {
       return;
     }
     const sessionId = data.sessionId || data.session_id || data.sessionid || '';
-    const messages = [];
+    if (process.env.CLAUDE_PLUGIN_ROOT) {
+      publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir);
+    }
+    let messages = [];
     const userMessages = [];
+    let pendingRestore = null;
+    let pendingRestoreMessage = null;
+
+    // Restore the newest PreCompact checkpoint after compaction (issue #3730).
+    // Only fires when Claude Code signals the session resumed from compaction
+    // (source === 'compact'); never on startup, resume, or clear.
+    if (data.source === 'compact' && sessionId) {
+      try {
+        const { preparePreCompactCheckpointRestore, commitPreCompactCheckpointRestore } = await import(
+          pathToFileURL(join(__dirname, 'lib', 'precompact-restore.mjs')).href
+        );
+        const restoreRoot = await resolveOmcStateRoot(directory);
+        const prepared = preparePreCompactCheckpointRestore(restoreRoot, sessionId);
+        if (prepared) {
+          pendingRestore = { ...prepared, restoreRoot, commitPreCompactCheckpointRestore };
+          pendingRestoreMessage = `<session-restore>\n\n${prepared.text}\n\n</session-restore>\n\n---\n`;
+          messages.push(pendingRestoreMessage);
+        }
+      } catch {
+        // Restore is advisory: never break session start on a checkpoint error.
+      }
+    }
 
     // Check for updates (non-blocking)
     // Read version from OMC's own package.json, not the project's (fixes #516)
@@ -685,6 +711,31 @@ ${agentsContent}
       }
     }
 
+    let additionalContext = '';
+    if (pendingRestore && pendingRestoreMessage) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+      if (additionalContext.includes(pendingRestoreMessage)) {
+        const markerStatus = pendingRestore.commitPreCompactCheckpointRestore(
+          pendingRestore.restoreRoot,
+          sessionId,
+          pendingRestore.path,
+          pendingRestore.created_at,
+          pendingRestore.mtime_ms,
+        );
+        if (!markerStatus) {
+          messages = messages.filter((message) => message !== pendingRestoreMessage);
+          additionalContext = buildSessionStartAdditionalContext(messages);
+        }
+      } else {
+        // The complete restore sentinel did not fit the aggregate budget;
+        // do not commit a replay marker for context that was not delivered.
+        messages = messages.filter((message) => message !== pendingRestoreMessage);
+        additionalContext = buildSessionStartAdditionalContext(messages);
+      }
+    } else if (messages.length > 0) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+    }
+
     if (messages.length > 0 || userMessages.length > 0) {
       const output = {
         continue: true,
@@ -695,7 +746,7 @@ ${agentsContent}
       if (messages.length > 0) {
         output.hookSpecificOutput = {
           hookEventName: 'SessionStart',
-          additionalContext: buildSessionStartAdditionalContext(messages)
+          additionalContext,
         };
       }
       console.log(JSON.stringify(output));

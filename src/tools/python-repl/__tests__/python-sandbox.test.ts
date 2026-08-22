@@ -58,6 +58,22 @@ describe('gyoshu bridge execution builtins hardening', () => {
     expect(result.stdout.trim()).toBe('x=10');
   });
 
+  it('computes variance and standard deviation with pure arithmetic (no library needed)', () => {
+    // Grounds the scientist guidance: `variance ** 0.5` is a plain Pow
+    // expression, so a square root needs no blocked import.
+    const result = executeBridgeCode(
+      [
+        'values = [2, 4, 4, 4, 5, 5, 7, 9]',
+        'n = len(values)',
+        'mean = sum(values) / n',
+        'variance = sum((v - mean) ** 2 for v in values) / (n - 1)',
+        'print(round(variance, 4), round(variance ** 0.5, 4))',
+      ].join('\n'),
+    );
+    expect(result.success).toBe(true);
+    expect(result.stdout.trim()).toBe('4.5714 2.1381');
+  });
+
   it('allows bridge memory helpers', () => {
     const result = executeBridgeCode('memory = get_memory()\nprint(isinstance(memory, dict))');
     expect(result.success).toBe(true);
@@ -120,5 +136,120 @@ describe('gyoshu bridge execution builtins hardening', () => {
     expect(result.stdout).toBe('');
     expect(result.error?.type).toBe('GyoshuSecurityError');
     expect(result.error?.message).toContain('Import statements are not available');
+  });
+
+  it.each([
+    ['import numpy as np'],
+    ['import pandas'],
+    ['import matplotlib'],
+  ])('blocks the advertised scientific imports: %s', (code) => {
+    const result = executeBridgeCode(code);
+    expect(result.success).toBe(false);
+    expect(result.error?.type).toBe('GyoshuSecurityError');
+    expect(result.error?.message).toContain('Import statements are not available');
+  });
+
+  it.each([
+    ['print(numpy.array([1, 2, 3]).sum())'],
+    ['print(pandas.DataFrame())'],
+    ['print(matplotlib)'],
+  ])('does not prebind the advertised scientific module: %s', (code) => {
+    const result = executeBridgeCode(code);
+    expect(result.success).toBe(false);
+    expect(result.error?.type).toBe('NameError');
+  });
+});
+interface BridgeLifecycleResult {
+  initialScientific: string[];
+  initialVariables: string[];
+  seedSuccess: boolean;
+  seedStdout: string;
+  seedErrorType: string | null;
+  scientificAfterSeed: string[];
+  variablesAfterSeed: string[];
+  resetStatus: string;
+  scientificAfterReset: string[];
+  variablesAfterReset: string[];
+  postResetSuccess: boolean;
+  postResetErrorType: string | null;
+  postResetError: string | null;
+}
+
+// Multi-step harness: exercise namespace seeding, execution, and reset in one
+// bridge process so persistence/isolation semantics are observable. The
+// execution core (namespace init, execute_code, reset) is pure stdlib Python
+// and runs identically on macOS, Linux, and Windows; the Windows-specific TCP
+// socket fallback is covered separately by tcp-fallback.test.ts.
+function runBridgeLifecycle(seedCode: string): BridgeLifecycleResult {
+  const bridgePath = new URL('../../../../bridge/gyoshu_bridge.py', import.meta.url).pathname;
+  const tmpScript = join(tmpdir(), `omc-bridge-lifecycle-${process.pid}-${Date.now()}.py`);
+  const script = [
+    'import importlib.util, json',
+    `spec = importlib.util.spec_from_file_location("gyoshu_bridge", ${JSON.stringify(bridgePath)})`,
+    'mod = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(mod)',
+    'state = mod.ExecutionState()',
+    'ns = state.namespace',
+    'SCIENTIFIC = ("numpy", "pandas", "matplotlib")',
+    'def user_vars(ns):',
+    '    return sorted(k for k in ns if not k.startswith("_") and k not in ("clean_memory", "get_memory"))',
+    'initialScientific = sorted(n for n in SCIENTIFIC if n in ns)',
+    'initialVariables = user_vars(ns)',
+    `seed = mod.execute_code(${JSON.stringify(seedCode)}, ns, timeout=5)`,
+    'scientificAfterSeed = sorted(n for n in SCIENTIFIC if n in ns)',
+    'variablesAfterSeed = user_vars(ns)',
+    'reset = state.reset()',
+    'ns2 = state.namespace',
+    'scientificAfterReset = sorted(n for n in SCIENTIFIC if n in ns2)',
+    'variablesAfterReset = user_vars(ns2)',
+    'post = mod.execute_code("print(numpy.array([1, 2, 3]).sum())", ns2, timeout=5)',
+    'print(json.dumps({',
+    '    "initialScientific": initialScientific,',
+    '    "initialVariables": initialVariables,',
+    '    "seedSuccess": seed["success"],',
+    '    "seedStdout": seed["stdout"],',
+    '    "seedErrorType": seed.get("exception_type"),',
+    '    "scientificAfterSeed": scientificAfterSeed,',
+    '    "variablesAfterSeed": variablesAfterSeed,',
+    '    "resetStatus": reset.get("status"),',
+    '    "scientificAfterReset": scientificAfterReset,',
+    '    "variablesAfterReset": variablesAfterReset,',
+    '    "postResetSuccess": post["success"],',
+    '    "postResetErrorType": post.get("exception_type"),',
+    '    "postResetError": post.get("exception"),',
+    '}))',
+  ].join('\n');
+  writeFileSync(tmpScript, script, 'utf-8');
+  try {
+    return JSON.parse(execSync(`python3 ${tmpScript}`, { timeout: 10000 }).toString().trim());
+  } finally {
+    try { unlinkSync(tmpScript); } catch { /* ignore */ }
+  }
+}
+
+describe('gyoshu bridge advertised scientific modules (#3682)', () => {
+  it('never prebinds numpy, pandas, or matplotlib in the execution namespace', () => {
+    const result = runBridgeLifecycle('total = sum([1, 2, 3])');
+    expect(result.initialScientific).toEqual([]);
+    expect(result.scientificAfterSeed).toEqual([]);
+    expect(result.scientificAfterReset).toEqual([]);
+  });
+
+  it('persists user variables across calls and clears them on reset', () => {
+    const result = runBridgeLifecycle('total = sum([1, 2, 3])');
+    expect(result.seedSuccess).toBe(true);
+    expect(result.seedStdout.trim()).toBe('');
+    expect(result.variablesAfterSeed).toEqual(['total']);
+    expect(result.resetStatus).toBe('reset');
+    expect(result.variablesAfterReset).toEqual([]);
+  });
+
+  it('leaves the advertised modules unreachable after reset while the positive control still runs', () => {
+    const result = runBridgeLifecycle('print(sum([1, 2, 3]))');
+    expect(result.seedSuccess).toBe(true);
+    expect(result.seedStdout.trim()).toBe('6');
+    expect(result.postResetSuccess).toBe(false);
+    expect(result.postResetErrorType).toBe('NameError');
+    expect(result.postResetError).toContain('numpy');
   });
 });

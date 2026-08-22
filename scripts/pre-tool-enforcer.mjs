@@ -16,7 +16,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
 import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
-import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
@@ -163,6 +163,283 @@ function readAgentDefinitionModel(subagentType) {
   } catch {
     return null;
   }
+}
+// ---------------------------------------------------------------------------
+// Skill vs agent namespace guard (issue #3667)
+//
+// Task/Agent subagent_type identifiers and bundled skills share the same
+// `oh-my-claudecode:` namespace, so a caller can hand a skill name to
+// Task(subagent_type=...) and receive only Claude Code's generic native
+// "Agent type not found". OMC owns both registries (agents/*.md and
+// skills/*/SKILL.md), so the PreToolUse hook denies the call BEFORE the
+// native boundary with an error that names the Skill tool and the exact
+// identifier, and forbids closest-match substitution.
+// ---------------------------------------------------------------------------
+
+const SKILL_AGENT_NAMESPACE_PREFIXES = ['oh-my-claudecode:', 'omc:'];
+const SKILL_IDENTIFIER_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+function splitAgentNamespace(subagentType) {
+  const folded = subagentType.toLowerCase();
+  for (const prefix of SKILL_AGENT_NAMESPACE_PREFIXES) {
+    if (folded.startsWith(prefix.toLowerCase())) {
+      return { name: subagentType.slice(prefix.length), namespaced: true };
+    }
+  }
+  return { name: subagentType, namespaced: false };
+}
+
+function getPluginAgentDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptAgentsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents');
+  return pluginRoot ? [join(pluginRoot, 'agents'), scriptAgentsDir] : [scriptAgentsDir];
+}
+
+function getPluginSkillsDirs() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const scriptSkillsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
+  return pluginRoot ? [join(pluginRoot, 'skills'), scriptSkillsDir] : [scriptSkillsDir];
+}
+
+/**
+ * Whether an agent definition resolves for the given identifier.
+ * Namespaced identifiers (oh-my-claudecode:X / omc:X) resolve only against
+ * plugin agents; bare identifiers resolve through the full native chain
+ * (plugin, project .claude/agents, user config agents). A real agent always
+ * wins over a bundled skill with the same name (collision rule).
+ */
+function agentDefinitionExists(agentType, directory, namespaced) {
+  const agentDirs = getPluginAgentDirs();
+  if (!namespaced) {
+    agentDirs.push(join(directory, '.claude', 'agents'));
+    agentDirs.push(join(getClaudeConfigDir(), 'agents'));
+  }
+  return agentDirs.some((agentsDir) => existsSync(join(agentsDir, `${agentType}.md`)));
+}
+
+/**
+ * Extract the primary `name` and raw alias list from a bundled SKILL.md YAML
+ * frontmatter block. Mirrors readAgentDefinitionModel's frontmatter
+ * extraction: only the first `--- ... ---` block is inspected, so `name:`
+ * lines in the skill body cannot create false matches.
+ */
+function parseSkillFrontmatterIdentifiers(content) {
+  const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+  if (!fmMatch) return { aliases: [], primary: null };
+  const fm = fmMatch[1];
+  const nameMatch = fm.match(/^name:\s*(\S+)/m);
+  const primary = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, '') : null;
+  const aliasMatch = fm.match(/^aliases:\s*(.+)$/m);
+  const aliases = [];
+  if (aliasMatch) {
+    const raw = aliasMatch[1].trim();
+    const tokens = raw.startsWith('[')
+      ? raw.slice(1, raw.indexOf(']') === -1 ? raw.length : raw.indexOf(']')).split(',')
+      : [raw.split(/\s+/)[0]];
+    for (const token of tokens) {
+      const clean = token.trim().replace(/^["']|["']$/g, '');
+      if (clean) aliases.push(clean);
+    }
+  }
+  return { aliases, primary };
+}
+
+/**
+ * Claude Code native command names that must not be shadowed by OMC skill
+ * short names. Mirrors src/features/builtin-skills/skills.ts:CC_NATIVE_COMMANDS
+ * and toSafeSkillName (plan -> omc-plan).
+ */
+const CC_NATIVE_SKILL_COMMANDS = new Set([
+  'review',
+  'plan',
+  'security-review',
+  'init',
+  'doctor',
+  'help',
+  'config',
+  'clear',
+  'compact',
+  'memory',
+]);
+
+function toSafeSkillName(name) {
+  const normalized = name.trim();
+  return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
+}
+/**
+ * Skills exposed only to skininthegamebros users. Mirrors
+ * src/features/builtin-skills/skills.ts:SKININTHEGAMEBROS_ONLY_SKILLS: the
+ * runtime loader deliberately hides these directories from everyone else.
+ */
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
+
+function isSkininthegamebrosUser() {
+  return process.env.USER_TYPE === 'ant';
+}
+
+/**
+ * Whether a bundled skill directory is visible to the current user, mirroring
+ * loadSkillsFromDirectory's entitlement filter. Hidden skills must never be
+ * suggested as invocable, even when their directory exists on disk.
+ */
+function isSkillVisibleToUser(skillName) {
+  // Case-fold before the Set lookup: identifiers are matched case-insensitively
+  // while filesystem lookup is case-insensitive on Windows/macOS.
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName.toLowerCase()) || isSkininthegamebrosUser();
+}
+
+let cachedCanonicalSkillRegistry = null;
+
+/**
+ * Build the canonical bundled-skill registry exactly like the runtime loader
+ * (src/features/builtin-skills/skills.ts loadSkillsFromDirectory +
+ * loadSkillFromFile):
+ * - `skillify` sorts first so it claims its deprecated alias `learner` before
+ *   the legacy skills/learner directory is seen;
+ * - primary names and aliases are normalized with toSafeSkillName;
+ * - the first claim of a name wins (seenNames dedup), so a directory whose
+ *   name is claimed as another skill's alias is not registered under its own
+ *   name.
+ * Returns Map<lowercaseName, primaryName>.
+ */
+function buildCanonicalSkillRegistry() {
+  if (cachedCanonicalSkillRegistry) return cachedCanonicalSkillRegistry;
+  const registry = new Map();
+  for (const skillsDir of getPluginSkillsDirs()) {
+    let entries = [];
+    try {
+      entries = readdirSync(skillsDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => {
+      if (a.name === 'skillify') return -1;
+      if (b.name === 'skillify') return 1;
+      return a.name.localeCompare(b.name);
+    });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      // Entitlement filter: hidden skills are not registered for this user.
+      if (!isSkillVisibleToUser(entry.name)) continue;
+      const skillPath = join(skillsDir, entry.name, 'SKILL.md');
+      if (!existsSync(skillPath)) continue;
+      let parsed;
+      try {
+        parsed = parseSkillFrontmatterIdentifiers(readFileSync(skillPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+      const primary = toSafeSkillName(parsed.primary || entry.name);
+      const allNames = [primary, ...parsed.aliases.map(toSafeSkillName)];
+      for (const candidate of allNames) {
+        const key = candidate.toLowerCase();
+        if (registry.has(key)) continue;
+        registry.set(key, primary);
+      }
+    }
+  }
+  cachedCanonicalSkillRegistry = registry;
+  return registry;
+}
+
+/**
+ * Resolve a Task/Agent subagent_type against the bundled skill registry.
+ * Returns { primary } when the identifier names a bundled skill (exact match
+ * only — no fuzzy/closest-match substitution), or null otherwise.
+ *
+ * Canonical registry precedence wins before any directory shortcut: a name
+ * claimed as a deprecated alias (e.g. `learner` owned by `skillify`) resolves
+ * to its canonical primary even when a directory with the same name exists
+ * (skills/learner).
+ *
+ * Bare (un-namespaced) identifiers are denied ONLY on canonical registry
+ * claims. The directory shortcut would otherwise mistake legitimate runtime
+ * agents for skills: Claude Code's built-in `Plan` agent and session-defined
+ * agents are not visible to file-based plugin/project/user agent discovery,
+ * yet `skills/plan` exists (registering `omc-plan`). Bare names therefore
+ * never consult the directory shortcut; explicitly namespaced identifiers
+ * (`oh-my-claudecode:` / `omc:`) are pinned to the OMC plugin namespace and
+ * keep the full canonical + shortcut resolution (e.g. `oh-my-claudecode:plan`
+ * -> `omc-plan`).
+ */
+function resolveBundledSkill(subagentType, directory) {
+  const { name, namespaced } = splitAgentNamespace(subagentType);
+  if (!SKILL_IDENTIFIER_PATTERN.test(name)) return null;
+  // Case-fold once, before every check: registry, alias, visibility, and
+  // filesystem lookups must agree even on case-insensitive filesystems
+  // (Windows/macOS), where a case-variant identifier resolves the same dir.
+  const foldedName = name.toLowerCase();
+  // A real agent definition wins over a skill with the same name.
+  if (agentDefinitionExists(foldedName, directory, namespaced)) return null;
+  // Canonical registry first: covers primaries and aliases (incl. collisions
+  // like learner -> skillify, cancel-ralph -> cancel).
+  const canonicalPrimary = buildCanonicalSkillRegistry().get(foldedName);
+  if (canonicalPrimary) return { primary: canonicalPrimary };
+  // Bare identifiers stop here: the directory shortcut is reserved for the
+  // pinned plugin namespace so native/session-defined agents (e.g. `Plan`)
+  // are never denied (issue #3667 P1).
+  if (!namespaced) return null;
+  // Directory shortcut fallback only for names the canonical registry does not
+  // claim (e.g. the plan/ dir whose frontmatter registers as omc-plan).
+  // Fail closed: a directory that is hidden from this user must never be
+  // suggested as an invocable bundled skill, even though it exists on disk.
+  if (!isSkillVisibleToUser(foldedName)) return null;
+  for (const skillsDir of getPluginSkillsDirs()) {
+    const directPath = join(skillsDir, foldedName, 'SKILL.md');
+    if (existsSync(directPath)) {
+      let primary = foldedName;
+      try {
+        const parsed = parseSkillFrontmatterIdentifiers(readFileSync(directPath, 'utf-8'));
+        if (parsed.primary) primary = parsed.primary;
+      } catch {
+        // Keep the directory name when the file cannot be parsed.
+      }
+      return { primary: toSafeSkillName(primary) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Preflight contract for #3667: when a Task/Agent call names a bundled skill
+ * as its subagent_type, deny the call with a precise, non-substitutable error
+ * that names the Skill tool and the correct identifier.
+ */
+function evaluateSkillAsAgentCall(toolName, toolInput, directory) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const rawSubagentType = toolInput.subagent_type;
+  if (typeof rawSubagentType !== 'string') return null;
+  const subagentType = rawSubagentType.trim();
+  if (subagentType.length === 0) return null;
+
+  const skill = resolveBundledSkill(subagentType, directory);
+  if (!skill) return null;
+
+  const { name } = splitAgentNamespace(subagentType);
+  // Always suggest the canonical plugin-namespaced identifier. A bare skill
+  // name can resolve to a different project/user skill or fail: bundled
+  // skills are exposed under the `oh-my-claudecode:` namespace (issue #3667
+  // review), so the recovery must be unambiguous regardless of the caller's
+  // input namespace form.
+  const skillIdentifier = `oh-my-claudecode:${skill.primary}`;
+  const isPrimaryMatch = name.toLowerCase() === skill.primary.toLowerCase();
+  const queriedName = isPrimaryMatch
+    ? `"${subagentType}"`
+    : `"${subagentType}" (alias of "${skill.primary}")`;
+  const reason =
+    `[SKILL vs AGENT] ${queriedName} is a Skill, not an agent. ` +
+    `Do NOT call it via ${toolName}(subagent_type=...) — that subagent type does not exist, ` +
+    `and Claude Code will fail the call with a generic "Agent type not found". ` +
+    `Use the Skill tool instead: Skill(skill="${skillIdentifier}"). ` +
+    `Do NOT substitute a similarly-named agent as a "closest match".`;
+  return {
+    continue: true,
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: reason,
+    },
+  };
 }
 
 
@@ -564,16 +841,66 @@ function extractJsonField(input, field, defaultValue = '') {
   }
 }
 
-// Get agent tracking info from state file
-function getAgentTrackingInfo(stateDir) {
-  const trackingFile = join(stateDir, 'subagent-tracking.json');
+// Get agent tracking info from state file.
+// Path resolution is owned by the canonical resolveSessionStatePathsForHook()
+// helper (validation/migration-aware, session-scoped-first read with legacy
+// fallback), so this reader cannot drift from the other OmC consumers again.
+// Issue #3732: the pre-fix manual path construction read legacy-only while
+// post-tool-verifier::getAgentCompletionSummary read session-scoped first,
+// producing contradicting agent counts for the same session.
+//
+// Name note: the canonical resolver normalizes `subagent-tracking` to
+// `<stateDir>/sessions/<sid>/subagent-tracking-state.json` (Wave-A layout) with
+// read fallback to `<stateDir>/subagent-tracking-state.json`. When the
+// session-scoped file exists but is malformed, the canonical legacy file for
+// the same name is probed explicitly (never skipped). The pre-Wave-A legacy
+// file was plain `subagent-tracking.json` (still read by
+// session-end/post-tool-verifier and written by pre-Wave-A installs), so after
+// the canonical probe finds nothing the plain legacy filename is read
+// directly. When no sessionId is observable only the two legacy filenames are
+// probed.
+async function getAgentTrackingInfo(stateDir, directory, sessionId = '') {
+  // The session id arrives from the hook payload and is influenceable, so it
+  // is validated against the canonical allowlist BEFORE any scoped resolution.
+  // An invalid id must skip every session-scoped candidate and only probe the
+  // safe legacy roots: the canonical resolver would throw on it, and the
+  // unvalidated path would let a payload like `../evil` escape the sessions
+  // directory and read unrelated state (issue #3732 review).
+  const safeSessionId = isValidSessionId(sessionId) ? sessionId : '';
+  const candidates = [];
   try {
-    if (existsSync(trackingFile)) {
-      const data = JSON.parse(readFileSync(trackingFile, 'utf-8'));
-      const running = (data.agents || []).filter(a => a.status === 'running').length;
-      return { running, total: data.total_spawned || 0 };
-    }
+    // Session-scoped effective read for the canonical state name (scoped-first
+    // with canonical-legacy read fallback).
+    const { readPath } = await resolveSessionStatePathsForHook(directory, 'subagent-tracking', safeSessionId || undefined);
+    candidates.push(readPath);
+    // Explicit canonical legacy read: when the session-scoped file exists but
+    // is malformed the effective read above points at it, and without this
+    // probe the valid <stateDir>/subagent-tracking-state.json would be
+    // silently skipped. The canonical legacy file is probed even when no
+    // session id is observable (issue #3732 review). Both reads stay owned by
+    // the canonical resolver — never the suffixed `subagent-tracking.json`
+    // state name, which the resolver would corrupt into `-state.json`.
+    const legacy = await resolveSessionStatePathsForHook(directory, 'subagent-tracking', undefined);
+    if (legacy.readPath !== readPath) candidates.push(legacy.readPath);
   } catch {}
+  // Pre-Wave-A legacy filename, read directly (outside the canonical naming
+  // scheme) so old installs keep working. resolveSessionStatePathsForHook
+  // appends `-state.json`, which would corrupt a name that already ends in
+  // `.json`, hence the direct join here under the resolved state root.
+  candidates.push(join(stateDir, 'subagent-tracking.json'));
+
+  for (const trackingFile of candidates) {
+    const data = readJsonFile(trackingFile);
+    // Shape-validate per candidate: a parseable file with a non-array `agents`
+    // field is a malformed candidate, never a reason to abort the whole hook
+    // (which would drop the spawn advisory and any configured model injection).
+    // Skip it and continue with the next canonical/legacy candidate.
+    if (!data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.agents)) {
+      continue;
+    }
+    const running = data.agents.filter(a => a && typeof a === 'object' && a.status === 'running').length;
+    return { running, total: data.total_spawned || 0 };
+  }
   return { running: 0, total: 0 };
 }
 
@@ -1090,7 +1417,7 @@ function getActiveTeamState(stateDir, sessionId) {
 }
 
 // Generate agent spawn message with metadata
-function generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId) {
+async function generateAgentSpawnMessage(toolInput, stateDir, directory, todoStatus, sessionId) {
   if (!toolInput || typeof toolInput !== 'object') {
     if (QUIET_LEVEL >= 2) return '';
     return `${todoStatus}Launch multiple agents in parallel when tasks are independent. Use run_in_background for long operations.`;
@@ -1100,7 +1427,7 @@ function generateAgentSpawnMessage(toolInput, stateDir, todoStatus, sessionId) {
   const model = toolInput.model || 'inherit';
   const desc = toolInput.description || '';
   const bg = toolInput.run_in_background ? ' [BACKGROUND]' : '';
-  const tracking = getAgentTrackingInfo(stateDir);
+  const tracking = await getAgentTrackingInfo(stateDir, directory, sessionId);
 
   // Team-routing guidance:
   // Claude Code 2.1.178+ removed TeamCreate/TeamDelete. When OMC team state is
@@ -1435,6 +1762,14 @@ async function main() {
     //   DENY  no-model calls when the session model itself has [1m] — guide to OMC_SUBAGENT_MODEL
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
+      // Skill vs agent namespace guard (issue #3667): deny BEFORE the native
+      // boundary when a bundled skill name is passed as subagent_type, with an
+      // error that names the Skill tool and the correct identifier.
+      const skillAgentDeny = evaluateSkillAsAgentCall(toolName, toolInput, directory);
+      if (skillAgentDeny) {
+        console.log(JSON.stringify(skillAgentDeny));
+        return;
+      }
       const toolModel = toolInput.model;
       if (isForceInheritEnabled()) {
         // Check both vars: if either carries [1m] the session model is unsafe for sub-agents.
@@ -1616,7 +1951,7 @@ async function main() {
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || null;
       // Reflect any injected per-agent model (issue #3242) in the advisory label.
-      message = generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, todoStatus, sessionId);
+      message = await generateAgentSpawnMessage(updatedToolInput || toolInput, stateDir, directory, todoStatus, sessionId);
     } else {
       message = generateMessage(toolName, todoStatus, modeActive);
     }

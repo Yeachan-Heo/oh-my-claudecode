@@ -4,7 +4,13 @@ vi.mock('../features/auto-update.js', () => ({
     isTeamEnabled: () => true,
 }));
 import { getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
-const TIER0_SKILLS = ['team', 'ralph', 'ultrawork', 'autopilot'];
+/**
+ * Keyword *mode types*, which are independent of shipped skill files: `ralph`
+ * and `ultrawork` remain valid KeywordType values after the 5.0.0 retirement.
+ */
+const TIER0_KEYWORD_MODES = ['team', 'ralph', 'ultrawork', 'autopilot'];
+/** Skills that must exist as canonical unprefixed entries in the catalog. */
+const TIER0_SKILLS = ['team', 'execute', 'ultragoal', 'autopilot'];
 describe('Tier-0 contract: skill aliases and canonical entrypoints', () => {
     beforeEach(() => {
         clearSkillsCache();

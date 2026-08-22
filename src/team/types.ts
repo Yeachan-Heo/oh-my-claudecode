@@ -615,6 +615,10 @@ export interface TeamEvent {
   reason?: string;
   next_action?: TeamLeaderNextAction;
   message?: string;
+  /** Undelivered directed messages addressed TO the worker (issue #3662). */
+  undelivered_inbound_count?: number;
+  /** Undelivered directed messages FROM the worker (owed reports/acks, issue #3662). */
+  undelivered_outbound_count?: number;
   created_at: string;
 }
 

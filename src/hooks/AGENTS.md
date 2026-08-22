@@ -83,6 +83,12 @@ Hooks intercept Claude Code events to enable:
 | `session-end/` | Session termination handling |
 | `background-notification/` | Background task notifications |
 
+### Registry Infrastructure
+
+| Directory | Purpose |
+|-----------|---------|
+| `registry/` | Declarative hook registry + dispatcher shadow mode (#3707); design doc in `docs/design/ISSUE-3707-HOOK-REGISTRY-SHADOW.md` |
+
 ### Setup Hooks
 
 | Directory | Purpose |

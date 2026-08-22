@@ -9,7 +9,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, basename } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
-import { resolveLiveData } from './live-data.js';
+import { hasLiveDataScriptArgumentPlaceholder, introducesLiveDataDirective, resolveLiveData, } from './live-data.js';
 import { parseFrontmatter, parseFrontmatterAliases, stripOptionalQuotes } from '../../utils/frontmatter.js';
 import { rewriteOmcCliInvocations } from '../../utils/omc-cli-rendering.js';
 import { parseSkillPipelineMetadata, renderSkillPipelineGuidance } from '../../utils/skill-pipeline.js';
@@ -204,6 +204,15 @@ export function findCommand(commandName) {
 function resolveArguments(content, args) {
     return content.replace(/\$ARGUMENTS/g, args || '(no arguments provided)');
 }
+function validateLiveDataArguments(args) {
+    for (const char of args) {
+        const code = char.charCodeAt(0);
+        if ((code < 32 && char !== '\t') || code === 127) {
+            return 'control character rejected';
+        }
+    }
+    return null;
+}
 function hasInvocationFlag(args, flag) {
     const escaped = flag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(^|\\s)${escaped}(?=\\s|$)`).test(args);
@@ -244,12 +253,29 @@ function formatCommandTemplate(cmd, args) {
     const displayArgs = isDeepInterviewAutoresearch
         ? stripInvocationFlag(args, '--autoresearch')
         : args;
+    const commandContent = cmd.content || '';
+    const hasArgumentsPlaceholder = commandContent.includes('$ARGUMENTS');
+    const hasScriptArgumentsPlaceholder = hasArgumentsPlaceholder
+        && hasLiveDataScriptArgumentPlaceholder(commandContent);
+    const argumentValidationError = hasArgumentsPlaceholder
+        ? hasScriptArgumentsPlaceholder
+            ? 'arguments are not supported in live-data script blocks'
+            : validateLiveDataArguments(displayArgs)
+        : null;
+    const resolvedContent = resolveArguments(commandContent, displayArgs);
+    const liveDataArgumentError = argumentValidationError
+        ?? (hasArgumentsPlaceholder && introducesLiveDataDirective(commandContent, resolvedContent)
+            ? 'live-data directive introduced by arguments'
+            : null);
+    const renderedArgs = liveDataArgumentError
+        ? `[blocked: ${liveDataArgumentError}]`
+        : displayArgs;
     sections.push(`<command-name>/${cmd.name}</command-name>\n`);
     if (cmd.metadata.description) {
         sections.push(`**Description**: ${cmd.metadata.description}\n`);
     }
-    if (displayArgs) {
-        sections.push(`**Arguments**: ${displayArgs}\n`);
+    if (renderedArgs) {
+        sections.push(`**Arguments**: ${renderedArgs}\n`);
     }
     if (cmd.metadata.model) {
         sections.push(`**Model**: ${cmd.metadata.model}\n`);
@@ -263,8 +289,9 @@ function formatCommandTemplate(cmd, args) {
     }
     sections.push('---\n');
     // Resolve arguments in content, then execute any live-data commands
-    const resolvedContent = resolveArguments(cmd.content || '', displayArgs);
-    const baseContent = resolveLiveData(resolvedContent);
+    const baseContent = liveDataArgumentError
+        ? `<live-data command="$ARGUMENTS" error="true">blocked: ${liveDataArgumentError}</live-data>`
+        : resolveLiveData(resolvedContent);
     const injectedContent = cmd.scope === 'skill'
         ? renderBundledSkillBody(cmd.metadata.name, baseContent)
         : rewriteOmcCliInvocations(baseContent);
@@ -283,10 +310,10 @@ function formatCommandTemplate(cmd, args) {
     sections.push([injectedContent.trim(), invocationGuidance, runtimeGuidance, pipelineGuidance, resourceGuidance]
         .filter((section) => section.trim().length > 0)
         .join('\n\n'));
-    if (displayArgs && !cmd.content?.includes('$ARGUMENTS')) {
+    if (renderedArgs && !cmd.content?.includes('$ARGUMENTS')) {
         sections.push('\n\n---\n');
         sections.push('## User Request\n');
-        sections.push(displayArgs);
+        sections.push(renderedArgs);
     }
     return sections.join('\n');
 }

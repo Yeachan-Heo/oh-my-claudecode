@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 vi.mock('../callbacks.js', () => ({
     triggerStopCallbacks: vi.fn(async () => undefined),
+    runSessionEndDeferredAction: vi.fn(async () => ({ status: 'completed' })),
 }));
 vi.mock('../../../notifications/index.js', () => ({
     notify: vi.fn(async () => undefined),
@@ -17,6 +18,7 @@ vi.mock('../../../tools/python-repl/bridge-manager.js', () => ({
     })),
 }));
 import { processSessionEndCleanupWorker } from '../index.js';
+import { prepareCoreManifest, sealCoreManifest, sealWikiManifest } from '../cleanup-manifest.js';
 import { cleanupBridgeSessions } from '../../../tools/python-repl/bridge-manager.js';
 describe('processSessionEndCleanupWorker python bridge cleanup', () => {
     let tmpDir;
@@ -42,6 +44,9 @@ describe('processSessionEndCleanupWorker python bridge cleanup', () => {
             }),
         ];
         fs.writeFileSync(transcriptPath, transcriptLines.join('\n'), 'utf-8');
+        prepareCoreManifest(tmpDir, 'session-123', { transcriptPath });
+        sealCoreManifest(tmpDir, 'session-123');
+        sealWikiManifest(tmpDir, 'session-123');
         await processSessionEndCleanupWorker({
             directory: tmpDir,
             sessionId: 'session-123',

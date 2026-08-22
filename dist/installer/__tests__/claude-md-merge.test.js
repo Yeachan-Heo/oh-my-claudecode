@@ -7,7 +7,6 @@ import { mergeClaudeMd } from '../index.js';
 const START_MARKER = '<!-- OMC:START -->';
 const END_MARKER = '<!-- OMC:END -->';
 const USER_CUSTOMIZATIONS = '<!-- User customizations -->';
-const USER_CUSTOMIZATIONS_RECOVERED = '<!-- User customizations (recovered from corrupted markers) -->';
 describe('mergeClaudeMd', () => {
     const omcContent = '# OMC Configuration\n\nThis is the OMC content.';
     describe('Fresh install (no existing content)', () => {
@@ -78,60 +77,21 @@ describe('mergeClaudeMd', () => {
             const expected = `${START_MARKER}\n${omcContent}\n${END_MARKER}\n\n${USER_CUSTOMIZATIONS}\n${existingContent}`;
             expect(result).toBe(expected);
         });
+        it('preserves a user-authored customization comment without managed scaffolding', () => {
+            const existingContent = `notes\n${USER_CUSTOMIZATIONS}\nkeep this line\n`;
+            const result = mergeClaudeMd(existingContent, omcContent);
+            expect(result.match(/<!-- User customizations -->/g)).toHaveLength(2);
+            expect(result).toContain(existingContent);
+        });
     });
     describe('Corrupted markers', () => {
-        it('handles START marker without END marker', () => {
-            const existingContent = `${START_MARKER}\nSome content\nMore content`;
-            const result = mergeClaudeMd(existingContent, omcContent);
-            expect(result).toContain(START_MARKER);
-            expect(result).toContain(END_MARKER);
-            expect(result).toContain(omcContent);
-            expect(result).toContain(USER_CUSTOMIZATIONS_RECOVERED);
-            // Original corrupted content should be preserved after user customizations
-            expect(result).toContain('Some content');
-        });
-        it('handles END marker without START marker', () => {
-            const existingContent = `Some content\n${END_MARKER}\nMore content`;
-            const result = mergeClaudeMd(existingContent, omcContent);
-            expect(result).toContain(START_MARKER);
-            expect(result).toContain(END_MARKER);
-            expect(result).toContain(omcContent);
-            expect(result).toContain(USER_CUSTOMIZATIONS_RECOVERED);
-            // Original corrupted content should be preserved
-            expect(result).toContain('Some content');
-            expect(result).toContain('More content');
-        });
-        it('handles END marker before START marker (invalid order)', () => {
-            const existingContent = `${END_MARKER}\nContent\n${START_MARKER}`;
-            const result = mergeClaudeMd(existingContent, omcContent);
-            // Should treat as corrupted and wrap new content, preserving old
-            expect(result).toContain(START_MARKER);
-            expect(result).toContain(END_MARKER);
-            expect(result).toContain(omcContent);
-            expect(result).toContain(USER_CUSTOMIZATIONS_RECOVERED);
-        });
-        it('does not grow unboundedly when called repeatedly with corrupted markers', () => {
-            // Regression: corrupted markers caused existingContent (including corrupted markers)
-            // to be appended as-is. Next call re-detected corruption, appended again → unbounded growth.
-            const corruptedContent = `${START_MARKER}\nUser stuff\nMore user stuff`;
-            const firstResult = mergeClaudeMd(corruptedContent, omcContent);
-            // Call again with the output of the first call
-            const secondResult = mergeClaudeMd(firstResult, omcContent);
-            // The file should NOT grow unboundedly — second call should produce
-            // similar or equal length output as the first call
-            expect(secondResult.length).toBeLessThanOrEqual(firstResult.length * 1.1);
-            // The corrupted markers should be stripped from recovered content
-            // so re-processing doesn't re-detect corruption and re-append
-            const thirdResult = mergeClaudeMd(secondResult, omcContent);
-            expect(thirdResult.length).toBeLessThanOrEqual(secondResult.length * 1.1);
-        });
-        it('strips unmatched OMC markers from recovered content', () => {
-            const corruptedContent = `${START_MARKER}\nUser custom config`;
-            const result = mergeClaudeMd(corruptedContent, omcContent);
-            // The recovered section should not contain bare OMC markers
-            // Count occurrences of START_MARKER: should only appear once (in the OMC block)
-            const startMarkerCount = (result.match(new RegExp(START_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
-            expect(startMarkerCount).toBe(1);
+        it.each([
+            `${START_MARKER}\nSome content\nMore content`,
+            `Some content\n${END_MARKER}\nMore content`,
+            `${END_MARKER}\nContent\n${START_MARKER}`,
+            `${START_MARKER}\nUser custom config`,
+        ])('fails closed without rewriting malformed existing content', existingContent => {
+            expect(() => mergeClaudeMd(existingContent, omcContent)).toThrow('Existing CLAUDE.md has corrupt OMC markers');
         });
     });
     describe('Edge cases', () => {
@@ -297,7 +257,7 @@ My note after duplicate block`;
             expect(result).not.toContain('Old OMC content v1');
             expect(result).not.toContain('Older duplicate block');
         });
-        it('removes autogenerated user customization headers while preserving real user text', () => {
+        it('preserves unknown scaffold-position labels and ambiguous later comments', () => {
             const existingContent = `${START_MARKER}
 Old OMC content
 ${END_MARKER}
@@ -308,8 +268,8 @@ First user note
 <!-- User customizations -->
 Second user note`;
             const result = mergeClaudeMd(existingContent, omcContent);
-            expect((result.match(/<!-- User customizations/g) || []).length).toBe(1);
-            expect(result).toContain(`${USER_CUSTOMIZATIONS}\nFirst user note\n\nSecond user note`);
+            expect((result.match(/<!-- User customizations/g) || []).length).toBe(3);
+            expect(result).toContain(`${USER_CUSTOMIZATIONS}\n\n<!-- User customizations (migrated from previous CLAUDE.md) -->\nFirst user note\n\n<!-- User customizations -->\nSecond user note`);
         });
     });
 });

@@ -8,6 +8,7 @@ import type { ApiKeySource } from './elements/api-key-source.js';
 import type { SessionSummaryState } from './elements/session-summary.js';
 import type { PayloadEstimate } from './payload-estimate.js';
 import type { MissionBoardConfig, MissionBoardState } from './mission-board.js';
+import type { AgentKind, IncomingAgentMessage } from './agent-kind.js';
 export type { AutopilotStateForHud, ApiKeySource, SessionSummaryState };
 export interface BackgroundTask {
     id: string;
@@ -77,6 +78,17 @@ export interface ActiveAgent {
     status: 'running' | 'completed';
     startTime: Date;
     endTime?: Date;
+    /**
+     * Which mechanism owns this agent (issue #3666). Deterministically derived
+     * from the spawning tool call: named spawns are teammates, unnamed spawns
+     * are subagents. Absent on legacy data that predates this field.
+     */
+    kind?: AgentKind;
+    /**
+     * Session id that issued the spawning tool call, when observable. Absent for
+     * legacy transcripts or when the spawner cannot be determined.
+     */
+    spawnedBy?: string;
 }
 export interface SkillInvocation {
     name: string;
@@ -104,6 +116,13 @@ export interface LastRequestTokenUsage {
 }
 export interface TranscriptData {
     agents: ActiveAgent[];
+    /**
+     * Classified incoming agent wrapper messages observed in the transcript
+     * (issue #3666). Each entry identifies the sender's kind and identity from
+     * the wrapper's own attributes with the payload redacted. Never populated
+     * from tool_result content, so agent outputs cannot spoof a message.
+     */
+    incomingMessages?: IncomingAgentMessage[];
     todos: TodoItem[];
     sessionStart?: Date;
     lastActivatedSkill?: SkillInvocation;

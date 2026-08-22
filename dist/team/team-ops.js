@@ -13,9 +13,9 @@ import { existsSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { TeamPaths, absPath } from './state-paths.js';
-import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { normalizeTeamGovernance } from './governance.js';
-import { migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
+import { isValidPersistedMaxWorkers, migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { isTerminalTeamTaskStatus, canTransitionTeamTaskStatus, } from './contracts.js';
 import { adoptRecoveryReservations as adoptRecoveryReservationsImpl, claimTask as claimTaskImpl, requeueRecoveredTask as requeueRecoveredTaskImpl, transitionTaskStatus as transitionTaskStatusImpl, releaseTaskClaim as releaseTaskClaimImpl, listTasks as listTasksImpl, } from './state/tasks.js';
@@ -145,7 +145,7 @@ function mergeTeamConfigSources(config, manifest) {
         workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
         worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
         next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-        max_workers: Math.max(config.max_workers ?? 0, 20),
+        max_workers: resolveMaxWorkers(config.max_workers),
     });
 }
 export async function teamReadConfig(teamName, cwd) {
@@ -156,6 +156,8 @@ export async function teamReadConfig(teamName, cwd) {
         readJsonSafe(configPath),
     ]);
     if (!config && existsSync(configPath))
+        throw new Error('invalid_persisted_state');
+    if (config && !isValidPersistedMaxWorkers(config.max_workers))
         throw new Error('invalid_persisted_state');
     // Preserve raw V1 agentTypes provenance before any worker canonicalization.
     // Canonicalization must not erase the only signal used to route legacy cleanup.

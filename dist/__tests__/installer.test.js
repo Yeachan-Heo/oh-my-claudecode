@@ -224,13 +224,19 @@ describe('Installer Constants', () => {
             expect(CLAUDE_MD_CONTENT).toContain('haiku');
             expect(CLAUDE_MD_CONTENT).toContain('sonnet');
             expect(CLAUDE_MD_CONTENT).toContain('opus');
+            // fable is a documented tier alias (issue #3738) and the session-model
+            // delegation contract must stay discoverable in the shipped file
+            expect(CLAUDE_MD_CONTENT).toContain('fable');
+            expect(CLAUDE_MD_CONTENT).toContain('session model');
+            expect(CLAUDE_MD_CONTENT).toContain('agents.<name>.model');
         });
         it('should document magic keywords and compatibility commands', () => {
             // Keywords are now in skill trigger columns
             // Check for key keywords in the skill tables
+            // ralph and ulw were retired in 5.0.0; canonical triggers remain documented.
             const keywords = [
-                'ralph',
-                'ulw',
+                'autopilot',
+                'ralplan',
                 'plan',
             ];
             for (const keyword of keywords) {
@@ -537,7 +543,7 @@ describe('Installer Constants', () => {
             expect(existsSync(templatesLibDir)).toBe(true);
             const libFiles = readdirSync(templatesLibDir);
             // Required lib files that must be present
-            const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs'];
+            const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs', 'bounded-git-timeout.mjs'];
             for (const file of requiredFiles) {
                 expect(libFiles).toContain(file);
             }

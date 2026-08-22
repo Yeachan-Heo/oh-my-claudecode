@@ -95,6 +95,41 @@ describe('ultragoal artifacts', () => {
     });
   });
 
+  it('targets named goals, preserves attempts on resume, and rejects conflicting or ineligible ids', async () => {
+    await withTempRepo(async (cwd) => {
+      await createUltragoalPlan(cwd, {
+        brief: 'brief',
+        goals: [
+          { title: 'First', objective: 'first' },
+          { title: 'Second', objective: 'second' },
+          { title: 'Third', objective: 'third' },
+        ],
+      });
+      const named = await startNextUltragoal(cwd, { goalId: 'G003-third' });
+      expect(named.goal?.id).toBe('G003-third');
+      expect(named.goal?.attempt).toBe(1);
+      const resumed = await startNextUltragoal(cwd, { goalId: 'G003-third' });
+      expect(resumed.resumed).toBe(true);
+      expect(resumed.goal?.attempt).toBe(1);
+      await expect(startNextUltragoal(cwd, { goalId: 'G002-second' })).rejects.toThrow(/active goal G003-third/);
+      const unchanged = await readUltragoalPlan(cwd);
+      expect(unchanged.activeGoalId).toBe('G003-third');
+      expect(unchanged.goals.find((goal) => goal.id === 'G002-second')?.status).toBe('pending');
+    });
+  });
+
+  it('requires explicit retry for a named failed goal', async () => {
+    await withTempRepo(async (cwd) => {
+      await createUltragoalPlan(cwd, { brief: 'brief', goals: [{ title: 'First', objective: 'first' }] });
+      const started = await startNextUltragoal(cwd);
+      await checkpointUltragoal(cwd, { goalId: started.goal!.id, status: 'failed', evidence: 'failed' });
+      await expect(startNextUltragoal(cwd, { goalId: started.goal!.id })).rejects.toThrow(/without --retry-failed/);
+      const retried = await startNextUltragoal(cwd, { goalId: started.goal!.id, retryFailed: true });
+      expect(retried.goal?.id).toBe(started.goal!.id);
+      expect(retried.goal?.attempt).toBe(2);
+    });
+  });
+
   it('checkpoints success, advances, and supports failed-goal retry', async () => {
     await withTempRepo(async (cwd) => {
       await createUltragoalPlan(cwd, {

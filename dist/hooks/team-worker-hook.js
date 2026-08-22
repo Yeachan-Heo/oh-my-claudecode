@@ -17,6 +17,7 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
+import { countOutstandingForWorker, scanMailboxOutstanding } from '../team/mailbox-outstanding.js';
 // ── Env helpers ────────────────────────────────────────────────────────────
 function safeString(value, fallback = '') {
     if (typeof value === 'string')
@@ -294,6 +295,11 @@ export async function maybeNotifyLeaderWorkerIdle(params) {
     const { leaderPaneId } = teamInfo;
     if (!leaderPaneId)
         return;
+    // Outstanding directed-work metadata (issue #3662): a worker with queued
+    // or unanswered inbound messages, or an undelivered owed report, must not
+    // be announced as plainly idle/available.
+    const mailboxDir = join(stateDir, 'team', teamName, 'mailbox');
+    const outstanding = await countOutstandingForWorker(mailboxDir, workerName);
     // Build notification message
     const parts = [`[OMC] ${workerName} idle`];
     if (prevState && prevState !== 'unknown')
@@ -302,6 +308,10 @@ export async function maybeNotifyLeaderWorkerIdle(params) {
         parts.push(`task: ${currentTaskId}`);
     if (currentReason)
         parts.push(`reason: ${currentReason}`);
+    if (outstanding.undeliveredInbound > 0)
+        parts.push(`outstanding: ${outstanding.undeliveredInbound} unanswered`);
+    if (outstanding.undeliveredOutbound > 0)
+        parts.push(`undelivered reports: ${outstanding.undeliveredOutbound}`);
     const message = `${parts.join('. ')}. ${DEFAULT_MARKER}`;
     const logWorkerIdlePersistenceFailure = createSwallowedErrorLogger('hooks.team-worker maybeNotifyLeaderWorkerIdle persistence failed');
     try {
@@ -329,6 +339,8 @@ export async function maybeNotifyLeaderWorkerIdle(params) {
                 prev_state: prevState,
                 task_id: currentTaskId || null,
                 reason: currentReason || null,
+                undelivered_inbound_count: outstanding.undeliveredInbound,
+                undelivered_outbound_count: outstanding.undeliveredOutbound,
                 created_at: nowIso,
             };
             await appendFile(eventsPath, JSON.stringify(event) + '\n');
@@ -372,8 +384,16 @@ export async function maybeNotifyLeaderAllWorkersIdle(params) {
         return;
     if (!leaderPaneId)
         return;
+    // Outstanding directed-work metadata (issue #3662): never claim plain
+    // readiness while any worker has queued/unanswered directed messages or an
+    // undelivered owed report.
+    const mailboxDir = join(stateDir, 'team', teamName, 'mailbox');
+    const outstandingByWorker = await scanMailboxOutstanding(mailboxDir);
+    const totalOutstanding = Object.values(outstandingByWorker).reduce((sum, counts) => sum + counts.undeliveredInbound + counts.undeliveredOutbound, 0);
     const N = workers.length;
-    const message = `[OMC] All ${N} worker${N === 1 ? '' : 's'} idle. Ready for next instructions. ${DEFAULT_MARKER}`;
+    const message = totalOutstanding > 0
+        ? `[OMC] All ${N} worker${N === 1 ? '' : 's'} idle (outstanding: ${totalOutstanding} undelivered directed messages). ${DEFAULT_MARKER}`
+        : `[OMC] All ${N} worker${N === 1 ? '' : 's'} idle. Ready for next instructions. ${DEFAULT_MARKER}`;
     const logAllWorkersIdlePersistenceFailure = createSwallowedErrorLogger('hooks.team-worker maybeNotifyLeaderAllWorkersIdle persistence failed');
     try {
         await tmux.sendKeys(leaderPaneId, message, true);
@@ -398,6 +418,7 @@ export async function maybeNotifyLeaderAllWorkersIdle(params) {
                 type: 'all_workers_idle',
                 worker: workerName,
                 worker_count: N,
+                outstanding_count: totalOutstanding,
                 created_at: nowIso,
             };
             await appendFile(eventsPath, JSON.stringify(event) + '\n');

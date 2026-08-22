@@ -42,6 +42,18 @@ export interface ReplayEvent {
   telemetry_status?: "unmatched_stop";
   parent_mode?: string;
   model?: string;
+  /** Agent-tool description (unnamed-agent address fallback, #3665). */
+  description?: string;
+  /** Agent-tool explicit name (authoritative address). */
+  name?: string;
+  /** Bounded dirty-worktree evidence recorded on abnormal termination (#3663). */
+  dirty_worktree?: {
+    tracked: number;
+    untracked: number;
+    ignored: number;
+    worktree_root: string;
+    truncated: boolean;
+  };
   /** Hook name (e.g., "keyword-detector") */
   hook?: string;
   /** Claude Code event (e.g., "UserPromptSubmit") */
@@ -78,6 +90,8 @@ export interface ReplaySummary {
   agents_completed: number;
   agents_failed: number;
   agents_untracked_stops?: number;
+  /** Number of agent stops that left a dirty worktree behind (#3663). */
+  dirty_worktrees?: number;
   tool_summary: Record<string, { count: number; total_ms: number; avg_ms: number; max_ms: number }>;
   bottlenecks: Array<{ tool: string; agent: string; avg_ms: number }>;
   timeline_range: { start: number; end: number };
@@ -182,7 +196,9 @@ export function recordAgentStart(
   agentType: string,
   task?: string,
   parentMode?: string,
-  model?: string
+  model?: string,
+  description?: string,
+  name?: string
 ): void {
   appendReplayEvent(directory, sessionId, {
     agent: agentId.substring(0, 7),
@@ -191,6 +207,8 @@ export function recordAgentStart(
     task: task?.substring(0, 100),
     parent_mode: parentMode,
     model,
+    description: description?.substring(0, 200),
+    name,
   });
 }
 
@@ -198,6 +216,14 @@ export interface AgentStopReplayMetadata {
   synthetic?: boolean;
   telemetry_status?: "unmatched_stop";
   reason?: string;
+  /** Bounded dirty-worktree evidence (issue #3663). */
+  dirty_worktree?: {
+    tracked: number;
+    untracked: number;
+    ignored: number;
+    worktree_root: string;
+    truncated: boolean;
+  };
 }
 
 /**
@@ -221,6 +247,7 @@ export function recordAgentStop(
     synthetic: metadata?.synthetic,
     telemetry_status: metadata?.telemetry_status,
     reason: metadata?.reason,
+    dirty_worktree: metadata?.dirty_worktree,
   });
 }
 
@@ -381,6 +408,14 @@ export function getReplaySummary(directory: string, sessionId: string): ReplaySu
         }
         break;
       case 'agent_stop':
+        // B2 (#3663): a dirty worktree implies an abnormal stop by
+        // construction (dirty evidence is only attached to abnormal
+        // terminations), so a synthetic/unmatched stop carrying dirty
+        // evidence must still count toward dirty_worktrees even though it is
+        // excluded from completed/failed counters.
+        if (event.dirty_worktree) {
+          summary.dirty_worktrees = (summary.dirty_worktrees || 0) + 1;
+        }
         if (event.synthetic || event.telemetry_status === 'unmatched_stop') {
           summary.agents_untracked_stops = (summary.agents_untracked_stops || 0) + 1;
           break;

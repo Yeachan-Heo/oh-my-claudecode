@@ -438,10 +438,15 @@ describe('team pipeline standalone stop enforcement', () => {
       mkdirSync(stateDir, { recursive: true });
       writeFileSync(
         join(stateDir, 'cancel-signal-state.json'),
-        JSON.stringify({
-          requested_at: new Date().toISOString(),
-          expires_at: new Date(Date.now() + 30000).toISOString(),
-        })
+        JSON.stringify(
+          (() => {
+            const requestedAt = Date.now();
+            return {
+              requested_at: new Date(requestedAt).toISOString(),
+              expires_at: new Date(requestedAt + 30_000).toISOString(),
+            };
+          })()
+        )
       );
 
       const result = await checkPersistentModes(sessionId, tempDir);
@@ -879,10 +884,15 @@ describe('ralplan standalone stop enforcement', () => {
       mkdirSync(stateDir, { recursive: true });
       writeFileSync(
         join(stateDir, 'cancel-signal-state.json'),
-        JSON.stringify({
-          requested_at: new Date().toISOString(),
-          expires_at: new Date(Date.now() + 30000).toISOString(),
-        })
+        JSON.stringify(
+          (() => {
+            const requestedAt = Date.now();
+            return {
+              requested_at: new Date(requestedAt).toISOString(),
+              expires_at: new Date(requestedAt + 30_000).toISOString(),
+            };
+          })()
+        )
       );
 
       const result = await checkPersistentModes(sessionId, tempDir);

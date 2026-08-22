@@ -28,6 +28,7 @@ import { sessionFrictionReportCommand } from './commands/session-friction-report
 import { teamCommand } from './commands/team.js';
 import { ralphthonCommand } from './commands/ralphthon.js';
 import { ultragoalCommand, ULTRAGOAL_HELP } from './commands/ultragoal.js';
+import { aliasRetirementCommand, ALIAS_RETIREMENT_HELP } from './commands/alias-retirement.js';
 import { teleportCommand, teleportListCommand, teleportRemoveCommand } from './commands/teleport.js';
 import { getRuntimePackageVersion } from '../lib/version.js';
 import { resolvePluginDirArg } from '../lib/plugin-dir.js';
@@ -1396,6 +1397,21 @@ program
     .addHelpText('after', `\n${ULTRAGOAL_HELP}`)
     .action(async (args) => {
     await ultragoalCommand(args);
+});
+/**
+ * Alias retirement verifier — Issue #3711
+ * Read-only eligibility check + generated closure inventory. Never deletes files.
+ */
+program
+    .command('alias-retirement')
+    .description('Alias retirement verifier and generated-closure inventory (issue #3711)')
+    .helpOption(false)
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .argument('[args...]', 'alias-retirement subcommand arguments')
+    .addHelpText('after', `\n${ALIAS_RETIREMENT_HELP}`)
+    .action(async (args) => {
+    await aliasRetirementCommand(args ?? []);
 });
 /**
  * Returns the fully-configured commander program.

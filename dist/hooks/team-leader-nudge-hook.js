@@ -14,6 +14,7 @@ import { join } from 'path';
 import { appendTeamEvent } from '../team/events.js';
 import { deriveTeamLeaderGuidance } from '../team/leader-nudge-guidance.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { scanMailboxOutstanding } from '../team/mailbox-outstanding.js';
 // ── Helpers ────────────────────────────────────────────────────────────────
 function safeString(value, fallback = '') {
     if (typeof value === 'string')
@@ -118,6 +119,10 @@ export async function checkLeaderStaleness(params) {
     let idleWorkerCount = 0;
     let aliveWorkerCount = 0;
     let nonReportingWorkerCount = 0;
+    // Outstanding directed-work metadata (issue #3662): a worker with
+    // queued/unanswered directed mailbox messages is not idle/available.
+    const mailboxDir = join(teamDir, 'mailbox');
+    const outstandingByWorker = await scanMailboxOutstanding(mailboxDir);
     for (const worker of workers) {
         const statusPath = join(teamDir, 'workers', worker.name, 'status.json');
         const status = await readJsonSafe(statusPath, {});
@@ -132,7 +137,11 @@ export async function checkLeaderStaleness(params) {
             }
         }
         if (status.state === 'idle' || status.state === 'done') {
-            idleWorkerCount++;
+            // Queued/unanswered directed work means the worker is not truly idle.
+            const outstanding = outstandingByWorker[worker.name]?.undeliveredInbound ?? 0;
+            if (outstanding === 0) {
+                idleWorkerCount++;
+            }
         }
     }
     // Count pending/in_progress tasks

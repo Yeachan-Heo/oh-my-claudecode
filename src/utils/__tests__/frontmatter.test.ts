@@ -128,6 +128,136 @@ Line 3`;
     const result = parseFrontmatter(content);
     expect(result.body).toBe('Line 1\nLine 2\nLine 3');
   });
+
+  it('does not promote nested mapping fields to top-level metadata', () => {
+    const content = `---
+name: compatibility-skill
+description: Top-level description
+metadata:
+  integration:
+    description: Nested integration description
+    model: nested-model
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'compatibility-skill',
+      description: 'Top-level description',
+      metadata: '',
+    });
+  });
+
+  it('preserves uniformly indented root mappings without promoting nested fields', () => {
+    const content = `---
+# comment: does not define mapping indentation
+  name: indented-skill
+  description: Indented root description
+  model: opus
+  metadata:
+    description: Nested description
+    model: nested-model
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'indented-skill',
+      description: 'Indented root description',
+      model: 'opus',
+      metadata: '',
+    });
+  });
+
+  it('ignores de-indented members of multiline flow mappings', () => {
+    const content = `---
+  name: indented-skill
+  metadata: {
+integration: remote,
+model: nested-model
+  }
+  description: Root description
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'indented-skill',
+      metadata: '{',
+      description: 'Root description',
+    });
+  });
+
+
+  it('ignores nested members of same-indent multiline flow mappings', () => {
+    const content = `---
+name: example-skill
+description: Top-level description
+metadata: {
+description: Nested,
+model: nested
+}
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'example-skill',
+      description: 'Top-level description',
+      metadata: '{',
+    });
+  });
+
+  it('ignores nested members of same-indent multiline flow sequences', () => {
+    const content = `---
+name: example-skill
+description: Top-level description
+metadata: [
+description: Nested,
+model: nested
+]
+agent: coder
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'example-skill',
+      description: 'Top-level description',
+      metadata: '[',
+      agent: 'coder',
+    });
+  });
+
+  it('does not open flow tracking for braces embedded in plain scalar values', () => {
+    const content = `---
+name: example-skill
+description: prose with { stray brace
+model: opus
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'example-skill',
+      description: 'prose with { stray brace',
+      model: 'opus',
+    });
+  });
+  it('ignores comments at the detected root indentation', () => {
+    const content = `---
+  name: indented-skill
+  # fake: comment
+  description: Root description
+---
+Body`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'indented-skill',
+      description: 'Root description',
+    });
+  });
 });
 
 describe('parseFrontmatterAliases', () => {

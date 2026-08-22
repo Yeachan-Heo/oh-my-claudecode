@@ -1,7 +1,7 @@
 /**
  * Shared types for Oh-My-ClaudeCode
  */
-export type ModelType = "sonnet" | "opus" | "haiku" | "inherit";
+export type ModelType = "sonnet" | "opus" | "haiku" | "fable" | "inherit";
 export interface AgentConfig {
     name: string;
     description: string;
@@ -194,9 +194,9 @@ export interface PluginConfig {
          *   (useful on non-Anthropic backends without the nuclear forceInherit)
          * - `{ haiku: 'sonnet' }` — promote all haiku agents to sonnet tier
          *
-         * Env: OMC_MODEL_ALIAS_HAIKU, OMC_MODEL_ALIAS_SONNET, OMC_MODEL_ALIAS_OPUS
+         * Env: OMC_MODEL_ALIAS_HAIKU, OMC_MODEL_ALIAS_SONNET, OMC_MODEL_ALIAS_OPUS, OMC_MODEL_ALIAS_FABLE
          */
-        modelAliases?: Partial<Record<"haiku" | "sonnet" | "opus", ModelType>>;
+        modelAliases?: Partial<Record<"haiku" | "sonnet" | "opus" | "fable", ModelType>>;
         /** Keywords that force escalation to higher tier */
         escalationKeywords?: string[];
         /** Keywords that suggest lower tier */

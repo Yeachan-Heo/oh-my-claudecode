@@ -498,12 +498,50 @@ describe('cleanupStaleSkills', () => {
     mkdirSync(skillsDir, { recursive: true });
 
     // Create a skill that matches a real current skill name (ralph)
-    createSkillDir(skillsDir, 'ralph', 'ralph');
+    createSkillDir(skillsDir, 'ultragoal', 'ultragoal');
 
     const removed = cleanup(log);
 
-    expect(removed).not.toContain('ralph');
-    expect(existsSync(join(skillsDir, 'ralph'))).toBe(true);
+    expect(removed).not.toContain('ultragoal');
+    expect(existsSync(join(skillsDir, 'ultragoal'))).toBe(true);
+  });
+
+  it('removes the pre-rename directory when standalone naming prefixes a native-command collision', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    // A prior install wrote `plan/`; standalone mode now installs it as
+    // `omc-plan/` because `plan` collides with a Claude Code native command.
+    // Both directories exist and only the renamed one is current.
+    createSkillDir(skillsDir, 'plan', 'plan');
+    createManagedSkillMarker(skillsDir, 'plan');
+    createSkillDir(skillsDir, 'omc-plan', 'plan');
+    createManagedSkillMarker(skillsDir, 'omc-plan');
+
+    const removed = cleanup(log, { safeStandaloneNames: true });
+
+    expect(removed).toContain('plan');
+    expect(existsSync(join(skillsDir, 'plan'))).toBe(false);
+    // The renamed directory is the live one and must survive.
+    expect(removed).not.toContain('omc-plan');
+    expect(existsSync(join(skillsDir, 'omc-plan'))).toBe(true);
+  });
+
+  it('keeps unprefixed names in plugin mode where no rename occurs', async () => {
+    vi.resetModules();
+    const { cleanupStaleSkills: cleanup, SKILLS_DIR: skillsDir } = await import('../index.js');
+
+    mkdirSync(skillsDir, { recursive: true });
+
+    createSkillDir(skillsDir, 'plan', 'plan');
+    createManagedSkillMarker(skillsDir, 'plan');
+
+    const removed = cleanup(log, { safeStandaloneNames: false });
+
+    expect(removed).not.toContain('plan');
+    expect(existsSync(join(skillsDir, 'plan'))).toBe(true);
   });
 
   it('preserves user-created skill directories without OMC frontmatter', async () => {
@@ -621,15 +659,15 @@ describe('prunePluginDuplicateSkills', () => {
 
     mkdirSync(skillsDir, { recursive: true });
 
-    // Create a standalone copy of 'ralph' (which the plugin also provides)
+    // Create a standalone copy of 'ultragoal' (which the plugin also provides)
     // and mark it as OMC-owned — this is what a prior `omc setup` would have done
-    createSkillDir(skillsDir, 'ralph', 'ralph');
-    createManagedSkillMarker(skillsDir, 'ralph');
+    createSkillDir(skillsDir, 'ultragoal', 'ultragoal');
+    createManagedSkillMarker(skillsDir, 'ultragoal');
 
     const removed = prune(log);
 
-    expect(removed).toContain('ralph');
-    expect(existsSync(join(skillsDir, 'ralph'))).toBe(false);
+    expect(removed).toContain('ultragoal');
+    expect(existsSync(join(skillsDir, 'ultragoal'))).toBe(false);
   });
 
   it('preserves user-authored skills without OMC frontmatter even if name matches', async () => {
@@ -639,12 +677,12 @@ describe('prunePluginDuplicateSkills', () => {
     mkdirSync(skillsDir, { recursive: true });
 
     // User-created skill with a name that collides with plugin skill but no OMC frontmatter
-    createUserSkillDir(skillsDir, 'ralph');
+    createUserSkillDir(skillsDir, 'ultragoal');
 
     const removed = prune(log);
 
-    expect(removed).not.toContain('ralph');
-    expect(existsSync(join(skillsDir, 'ralph'))).toBe(true);
+    expect(removed).not.toContain('ultragoal');
+    expect(existsSync(join(skillsDir, 'ultragoal'))).toBe(true);
   });
 
   it('preserves user skills with standard frontmatter that have different content from plugin version (issue #2573)', async () => {
@@ -656,8 +694,8 @@ describe('prunePluginDuplicateSkills', () => {
 
     mkdirSync(skillsDir, { recursive: true });
 
-    // User's custom version of 'ralph' — standard frontmatter, but unique body
-    const customSkillDir = join(skillsDir, 'ralph');
+    // User's custom version of 'ultragoal' — standard frontmatter, but unique body
+    const customSkillDir = join(skillsDir, 'ultragoal');
     mkdirSync(customSkillDir, { recursive: true });
     writeFileSync(
       join(customSkillDir, 'SKILL.md'),
@@ -667,8 +705,8 @@ describe('prunePluginDuplicateSkills', () => {
 
     const removed = prune(log);
 
-    expect(removed).not.toContain('ralph');
-    expect(existsSync(join(skillsDir, 'ralph'))).toBe(true);
+    expect(removed).not.toContain('ultragoal');
+    expect(existsSync(join(skillsDir, 'ultragoal'))).toBe(true);
   });
 
   it('removes exact-match standalone alias duplicates like omc-plan while preserving alias lookup behavior', async () => {
@@ -743,11 +781,11 @@ describe('prunePluginDuplicateSkills', () => {
     const { prunePluginDuplicateSkills: prune, SKILLS_DIR: skillsDir } = await import('../index.js');
 
     mkdirSync(skillsDir, { recursive: true });
-    createSkillDir(skillsDir, 'ralph', 'ralph');
-    createManagedSkillMarker(skillsDir, 'ralph');
+    createSkillDir(skillsDir, 'ultragoal', 'ultragoal');
+    createManagedSkillMarker(skillsDir, 'ultragoal');
 
     const first = prune(log);
-    expect(first).toContain('ralph');
+    expect(first).toContain('ultragoal');
 
     const second = prune(log);
     expect(second).toEqual([]);

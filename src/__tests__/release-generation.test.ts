@@ -278,14 +278,16 @@ describe('release generation', () => {
     expect(workflow).toContain('SMOKE_GJC_CONFIG_DIR="$SMOKE_HOME/.gjc"');
     expect(workflow).toContain('SMOKE_PACKAGE_ROOT="$SMOKE_PREFIX/node_modules/oh-my-claude-sisyphus"');
     expect(workflow).toContain('OMC_SETUP_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT" CLAUDE_PLUGIN_ROOT="$SMOKE_PACKAGE_ROOT"');
-    expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/setup/SKILL.md"');
+    expect(workflow).toContain('test -s "$SMOKE_PACKAGE_ROOT/skills/wiki/SKILL.md"');
+    expect(workflow).not.toContain('skills/omc-reference/SKILL.md');
+    expect(workflow).not.toContain('skills/setup/SKILL.md');
     expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/SKILL.md"');
     expect(workflow).toContain('test -f "$SMOKE_PACKAGE_ROOT/skills/omc-setup/phases/01-install-claude-md.md"');
     expect(workflow).toContain('cd "$SMOKE_PROJECT"');
     expect(workflow).not.toContain('working-directory: "$SMOKE_PROJECT"');
     expect(workflow).toContain('bash -c \'bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" local\'');
     expect(workflow).toContain('cmp "$SMOKE_PACKAGE_ROOT/docs/CLAUDE.md" "$SMOKE_PROJECT/.claude/CLAUDE.md"');
-    expect(workflow).toContain('cmp "$SMOKE_PACKAGE_ROOT/skills/omc-reference/SKILL.md" "$SMOKE_PROJECT/.claude/skills/omc-reference/SKILL.md"');
+    expect(workflow).toContain('cmp "$SMOKE_PACKAGE_ROOT/skills/wiki/SKILL.md" "$SMOKE_PROJECT/.claude/skills/wiki/SKILL.md"');
     expect(workflow).toContain('test "$FINAL_TARBALL_SHA256" = "$(sha256sum "$FINAL_TARBALL" | cut -d \' \' -f 1)"');
     expect(workflow).toContain('package/bridge/claude-md-coordinator.cjs');
     expect(workflow).toContain('require(process.argv[1]).gitHead');

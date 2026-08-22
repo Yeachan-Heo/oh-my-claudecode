@@ -2833,7 +2833,8 @@ export async function startTeamV2(config) {
                 ...(prepared.role ? { role: prepared.role } : {}),
             });
             if (workerLaunch.paneId) {
-                workerPaneIds.push(workerLaunch.paneId);
+                if (workerLaunch.startupAssigned)
+                    workerPaneIds.push(workerLaunch.paneId);
                 launchedWorkers.push({
                     name: wName, paneId: workerLaunch.paneId,
                     ...(workerLaunch.launchAttemptId ? { launchAttemptId: workerLaunch.launchAttemptId } : {}),

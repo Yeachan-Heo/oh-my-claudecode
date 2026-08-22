@@ -52,5 +52,37 @@ describe('runHudWatchLoop', () => {
         expect(hudMain).toHaveBeenNthCalledWith(1, true, false);
         expect(hudMain).toHaveBeenNthCalledWith(2, true, true);
     });
+    it('keeps the polling timer referenced while watch mode is active', async () => {
+        const intervalMs = 60_000;
+        let shutdownHandler;
+        const registerShutdownHandlers = vi.fn((options) => {
+            const onShutdown = async (reason) => {
+                await options.onShutdown(reason);
+            };
+            shutdownHandler = onShutdown;
+            return { shutdown: onShutdown };
+        });
+        const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+        const loopPromise = runHudWatchLoop({
+            intervalMs,
+            hudMain: vi.fn(async () => { }),
+            registerShutdownHandlers,
+        });
+        try {
+            await vi.waitFor(() => {
+                expect(setTimeoutSpy.mock.calls.some(([, delay]) => delay === intervalMs)).toBe(true);
+            });
+            const pollingTimers = setTimeoutSpy.mock.calls.flatMap(([, delay], index) => delay === intervalMs
+                ? [setTimeoutSpy.mock.results[index]?.value]
+                : []);
+            expect(pollingTimers).toHaveLength(1);
+            expect(pollingTimers[0]?.hasRef()).toBe(true);
+        }
+        finally {
+            await shutdownHandler?.('SIGTERM');
+            await loopPromise;
+            setTimeoutSpy.mockRestore();
+        }
+    });
 });
 //# sourceMappingURL=hud-watch.test.js.map

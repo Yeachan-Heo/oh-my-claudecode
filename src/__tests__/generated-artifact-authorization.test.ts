@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -150,6 +150,8 @@ const exactAuthorization = (() => {
   if (!authorization) throw new Error('Missing exact #3537 base-owned authorization fixture');
   return authorization;
 })();
+const EXPIRES_AT = exactAuthorization.expiresAt;
+const EXPIRY_INSTANT = Date.parse(EXPIRES_AT);
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -277,14 +279,23 @@ describe('generated-artifact base trust root workflow', () => {
       [3538, 'dev'],
       [3539, 'dev'],
       [3541, 'dev'],
+      [3572, 'dev'],
+      [3588, 'dev'],
+      [3602, 'dev'],
+      [3603, 'dev'],
+      [3610, 'dev'],
+      [3651, 'dev'],
+      [3660, 'dev'],
       [3690, 'main'],
       [3692, 'dev'],
+      [3697, 'dev'],
       [3749, 'main'],
+      [3772, 'dev'],
     ]);
     expect(manifest.authorizations.find(entry => entry.pullNumber === 3538)).toMatchObject({
       targetRef: 'dev',
-      headSha: 'e798c12426f1f11701dede43a0f35c183651627e',
-      mergeBaseSha: '10078ece166ad36332390ecbaab2d5e247852bbc',
+      headSha: '24e4e2f0e92dc4c4f61636d32fc411614fae3728',
+      mergeBaseSha: '3219495628cbf7680632f37e261351929508f295',
     });
   });
 
@@ -327,7 +338,7 @@ describe('generated-artifact base-owned authorization decision', () => {
       mergeBaseSha: MERGE_BASE_SHA,
       headSha: HEAD_SHA,
       owner: OWNER,
-      expiresAt: '2026-08-05T00:00:00.000Z',
+      expiresAt: '2026-08-19T00:00:00.000Z',
       generatedDelta: {
         count: 199,
         sha256: '3c1987d239441a787e5428d38b74e9bff51d694ad554d9fe34eae72cd78b059f',
@@ -620,6 +631,93 @@ describe('generated-artifact base-owned authorization decision', () => {
       input.files.push({ status: 'added', filename: 'dist/extra.js', sha: 'd'.repeat(40) });
       input.livePull.changed_files += 1;
     }, 'authorized closure');
+  });
+
+  it('enforces the exact expiry boundary of the authorized manifest entry', () => {
+    const lastValid = authorizedInput();
+    lastValid.now = new Date(EXPIRY_INSTANT - 1);
+    expect(verifier.evaluateGeneratedArtifactAuthorization(lastValid)).toMatchObject({ allowed: true });
+
+    const expired = authorizedInput();
+    expired.now = new Date(EXPIRY_INSTANT);
+    expect(verifier.evaluateGeneratedArtifactAuthorization(expired)).toEqual({
+      allowed: false,
+      reason: 'generated-artifact authorization has expired',
+    });
+
+    const farFuture = authorizedInput();
+    farFuture.now = new Date('2999-01-01T00:00:00.000Z');
+    expect(verifier.evaluateGeneratedArtifactAuthorization(farFuture)).toEqual({
+      allowed: false,
+      reason: 'generated-artifact authorization has expired',
+    });
+  });
+
+  it('keeps the live decision green under a wall clock far past the fixture expiry', async () => {
+    // #3759 regression: the live path must consult the injected fixture clock,
+    // never the system clock. Freeze the system clock far past every manifest
+    // expiry and prove the exact-head live verification still authorizes.
+    vi.useFakeTimers({
+      now: new Date('2999-01-01T00:00:00.000Z'),
+      toFake: ['Date'],
+    });
+    try {
+      expect(Date.now()).toBe(Date.parse('2999-01-01T00:00:00.000Z'));
+
+      const checkoutRoot = mkdtempSync(join(tmpdir(), 'generated-artifact-authorization-'));
+      mkdirSync(join(checkoutRoot, '.git'));
+      writeFileSync(join(checkoutRoot, '.git', 'HEAD'), `${LIVE_BASE_SHA}\n`);
+      try {
+        const input = authorizedInput();
+        const fetchImpl: typeof fetch = async request => {
+          const url = new URL(
+            typeof request === 'string' ? request : request instanceof URL ? request.href : request.url,
+          );
+          const path = `${url.pathname}${url.search}`;
+          let body: unknown;
+          if (path === `/repos/${REPOSITORY}`) body = input.repositoryMetadata;
+          else if (path === `/repos/${REPOSITORY}/commits/main`) body = input.runtimeCommit;
+          else if (path === `/repos/${REPOSITORY}/pulls/${PULL_NUMBER}`) body = input.livePull;
+          else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=1')) body = input.files.slice(0, 100);
+          else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=2')) body = input.files.slice(100);
+          else if (path.includes(`/pulls/${PULL_NUMBER}/files`) && path.endsWith('page=3')) body = [];
+          else if (path.startsWith(`/repos/${REPOSITORY}/compare/`)) body = input.compare;
+          else if (path === `/repos/${REPOSITORY}/commits/${HEAD_SHA}`) body = input.commit;
+          else if (path === '/graphql') body = { data: { repository: { object: input.signature } } };
+          else throw new Error(`Unexpected GitHub API path ${path}`);
+          return { ok: true, json: async () => body } as Response;
+        };
+
+        await expect(
+          verifier.verifyLiveGeneratedArtifactAuthorization({
+            event: input.event,
+            manifest: input.manifest,
+            environment: input.environment,
+            token: 'test-token',
+            fetchImpl,
+            repositoryRoot: checkoutRoot,
+            now: input.now,
+          }),
+        ).resolves.toMatchObject({ requiresAuthorization: true, pullNumber: PULL_NUMBER });
+
+        // The same live input must fail closed without the injected clock once
+        // the real (faked far-future) clock is consulted: expiry still bites.
+        await expect(
+          verifier.verifyLiveGeneratedArtifactAuthorization({
+            event: input.event,
+            manifest: input.manifest,
+            environment: input.environment,
+            token: 'test-token',
+            fetchImpl,
+            repositoryRoot: checkoutRoot,
+          }),
+        ).rejects.toThrow('generated-artifact authorization has expired');
+      } finally {
+        rmSync(checkoutRoot, { recursive: true, force: true });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('requires exact authorization for generated-path rename, copy, and deletion records', () => {

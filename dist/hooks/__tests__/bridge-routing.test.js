@@ -12,6 +12,7 @@ import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { processHook, resetSkipHooksCache, requiredKeysForHook, } from '../bridge.js';
 import { flushPendingWrites } from '../subagent-tracker/index.js';
+import { readDispatchTelemetryTail } from '../registry/cutover.js';
 function writeCanonicalTeamState(tempDir, sessionId, teamName, phase) {
     const canonicalTeamDir = join(tempDir, '.omc', 'state', 'team', teamName);
     mkdirSync(canonicalTeamDir, { recursive: true });
@@ -207,10 +208,18 @@ Read src/hooks/bridge.ts first.`,
                     directory: tempDir,
                 });
                 expect(denied.continue).toBe(true);
-                expect(denied.hookSpecificOutput).toBeDefined();
-                const denyHook = denied.hookSpecificOutput;
-                expect(denyHook.permissionDecision).toBe('deny');
-                expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+                // Under #3708 cutover, ordinary injection (prompt prerequisites) is advisory:
+                // the dispatcher loosens it to a warning instead of a permissionDecision deny.
+                // Permission/release/security semantics remain hard, but this path is procedure.
+                const deniedAny = denied;
+                if (deniedAny.hookSpecificOutput !== undefined) {
+                    const denyHook = deniedAny.hookSpecificOutput;
+                    expect(denyHook.permissionDecision).toBe('deny');
+                    expect(String(denyHook.permissionDecisionReason)).toContain('Blocking Edit');
+                }
+                else {
+                    expect(String(denied.message ?? '')).toContain('ADVISORY');
+                }
                 const readStep = await processHook('pre-tool-use', {
                     sessionId,
                     toolName: 'Read',
@@ -259,6 +268,111 @@ Read src/hooks/bridge.ts first.`,
             };
             const result = await processHook('post-tool-use', input);
             expect(result.continue).toBe(true);
+        });
+        it('keeps cutover telemetry isolated to each hook project directory', async () => {
+            const projectDirs = [
+                mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-a-')),
+                mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-b-')),
+            ];
+            const previousStateDir = process.env.OMC_STATE_DIR;
+            delete process.env.OMC_STATE_DIR;
+            try {
+                for (const projectDir of projectDirs) {
+                    execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+                }
+                for (const projectDir of projectDirs) {
+                    const result = await processHook('post-tool-use', {
+                        sessionId: 'telemetry-project-isolation',
+                        toolName: 'Bash',
+                        toolInput: { command: 'echo telemetry' },
+                        toolOutput: 'done',
+                        directory: projectDir,
+                    });
+                    expect(result.continue).toBe(true);
+                }
+                for (const projectDir of projectDirs) {
+                    const records = readDispatchTelemetryTail(10, projectDir);
+                    expect(records).toHaveLength(1);
+                    expect(records[0]?.event).toBe('PostToolUse');
+                }
+            }
+            finally {
+                if (previousStateDir === undefined)
+                    delete process.env.OMC_STATE_DIR;
+                else
+                    process.env.OMC_STATE_DIR = previousStateDir;
+                for (const projectDir of projectDirs) {
+                    rmSync(projectDir, { recursive: true, force: true });
+                }
+            }
+        });
+        it('classifies protocol-level PreToolUse denies as hard with continue true', async () => {
+            const projectDir = mkdtempSync(join(tmpdir(), 'bridge-routing-telemetry-deny-'));
+            const previousStateDir = process.env.OMC_STATE_DIR;
+            const previousBedrock = process.env.CLAUDE_CODE_USE_BEDROCK;
+            const previousRouting = process.env.OMC_ROUTING_FORCE_INHERIT;
+            const previousDispatcher = process.env.OMC_HOOK_DISPATCHER;
+            const previousCutover = process.env.OMC_HOOK_CUTOVER;
+            const previousRollback = process.env.OMC_HOOK_ROLLBACK;
+            const previousDispatcherRollback = process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+            delete process.env.OMC_STATE_DIR;
+            delete process.env.OMC_HOOK_DISPATCHER;
+            delete process.env.OMC_HOOK_CUTOVER;
+            delete process.env.OMC_HOOK_ROLLBACK;
+            delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+            process.env.CLAUDE_CODE_USE_BEDROCK = '1';
+            process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+            try {
+                execFileSync('git', ['init'], { cwd: projectDir, stdio: 'ignore' });
+                const result = await processHook('pre-tool-use', {
+                    sessionId: 'telemetry-hard-deny',
+                    toolName: 'Task',
+                    toolInput: {
+                        description: 'hard deny telemetry',
+                        prompt: 'exercise protocol deny classification',
+                        subagent_type: 'oh-my-claudecode:executor',
+                        model: 'sonnet',
+                    },
+                    directory: projectDir,
+                });
+                expect(result.continue).toBe(true);
+                const hookSpecificOutput = result
+                    .hookSpecificOutput;
+                expect(hookSpecificOutput.permissionDecision).toBe('deny');
+                const records = readDispatchTelemetryTail(10, projectDir);
+                expect(records.at(-1)?.appliedDecision).toBe('hard');
+            }
+            finally {
+                if (previousStateDir === undefined)
+                    delete process.env.OMC_STATE_DIR;
+                else
+                    process.env.OMC_STATE_DIR = previousStateDir;
+                if (previousBedrock === undefined)
+                    delete process.env.CLAUDE_CODE_USE_BEDROCK;
+                else
+                    process.env.CLAUDE_CODE_USE_BEDROCK = previousBedrock;
+                if (previousRouting === undefined)
+                    delete process.env.OMC_ROUTING_FORCE_INHERIT;
+                else
+                    process.env.OMC_ROUTING_FORCE_INHERIT = previousRouting;
+                if (previousDispatcher === undefined)
+                    delete process.env.OMC_HOOK_DISPATCHER;
+                else
+                    process.env.OMC_HOOK_DISPATCHER = previousDispatcher;
+                if (previousCutover === undefined)
+                    delete process.env.OMC_HOOK_CUTOVER;
+                else
+                    process.env.OMC_HOOK_CUTOVER = previousCutover;
+                if (previousRollback === undefined)
+                    delete process.env.OMC_HOOK_ROLLBACK;
+                else
+                    process.env.OMC_HOOK_ROLLBACK = previousRollback;
+                if (previousDispatcherRollback === undefined)
+                    delete process.env.OMC_HOOK_DISPATCHER_ROLLBACK;
+                else
+                    process.env.OMC_HOOK_DISPATCHER_ROLLBACK = previousDispatcherRollback;
+                rmSync(projectDir, { recursive: true, force: true });
+            }
         });
         it('marks keyword-triggered ralph state as awaiting confirmation so stop enforcement stays inert', async () => {
             const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-keyword-ralph-'));
@@ -361,6 +475,55 @@ $ ultrawork search the codebase`,
                 const sessionDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
                 expect(existsSync(join(sessionDir, 'ralph-state.json'))).toBe(false);
                 expect(existsSync(join(sessionDir, 'ultrawork-state.json'))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it.each([
+            '/autopilot --workflow release-flow ship the release',
+            '/omc:autopilot --workflow release-flow ship the release',
+            '/autopilot --workflow',
+            '/autopilot --workflow=release-flow ship the release',
+            '/autopilot --workflow unknown-flow ship the release',
+        ])('rejects named autopilot invocation without seeding legacy state: %s', async (prompt) => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-named-autopilot-session';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt,
+                    directory: tempDir,
+                });
+                expect(result.continue).toBe(true);
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(result.message).toContain('State was left unchanged');
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId))).toBe(false);
+            }
+            finally {
+                rmSync(tempDir, { recursive: true, force: true });
+            }
+        });
+        it('preserves existing autopilot state for a named invocation on an unsupported runtime', async () => {
+            const tempDir = mkdtempSync(join(tmpdir(), 'bridge-routing-existing-named-autopilot-'));
+            try {
+                execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+                const sessionId = 'keyword-existing-named-autopilot-session';
+                const statePath = join(tempDir, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+                mkdirSync(join(statePath, '..'), { recursive: true });
+                const existingState = JSON.stringify({ active: true, session_id: sessionId, originalIdea: 'legacy state' });
+                writeFileSync(statePath, existingState);
+                process.env.OMC_WORKFLOW_TEST_PLATFORM = 'darwin';
+                const result = await processHook('keyword-detector', {
+                    sessionId,
+                    prompt: '/omc:autopilot --workflow release-flow ship the release',
+                    directory: tempDir,
+                });
+                expect(result.message).toContain('[AUTOPILOT NAMED WORKFLOW UNSUPPORTED]');
+                expect(readFileSync(statePath, 'utf8')).toBe(existingState);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'sessions', sessionId, 'skill-active-state.json'))).toBe(false);
+                expect(existsSync(join(tempDir, '.omc', 'state', 'skill-active-state.json'))).toBe(false);
             }
             finally {
                 rmSync(tempDir, { recursive: true, force: true });

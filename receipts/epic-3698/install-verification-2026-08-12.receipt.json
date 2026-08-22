@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "install-verification",
+  "issue": 3712,
+  "createdAt": "2026-08-12T20:30:00Z",
+  "payload": {
+    "base": "570028b24edea9878b0d003bcbf1cb184d8fa47c",
+    "scope": "installation verification independent of unmerged epic children, executed against exact origin/dev head in an isolated clone and scratch HOME",
+    "results": [
+      { "command": "npm ci --ignore-scripts", "verdict": "passed", "evidence": "clean dependency install in /tmp/omc-dev-verify at 570028b24edea9878b0d003bcbf1cb184d8fa47c" },
+      { "command": "npm run build", "verdict": "passed", "evidence": "tsc + all build:* steps completed; bridge/cli.cjs, runtime-cli.cjs, team-mcp.cjs, claude-md-coordinator.cjs built" },
+      { "command": "npm pack", "verdict": "passed", "evidence": "oh-my-claude-sisyphus-4.15.10.tgz, 5169 files, shasum ce52508047bbeb3646905794acc3fc42937f0558" },
+      { "command": "npm install -g --prefix /tmp/omc-install-prefix <tarball>", "verdict": "passed", "evidence": "added 145 packages; no install-script failure" },
+      { "command": "omc --version (scratch HOME)", "verdict": "passed", "evidence": "printed 4.15.10, matching package.json" },
+      { "command": "omc doctor conflicts (scratch HOME)", "verdict": "passed", "evidence": "exit 0; 'No conflicts detected / OMC is properly configured'" },
+      { "command": "node scripts/generate-inventory-graph.mjs --verify", "verdict": "passed", "evidence": "baseline current; public=95 internal=1258 generated=4328 prompt=40; nodes=6103 edges=6695; provenance base=05c800f40d1a planningHead=0a91273e61db head=570028b24ede" },
+      { "command": "alias resolver smoke: resolveWorkflowInputWithWarning('autopilot','s1') twice (scratch OMC_STATE_DIR)", "verdict": "passed", "evidence": "first call warned once ('Alias \"autopilot\" is deprecated → use \"execute\" (Tier-0)'), second call suppressed; alias-telemetry.jsonl retained both events (warned=true and warned=false); alias-receipts.json migration receipt emitted with byAlias/byCanonical counts" }
+    ],
+    "note": "No release, tag, publish, or main mutation was performed or attempted. The npm pack artifact was installed only into a scratch prefix and is not published."
+  }
+}

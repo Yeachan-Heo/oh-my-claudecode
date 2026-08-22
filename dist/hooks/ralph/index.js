@@ -25,13 +25,13 @@ export {
 // File operations
 readPrd, writePrd, findPrdPath, getPrdPath, getOmcPrdPath, getSessionPrdPath, getLegacyStatePrdPath, 
 // PRD status & operations
-getPrdStatus, markStoryComplete, markStoryIncomplete, markStoryArchitectVerified, getStory, getNextStory, 
+getPrdStatus, markStoryComplete, markStoryIncomplete, markStoryArchitectVerified, getStory, getNextStory, amendCriterion, supersedeCriterion, 
 // PRD creation
 createPrd, createSimplePrd, initPrd, ensurePrdForStartup, 
 // Formatting
-formatPrdStatus, formatStory, formatPrd, formatNextStoryPrompt, 
+formatPrdStatus, formatStory, formatPrd, formatNextStoryPrompt, formatCriterionAmendments, 
 // Constants
-PRD_FILENAME, PRD_EXAMPLE_FILENAME } from './prd.js';
+PRD_FILENAME, PRD_EXAMPLE_FILENAME, MIN_CRITERION_EVIDENCE_LENGTH } from './prd.js';
 // ============================================================================
 // Ralph Progress (Memory Persistence)
 // ============================================================================
@@ -54,4 +54,14 @@ readVerificationState, writeVerificationState, clearVerificationState,
 startVerification, recordArchitectFeedback, 
 // Prompts & detection
 getArchitectVerificationPrompt, getArchitectRejectionContinuationPrompt, detectArchitectApproval, detectArchitectRejection } from './verifier.js';
+// ============================================================================
+// Ralph PRD Stale-State Detection & Reconciliation (#3669)
+// ============================================================================
+export { 
+// Detection
+detectStalePrd, formatStalePrdWarning, getSessionEndStalePrdWarning, 
+// Reconciliation
+reconcileStalePrd, reconcileStalePrdForStartup, runObservableCheck, 
+// Constants
+PRD_RECONCILIATION_AUDIT_FILENAME, DEFAULT_STALE_PRD_AFTER_MS } from './stale-prd.js';
 //# sourceMappingURL=index.js.map

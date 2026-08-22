@@ -131,19 +131,51 @@ describe('beads-context', () => {
         });
     });
     describe('constants', () => {
-        it('BEADS_INSTRUCTIONS should contain beads CLI commands', () => {
-            expect(BEADS_INSTRUCTIONS).toContain('bd create');
-            expect(BEADS_INSTRUCTIONS).toContain('bd list');
-            expect(BEADS_INSTRUCTIONS).toContain('bd show');
-            expect(BEADS_INSTRUCTIONS).toContain('bd update');
-            expect(BEADS_INSTRUCTIONS).toContain('bd deps');
-        });
-        it('BEADS_RUST_INSTRUCTIONS should contain beads-rust CLI commands', () => {
-            expect(BEADS_RUST_INSTRUCTIONS).toContain('br create');
-            expect(BEADS_RUST_INSTRUCTIONS).toContain('br list');
-            expect(BEADS_RUST_INSTRUCTIONS).toContain('br show');
-            expect(BEADS_RUST_INSTRUCTIONS).toContain('br update');
-            expect(BEADS_RUST_INSTRUCTIONS).toContain('br deps');
+        const instructionContracts = [
+            {
+                instructions: BEADS_INSTRUCTIONS,
+                commands: [
+                    'bd create "title"',
+                    'bd list',
+                    'bd show <id>',
+                    'bd close <id>',
+                    'bd dep add <id> <depends-on-id>',
+                    'Add a dependency: <id> depends on <depends-on-id>',
+                    'bd update abc123 --status in_progress',
+                    'bd close abc123',
+                ],
+                invalidCommands: [
+                    /`bd\s+update\s+[^`\n]*\s--status\s+done`/,
+                    /`bd\s+deps\b[^`\n]*`/,
+                    /`bd\s+dep(?:s)?\b[^`\n]*\s--add\b[^`\n]*`/,
+                ],
+            },
+            {
+                instructions: BEADS_RUST_INSTRUCTIONS,
+                commands: [
+                    'br create "title"',
+                    'br list',
+                    'br show <id>',
+                    'br close <id>',
+                    'br dep add <id> <depends-on-id>',
+                    'Add a dependency: <id> depends on <depends-on-id>',
+                    'br update abc123 --status in_progress',
+                    'br close abc123',
+                ],
+                invalidCommands: [
+                    /`br\s+update\s+[^`\n]*\s--status\s+done`/,
+                    /`br\s+deps\b[^`\n]*`/,
+                    /`br\s+dep(?:s)?\b[^`\n]*\s--add\b[^`\n]*`/,
+                ],
+            },
+        ];
+        it.each(instructionContracts)('contains valid exact commands and rejects obsolete syntax', ({ instructions, commands, invalidCommands }) => {
+            for (const command of commands) {
+                expect(instructions).toContain(command);
+            }
+            for (const invalidCommand of invalidCommands) {
+                expect(instructions).not.toMatch(invalidCommand);
+            }
         });
     });
 });

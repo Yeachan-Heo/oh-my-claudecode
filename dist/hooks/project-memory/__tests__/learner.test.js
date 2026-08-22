@@ -39,19 +39,40 @@ describe('Project Memory Learner', () => {
             const updated = await loadProjectMemory(tempDir);
             expect(updated?.build.buildCommand).toBeNull();
         });
-        it('should detect and store build commands', async () => {
+        it.each([
+            ['simple build command', 'pnpm build'],
+            ['simple test command', 'cargo test'],
+            ['arbitrary transcript with build/test substrings', 'echo "build passed; test next"'],
+            ['heredoc containing build/test substrings', 'cat <<EOF\nbuildCommand=pnpm build\ntestCommand=pnpm test\nEOF'],
+            ['copy command with build substring', 'cp build/output.js dist/output.js'],
+            ['remove command with test substring', 'rm -rf test-results'],
+            ['absolute worktree path command', '/tmp/worktrees/project/scripts/build-and-test.sh'],
+            ['compound pipeline command', 'git diff --name-only | xargs pnpm test -- --runInBand'],
+            ['echo separator command', 'echo "--- build ---" && echo "--- test ---"'],
+        ])('should not learn build/test commands from Bash PostToolUse commands: %s', async (_name, command) => {
             const memory = createBasicMemory();
+            memory.build.buildCommand = 'trusted build';
+            memory.build.testCommand = 'trusted test';
             await saveProjectMemory(tempDir, memory);
-            await learnFromToolOutput('Bash', { command: 'pnpm build' }, '', tempDir);
+            await learnFromToolOutput('Bash', { command }, 'Node.js v20.10.0', tempDir);
             const updated = await loadProjectMemory(tempDir);
-            expect(updated?.build.buildCommand).toBe('pnpm build');
+            expect(updated?.build.buildCommand).toBe('trusted build');
+            expect(updated?.build.testCommand).toBe('trusted test');
+            expect(updated?.customNotes.some(note => note.content === 'Node.js v20.10.0')).toBe(true);
         });
-        it('should detect and store test commands', async () => {
+        it.each([
+            ['heredoc', 'cat <<EOF\nnpm run build\nnpm test\nEOF'],
+            ['cp/rm', 'cp build.log /tmp/build.log && rm -rf test-output'],
+            ['absolute worktree path', '/tmp/worktrees/demo/build-test'],
+            ['compound pipeline', 'echo build | tee /tmp/log | xargs echo test'],
+            ['echo separators', 'echo "===== build/test ====="'],
+        ])('should not populate empty build/test commands from Bash command shape: %s', async (_name, command) => {
             const memory = createBasicMemory();
             await saveProjectMemory(tempDir, memory);
-            await learnFromToolOutput('Bash', { command: 'cargo test' }, '', tempDir);
+            await learnFromToolOutput('Bash', { command }, '', tempDir);
             const updated = await loadProjectMemory(tempDir);
-            expect(updated?.build.testCommand).toBe('cargo test');
+            expect(updated?.build.buildCommand).toBeNull();
+            expect(updated?.build.testCommand).toBeNull();
         });
         it('should extract Node.js version from output', async () => {
             const memory = createBasicMemory();
@@ -62,6 +83,15 @@ describe('Project Memory Learner', () => {
             expect(updated?.customNotes).toHaveLength(1);
             expect(updated?.customNotes[0].category).toBe('runtime');
             expect(updated?.customNotes[0].content).toContain('Node.js');
+        });
+        it('should extract Bash output hints even when command input is missing', async () => {
+            const memory = createBasicMemory();
+            await saveProjectMemory(tempDir, memory);
+            await learnFromToolOutput('Bash', {}, 'Python 3.11.5', tempDir);
+            const updated = await loadProjectMemory(tempDir);
+            expect(updated?.build.buildCommand).toBeNull();
+            expect(updated?.build.testCommand).toBeNull();
+            expect(updated?.customNotes[0].content).toBe('Python 3.11.5');
         });
         it('should extract Python version from output', async () => {
             const memory = createBasicMemory();

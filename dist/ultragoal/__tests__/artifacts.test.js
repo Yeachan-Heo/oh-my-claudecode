@@ -60,8 +60,10 @@ describe('ultragoal artifacts', () => {
             expect(resumed.goal?.id).toBe('G001-first');
             expect(resumed.resumed).toBe(true);
             const instruction = buildClaudeGoalInstruction(started.goal, started.plan);
-            expect(instruction).toMatch(/active Claude \/goal condition/i);
+            expect(instruction).toMatch(/first confirm the active Claude \/goal for this session/i);
             expect(instruction).toMatch(/invoke \/goal/i);
+            expect(instruction).toMatch(/ask the user to type it/i);
+            expect(instruction).toMatch(/does not satisfy the PreToolUse \/goal guard/i);
             expect(instruction).toMatch(/Claude \/goal = the whole ultragoal run/i);
             expect(instruction).toMatch(/same aggregate objective as active/i);
             expect(instruction).toMatch(/do not clear the \/goal yet/i);
@@ -73,6 +75,39 @@ describe('ultragoal artifacts', () => {
             expect(instruction).not.toMatch(/create_goal/);
             expect(instruction).not.toMatch(/update_goal/);
             expect(instruction).not.toMatch(/\bcodex\b/i);
+        });
+    });
+    it('targets named goals, preserves attempts on resume, and rejects conflicting or ineligible ids', async () => {
+        await withTempRepo(async (cwd) => {
+            await createUltragoalPlan(cwd, {
+                brief: 'brief',
+                goals: [
+                    { title: 'First', objective: 'first' },
+                    { title: 'Second', objective: 'second' },
+                    { title: 'Third', objective: 'third' },
+                ],
+            });
+            const named = await startNextUltragoal(cwd, { goalId: 'G003-third' });
+            expect(named.goal?.id).toBe('G003-third');
+            expect(named.goal?.attempt).toBe(1);
+            const resumed = await startNextUltragoal(cwd, { goalId: 'G003-third' });
+            expect(resumed.resumed).toBe(true);
+            expect(resumed.goal?.attempt).toBe(1);
+            await expect(startNextUltragoal(cwd, { goalId: 'G002-second' })).rejects.toThrow(/active goal G003-third/);
+            const unchanged = await readUltragoalPlan(cwd);
+            expect(unchanged.activeGoalId).toBe('G003-third');
+            expect(unchanged.goals.find((goal) => goal.id === 'G002-second')?.status).toBe('pending');
+        });
+    });
+    it('requires explicit retry for a named failed goal', async () => {
+        await withTempRepo(async (cwd) => {
+            await createUltragoalPlan(cwd, { brief: 'brief', goals: [{ title: 'First', objective: 'first' }] });
+            const started = await startNextUltragoal(cwd);
+            await checkpointUltragoal(cwd, { goalId: started.goal.id, status: 'failed', evidence: 'failed' });
+            await expect(startNextUltragoal(cwd, { goalId: started.goal.id })).rejects.toThrow(/without --retry-failed/);
+            const retried = await startNextUltragoal(cwd, { goalId: started.goal.id, retryFailed: true });
+            expect(retried.goal?.id).toBe(started.goal.id);
+            expect(retried.goal?.attempt).toBe(2);
         });
     });
     it('checkpoints success, advances, and supports failed-goal retry', async () => {
@@ -274,6 +309,8 @@ describe('ultragoal artifacts', () => {
             const instruction = buildClaudeGoalInstruction(first.goal, first.plan);
             expect(instruction).toMatch(/Ultragoal active-goal handoff/);
             expect(instruction).toMatch(/fresh Claude Code session/);
+            expect(instruction).toMatch(/ask the user to type it/i);
+            expect(instruction).toMatch(/does not satisfy the PreToolUse \/goal guard/i);
             await checkpointUltragoal(cwd, {
                 goalId: first.goal.id,
                 status: 'complete',

@@ -392,18 +392,42 @@ function validateQualityGate(value) {
 export async function startNextUltragoal(cwd, options = {}) {
     const plan = await readUltragoalPlan(cwd, options.planId);
     const now = iso(options.now);
+    const named = options.goalId ? plan.goals.find((goal) => goal.id === options.goalId) : undefined;
+    if (options.goalId && !named)
+        throw new UltragoalError(`Unknown ultragoal id: ${options.goalId}`);
+    if (named?.status === 'complete')
+        throw new UltragoalError(`Cannot start ultragoal ${named.id}: it is already complete.`);
+    if (named?.status === 'review_blocked')
+        throw new UltragoalError(`Cannot start ultragoal ${named.id}: it is review-blocked.`);
     if (plan.aggregateCompletion?.status === 'complete')
         return { plan, goal: null, resumed: false, done: true };
     const existing = plan.goals.find((goal) => goal.status === 'in_progress');
     if (existing) {
+        if (options.goalId && options.goalId !== existing.id) {
+            throw new UltragoalError(`Cannot start ultragoal ${options.goalId}: active goal ${existing.id} is already in progress.`);
+        }
         await appendLedger(cwd, { ts: now, event: 'goal_resumed', goalId: existing.id, status: existing.status, message: 'Resuming active ultragoal' }, plan.planId);
         return { plan, goal: existing, resumed: true, done: false };
     }
-    let next = plan.goals.find((goal) => goal.status === 'pending');
-    if (!next && options.retryFailed) {
-        next = plan.goals.find((goal) => goal.status === 'failed');
-        if (next)
-            await appendLedger(cwd, { ts: now, event: 'goal_retried', goalId: next.id, status: 'pending', message: next.failureReason }, plan.planId);
+    let next;
+    if (options.goalId) {
+        next = named;
+        if (!next)
+            throw new UltragoalError(`Unknown ultragoal id: ${options.goalId}`);
+        if (next.status === 'failed' && !options.retryFailed) {
+            throw new UltragoalError(`Cannot start failed ultragoal ${next.id} without --retry-failed.`);
+        }
+        if (next.status !== 'pending' && next.status !== 'failed') {
+            throw new UltragoalError(`Cannot start ultragoal ${next.id} while it is ${next.status}.`);
+        }
+    }
+    else {
+        next = plan.goals.find((goal) => goal.status === 'pending');
+        if (!next && options.retryFailed)
+            next = plan.goals.find((goal) => goal.status === 'failed');
+    }
+    if (next?.status === 'failed') {
+        await appendLedger(cwd, { ts: now, event: 'goal_retried', goalId: next.id, status: 'pending', message: next.failureReason }, plan.planId);
     }
     if (!next)
         return { plan, goal: null, resumed: false, done: isUltragoalDone(plan) };

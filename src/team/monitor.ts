@@ -33,7 +33,7 @@ import type {
   TeamSummaryPerformance,
 } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
-import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 
 // ---------------------------------------------------------------------------
@@ -110,6 +110,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isSafeCounter(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+export function isValidPersistedMaxWorkers(value: unknown): value is number | undefined {
+  return value === undefined || (isSafeCounter(value) && value >= 1);
 }
 
 function isTimestamp(value: unknown): value is string {
@@ -204,7 +208,7 @@ function isTeamConfig(value: unknown, requireRevision: boolean, expectedTeamName
     || (value.task !== undefined && typeof value.task !== 'string')
     || (value.worker_launch_mode !== undefined && !['interactive', 'prompt'].includes(value.worker_launch_mode as string))
     || !isSafeCounter(value.worker_count)
-    || (value.max_workers !== undefined && !isSafeCounter(value.max_workers))
+    || !isValidPersistedMaxWorkers(value.max_workers)
     || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
     || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
     || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
@@ -358,7 +362,7 @@ export async function readTeamConfig(teamName: string, cwd: string): Promise<Tea
     workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
     worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
     next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-    max_workers: Math.max(config.max_workers ?? 0, 20),
+    max_workers: resolveMaxWorkers(config.max_workers),
   });
 }
 

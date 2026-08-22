@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [v4.x → v5.0: Workflow Retirement](#v4x--v50-workflow-retirement)
 - [Unreleased: Team MCP Runtime Deprecation (CLI-Only)](#unreleased-team-mcp-runtime-deprecation-cli-only)
 - [Unreleased: Native Team Worktree Mode (Opt-In)](#unreleased-native-team-worktree-mode-opt-in)
 - [v3.5.3 → v3.5.5: Test Fixes & Cleanup](#v353--v355-test-fixes--cleanup)
@@ -13,6 +14,89 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
 - [v3.0 → v3.1: Notepad Wisdom & Enhanced Features](#v30--v31-notepad-wisdom--enhanced-features)
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
+
+---
+
+## v4.x → v5.0: Workflow Retirement
+
+### TL;DR
+
+17 workflow names were **removed outright**, not kept as aliases. The public
+surface is now four canonical workflows — `plan` → `execute` → `review` →
+`verify` — plus a small set of independent workflows and utilities.
+
+If you use `/ultrawork`, `/ultraqa`, `/ccg`, `/sciomc`, `/deep-dive`,
+`/omc-teams`, `/setup`, `/mcp-setup`, `/learner`, or `/writer-memory`, those
+names no longer resolve. Use the replacement in the table below.
+
+### Removed skills and commands
+
+| Removed                | Replacement                              | Notes                                                        |
+| ---------------------- | ---------------------------------------- | ------------------------------------------------------------ |
+| `ultrawork`            | `/oh-my-claudecode:execute` or `/team`   | Use `/team` when you want coordinated parallel workers        |
+| `ultrapilot`           | `/oh-my-claudecode:team`                 | Declared-only; never shipped as a skill file                  |
+| `swarm`                | `/oh-my-claudecode:team`                 | Declared-only                                                 |
+| `pipeline`             | `/oh-my-claudecode:execute`              | Declared-only                                                 |
+| `ultraqa`              | `/oh-my-claudecode:verify`               |                                                               |
+| `merge-readiness`      | `/oh-my-claudecode:review`               | Advisory review; release hard checks are unchanged            |
+| `deep-dive`            | `/oh-my-claudecode:research`             |                                                               |
+| `sciomc`               | `/oh-my-claudecode:research`             |                                                               |
+| `ccg`                  | `/oh-my-claudecode:ask` + `/team`        | Run `/ask codex` and `/ask antigravity`, then synthesize      |
+| `omc-teams`            | `/oh-my-claudecode:team` or `omc team`   |                                                               |
+| `setup`                | `/oh-my-claudecode:omc-setup`            |                                                               |
+| `mcp-setup`            | `/oh-my-claudecode:omc-setup`            |                                                               |
+| `omc-reference`        | `/oh-my-claudecode:wiki`                 | Model-routing reference moved into the wiki skill             |
+| `learner`              | `/oh-my-claudecode:remember`             |                                                               |
+| `writer-memory`        | `/oh-my-claudecode:remember`             |                                                               |
+| `local-build-reminder` | —                                        | Removed; docs and CI cover the rebuild signal                 |
+| `understanding-gate`   | `/oh-my-claudecode:review`               | Frontmatter alias of the removed merge-readiness              |
+
+Command files removed alongside their skills: `ccg.md`, `deep-dive.md`,
+`learner.md`, `mcp-setup.md`, `omc-teams.md`, `sciomc.md`, `writer-memory.md`.
+
+### What is kept
+
+These were **not** retired, despite routing into the canonical workflows:
+
+- **Canonical Tier-0**: `plan`, `execute`, `review`, `verify`
+- **Independent Tier-0 planning**: `deep-interview`, `ralplan`
+- **Directly invocable workflows**: `autopilot`, `autoresearch`, `ultragoal`, `ralph`
+- **Internal lanes**: `team`, `research`
+- **Surviving aliases**: `psm` → `project-session-manager`, `release` → maintainer-only `omc release`
+
+### Newly available to everyone
+
+`verify`, `remember`, and `debug` were previously gated behind an internal
+entitlement (`USER_TYPE=ant`). They now install for all users — `verify`
+completes the canonical chain and `remember` is the target for the retired
+`learner`/`writer-memory`.
+
+### Installed names
+
+Two skills install under an `omc-` prefix because their names collide with
+Claude Code native commands:
+
+| Skill    | Installed as |
+| -------- | ------------ |
+| `plan`   | `omc-plan`   |
+| `review` | `omc-review` |
+
+### Migration Steps
+
+1. Update any scripts, docs, or prompts that invoke a removed name.
+2. Run `omc setup` (or `/oh-my-claudecode:omc-setup`). The installer prunes the
+   retired skill directories automatically — no manual cleanup needed.
+3. If you pinned a removed skill in `.claude/settings.json` or a project
+   `CLAUDE.md`, replace it using the table above.
+
+### Why these were removed rather than aliased
+
+The alias retirement policy normally requires ≥2 minor releases, ≥90 days, and
+≥95% canonical usage before a name can be removed. A major version is the
+sanctioned place for breaking removals, so 5.0.0 applies a major-boundary
+carve-out (`isMajorBoundaryRemoval`). The carve-out does **not** waive the
+critical-integrations check — an alias with a known critical consumer still
+blocks.
 
 ---
 

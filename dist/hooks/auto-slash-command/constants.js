@@ -16,11 +16,11 @@ export const SLASH_COMMAND_PATTERN = /^\/([a-zA-Z][\w-]*)\s*(.*)/;
  * (they have special handling elsewhere or are now skills with oh-my-claudecode: prefix)
  */
 export const EXCLUDED_COMMANDS = new Set([
-    'ralph',
+    // ralph / ultraqa / learner were retired in 5.0.0; execute and verify cover them.
     'oh-my-claudecode:ralplan',
-    'oh-my-claudecode:ultraqa',
+    'oh-my-claudecode:execute',
+    'oh-my-claudecode:verify',
     'oh-my-claudecode:skillify',
-    'oh-my-claudecode:learner',
     'oh-my-claudecode:plan',
     'oh-my-claudecode:cancel',
     // Claude Code built-in commands that shouldn't be expanded

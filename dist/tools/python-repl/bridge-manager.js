@@ -119,8 +119,7 @@ async function ensurePythonEnvironment(projectRoot) {
         // python3 not available
     }
     throw new Error('No Python environment found. Create a virtual environment first:\n' +
-        '  python -m venv .venv\n' +
-        '  .venv/bin/pip install pandas numpy matplotlib');
+        '  python -m venv .venv');
 }
 // =============================================================================
 // PROCESS IDENTITY VERIFICATION

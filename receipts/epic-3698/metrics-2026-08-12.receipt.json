@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "kind": "metrics-snapshot",
+  "issue": 3712,
+  "createdAt": "2026-08-12T20:30:00Z",
+  "payload": {
+    "skills": 41,
+    "commands": 28,
+    "hookFiles": 294,
+    "workflows": 8,
+    "agentDefinitions": 18,
+    "promptLikeFiles": 40,
+    "measurementSha256": "ea861d86186cab95a9ac70df2f0e3c9442851e5d19620b75c4664b56117dcab7",
+    "base": "570028b24edea9878b0d003bcbf1cb184d8fa47c",
+    "measuredAt": "origin/dev exact head 570028b24edea9878b0d003bcbf1cb184d8fa47c via scripts/inventory-issue-3698.mjs",
+    "inventoryGraphVerify": "node scripts/generate-inventory-graph.mjs --verify -> ok (public=95 internal=1258 generated=4328 prompt=40; nodes=6103 edges=6695)"
+  }
+}

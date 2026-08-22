@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 describe('Type Tests', () => {
     describe('ModelType', () => {
         it('should accept valid model types', () => {
-            const validTypes = ['sonnet', 'opus', 'haiku', 'inherit'];
-            expect(validTypes).toHaveLength(4);
+            const validTypes = ['sonnet', 'opus', 'haiku', 'fable', 'inherit'];
+            expect(validTypes).toHaveLength(5);
         });
     });
     describe('AgentConfig', () => {

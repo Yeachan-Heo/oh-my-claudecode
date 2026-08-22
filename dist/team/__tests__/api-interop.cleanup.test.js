@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 const { shutdownTeamV2Mock, shutdownTeamMock } = vi.hoisted(() => ({
-    shutdownTeamV2Mock: vi.fn(async () => { }),
+    shutdownTeamV2Mock: vi.fn(async () => ({ outcome: 'cleaned' })),
     shutdownTeamMock: vi.fn(async () => { }),
 }));
 vi.mock('../runtime-v2.js', async (importOriginal) => {

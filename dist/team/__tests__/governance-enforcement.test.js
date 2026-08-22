@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { shutdownTeamV2 } from '../runtime-v2.js';
@@ -21,6 +21,7 @@ describe('team governance enforcement', () => {
         const teamName = 'approval-team';
         await writeJson(`.omc/state/team/${teamName}/config.json`, {
             name: teamName,
+            state_revision: 2,
             task: 'test',
             agent_type: 'claude',
             worker_launch_mode: 'interactive',
@@ -45,6 +46,7 @@ describe('team governance enforcement', () => {
         await writeJson(`.omc/state/team/${teamName}/manifest.json`, {
             schema_version: 2,
             name: teamName,
+            state_revision: 1,
             task: 'test',
             leader: { session_id: 's1', worker_id: 'leader-fixed', role: 'leader' },
             policy: {
@@ -55,7 +57,7 @@ describe('team governance enforcement', () => {
             },
             governance: {
                 delegation_only: false,
-                plan_approval_required: true,
+                plan_approval_required: false,
                 nested_teams_allowed: false,
                 one_team_per_leader_session: true,
                 cleanup_requires_all_workers_inactive: true,
@@ -97,8 +99,20 @@ describe('team governance enforcement', () => {
             decision_reason: 'approved',
             decided_at: new Date().toISOString(),
         });
-        const claimed = await teamClaimTask(teamName, '1', 'worker-1', null, cwd);
-        expect(claimed.ok).toBe(true);
+        const previousAttemptId = process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
+        process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = 'attempt-current';
+        try {
+            const claimed = await teamClaimTask(teamName, '1', 'worker-1', null, cwd);
+            expect(claimed.ok).toBe(true);
+            const task = JSON.parse(await readFile(join(cwd, `.omc/state/team/${teamName}/tasks/task-1.json`), 'utf-8'));
+            expect(task.claim?.launch_attempt_id).toBe('attempt-current');
+        }
+        finally {
+            if (previousAttemptId === undefined)
+                delete process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID;
+            else
+                process.env.OMC_WORKER_LAUNCH_ATTEMPT_ID = previousAttemptId;
+        }
     });
     it('allows shutdown cleanup override when governance disables inactive-worker requirement', async () => {
         const teamName = 'cleanup-team';
@@ -118,7 +132,7 @@ describe('team governance enforcement', () => {
             max_workers: 20,
             workers: [],
             created_at: new Date().toISOString(),
-            tmux_session: '',
+            tmux_session: `${teamName}:0`,
             next_task_id: 2,
             leader_pane_id: null,
             hud_pane_id: null,
@@ -132,7 +146,7 @@ describe('team governance enforcement', () => {
             status: 'pending',
             created_at: new Date().toISOString(),
         });
-        await expect(shutdownTeamV2(teamName, cwd)).resolves.toBeUndefined();
+        await expect(shutdownTeamV2(teamName, cwd)).resolves.toEqual({ outcome: 'cleaned' });
     });
 });
 //# sourceMappingURL=governance-enforcement.test.js.map

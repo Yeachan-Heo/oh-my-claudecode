@@ -14,6 +14,7 @@ import { readFileSync } from "fs";
 import { basename, join } from "path";
 import { writeModeState, readModeState, clearModeStateFile, } from "../../lib/mode-state-io.js";
 import { ensurePrdForStartup, findPrdPath, readPrd, getPrdStatus, formatNextStoryPrompt, formatPrdStatus, } from "./prd.js";
+import { detectStalePrd, formatStalePrdWarning, reconcileStalePrdForStartup, } from "./stale-prd.js";
 import { findProgressPath, getProgressContext, appendProgress, initProgress, addPattern, } from "./progress.js";
 import { readUltraworkState as readUltraworkStateFromModule, writeUltraworkState as writeUltraworkStateFromModule, } from "../ultrawork/index.js";
 import { resolveSessionStatePath, getOmcRoot, } from "../../lib/worktree-paths.js";
@@ -180,6 +181,14 @@ export function createRalphLoopHook(directory) {
             console.error(`[RALPH PRD REQUIRED] ${startupPrd.error}`);
             return false;
         }
+        // Stale-state reconciliation (#3669): if the active PRD was left unfinished
+        // by an abnormal/non-Step 8 exit, reconcile it from configured observable
+        // evidence (bounded: content checks only, never PR/merge status) and
+        // surface any remaining divergence at the moment it is cheapest to fix.
+        const staleReconcile = reconcileStalePrdForStartup(directory, sessionId);
+        if (staleReconcile.warning) {
+            console.error(staleReconcile.warning);
+        }
         if (!findProgressPath(directory)) {
             initProgress(directory);
         }
@@ -274,6 +283,13 @@ export function getPrdCompletionStatus(directory, sessionId) {
  */
 export function getRalphContext(directory, sessionId) {
     const parts = [];
+    // Add stale-unfinished-PRD warning (#3669): the live loop excludes the
+    // active-ralph-state signal (it is the normal case here) and only reports
+    // divergence backed by age / stale-pointer signals.
+    const staleDetection = detectStalePrd(directory, sessionId, { includeAbnormalExit: false });
+    if (staleDetection?.stale) {
+        parts.push(`<stale-prd-warning>\n${formatStalePrdWarning(staleDetection)}\n</stale-prd-warning>\n`);
+    }
     // Add progress context (patterns, learnings)
     const progressContext = getProgressContext(directory);
     if (progressContext) {

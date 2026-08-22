@@ -546,40 +546,28 @@ TypeScript, JavaScript, TSX, JSX, Python, Go, Rust, Java, C, C++, C#, Ruby, Swif
 
 ## Python REPL
 
-Python REPL is a Python execution environment where state persists across calls within a session. Used for data analysis, statistical computation, visualization, and prototyping.
+Python REPL is a sandboxed Python execution environment where state persists across calls within a session. Used for in-memory data analysis, statistical computation, and prototyping.
 
 ### Tool
 
 #### `python_repl`
 
-Executes Python code and returns the result.
+Executes Python code and returns the result. Execution is sandboxed: imports, file I/O, and dynamic code execution are blocked, so code must be self-contained using built-in functions and persistent variables.
 
 ```
-python_repl(code="import json; data = json.loads('{\"key\": \"value\"}'); print(data)")
+python_repl(code="data = [3, 1, 2]; print(sorted(data))")
 ```
 
 ### Features
 
-**Persistent state:** Variables, functions, and imports defined in one call remain available in subsequent calls.
+**Persistent state:** Variables and functions defined in one call remain available in subsequent calls.
 
 ```python
 # First call
-python_repl(code="import pandas as pd; df = pd.read_csv('data.csv')")
+python_repl(code="data = [3, 1, 4, 1, 5, 9, 2, 6]")
 
-# Second call (df is still available)
-python_repl(code="print(df.describe())")
-```
-
-**Data analysis:**
-
-```python
-python_repl(code="""
-import json
-with open('.omc/research/session-1/state.json') as f:
-    state = json.load(f)
-print(f"Stages: {len(state['stages'])}")
-print(f"Status: {state['status']}")
-""")
+# Second call (data is still available)
+python_repl(code="print(sum(data) / len(data))")
 ```
 
 **Computation and transformation:**
@@ -594,21 +582,14 @@ print(f"Estimated cost: ${cost:.4f}")
 """)
 ```
 
-**File processing:**
+**In-memory analysis:**
 
 ```python
 python_repl(code="""
-import os
-
-# Project file statistics
-extensions = {}
-for root, dirs, files in os.walk('src'):
-    for f in files:
-        ext = os.path.splitext(f)[1]
-        extensions[ext] = extensions.get(ext, 0) + 1
-
-for ext, count in sorted(extensions.items(), key=lambda x: -x[1]):
-    print(f"{ext}: {count} files")
+prices = [102.5, 98.3, 101.2, 99.8, 103.1]
+print(f"Mean: {sum(prices) / len(prices):.2f}")
+print(f"Max: {max(prices)}")
+print(f"Min: {min(prices)}")
 """)
 ```
 
@@ -616,10 +597,8 @@ for ext, count in sorted(extensions.items(), key=lambda x: -x[1]):
 
 | Use Case | Description |
 |----------|-------------|
-| Data analysis | Analyze CSV/JSON files, compute statistics |
+| In-memory data analysis | Compute statistics on data constructed in code |
 | Prototyping | Validate algorithms, test logic |
-| File processing | File transformation, batch processing |
-| Visualization | Generate charts with matplotlib or plotly |
 | Computation | Math calculations, cost estimation |
 
 ### Integration with scientist Agent

@@ -13,6 +13,7 @@ import { mkdir, readFile, appendFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { TeamPaths, absPath } from './state-paths.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { countOutstandingForWorker } from './mailbox-outstanding.js';
 /**
  * Append a team event to the JSONL event log.
  * Thread-safe via atomic append (O_WRONLY|O_APPEND|O_CREAT).
@@ -105,10 +106,14 @@ export async function emitMonitorDerivedEvents(teamName, tasks, workers, previou
             }, cwd).catch(logDerivedEventFailure);
         }
         if (prevState === 'working' && worker.status.state === 'idle') {
+            const mailboxDir = dirname(absPath(cwd, TeamPaths.mailbox(teamName, worker.name)));
+            const outstanding = await countOutstandingForWorker(mailboxDir, worker.name);
             await appendTeamEvent(teamName, {
                 type: 'worker_idle',
                 worker: worker.name,
                 reason: `state_transition:${prevState}->${worker.status.state}`,
+                undelivered_inbound_count: outstanding.undeliveredInbound,
+                undelivered_outbound_count: outstanding.undeliveredOutbound,
             }, cwd).catch(logDerivedEventFailure);
         }
     }

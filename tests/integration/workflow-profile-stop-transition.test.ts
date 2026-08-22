@@ -402,12 +402,13 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     const state = workflowState(f);
     writeState(f, state);
     const signalPath = join(dirname(f.statePath), 'cancel-signal-state.json');
+    const requestedAt = Date.now();
     writeFileSync(signalPath, JSON.stringify({
       active: true,
       mode: 'autopilot',
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
       target_workflow_run_id: '22222222-2222-4222-8222-222222222222',
     }));
 
@@ -422,11 +423,12 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
   ])('does not let a deleted autopilot signal with %s cancel Ralph', (_name, marker) => {
     const f = fixture(kind);
     writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
     writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
       active: true,
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
       ...marker,
     }));
 
@@ -436,24 +438,125 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
   it('still honors a fresh targetless generic cancellation after confirming no autopilot target', () => {
     const f = fixture(kind);
     writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
     writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
       active: true,
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
     }));
 
     expect(invoke(f)).toEqual({ continue: true, suppressOutput: true });
   });
 
-  it('does not let an absent-generation exact autopilot signal suppress concurrent activation', async () => {
+  it('honors a targetless generic cancellation when exclusive locking is unavailable and no autopilot state exists', () => {
     const f = fixture(kind);
+    writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+    }));
+
+    expect(invoke(f, {}, { OMC_TEST_FLOCK_AVAILABLE: '0' })).toEqual({ continue: true, suppressOutput: true });
+  });
+
+  it('fails closed for a targetless generic cancellation while the absent autopilot state remains locked', () => {
+    const f = fixture(kind);
+    writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+    }));
+    writeFileSync(`${f.statePath}.mutation.lock`, liveLockOwner());
+
+    expect(invoke(f)).toMatchObject({ decision: 'block' });
+  });
+
+  it('rechecks a generic cancellation after concurrent autopilot activation commits under the state lock', async () => {
+    const f = fixture(kind);
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+    }));
+    const lockPath = `${f.statePath}.mutation.lock`;
+    writeFileSync(lockPath, liveLockOwner());
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 75));
+    writeState(f, workflowState(f));
+    unlinkSync(lockPath);
+
+    expect(await pending).toMatchObject({ continue: false, decision: 'block', reason: expectedStagePrompt('ralplan') });
+  });
+
+  it('fails closed when concurrent autopilot activation commits after lock retries expire', async () => {
+    const f = fixture(kind);
+    writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+    }));
+    const lockPath = `${f.statePath}.mutation.lock`;
+    writeFileSync(lockPath, liveLockOwner());
+    const pending = invokeAsync(f);
+    await new Promise(resolve => setTimeout(resolve, 600));
+    writeState(f, workflowState(f));
+    unlinkSync(lockPath);
+
+    expect(await pending).toMatchObject({ decision: 'block' });
+  });
+
+  it('does not let a target-bound autopilot signal cancel Ralph when the absent autopilot state is locked', () => {
+    const f = fixture(kind);
+    writeFileSync(join(dirname(f.statePath), 'ralph-state.json'), JSON.stringify(ralphState(f)));
+    const requestedAt = Date.now();
     writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
       active: true,
       mode: 'autopilot',
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+      target_state_sha256: '0'.repeat(64),
+    }));
+    writeFileSync(`${f.statePath}.mutation.lock`, liveLockOwner());
+
+    expect(invoke(f)).toMatchObject({ decision: 'block' });
+  });
+
+  it('does not let a generic cancellation bypass an active autopilot when exclusive locking is unavailable', () => {
+    const f = fixture(kind);
+    writeState(f, workflowState(f));
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
+    }));
+
+    expect(invoke(f, {}, { OMC_TEST_FLOCK_AVAILABLE: '0' }).reason).toBe(expectedStagePrompt('ralplan'));
+  });
+
+  it('does not let an absent-generation exact autopilot signal suppress concurrent activation', async () => {
+    const f = fixture(kind);
+    const requestedAt = Date.now();
+    writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
+      active: true,
+      mode: 'autopilot',
+      source: 'state_clear',
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
       target_state_sha256: createHash('sha256').update('{}').digest('hex'),
       target_workflow_run_id: '22222222-2222-4222-8222-222222222222',
     }));
@@ -497,7 +600,7 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       mode: 'autopilot',
       source: 'state_clear',
       requested_at: now,
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      expires_at: new Date(Date.parse(now) + 30_000).toISOString(),
       target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
     }));
 
@@ -517,12 +620,13 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
       replacement = workflowState(f);
       replacement.workflowRunId = '22222222-2222-4222-8222-222222222222';
     }
+    const requestedAt = Date.now();
     writeFileSync(join(dirname(f.statePath), 'cancel-signal-state.json'), JSON.stringify({
       active: true,
       mode: 'autopilot',
       source: 'state_clear',
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(requestedAt).toISOString(),
+      expires_at: new Date(requestedAt + 30_000).toISOString(),
       target_workflow_run_id: state.workflowRunId,
       target_state_sha256: createHash('sha256').update(JSON.stringify(readState(f))).digest('hex'),
     }));
@@ -580,10 +684,11 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(invoke(f).reason).toBe(expectedStagePrompt('ralplan'));
     expect(existsSync(signalPath)).toBe(false);
 
+    const forgedRequestedAt = Date.now();
     const forged = {
       ...expired,
-      requested_at: new Date().toISOString(),
-      expires_at: new Date(Date.now() + 30_000).toISOString(),
+      requested_at: new Date(forgedRequestedAt).toISOString(),
+      expires_at: new Date(forgedRequestedAt + 30_000).toISOString(),
       target_state_sha256: '0'.repeat(64),
     };
     writeFileSync(signalPath, JSON.stringify(forged));

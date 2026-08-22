@@ -230,12 +230,15 @@ describe('Agents Element', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
           ...createAgent('oh-my-claudecode:architect', 'opus'),
+          id: 'ae1e2be26cb41fc74',
           description: 'Analyzing code',
         },
       ];
       const result = renderAgentsByFormat(agentsWithDesc, 'descriptions');
       expect(result).toContain('A');
-      expect(result).toContain('Analyzing code');
+      expect(result).toContain('Anal');
+      // Unnamed agents get the short id appended so the row is discoverable (#3665).
+      expect(result).toContain('(ae1e2be)');
     });
 
     it('should render named teammates distinctly from anonymous subagents', () => {
@@ -256,12 +259,15 @@ describe('Agents Element', () => {
       const agentsWithDesc: ActiveAgent[] = [
         {
           ...createAgent('oh-my-claudecode:architect', 'opus'),
+          id: 'ae1e2be26cb41fc74',
           description: 'Analyzing code',
         },
       ];
       const result = renderAgentsByFormat(agentsWithDesc, 'tasks');
       expect(result).toContain('[');
-      expect(result).toContain('Analyzing code');
+      expect(result).toContain('Anal');
+      // Unnamed agents get the short id appended so the row is discoverable (#3665).
+      expect(result).toContain('(ae1e2be)');
       expect(result).not.toContain('A:'); // tasks format doesn't show codes
     });
 
@@ -487,6 +493,35 @@ describe('Agents Element', () => {
       const result = renderAgentsMultiLine(agents);
       expect(result.detailLines).toHaveLength(1);
       expect(result.detailLines[0]).toContain('...');
+    });
+    it('should append the short id for unnamed agents so the row is addressable (#3665)', () => {
+      const agents: ActiveAgent[] = [
+        {
+          ...createAgent('oh-my-claudecode:architect', 'opus'),
+          id: 'ae1e2be26cb41fc74',
+          description: 'S2 nspin4 A/B vehicle',
+        },
+      ];
+      const result = renderAgentsMultiLine(agents);
+      expect(result.detailLines).toHaveLength(1);
+      expect(result.detailLines[0]).toContain('S2 nspin4 A/B vehicle');
+      expect(result.detailLines[0]).toContain('(ae1e2be)');
+    });
+
+    it('should not add an id suffix to explicitly named agents (#3665 backward compat)', () => {
+      const agents: ActiveAgent[] = [
+        {
+          ...createAgent('oh-my-claudecode:executor', 'sonnet'),
+          id: 'ae1e2be26cb41fc74',
+          name: 'worker-1',
+          description: 'implementing teammate task',
+        },
+      ];
+      const result = renderAgentsMultiLine(agents);
+      expect(result.detailLines).toHaveLength(1);
+      expect(result.detailLines[0]).toContain('tm:worker-1');
+      expect(result.detailLines[0]).toContain('implementing teammate task');
+      expect(result.detailLines[0]).not.toContain('(ae1e2be)');
     });
 
     it('should route to multiline from renderAgentsByFormat', () => {

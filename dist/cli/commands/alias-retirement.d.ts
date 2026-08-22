@@ -1,0 +1,11 @@
+/**
+ * Alias retirement CLI — Issue #3711 / Epic #3698.
+ *
+ * Read-only, deterministic verifier + closure reporter. Never deletes files.
+ * Retire ONLY after (2 minors AND 90 days) AND (>=95% canonical share for 2
+ * consecutive releases) AND (zero critical integrations). Otherwise the
+ * receipt's `extensionReceipt` is true and blockers explain why.
+ */
+export declare const ALIAS_RETIREMENT_HELP = "omc alias-retirement - Alias retirement verifier and generated-closure inventory (issue #3711)\n\nUsage:\n  omc alias-retirement verify [options]   Verify all aliases against the retirement contract (default)\n  omc alias-retirement help               Show this help\n\nOptions:\n  --json                                 Machine-readable JSON output\n  --out <path>                           Write receipts JSON to file (implies --json content)\n  --current-version <semver>             Override current package version (default: package.json)\n  --now <ISO-8601>                       Override evaluation time (default: now)\n  --usage-history <json|path>            Mapping alias -> [{aliasCount,canonicalCount}, ...] (oldest->newest)\n  --critical-integrations <json|path>    Mapping alias -> string[] of known critical consumers\n  --check-eligible                       Exit 2 when any alias is eligible (for future deletion PRs)\n\nContract (all must be true to retire):\n  1) >=2 minor releases AND >=90 days since alias introduction (whichever is longer)\n  2) >=95% canonical share for 2 consecutive releases (per-alias, last 2 samples)\n  3) zero known critical integrations using the alias\n\nOtherwise an extension receipt is emitted; no alias or generated projection is removed here.\nEvidence:\n  Receipts are machine-readable (schemaVersion, checks, blockers, nextEligibleDate/Version).\n  Generated-closure report lists alias-owned projection paths that become deletable only after eligibility.\n";
+export declare function aliasRetirementCommand(args: string[]): Promise<void>;
+//# sourceMappingURL=alias-retirement.d.ts.map

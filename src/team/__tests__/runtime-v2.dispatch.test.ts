@@ -170,10 +170,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     mocks.resolveSplitPaneWorkerPaneIds.mockReset();
     mocks.killOwnedWorkerPane.mockClear();
     mocks.getWorkerLiveness.mockReset();
+    mocks.workerPaneBelongsToProviderTarget.mockReset();
     mocks.killTeamSession.mockResolvedValue(undefined);
     mocks.killWorkerPanes.mockResolvedValue(undefined);
     mocks.resolveSplitPaneWorkerPaneIds.mockImplementation(async (_session: string | undefined, paneIds: string[]) => paneIds);
     mocks.getWorkerLiveness.mockImplementation(async () => mocks.killOwnedWorkerPane.mock.calls.length > 0 ? 'dead' : 'alive');
+    mocks.workerPaneBelongsToProviderTarget.mockResolvedValue(true);
     mocks.execFile.mockReset();
     mocks.spawnSync.mockReset();
     modelContractMocks.buildWorkerArgv.mockReset();
@@ -996,7 +998,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalled();
   });
 
-  it('tears down the owned worker launch when startup readiness fails', async () => {
+  it('does not retain a torn-down worker pane as a future split target when startup readiness fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-ready-'));
     mocks.deliverStartupInbox.mockResolvedValueOnce({ ok: false, reason: 'readiness_timeout' });
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -1014,6 +1016,46 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
+
+  it.each(['readiness_timeout', 'copy_mode'])(
+    'uses a live pane after a cleaned %s startup failure',
+    async (failureReason) => {
+      cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-cleaned-pane-split-'));
+      const deadPaneIds = new Set<string>();
+      mocks.deliverStartupInbox.mockResolvedValueOnce({ ok: false, reason: failureReason });
+      mocks.nextStartupTaskId = 2;
+      mocks.killOwnedWorkerPane.mockImplementationOnce(async (...args: unknown[]) => {
+        const [ownership] = args as [{ paneId: string }];
+        deadPaneIds.add(ownership.paneId);
+      });
+      mocks.workerPaneBelongsToProviderTarget.mockImplementation(async (...args: unknown[]) => {
+        const [{ paneId }] = args as [{ paneId: string }];
+        return !deadPaneIds.has(paneId);
+      });
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      const runtime = await startTeamV2({
+        teamName: 'dispatch-team',
+        workerCount: 2,
+        agentTypes: ['claude', 'claude'],
+        tasks: [
+          { subject: 'First dispatch', description: 'This worker fails startup and is cleaned up' },
+          { subject: 'Second dispatch', description: 'This worker starts from a live split target' },
+        ],
+        cwd,
+      });
+
+      expect(runtime.config.workers[0]?.pane_id).toBe('%2');
+      expect(runtime.config.workers[1]).toMatchObject({ pane_id: '%3', assigned_tasks: ['2'] });
+      expect(mocks.spawnWorkerInPane).toHaveBeenNthCalledWith(
+        2,
+        'dispatch-session',
+        '%3',
+        expect.objectContaining({ workerName: 'worker-2' }),
+      );
+      expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+    },
+  );
 
   it('tears down the owned worker launch when startup notification fails', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-v2-no-autokill-notify-'));

@@ -16,7 +16,7 @@ import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES } from '../shared/types.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { TeamPaths, absPath } from './state-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
-import { normalizeTeamManifest } from './governance.js';
+import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
@@ -85,6 +85,9 @@ function isNonEmptyString(value) {
 }
 function isSafeCounter(value) {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+export function isValidPersistedMaxWorkers(value) {
+    return value === undefined || (isSafeCounter(value) && value >= 1);
 }
 function isTimestamp(value) {
     return typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -167,7 +170,7 @@ function isTeamConfig(value, requireRevision, expectedTeamName) {
         || (value.task !== undefined && typeof value.task !== 'string')
         || (value.worker_launch_mode !== undefined && !['interactive', 'prompt'].includes(value.worker_launch_mode))
         || !isSafeCounter(value.worker_count)
-        || (value.max_workers !== undefined && !isSafeCounter(value.max_workers))
+        || !isValidPersistedMaxWorkers(value.max_workers)
         || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
         || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
         || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
@@ -326,7 +329,7 @@ export async function readTeamConfig(teamName, cwd) {
         workers: [...(config.workers ?? []), ...(manifest.workers ?? [])],
         worker_count: Math.max(config.worker_count ?? 0, manifest.worker_count ?? 0),
         next_task_id: Math.max(config.next_task_id ?? 1, manifest.next_task_id ?? 1),
-        max_workers: Math.max(config.max_workers ?? 0, 20),
+        max_workers: resolveMaxWorkers(config.max_workers),
     });
 }
 /** Recovery readers keep revisioned config authoritative without changing legacy reads. */

@@ -11,12 +11,17 @@
  * Storage: session-scoped under .omc/state/sessions/{sessionId}/subagent-tracking-state.json
  * Locking:  withFileLockSync from file-lock.ts (O_CREAT|O_EXCL advisory lock)
  */
+import { type WorktreeDirtyEvidence } from './worktree-evidence.js';
 export interface SubagentInfo {
     agent_id: string;
     agent_type: string;
     started_at: string;
     parent_mode: string;
     task_description?: string;
+    /** Explicit user-chosen name (Agent tool `name`) — authoritative address. */
+    name?: string;
+    /** User-supplied description (Agent tool `description`) — display/address fallback (#3665). */
+    description?: string;
     file_ownership?: string[];
     status: "running" | "completed" | "failed";
     completed_at?: string;
@@ -28,6 +33,8 @@ export interface SubagentInfo {
     synthetic?: boolean;
     telemetry_status?: "unmatched_stop";
     telemetry_note?: string;
+    /** Bounded dirty-worktree evidence recorded on abnormal termination (#3663). */
+    worktree_evidence?: WorktreeDirtyEvidence;
 }
 export interface ToolUsageEntry {
     tool_name: string;
@@ -70,6 +77,10 @@ export interface SubagentStartInput {
     hook_event_name: "SubagentStart";
     agent_id: string;
     agent_type: string;
+    /** Explicit user-chosen name (Agent tool `name`) — authoritative address. */
+    name?: string;
+    /** User-supplied description (Agent tool `description`) — display/address fallback (#3665). */
+    description?: string;
     prompt?: string;
     model?: string;
 }

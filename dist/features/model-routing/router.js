@@ -28,10 +28,20 @@ export function routeTask(context, config = {}) {
     if (!mergedConfig.enabled) {
         return createDecision(mergedConfig.defaultTier, mergedConfig.tierModels, ['Routing disabled, using default tier'], false);
     }
-    // If explicit model is specified, respect it
+    // If explicit model is specified, respect it. Preserve the exact modelType
+    // (e.g. 'fable') instead of collapsing it to the tier default via
+    // createDecision, so explicit selection is not lost (issue #3726).
     if (context.explicitModel) {
         const explicitTier = modelTypeToTier(context.explicitModel);
-        return createDecision(explicitTier, mergedConfig.tierModels, ['Explicit model specified by user'], false, explicitTier);
+        return {
+            model: mergedConfig.tierModels[explicitTier],
+            modelType: context.explicitModel,
+            tier: explicitTier,
+            confidence: 0.7,
+            reasons: ['Explicit model specified by user'],
+            escalated: false,
+            originalTier: explicitTier,
+        };
     }
     // Check for agent-specific overrides
     if (context.agentType && mergedConfig.agentOverrides?.[context.agentType]) {
@@ -105,6 +115,7 @@ function createDecision(tier, tierModels, reasons, escalated, originalTier) {
 function modelTypeToTier(modelType) {
     switch (modelType) {
         case 'opus':
+        case 'fable': // Fable sits above Opus; both select the HIGH tier (issue #3726)
             return 'HIGH';
         case 'haiku':
             return 'LOW';
@@ -221,7 +232,7 @@ export function quickTierForAgent(agentType) {
  *
  * @param agentType - The agent to delegate to
  * @param taskPrompt - The task description
- * @returns The recommended model type ('haiku', 'sonnet', or 'opus')
+ * @returns The recommended model type ('haiku', 'sonnet', 'opus', or 'fable')
  */
 export function getModelForTask(agentType, taskPrompt, config = {}) {
     // All agents are adaptive based on task complexity

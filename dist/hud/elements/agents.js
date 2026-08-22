@@ -8,6 +8,7 @@
  */
 import { dim, RESET, getModelTierColor, getDurationColor } from '../colors.js';
 import { truncateToWidth } from '../../utils/string-width.js';
+import { shortId } from '../../features/agent-addressability/index.js';
 const CYAN = '\x1b[36m';
 // ============================================================================
 // Agent Type Codes
@@ -298,6 +299,21 @@ function truncateDescription(desc, maxWidth = 20) {
     return truncateToWidth(desc, maxWidth);
 }
 /**
+ * Truncated description for an UNNAMED agent with the short id appended, so
+ * the row stays discoverable and addressable (#3665). Display-only: the short
+ * id is never a valid address — addresses are always full and exact.
+ * Named agents keep their existing rendering (their name is the address).
+ */
+function truncateDescriptionWithId(desc, id, maxWidth) {
+    const suffix = ` (${shortId(id)})`; // " (short-id)" = 10 visual columns
+    if (!desc)
+        return `...${suffix}`;
+    // Reserve room for the suffix plus the ellipsis truncateToWidth may append,
+    // so the rendered label never exceeds maxWidth.
+    const budget = Math.max(4, maxWidth - 10 - 3);
+    return `${truncateToWidth(desc, budget)}${suffix}`;
+}
+/**
  * Get short agent type name.
  */
 function getShortAgentName(agentType) {
@@ -374,7 +390,11 @@ export function renderAgentsWithDescriptions(agents) {
         const color = getAgentDisplayColor(a);
         const teammateName = getTeammateName(a);
         const displayName = getAgentDisplayName(a);
-        const desc = truncateDescription(a.description, teammateName ? 30 : 25);
+        // Unnamed agents get the short id appended so the row maps back to an
+        // addressable agent (#3665); named agents keep their existing label.
+        const desc = teammateName
+            ? truncateDescription(a.description, 30)
+            : truncateDescriptionWithId(a.description, a.id, 25);
         const label = teammateName
             ? `${displayName}${desc ? ` ${desc}` : ""}`
             : desc;
@@ -409,7 +429,13 @@ export function renderAgentsDescOnly(agents) {
     const descriptions = running.map((a) => {
         const color = getAgentDisplayColor(a);
         const shortName = getAgentDisplayName(a);
-        const desc = a.description ? truncateDescription(a.description, 20) : shortName;
+        // Unnamed agents get the short id appended (discoverability, #3665);
+        // named agents keep their existing rendering.
+        const desc = getTeammateName(a)
+            ? a.description
+                ? truncateDescription(a.description, 20)
+                : shortName
+            : truncateDescriptionWithId(a.description, a.id, 20);
         const durationMs = now - a.startTime.getTime();
         const duration = formatDuration(durationMs);
         if (duration === '!') {
@@ -471,9 +497,12 @@ export function renderAgentsMultiLine(agents, maxLines = 5) {
         const durationMs = now - a.startTime.getTime();
         const duration = formatDurationPadded(durationMs);
         const durationColor = getDurationColor(durationMs);
-        const desc = a.description || '...';
-        // Use CJK-aware truncation (45 visual columns)
-        const truncatedDesc = truncateToWidth(desc, 45);
+        // Named agents keep their existing description column; unnamed agents get
+        // the short id appended so the row maps back to an addressable agent
+        // (#3665). CJK-aware truncation (45 visual columns).
+        const truncatedDesc = getTeammateName(a)
+            ? truncateToWidth(a.description || '...', 45)
+            : truncateDescriptionWithId(a.description, a.id, 45);
         detailLines.push(`${dim(prefix)} ${color}${code}${RESET} ${dim(shortName)}${durationColor}${duration}${RESET}  ${truncatedDesc}`);
     });
     // Add overflow indicator if needed

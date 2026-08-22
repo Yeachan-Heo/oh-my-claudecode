@@ -41,6 +41,7 @@ beforeEach(async () => {
 });
 afterEach(() => {
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
 });
 // ─── killWorkerPanes ─────────────────────────────────────────────────────────
 describe('killWorkerPanes', () => {
@@ -107,15 +108,14 @@ describe('killTeamSession', () => {
         await killTeamSession('mysession:1', ['%2', '%3'], '%1');
         expect(killedSessions).toHaveLength(0);
     });
-    it('kills worker panes in split-pane mode', async () => {
+    it('preserves worker panes when split-pane membership cannot be proven', async () => {
         await killTeamSession('mysession:1', ['%2', '%3'], '%1');
-        expect(killedPanes).toContain('%2');
-        expect(killedPanes).toContain('%3');
+        expect(killedPanes).toEqual([]);
     });
-    it('skips leaderPaneId in split-pane mode', async () => {
+    it('still skips the leader when split-pane membership is unavailable', async () => {
         await killTeamSession('mysession:1', ['%1', '%2'], '%1');
         expect(killedPanes).not.toContain('%1');
-        expect(killedPanes).toContain('%2');
+        expect(killedPanes).toEqual([]);
     });
     it('is a no-op in split-pane mode when paneIds is empty', async () => {
         await killTeamSession('mysession:1', [], '%1');
@@ -128,6 +128,7 @@ describe('killTeamSession', () => {
         expect(killedSessions).toHaveLength(0);
     });
     it('calls kill-session for session-mode sessions (no ":" in name)', async () => {
+        vi.stubEnv('TMUX', '');
         await killTeamSession('omc-team-myteam-worker1');
         expect(killedSessions).toContain('omc-team-myteam-worker1');
     });

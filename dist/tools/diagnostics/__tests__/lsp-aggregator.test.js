@@ -36,6 +36,25 @@ describe('runLspAggregatedDiagnostics', () => {
             rmSync(tmp, { recursive: true });
         }
     });
+    it('surfaces the selected basedpyright install hint without ty fallback', async () => {
+        mockGetServerForFile.mockReturnValue({
+            command: 'basedpyright-langserver',
+            installHint: 'uv tool install basedpyright'
+        });
+        mockRunWithClientLease.mockRejectedValue(new Error("Language server 'basedpyright-langserver' not found.\nInstall with: uv tool install basedpyright"));
+        const tmp = mkdtempSync(join(tmpdir(), 'lsp-agg-test-'));
+        try {
+            writeFileSync(join(tmp, 'a.py'), '');
+            const result = await runLspAggregatedDiagnostics(tmp, ['.py']);
+            expect(result.installHints).toEqual(['uv tool install basedpyright']);
+            expect(result.skippedFiles[0].reason).toBe('missing language server: basedpyright-langserver');
+            expect(result.skippedFiles[0].reason).not.toBe('missing language server: ty');
+            expect(result.success).toBe(false);
+        }
+        finally {
+            rmSync(tmp, { recursive: true });
+        }
+    });
     it('pre-check skips files with no registered language server', async () => {
         mockGetServerForFile
             .mockReturnValueOnce(null)

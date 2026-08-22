@@ -295,8 +295,8 @@ export function loadEnvConfig() {
             };
         }
     }
-    // Model alias overrides from environment (issue #1211)
-    const aliasKeys = ["HAIKU", "SONNET", "OPUS"];
+    // Model alias overrides from environment (issue #1211, issue #3726)
+    const aliasKeys = ["HAIKU", "SONNET", "OPUS", "FABLE"];
     const modelAliases = {};
     for (const key of aliasKeys) {
         const envVal = process.env[`OMC_MODEL_ALIAS_${key}`];

@@ -127,6 +127,7 @@ Fires immediately before Claude uses a tool.
 | `pre-tool-enforcer.mjs` | Validates rules before tool use | 3s |
 
 Runs on all tool calls (`matcher: "*"`). Enforces agent permission restrictions (e.g., blocking Write/Edit for read-only agents).
+Denies Task/Agent calls whose `subagent_type` names a bundled skill (issue #3667): instead of Claude Code's generic native "Agent type not found", the hook returns a precise error naming the Skill tool and the correct identifier, and forbids closest-match agent substitution.
 
 ### PermissionRequest
 
@@ -187,7 +188,7 @@ Fires immediately before context compaction.
 | `pre-compact.mjs` | Preserves state before compaction | 10s |
 | `project-memory-precompact.mjs` | Preserves project memory | 5s |
 
-Saves important state and memory before compaction runs because the context window is full.
+Saves important state and memory before compaction runs because the context window is full. The checkpoint captures active mode states, TODO counts, background job status, and durable plan anchors (PRD/boulder references). After compaction, the `SessionStart` hook (`source: "compact"`) restores the newest matching checkpoint into context so OMC-owned plan detail survives compaction (issue #3730).
 
 ### Stop
 

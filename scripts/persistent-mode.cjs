@@ -752,13 +752,27 @@ function getActiveSubagentCount(stateDir) {
 
 /**
  * Count incomplete Tasks from Claude Code's native Task system.
+ *
+ * Identity contract (issue #3732): the task store is read at
+ * ~/.claude/tasks/<identity>/ where <identity> is the
+ * CLAUDE_CODE_TASK_LIST_ID env override when set and valid, otherwise the
+ * session id. Hook payloads expose no observable team/teammate identity
+ * field, so no implicit team inference is attempted.
  */
 function countIncompleteTasks(sessionId) {
   if (!sessionId || typeof sessionId !== "string") return 0;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return 0;
 
+  const override = process.env.CLAUDE_CODE_TASK_LIST_ID;
+  const identity =
+    typeof override === "string" &&
+    override.trim() &&
+    /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(override)
+      ? override.trim()
+      : sessionId;
+
   const cfgDir = getClaudeConfigDir();
-  const taskDir = join(cfgDir, "tasks", sessionId);
+  const taskDir = join(cfgDir, "tasks", identity);
   if (!existsSync(taskDir)) return 0;
 
   let count = 0;

@@ -1,411 +1,337 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+const fsPromisesControl = vi.hoisted(() => ({
+    renameHook: undefined,
+    taskTargetWriteFileCalls: 0,
+    taskTargetPath: undefined,
+}));
+const historicalDirectWriteControl = vi.hoisted(() => ({
+    taskTargetPath: undefined,
+    signalTruncation: undefined,
+    awaitRelease: undefined,
+}));
+vi.mock('fs/promises', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        writeFile: async (path, data, options) => {
+            if (path === fsPromisesControl.taskTargetPath) {
+                fsPromisesControl.taskTargetWriteFileCalls++;
+                throw new Error('direct task-target writeFile publication is forbidden');
+            }
+            await actual.writeFile(path, data, options);
+        },
+        rename: async (from, to) => {
+            await fsPromisesControl.renameHook?.(from, to);
+            await actual.rename(from, to);
+        },
+    };
+});
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { watchdogCliWorkers } from '../runtime.js';
 import { DEFAULT_MAX_TASK_RETRIES, readTaskFailure, writeTaskFailure } from '../task-file-ops.js';
-let watchdogCliWorkers;
 const tmuxMocks = vi.hoisted(() => ({
     isWorkerAlive: vi.fn(),
     spawnWorkerInPane: vi.fn(),
     sendToWorker: vi.fn(),
+    splitTeamWorkerPane: vi.fn(),
+    killTeamPane: vi.fn(),
+    applyMainVerticalLayout: vi.fn(),
 }));
 const modelContractMocks = vi.hoisted(() => ({
     buildWorkerArgv: vi.fn(() => ['codex']),
     getWorkerEnv: vi.fn(() => ({})),
     isPromptModeAgent: vi.fn(() => true),
     getPromptModeArgs: vi.fn(() => ['-p', 'stub prompt']),
+    resolveValidatedBinaryPath: vi.fn(() => '/usr/bin/codex'),
 }));
-function makeRuntime(cwd, teamName) {
+vi.mock('../tmux-session.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    isWorkerAlive: tmuxMocks.isWorkerAlive,
+    spawnWorkerInPane: tmuxMocks.spawnWorkerInPane,
+    sendToWorker: tmuxMocks.sendToWorker,
+    splitTeamWorkerPane: tmuxMocks.splitTeamWorkerPane,
+    killTeamPane: tmuxMocks.killTeamPane,
+    applyMainVerticalLayout: tmuxMocks.applyMainVerticalLayout,
+}));
+vi.mock('../model-contract.js', async (importOriginal) => ({
+    ...(await importOriginal()),
+    buildWorkerArgv: modelContractMocks.buildWorkerArgv,
+    getWorkerEnv: modelContractMocks.getWorkerEnv,
+    isPromptModeAgent: modelContractMocks.isPromptModeAgent,
+    getPromptModeArgs: modelContractMocks.getPromptModeArgs,
+    resolveValidatedBinaryPath: modelContractMocks.resolveValidatedBinaryPath,
+}));
+function deferred() {
+    let resolve;
+    return { promise: new Promise(done => { resolve = done; }), resolve };
+}
+function makeRuntime(cwd, teamName, tasks = [{ subject: 'Task 1', description: 'Do work' }]) {
     return {
         teamName,
         sessionName: 'test-session:0',
         leaderPaneId: '%0',
         ownsWindow: false,
-        config: {
-            teamName,
-            workerCount: 1,
-            agentTypes: ['codex'],
-            tasks: [{ subject: 'Task 1', description: 'Do work' }],
-            cwd,
-        },
+        config: { teamName, workerCount: 1, agentTypes: ['codex'], tasks, cwd },
         workerNames: ['worker-1'],
         workerPaneIds: ['%1'],
-        activeWorkers: new Map([
-            ['worker-1', { paneId: '%1', taskId: '1', spawnedAt: Date.now() }],
-        ]),
+        activeWorkers: new Map([['worker-1', { paneId: '%1', taskId: '1', spawnedAt: Date.now() }]]),
         cwd,
     };
 }
-function makeRuntimeWithTask(cwd, teamName, taskId) {
-    return {
-        teamName,
-        sessionName: 'test-session:0',
-        leaderPaneId: '%0',
-        ownsWindow: false,
-        config: {
-            teamName,
-            workerCount: 1,
-            agentTypes: ['codex'],
-            tasks: [{ subject: 'Task 1', description: 'Do work' }],
-            cwd,
-        },
-        workerNames: ['worker-1'],
-        workerPaneIds: ['%1'],
-        activeWorkers: new Map([
-            ['worker-1', { paneId: '%1', taskId, spawnedAt: Date.now() }],
-        ]),
-        cwd,
-    };
-}
-function initTask(cwd, teamName) {
+function initTask(cwd, teamName, task = {}) {
     const root = join(cwd, '.omc', 'state', 'team', teamName);
     mkdirSync(join(root, 'tasks'), { recursive: true });
     mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
     writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
-        id: '1',
-        subject: 'Task 1',
-        description: 'Do work',
-        status: 'in_progress',
-        owner: 'worker-1',
-        assignedAt: new Date().toISOString(),
-    }), 'utf-8');
+        id: '1', subject: 'Task 1', description: 'Do work', status: 'in_progress', owner: 'worker-1',
+        assignedAt: new Date().toISOString(), ...task,
+    }));
     return root;
 }
-const DEFAULT_WATCHDOG_WAIT_TIMEOUT_MS = 5000;
-const WATCHDOG_WAIT_INTERVAL_MS = 20;
-function mockWorkerDiesOnceThenAlive() {
-    let firstCheck = true;
-    tmuxMocks.isWorkerAlive.mockImplementation(async () => {
-        if (firstCheck) {
-            firstCheck = false;
-            return false;
-        }
-        return true;
-    });
+async function runTick() {
+    await vi.advanceTimersByTimeAsync(20);
 }
-async function waitFor(predicate, timeoutMs = DEFAULT_WATCHDOG_WAIT_TIMEOUT_MS) {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-        try {
-            if (predicate()) {
-                return;
-            }
-        }
-        catch {
-            // Ignore transient file-read races while the watchdog updates task files.
-        }
-        await new Promise((resolve) => setTimeout(resolve, WATCHDOG_WAIT_INTERVAL_MS));
-    }
-    expect(predicate(), 'watchdog condition should become true').toBe(true);
-}
-async function readJsonFileWithRetry(filePath) {
-    let lastError;
-    for (let attempt = 1; attempt <= 5; attempt++) {
-        try {
-            return JSON.parse(readFileSync(filePath, 'utf-8'));
-        }
-        catch (error) {
-            lastError = error;
-            await new Promise((resolve) => setTimeout(resolve, WATCHDOG_WAIT_INTERVAL_MS));
-        }
-    }
-    throw lastError;
-}
-async function stopWatchdogAndSettle(stop) {
-    stop();
-    await new Promise((resolve) => setTimeout(resolve, WATCHDOG_WAIT_INTERVAL_MS * 3));
-}
-describe('watchdogCliWorkers dead-pane retry behavior', { timeout: 15000 }, () => {
+describe('watchdogCliWorkers dead-pane retry behavior', () => {
     let cwd;
     let warnSpy;
-    beforeEach(async () => {
+    beforeEach(() => {
         vi.useRealTimers();
-        vi.resetModules();
-        vi.doUnmock('../tmux-session.js');
-        vi.doUnmock('../model-contract.js');
-        vi.doUnmock('child_process');
         cwd = mkdtempSync(join(tmpdir(), 'runtime-watchdog-retry-'));
-        tmuxMocks.isWorkerAlive.mockReset();
-        tmuxMocks.spawnWorkerInPane.mockReset();
-        tmuxMocks.sendToWorker.mockReset();
-        tmuxMocks.isWorkerAlive.mockResolvedValue(false);
-        tmuxMocks.spawnWorkerInPane.mockResolvedValue(undefined);
-        tmuxMocks.sendToWorker.mockResolvedValue(true);
-        modelContractMocks.buildWorkerArgv.mockReset();
-        modelContractMocks.getWorkerEnv.mockReset();
-        modelContractMocks.isPromptModeAgent.mockReset();
-        modelContractMocks.getPromptModeArgs.mockReset();
-        modelContractMocks.buildWorkerArgv.mockReturnValue(['codex']);
-        modelContractMocks.getWorkerEnv.mockReturnValue({});
-        modelContractMocks.isPromptModeAgent.mockReturnValue(true);
-        modelContractMocks.getPromptModeArgs.mockReturnValue(['-p', 'stub prompt']);
+        tmuxMocks.isWorkerAlive.mockReset().mockResolvedValue(false);
+        tmuxMocks.spawnWorkerInPane.mockReset().mockResolvedValue(undefined);
+        tmuxMocks.sendToWorker.mockReset().mockResolvedValue(true);
+        tmuxMocks.splitTeamWorkerPane.mockReset().mockResolvedValue('%42');
+        tmuxMocks.killTeamPane.mockReset().mockResolvedValue(undefined);
+        tmuxMocks.applyMainVerticalLayout.mockReset().mockResolvedValue(undefined);
+        modelContractMocks.buildWorkerArgv.mockReset().mockReturnValue(['codex']);
+        modelContractMocks.getWorkerEnv.mockReset().mockReturnValue({});
+        modelContractMocks.isPromptModeAgent.mockReset().mockReturnValue(true);
+        modelContractMocks.getPromptModeArgs.mockReset().mockReturnValue(['-p', 'stub prompt']);
+        modelContractMocks.resolveValidatedBinaryPath.mockReset().mockReturnValue('/usr/bin/codex');
         warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-        vi.doMock('../tmux-session.js', async (importOriginal) => {
-            const actual = await importOriginal();
-            return {
-                ...actual,
-                isWorkerAlive: tmuxMocks.isWorkerAlive,
-                spawnWorkerInPane: tmuxMocks.spawnWorkerInPane,
-                sendToWorker: tmuxMocks.sendToWorker,
-            };
-        });
-        vi.doMock('../model-contract.js', async (importOriginal) => {
-            const actual = await importOriginal();
-            return {
-                ...actual,
-                buildWorkerArgv: modelContractMocks.buildWorkerArgv,
-                getWorkerEnv: modelContractMocks.getWorkerEnv,
-                isPromptModeAgent: modelContractMocks.isPromptModeAgent,
-                getPromptModeArgs: modelContractMocks.getPromptModeArgs,
-            };
-        });
-        vi.doMock('child_process', async (importOriginal) => {
-            const actual = await importOriginal();
-            const { promisify: utilPromisify } = await import('util');
-            function mockExecFile(_cmd, args, cb) {
-                if (args[0] === 'split-window') {
-                    cb(null, '%42\n', '');
-                    return {};
-                }
-                cb(null, '', '');
-                return {};
-            }
-            mockExecFile[utilPromisify.custom] = async (_cmd, args) => {
-                if (args[0] === 'split-window') {
-                    return { stdout: '%42\n', stderr: '' };
-                }
-                return { stdout: '', stderr: '' };
-            };
-            return {
-                ...actual,
-                execFile: mockExecFile,
-            };
-        });
-        ({ watchdogCliWorkers } = await import('../runtime.js'));
-    }, 30000);
+        vi.useFakeTimers();
+    });
     afterEach(() => {
-        vi.useRealTimers();
-        vi.doUnmock('../tmux-session.js');
-        vi.doUnmock('../model-contract.js');
-        vi.doUnmock('child_process');
+        fsPromisesControl.renameHook = undefined;
+        fsPromisesControl.taskTargetPath = undefined;
+        fsPromisesControl.taskTargetWriteFileCalls = 0;
+        historicalDirectWriteControl.taskTargetPath = undefined;
+        historicalDirectWriteControl.signalTruncation = undefined;
+        historicalDirectWriteControl.awaitRelease = undefined;
         warnSpy.mockRestore();
+        vi.useRealTimers();
+        vi.doUnmock('../lib/atomic-write.js');
         rmSync(cwd, { recursive: true, force: true });
     });
-    it('requeues task when dead pane still has retries remaining', async () => {
-        mockWorkerDiesOnceThenAlive();
+    it('requeues once with the established five-retry budget', async () => {
         const teamName = 'dead-pane-requeue-team';
         const root = initTask(cwd, teamName);
-        const runtime = makeRuntime(cwd, teamName);
-        const stop = watchdogCliWorkers(runtime, 20);
-        try {
-            await waitFor(() => {
-                const retryCount = readTaskFailure(teamName, '1', { cwd })?.retryCount ?? 0;
-                const requeueWarned = warnSpy.mock.calls.some(([msg]) => (String(msg).includes('dead pane — requeuing task 1 (retry 1/5)')));
-                return retryCount >= 1 && requeueWarned;
-            }, 2000);
-        }
-        finally {
-            await stopWatchdogAndSettle(stop);
-        }
-        const task = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        const failure = readTaskFailure(teamName, '1', { cwd });
+        const stop = watchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+        await runTick();
+        await stop();
+        const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'));
         expect(['pending', 'in_progress']).toContain(task.status);
         expect(task.owner === null || task.owner === 'worker-1').toBe(true);
-        expect(failure?.retryCount).toBe(1);
-        expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('dead pane — requeuing task 1 (retry 1/5)'))).toBe(true);
+        expect(readTaskFailure(teamName, '1', { cwd })?.retryCount).toBe(1);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dead pane — requeuing task 1 (retry 1/5)'));
     });
-    it('multi-task requeue: nextPendingTaskIndex picks requeued task, not a different pending task', async () => {
-        mockWorkerDiesOnceThenAlive();
+    it('reassigns the requeued first task before a later pending task', async () => {
         const teamName = 'multi-task-requeue-team';
-        const root = join(cwd, '.omc', 'state', 'team', teamName);
-        mkdirSync(join(root, 'tasks'), { recursive: true });
-        mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
-        // Task 1: in_progress, assigned to worker-1 (will be requeued when pane dies)
-        writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
-            id: '1',
-            subject: 'Task 1',
-            description: 'First task',
-            status: 'in_progress',
-            owner: 'worker-1',
-            assignedAt: new Date().toISOString(),
-        }), 'utf-8');
-        // Task 2: already completed — should NOT be picked up
-        writeFileSync(join(root, 'tasks', '2.json'), JSON.stringify({
-            id: '2',
-            subject: 'Task 2',
-            description: 'Second task',
-            status: 'completed',
-            owner: 'worker-2',
-            completedAt: new Date().toISOString(),
-        }), 'utf-8');
-        // Task 3: pending — this exists but task 1 should be requeued and picked first
-        writeFileSync(join(root, 'tasks', '3.json'), JSON.stringify({
-            id: '3',
-            subject: 'Task 3',
-            description: 'Third task',
-            status: 'pending',
-            owner: null,
-        }), 'utf-8');
-        const runtime = {
-            teamName,
-            sessionName: 'test-session:0',
-            leaderPaneId: '%0',
-            ownsWindow: false,
-            config: {
-                teamName,
-                workerCount: 1,
-                agentTypes: ['codex'],
-                tasks: [
-                    { subject: 'Task 1', description: 'First task' },
-                    { subject: 'Task 2', description: 'Second task' },
-                    { subject: 'Task 3', description: 'Third task' },
-                ],
-                cwd,
-            },
-            workerNames: ['worker-1'],
-            workerPaneIds: ['%1'],
-            activeWorkers: new Map([
-                ['worker-1', { paneId: '%1', taskId: '1', spawnedAt: Date.now() }],
-            ]),
-            cwd,
-        };
+        const root = initTask(cwd, teamName);
+        writeFileSync(join(root, 'tasks', '2.json'), JSON.stringify({ id: '2', subject: 'Task 2', description: 'Done', status: 'completed', owner: 'worker-2' }));
+        writeFileSync(join(root, 'tasks', '3.json'), JSON.stringify({ id: '3', subject: 'Task 3', description: 'Later', status: 'pending', owner: null }));
+        const runtime = makeRuntime(cwd, teamName, [
+            { subject: 'Task 1', description: 'Do work' }, { subject: 'Task 2', description: 'Done' }, { subject: 'Task 3', description: 'Later' },
+        ]);
         const stop = watchdogCliWorkers(runtime, 20);
-        try {
-            await waitFor(() => {
-                const retryCount = readTaskFailure(teamName, '1', { cwd })?.retryCount ?? 0;
-                const task1 = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf-8'));
-                const task3 = JSON.parse(readFileSync(join(root, 'tasks', '3.json'), 'utf-8'));
-                return retryCount >= 1
-                    && task1.status === 'in_progress'
-                    && task1.owner === 'worker-1'
-                    && task3.status === 'pending'
-                    && task3.owner === null;
-            });
-        }
-        finally {
-            await stopWatchdogAndSettle(stop);
-        }
-        // After requeue, task 1 should be pending (requeued) and task 3 stays pending.
-        // nextPendingTaskIndex iterates by index, so task 1 (index 0) is picked first.
-        // The spawnWorkerInPane call confirms a respawn happened.
-        // The task that got re-assigned should be task 1 (not task 3),
-        // because nextPendingTaskIndex scans from index 0 and task 1 was requeued to pending.
-        const task1 = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        // Task 1 should have been requeued, and may be immediately re-assigned depending on environment timing.
+        await runTick();
+        await stop();
+        const task1 = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'));
+        const task3 = JSON.parse(readFileSync(join(root, 'tasks', '3.json'), 'utf8'));
         expect(['pending', 'in_progress']).toContain(task1.status);
         expect(task1.owner === null || task1.owner === 'worker-1').toBe(true);
-        // Task 3 should still be pending and unowned — it was NOT the one picked
-        const task3 = await readJsonFileWithRetry(join(root, 'tasks', '3.json'));
-        expect(task3.status).toBe('pending');
-        expect(task3.owner).toBeNull();
+        expect(task3).toMatchObject({ status: 'pending', owner: null });
     });
-    it('permanently fails task when dead pane exhausts retry budget', async () => {
+    it('fails a dead pane task at the unchanged retry limit', async () => {
         const teamName = 'dead-pane-exhausted-team';
         const root = initTask(cwd, teamName);
-        for (let i = 0; i < DEFAULT_MAX_TASK_RETRIES - 1; i++) {
+        for (let i = 0; i < DEFAULT_MAX_TASK_RETRIES - 1; i++)
             writeTaskFailure(teamName, '1', `pre-error-${i}`, { cwd });
-        }
         const runtime = makeRuntime(cwd, teamName);
         const stop = watchdogCliWorkers(runtime, 20);
-        try {
-            await waitFor(() => runtime.activeWorkers.size === 0);
-        }
-        finally {
-            await stopWatchdogAndSettle(stop);
-        }
-        const task = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        const failure = readTaskFailure(teamName, '1', { cwd });
+        await runTick();
+        await stop();
+        const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'));
         expect(task.status).toBe('failed');
         expect(task.summary).toContain('Worker pane died before done.json was written');
-        expect(failure?.retryCount).toBe(DEFAULT_MAX_TASK_RETRIES);
+        expect(readTaskFailure(teamName, '1', { cwd })?.retryCount).toBe(DEFAULT_MAX_TASK_RETRIES);
         expect(tmuxMocks.spawnWorkerInPane).not.toHaveBeenCalled();
     });
-    it('serializes concurrent dead-pane retries across watchdog instances', async () => {
-        mockWorkerDiesOnceThenAlive();
+    it('serializes concurrent watchdog retries for the same task', async () => {
         const teamName = 'dead-pane-contention-team';
         const root = initTask(cwd, teamName);
-        const runtimeA = makeRuntime(cwd, teamName);
-        const runtimeB = makeRuntime(cwd, teamName);
-        const stopA = watchdogCliWorkers(runtimeA, 20);
-        const stopB = watchdogCliWorkers(runtimeB, 20);
-        try {
-            await waitFor(() => (readTaskFailure(teamName, '1', { cwd })?.retryCount ?? 0) >= 1);
-        }
-        finally {
-            await Promise.all([
-                stopWatchdogAndSettle(stopA),
-                stopWatchdogAndSettle(stopB),
-            ]);
-        }
-        // Give the second watchdog one more tick to observe the settled state.
-        await new Promise(resolve => setTimeout(resolve, 80));
-        const task = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        const failure = readTaskFailure(teamName, '1', { cwd });
+        const stopA = watchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+        const stopB = watchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+        await runTick();
+        await Promise.all([stopA(), stopB()]);
+        const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'));
         expect(['pending', 'in_progress']).toContain(task.status);
         expect(task.owner === null || task.owner === 'worker-1').toBe(true);
-        expect(failure?.retryCount).toBe(1);
+        expect(readTaskFailure(teamName, '1', { cwd })?.retryCount).toBe(1);
     });
-    it('does not requeue or increment retries when dead-pane detection races with completion', async () => {
-        const teamName = 'dead-pane-completed-race-team';
-        const root = join(cwd, '.omc', 'state', 'team', teamName);
-        mkdirSync(join(root, 'tasks'), { recursive: true });
-        mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
-        writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
-            id: '1',
-            subject: 'Task 1',
-            description: 'Do work',
-            status: 'completed',
-            owner: 'worker-1',
-            summary: 'already completed elsewhere',
-            result: 'already completed elsewhere',
-            completedAt: new Date().toISOString(),
-        }), 'utf-8');
-        const runtime = makeRuntimeWithTask(cwd, teamName, '1');
+    it('keeps completion and owner-transfer guards ahead of retry recovery', async () => {
+        const teamName = 'dead-pane-guards-team';
+        const root = initTask(cwd, teamName, { status: 'completed', summary: 'done elsewhere' });
+        const runtime = makeRuntime(cwd, teamName);
         const stop = watchdogCliWorkers(runtime, 20);
+        await runTick();
+        await stop();
+        expect(JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'))).toMatchObject({ status: 'completed', summary: 'done elsewhere' });
+        expect(readTaskFailure(teamName, '1', { cwd })).toBeNull();
+        writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({ id: '1', subject: 'Task 1', description: 'Do work', status: 'in_progress', owner: 'worker-2' }));
+        const ownerStop = watchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+        await runTick();
+        await ownerStop();
+        expect(JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'))).toMatchObject({ status: 'in_progress', owner: 'worker-2' });
+        expect(readTaskFailure(teamName, '1', { cwd })).toBeNull();
+    });
+    it('keeps a mutating dead-pane tick alive until every retry effect completes', async () => {
+        const teamName = 'watchdog-stop-quiescence-team';
+        const root = initTask(cwd, teamName);
+        const taskPath = join(root, 'tasks', '1.json');
+        const runtime = makeRuntime(cwd, teamName);
+        const spawnEntered = deferred();
+        const releaseSpawn = deferred();
+        tmuxMocks.spawnWorkerInPane.mockImplementationOnce(async (_sessionName, paneId) => {
+            expect(paneId).toBe('%42');
+            spawnEntered.resolve();
+            await releaseSpawn.promise;
+        });
+        const stop = watchdogCliWorkers(runtime, 20);
+        vi.advanceTimersByTime(20);
+        let stopResolved = false;
         try {
-            await waitFor(() => runtime.activeWorkers.size === 0);
+            await spawnEntered.promise;
+            const stopping = stop().then(() => { stopResolved = true; });
+            await Promise.resolve();
+            expect(stopResolved).toBe(false);
+            expect(JSON.parse(readFileSync(taskPath, 'utf8'))).toMatchObject({ status: 'in_progress', owner: 'worker-1' });
+            expect(readTaskFailure(teamName, '1', { cwd })).toMatchObject({ retryCount: 1 });
+            expect(runtime.workerPaneIds).toEqual([]);
+            expect(runtime.activeWorkers.size).toBe(0);
+            releaseSpawn.resolve();
+            await stopping;
+            const snapshot = {
+                task: readFileSync(taskPath, 'utf8'),
+                sidecar: readTaskFailure(teamName, '1', { cwd }),
+                workerPaneIds: [...runtime.workerPaneIds],
+                activeWorkers: [...runtime.activeWorkers.entries()],
+                warnings: warnSpy.mock.calls.length,
+            };
+            expect(JSON.parse(snapshot.task)).toMatchObject({ status: 'in_progress', owner: 'worker-1' });
+            expect(snapshot.sidecar).toMatchObject({ retryCount: 1 });
+            expect(tmuxMocks.splitTeamWorkerPane).toHaveBeenCalledWith('%0', 'right', cwd);
+            expect(tmuxMocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+            expect(snapshot.workerPaneIds).toEqual(['%42']);
+            expect(snapshot.activeWorkers).toHaveLength(1);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dead pane — requeuing task 1 (retry 1/5)'));
+            await vi.advanceTimersByTimeAsync(100);
+            expect({
+                task: readFileSync(taskPath, 'utf8'),
+                sidecar: readTaskFailure(teamName, '1', { cwd }),
+                workerPaneIds: [...runtime.workerPaneIds],
+                activeWorkers: [...runtime.activeWorkers.entries()],
+                warnings: warnSpy.mock.calls.length,
+            }).toEqual(snapshot);
         }
         finally {
-            await stopWatchdogAndSettle(stop);
+            releaseSpawn.resolve();
+            await stop();
         }
-        const task = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        const failure = readTaskFailure(teamName, '1', { cwd });
-        expect(task.status).toBe('completed');
-        expect(task.owner).toBe('worker-1');
-        expect(task.summary).toBe('already completed elsewhere');
-        expect(task.completedAt).toBeTruthy();
-        expect(failure).toBeNull();
-        expect(tmuxMocks.spawnWorkerInPane).not.toHaveBeenCalled();
-        expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('dead pane — requeuing task'))).toBe(false);
     });
-    it('does not requeue or increment retries when dead-pane worker no longer owns the task', async () => {
-        const teamName = 'dead-pane-owner-race-team';
-        const root = join(cwd, '.omc', 'state', 'team', teamName);
-        mkdirSync(join(root, 'tasks'), { recursive: true });
-        mkdirSync(join(root, 'workers', 'worker-1'), { recursive: true });
-        writeFileSync(join(root, 'tasks', '1.json'), JSON.stringify({
-            id: '1',
-            subject: 'Task 1',
-            description: 'Do work',
-            status: 'in_progress',
-            owner: 'worker-2',
-            assignedAt: new Date().toISOString(),
-        }), 'utf-8');
-        const runtime = makeRuntimeWithTask(cwd, teamName, '1');
-        const stop = watchdogCliWorkers(runtime, 20);
+    it('keeps the previous task JSON parseable until atomic task publication', async () => {
+        const teamName = 'watchdog-atomic-publication-team';
+        const root = initTask(cwd, teamName);
+        const taskPath = join(root, 'tasks', '1.json');
+        const oldTask = JSON.parse(readFileSync(taskPath, 'utf8'));
+        const renameEntered = deferred();
+        const releaseRename = deferred();
+        fsPromisesControl.taskTargetPath = taskPath;
+        fsPromisesControl.renameHook = async (_from, to) => {
+            if (to === taskPath) {
+                renameEntered.resolve();
+                await releaseRename.promise;
+            }
+        };
+        const stop = watchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+        vi.advanceTimersByTime(20);
         try {
-            await waitFor(() => runtime.activeWorkers.size === 0);
+            await renameEntered.promise;
+            expect(JSON.parse(readFileSync(taskPath, 'utf8'))).toEqual(oldTask);
         }
         finally {
-            await stopWatchdogAndSettle(stop);
+            releaseRename.resolve();
         }
-        const task = await readJsonFileWithRetry(join(root, 'tasks', '1.json'));
-        const failure = readTaskFailure(teamName, '1', { cwd });
-        expect(task.status).toBe('in_progress');
-        expect(task.owner).toBe('worker-2');
-        expect(failure).toBeNull();
-        expect(tmuxMocks.spawnWorkerInPane).not.toHaveBeenCalled();
-        expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('dead pane — requeuing task'))).toBe(false);
+        await stop();
+        const task = JSON.parse(readFileSync(taskPath, 'utf8'));
+        expect(task).toMatchObject({ status: 'in_progress', owner: 'worker-1' });
+        expect(readTaskFailure(teamName, '1', { cwd })).toMatchObject({ retryCount: 1 });
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dead pane — requeuing task 1 (retry 1/5)'));
+        expect(fsPromisesControl.taskTargetWriteFileCalls).toBe(0);
+    });
+    it('reproduces the historical direct-write parse failure as a controlled baseline', async () => {
+        const teamName = 'watchdog-historical-direct-write-team';
+        const root = initTask(cwd, teamName);
+        const taskPath = join(root, 'tasks', '1.json');
+        const truncated = deferred();
+        const releaseDirectWrite = deferred();
+        historicalDirectWriteControl.taskTargetPath = taskPath;
+        historicalDirectWriteControl.signalTruncation = truncated.resolve;
+        historicalDirectWriteControl.awaitRelease = () => releaseDirectWrite.promise;
+        // This isolated mock models the rejected direct visible-target publication,
+        // not the production atomic writer covered by the neighboring green test.
+        vi.resetModules();
+        vi.doMock('../../lib/atomic-write.js', async (importOriginal) => {
+            const actual = await importOriginal();
+            return {
+                ...actual,
+                atomicWriteJson: async (filePath, data) => {
+                    if (filePath !== historicalDirectWriteControl.taskTargetPath) {
+                        await actual.atomicWriteJson(filePath, data);
+                        return;
+                    }
+                    const content = JSON.stringify(data, null, 2);
+                    writeFileSync(filePath, '', 'utf8');
+                    historicalDirectWriteControl.signalTruncation?.();
+                    await historicalDirectWriteControl.awaitRelease?.();
+                    writeFileSync(filePath, content, 'utf8');
+                },
+            };
+        });
+        let stop;
+        try {
+            const { watchdogCliWorkers: historicalWatchdogCliWorkers } = await import('../runtime.js');
+            stop = historicalWatchdogCliWorkers(makeRuntime(cwd, teamName), 20);
+            vi.advanceTimersByTime(20);
+            await truncated.promise;
+            let parseError;
+            try {
+                JSON.parse(readFileSync(taskPath, 'utf8'));
+            }
+            catch (error) {
+                parseError = error;
+            }
+            expect(parseError).toBeInstanceOf(SyntaxError);
+            expect(parseError.message).toBe('Unexpected end of JSON input');
+        }
+        finally {
+            releaseDirectWrite.resolve();
+            await stop?.();
+            vi.doUnmock('../../lib/atomic-write.js');
+            vi.resetModules();
+        }
     });
 });
 //# sourceMappingURL=runtime-watchdog-retry.test.js.map

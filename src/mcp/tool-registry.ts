@@ -79,13 +79,19 @@ function zodTypeToJsonSchema(zodType: z.ZodTypeAny): Record<string, unknown> {
     return { type: 'string' };
   }
 
+  // `.optional()` / `.default()` are usually applied before `.describe()`, so the
+  // description lives on the wrapper. Carry it onto the unwrapped schema instead
+  // of dropping the parameter documentation MCP clients render.
   if (zodType instanceof z.ZodOptional) {
-    return zodTypeToJsonSchema(zodType._def.innerType);
+    const inner = zodTypeToJsonSchema(zodType._def.innerType);
+    if (zodType._def?.description) inner.description = zodType._def.description;
+    return inner;
   }
 
   if (zodType instanceof z.ZodDefault) {
     const inner = zodTypeToJsonSchema(zodType._def.innerType);
     inner.default = zodType._def.defaultValue();
+    if (zodType._def?.description) inner.description = zodType._def.description;
     return inner;
   }
 

@@ -80,4 +80,6 @@ export {
 decomposeTask, analyzeTask, identifyComponents, generateSubtasks, assignFileOwnership, identifySharedFiles } from './task-decomposer/index.js';
 // Session History Search - local transcript/session artifact search
 export { searchSessionHistory, parseSinceSpec, } from './session-history-search/index.js';
+// Agent Addressability & Discoverability - unnamed agent addressing/listing contract (#3665)
+export { shortId, hasExplicitName, hasDescription, addressFor, listingLabel, notificationReference, resolveAgent, formatAgentList, SHORT_ID_LENGTH, } from './agent-addressability/index.js';
 //# sourceMappingURL=index.js.map

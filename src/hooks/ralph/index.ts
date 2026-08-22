@@ -72,6 +72,8 @@ export {
   markStoryArchitectVerified,
   getStory,
   getNextStory,
+  amendCriterion,
+  supersedeCriterion,
 
   // PRD creation
   createPrd,
@@ -84,13 +86,19 @@ export {
   formatStory,
   formatPrd,
   formatNextStoryPrompt,
+  formatCriterionAmendments,
 
   // Constants
   PRD_FILENAME,
   PRD_EXAMPLE_FILENAME,
+  MIN_CRITERION_EVIDENCE_LENGTH,
 
   // Types (re-export with aliases to avoid conflicts)
-  type UserStoryInput
+  type UserStoryInput,
+  type CriterionAmendment,
+  type CriterionAmendmentInput,
+  type CriterionAmendmentResult,
+  type CriterionAmendmentKind
 } from './prd.js';
 
 // ============================================================================
@@ -153,3 +161,31 @@ export {
   // Types
   type VerificationState
 } from './verifier.js';
+
+// ============================================================================
+// Ralph PRD Stale-State Detection & Reconciliation (#3669)
+// ============================================================================
+
+export {
+  // Detection
+  detectStalePrd,
+  formatStalePrdWarning,
+  getSessionEndStalePrdWarning,
+
+  // Reconciliation
+  reconcileStalePrd,
+  reconcileStalePrdForStartup,
+  runObservableCheck,
+
+  // Constants
+  PRD_RECONCILIATION_AUDIT_FILENAME,
+  DEFAULT_STALE_PRD_AFTER_MS,
+
+  // Types
+  type ObservableCheck,
+  type ObservableCheckResult,
+  type PrdReconciliationConfig,
+  type StalePrdDetection,
+  type ReconciliationAuditEntry,
+  type ReconcileStalePrdResult
+} from './stale-prd.js';

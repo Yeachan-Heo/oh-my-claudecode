@@ -16,44 +16,53 @@ SCRIPT_PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 resolve_active_plugin_root() {
   is_valid_plugin_root() {
     local candidate="$1"
+    # The skill probe is a canary that the checkout carries real skill content
+    # rather than an empty/partial tree. omc-reference was retired in 5.0.0, so
+    # this now probes wiki, its canonical replacement.
     [ -d "$candidate" ] \
       && [ -f "${candidate}/scripts/setup-claude-md.sh" ] \
       && [ -f "${candidate}/scripts/lib/config-dir.sh" ] \
       && [ -f "${candidate}/docs/CLAUDE.md" ] \
       && [ -f "${candidate}/bridge/claude-md-coordinator.cjs" ] \
-      && [ -s "${candidate}/skills/omc-reference/SKILL.md" ]
+      && [ -s "${candidate}/skills/wiki/SKILL.md" ]
   }
 
+  # Issue #3743: version-manager shims (e.g. Volta on Windows) can truncate a
+  # multiline `node -e` argument at the first newline, silently running an empty
+  # program. Assemble the program on a single line; version candidates still
+  # arrive on stdin.
   select_latest_semver() {
-    node -e '
-      const fs = require("node:fs");
-      const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]+)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]+))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
-      const parse = value => {
-        const match = value.match(semver);
-        const pre = match?.[4]?.split(".") ?? [];
-        return match && !pre.some(identifier => /^\d+$/.test(identifier) && !/^(0|[1-9]\d*)$/.test(identifier))
-          ? { value, core: match.slice(1, 4).map(Number), pre }
-          : null;
-      };
-      const compare = (left, right) => {
-        for (let index = 0; index < 3; index += 1) if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];
-        if (!left.pre.length || !right.pre.length) return left.pre.length ? -1 : right.pre.length ? 1 : 0;
-        for (let index = 0; index < Math.max(left.pre.length, right.pre.length); index += 1) {
-          if (left.pre[index] === undefined) return -1;
-          if (right.pre[index] === undefined) return 1;
-          if (left.pre[index] === right.pre[index]) continue;
-          const numericLeft = /^\d+$/.test(left.pre[index]);
-          const numericRight = /^\d+$/.test(right.pre[index]);
-          if (numericLeft && numericRight) return Number(left.pre[index]) - Number(right.pre[index]);
-          if (numericLeft !== numericRight) return numericLeft ? -1 : 1;
-          return left.pre[index] < right.pre[index] ? -1 : 1;
-        }
-        return 0;
-      };
-      const versions = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean).map(parse).filter(Boolean);
-      versions.sort(compare);
-      if (versions.length) process.stdout.write(`${versions.at(-1).value}\n`);
-    '
+    local semver_prog
+    semver_prog="$(printf '%s ' \
+      'const fs = require("node:fs");' \
+      'const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]+)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]+))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;' \
+      'const parse = value => {' \
+      'const match = value.match(semver);' \
+      'const pre = match?.[4]?.split(".") ?? [];' \
+      'return match && !pre.some(identifier => /^\d+$/.test(identifier) && !/^(0|[1-9]\d*)$/.test(identifier))' \
+      '? { value, core: match.slice(1, 4).map(Number), pre }' \
+      ': null;' \
+      '};' \
+      'const compare = (left, right) => {' \
+      'for (let index = 0; index < 3; index += 1) if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index];' \
+      'if (!left.pre.length || !right.pre.length) return left.pre.length ? -1 : right.pre.length ? 1 : 0;' \
+      'for (let index = 0; index < Math.max(left.pre.length, right.pre.length); index += 1) {' \
+      'if (left.pre[index] === undefined) return -1;' \
+      'if (right.pre[index] === undefined) return 1;' \
+      'if (left.pre[index] === right.pre[index]) continue;' \
+      'const numericLeft = /^\d+$/.test(left.pre[index]);' \
+      'const numericRight = /^\d+$/.test(right.pre[index]);' \
+      'if (numericLeft && numericRight) return Number(left.pre[index]) - Number(right.pre[index]);' \
+      'if (numericLeft !== numericRight) return numericLeft ? -1 : 1;' \
+      'return left.pre[index] < right.pre[index] ? -1 : 1;' \
+      '}' \
+      'return 0;' \
+      '};' \
+      'const versions = fs.readFileSync(0, "utf8").split(/\r?\n/).filter(Boolean).map(parse).filter(Boolean);' \
+      'versions.sort(compare);' \
+      'if (versions.length) process.stdout.write(`${versions.at(-1).value}\n`);'
+    )"
+    node -e "$semver_prog"
   }
 
   list_cache_versions() {
@@ -127,12 +136,31 @@ EOF
   echo "Configured git exclude for local OMC/OMX artifacts (preserving .omc/skills/)"
 }
 
-install_omc_reference_skill() {
+install_reference_skill() {
   local source="$1"
-  [ -s "$source" ] || { echo "Skipped omc-reference skill install (canonical skill source unavailable)"; return 0; }
+  [ -s "$source" ] || { echo "Skipped wiki skill install (canonical skill source unavailable)"; return 0; }
   mkdir -p "$(dirname "$SKILL_TARGET_PATH")"
   cp "$source" "$SKILL_TARGET_PATH"
-  echo "Installed omc-reference skill to $SKILL_TARGET_PATH"
+  echo "Installed wiki skill to $SKILL_TARGET_PATH"
+}
+# Issue #3743: installed_plugins.json can record Windows-style installPath
+# values that never string-match POSIX/MSYS roots, which made the re-exec guard
+# exec the same script forever. Canonicalize both sides physically; equal roots
+# must continue in this process instead of re-exec.
+normalize_plugin_root() {
+  local root="$1" canonical
+  case "$root" in
+    *\\*)
+      if command -v cygpath >/dev/null 2>&1; then
+        root="$(cygpath -u "$root" 2>/dev/null || printf '%s\n' "$root")"
+      fi
+      ;;
+  esac
+  if canonical="$(cd "$root" 2>/dev/null && pwd -P)"; then
+    printf '%s\n' "$canonical"
+  else
+    printf '%s\n' "$root"
+  fi
 }
 
 if [ "$MODE" != "local" ] && [ "$MODE" != "global" ]; then
@@ -148,13 +176,26 @@ if ! ACTIVE_PLUGIN_ROOT="$(resolve_active_plugin_root)"; then
   echo "ERROR: Active plugin root lacks the required coordinator artifact and canonical source; refusing setup." >&2
   exit 1
 fi
-if [ "$ACTIVE_PLUGIN_ROOT" != "$SCRIPT_PLUGIN_ROOT" ]; then
-  exec bash "${ACTIVE_PLUGIN_ROOT}/scripts/setup-claude-md.sh" "$MODE" "$INSTALL_STYLE"
+ACTIVE_PLUGIN_ROOT_NORMALIZED="$(normalize_plugin_root "$ACTIVE_PLUGIN_ROOT")"
+SCRIPT_PLUGIN_ROOT_NORMALIZED="$(normalize_plugin_root "$SCRIPT_PLUGIN_ROOT")"
+if [ "$ACTIVE_PLUGIN_ROOT_NORMALIZED" = "$SCRIPT_PLUGIN_ROOT_NORMALIZED" ]; then
+  # Same physical plugin root: keep executing this script. Re-exec'ing here is
+  # what turned a Windows-style installPath into an infinite process chain.
+  ACTIVE_PLUGIN_ROOT="$SCRIPT_PLUGIN_ROOT"
+else
+  # Bounded re-exec (issue #3743): a defect that makes the guard compare
+  # unequal roots forever must terminate loudly, not hang the user's shell.
+  REEXEC_DEPTH=$(( ${OMC_SETUP_REEXEC_DEPTH:-0} + 1 ))
+  if [ "$REEXEC_DEPTH" -gt 2 ]; then
+    echo "ERROR: setup re-exec loop detected (depth $REEXEC_DEPTH); refusing to continue." >&2
+    exit 1
+  fi
+  exec env OMC_SETUP_REEXEC_DEPTH="$REEXEC_DEPTH" bash "${ACTIVE_PLUGIN_ROOT}/scripts/setup-claude-md.sh" "$MODE" "$INSTALL_STYLE"
 fi
 COORDINATOR="${ACTIVE_PLUGIN_ROOT}/bridge/claude-md-coordinator.cjs"
 CANONICAL_CLAUDE_MD="${ACTIVE_PLUGIN_ROOT}/docs/CLAUDE.md"
-CANONICAL_OMC_REFERENCE_SKILL="${ACTIVE_PLUGIN_ROOT}/skills/omc-reference/SKILL.md"
-if [ ! -f "$COORDINATOR" ] || [ ! -f "$CANONICAL_CLAUDE_MD" ] || [ ! -s "$CANONICAL_OMC_REFERENCE_SKILL" ]; then
+CANONICAL_REFERENCE_SKILL="${ACTIVE_PLUGIN_ROOT}/skills/wiki/SKILL.md"
+if [ ! -f "$COORDINATOR" ] || [ ! -f "$CANONICAL_CLAUDE_MD" ] || [ ! -s "$CANONICAL_REFERENCE_SKILL" ]; then
   echo "ERROR: Coordinator artifact or canonical source is unavailable; refusing setup." >&2
   exit 1
 fi
@@ -162,11 +203,11 @@ fi
 CONFIG_DIR="$(resolve_claude_config_dir)"
 if [ "$MODE" = "local" ]; then
   CONFIG_ROOT="$(pwd)/.claude"
-  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/omc-reference/SKILL.md"
+  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/wiki/SKILL.md"
   COORDINATOR_MODE="local"
 else
   CONFIG_ROOT="$CONFIG_DIR"
-  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/omc-reference/SKILL.md"
+  SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/wiki/SKILL.md"
   if [ "$INSTALL_STYLE" = "preserve" ]; then COORDINATOR_MODE="global-preserve"; else COORDINATOR_MODE="global-overwrite"; fi
 fi
 # The coordinator owns the build handshake. Independently hashing the canonical
@@ -237,7 +278,7 @@ if [ "$VALIDATOR_STATUS" -ne 0 ]; then
   exit "$VALIDATOR_STATUS"
 fi
 
-install_omc_reference_skill "$CANONICAL_OMC_REFERENCE_SKILL"
+install_reference_skill "$CANONICAL_REFERENCE_SKILL"
 if [ "$MODE" = "local" ]; then ensure_local_omc_git_exclude; fi
 
 if [ "$MODE" = "global" ]; then

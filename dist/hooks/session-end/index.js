@@ -11,6 +11,7 @@ import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
 import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob, sealWikiManifest } from './cleanup-manifest.js';
 import { spawnSessionEndWorker } from './worker.js';
 import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
+import { getSessionEndStalePrdWarning } from '../ralph/stale-prd.js';
 const SESSION_STARTED_MARKER_FILE = 'session-started.json';
 const DEFAULT_SESSION_END_CLEANUP_BUDGET_MS = 2_000;
 const MAX_SESSION_END_CLEANUP_BUDGET_MS = 10_000;
@@ -758,6 +759,13 @@ function buildDurableSessionEndPayload(directory, input, metrics) {
 }
 export async function processSessionEnd(input) {
     const directory = resolveToWorktreeRoot(input.cwd);
+    // Stale-unfinished-PRD warning (#3669): surface the divergence at session end
+    // BEFORE mode-state cleanup removes the ralph state (the abnormal-exit
+    // signal). Never blocks session end.
+    const stalePrdWarning = getSessionEndStalePrdWarning(directory, input.session_id);
+    if (stalePrdWarning) {
+        console.warn(stalePrdWarning);
+    }
     const metrics = recordSessionMetrics(directory, input);
     const payload = buildDurableSessionEndPayload(directory, input, metrics);
     const manifest = prepareCoreManifest(directory, input.session_id, payload);

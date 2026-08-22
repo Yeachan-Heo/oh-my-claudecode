@@ -34,6 +34,7 @@ import { resolveAutopilotPlanPath, resolveOpenQuestionsPlanPath, } from "../conf
 import { formatAutopilotRuntimeInsight } from "./autopilot/runtime-insight.js";
 import { writeSkillActiveState, isCanonicalWorkflowSkill, upsertWorkflowSkillSlot, markWorkflowSkillCompleted, pruneExpiredWorkflowSkillTombstones, readSkillActiveStateNormalized, writeSkillActiveStateCopies, } from "./skill-state/index.js";
 import { parseExplicitWorkflowSlashInvocation } from "./keyword-detector/index.js";
+import { resolveWorkflowInputWithWarning } from "../workflow/alias-resolver.js";
 import { ULTRATHINK_MESSAGE, SEARCH_MESSAGE, ANALYZE_MESSAGE, TDD_MESSAGE, CODE_REVIEW_MESSAGE, SECURITY_REVIEW_MESSAGE, RALPH_MESSAGE, PROMPT_TRANSLATION_MESSAGE, } from "../installer/hooks.js";
 import { getUltraworkMessage } from "./keyword-detector/ultrawork/index.js";
 // Agent dashboard is used in pre/post-tool-use hot path
@@ -43,6 +44,8 @@ import { recordFileTouch } from "./subagent-tracker/session-replay.js";
 import { getBackgroundBashPermissionFallback, getBackgroundTaskPermissionFallback, } from "./permission-handler/index.js";
 // Security: wrap untrusted file content to prevent prompt injection
 import { wrapUntrustedFileContent } from "../agents/prompt-helpers.js";
+import { isHookShadowEnabled, runShadowObservation, } from "./registry/index.js";
+import { isFamilyCutoverEnabled, hasHookProtocolDeny, recordDispatchTelemetry, shouldLoosenOrdinaryEnforcement, } from "./registry/cutover.js";
 const PKILL_F_FLAG_PATTERN = /\bpkill\b.*\s-f\b/;
 const PKILL_FULL_FLAG_PATTERN = /\bpkill\b.*--full\b/;
 const WORKER_BLOCKED_TMUX_PATTERN = /\btmux\s+/i;
@@ -1085,6 +1088,18 @@ async function processKeywordDetector(input) {
         };
     }
     if (explicitSlash) {
+        // Alias resolver: route slash invocations through Tier-0 mapping, emit once/session warning, retain diagnostics/telemetry.
+        // For explicit slash, we record alias telemetry and optionally emit a concise actionable warning.
+        // The underlying skill name remains the alias for compatibility (no breaking invocation), but telemetry maps it.
+        try {
+            const aliasRes = resolveWorkflowInputWithWarning(explicitSlash.skill, sessionId ?? undefined, directory);
+            if (aliasRes.warningToEmit && aliasRes.canonical && aliasRes.canonical !== explicitSlash.skill.toLowerCase()) {
+                messages.push(aliasRes.warningToEmit);
+            }
+        }
+        catch {
+            // never break slash flow on alias resolver failure
+        }
         seedWorkflowSlotForSkill(directory, explicitSlash.skill, sessionId, "prompt-submit:explicit-slash");
         await seedModeStateForExplicitWorkflowSlash(explicitSlash.skill, directory, promptText, sessionId);
         if (explicitSlash.skill === "ralplan") {
@@ -1176,6 +1191,25 @@ async function processKeywordDetector(input) {
     const sanitizedText = sanitizeForKeywordDetection(cleanedText);
     if (NON_LATIN_SCRIPT_PATTERN.test(sanitizedText)) {
         messages.push(PROMPT_TRANSLATION_MESSAGE);
+    }
+    // Alias resolver: concise actionable warning once/session, diagnostics retain full mapping.
+    // Telemetry/receipts are recorded inside resolveWorkflowInputWithWarning; explicit slash
+    // invocations are also covered via the invocation path below. For keyword-detected paths,
+    // emit at most one alias warning per detected keyword (deduped per session).
+    {
+        const aliasWarnings = [];
+        for (const kw of keywords) {
+            // normalize to resolver input form (keyword detector already lowercases)
+            const res = resolveWorkflowInputWithWarning(kw, sessionId ?? undefined, directory);
+            if (res.warningToEmit)
+                aliasWarnings.push(res.warningToEmit);
+            // also handle explicit release via keyword-like "release" if ever surfaced as keyword — defensive
+        }
+        // Dedupe alias warnings across multiple keywords that map to same canonical
+        const uniqueAliasWarnings = [...new Set(aliasWarnings)];
+        for (const w of uniqueAliasWarnings) {
+            messages.push(w);
+        }
     }
     // Wake OpenClaw gateway for keyword-detector (non-blocking, fires for all prompts)
     if (input.sessionId) {
@@ -1776,14 +1810,17 @@ function processPreToolUse(input) {
             }
         }
     }
-    // Check delegation enforcement FIRST
+    // Check delegation enforcement FIRST — material delegation/security
+    // boundaries remain hard per owner direction; only duplicated
+    // injection/procedure (prompt prerequisites) collapses to advisory
+    // behind the dispatcher. Routing/instrumentation exceptions fail open,
+    // handler-produced block/deny results propagate unchanged.
     const enforcementResult = processOrchestratorPreTool({
         toolName: input.toolName || "",
         toolInput: input.toolInput || {},
         sessionId: input.sessionId,
         directory,
     });
-    // If enforcement blocks, return immediately
     if (!enforcementResult.continue) {
         return {
             continue: false,
@@ -1798,17 +1835,40 @@ function processPreToolUse(input) {
     // Check blocking BEFORE recording progress — otherwise a denied tool
     // (e.g. Edit) that also matches a prerequisite would have its progress
     // persisted even though the tool never actually executed.
+    // Under dispatcher cutover (#3708) ordinary prompt prerequisites are
+    // advisory — collapsed behind the dispatcher per owner direction; only
+    // material-risk families stay hard. Preserve hookSpecificOutput deny only
+    // when PreToolUse is not in cutover (rollback) so hard permission/security
+    // semantics remain; otherwise demote to an advisory warning.
     const promptPrerequisiteState = readPromptPrerequisiteState(directory, input.sessionId);
     if (promptPrerequisiteState?.active
         && isPromptPrerequisiteBlockingTool(input.toolName, promptPrerequisiteConfig)) {
-        return {
-            continue: true,
-            hookSpecificOutput: {
-                hookEventName: "PreToolUse",
-                permissionDecision: "deny",
-                permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
-            },
-        };
+        if (shouldLoosenOrdinaryEnforcement('PreToolUse')) {
+            const advisoryReason = buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName);
+            preToolMessages.push(`[ADVISORY] ${advisoryReason}`);
+            recordDispatchTelemetry({
+                schemaVersion: 1,
+                event: 'PreToolUse',
+                hookType: 'pre-tool-use',
+                hookId: 'PreToolUse:*:prompt-prerequisites',
+                riskClass: 'advisory',
+                failMode: 'fail-open',
+                appliedDecision: 'advisory',
+                durationMs: 0,
+                verdict: 'advisory-demoted',
+                recordedAt: new Date().toISOString(),
+            }, directory);
+        }
+        else {
+            return {
+                continue: true,
+                hookSpecificOutput: {
+                    hookEventName: "PreToolUse",
+                    permissionDecision: "deny",
+                    permissionDecisionReason: buildPromptPrerequisiteDenyReason(promptPrerequisiteState, input.toolName),
+                },
+            };
+        }
     }
     const promptPrerequisiteProgress = recordPromptPrerequisiteProgress(directory, input.sessionId, input.toolName, input.toolInput);
     if (promptPrerequisiteProgress?.isComplete) {
@@ -2288,7 +2348,7 @@ export function resetSkipHooksCache() {
  * Main hook processor
  * Routes to specific hook handler based on type
  */
-export async function processHook(hookType, rawInput) {
+async function processHookImpl(hookType, rawInput) {
     // Environment kill-switches for plugin coexistence
     if (process.env.DISABLE_OMC === "1" || process.env.DISABLE_OMC === "true") {
         return { continue: true };
@@ -2358,6 +2418,8 @@ export async function processHook(hookType, rawInput) {
                     hook_event_name: "SubagentStart",
                     prompt: normalized.prompt,
                     model: normalized.model,
+                    name: normalized.name,
+                    description: normalized.description,
                 };
                 // recordAgentStart is already called inside processSubagentStart,
                 // so we don't call it here to avoid duplicate session replay entries.
@@ -2463,6 +2525,69 @@ export async function processHook(hookType, rawInput) {
         console.error(`[hook-bridge] Error in ${hookType}:`, error);
         return { continue: true };
     }
+}
+/**
+ * Main hook processor (epic #3698, issues #3707 + #3708).
+ *
+ * Thin wrapper over the legacy dispatcher: runs the legacy path unchanged,
+ * then records shadow and cutover observations. Shadow mode is gated behind
+ * OMC_HOOK_SHADOW; cutover dispatch telemetry is recorded boundedly per
+ * event family (with advisory fail-open by default, hard only for approved
+ * risk classes) and per-family rollback via OMC_HOOK_ROLLBACK /
+ * OMC_HOOK_DISPATCHER_ROLLBACK. Unknown failures remain advisory.
+ */
+export async function processHook(hookType, rawInput) {
+    const legacyStarted = performance.now();
+    const rawRecord = rawInput && typeof rawInput === "object"
+        ? rawInput
+        : {};
+    const inputDirectory = typeof rawRecord.cwd === "string"
+        ? rawRecord.cwd
+        : typeof rawRecord.directory === "string"
+            ? rawRecord.directory
+            : undefined;
+    const projectDirectory = resolveToWorktreeRoot(inputDirectory);
+    const output = await processHookImpl(hookType, rawInput);
+    // Cutover telemetry: one bounded privacy-preserving record per invocation
+    // when the hook's family is cut over (event-family cutover, advisory default).
+    try {
+        const evt = (hookType === 'keyword-detector' ? 'UserPromptSubmit'
+            : hookType === 'session-start' || hookType === 'setup-init' || hookType === 'setup-maintenance' ? 'SessionStart'
+                : hookType === 'pre-tool-use' ? 'PreToolUse'
+                    : hookType === 'permission-request' ? 'PermissionRequest'
+                        : hookType === 'post-tool-use' ? 'PostToolUse'
+                            : hookType === 'subagent-start' ? 'SubagentStart'
+                                : hookType === 'subagent-stop' ? 'SubagentStop'
+                                    : hookType === 'pre-compact' ? 'PreCompact'
+                                        : hookType === 'stop-continuation' || hookType === 'persistent-mode' || hookType === 'ralph' || hookType === 'code-simplifier' ? 'Stop'
+                                            : hookType === 'session-end' ? 'SessionEnd'
+                                                : null);
+        if (evt && isFamilyCutoverEnabled(evt)) {
+            const hard = evt === 'PermissionRequest' || evt === 'PreToolUse';
+            const hasHardDecision = output.continue === false || hasHookProtocolDeny(output);
+            const applied = hasHardDecision ? (hard ? 'hard' : 'advisory') : 'none';
+            recordDispatchTelemetry({
+                schemaVersion: 1,
+                event: evt,
+                hookType,
+                appliedDecision: applied,
+                durationMs: performance.now() - legacyStarted,
+                recordedAt: new Date().toISOString(),
+            }, projectDirectory);
+        }
+    }
+    catch {
+        // telemetry is bounded and advisory-only
+    }
+    if (isHookShadowEnabled()) {
+        try {
+            await runShadowObservation(hookType, output, performance.now() - legacyStarted);
+        }
+        catch {
+            // Shadow observation is advisory and must never change hook behavior.
+        }
+    }
+    return output;
 }
 /**
  * CLI entry point for shell script invocation

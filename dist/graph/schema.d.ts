@@ -47,8 +47,8 @@ export declare const graphAgentNodeSchema: z.ZodObject<{
 }, "strict", z.ZodTypeAny, {
     title: string;
     id: string;
-    instructions: string;
     kind: "agent";
+    instructions: string;
     timeout_ms: number;
     max_attempts: number;
     effect_policy: {
@@ -62,8 +62,8 @@ export declare const graphAgentNodeSchema: z.ZodObject<{
 }, {
     title: string;
     id: string;
-    instructions: string;
     kind: "agent";
+    instructions: string;
     timeout_ms: number;
     max_attempts: number;
     effect_policy: {
@@ -202,8 +202,8 @@ export declare const graphNodeSchema: z.ZodDiscriminatedUnion<"kind", [z.ZodObje
 }, "strict", z.ZodTypeAny, {
     title: string;
     id: string;
-    instructions: string;
     kind: "agent";
+    instructions: string;
     timeout_ms: number;
     max_attempts: number;
     effect_policy: {
@@ -217,8 +217,8 @@ export declare const graphNodeSchema: z.ZodDiscriminatedUnion<"kind", [z.ZodObje
 }, {
     title: string;
     id: string;
-    instructions: string;
     kind: "agent";
+    instructions: string;
     timeout_ms: number;
     max_attempts: number;
     effect_policy: {
@@ -514,8 +514,8 @@ export declare const graphDescriptorSchema: z.ZodObject<{
     }, "strict", z.ZodTypeAny, {
         title: string;
         id: string;
-        instructions: string;
         kind: "agent";
+        instructions: string;
         timeout_ms: number;
         max_attempts: number;
         effect_policy: {
@@ -529,8 +529,8 @@ export declare const graphDescriptorSchema: z.ZodObject<{
     }, {
         title: string;
         id: string;
-        instructions: string;
         kind: "agent";
+        instructions: string;
         timeout_ms: number;
         max_attempts: number;
         effect_policy: {
@@ -722,8 +722,8 @@ export declare const graphDescriptorSchema: z.ZodObject<{
     nodes: ({
         title: string;
         id: string;
-        instructions: string;
         kind: "agent";
+        instructions: string;
         timeout_ms: number;
         max_attempts: number;
         effect_policy: {
@@ -799,8 +799,8 @@ export declare const graphDescriptorSchema: z.ZodObject<{
     nodes: ({
         title: string;
         id: string;
-        instructions: string;
         kind: "agent";
+        instructions: string;
         timeout_ms: number;
         max_attempts: number;
         effect_policy: {

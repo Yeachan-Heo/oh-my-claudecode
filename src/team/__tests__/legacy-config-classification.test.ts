@@ -35,4 +35,20 @@ describe('legacy on-disk config classification (exact-head 70d5 P1)', () => {
     // Empty workers array is OK only if agentTypes is still present for classification
     expect(loaded.agentTypes).toEqual(['codex']);
   });
+
+  it.each([0, -1, 1.5])('rejects an invalid persisted V1 max_workers cap of %s', async maxWorkers => {
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    mkdirSync(join(configPath, '..'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      task: 'legacy task',
+      agentTypes: ['codex'],
+      tmuxSession: 'omc-team-legacy',
+      workerCount: 2,
+      tmuxOwnsWindow: false,
+      max_workers: maxWorkers,
+    }));
+
+    await expect(teamReadConfig(teamName, cwd)).rejects.toThrow('invalid_persisted_state');
+  });
 });

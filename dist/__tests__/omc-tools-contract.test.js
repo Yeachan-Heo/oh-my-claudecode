@@ -8,6 +8,7 @@
  * - Tool handlers are async functions
  */
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { lspTools } from '../tools/lsp-tools.js';
 import { astTools } from '../tools/ast-tools.js';
 import { pythonReplTool } from '../tools/python-repl/index.js';
@@ -108,6 +109,17 @@ describe('MCP Tools Contract - Schema Validity', () => {
             }
         });
     }
+    it('every schema is a ZodRawShape, never a wrapped ZodObject', () => {
+        // The Agent SDK `tool()` call and every OMC serializer treat `schema` as a
+        // raw shape. A ZodObject here silently serializes the object's instance
+        // properties instead of the tool parameters.
+        for (const tool of allTools) {
+            expect(tool.schema instanceof z.ZodObject, `${tool.name} must expose a raw shape`).toBe(false);
+            for (const [key, value] of Object.entries(tool.schema)) {
+                expect(value instanceof z.ZodType, `${tool.name}.${key} must be a Zod type`).toBe(true);
+            }
+        }
+    });
 });
 // ============================================================================
 // Category Counts

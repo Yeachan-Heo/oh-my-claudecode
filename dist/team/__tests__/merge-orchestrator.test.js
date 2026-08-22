@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => {
         handlers,
         reset,
         execFileSync: vi.fn((cmd, args, opts) => {
-            calls.push({ cmd, args, cwd: opts?.cwd });
+            calls.push({ cmd, args, cwd: opts?.cwd, options: opts });
             for (const h of handlers) {
                 if (h.match(args, opts?.cwd)) {
                     const r = h.handler(args, opts?.cwd);
@@ -114,6 +114,32 @@ function defaultHappyPath(_repoRoot, leaderBranch) {
 beforeEach(() => {
     mocks.reset();
     process.env.OMC_RUNTIME_V2 = '1';
+});
+describe('Git process construction', () => {
+    it('uses git argv with hidden-window options for merger worktree setup', async () => {
+        const repoRoot = makeRepoRoot();
+        try {
+            const cfg = defaultConfig(repoRoot);
+            defaultHappyPath(repoRoot, cfg.leaderBranch);
+            const handle = await startMergeOrchestrator(cfg);
+            await handle.drainAndStop();
+            expect(mocks.calls).not.toHaveLength(0);
+            for (const call of mocks.calls) {
+                expect(call.cmd).toBe('git');
+                expect(Array.isArray(call.args)).toBe(true);
+                expect(call.options).toEqual(expect.objectContaining({ windowsHide: true }));
+            }
+            expect(mocks.calls).toContainEqual(expect.objectContaining({
+                cmd: 'git',
+                args: ['worktree', 'add', '--force', expect.any(String), cfg.leaderBranch],
+                cwd: repoRoot,
+                options: expect.objectContaining({ stdio: 'pipe', windowsHide: true }),
+            }));
+        }
+        finally {
+            rmSync(repoRoot, { recursive: true, force: true });
+        }
+    });
 });
 afterEach(() => {
     delete process.env.OMC_RUNTIME_V2;

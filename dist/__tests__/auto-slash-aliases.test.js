@@ -194,6 +194,34 @@ Compatibility body`);
         expect(result.replacementText).toContain('.agents/skills/compat-skill');
         expect(result.replacementText).toContain('`templates/`');
     });
+    it('keeps top-level descriptions for compatibility skills with nested metadata', async () => {
+        mkdirSync(join(tempProjectDir, '.agents', 'skills', 'nested-metadata-skill'), { recursive: true });
+        writeFileSync(join(tempProjectDir, '.agents', 'skills', 'nested-metadata-skill', 'SKILL.md'), `---
+  name: nested-metadata-skill
+  description: Top-level skill description
+  metadata:
+    optionalEnv:
+      - name: EXAMPLE_SECRET
+        description: Nested environment description
+---
+
+Nested metadata skill body`);
+        const { findCommand, executeSlashCommand, listAvailableCommands } = await loadExecutor();
+        expect(findCommand('nested-metadata-skill')?.metadata.description).toBe('Top-level skill description');
+        expect(listAvailableCommands()).toContainEqual({
+            name: 'nested-metadata-skill',
+            description: 'Top-level skill description',
+            scope: 'skill',
+        });
+        const result = executeSlashCommand({
+            command: 'nested-metadata-skill',
+            args: '',
+            raw: '/nested-metadata-skill',
+        });
+        expect(result.success).toBe(true);
+        expect(result.replacementText).toContain('**Description**: Top-level skill description');
+        expect(result.replacementText).not.toContain('Nested environment description');
+    });
     it('discovers workspace-local Claude Code skills from .claude/skills before OMC compatibility skills', async () => {
         mkdirSync(join(tempProjectDir, '.claude', 'skills', 'workspace-skill', 'references'), { recursive: true });
         writeFileSync(join(tempProjectDir, '.claude', 'skills', 'workspace-skill', 'SKILL.md'), `---
@@ -268,23 +296,6 @@ Deep interview body`);
         expect(result.success).toBe(true);
         expect(result.replacementText)
             .toContain('Skill("oh-my-claudecode:autoresearch")');
-    });
-    it('routes /ccg advisor asks through the plugin bridge inside an active Claude session when CLAUDE_PLUGIN_ROOT is set', async () => {
-        process.env.CLAUDE_PLUGIN_ROOT = '/plugin-root';
-        process.env.PATH = '';
-        process.env.CLAUDECODE = '1';
-        process.env.CLAUDE_SESSION_ID = 'session-123';
-        const { executeSlashCommand } = await loadExecutor();
-        const result = executeSlashCommand({
-            command: 'ccg',
-            args: 'review this auth flow',
-            raw: '/ccg review this auth flow',
-        });
-        expect(result.success).toBe(true);
-        expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask codex "<codex prompt>"`');
-        expect(result.replacementText).toContain('`node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs ask antigravity "<antigravity prompt>"`');
-        expect(result.replacementText).not.toContain('`omc ask codex "<codex prompt>"`');
-        expect(result.replacementText).not.toContain('`omc ask antigravity "<antigravity prompt>"`');
     });
 });
 //# sourceMappingURL=auto-slash-aliases.test.js.map

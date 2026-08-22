@@ -38,7 +38,8 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
     it('registers every bundled skill through plugin.json with concise native skill shims', () => {
         const defaultSkillDirs = pluginSkillDirs();
         const allSkillDirs = bundledSkillDirs();
-        expect(allSkillDirs.length).toBeGreaterThan(30);
+        // 5.0.0 retired 15 legacy skills; the bundled surface is intentionally smaller.
+        expect(allSkillDirs.length).toBeGreaterThan(20);
         expect(defaultSkillDirs).toEqual(allSkillDirs);
     });
     it('compacts installed plugin SKILL.md files while archiving full on-demand skill bodies', () => {
@@ -51,7 +52,10 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
             const allSkillDirs = bundledSkillDirs();
             expect(result.errors).toEqual([]);
             expect(result.compacted).toBe(allSkillDirs.length);
-            expect(originalBytes).toBeGreaterThan(400 * 1024);
+            // Precondition: the uncompacted payload is still large enough that
+            // compaction is doing real work. Lowered from 400KB after the 5.0.0
+            // retirement removed 15 skills from the bundled surface.
+            expect(originalBytes).toBeGreaterThan(300 * 1024);
             expect(compactBytes).toBeLessThan(COMPACT_PLUGIN_SKILL_BUDGET_BYTES);
             expect(result.totalBytes).toBe(compactBytes);
             for (const skillDir of allSkillDirs) {
@@ -116,6 +120,7 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
             writeFileSync(join(sourceRoot, 'commands', 'omc-setup.md'), 'Read skills/omc-setup/SKILL.md and pass $ARGUMENTS.\n');
             writeFileSync(join(sourceRoot, 'dist', 'hooks', 'skill-bridge.cjs'), 'console.log("skill bridge");\n');
             writeFileSync(join(sourceRoot, 'bridge', 'cli.cjs'), 'console.log("bridge");\n');
+            writeFileSync(join(sourceRoot, 'bridge', 'claude-md-coordinator.cjs'), 'console.log("CLAUDE.md coordinator");\n');
             writeFileSync(join(sourceRoot, 'hooks', 'hooks.json'), '{}\n');
             writeFileSync(join(sourceRoot, 'skills', 'plan', 'SKILL.md'), 'name: plan\n');
             writeFileSync(join(sourceRoot, 'package.json'), JSON.stringify({ name: 'oh-my-claude-sisyphus', version: '4.14.1' }));
@@ -133,8 +138,9 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
         }
     });
     it('preserves deprecated slash aliases as command wrappers', () => {
-        expect(readFileSync(join(COMMANDS_DIR, 'learner.md'), 'utf-8')).toContain('skills/skillify/SKILL.md');
+        // learner.md was retired in 5.0.0; psm remains the surviving command alias.
         expect(readFileSync(join(COMMANDS_DIR, 'psm.md'), 'utf-8')).toContain('skills/project-session-manager/SKILL.md');
+        expect(existsSync(join(COMMANDS_DIR, 'learner.md'))).toBe(false);
     });
 });
 //# sourceMappingURL=plugin-skill-budget.test.js.map

@@ -116,8 +116,14 @@ export declare const _openclaw: {
  */
 export declare function resetSkipHooksCache(): void;
 /**
- * Main hook processor
- * Routes to specific hook handler based on type
+ * Main hook processor (epic #3698, issues #3707 + #3708).
+ *
+ * Thin wrapper over the legacy dispatcher: runs the legacy path unchanged,
+ * then records shadow and cutover observations. Shadow mode is gated behind
+ * OMC_HOOK_SHADOW; cutover dispatch telemetry is recorded boundedly per
+ * event family (with advisory fail-open by default, hard only for approved
+ * risk classes) and per-family rollback via OMC_HOOK_ROLLBACK /
+ * OMC_HOOK_DISPATCHER_ROLLBACK. Unknown failures remain advisory.
  */
 export declare function processHook(hookType: HookType, rawInput: HookInput): Promise<HookOutput>;
 /**

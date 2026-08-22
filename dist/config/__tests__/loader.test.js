@@ -17,9 +17,15 @@ const ALL_KEYS = [
     "CLAUDE_CODE_BEDROCK_OPUS_MODEL",
     "CLAUDE_CODE_BEDROCK_SONNET_MODEL",
     "CLAUDE_CODE_BEDROCK_HAIKU_MODEL",
+    "CLAUDE_CODE_BEDROCK_FABLE_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL",
+    "OMC_MODEL_ALIAS_HAIKU",
+    "OMC_MODEL_ALIAS_SONNET",
+    "OMC_MODEL_ALIAS_OPUS",
+    "OMC_MODEL_ALIAS_FABLE",
     "OMC_DELEGATION_ROUTING_ENABLED",
     "OMC_DELEGATION_ROUTING_DEFAULT_PROVIDER",
 ];
@@ -131,6 +137,38 @@ describe("loadConfig() — auto-forceInherit for non-standard providers", () => 
         expect(config.agents?.architect?.model).toBe("claude-opus-4-6-custom");
         expect(config.agents?.executor?.model).toBe("claude-sonnet-4-6-custom");
         expect(config.agents?.explore?.model).toBe("claude-haiku-4-5-custom");
+    });
+});
+// ---------------------------------------------------------------------------
+// Model alias env overrides (issue #1211, issue #3726)
+// ---------------------------------------------------------------------------
+describe("loadConfig() — model alias env overrides", () => {
+    let saved;
+    beforeEach(() => {
+        saved = saveAndClear(ALL_KEYS);
+    });
+    afterEach(() => {
+        restore(saved);
+    });
+    it("reads OMC_MODEL_ALIAS_OPUS=fable into routing.modelAliases (issue #3726)", () => {
+        process.env.OMC_MODEL_ALIAS_OPUS = "fable";
+        const config = loadConfig();
+        expect(config.routing?.modelAliases?.opus).toBe("fable");
+    });
+    it("reads OMC_MODEL_ALIAS_FABLE into routing.modelAliases (issue #3726)", () => {
+        process.env.OMC_MODEL_ALIAS_FABLE = "opus";
+        const config = loadConfig();
+        expect(config.routing?.modelAliases?.fable).toBe("opus");
+    });
+    it("lowercases alias env values", () => {
+        process.env.OMC_MODEL_ALIAS_HAIKU = "SONNET";
+        const config = loadConfig();
+        expect(config.routing?.modelAliases?.haiku).toBe("sonnet");
+    });
+    it("preserves inherit as an alias target", () => {
+        process.env.OMC_MODEL_ALIAS_OPUS = "inherit";
+        const config = loadConfig();
+        expect(config.routing?.modelAliases?.opus).toBe("inherit");
     });
 });
 describe("startup context compaction", () => {
@@ -629,6 +667,106 @@ describe("loadConfig() — autopilot team worker config", () => {
         const schema = generateConfigSchema();
         expect(schema.properties?.autopilot).toBeDefined();
         expect(schema.properties?.autopilot?.properties?.team).toBeDefined();
+    });
+});
+describe("loadConfig() — autopilot.workflows", () => {
+    const originalCwd = process.cwd();
+    const originalConfigHome = process.env.XDG_CONFIG_HOME;
+    let tempDir;
+    let configHome;
+    const writeProjectConfig = (content) => {
+        require("node:fs").mkdirSync(join(tempDir, ".claude"), { recursive: true });
+        writeFileSync(join(tempDir, ".claude", "omc.jsonc"), content);
+    };
+    const writeUserConfig = (content) => {
+        const path = join(configHome, "claude-omc");
+        require("node:fs").mkdirSync(path, { recursive: true });
+        writeFileSync(join(path, "config.jsonc"), content);
+    };
+    beforeEach(() => {
+        tempDir = mkdtempSync(join(tmpdir(), "omc-workflow-config-"));
+        configHome = join(tempDir, "config");
+        process.env.XDG_CONFIG_HOME = configHome;
+        process.chdir(tempDir);
+    });
+    afterEach(() => {
+        process.chdir(originalCwd);
+        if (originalConfigHome === undefined)
+            delete process.env.XDG_CONFIG_HOME;
+        else
+            process.env.XDG_CONFIG_HOME = originalConfigHome;
+        rmSync(tempDir, { recursive: true, force: true });
+    });
+    it.each([
+        ["ralplan, execution", ["ralplan", "execution"]],
+        ["ralplan, execution, ralph", ["ralplan", "execution", "ralph"]],
+        ["ralplan, execution, qa", ["ralplan", "execution", "qa"]],
+        ["ralplan, execution, ralph, qa", ["ralplan", "execution", "ralph", "qa"]],
+    ])("accepts the v1 sequence %s", (_label, stages) => {
+        writeProjectConfig(JSON.stringify({
+            autopilot: { workflows: { "plan-build": { version: 1, stages } } },
+        }));
+        expect(loadConfig().autopilot?.workflows?.["plan-build"]?.stages).toEqual(stages);
+    });
+    it.each([
+        ["stageModels", { version: 1, stages: ["ralplan", "execution"], stageModels: {} }, /project autopilot\.workflows\.plan-build\.stageModels/],
+        ["wrong order", { version: 1, stages: ["execution", "ralplan"] }, /project autopilot\.workflows\.plan-build\.stages/],
+        ["duplicate stage", { version: 1, stages: ["ralplan", "execution", "qa", "qa"] }, /project autopilot\.workflows\.plan-build\.stages/],
+        ["missing version", { stages: ["ralplan", "execution"] }, /project autopilot\.workflows\.plan-build\.version/],
+        ["comma-bearing composite stage", { version: 1, stages: ["ralplan", "execution,qa"] }, /project autopilot\.workflows\.plan-build\.stages/],
+        ["nested stage array", { version: 1, stages: [["ralplan", "execution"]] }, /project autopilot\.workflows\.plan-build\.stages/],
+    ])("rejects %s with a path-specific error", (_label, profile, error) => {
+        writeProjectConfig(JSON.stringify({ autopilot: { workflows: { "plan-build": profile } } }));
+        expect(() => loadConfig()).toThrow(error);
+    });
+    it.each(["default", "autopilot", "ralplan", "ultrawork", "ultragoal", "ultrapilot"])("rejects reserved workflow name %s", (name) => {
+        writeProjectConfig(JSON.stringify({
+            autopilot: { workflows: { [name]: { version: 1, stages: ["ralplan", "execution"] } } },
+        }));
+        expect(() => loadConfig()).toThrow(new RegExp(`project autopilot\\.workflows\\.${name}: name .*reserved`));
+    });
+    it("validates malformed user and project workflow blocks before composition", () => {
+        writeUserConfig(JSON.stringify({
+            autopilot: { workflows: { "user-flow": { version: 1, stages: ["execution"] } } },
+        }));
+        expect(() => loadConfig()).toThrow(/user autopilot\.workflows\.user-flow\.stages/);
+        writeUserConfig(JSON.stringify({
+            autopilot: { workflows: { "same-flow": { version: 1, stages: ["ralplan", "execution"] } } },
+        }));
+        writeProjectConfig(JSON.stringify({
+            autopilot: { workflows: { "same-flow": { version: 1, stages: ["ralplan", "execution"], stageModels: {} } } },
+        }));
+        expect(() => loadConfig()).toThrow(/project autopilot\.workflows\.same-flow\.stageModels/);
+    });
+    it("replaces same-named profiles atomically and composes distinct names", () => {
+        writeUserConfig(JSON.stringify({
+            autopilot: {
+                workflows: {
+                    "same-flow": { version: 1, stages: ["ralplan", "execution", "ralph"] },
+                    "user-flow": { version: 1, stages: ["ralplan", "execution", "qa"] },
+                },
+            },
+        }));
+        writeProjectConfig(JSON.stringify({
+            autopilot: {
+                workflows: {
+                    "same-flow": { version: 1, stages: ["ralplan", "execution"] },
+                    "project-flow": { version: 1, stages: ["ralplan", "execution", "ralph", "qa"] },
+                },
+            },
+        }));
+        expect(loadConfig().autopilot?.workflows).toEqual({
+            "same-flow": { version: 1, stages: ["ralplan", "execution"] },
+            "user-flow": { version: 1, stages: ["ralplan", "execution", "qa"] },
+            "project-flow": { version: 1, stages: ["ralplan", "execution", "ralph", "qa"] },
+        });
+    });
+    it("publishes the closed workflow schema", () => {
+        const schema = generateConfigSchema();
+        const workflows = schema.properties?.autopilot?.properties?.workflows;
+        expect(workflows.additionalProperties?.additionalProperties).toBe(false);
+        expect(workflows.additionalProperties?.required).toEqual(["version", "stages"]);
+        expect(workflows.additionalProperties?.properties).not.toHaveProperty("stageModels");
     });
 });
 //# sourceMappingURL=loader.test.js.map

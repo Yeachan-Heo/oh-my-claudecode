@@ -13,6 +13,8 @@ import { promises as fsPromises } from "fs";
 import { join } from "path";
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { initJobDb, getActiveJobs, getRecentJobs, getJobStats } from '../../lib/job-state-db.js';
+import { findPrdPath, readPrdFromPath } from '../ralph/prd.js';
+import { readBoulderState, getPlanProgress } from '../../features/boulder-state/index.js';
 // ============================================================================
 // Constants
 // ============================================================================
@@ -222,14 +224,68 @@ async function getActiveJobsSummary(directory) {
     }
 }
 /**
+ * Collect durable plan anchors (issue #3730).
+ *
+ * Captures references to already-persisted plan artifacts so a restored
+ * checkpoint can point the post-compaction session back at its plan:
+ * - the active PRD (ralph PRD mode), via findPrdPath
+ * - the active boulder plan (OMC orchestrator)
+ *
+ * Only pointers and bounded counts are recorded. Plan file contents are
+ * never copied into the checkpoint.
+ */
+export function collectPlanRefs(directory, sessionId) {
+    const refs = {};
+    // PRD (ralph structured task tracking)
+    try {
+        const prdPath = findPrdPath(directory, sessionId);
+        if (prdPath) {
+            const read = readPrdFromPath(prdPath);
+            const prd = read?.prd;
+            if (prd) {
+                const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
+                refs.prd = {
+                    path: prdPath,
+                    title: typeof prd.project === "string" ? prd.project : "untitled",
+                    status: stories.some((s) => !s.passes) ? "in_progress" : "done",
+                    stories_total: stories.length,
+                    stories_completed: stories.filter((s) => s.passes).length,
+                };
+            }
+        }
+    }
+    catch (error) {
+        console.error("[PreCompact] Error collecting PRD anchor:", error);
+    }
+    // Boulder plan (OMC orchestrator)
+    // readBoulderState resolves {directory}/.omc/boulder.json itself, so pass
+    // the project directory, not the already-resolved .omc root.
+    try {
+        const boulder = readBoulderState(directory);
+        if (boulder && boulder.active) {
+            refs.boulder = {
+                active_plan: boulder.active_plan,
+                plan_name: boulder.plan_name,
+                progress: getPlanProgress(boulder.active_plan),
+            };
+        }
+    }
+    catch (error) {
+        console.error("[PreCompact] Error collecting boulder anchor:", error);
+    }
+    return Object.keys(refs).length > 0 ? refs : undefined;
+}
+/**
  * Create a compact checkpoint
  */
-export async function createCompactCheckpoint(directory, trigger) {
+export async function createCompactCheckpoint(directory, trigger, sessionId) {
     const activeModes = await saveModeSummary(directory);
     const todoSummary = readTodoSummary(directory);
     const jobsSummary = await getActiveJobsSummary(directory);
+    const planRefs = collectPlanRefs(directory, sessionId);
     return {
         created_at: new Date().toISOString(),
+        session_id: sessionId,
         trigger,
         active_modes: activeModes,
         todo_summary: todoSummary,
@@ -239,6 +295,7 @@ export async function createCompactCheckpoint(directory, trigger) {
             recent: jobsSummary.recentJobs,
             stats: jobsSummary.stats,
         },
+        plan_refs: planRefs,
     };
 }
 /**
@@ -317,6 +374,23 @@ export function formatCompactSummary(checkpoint) {
             lines.push("");
         }
     }
+    // Plan anchors (issue #3730)
+    const refs = checkpoint.plan_refs;
+    if (refs?.prd || refs?.boulder) {
+        lines.push("## Plan References");
+        lines.push("");
+        if (refs.prd) {
+            const prd = refs.prd;
+            lines.push(`- **PRD:** ${prd.title} (${prd.stories_completed}/${prd.stories_total} stories, status: ${prd.status})`);
+            lines.push(`  - File: ${prd.path}`);
+        }
+        if (refs.boulder) {
+            const boulder = refs.boulder;
+            lines.push(`- **Boulder plan:** ${boulder.plan_name} (${boulder.progress.completed}/${boulder.progress.total} steps)`);
+            lines.push(`  - File: ${boulder.active_plan}`);
+        }
+        lines.push("");
+    }
     // Wisdom status
     if (checkpoint.wisdom_exported) {
         lines.push("## Wisdom");
@@ -325,8 +399,8 @@ export function formatCompactSummary(checkpoint) {
         lines.push("");
     }
     lines.push("---");
-    lines.push("**Note:** This checkpoint preserves critical state before compaction.");
-    lines.push("Review active modes to ensure continuity after compaction.");
+    lines.push("**Note:** This checkpoint preserves critical state before compaction and is restored automatically after compaction via SessionStart (source: compact).");
+    lines.push("Review active modes and plan references above to ensure continuity after compaction.");
     return lines.join("\n");
 }
 /**
@@ -336,7 +410,7 @@ export function formatCompactSummary(checkpoint) {
 async function doProcessPreCompact(input) {
     const directory = input.cwd;
     // Create checkpoint
-    const checkpoint = await createCompactCheckpoint(directory, input.trigger);
+    const checkpoint = await createCompactCheckpoint(directory, input.trigger, input.session_id);
     // Export wisdom
     const { wisdom, exported } = await exportWisdomToNotepad(directory);
     checkpoint.wisdom_exported = exported;

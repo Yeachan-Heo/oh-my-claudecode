@@ -13,6 +13,7 @@ import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from './lib/cache-occupancy.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -901,8 +902,29 @@ async function main() {
     }
     const sessionId = data.session_id || data.sessionId || '';
     const omcRoot = await resolveOmcStateRoot(directory);
-    const messages = [];
+    let messages = [];
     const userMessages = [];
+    let pendingRestore = null;
+    let pendingRestoreMessage = null;
+
+    // Restore the newest PreCompact checkpoint after compaction (issue #3730).
+    // Only fires when Claude Code signals the session resumed from compaction
+    // (source === 'compact'); never on startup, resume, or clear.
+    if (data.source === 'compact' && sessionId) {
+      try {
+        const { preparePreCompactCheckpointRestore, commitPreCompactCheckpointRestore } = await import(
+          pathToFileURL(join(__dirname, 'lib', 'precompact-restore.mjs')).href
+        );
+        const prepared = preparePreCompactCheckpointRestore(omcRoot, sessionId);
+        if (prepared) {
+          pendingRestore = { ...prepared, commitPreCompactCheckpointRestore };
+          pendingRestoreMessage = `<session-restore>\n\n${prepared.text}\n\n</session-restore>\n\n---\n`;
+          messages.push(pendingRestoreMessage);
+        }
+      } catch {
+        // Restore is advisory: never break session start on a checkpoint error.
+      }
+    }
 
     // Fire sibling-retrofit warning once per session (lifted off getOmcRoot hot path)
     try {
@@ -918,6 +940,9 @@ async function main() {
     const projectMemoryModules = await loadProjectMemoryModules();
 
     writeSessionStartedMarker(omcRoot, directory, sessionId);
+    if (process.env.CLAUDE_PLUGIN_ROOT) {
+      publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir);
+    }
     reconcileAbandonedSessionStarts(omcRoot, sessionId);
     reconcileSessionEndJobsInBackground(getRuntimeBaseDir(), directory);
 
@@ -1118,6 +1143,7 @@ ${cleanContent}
     // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
     try {
       const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      const occupancy = readOccupiedPluginRoots(configDir);
       let versions = [];
       if (existsSync(cacheBase)) {
         versions = readdirSync(cacheBase)
@@ -1159,6 +1185,7 @@ ${cleanContent}
                   }
                 }
               } else if (stat.isDirectory()) {
+                if (occupancy.unavailable || occupancy.roots.has(pathIdentity(versionPath))) continue;
                 // Directory → symlink: cannot be atomic, but run.cjs now
                 // handles missing targets gracefully (issue #1007).
                 rmSync(versionPath, { recursive: true, force: true });
@@ -1243,6 +1270,31 @@ ${cleanContent}
       // Notification module not available, skip silently
     }
 
+    let additionalContext = '';
+    if (pendingRestore && pendingRestoreMessage) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+      if (additionalContext.includes(pendingRestoreMessage)) {
+        const markerStatus = pendingRestore.commitPreCompactCheckpointRestore(
+          omcRoot,
+          sessionId,
+          pendingRestore.path,
+          pendingRestore.created_at,
+          pendingRestore.mtime_ms,
+        );
+        if (!markerStatus) {
+          messages = messages.filter((message) => message !== pendingRestoreMessage);
+          additionalContext = buildSessionStartAdditionalContext(messages);
+        }
+      } else {
+        // The complete restore sentinel did not fit the aggregate budget;
+        // do not commit a replay marker for context that was not delivered.
+        messages = messages.filter((message) => message !== pendingRestoreMessage);
+        additionalContext = buildSessionStartAdditionalContext(messages);
+      }
+    } else if (messages.length > 0) {
+      additionalContext = buildSessionStartAdditionalContext(messages);
+    }
+
     if (messages.length > 0 || userMessages.length > 0) {
       const output = {
         continue: true,
@@ -1253,7 +1305,7 @@ ${cleanContent}
       if (messages.length > 0) {
         output.hookSpecificOutput = {
           hookEventName: 'SessionStart',
-          additionalContext: buildSessionStartAdditionalContext(messages)
+          additionalContext,
         };
       }
       console.log(JSON.stringify(output));

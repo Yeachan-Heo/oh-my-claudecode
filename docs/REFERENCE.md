@@ -14,7 +14,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (29 Total)](#agents-29-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal)
-- [Skills (38 Total)](#skills-38-total)
+- [Skills (33 Total)](#skills-33-total)
 - [Slash Commands](#slash-commands)
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
 - [Hooks System](#hooks-system)
@@ -49,7 +49,7 @@ npm i -g oh-my-claude-sisyphus@latest
 omc setup
 ```
 
-The npm package exposes both `oh-my-claudecode` and `omc`; examples prefer `omc` unless troubleshooting needs the long alias. The CLI does not make in-session slash skills available by itself; install the plugin for `/autopilot`, `/ralph`, `/team`, and other interactive skills.
+The npm package exposes both `oh-my-claudecode` and `omc`; examples prefer `omc` unless troubleshooting needs the long alias. The CLI does not make in-session slash skills available by itself; install the plugin for `/autopilot`, `/ralph`, `/execute`, `/team`, and other interactive skills.
 
 ### Requirements
 
@@ -181,7 +181,7 @@ Resolution order inside `getOmcRoot()`:
 3. `git rev-parse --show-toplevel` (monorepo / single repo).
 4. `process.cwd()` (last resort).
 
-Once a workspace is anchored, multiple Claude Code sessions in different sub-repos can run `/ultragoal`, `/ralph`, `/ultrawork`, `/autopilot` in parallel without bleeding state. For `/ultragoal` specifically, pass `--plan-id <id>` or `--auto-plan-id` on `create-goals` so each session writes to `.omc/ultragoal/plans/{planId}/` instead of the shared `goals.json` — see "ultragoal multi-plan" below. The PARALLEL SESSION WARNING in `session-start.mjs` performs a PID-aware liveness check and no longer suppresses restore when the owner session is dead.
+Once a workspace is anchored, multiple Claude Code sessions in different sub-repos can run `/ultragoal`, `/ralph`, `/execute`, `/autopilot` in parallel without bleeding state. For `/ultragoal` specifically, pass `--plan-id <id>` or `--auto-plan-id` on `create-goals` so each session writes to `.omc/ultragoal/plans/{planId}/` instead of the shared `goals.json` — see "ultragoal multi-plan" below. The PARALLEL SESSION WARNING in `session-start.mjs` performs a PID-aware liveness check and no longer suppresses restore when the owner session is dead.
 
 #### `.omc/handoffs/` shared contract
 
@@ -588,7 +588,7 @@ Use OMC's terminal and library surfaces in non-interactive environments:
 - Run CLI commands that have deterministic exit codes, for example `omc setup`, `omc ask ...`, `omc session search ... --json`, or repo-owned verification scripts such as `npm run sync-metadata:verify`.
 - Provide authentication through runner environment variables (`ANTHROPIC_API_KEY`) or pre-authenticated provider CLIs for `codex`, `gemini`, `antigravity`, `grok`, or `cursor` when using `omc ask` / `omc team`.
 - Keep state explicit for ephemeral runners by setting `OMC_STATE_DIR` when state must survive worktree deletion or checkout replacement.
-- Avoid interactive slash skills (`/autopilot`, `/ralph`, `/ultrawork`, `/deep-interview`, `/team`) in CI jobs; they require an active Claude Code session and user-visible conversation loop.
+- Avoid interactive slash skills (`/autopilot`, `/ralph`, `/execute`, `/deep-interview`, `/team`) in CI jobs; they require an active Claude Code session and user-visible conversation loop.
 - OMC does not currently provide a VS Code extension or VS Code-specific automation contract. The documented IDE path is to use Claude Code's own integrations, then install OMC through the Claude Code plugin surface.
 - Programmatic Agent SDK usage is supported through the exported TypeScript helpers and the in-process MCP server helpers in this package; it is a Node.js library surface, not an interactive plugin installer.
 
@@ -687,7 +687,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | **Build**          | -                       | `debugger`            | -                   |
 | **TDD**            | -                       | `test-engineer`       | -                   |
 | **Code Review**    | -                       | -                     | `code-reviewer`     |
-| **Data Science**   | -                       | `scientist`           | `scientist-high`    |
+| **Data Analysis** | -                       | `scientist`           | `scientist-high`    |
 | **Git**            | -                       | `git-master`          | -                   |
 | **Simplification** | -                       | -                     | `code-simplifier`   |
 
@@ -723,7 +723,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 | Quick code check               | `code-reviewer` (model=haiku)                                          | haiku  |
 | Data analysis/stats            | `scientist`                                                            | sonnet |
 | Quick data inspection          | `scientist` (model=haiku)                                              | haiku  |
-| Complex ML/hypothesis          | `scientist-high`                                                       | opus   |
+| Deep data analysis            | `scientist-high`                                                       | opus   |
 | Git operations                 | `git-master`                                                           | sonnet |
 | Code simplification            | `code-simplifier`                                                      | opus   |
 
@@ -761,6 +761,28 @@ When multiple loops could apply, use this deterministic policy:
 `/goal` evaluator success can be useful evidence, but OMC completion should still require the relevant durable proof: command output, changed files, reviewer verdicts, task results, or release artifacts.
 
 For the shorter user-facing chooser, see [Mode Selection Guide](./shared/mode-selection-guide.md#goal-oriented-workflow-selection).
+
+### Ralph PRD criterion amendments (evidence-preserving supersession)
+
+Ralph's PRD freezes acceptance criteria at dispatch time. When implementation **empirically refutes** an active criterion (e.g. the dispatching brief says "all 16 files" but measurement finds 12), the criterion can stop governing ONLY through the evidence-preserving amendment path — never by silent deletion or by "satisfying" a falsified requirement.
+
+Per story, `acceptanceCriteria` holds the currently governing criteria, and the optional `criterionAmendments` ledger retains every refuted original verbatim:
+
+```jsonc
+{
+  "kind": "replaced", // or "superseded" (no replacement governs)
+  "original": "All 16 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+  "replacement": "All 12 files that set FDFT_WHALE_STREAM=1 are classified affected/not-affected WITH EVIDENCE",
+  "reason": "The brief count was wrong: 7 listed names are readers/asserters/doc-recipes, not setters",
+  "evidence": "Enumerated setters via grep FDFT_WHALE_STREAM=1: 12 setters, 16 total matches",
+  "authority": "ses_<ralph-session-id>",
+  "timestamp": "2026-08-10T03:15:00.000Z"
+}
+```
+
+Programmatic API (from `src/hooks/ralph`): `amendCriterion(dir, storyId, { original, replacement, reason, evidence, authority })` replaces an active criterion and inserts the corrected one at its position; `supersedeCriterion(dir, storyId, { original, reason, evidence, authority })` removes it with no replacement. Both require non-empty reason/authority and bounded evidence (`MIN_CRITERION_EVIDENCE_LENGTH = 10`); failures return closed error codes and never mutate the PRD.
+
+Fail-closed invariants: a malformed ledger entry, an amended original that is still active, or an original amended twice makes the PRD invalid on read (`readPrd` → `null`), matching existing invalid-PRD startup behavior. Backward compatible: legacy PRDs without `criterionAmendments` read, format, and write unchanged; an empty `[]` ledger is treated as absent. Older builds that rewrite a PRD serialize only fields their own normalizer knows, so amendment records are only preserved by builds that ship this schema. See [ADR 03664](./adr/03664-ralph-prd-criterion-amendment.md) for the decision record.
 
 ## Named autopilot stage profiles (v1)
 
@@ -800,7 +822,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (38 Total)
+## Skills (33 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -808,79 +830,85 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 
 
-| Skill                     | Description                                                      | Manual Command                              |
-| ------------------------- | ---------------------------------------------------------------- | ------------------------------------------- |
-| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass | `/oh-my-claudecode:ai-slop-cleaner`         |
-| `ask`                     | Ask Claude, Codex, Gemini, Antigravity, or Grok via local CLI and capture a reusable artifact | `/oh-my-claudecode:ask`               |
-| `autoresearch`            | Stateful single-mission evaluator-driven improvement loop           | `/oh-my-claudecode:autoresearch`            |
-| `autopilot`               | Full autonomous execution from idea to working code              | `/oh-my-claudecode:autopilot`               |
-| `cancel`                  | Unified cancellation for active modes                            | `/oh-my-claudecode:cancel`                  |
-| `ccg`                     | Tri-model workflow via `ask codex` + `ask antigravity`, then Claude synthesis | `/oh-my-claudecode:ccg`                     |
-| `configure-notifications` | Configure notification integrations (Telegram, Discord, Slack) via natural language | `/oh-my-claudecode:configure-notifications` |
-| `deep-dive`               | Two-stage trace → deep-interview pipeline with context handoff   | `/oh-my-claudecode:deep-dive`               |
-| `deep-interview`          | Socratic deep interview with ambiguity gating                    | `/deep-interview`                           |
-| `deepinit`                | Generate hierarchical AGENTS.md docs                             | `/oh-my-claudecode:deepinit`                |
-| `external-context`        | Parallel document-specialist research                            | `/oh-my-claudecode:external-context`        |
-| `hud`                     | Configure HUD/statusline                                         | `/oh-my-claudecode:hud`                     |
-| `skillify`                | Extract reusable skill from session                              | `/oh-my-claudecode:skillify`                |
-| `learner`                 | **Deprecated** compatibility alias for `skillify`                | `/oh-my-claudecode:learner`                 |
-| `mcp-setup`               | Configure MCP servers                                            | `/oh-my-claudecode:mcp-setup`               |
-| `omc-doctor`              | Diagnose and fix installation issues                             | `/oh-my-claudecode:omc-doctor`              |
-| `omc-plan`                | Planning workflow (`/plan` safe alias; bundled directory ID is `plan`) | `/oh-my-claudecode:plan`                    |
-| `omc-reference`           | Detailed OMC agent/tools/team/commit reference skill             | Auto-loaded reference only                  |
-| `omc-setup`               | One-time setup wizard                                            | `/oh-my-claudecode:omc-setup`               |
-| `omc-teams`               | Spawn `claude`/`codex`/`gemini`/`antigravity`/`grok`/`cursor` tmux workers for parallel execution | `/oh-my-claudecode:omc-teams`             |
-| `project-session-manager` | Manage isolated dev environments (git worktrees + tmux)          | `/oh-my-claudecode:project-session-manager` |
-| `psm` | **Deprecated** compatibility alias for `project-session-manager` | `/oh-my-claudecode:psm` |
-| `ralph`                   | Persistence loop until verified completion                       | `/oh-my-claudecode:ralph`                   |
-| `ralplan`                 | Consensus planning alias for `/plan --consensus`                 | `/oh-my-claudecode:ralplan`                 |
-| `release`                 | Automated release workflow                                       | `/oh-my-claudecode:release`                 |
-| `self-improve`            | Autonomous evolutionary code improvement engine with tournament selection; artifacts are topic-scoped under `.omc/self-improve/topics/<topic-slug>/` by default, with flat `.omc/self-improve/` preserved for legacy single-track resumes | `/oh-my-claudecode:self-improve`    |
-| `setup`                   | Unified setup entrypoint for install, diagnostics, and MCP configuration | `/oh-my-claudecode:setup`              |
-| `sciomc`                  | Parallel scientist orchestration                                 | `/oh-my-claudecode:sciomc`                  |
-| `skill`                   | Manage local skills (list/add/remove/search/edit)                | `/oh-my-claudecode:skill`                   |
-| `team`                    | Coordinated multi-agent workflow                                 | `/oh-my-claudecode:team`                    |
-| `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses     | `/oh-my-claudecode:trace`                   |
-| `ultraqa`                 | QA cycle until goal is met                                       | `/oh-my-claudecode:ultraqa`                 |
-| `ultrawork`               | Maximum parallel throughput mode                                 | `/oh-my-claudecode:ultrawork`               |
-| `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons | `/oh-my-claudecode:visual-verdict`          |
-| `wiki`                    | LLM Wiki — persistent markdown knowledge base that compounds across sessions | `/oh-my-claudecode:wiki`           |
-| `writer-memory`           | Agentic memory system for writing projects                       | `/oh-my-claudecode:writer-memory`           |
+| Skill                     | Description                                                                    | Manual Command                              |
+| ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------- |
+| `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass        | `/oh-my-claudecode:ai-slop-cleaner`         |
+| `ask`                     | Ask Claude, Codex, Gemini, Antigravity, Grok, or Cursor via local CLI          | `/oh-my-claudecode:ask`                     |
+| `autopilot`               | Full autonomous execution from idea to working code                            | `/oh-my-claudecode:autopilot`               |
+| `autoresearch`            | Stateful evaluator-driven improvement loop                                     | `/oh-my-claudecode:autoresearch`            |
+| `cancel`                  | Unified cancellation for active modes                                          | `/oh-my-claudecode:cancel`                  |
+| `cancel-ralph`            | Deprecated compatibility alias for `cancel`                                   | `/oh-my-claudecode:cancel-ralph`            |
+| `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
+| `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
+| `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/deep-interview`                           |
+| `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
+| `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
+| `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
+| `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
+| `omc-doctor`              | Diagnose and fix installation issues                                           | `/oh-my-claudecode:omc-doctor`              |
+| `omc-plan`                | Strategic planning with optional interview and consensus modes                 | `/oh-my-claudecode:omc-plan`               |
+| `omc-review`              | Evaluate finished work for defects, risk, and simplification                   | `/oh-my-claudecode:omc-review`             |
+| `omc-setup`               | Install or refresh OMC for plugin, npm, and local-development setups           | `/oh-my-claudecode:omc-setup`              |
+| `project-session-manager` | Manage isolated development environments (git worktrees + tmux)                | `/oh-my-claudecode:project-session-manager` |
+| `psm`                     | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                     |
+| `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
+| `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
+| `release`                 | Automated release workflow                                                      | `/oh-my-claudecode:release`                 |
+| `remember`                | Save and retrieve durable session memory                                        | `/oh-my-claudecode:remember`                |
+| `research`                | Investigate an open question and return grounded findings                       | `/oh-my-claudecode:research`               |
+| `self-improve`            | Autonomous evolutionary code improvement engine                                | `/oh-my-claudecode:self-improve`           |
+| `skill`                   | Manage local skills (list/add/remove/search/edit)                              | `/oh-my-claudecode:skill`                   |
+| `skillify`                | Extract a reusable skill from the current session                              | `/oh-my-claudecode:skillify`                |
+| `team`                    | Coordinated multi-agent workflow                                               | `/oh-my-claudecode:team`                    |
+| `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses                   | `/oh-my-claudecode:trace`                  |
+| `ultragoal`               | Durable multi-goal workflow with checkpointed artifacts                        | `/oh-my-claudecode:ultragoal`              |
+| `verify`                  | Verify that a change really works before claiming completion                    | `/oh-my-claudecode:verify`                 |
+| `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons              | `/oh-my-claudecode:visual-verdict`        |
+| `wiki`                    | Persistent markdown knowledge base that compounds across sessions              | `/oh-my-claudecode:wiki`                   |
 
 
 ---
 
 ## Slash Commands
 
-Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list; the commands below highlight common entrypoints and aliases. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
+Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list, including frontmatter aliases; the commands below list shipped command files and direct skill entrypoints. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `/oh-my-claudecode:ai-slop-cleaner <target>`             | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                        |
 | `/oh-my-claudecode:ask <claude\|codex\|gemini\|antigravity\|grok\|cursor> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact                   |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
+| `/oh-my-claudecode:autoresearch <task>`                  | Run a bounded evaluator-driven improvement mission                                             |
+| `/oh-my-claudecode:cancel [--force\|--all]`              | Cancel active OMC modes                                                                       |
+| `/oh-my-claudecode:cancel-ralph [--force\|--all]`        | Deprecated alias for cancellation                                                             |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
-| `/oh-my-claudecode:compact [note]`                        | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
-| `/oh-my-claudecode:deep-dive <problem>`                  | Run the trace → deep-interview pipeline                                                       |
+| `/oh-my-claudecode:compact [note]`                       | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
+| `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
-| `/oh-my-claudecode:mcp-setup`                            | Configure MCP servers                                                                         |
+| `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
+| `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
+| `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
 | `/oh-my-claudecode:omc-doctor`                           | Diagnose and fix installation issues                                                          |
-| `/oh-my-claudecode:plan <description>`                   | Start planning session (supports consensus structured deliberation)                           |
-| `/oh-my-claudecode:omc-setup`                            | One-time setup wizard                                                                         |
-| `/oh-my-claudecode:omc-teams <N>:<agent> <task>`         | Spawn `claude`/`codex`/`gemini`/`antigravity`/`grok`/`cursor` tmux workers for legacy parallel execution                    |
+| `/oh-my-claudecode:omc-plan <description>`               | Start planning session (supports consensus structured deliberation)                           |
+| `/oh-my-claudecode:omc-review [path]`                    | Review finished work for defects and risk                                                       |
+| `/oh-my-claudecode:omc-setup`                            | Install or refresh OMC                                                                        |
 | `/oh-my-claudecode:project-session-manager <arguments>`  | Manage isolated dev environments with git worktrees + tmux                                    |
 | `/oh-my-claudecode:psm <arguments>`                      | Deprecated alias for project session manager                                                  |
-| `/oh-my-claudecode:ralph <task>`                         | Self-referential loop until task completion (`--critic=architect \| critic \| codex`)       |
-| `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation (`--deliberate` for high-risk mode) |
+| `/oh-my-claudecode:ralph <task>`                         | Persistence loop until task completion (`--critic=architect \| critic \| codex`)             |
+| `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation                                     |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
-| `/oh-my-claudecode:setup`                                | Unified setup entrypoint (`setup`, `setup doctor`, `setup mcp`)                               |
-| `/oh-my-claudecode:sciomc <topic>`                       | Parallel research orchestration                                                               |
-| `/oh-my-claudecode:team <N>:<agent> <task>`              | Coordinated native team workflow                                                              |
-| `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane that orchestrates parallel tracer hypotheses in team mode        |
-| `/oh-my-claudecode:ultraqa <goal>`                       | Autonomous QA cycling workflow                                                                |
-| `/oh-my-claudecode:ultrawork <task>`                     | Maximum performance mode with parallel agents                                                 |
+| `/oh-my-claudecode:remember <note>`                      | Save durable session memory                                                                   |
+| `/oh-my-claudecode:research <question>`                  | Investigate an open question and return grounded findings                                      |
+| `/oh-my-claudecode:self-improve <topic>`                 | Run the autonomous code-improvement workflow                                                   |
+| `/oh-my-claudecode:skill <action>`                       | Manage local skills                                                                           |
+| `/oh-my-claudecode:skillify`                             | Extract a reusable skill from the current session                                             |
+| `/oh-my-claudecode:team <N>:<agent> <task>`               | Coordinated native team workflow                                                              |
+| `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane                                                                  |
+| `/oh-my-claudecode:ultragoal <condition>`                | Track a durable multi-goal workflow                                                           |
+| `/oh-my-claudecode:verify <target>`                      | Verify that a change really works before claiming completion                                  |
 | `/oh-my-claudecode:visual-verdict <task>`                | Structured visual QA verdict for screenshot/reference comparisons                             |
+| `/oh-my-claudecode:wiki <action>`                        | Query or update the persistent markdown knowledge base                                         |
 
 
 ### Skill Pipeline Metadata (Preview)

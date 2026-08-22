@@ -10,6 +10,7 @@ import {
   getModelForAgent,
   type AgentInput
 } from '../features/delegation-enforcer.js';
+import { clearSkillsCache } from '../features/builtin-skills/skills.js';
 import { resolveDelegation } from '../features/delegation-routing/resolver.js';
 
 describe('delegation-enforcer', () => {
@@ -148,6 +149,192 @@ describe('delegation-enforcer', () => {
       };
 
       expect(() => enforceModel(input)).toThrow('Unknown agent type');
+    });
+    it('throws error for a bundled skill name with Skill-tool guidance (issue #3667)', () => {
+      const input: AgentInput = {
+        description: 'Deslop changed files',
+        prompt: 'Run the cleaner',
+        subagent_type: 'oh-my-claudecode:ai-slop-cleaner'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Unknown agent type');
+      expect(thrown!.message).toContain('ai-slop-cleaner');
+      expect(thrown!.message).toContain('Skill');
+      expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      expect(thrown!.message).toContain('do NOT substitute a similarly-named agent');
+    });
+
+    it('does not add Skill guidance for genuinely unknown agents (no closest-match substitution)', () => {
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'oh-my-claudecode:ai-slop-cleanr'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Unknown agent type');
+      expect(thrown!.message).not.toContain('Skill');
+      expect(thrown!.message).not.toContain('closest match');
+    });
+
+    it('resolves the dir-only plan name to omc-plan in the guidance (hook parity)', () => {
+      const input: AgentInput = {
+        description: 'Plan task',
+        prompt: 'Run it',
+        subagent_type: 'oh-my-claudecode:plan'
+      };
+
+      let thrown: Error | undefined;
+      try {
+        enforceModel(input);
+      } catch (error) {
+        thrown = error as Error;
+      }
+
+      expect(thrown).toBeDefined();
+      expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+    });
+    describe('bundled skill visibility (entitlement set empty since 5.0.0, issue #3667)', () => {
+      let savedUserType: string | undefined;
+
+      beforeEach(() => {
+        savedUserType = process.env.USER_TYPE;
+        clearSkillsCache();
+      });
+
+      afterEach(() => {
+        if (savedUserType === undefined) {
+          delete process.env.USER_TYPE;
+        } else {
+          process.env.USER_TYPE = savedUserType;
+        }
+        clearSkillsCache();
+      });
+
+      function thrownFor(subagentType: string): Error | undefined {
+        try {
+          enforceModel({ description: 't', prompt: 'p', subagent_type: subagentType });
+        } catch (error) {
+          return error as Error;
+        }
+        return undefined;
+      }
+
+      // Ungated in 5.0.0: remember/verify/debug are suggested for every user.
+      it.each(['remember', 'verify', 'debug'])(
+        'adds Skill guidance for the %s skill regardless of USER_TYPE',
+        (skillName) => {
+          delete process.env.USER_TYPE;
+          clearSkillsCache();
+          const thrown = thrownFor(`oh-my-claudecode:${skillName}`);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain(`Skill(skill="oh-my-claudecode:${skillName}")`);
+        },
+      );
+
+      it.each(['remember', 'verify', 'debug'])(
+        'adds Skill guidance for the %s skill when USER_TYPE=ant',
+        (hiddenSkill) => {
+          process.env.USER_TYPE = 'ant';
+          clearSkillsCache();
+          const thrown = thrownFor(`oh-my-claudecode:${hiddenSkill}`);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain(`Skill(skill="oh-my-claudecode:${hiddenSkill}")`);
+        },
+      );
+
+      it('keeps guidance for every bundled skill in the same process', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        const visible = thrownFor('oh-my-claudecode:ai-slop-cleaner');
+        const ungated = thrownFor('oh-my-claudecode:remember');
+        expect(visible!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+        expect(ungated!.message).toContain('Skill(skill="oh-my-claudecode:remember")');
+      });
+
+      it('case-folds identifiers before visibility and resolution (Windows/macOS semantics, issue #3667)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        const ungatedMixedCase = thrownFor('oh-my-claudecode:Remember');
+        expect(ungatedMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:remember")');
+
+        const visibleMixedCase = thrownFor('oh-my-claudecode:Plan');
+        expect(visibleMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
+
+      });
+
+      it('case-folds the namespace prefix for USER_TYPE=ant', () => {
+        process.env.USER_TYPE = 'ant';
+        clearSkillsCache();
+        const hiddenMixedCase = thrownFor('oh-my-claudecode:Remember');
+        expect(hiddenMixedCase!.message).toContain('Skill(skill="oh-my-claudecode:remember")');
+        const omcPrefix = thrownFor('OMC:ai-slop-cleaner');
+        expect(omcPrefix!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      });
+      it('preserves bare native identifiers (no Skill guidance for plan/general-purpose, issue #3667 P1)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        for (const bare of ['plan', 'Plan', 'general-purpose']) {
+          const thrown = thrownFor(bare);
+          expect(thrown).toBeDefined();
+          expect(thrown!.message).toContain('Unknown agent type');
+          expect(thrown!.message).not.toContain('Skill(skill=');
+        }
+      });
+
+      it('validates skill names even with an explicit model (issue #3667 P2)', () => {
+        delete process.env.USER_TYPE;
+        clearSkillsCache();
+        let thrown: Error | undefined;
+        try {
+          enforceModel({
+            description: 't',
+            prompt: 'p',
+            subagent_type: 'oh-my-claudecode:ai-slop-cleaner',
+            model: 'sonnet',
+          });
+        } catch (error) {
+          thrown = error as Error;
+        }
+        expect(thrown).toBeDefined();
+        expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+      });
+
+      it('validates skill names under force-inherit routing (issue #3667 P2)', () => {
+        delete process.env.USER_TYPE;
+        process.env.OMC_ROUTING_FORCE_INHERIT = 'true';
+        clearSkillsCache();
+        let thrown: Error | undefined;
+        try {
+          enforceModel({ description: 't', prompt: 'p', subagent_type: 'oh-my-claudecode:ai-slop-cleaner' });
+        } catch (error) {
+          thrown = error as Error;
+        }
+        expect(thrown).toBeDefined();
+        expect(thrown!.message).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
+        delete process.env.OMC_ROUTING_FORCE_INHERIT;
+      });
+
+      it('keeps valid agents passing validation with an explicit model', () => {
+        const result = enforceModel({ description: 't', prompt: 'p', subagent_type: 'executor', model: 'haiku' });
+        expect(result.modifiedInput.model).toBe('haiku');
+        expect(result.injected).toBe(false);
+      });
     });
 
     it('logs warning only when OMC_DEBUG=true', () => {
@@ -338,6 +525,14 @@ describe('delegation-enforcer', () => {
     it('throws error for unknown agent', () => {
       expect(() => getModelForAgent('unknown')).toThrow('Unknown agent type');
     });
+
+    it('guides namespaced bundled skills to the canonical Skill invocation (issue #3667 P2)', () => {
+      for (const skillType of ['oh-my-claudecode:plan', 'omc:plan']) {
+        expect(() => getModelForAgent(skillType)).toThrow(
+          'Skill(skill="oh-my-claudecode:omc-plan")',
+        );
+      }
+    });
   });
 
   describe('deprecated alias routing', () => {
@@ -417,7 +612,7 @@ describe('delegation-enforcer', () => {
 
   describe('modelAliases config override (issue #1211)', () => {
     const savedEnv: Record<string, string | undefined> = {};
-    const aliasEnvKeys = ['OMC_MODEL_ALIAS_HAIKU', 'OMC_MODEL_ALIAS_SONNET', 'OMC_MODEL_ALIAS_OPUS'];
+    const aliasEnvKeys = ['OMC_MODEL_ALIAS_HAIKU', 'OMC_MODEL_ALIAS_SONNET', 'OMC_MODEL_ALIAS_OPUS', 'OMC_MODEL_ALIAS_FABLE'];
 
     beforeEach(() => {
       for (const key of aliasEnvKeys) {
@@ -497,6 +692,18 @@ describe('delegation-enforcer', () => {
       const result = enforceModel(input);
       expect(result.model).toBe('inherit');
       expect(result.modifiedInput.model).toBeUndefined();
+    });
+
+    it('remaps opus agents to fable via env var (issue #3726)', () => {
+      process.env.OMC_MODEL_ALIAS_OPUS = 'fable';
+      const input: AgentInput = {
+        description: 'Test task',
+        prompt: 'Do something',
+        subagent_type: 'architect' // architect defaults to opus
+      };
+      const result = enforceModel(input);
+      expect(result.model).toBe('fable');
+      expect(result.modifiedInput.model).toBe('fable');
     });
 
     it('remaps opus agents to inherit via env var', () => {

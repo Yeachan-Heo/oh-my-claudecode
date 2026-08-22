@@ -15,10 +15,37 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { ensureSessionStateDir, getOmcRoot, getSessionStateDir } from '../../lib/worktree-paths.js';
+import type { ObservableCheck, PrdReconciliationConfig } from './stale-prd.js';
 
 // ============================================================================
 // Types
 // ============================================================================
+
+export type CriterionAmendmentKind = 'replaced' | 'superseded';
+
+/**
+ * Evidence-preserving record of an acceptance criterion that no longer
+ * governs a story. The original criterion text is retained verbatim forever;
+ * it is never rewritten or deleted. Amending a criterion is the only
+ * sanctioned way for an empirically refuted criterion to stop governing the
+ * story's completion check.
+ */
+export interface CriterionAmendment {
+  /** Kind of amendment: 'replaced' (a corrected criterion now governs) or 'superseded' (no replacement governs). */
+  kind: CriterionAmendmentKind;
+  /** The verbatim original criterion text that was refuted. Retained forever. */
+  original: string;
+  /** Corrected criterion that now governs; required when kind === 'replaced'. */
+  replacement?: string;
+  /** Why the original criterion no longer governs (mandatory, non-empty). */
+  reason: string;
+  /** The bounded measurement/proof that refuted the original (mandatory, non-empty, >= MIN_CRITERION_EVIDENCE_LENGTH chars). */
+  evidence: string;
+  /** Authority that performed the amendment (mandatory, non-empty). */
+  authority: string;
+  /** ISO 8601 timestamp when the amendment was recorded. */
+  timestamp: string;
+}
 
 export interface UserStory {
   /** Unique identifier (e.g., "US-001") */
@@ -27,8 +54,10 @@ export interface UserStory {
   title: string;
   /** Full user story description */
   description: string;
-  /** List of acceptance criteria that must be met */
+  /** Acceptance criteria that currently govern this story. Amended/superseded originals are retained in criterionAmendments. */
   acceptanceCriteria: string[];
+  /** Evidence-preserving amendment ledger: originals retained with proof, reason, authority, and timestamp. */
+  criterionAmendments?: CriterionAmendment[];
   /** Execution priority (1 = highest) */
   priority: number;
   /** Whether this story passes (complete and verified) */
@@ -48,6 +77,12 @@ export interface PRD {
   description: string;
   /** List of user stories */
   userStories: UserStory[];
+  /**
+   * Optional stale-state reconciliation configuration (#3669). Carried inside
+   * the PRD so it travels with the stories and stays session-scoped. Legacy
+   * PRDs without this field read back as undefined and are fully supported.
+   */
+  reconciliation?: PrdReconciliationConfig;
 }
 
 export interface PRDStatus {
@@ -71,6 +106,7 @@ export interface PRDStatus {
 
 export const PRD_FILENAME = 'prd.json';
 export const PRD_EXAMPLE_FILENAME = 'prd.example.json';
+export const MIN_CRITERION_EVIDENCE_LENGTH = 10;
 
 export interface EnsurePrdForStartupResult {
   ok: boolean;
@@ -78,6 +114,115 @@ export interface EnsurePrdForStartupResult {
   path: string | null;
   prd?: PRD;
   error?: string;
+}
+
+/**
+ * Input for an evidence-preserving criterion amendment. `timestamp` defaults
+ * to the current time when omitted; all other fields are required so that no
+ * amendment can be recorded without bounded proof, a reason, and an authority.
+ */
+export interface CriterionAmendmentInput {
+  /** The verbatim original criterion text (must currently be active). */
+  original: string;
+  /** Corrected criterion for kind 'replaced'; must be absent for 'superseded'. */
+  replacement?: string;
+  /** Why the original criterion no longer governs. */
+  reason: string;
+  /** The bounded measurement/proof that refuted the original. */
+  evidence: string;
+  /** Authority that performed the amendment (e.g. the ralph session id). */
+  authority: string;
+  /** Optional explicit ISO 8601 timestamp; defaults to now. */
+  timestamp?: string;
+}
+
+export interface CriterionAmendmentResult {
+  ok: boolean;
+  /** Machine-readable closed error code on failure. */
+  error?: string;
+  /** The recorded amendment on success. */
+  amendment?: CriterionAmendment;
+}
+
+function normalizeCriterionAmendment(candidate: unknown): CriterionAmendment | null {
+  if (!candidate || typeof candidate !== 'object') {
+    return null;
+  }
+
+  const amendment = candidate as Record<string, unknown>;
+  const kind = amendment.kind;
+  const original = amendment.original;
+  const reason = amendment.reason;
+  const evidence = amendment.evidence;
+  const authority = amendment.authority;
+  const timestamp = amendment.timestamp;
+  const replacement = amendment.replacement;
+
+  if (
+    (kind !== 'replaced' && kind !== 'superseded') ||
+    typeof original !== 'string' ||
+    original.trim() === '' ||
+    typeof reason !== 'string' ||
+    reason.trim() === '' ||
+    typeof evidence !== 'string' ||
+    evidence.trim() === '' ||
+    typeof authority !== 'string' ||
+    authority.trim() === '' ||
+    typeof timestamp !== 'string' ||
+    timestamp.trim() === '' ||
+    (kind === 'replaced' && (typeof replacement !== 'string' || replacement.trim() === '')) ||
+    (kind === 'superseded' && replacement !== undefined)
+  ) {
+    return null;
+  }
+
+  return {
+    kind,
+    original,
+    replacement: kind === 'replaced' ? (replacement as string) : undefined,
+    reason,
+    evidence,
+    authority,
+    timestamp
+  };
+}
+
+/**
+ * Normalize a story's optional amendment ledger and enforce its invariants:
+ * - an amended/superseded original must not still be active, and
+ * - an original may be amended at most once.
+ * Any violation makes the story (and therefore the PRD) invalid so that a
+ * silently deviated PRD fails closed instead of being misread as authoritative.
+ */
+function normalizeCriterionAmendments(
+  candidate: unknown,
+  acceptanceCriteria: readonly string[]
+): CriterionAmendment[] | null | undefined {
+  if (candidate === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(candidate)) {
+    return null;
+  }
+  if (candidate.length === 0) {
+    return undefined;
+  }
+
+  const amendments = candidate.map(normalizeCriterionAmendment);
+  if (amendments.some(amendment => amendment === null)) {
+    return null;
+  }
+
+  const originals = new Set<string>();
+  const active = new Set(acceptanceCriteria);
+  for (const amendment of amendments as CriterionAmendment[]) {
+    if (originals.has(amendment.original) || active.has(amendment.original)) {
+      return null;
+    }
+    originals.add(amendment.original);
+  }
+
+  return amendments as CriterionAmendment[];
 }
 
 function normalizeStory(candidate: unknown): UserStory | null {
@@ -99,11 +244,21 @@ function normalizeStory(candidate: unknown): UserStory | null {
     return null;
   }
 
+  const acceptanceCriteria = [...story.acceptanceCriteria];
+  const criterionAmendments = normalizeCriterionAmendments(
+    story.criterionAmendments,
+    acceptanceCriteria
+  );
+  if (criterionAmendments === null) {
+    return null;
+  }
+
   return {
     id: story.id,
     title: story.title,
     description: story.description,
-    acceptanceCriteria: [...story.acceptanceCriteria],
+    acceptanceCriteria,
+    criterionAmendments,
     priority: story.priority,
     passes: story.passes,
     architectVerified: story.architectVerified === true,
@@ -133,15 +288,93 @@ function normalizePrd(candidate: unknown): PRD | null {
     return null;
   }
 
+  const reconciliation = normalizeReconciliation(prd.reconciliation);
+
   return {
     project: prd.project,
     branchName: prd.branchName,
     description: prd.description,
-    userStories: userStories as UserStory[]
+    userStories: userStories as UserStory[],
+    ...(reconciliation ? { reconciliation } : {})
   };
 }
 
-function readPrdFromPath(prdPath: string): { prd?: PRD; error?: string } {
+/**
+ * Validate and preserve the optional reconciliation config. Returns undefined
+ * for legacy PRDs (no field) or malformed values — a malformed config must not
+ * invalidate an otherwise valid PRD, it just disables auto-reconciliation.
+ */
+function normalizeReconciliation(candidate: unknown): PrdReconciliationConfig | undefined {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return undefined;
+  }
+
+  const raw = candidate as Record<string, unknown>;
+  const config: PrdReconciliationConfig = {};
+
+  if (typeof raw.staleAfterMs === 'number' && Number.isFinite(raw.staleAfterMs) && raw.staleAfterMs > 0) {
+    config.staleAfterMs = raw.staleAfterMs;
+  }
+
+  if (typeof raw.autoReconcile === 'boolean') {
+    config.autoReconcile = raw.autoReconcile;
+  }
+
+  if (raw.observableChecks && typeof raw.observableChecks === 'object' && !Array.isArray(raw.observableChecks)) {
+    const checksByStory = raw.observableChecks as Record<string, unknown>;
+    const observableChecks: Record<string, unknown> = {};
+    for (const [storyId, checks] of Object.entries(checksByStory)) {
+      if (!Array.isArray(checks)) {
+        continue;
+      }
+      const normalizedChecks = checks
+        .map(c => normalizeObservableCheck(c))
+        .filter((c): c is ObservableCheck => c !== null);
+      if (normalizedChecks.length > 0) {
+        observableChecks[storyId] = normalizedChecks;
+      }
+    }
+    if (Object.keys(observableChecks).length > 0) {
+      config.observableChecks = observableChecks as PrdReconciliationConfig['observableChecks'];
+    }
+  }
+
+  return Object.keys(config).length > 0 ? config : undefined;
+}
+
+/**
+ * Validate a single observable check. Unknown check types or missing required
+ * fields are dropped rather than failing the whole PRD.
+ */
+function normalizeObservableCheck(candidate: unknown): ObservableCheck | null {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return null;
+  }
+
+  const raw = candidate as Record<string, unknown>;
+  const type = raw.type;
+  if (type !== 'fileExists' && type !== 'fileContains' && type !== 'gitGrep') {
+    return null;
+  }
+
+  const check: ObservableCheck = { type };
+  if (typeof raw.path === 'string' && raw.path.length > 0) {
+    check.path = raw.path;
+  }
+  if (typeof raw.ref === 'string' && raw.ref.length > 0) {
+    check.ref = raw.ref;
+  }
+  if (typeof raw.pattern === 'string' && raw.pattern.length > 0) {
+    check.pattern = raw.pattern;
+  }
+  if (typeof raw.description === 'string' && raw.description.length > 0) {
+    check.description = raw.description;
+  }
+
+  return check;
+}
+
+export function readPrdFromPath(prdPath: string): { prd?: PRD; error?: string } {
   try {
     const content = readFileSync(prdPath, 'utf-8');
     const parsed = JSON.parse(content) as unknown;
@@ -398,6 +631,121 @@ export function getNextStory(directory: string, sessionId?: string): UserStory |
   const status = getPrdStatus(prd);
   return status.nextStory;
 }
+/**
+ * Apply an evidence-preserving criterion amendment to a story.
+ *
+ * The original criterion must currently be active. On success the original is
+ * removed from `acceptanceCriteria` (a corrected criterion is inserted at the
+ * original's position for kind 'replaced'), and the amendment is appended to
+ * the story's `criterionAmendments` ledger with bounded proof, reason,
+ * authority, and timestamp. There is no silent deletion path: an original can
+ * only leave the active list through this ledger or a direct hand edit that
+ * fails closed on the next read.
+ */
+function applyCriterionAmendment(
+  directory: string,
+  storyId: string,
+  kind: CriterionAmendmentKind,
+  input: CriterionAmendmentInput,
+  sessionId?: string
+): CriterionAmendmentResult {
+  const prd = readPrd(directory, sessionId);
+  if (!prd) {
+    return { ok: false, error: 'prd-not-found' };
+  }
+
+  const story = prd.userStories.find(s => s.id === storyId);
+  if (!story) {
+    return { ok: false, error: 'story-not-found' };
+  }
+
+  const original = input.original;
+  if (typeof original !== 'string' || original.trim() === '' || !story.acceptanceCriteria.includes(original)) {
+    return { ok: false, error: 'original-not-active' };
+  }
+
+  const reason = input.reason?.trim() ?? '';
+  const evidence = input.evidence?.trim() ?? '';
+  const authority = input.authority?.trim() ?? '';
+
+  if (reason === '') {
+    return { ok: false, error: 'reason-required' };
+  }
+  if (evidence === '') {
+    return { ok: false, error: 'evidence-required' };
+  }
+  if (evidence.length < MIN_CRITERION_EVIDENCE_LENGTH) {
+    return { ok: false, error: 'evidence-too-short' };
+  }
+  if (authority === '') {
+    return { ok: false, error: 'authority-required' };
+  }
+
+  const replacement = input.replacement?.trim();
+  if (kind === 'replaced' && (replacement === undefined || replacement === '')) {
+    return { ok: false, error: 'replacement-required' };
+  }
+  if (kind === 'superseded' && input.replacement !== undefined) {
+    return { ok: false, error: 'replacement-not-allowed' };
+  }
+
+  // A successfully amended original leaves the active list and can never return:
+  // read-time normalization rejects any PRD where an amended original is still
+  // active, so no second amendment of the same original is possible here.
+  const ledger = story.criterionAmendments ?? [];
+
+  const amendment: CriterionAmendment = {
+    kind,
+    original,
+    replacement: kind === 'replaced' ? replacement : undefined,
+    reason,
+    evidence,
+    authority,
+    timestamp: input.timestamp ?? new Date().toISOString()
+  };
+
+  const originalIndex = story.acceptanceCriteria.indexOf(original);
+  const nextCriteria = [...story.acceptanceCriteria];
+  nextCriteria.splice(originalIndex, 1);
+  if (kind === 'replaced' && replacement !== undefined) {
+    nextCriteria.splice(originalIndex, 0, replacement);
+  }
+  story.acceptanceCriteria = nextCriteria;
+  story.criterionAmendments = [...ledger, amendment];
+
+  if (!writePrd(directory, prd, sessionId)) {
+    return { ok: false, error: 'write-failed' };
+  }
+
+  return { ok: true, amendment };
+}
+
+/**
+ * Amend (replace) an active acceptance criterion with a corrected one.
+ * The original is retained verbatim in the amendment ledger.
+ */
+export function amendCriterion(
+  directory: string,
+  storyId: string,
+  input: CriterionAmendmentInput,
+  sessionId?: string
+): CriterionAmendmentResult {
+  return applyCriterionAmendment(directory, storyId, 'replaced', input, sessionId);
+}
+
+/**
+ * Supersede an active acceptance criterion with no replacement. The original
+ * no longer governs completion, but is retained verbatim with proof, reason,
+ * authority, and timestamp in the amendment ledger.
+ */
+export function supersedeCriterion(
+  directory: string,
+  storyId: string,
+  input: CriterionAmendmentInput,
+  sessionId?: string
+): CriterionAmendmentResult {
+  return applyCriterionAmendment(directory, storyId, 'superseded', input, sessionId);
+}
 
 // ============================================================================
 // PRD Creation
@@ -588,6 +936,27 @@ export function formatPrdStatus(status: PRDStatus): string {
 }
 
 /**
+ * Format a story's amendment ledger (struck-through originals with proof).
+ * Returns an empty string when the story has no amendments.
+ */
+export function formatCriterionAmendments(story: UserStory): string {
+  const amendments = story.criterionAmendments;
+  if (!amendments || amendments.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = ['**Amended/Superseded Criteria (evidence ledger):**'];
+  for (const amendment of amendments) {
+    const action = amendment.kind === 'replaced' ? 'replaced by' : 'superseded';
+    const target = amendment.kind === 'replaced' ? `: ${amendment.replacement}` : '';
+    lines.push(
+      `- ~~${amendment.original}~~ — ${action}${target} (reason: ${amendment.reason}; evidence: ${amendment.evidence}; authority: ${amendment.authority}; at: ${amendment.timestamp})`
+    );
+  }
+  return lines.join('\n');
+}
+
+/**
  * Format a story for display
  */
 export function formatStory(story: UserStory): string {
@@ -608,6 +977,12 @@ export function formatStory(story: UserStory): string {
   story.acceptanceCriteria.forEach((c, i) => {
     lines.push(`${i + 1}. ${c}`);
   });
+
+  const amendments = formatCriterionAmendments(story);
+  if (amendments) {
+    lines.push('');
+    lines.push(amendments);
+  }
 
   if (story.notes) {
     lines.push('');
@@ -651,6 +1026,9 @@ export function formatPrd(prd: PRD): string {
  * Format next story prompt for injection into ralph
  */
 export function formatNextStoryPrompt(story: UserStory, prdPath?: string): string {
+  const amendments = formatCriterionAmendments(story);
+  const amendmentSection = amendments ? `\n${amendments}\n` : '';
+
   return `<current-story>
 
 ## Current Story: ${story.id} - ${story.title}
@@ -659,13 +1037,14 @@ ${story.description}
 
 **Acceptance Criteria:**
 ${story.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
-
+${amendmentSection}
 ${prdPath ? `**Active PRD file:** ${prdPath}\n\n` : ''}**Instructions:**
 1. Implement this story completely
 2. Verify ALL acceptance criteria are met
 3. Run quality checks (tests, typecheck, lint)
 4. When complete, mark story as passes: true in the active PRD file
-5. If ALL stories are done, run \`/oh-my-claudecode:cancel\` to cleanly exit ralph mode and clean up all state files
+5. If implementation proves an acceptance criterion false, amend or supersede it with evidence instead of silently deleting it or claiming it passes (see the amendment ledger above and the ralph skill)
+6. If ALL stories are done, run \`/oh-my-claudecode:cancel\` to cleanly exit ralph mode and clean up all state files
 
 </current-story>
 

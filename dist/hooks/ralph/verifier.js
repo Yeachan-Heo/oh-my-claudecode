@@ -166,13 +166,21 @@ export function recordArchitectFeedback(directory, approved, feedback, sessionId
 export function getArchitectVerificationPrompt(state, currentStory) {
     const criticLabel = getCriticLabel(state.critic_mode);
     const approvalTag = `<ralph-approved critic="${getCriticMode(state.critic_mode)}" request-id="${state.request_id}"${state.story_id ? ` story-id="${state.story_id}"` : ''}>VERIFIED_COMPLETE</ralph-approved>`;
+    const amendmentLedger = currentStory?.criterionAmendments?.length
+        ? `
+
+**Amended/Superseded Criteria (evidence ledger — original criteria retained):**
+${currentStory.criterionAmendments.map((a, i) => `${i + 1}. ~~${a.original}~~ — ${a.kind === 'replaced' ? `replaced by: ${a.replacement}` : 'superseded'} (reason: ${a.reason}; evidence: ${a.evidence}; authority: ${a.authority}; at: ${a.timestamp})`).join('\n')}
+Verify that each amendment is justified by its cited evidence and that the active criteria below are the ones that govern.
+`
+        : '';
     const storySection = currentStory ? `
 **Current Story: ${currentStory.id} - ${currentStory.title}**
 ${currentStory.description}
 
 **Acceptance Criteria to Verify:**
 ${currentStory.acceptanceCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
-
+${amendmentLedger}
 IMPORTANT: This review gates Ralph's progression to the next story/complete state. Verify EACH acceptance criterion above is met. Do not verify based on general impressions — check each criterion individually with concrete evidence.
 ` : '';
     return `<ralph-verification>

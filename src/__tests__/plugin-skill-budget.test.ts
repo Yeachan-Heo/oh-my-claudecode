@@ -54,7 +54,8 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
     const defaultSkillDirs = pluginSkillDirs();
     const allSkillDirs = bundledSkillDirs();
 
-    expect(allSkillDirs.length).toBeGreaterThan(30);
+    // 5.0.0 retired 15 legacy skills; the bundled surface is intentionally smaller.
+    expect(allSkillDirs.length).toBeGreaterThan(20);
     expect(defaultSkillDirs).toEqual(allSkillDirs);
   });
 
@@ -70,7 +71,10 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
 
       expect(result.errors).toEqual([]);
       expect(result.compacted).toBe(allSkillDirs.length);
-      expect(originalBytes).toBeGreaterThan(400 * 1024);
+      // Precondition: the uncompacted payload is still large enough that
+      // compaction is doing real work. Lowered from 400KB after the 5.0.0
+      // retirement removed 15 skills from the bundled surface.
+      expect(originalBytes).toBeGreaterThan(300 * 1024);
       expect(compactBytes).toBeLessThan(COMPACT_PLUGIN_SKILL_BUDGET_BYTES);
       expect(result.totalBytes).toBe(compactBytes);
 
@@ -173,7 +177,8 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
   });
 
   it('preserves deprecated slash aliases as command wrappers', () => {
-    expect(readFileSync(join(COMMANDS_DIR, 'learner.md'), 'utf-8')).toContain('skills/skillify/SKILL.md');
+    // learner.md was retired in 5.0.0; psm remains the surviving command alias.
     expect(readFileSync(join(COMMANDS_DIR, 'psm.md'), 'utf-8')).toContain('skills/project-session-manager/SKILL.md');
+    expect(existsSync(join(COMMANDS_DIR, 'learner.md'))).toBe(false);
   });
 });

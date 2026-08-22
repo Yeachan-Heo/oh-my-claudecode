@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { canonicalizeTeamConfigWorkers } from '../../team/worker-canonicalization.js';
 const mocks = vi.hoisted(() => ({
     spawn: vi.fn(),
     killWorkerPanes: vi.fn(),
@@ -74,6 +75,7 @@ describe('team cli', () => {
         mocks.resumeTeam.mockReset();
         mocks.monitorTeam.mockReset();
         mocks.shutdownTeam.mockReset();
+        mocks.shutdownTeam.mockResolvedValue(true);
         mocks.isRuntimeV2Enabled.mockReset();
         mocks.isRuntimeV2Enabled.mockReturnValue(false);
         mocks.monitorTeamV2.mockReset();
@@ -448,7 +450,7 @@ describe('team cli', () => {
             max_workers: 20,
             workers: [],
             created_at: new Date().toISOString(),
-            tmux_session: '',
+            tmux_session: 'demo-session:0',
             leader_pane_id: null,
             hud_pane_id: null,
             resize_hook_name: null,
@@ -495,7 +497,7 @@ describe('team cli', () => {
             max_workers: 20,
             workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] }],
             created_at: new Date().toISOString(),
-            tmux_session: '',
+            tmux_session: 'demo-session:0',
             leader_pane_id: null,
             hud_pane_id: null,
             resize_hook_name: null,
@@ -661,16 +663,17 @@ describe('team cli', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-v2-status-dedup-'));
         const root = join(cwd, '.omc', 'state', 'team', 'demo-team');
         mkdirSync(root, { recursive: true });
-        writeFileSync(join(root, 'config.json'), JSON.stringify({
+        const duplicateWorkerConfig = canonicalizeTeamConfigWorkers({
             name: 'demo-team',
             task: 'demo',
             agent_type: 'executor',
+            worker_launch_mode: 'interactive',
             worker_count: 2,
             max_workers: 20,
             tmux_session: 'demo-session:0',
             workers: [
                 { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%1' },
-                { name: 'worker-1', index: 0, role: 'executor', assigned_tasks: [] },
+                { name: 'worker-1', index: 2, role: 'executor', assigned_tasks: [] },
             ],
             created_at: new Date().toISOString(),
             next_task_id: 2,
@@ -678,7 +681,8 @@ describe('team cli', () => {
             hud_pane_id: null,
             resize_hook_name: null,
             resize_hook_target: null,
-        }));
+        });
+        writeFileSync(join(root, 'config.json'), JSON.stringify(duplicateWorkerConfig));
         await teamCommand(['status', 'demo-team', '--json', '--cwd', cwd]);
         const payload = JSON.parse(logSpy.mock.calls[0][0]);
         expect(payload.workerPaneIds).toEqual(['%1']);
@@ -738,7 +742,7 @@ describe('team cli', () => {
         const { teamCommand } = await import('../team.js');
         const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
         mocks.isRuntimeV2Enabled.mockReturnValue(true);
-        mocks.shutdownTeamV2.mockResolvedValue(undefined);
+        mocks.shutdownTeamV2.mockResolvedValue({ outcome: 'cleaned' });
         const cwd = mkdtempSync(join(tmpdir(), 'omc-team-cli-v2-shutdown-'));
         const root = join(cwd, '.omc', 'state', 'team', 'beta-team');
         mkdirSync(root, { recursive: true });
@@ -786,6 +790,28 @@ describe('team cli', () => {
         const payload = JSON.parse(logSpy.mock.calls[0][0]);
         expect(payload.shutdown).toBe(true);
         expect(payload.forced).toBe(true);
+        logSpy.mockRestore();
+    });
+    it('team shutdown reports failed cleanup when shutdownTeam returns false', async () => {
+        const { teamCommand } = await import('../team.js');
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+        mocks.resumeTeam.mockResolvedValue({
+            teamName: 'beta-team',
+            sessionName: 'omc-team-beta:0',
+            leaderPaneId: '%0',
+            config: { teamName: 'beta-team', workerCount: 1, agentTypes: ['codex'], tasks: [], cwd: '/tmp/demo' },
+            workerNames: ['worker-1'],
+            workerPaneIds: ['%1'],
+            activeWorkers: new Map(),
+            cwd: '/tmp/demo',
+        });
+        mocks.shutdownTeam.mockResolvedValueOnce(false);
+        await teamCommand(['shutdown', 'beta-team', '--force', '--json']);
+        expect(mocks.shutdownTeam).toHaveBeenCalledWith('beta-team', 'omc-team-beta:0', '/tmp/demo', 0, ['%1'], '%0', undefined);
+        const payload = JSON.parse(logSpy.mock.calls[0][0]);
+        expect(payload.shutdown).toBe(false);
+        expect(payload.forced).toBe(true);
+        expect(payload.error).toContain('cleanup_unverified');
         logSpy.mockRestore();
     });
     it('legacy shorthand start alias supports optional ralph token', async () => {

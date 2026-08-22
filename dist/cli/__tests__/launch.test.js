@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 vi.mock('child_process', async (importOriginal) => {
@@ -856,6 +856,9 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
             symlinkSync: vi.fn(() => {
                 throw new Error('symlink unavailable');
             }),
+            linkSync: vi.fn(() => {
+                throw new Error('hardlink unavailable');
+            }),
         }));
         try {
             const { prepareOmcLaunchConfigDir: prepareWithFailedSymlink } = await import('../launch.js');
@@ -863,11 +866,52 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
             mkdirSync(configDir, { recursive: true });
             const credentialsPath = join(configDir, '.credentials.json');
             writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
-            writeFileSync(credentialsPath, '{"accessToken":"test-only-token"}');
+            writeFileSync(credentialsPath, JSON.stringify({ accessToken: 'test-only-token', expiresAt: 1000 }));
+            expect(() => prepareWithFailedSymlink(configDir)).toThrow(/Unable to mirror Claude credentials without copying credential content/);
+            expect(copyFileSyncSpy).not.toHaveBeenCalledWith(credentialsPath, expect.stringContaining('.credentials.json'));
+        }
+        finally {
+            vi.doUnmock('fs');
+            vi.resetModules();
+        }
+    });
+    it.skipIf(process.platform === 'win32')('falls back to a hard link when credential symlink creation fails and remains reconcilable', async () => {
+        vi.resetModules();
+        const actualFs = await vi.importActual('node:fs');
+        vi.doMock('fs', () => ({
+            ...actualFs,
+            symlinkSync: vi.fn(() => {
+                throw new Error('symlink unavailable');
+            }),
+        }));
+        try {
+            const { prepareOmcLaunchConfigDir: prepareWithFailedSymlink } = await import('../launch.js');
+            const configDir = join(tempRoot, '.claude');
+            mkdirSync(configDir, { recursive: true });
+            writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+            writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+                oauthAccount: { accountUuid: 'same-account' },
+            }));
+            const credentialsPath = join(configDir, '.credentials.json');
+            writeFileSync(credentialsPath, JSON.stringify({
+                claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+            }));
             const runtimeDir = prepareWithFailedSymlink(configDir);
             const runtimeCredentialsPath = join(runtimeDir, '.credentials.json');
-            expect(existsSync(runtimeCredentialsPath)).toBe(false);
-            expect(copyFileSyncSpy).not.toHaveBeenCalledWith(credentialsPath, runtimeCredentialsPath);
+            expect(lstatSync(runtimeCredentialsPath).isSymbolicLink()).toBe(false);
+            expect(statSync(runtimeCredentialsPath).ino).toBe(statSync(credentialsPath).ino);
+            rmSync(runtimeCredentialsPath, { force: true });
+            writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+                oauthAccount: { accountUuid: 'same-account' },
+            }));
+            writeFileSync(runtimeCredentialsPath, JSON.stringify({
+                claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+            }));
+            const rebuiltRuntimeDir = prepareWithFailedSymlink(configDir);
+            const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+            expect(baseCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+            expect(lstatSync(join(rebuiltRuntimeDir, '.credentials.json')).isSymbolicLink()).toBe(false);
+            expect(statSync(join(rebuiltRuntimeDir, '.credentials.json')).ino).toBe(statSync(credentialsPath).ino);
         }
         finally {
             vi.doUnmock('fs');
@@ -936,6 +980,405 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
                 playwright: { command: 'npx', args: ['@playwright/mcp'] },
             },
         });
+    });
+    it('seeds onboarding completion and version from source .claude.json', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            hasCompletedOnboarding: true,
+            lastOnboardingVersion: '2.1',
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(runtimeDir, '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.hasCompletedOnboarding).toBe(true);
+        expect(runtimeClaudeJson.lastOnboardingVersion).toBe('2.1');
+    });
+    it('inherits onboarding without mcpServers while preserving runtime session and projects', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            session: 'keep-session',
+            projects: { '/repo': { history: ['keep-project'] } },
+        }));
+        const rebuiltRuntimeDir = prepareOmcLaunchConfigDir(configDir);
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(rebuiltRuntimeDir, '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.hasCompletedOnboarding).toBe(true);
+        expect(runtimeClaudeJson.session).toBe('keep-session');
+        expect(runtimeClaudeJson.projects).toEqual({ '/repo': { history: ['keep-project'] } });
+        expect(runtimeClaudeJson.mcpServers).toBeUndefined();
+    });
+    it('replaces mismatched oauthAccount and deletes it when source removes the account', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        const sourceClaudeJsonPath = join(tempRoot, '.claude.json');
+        writeFileSync(sourceClaudeJsonPath, JSON.stringify({ oauthAccount: { accountUuid: 'source-account' } }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            session: 'keep-session',
+            oauthAccount: { accountUuid: 'runtime-account' },
+        }));
+        let runtimeClaudeJson = JSON.parse(readFileSync(join(prepareOmcLaunchConfigDir(configDir), '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.oauthAccount).toEqual({ accountUuid: 'source-account' });
+        expect(runtimeClaudeJson.session).toBe('keep-session');
+        writeFileSync(sourceClaudeJsonPath, JSON.stringify({ oauthAccount: null }));
+        runtimeClaudeJson = JSON.parse(readFileSync(join(prepareOmcLaunchConfigDir(configDir), '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.oauthAccount).toBeUndefined();
+        expect(runtimeClaudeJson.session).toBe('keep-session');
+    });
+    it('promotes a fresher nested runtime credential and preserves unrelated base keys', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100, refreshToken: 'base-refresh' },
+            unrelated: 'preserve-me',
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200, refreshToken: 'runtime-refresh' },
+        }));
+        const rebuiltRuntimeDir = prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        const runtimeCredentialsPath = join(rebuiltRuntimeDir, '.credentials.json');
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+        expect(baseCredentials.unrelated).toBe('preserve-me');
+        expect(lstatSync(runtimeCredentialsPath).isSymbolicLink()).toBe(true);
+        expect(readlinkSync(runtimeCredentialsPath)).toBe(credentialsPath);
+    });
+    it('promotes a fresher credential when UUID matches despite stale email metadata', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account', emailAddress: 'Current@Example.com' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account', emailAddress: 'stale@example.COM' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+    });
+    it('promotes a fresher credential when a shared email identity matches case-insensitively', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { emailAddress: 'User@Example.com' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { emailAddress: 'user@example.COM' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+    });
+    it('blocks credential promotion when account emails appear only in different fields', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { emailAddress: 'same@example.com' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { email: 'same@example.com' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+    });
+    it('does not promote a high-expiry runtime credential without an access token', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 } }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { refreshToken: 'runtime-refresh', expiresAt: 999 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.expiresAt).toBe(100);
+    });
+    it('does not resurrect a runtime credential when the base credential file is missing', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        const runtimeCredentialsPath = join(runtimeDir, '.credentials.json');
+        writeFileSync(runtimeCredentialsPath, JSON.stringify({
+            accessToken: 'runtime-token',
+            expiresAt: 999,
+        }));
+        const rebuiltRuntimeDir = prepareOmcLaunchConfigDir(configDir);
+        expect(existsSync(join(configDir, '.credentials.json'))).toBe(false);
+        expect(existsSync(join(rebuiltRuntimeDir, '.credentials.json'))).toBe(false);
+    });
+    it('blocks credential promotion when source and runtime account identities differ', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'source-account' } }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 } }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'different-account' } }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 999 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.expiresAt).toBe(100);
+    });
+    it('blocks credential promotion when credential account identities conflict despite matching metadata', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100, accountUuid: 'base-account' },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 999, accountUuid: 'runtime-account' },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.expiresAt).toBe(100);
+    });
+    it('blocks credential promotion when credential email identities conflict despite matching metadata', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: {
+                accessToken: 'base-token',
+                expiresAt: 100,
+                emailAddress: 'base@example.com',
+            },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: {
+                accessToken: 'runtime-token',
+                expiresAt: 999,
+                emailAddress: 'runtime@example.com',
+            },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.expiresAt).toBe(100);
+    });
+    it('blocks credential promotion when only the base credential has a stable identity', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'stale-account' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: {
+                accessToken: 'base-token',
+                refreshToken: 'base-refresh',
+                expiresAt: 100,
+                accountUuid: 'current-account',
+            },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'stale-account' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 999 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.refreshToken).toBe('base-refresh');
+    });
+    it('promotes a fresher credential when credential UUID matches despite stale email', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({
+            claudeAiOauth: {
+                accessToken: 'base-token',
+                expiresAt: 100,
+                accountUuid: 'same-account',
+                emailAddress: 'current@example.com',
+            },
+        }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: {
+                accessToken: 'runtime-token',
+                expiresAt: 999,
+                accountUuid: 'same-account',
+                emailAddress: 'stale@example.com',
+            },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+    });
+    it('blocks credential promotion when either account identity is missing', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'source-account' } }));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 } }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        // Runtime has no oauthAccount after a forced rewrite
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ session: 'no-account-meta' }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 999 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        const baseCredentials = JSON.parse(readFileSync(credentialsPath, 'utf-8'));
+        expect(baseCredentials.claudeAiOauth.accessToken).toBe('base-token');
+        expect(baseCredentials.claudeAiOauth.expiresAt).toBe(100);
+    });
+    it('inherits lastOnboardingVersion using semver-aware comparison', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ lastOnboardingVersion: '2.10.0' }));
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ lastOnboardingVersion: '2.9.0' }));
+        const rebuilt = prepareOmcLaunchConfigDir(configDir);
+        const runtimeClaudeJson = JSON.parse(readFileSync(join(rebuilt, '.claude.json'), 'utf-8'));
+        expect(runtimeClaudeJson.lastOnboardingVersion).toBe('2.10.0');
+    });
+    it('updates a symlink target during credential promotion without replacing the symlink', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+        const targetCredentialsPath = join(tempRoot, 'credentials-target.json');
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(targetCredentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+            unrelated: 'preserve-me',
+        }));
+        symlinkSync(targetCredentialsPath, credentialsPath);
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        expect(lstatSync(credentialsPath).isSymbolicLink()).toBe(true);
+        expect(readlinkSync(credentialsPath)).toBe(targetCredentialsPath);
+        const targetCredentials = JSON.parse(readFileSync(targetCredentialsPath, 'utf-8'));
+        expect(targetCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
+        expect(targetCredentials.unrelated).toBe('preserve-me');
+    });
+    it.skipIf(process.platform === 'win32')('resolves a credential symlink chain beyond the former depth cap without replacing links', () => {
+        const configDir = join(tempRoot, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+        writeFileSync(join(tempRoot, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        const finalCredentialsPath = join(tempRoot, 'credentials-final.json');
+        const chainPaths = Array.from({ length: 20 }, (_, index) => join(tempRoot, `credentials-link-${index}.json`));
+        const credentialsPath = join(configDir, '.credentials.json');
+        writeFileSync(finalCredentialsPath, JSON.stringify({
+            claudeAiOauth: { accessToken: 'base-token', expiresAt: 100 },
+        }));
+        for (let index = chainPaths.length - 1; index >= 0; index -= 1) {
+            symlinkSync(chainPaths[index + 1] ?? finalCredentialsPath, chainPaths[index]);
+        }
+        symlinkSync(chainPaths[0], credentialsPath);
+        const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+        writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({
+            oauthAccount: { accountUuid: 'same-account' },
+        }));
+        rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+        writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({
+            claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 },
+        }));
+        prepareOmcLaunchConfigDir(configDir);
+        expect(lstatSync(credentialsPath).isSymbolicLink()).toBe(true);
+        expect(readlinkSync(credentialsPath)).toBe(chainPaths[0]);
+        for (let index = 0; index < chainPaths.length; index += 1) {
+            expect(lstatSync(chainPaths[index]).isSymbolicLink()).toBe(true);
+            expect(readlinkSync(chainPaths[index])).toBe(chainPaths[index + 1] ?? finalCredentialsPath);
+        }
+        expect(lstatSync(finalCredentialsPath).isSymbolicLink()).toBe(false);
+        const finalCredentials = JSON.parse(readFileSync(finalCredentialsPath, 'utf-8'));
+        expect(finalCredentials.claudeAiOauth.accessToken).toBe('runtime-token');
     });
     it('preserves runtime .claude.json when source .claude.json is absent, invalid, or has no mcpServers', () => {
         const configDir = join(tempRoot, '.claude');

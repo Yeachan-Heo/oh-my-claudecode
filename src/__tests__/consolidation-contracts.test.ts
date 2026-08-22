@@ -17,13 +17,13 @@ describe('Consolidation contracts', () => {
       const names = listBuiltinSkillNames();
 
       expect(names).toContain('autopilot');
-      expect(names).toContain('ultrawork');
-      expect(names).toContain('ralph');
+      expect(names).toContain('execute');
+      expect(names).toContain('ultragoal');
       expect(names).toContain('team');
     });
 
     it('resolves Tier-0 skills via getBuiltinSkill()', () => {
-      const tier0 = ['autopilot', 'ultrawork', 'ralph', 'team'] as const;
+      const tier0 = ['autopilot', 'execute', 'ultragoal', 'team'] as const;
 
       for (const name of tier0) {
         const skill = getBuiltinSkill(name);

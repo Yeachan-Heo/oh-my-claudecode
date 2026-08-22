@@ -116,15 +116,19 @@ function zodToJsonSchema(schema: z.ZodObject<z.ZodRawShape>): {
 function zodTypeToJsonSchema(zodType: z.ZodTypeAny): Record<string, unknown> {
   const result: Record<string, unknown> = {};
 
-  // Handle optional wrapper
+  // Handle optional/default wrappers. `.optional()` / `.default()` normally run
+  // before `.describe()`, so the description sits on the wrapper and must be
+  // carried onto the unwrapped schema.
   if (zodType instanceof z.ZodOptional) {
-    return zodTypeToJsonSchema(zodType._def.innerType);
+    const inner = zodTypeToJsonSchema(zodType._def.innerType);
+    if (zodType._def.description) inner.description = zodType._def.description;
+    return inner;
   }
 
-  // Handle default wrapper
   if (zodType instanceof z.ZodDefault) {
     const inner = zodTypeToJsonSchema(zodType._def.innerType);
     inner.default = zodType._def.defaultValue();
+    if (zodType._def.description) inner.description = zodType._def.description;
     return inner;
   }
 

@@ -20,7 +20,7 @@ This is the single source of truth for all agent tier information. All skill fil
 | **Security** | security-reviewer-low | - | security-reviewer |
 | **TDD** | test-engineer (model=haiku) | test-engineer | - |
 | **Code Review** | - | - | code-reviewer |
-| **Data Science** | - | scientist | scientist-high |
+| **Data Analysis** | - | scientist | scientist-high |
 
 ## Model Routing Guide
 
@@ -61,7 +61,7 @@ This is the single source of truth for all agent tier information. All skill fil
 | Quick code check | code-reviewer (model=haiku) | LOW |
 | Data analysis/stats | scientist | MEDIUM |
 | Quick data inspection | scientist (model=haiku) | LOW |
-| Complex ML/hypothesis | scientist-high | HIGH |
+| Deep data analysis | scientist-high | HIGH |
 | Find symbol references | explore-high | HIGH |
 | Get file/workspace symbol outline | explore | LOW |
 | Structural code pattern search | explore | LOW |

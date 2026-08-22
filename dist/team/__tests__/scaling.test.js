@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 const tmuxUtilsMocks = vi.hoisted(() => ({
@@ -10,6 +11,9 @@ const modelContractMocks = vi.hoisted(() => ({
     buildWorkerArgv: vi.fn(),
     getWorkerEnv: vi.fn(),
     resolveClaudeWorkerModel: vi.fn(),
+    validateWorkerLaunchDescriptor: vi.fn((value) => value),
+    clearResolvedPathCache: vi.fn(),
+    resolveValidatedBinaryPath: vi.fn(() => '/usr/bin/claude'),
 }));
 const teamOpsMocks = vi.hoisted(() => ({
     teamReadConfig: vi.fn(),
@@ -21,12 +25,46 @@ const teamOpsMocks = vi.hoisted(() => ({
 const monitorMocks = vi.hoisted(() => ({
     withScalingLock: vi.fn(),
     saveTeamConfig: vi.fn(),
+    migrateTeamConfigRevision: vi.fn(),
+    readRevisionedTeamConfig: vi.fn(),
+    saveTeamConfigAtRevision: vi.fn(),
+}));
+const processIdentityMocks = vi.hoisted(() => ({
+    currentProcessStartIdentity: vi.fn(),
+    isProcessIdentityDead: vi.fn(),
+}));
+function currentPlatformProcessIdentity(pid) {
+    if (process.platform === 'linux')
+        return `linux:${pid}`;
+    if (process.platform === 'win32')
+        return `win32:${pid}`;
+    if (process.platform === 'darwin')
+        return `darwin:${pid}:0`;
+    return `${process.platform}:identity-${pid}`;
+}
+vi.mock('../team-owner-epoch.js', () => ({
+    currentProcessStartIdentity: processIdentityMocks.currentProcessStartIdentity,
+    isProcessIdentityDead: processIdentityMocks.isProcessIdentityDead,
+    isValidProcessStartIdentity: (value) => typeof value === 'string' && /^(linux|darwin|win32):/.test(value),
 }));
 const tmuxSessionMocks = vi.hoisted(() => ({
     sanitizeName: vi.fn((name) => name),
     getWorkerLiveness: vi.fn(),
     killWorkerPanes: vi.fn(),
-    buildWorkerStartCommand: vi.fn(() => 'start-worker'),
+    adoptWorkerPaneOwnership: vi.fn(async (input) => ({
+        ok: true,
+        ownership: { provider: 'tmux', providerTarget: input.providerTarget, paneId: input.paneId,
+            splitTarget: '', leaderPaneId: input.leaderPaneId, reservedPaneIds: [], source: 'adopted' },
+    })),
+    spawnOwnedWorkerInPane: vi.fn(async (_session, ownership, config) => ({
+        ownership,
+        provider: config.provider,
+        attempt: { attempt_id: `attempt-${ownership.paneId}`, currentPath: '/tmp/current', decisionPath: '/tmp/decision',
+            startedPath: '/tmp/started' },
+    })),
+    killOwnedWorkerPane: vi.fn(async (ownership) => {
+        tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
+    }),
     waitForPaneReady: vi.fn(),
 }));
 const gitWorktreeMocks = vi.hoisted(() => ({
@@ -37,14 +75,24 @@ const gitWorktreeMocks = vi.hoisted(() => ({
     checkWorkerWorktreeRemovalSafety: vi.fn(),
     prepareWorkerWorktreeForRemoval: vi.fn(),
 }));
+const workerLaunchMocks = vi.hoisted(() => ({
+    loadWorkerLaunchAttempt: vi.fn(async () => ({ attempt_id: 'attempt-loaded', currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' })),
+    isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
+    retireWorkerLaunchAttempt: vi.fn(async () => true),
+    terminateWorkerLaunchProvider: vi.fn(async () => true),
+    retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt, _reason, cleanup) => cleanup()),
+}));
 vi.mock('../../cli/tmux-utils.js', () => ({
     tmuxExec: tmuxUtilsMocks.tmuxExec,
     tmuxSpawn: tmuxUtilsMocks.tmuxSpawn,
 }));
 vi.mock('../model-contract.js', () => ({
     buildWorkerArgv: modelContractMocks.buildWorkerArgv,
+    clearResolvedPathCache: modelContractMocks.clearResolvedPathCache,
+    resolveValidatedBinaryPath: modelContractMocks.resolveValidatedBinaryPath,
     getWorkerEnv: modelContractMocks.getWorkerEnv,
     resolveClaudeWorkerModel: modelContractMocks.resolveClaudeWorkerModel,
+    validateWorkerLaunchDescriptor: modelContractMocks.validateWorkerLaunchDescriptor,
     assertHeadlessSupported: () => { },
     isHeadlessSupportedOnPlatform: () => true,
 }));
@@ -58,12 +106,17 @@ vi.mock('../team-ops.js', () => ({
 vi.mock('../monitor.js', () => ({
     withScalingLock: monitorMocks.withScalingLock,
     saveTeamConfig: monitorMocks.saveTeamConfig,
+    migrateTeamConfigRevision: monitorMocks.migrateTeamConfigRevision,
+    readRevisionedTeamConfig: monitorMocks.readRevisionedTeamConfig,
+    saveTeamConfigAtRevision: monitorMocks.saveTeamConfigAtRevision,
 }));
 vi.mock('../tmux-session.js', () => ({
     sanitizeName: tmuxSessionMocks.sanitizeName,
     getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
     killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
-    buildWorkerStartCommand: tmuxSessionMocks.buildWorkerStartCommand,
+    adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
+    spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
+    killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
     waitForPaneReady: tmuxSessionMocks.waitForPaneReady,
 }));
 vi.mock('../git-worktree.js', () => ({
@@ -74,7 +127,10 @@ vi.mock('../git-worktree.js', () => ({
     checkWorkerWorktreeRemovalSafety: gitWorktreeMocks.checkWorkerWorktreeRemovalSafety,
     prepareWorkerWorktreeForRemoval: gitWorktreeMocks.prepareWorkerWorktreeForRemoval,
 }));
-import { scaleUp } from '../scaling.js';
+vi.mock('../runtime-owner-client.js', () => ({ resolveRuntimeCliPath: () => '/runtime-cli.js' }));
+vi.mock('../worker-launch-ack.js', () => workerLaunchMocks);
+import { scaleDown, scaleUp } from '../scaling.js';
+import { absPath, TeamPaths } from '../state-paths.js';
 describe('scaleUp duplicate worker guard', () => {
     let cwd;
     let config;
@@ -99,14 +155,30 @@ describe('scaleUp duplicate worker guard', () => {
         };
         return { ...base, ...overrides };
     }
+    function setActiveScaleUpFence(pid, processStartedAt, phase = 'reserved') {
+        config.active_scale_up = {
+            operation_id: 'abandoned-scale-up', phase, pid, process_started_at: processStartedAt,
+            state_revision: config.state_revision ?? 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+        };
+    }
     beforeEach(async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-duplicate-'));
         vi.clearAllMocks();
+        processIdentityMocks.currentProcessStartIdentity.mockImplementation((pid = process.pid) => currentPlatformProcessIdentity(pid));
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(false);
         monitorMocks.withScalingLock.mockImplementation(async (_teamName, _leaderCwd, fn) => fn());
         monitorMocks.saveTeamConfig.mockImplementation(async (nextConfig) => {
             config = nextConfig;
         });
         teamOpsMocks.teamReadConfig.mockImplementation(async () => config);
+        monitorMocks.migrateTeamConfigRevision.mockImplementation(async () => ({ config, stateRevision: config.state_revision ?? 0 }));
+        monitorMocks.readRevisionedTeamConfig.mockImplementation(async () => ({ config, stateRevision: config.state_revision ?? 0 }));
+        monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (nextConfig, expectedRevision) => {
+            if ((config.state_revision ?? 0) !== expectedRevision)
+                return false;
+            config = nextConfig;
+            return true;
+        });
         teamOpsMocks.teamWriteWorkerIdentity.mockResolvedValue(undefined);
         teamOpsMocks.teamAppendEvent.mockResolvedValue(undefined);
         modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude']);
@@ -140,8 +212,173 @@ describe('scaleUp duplicate worker guard', () => {
         expect(config.next_worker_index).toBe(3);
         expect(config.workers.map((worker) => worker.name)).toEqual(['worker-1', 'worker-2']);
         expect(tmuxUtilsMocks.tmuxSpawn).toHaveBeenCalledWith([
-            'split-window', '-v', '-t', '%1', '-d', '-P', '-F', '#{pane_id}', '-c', resolve(cwd), 'start-worker',
+            'split-window', '-v', '-t', '%1', '-d', '-P', '-F', '#{pane_id}', '-c', resolve(cwd),
         ]);
+    });
+    it('keeps the active scale-up fence revision aligned through normal worker reservation and commit', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        const snapshots = [];
+        monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (nextConfig, expectedRevision) => {
+            if ((config.state_revision ?? 0) !== expectedRevision)
+                return false;
+            if (nextConfig.active_scale_up?.state_revision !== undefined
+                && nextConfig.active_scale_up.state_revision !== nextConfig.state_revision) {
+                throw new Error('invalid_persisted_state');
+            }
+            snapshots.push(structuredClone(nextConfig));
+            config = nextConfig;
+            return true;
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: true, newWorkerCount: 2, nextWorkerIndex: 3 });
+        expect(snapshots.some(snapshot => snapshot.workers.some(worker => worker.name === 'worker-2'
+            && worker.operational_state === 'starting'))).toBe(true);
+        expect(snapshots.some(snapshot => snapshot.workers.some(worker => worker.name === 'worker-2'
+            && worker.operational_state === 'active'))).toBe(true);
+        expect(snapshots.filter(snapshot => snapshot.active_scale_up).every(snapshot => snapshot.active_scale_up?.state_revision === snapshot.state_revision)).toBe(true);
+        expect(snapshots.at(-1)?.active_scale_up).toBeUndefined();
+    });
+    it.each(['shutting_down', 'stopped'])('rejects scale-up while team lifecycle is %s', async (lifecycleState) => {
+        config = makeConfig({ state_revision: 4, lifecycle_state: lifecycleState, next_worker_index: 2 });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+        expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
+    });
+    it('reclaims a complete positively dead scale-up fence before worker effects', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        const abandonedPid = 812_345;
+        const abandonedStart = currentPlatformProcessIdentity(abandonedPid);
+        setActiveScaleUpFence(abandonedPid, abandonedStart);
+        processIdentityMocks.isProcessIdentityDead.mockImplementation((fence) => fence.pid === abandonedPid && fence.process_started_at === abandonedStart);
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toMatchObject({ ok: true, newWorkerCount: 2 });
+        expect(processIdentityMocks.isProcessIdentityDead).toHaveBeenCalledWith(expect.objectContaining({
+            pid: abandonedPid, process_started_at: abandonedStart,
+        }));
+        const reclamation = monitorMocks.saveTeamConfigAtRevision.mock.calls[0]?.[0];
+        expect(reclamation.active_scale_up?.operation_id).not.toBe('abandoned-scale-up');
+        const splitCall = tmuxUtilsMocks.tmuxSpawn.mock.calls.findIndex(([args]) => args[0] === 'split-window');
+        expect(monitorMocks.saveTeamConfigAtRevision.mock.invocationCallOrder[0]).toBeLessThan(tmuxUtilsMocks.tmuxSpawn.mock.invocationCallOrder[splitCall]);
+    });
+    it('keeps a positively dead effects attempt fenced without touching attributable worker resources', async () => {
+        const abandonedPid = 812_350;
+        config = makeConfig({ state_revision: 4, worker_count: 2, next_worker_index: 3, worktree_mode: 'disabled', workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1', operational_state: 'active' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%abandoned', operational_state: 'starting' },
+            ] });
+        setActiveScaleUpFence(abandonedPid, currentPlatformProcessIdentity(abandonedPid), 'effects');
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(config.active_scale_up).toMatchObject({ operation_id: 'abandoned-scale-up', phase: 'effects' });
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
+    });
+    it('keeps a positively dead failed scale-up attempt fenced without starting effects', async () => {
+        const abandonedPid = 812_351;
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        setActiveScaleUpFence(abandonedPid, currentPlatformProcessIdentity(abandonedPid), 'failed');
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(config.active_scale_up).toMatchObject({ operation_id: 'abandoned-scale-up', phase: 'failed' });
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalled();
+    });
+    it.each([
+        ['live', process.pid, currentPlatformProcessIdentity(process.pid)],
+        ['malformed', 812_346, 'not-a-process-start-identity'],
+        ['cross-platform', 812_347, process.platform === 'linux' ? 'win32:1' : 'linux:1'],
+        ['unknown', 812_348, currentPlatformProcessIdentity(812_348)],
+    ])('keeps a %s scale-up fence busy without effects when ownership cannot be proved dead', async (_kind, pid, processStartedAt) => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        setActiveScaleUpFence(pid, processStartedAt);
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(false);
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(processIdentityMocks.isProcessIdentityDead).toHaveBeenCalledWith(expect.objectContaining({ pid, process_started_at: processStartedAt }));
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    });
+    it('does not start worker effects when the dead-fence reclamation CAS is lost', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        const abandonedPid = 812_349;
+        setActiveScaleUpFence(abandonedPid, currentPlatformProcessIdentity(abandonedPid));
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+        monitorMocks.saveTeamConfigAtRevision.mockResolvedValueOnce(false);
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    });
+    it('normalizes an effects-fence CAS exception and clears the exact reservation before effects', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        monitorMocks.saveTeamConfigAtRevision
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockRejectedValueOnce(new Error('stale_state_revision'))
+            .mockImplementation(async (nextConfig, expectedRevision) => {
+            if ((config.state_revision ?? 0) !== expectedRevision)
+                return false;
+            config = nextConfig;
+            return true;
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(config.active_scale_up).toBeUndefined();
+        expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    });
+    it('rolls back scale-up effects when manifest projection fails before config commit', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (nextConfig, expectedRevision) => {
+            if ((config.state_revision ?? 0) !== expectedRevision)
+                return false;
+            if (nextConfig.workers.some(worker => worker.name === 'worker-2' && worker.operational_state === 'active')) {
+                throw new Error('invalid_persisted_state');
+            }
+            config = nextConfig;
+            return true;
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false, error: expect.stringContaining('config commit lost its revision') });
+        expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
+        expect(config.active_scale_up).toBeUndefined();
+    });
+    it('retires both active and starting reservations when a later worker fails', async () => {
+        config = makeConfig({ state_revision: 4, worker_count: 0, workers: [], next_worker_index: 1,
+            leader_pane_id: '%0', worktree_mode: 'disabled' });
+        const snapshots = [];
+        monitorMocks.saveTeamConfigAtRevision.mockImplementation(async (nextConfig, expectedRevision) => {
+            if ((config.state_revision ?? 0) !== expectedRevision)
+                return false;
+            snapshots.push(structuredClone(nextConfig));
+            config = nextConfig;
+            return true;
+        });
+        teamOpsMocks.teamWriteWorkerIdentity.mockImplementation(async (_teamName, workerName) => {
+            if (workerName === 'worker-2')
+                throw new Error('second identity failed');
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        const result = await scaleUp('demo-team', 2, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        const firstReservation = snapshots.find(snapshot => snapshot.workers.length === 1
+            && snapshot.workers[0]?.name === 'worker-1' && snapshot.workers[0].operational_state === 'starting');
+        const secondReservation = snapshots.find(snapshot => snapshot.workers.length === 2
+            && snapshot.workers[0]?.operational_state === 'active' && snapshot.workers[1]?.operational_state === 'starting');
+        expect(firstReservation?.workers).toEqual([expect.objectContaining({ name: 'worker-1', operational_state: 'starting' })]);
+        expect(secondReservation?.workers).toEqual([
+            expect.objectContaining({ name: 'worker-1', operational_state: 'active' }),
+            expect.objectContaining({ name: 'worker-2', operational_state: 'starting' }),
+        ]);
+        expect(config.workers).toEqual([]);
+        expect(config.worker_count).toBe(0);
     });
     it('self-heals across multiple collisions', async () => {
         config = makeConfig({
@@ -156,6 +393,18 @@ describe('scaleUp duplicate worker guard', () => {
         expect(result).toMatchObject({ ok: true, newWorkerCount: 3, nextWorkerIndex: 4 });
         expect(config.next_worker_index).toBe(4);
         expect(config.workers.map((worker) => worker.name)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+    });
+    it('rejects scale-up that would exceed a configured cap below the hard ceiling (#3744)', async () => {
+        config = makeConfig({ max_workers: 2, next_worker_index: 2 });
+        const result = await scaleUp('demo-team', 2, 'claude', [
+            { subject: 'demo-a', description: 'demo task' },
+            { subject: 'demo-b', description: 'demo task' },
+        ], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'Cannot add 2 workers: would exceed max_workers (1 + 2 > 2)' });
+        expect(config.workers.map((worker) => worker.name)).toEqual(['worker-1']);
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+        expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
     });
     it('allows legacy session-only tmux_session configs while still validating the session before split-window', async () => {
         config = makeConfig({
@@ -252,6 +501,334 @@ describe('scaleUp duplicate worker guard', () => {
             expect(result.error).toContain('expected demo-session:0');
         }
         expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
+    });
+    it('rolls back spawned effects when shutdown wins the config revision', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+        const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+        gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+            detached: false, created: true });
+        gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+        teamOpsMocks.teamWriteWorkerIdentity.mockImplementation(async (teamName, workerName) => {
+            const workerDir = absPath(cwd, TeamPaths.workerDir(teamName, workerName));
+            await mkdir(workerDir, { recursive: true });
+            await writeFile(join(workerDir, 'identity.json'), '{}');
+        });
+        monitorMocks.saveTeamConfigAtRevision
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockImplementation(async () => {
+            config = { ...config, workers: config.workers.filter(worker => worker.name !== 'worker-2'), worker_count: 1,
+                lifecycle_state: 'shutting_down', state_revision: 8 };
+            throw new Error('stale_state_revision');
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        if (!result.ok)
+            expect(result.error).toContain('config commit lost its revision');
+        expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+        expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
+        expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2')))).toBe(false);
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
+        expect(config.lifecycle_state).toBe('shutting_down');
+        // Release is blocked while lifecycle is shutting_down (post-commit race guard).
+        expect(monitorMocks.saveTeamConfigAtRevision).toHaveBeenCalledTimes(4);
+        expect(monitorMocks.saveTeamConfig).not.toHaveBeenCalled();
+    });
+    it('rolls back every spawned effect when worker identity publication fails', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+        const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+        gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+            detached: false, created: true });
+        gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+        teamOpsMocks.teamWriteWorkerIdentity.mockRejectedValue(new Error('identity write failed'));
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        if (!result.ok)
+            expect(result.error).toContain('post-effect failed');
+        expect(tmuxUtilsMocks.tmuxExec).not.toHaveBeenCalledWith(['kill-pane', '-t', '%12'], { stdio: 'pipe' });
+        expect(workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(expect.objectContaining({ attempt_id: 'attempt-%12' }), 'scale_up_rollback', expect.any(Function));
+        expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
+    });
+    it('cleans the exact partial worktree and worker directory when worktree creation throws', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+        const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+        gitWorktreeMocks.ensureWorkerWorktree.mockImplementation(() => {
+            rmSync(worktreePath, { recursive: true, force: true });
+            mkdirSync(worktreePath, { recursive: true });
+            throw new Error('metadata publication failed');
+        });
+        gitWorktreeMocks.removeWorkerWorktree.mockImplementation(() => rmSync(worktreePath, { recursive: true, force: true }));
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        expect(gitWorktreeMocks.removeWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', resolve(cwd));
+        expect(existsSync(worktreePath)).toBe(false);
+        expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2')))).toBe(false);
+    });
+    it('records durable orphan evidence when split succeeds without an addressable pane id', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'disabled' });
+        tmuxUtilsMocks.tmuxSpawn.mockImplementation((args) => {
+            if (args[0] === 'display-message')
+                return { status: 0, stdout: 'demo-session:0\n', stderr: '' };
+            if (args[0] === 'split-window')
+                return { status: 0, stdout: '', stderr: '' };
+            return { status: 0, stdout: '', stderr: '' };
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        if (!result.ok)
+            expect(result.error).toContain('rollback incomplete');
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('unaddressable_spawned_pane:<missing>'));
+        expect(existsSync(absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2')))).toBe(false);
+    });
+    it('publishes durable orphan evidence when pane and worktree cleanup cannot be verified', async () => {
+        config = makeConfig({ state_revision: 4, next_worker_index: 2, worktree_mode: 'named' });
+        const worktreePath = join(cwd, '.omc', 'team', 'demo-team', 'worktrees', 'worker-2');
+        await mkdir(worktreePath, { recursive: true });
+        gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({ path: worktreePath, branch: 'worker-2',
+            detached: false, created: true });
+        gitWorktreeMocks.installWorktreeRootAgents.mockReturnValue(undefined);
+        gitWorktreeMocks.removeWorkerWorktree.mockImplementation(() => { throw new Error('worktree busy'); });
+        tmuxUtilsMocks.tmuxExec.mockImplementation(() => { throw new Error('pane still alive'); });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('alive');
+        monitorMocks.saveTeamConfigAtRevision
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockImplementationOnce(async (nextConfig) => { config = nextConfig; return true; })
+            .mockRejectedValue(new Error('stale_state_revision'));
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: false });
+        if (!result.ok)
+            expect(result.error).toContain('rollback incomplete');
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('cleanup_failures'));
+        expect(existsSync(worktreePath)).toBe(true);
+    });
+    it('revalidates the lifecycle reservation before scale-down effects when recovery appears during drain', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+        });
+        let recoveryInjected = false;
+        teamOpsMocks.teamReadWorkerStatus.mockImplementation(async () => {
+            if (!recoveryInjected) {
+                recoveryInjected = true;
+                const revision = (config.state_revision ?? 0) + 1;
+                const now = new Date().toISOString();
+                config = { ...config, state_revision: revision, active_recovery: {
+                        request_id: 'request-race', recovery_id: 'recovery-race', worker_name: 'worker-2',
+                        owner_epoch: 2, owner_nonce: 'owner', phase: 'active', state_revision: revision,
+                        created_at: now, updated_at: now,
+                    } };
+            }
+            return { state: 'idle', updated_at: new Date().toISOString() };
+        });
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], drainTimeoutMs: 25 }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(config.active_recovery?.recovery_id).toBe('recovery-race');
+        expect(config.active_scale_down).toMatchObject({ phase: 'failed', failure_reason: 'scale_down_fence_lost_before_effects' });
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('scale_down_fence_lost_before_effects'));
+    });
+    it('refuses scale-down without positive pane identity before destructive effects', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [] },
+            ],
+        });
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'scale_down_worker_liveness_unknown:missing_pane_id:worker-2' });
+        expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('missing_pane_id:worker-2'));
+    });
+    it('publishes scale-down evidence even when durable failure marking throws after pane effects', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2', worker_cli: 'claude',
+                    launch_attempt_id: 'attempt-2', launch_descriptor: { schema_version: 1, provider: 'claude', model: null,
+                        binary: '/usr/bin/claude', args: [] } },
+            ],
+        });
+        tmuxSessionMocks.killOwnedWorkerPane.mockRejectedValueOnce(new Error('kill failed after partial effect'));
+        monitorMocks.readRevisionedTeamConfig
+            .mockImplementationOnce(async () => ({ config, stateRevision: config.state_revision ?? 0 }))
+            .mockRejectedValueOnce(new Error('config read unavailable'));
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'pane_cleanup_failed:worker-2:kill failed after partial effect' });
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringMatching(/pane_cleanup_failed:worker-2:kill failed after partial effect[\s\S]*config_mark_error[\s\S]*config read unavailable/));
+    });
+    it('never reclaims an incomplete active scale-down owner record', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+        });
+        Object.assign(config, { active_scale_down: { operation_id: 'incomplete-owner', phase: 'draining',
+                workers: [{ name: 'worker-2', pane_id: '%2' }], state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString() } });
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+    });
+    it('never reclaims a cross-platform active scale-down owner record', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_down: {
+                operation_id: 'cross-platform-owner', phase: 'draining', pid: 2_147_483_647,
+                process_started_at: process.platform === 'linux' ? 'win32:123' : 'linux:123',
+                workers: [{ name: 'worker-2', pane_id: '%2' }], state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+        expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+    });
+    it('reclaims a failed scale-down fence when the owner process is dead', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_down: {
+                operation_id: 'failed-dead-owner', phase: 'failed', pid: 999_999,
+                process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
+                state_revision: 4, failure_reason: 'pane_cleanup_failed',
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+        processIdentityMocks.currentProcessStartIdentity.mockReturnValue('linux:live');
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-1'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        // Must not stay wedged; must RESUME exact operation/targets (not retarget to worker-1).
+        expect(result).not.toEqual({ ok: false, error: 'team_mutation_busy' });
+        // Durable transaction identity preserved through reclaim write
+        const saved = monitorMocks.saveTeamConfigAtRevision.mock.calls.map((c) => c[0]);
+        const resumed = saved.find((c) => c?.active_scale_down?.operation_id === 'failed-dead-owner');
+        expect(resumed).toBeTruthy();
+        expect(resumed.active_scale_down.workers).toEqual([{ name: 'worker-2', pane_id: '%2' }]);
+    });
+    it('reclaims a failed scale-down fence for the same live owner (resumable cleanup)', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_down: {
+                operation_id: 'failed-same-owner', phase: 'failed', pid: process.pid,
+                process_started_at: 'linux:same', workers: [{ name: 'worker-2', pane_id: '%2' }],
+                state_revision: 4, failure_reason: 'pane_cleanup_failed',
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(false);
+        processIdentityMocks.currentProcessStartIdentity.mockReturnValue('linux:same');
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).not.toEqual({ ok: false, error: 'team_mutation_busy' });
+    });
+    it('does not reclaim an effects-phase scale-down fence even when the owner is dead', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_down: {
+                operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+                process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
+                state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        processIdentityMocks.isProcessIdentityDead.mockReturnValue(true);
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
+    });
+    it('reclaims a committed scale-up fence after release write failure without duplicating workers', async () => {
+        config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_up: {
+                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+                process_started_at: 'dead-process', state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'reclaim committed fence' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: true, newWorkerCount: 3, nextWorkerIndex: 4 });
+        expect(config.active_scale_up).toBeUndefined();
+        // Workers are not duplicated
+        expect(config.workers.map(w => w.name)).toEqual(['worker-1', 'worker-2', 'worker-3']);
+    });
+    it('does not reclaim an effects-phase fence even when the owner process is dead', async () => {
+        config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+            active_scale_up: {
+                operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+                process_started_at: 'dead-process', state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'blocked by effects fence' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toMatchObject({ ok: false });
+        expect(config.active_scale_up?.phase).toBe('effects');
+    });
+    it('reconciles a committed fence: scale-down passes fence gate and enters owned-worker drain', async () => {
+        config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+            active_scale_up: {
+                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+                process_started_at: 'dead-process', state_revision: 4,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            },
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        // Positive proof: the committed fence did NOT block scale-down from
+        // entering the drain phase. The scale-down reservation was acquired
+        // (active_scale_down was written), proving the fence was reconciled.
+        expect(config.active_scale_down?.operation_id).toBeDefined();
+        // The committed scale-up fence was cleared by the scale-down reservation
+        expect(config.active_scale_up).toBeUndefined();
+        // Worker set unchanged at this point (drain hasn't completed)
+        expect(config.workers.map(w => w.name)).toEqual(['worker-1', 'worker-2']);
+        // State revision advanced past the stale fence
+        expect(config.state_revision).toBeGreaterThan(5);
     });
 });
 //# sourceMappingURL=scaling.test.js.map

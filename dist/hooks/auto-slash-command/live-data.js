@@ -14,7 +14,7 @@
  * - Multi-line: `!begin-script bash` ... `!end-script`
  * - Security allowlist via .omc/config/live-data-policy.json
  */
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import safe from "safe-regex";
@@ -36,9 +36,11 @@ const DIFF_ADDED_LINES_PATTERN = /^\+[^+]/gm;
 const DIFF_DELETED_LINES_PATTERN = /^-[^-]/gm;
 const DIFF_FILE_HEADER_PATTERN = /^(?:diff --git|---|\+\+\+) [ab]\/(.+)/gm;
 const DIFF_HEADER_PREFIX_PATTERN = /^(?:diff --git|---|\+\+\+) [ab]\//;
-const SCRIPT_BEGIN_PATTERN = /^\s*!begin-script\s+(\S+)\s*$/;
+const SCRIPT_BEGIN_PATTERN = /^\s*!begin-script\s+(.+?)\s*$/;
 const SCRIPT_END_PATTERN = /^\s*!end-script\s*$/;
-const WHITESPACE_SPLIT_PATTERN = /\s/;
+function isWindowsPathToken(token) {
+    return /^[A-Za-z]:/.test(token) || token.startsWith("\\");
+}
 // ─── Cache ───────────────────────────────────────────────────────────────────
 const cache = new Map();
 const onceCommands = new Set();
@@ -94,6 +96,129 @@ export function clearCache() {
     cache.clear();
     onceCommands.clear();
 }
+function parseCommandInvocation(command) {
+    let quote = null;
+    let escaped = false;
+    let tokenStarted = false;
+    let token = "";
+    const tokens = [];
+    for (let i = 0; i < command.length; i++) {
+        const char = command[i];
+        const isUnquotedTabDelimiter = char === "\t" && quote === null && !escaped;
+        if ((char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) && !isUnquotedTabDelimiter) {
+            return { ok: false, reason: "control character rejected" };
+        }
+        if (escaped) {
+            token += char;
+            tokenStarted = true;
+            escaped = false;
+            continue;
+        }
+        if (quote === "single") {
+            if (char === "'") {
+                quote = null;
+            }
+            else {
+                token += char;
+            }
+            tokenStarted = true;
+            continue;
+        }
+        if (quote === "double") {
+            if (char === "\\") {
+                const next = command[i + 1];
+                if (isWindowsPathToken(token) || (token === "" && next === "\\")) {
+                    token += char;
+                }
+                else if (next === undefined || '"\\`$'.includes(next)) {
+                    escaped = true;
+                }
+                else {
+                    token += char;
+                }
+            }
+            else if (char === '"') {
+                quote = null;
+            }
+            else if (char === "`") {
+                return { ok: false, reason: "command substitution rejected" };
+            }
+            else if (char === "$" && command[i + 1] === "(") {
+                return { ok: false, reason: "command substitution rejected" };
+            }
+            else {
+                token += char;
+            }
+            tokenStarted = true;
+            continue;
+        }
+        if (char === " " || char === "\t") {
+            if (tokenStarted) {
+                tokens.push(token);
+                token = "";
+                tokenStarted = false;
+            }
+            continue;
+        }
+        if (char === "'") {
+            quote = "single";
+            tokenStarted = true;
+            continue;
+        }
+        if (char === '"') {
+            quote = "double";
+            tokenStarted = true;
+            continue;
+        }
+        if (char === "\\") {
+            const next = command[i + 1];
+            if (isWindowsPathToken(token) || (token === "" && next === "\\")) {
+                token += char;
+            }
+            else if (next === undefined ||
+                next === " " ||
+                next === "\t" ||
+                "'\"\\;&|<>`$".includes(next)) {
+                escaped = true;
+            }
+            else {
+                token += char;
+            }
+            tokenStarted = true;
+            continue;
+        }
+        if (char === "`" || (char === "$" && command[i + 1] === "(")) {
+            return { ok: false, reason: "command substitution rejected" };
+        }
+        if (";&|<>".includes(char)) {
+            return { ok: false, reason: `shell operator rejected: ${char}` };
+        }
+        token += char;
+        tokenStarted = true;
+    }
+    if (escaped) {
+        return { ok: false, reason: "trailing escape" };
+    }
+    if (quote === "single") {
+        return { ok: false, reason: "unterminated single quote" };
+    }
+    if (quote === "double") {
+        return { ok: false, reason: "unterminated double quote" };
+    }
+    if (tokenStarted) {
+        tokens.push(token);
+    }
+    if (tokens.length === 0) {
+        return { ok: false, reason: "empty command" };
+    }
+    return {
+        ok: true,
+        invocation: {
+            executable: tokens[0],
+            args: tokens.slice(1),
+        },
+    };
+}
 // ─── Security ────────────────────────────────────────────────────────────────
 let cachedPolicy = null;
 let policyLoadedFrom = null;
@@ -124,9 +249,8 @@ export function resetSecurityPolicy() {
     cachedPolicy = null;
     policyLoadedFrom = null;
 }
-function checkSecurity(command) {
+function checkSecurity(command, executable) {
     const policy = loadSecurityPolicy();
-    const cmdBase = command.split(WHITESPACE_SPLIT_PATTERN)[0];
     // Check denied patterns first (always enforced)
     if (policy.denied_patterns) {
         for (const pat of policy.denied_patterns) {
@@ -146,8 +270,8 @@ function checkSecurity(command) {
         }
     }
     if (policy.denied_commands) {
-        if (policy.denied_commands.includes(cmdBase)) {
-            return { allowed: false, reason: `command '${cmdBase}' is denied` };
+        if (policy.denied_commands.includes(executable)) {
+            return { allowed: false, reason: `command '${executable}' is denied` };
         }
     }
     // Default-deny: if an allowlist is configured, command MUST match it
@@ -164,7 +288,7 @@ function checkSecurity(command) {
     let baseAllowed = false;
     let patternAllowed = false;
     if (policy.allowed_commands) {
-        baseAllowed = policy.allowed_commands.includes(cmdBase);
+        baseAllowed = policy.allowed_commands.includes(executable);
     }
     if (policy.allowed_patterns) {
         for (const pat of policy.allowed_patterns) {
@@ -188,7 +312,7 @@ function checkSecurity(command) {
     if (!baseAllowed && !patternAllowed) {
         return {
             allowed: false,
-            reason: `command '${cmdBase}' not in allowlist`,
+            reason: `command '${executable}' not in allowlist`,
         };
     }
     return { allowed: true };
@@ -300,13 +424,15 @@ function checkIfBranch(pattern) {
     }
 }
 // ─── Execution ───────────────────────────────────────────────────────────────
-function executeCommand(command) {
+function executeCommand(invocation) {
     try {
-        const stdout = execSync(command, {
+        const stdout = execFileSync(invocation.executable, invocation.args, {
+            shell: false,
             timeout: TIMEOUT_MS,
             maxBuffer: MAX_OUTPUT_BYTES + 1024,
             encoding: "utf-8",
             stdio: ["pipe", "pipe", "pipe"],
+            windowsHide: true,
         });
         let output = stdout ?? "";
         let truncated = false;
@@ -321,9 +447,12 @@ function executeCommand(command) {
         return { stdout: output, error: false };
     }
     catch (err) {
-        const message = err instanceof Error
-            ? err.stderr || err.message
-            : String(err);
+        const executionError = err;
+        const message = process.platform === "win32" && executionError?.code === "EINVAL"
+            ? "Windows .cmd/.bat launchers are unsupported for shell-free live-data execution"
+            : err instanceof Error
+                ? executionError.stderr || err.message
+                : String(err);
         return { stdout: String(message), error: true };
     }
 }
@@ -378,6 +507,66 @@ function extractScriptBlocks(lines, codeBlockRanges) {
     }
     return blocks;
 }
+export function hasLiveDataScriptArgumentPlaceholder(content) {
+    const lines = content.split("\n");
+    const codeBlockRanges = getCodeBlockRanges(lines);
+    return extractScriptBlocks(lines, codeBlockRanges).some((block) => block.shell.includes("$ARGUMENTS") || block.body.includes("$ARGUMENTS"));
+}
+function getExecutableLiveDataLineIndexes(content) {
+    const lines = content.split("\n");
+    const codeBlockRanges = getCodeBlockRanges(lines);
+    const scriptBlocks = extractScriptBlocks(lines, codeBlockRanges);
+    const scriptLineIndexes = new Set();
+    const executableLineIndexes = new Set();
+    for (const block of scriptBlocks) {
+        executableLineIndexes.add(block.startLine);
+        for (let i = block.startLine; i <= block.endLine; i++) {
+            scriptLineIndexes.add(i);
+        }
+    }
+    for (let i = 0; i < lines.length; i++) {
+        if (scriptLineIndexes.has(i) || isInsideCodeBlock(i, codeBlockRanges)) {
+            continue;
+        }
+        if (isLiveDataLine(lines[i])) {
+            executableLineIndexes.add(i);
+        }
+    }
+    return executableLineIndexes;
+}
+function getExecutableScriptStartIndexes(content) {
+    const lines = content.split("\n");
+    const codeBlockRanges = getCodeBlockRanges(lines);
+    return new Set(extractScriptBlocks(lines, codeBlockRanges).map((block) => block.startLine));
+}
+/**
+ * Return whether placeholder replacement made a previously non-executable line
+ * become an executable live-data directive.
+ */
+export function introducesLiveDataDirective(templateContent, resolvedContent) {
+    const templateLines = templateContent.split("\n");
+    const resolvedLines = resolvedContent.split("\n");
+    // Argument validation should keep line counts stable. Fail closed if a caller
+    // skips that validation or a future replacement mechanism changes this rule.
+    if (templateLines.length !== resolvedLines.length) {
+        return true;
+    }
+    const templateExecutableLines = getExecutableLiveDataLineIndexes(templateContent);
+    const resolvedExecutableLines = getExecutableLiveDataLineIndexes(resolvedContent);
+    const templateScriptStarts = getExecutableScriptStartIndexes(templateContent);
+    const resolvedScriptStarts = getExecutableScriptStartIndexes(resolvedContent);
+    for (const lineIndex of resolvedScriptStarts) {
+        if (!templateScriptStarts.has(lineIndex)) {
+            return true;
+        }
+    }
+    for (const lineIndex of resolvedExecutableLines) {
+        if (!templateExecutableLines.has(lineIndex)) {
+            return true;
+        }
+    }
+    return false;
+}
 // ─── Main Resolver ───────────────────────────────────────────────────────────
 /**
  * Resolve all live-data directives in content.
@@ -394,19 +583,30 @@ export function resolveLiveData(content) {
         for (let i = block.startLine; i <= block.endLine; i++) {
             scriptLineSet.add(i);
         }
-        const security = checkSecurity(block.shell);
+        const parsedShell = parseCommandInvocation(block.shell);
+        if (!parsedShell.ok || parsedShell.invocation.args.length > 0) {
+            const reason = parsedShell.ok
+                ? "script interpreter arguments are not supported"
+                : parsedShell.reason;
+            scriptReplacements.set(block.startLine, `<live-data command="script:${escapeHtml(block.shell)}" error="true">blocked: ${escapeHtml(reason)}</live-data>`);
+            continue;
+        }
+        const shellExecutable = parsedShell.invocation.executable;
+        const security = checkSecurity(block.shell, shellExecutable);
         if (!security.allowed) {
             scriptReplacements.set(block.startLine, `<live-data command="script:${escapeHtml(block.shell)}" error="true">blocked: ${escapeHtml(security.reason ?? "")}</live-data>`);
             continue;
         }
-        // Write script to stdin of shell
+        // Write the authored script body to the explicitly allowlisted interpreter.
         try {
-            const result = execSync(block.shell, {
+            const result = execFileSync(shellExecutable, [], {
                 input: block.body,
+                shell: false,
                 timeout: TIMEOUT_MS,
                 maxBuffer: MAX_OUTPUT_BYTES + 1024,
                 encoding: "utf-8",
                 stdio: ["pipe", "pipe", "pipe"],
+                windowsHide: true,
             });
             scriptReplacements.set(block.startLine, `<live-data command="script:${escapeHtml(block.shell)}">${escapeHtml(result ?? "")}</live-data>`);
         }
@@ -433,8 +633,13 @@ export function resolveLiveData(content) {
             continue;
         }
         const directive = parseDirective(line);
-        // Security check
-        const security = checkSecurity(directive.command);
+        const parsed = parseCommandInvocation(directive.command);
+        if (!parsed.ok) {
+            result.push(`<live-data command="${escapeHtml(directive.command)}" error="true">blocked: ${escapeHtml(parsed.reason)}</live-data>`);
+            continue;
+        }
+        const invocation = parsed.invocation;
+        const security = checkSecurity(directive.command, invocation.executable);
         if (!security.allowed) {
             result.push(`<live-data command="${escapeHtml(directive.command)}" error="true">blocked: ${escapeHtml(security.reason ?? "")}</live-data>`);
             continue;
@@ -445,7 +650,7 @@ export function resolveLiveData(content) {
                     result.push(`<live-data command="${escapeHtml(directive.command)}" skipped="true">condition not met: no files matching '${escapeHtml(directive.pattern)}' modified</live-data>`);
                 }
                 else {
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     result.push(formatOutput(directive.command, stdout, error, null));
                 }
                 break;
@@ -455,7 +660,7 @@ export function resolveLiveData(content) {
                     result.push(`<live-data command="${escapeHtml(directive.command)}" skipped="true">condition not met: branch does not match '${escapeHtml(directive.pattern)}'</live-data>`);
                 }
                 else {
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     result.push(formatOutput(directive.command, stdout, error, null));
                 }
                 break;
@@ -466,7 +671,7 @@ export function resolveLiveData(content) {
                 }
                 else {
                     markCommandExecuted(directive.command);
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     result.push(formatOutput(directive.command, stdout, error, null));
                 }
                 break;
@@ -478,7 +683,7 @@ export function resolveLiveData(content) {
                     result.push(formatOutput(directive.command, cached.output, cached.error, null).replace("<live-data", '<live-data cached="true"'));
                 }
                 else {
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     setCache(directive.command, stdout, error, ttl);
                     result.push(formatOutput(directive.command, stdout, error, null));
                 }
@@ -491,7 +696,7 @@ export function resolveLiveData(content) {
                     result.push(formatOutput(directive.command, cached.output, cached.error, directive.format).replace("<live-data", '<live-data cached="true"'));
                 }
                 else {
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     if (ttl > 0)
                         setCache(directive.command, stdout, error, ttl);
                     result.push(formatOutput(directive.command, stdout, error, directive.format));
@@ -506,7 +711,7 @@ export function resolveLiveData(content) {
                     result.push(formatOutput(directive.command, cached.output, cached.error, null).replace("<live-data", '<live-data cached="true"'));
                 }
                 else {
-                    const { stdout, error } = executeCommand(directive.command);
+                    const { stdout, error } = executeCommand(invocation);
                     if (ttl > 0)
                         setCache(directive.command, stdout, error, ttl);
                     result.push(formatOutput(directive.command, stdout, error, null));

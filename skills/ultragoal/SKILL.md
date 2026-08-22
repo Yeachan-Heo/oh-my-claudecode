@@ -53,9 +53,9 @@ Claude Code `/goal` is a session-scoped Stop hook: it blocks the session from st
 
 2. Start (or resume) the next story:
    ```
-   omc ultragoal complete-goals
+   omc ultragoal complete-goals [<goal-id>]
    ```
-   This prints a model-facing handoff. The active Claude agent must read it and:
+   With no goal id, this preserves the default behavior of resuming the active story or starting the first pending story. With a goal id, OMC targets exactly that named eligible story (a pending story may be started out of order); it never falls through to another story. An active different story, unknown id, completed or review-blocked story, or failed story without `--retry-failed` is rejected without state mutation. An in-progress named story is resumed without changing its attempt. This prints a model-facing handoff. The active Claude agent must read it and:
    - Set the native Claude `/goal` for this session — in standalone Claude Code neither the
      shell nor the agent can do it, so ask the user to type `/goal <aggregate objective>` and
      wait. `--claude-goal-json` (below) reconciles the ledger only and does not satisfy the
@@ -94,3 +94,10 @@ Claude Code `/goal` is a session-scoped Stop hook: it blocks the session from st
 - Snapshots passed via `--claude-goal-json` are model-supplied proof of the active `/goal` state; OMC validates them for textual consistency with the plan's expected objective and ledger event, but it cannot independently observe Claude `/goal` state. They do not satisfy the PreToolUse `/goal` guard, which requires an actual active `/goal` — a host-injected snapshot or the native `/goal` the user set in-session.
 - If the Claude `/goal` slash command is renamed or restructured, only the handoff wording needs to change; the reconciliation logic is name-agnostic.
 </Important_Limitations>
+
+## Parallel session caveats
+
+- **Multi-repo workspace anchor:** drop a `.omc-workspace` marker at the parent directory so multiple sessions across sub-repos share one `.omc/`. Resolution order: `OMC_STATE_DIR > .omc-workspace > git > cwd`. See `docs/REFERENCE.md`.
+- **Session id source:** OMC_SESSION_ID env var wins in CLI contexts; hook payload data.session_id wins in hook contexts.
+- **Plan id (when applicable):** Two runs in the same workspace will conflict on shared plan artifacts. Use distinct session IDs (the hook payload session_id is already isolated per Claude Code session), or pass `--plan-id` to keep parallel ultragoal runs on separate ledgers.
+- **Parallel verdict:** supported (each session writes its own session-scoped state)

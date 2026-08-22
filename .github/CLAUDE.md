@@ -1,5 +1,5 @@
 <!-- OMC:START -->
-<!-- OMC:VERSION:4.8.2 -->
+<!-- OMC:VERSION:4.15.10 -->
 
 # oh-my-claudecode - Intelligent Multi-Agent Orchestration
 
@@ -20,42 +20,30 @@ Route code to `executor` (use `model=opus` for complex work). Uncertain SDK usag
 </delegation_rules>
 
 <model_routing>
-`haiku` (quick lookups), `sonnet` (standard), `opus` (architecture, deep analysis).
+`haiku` (quick lookups), `sonnet` (standard), `opus` (architecture, deep analysis), `fable` (Claude Fable 5, above Opus).
+The session model set via `/model` governs the main loop only; delegated agents run on their pinned tier unless you pass `model` explicitly or set a per-agent `agents.<name>.model` override.
 Direct writes OK for: `~/.claude/**`, `.omc/**`, `.claude/**`, `CLAUDE.md`, `AGENTS.md`.
 </model_routing>
 
-<agent_catalog>
-Prefix: `oh-my-claudecode:`. See `agents/*.md` for full prompts.
-
-explore (haiku), analyst (opus), planner (opus), architect (opus), debugger (sonnet), executor (sonnet), verifier (sonnet), tracer (sonnet), security-reviewer (sonnet), code-reviewer (opus), test-engineer (sonnet), designer (sonnet), writer (haiku), qa-tester (sonnet), scientist (sonnet), document-specialist (sonnet), git-master (sonnet), code-simplifier (opus), critic (opus)
-</agent_catalog>
-
-<tools>
-External AI: `/team N:executor "task"`, `omc team N:codex|gemini "..."`, `omc ask <claude|codex|gemini>`, `/ccg`
-OMC State: `state_read`, `state_write`, `state_clear`, `state_list_active`, `state_get_status`
-Teams: Claude Code implicit agent team via Agent/Task `name`; OMC tmux/CLI workers via `/team` or `omc team`; task tracking via TodoWrite/TaskList/TaskGet/TaskUpdate when available
-Notepad: `notepad_read`, `notepad_write_priority`, `notepad_write_working`, `notepad_write_manual`
-Project Memory: `project_memory_read`, `project_memory_write`, `project_memory_add_note`, `project_memory_add_directive`
-Code Intel: LSP (`lsp_hover`, `lsp_goto_definition`, `lsp_find_references`, `lsp_diagnostics`, etc.), AST (`ast_grep_search`, `ast_grep_replace`), `python_repl`
-</tools>
-
 <skills>
 Invoke via `/oh-my-claudecode:<name>`. Trigger patterns auto-detect keywords.
-
-Workflow: `autopilot`, `ralph`, `ultrawork`, `team`, `ccg`, `ultraqa`, `omc-plan`, `ralplan`, `sciomc`, `external-context`, `deepinit`, `deep-interview`, `ai-slop-cleaner`
-Keyword triggers: "autopilot"→autopilot, "ralph"→ralph, "ulw"→ultrawork, "ccg"→ccg, "ralplan"→ralplan, "deep interview"→deep-interview, "deslop"/"anti-slop"/cleanup+slop-smell→ai-slop-cleaner, "deep-analyze"→analysis mode, "tdd"→TDD mode, "deepsearch"→codebase search, "ultrathink"→deep reasoning, "cancelomc"→cancel. Team orchestration is explicit via `/team`.
-Utilities: `ask-codex`, `ask-gemini`, `cancel`, `note`, `learner`, `omc-setup`, `mcp-setup`, `hud`, `omc-doctor`, `omc-help`, `trace`, `release`, `project-session-manager`, `skill`, `writer-memory`, `ralph-init`, `configure-notifications`, `learn-about-omc` (`trace` is the evidence-driven tracing lane)
+**Canonical workflows (Tier-0):** `plan` → `execute` → `review` → `verify`. Roles: `planner` → `executor` → `reviewer` → `verifier`. `deep-interview` and `ralplan` are independent Tier-0 planning workflows. `research` and `team` are internal lanes; `autopilot`, `autoresearch`, `ralph`, and `ultragoal` remain directly invocable.
+**Retired in 5.0.0 (removed, not aliased):** `ultrawork`, `ultraqa`, `ultrapilot`, `swarm`, `pipeline`, `merge-readiness`, `deep-dive`, `sciomc`, `ccg`, `omc-teams`, `setup`, `mcp-setup`, `omc-reference`, `learner`, `writer-memory`, `local-build-reminder`. Use `execute`, `verify`, `review`, `research`, `omc-setup`, `wiki`, `remember`, or `team` instead.
+Keyword triggers: `"autopilot"→autopilot`, `"ralplan"→ralplan`, `"deep interview"→deep-interview`, `"deslop"`/`"anti-slop"`→ai-slop-cleaner (→`review`, opt-in), `"deep-analyze"`→analysis mode, `"tdd"`→TDD mode, `"deepsearch"`→codebase search, `"ultrathink"`→deep reasoning, `"cancelomc"`→cancel. Team orchestration is explicit via `/team`.
+Release is maintainer-only `omc release` (see Migration Guide); `/release` remains a compatibility alias and never bypasses the release boundary.
+Detailed agent catalog, tools, team pipeline, commit protocol, and full skill registry live in the `wiki` skill when skills are available, including reference for `explore`, `planner`, `architect`, `executor`, `designer`, and `writer`; this file remains sufficient without skill support. Specialists remain internal/routable modules (document-specialist, test-engineer, designer, etc.) — not Tier-0 workflows.
 </skills>
-
-<team_pipeline>
-Stages: `team-plan` → `team-prd` → `team-exec` → `team-verify` → `team-fix` (loop).
-Fix loop bounded by max attempts. `team ralph` links both modes.
-</team_pipeline>
 
 <verification>
 Verify before claiming completion. Size appropriately: small→haiku, standard→sonnet, large/security→opus.
 If verification fails, keep iterating.
 </verification>
+
+<failure_mode_guards>
+User input: when clarification, preference, or approval is required and AskUserQuestion is available, use AskUserQuestion instead of ending with a prose question; ask one focused question with 2-4 options. Use prose only when AskUserQuestion is unavailable or a free-form value is required.
+Session/worktree continuity: before editing after resume/compaction or inside a linked worktree, re-check `git status --short --branch`, current cwd, and relevant `.omc/state/` or `.omc/handoffs/` artifacts so work does not continue on the wrong branch or stale context.
+No fake completion: TODO-style placeholder notes, `test.skip`/`.only`, stub tests, and unimplemented branches are blockers, not evidence. Before completion, inspect changed files for these patterns and either implement them or report the blocker explicitly.
+</failure_mode_guards>
 
 <execution_protocols>
 Broad requests: explore first, then plan. 2+ independent tasks in parallel. `run_in_background` for builds/tests.
@@ -64,38 +52,8 @@ Never self-approve in the same active context; use `code-reviewer` or `verifier`
 Before concluding: zero pending tasks, tests passing, verifier evidence collected.
 </execution_protocols>
 
-<commit_protocol>
-Use git trailers to preserve decision context in every commit message.
-Format: conventional commit subject line, optional body, then structured trailers.
-
-Trailers (include when applicable — skip for trivial commits like typos or formatting):
-- `Constraint:` active constraint that shaped this decision
-- `Rejected:` alternative considered | reason for rejection
-- `Directive:` warning or instruction for future modifiers of this code
-- `Confidence:` high | medium | low
-- `Scope-risk:` narrow | moderate | broad
-- `Not-tested:` edge case or scenario not covered by tests
-
-Example:
-```
-fix(auth): prevent silent session drops during long-running ops
-
-Auth service returns inconsistent status codes on token expiry,
-so the interceptor catches all 4xx and triggers inline refresh.
-
-Constraint: Auth service does not support token introspection
-Constraint: Must not add latency to non-expired-token paths
-Rejected: Extend token TTL to 24h | security policy violation
-Rejected: Background refresh on timer | race condition with concurrent requests
-Confidence: high
-Scope-risk: narrow
-Directive: Error handling is intentionally broad (all 4xx) — do not narrow without verifying upstream behavior
-Not-tested: Auth service cold-start latency >500ms
-```
-</commit_protocol>
-
 <hooks_and_context>
-Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (invoke skill), `The boulder never stops` (ralph/ultrawork active).
+Hooks inject `<system-reminder>` tags. Key patterns: `hook success: Success` (proceed), `[MAGIC KEYWORD: ...]` (invoke skill), `The boulder never stops` (continuation mode active).
 Persistence: `<remember>` (7 days), `<remember priority>` (permanent).
 Kill switches: `DISABLE_OMC`, `OMC_SKIP_HOOKS` (comma-separated).
 </hooks_and_context>
@@ -105,14 +63,8 @@ Kill switches: `DISABLE_OMC`, `OMC_SKIP_HOOKS` (comma-separated).
 </cancellation>
 
 <worktree_paths>
-State: `.omc/state/`, `.omc/state/sessions/{sessionId}/`, `.omc/notepad.md`, `.omc/project-memory.json`, `.omc/plans/`, `.omc/research/`, `.omc/logs/`
+State root: `.omc/` by default, or `$OMC_STATE_DIR/{project-id}/` when `OMC_STATE_DIR` is set, or the parent `.omc/` when a `.omc-workspace` marker anchors a multi-repo workspace. Runtime state includes `.omc/state/`, `.omc/state/sessions/{sessionId}/`, `.omc/notepad.md`, `.omc/project-memory.json`, `.omc/plans/`, `.omc/research/`, `.omc/logs/`, `.omc/artifacts/`, `.omc/handoffs/`, and `.omc/ultragoal/`. These are ignored operational artifacts by default; `.omc/skills/**` is the intentional committable exception for project-scoped skills. In linked git worktrees, local `.omc/` state is removed with the worktree unless centralized via `OMC_STATE_DIR`.
 </worktree_paths>
-
-<contribution_rules>
-**PRs must always target `dev`, never `main`.** `main` is release-only and is only ever merged into by the maintainer via the release workflow. If you open a PR and realize it targets `main`, use `gh pr edit --base dev` to fix it before asking for review.
-
-**Never commit `dist/` or `bridge/`.** These are build artifacts generated by `npm run build`. They are gitignored. If they appear in your diff, run `git restore dist/ bridge/` before committing. Committing them inflates PR size, creates merge conflicts, and obscures the actual changes under review.
-</contribution_rules>
 
 ## Setup
 

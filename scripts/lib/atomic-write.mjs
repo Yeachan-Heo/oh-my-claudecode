@@ -162,6 +162,10 @@ function guardedLockRemoval(lockPath, operation, owner) {
   return 'unverifiable';
 }
 
+export function isStateFileLockingSupported() {
+  return Boolean(flockPath());
+}
+
 function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
   ensureDirSync(dirname(lockPath));
   if (!flockPath()) return requireExclusive ? null : { unlocked: true };

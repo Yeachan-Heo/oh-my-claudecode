@@ -24,7 +24,7 @@ export const ULTRAGOAL_HELP = `omc ultragoal - Durable repo-native multi-goal wo
 
 Usage:
   omc ultragoal create-goals [--brief <text> | --brief-file <path> | --from-stdin] [--goal <title::objective>] [--claude-goal-mode <aggregate|per-story>] [--force] [--plan-id <id> | --auto-plan-id] [--json]
-  omc ultragoal complete-goals [--retry-failed] [--plan-id <id>] [--json]
+  omc ultragoal complete-goals [<goal-id>] [--retry-failed] [--plan-id <id>] [--json]
   omc ultragoal add-goal --title <title> --objective <text> [--evidence <text>] [--plan-id <id>] [--json]
   omc ultragoal record-review-blockers --goal-id <id> --title <title> --objective <text> --evidence <review-findings> --claude-goal-json <active-json-or-path> [--plan-id <id>] [--json]
   omc ultragoal checkpoint --goal-id <id> --status <complete|failed|blocked> [--evidence <text>] [--claude-goal-json <json-or-path>] [--quality-gate-json <json-or-path>] [--plan-id <id>] [--json]
@@ -107,6 +107,7 @@ function positionalText(args: readonly string[]): string {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (valueTaking.has(arg)) { i += 1; continue; }
+    if ([...valueTaking].some((flag) => arg.startsWith(`${flag}=`))) continue;
     if (arg.startsWith('--')) continue;
     words.push(arg);
   }
@@ -267,7 +268,9 @@ export async function ultragoalCommand(args: string[]): Promise<void> {
 
     if (command === 'complete' || command === 'complete-goals' || command === 'next' || command === 'start-next') {
       const planId = await resolveActivePlanId(cwd, readValue(rest, '--plan-id'));
-      const result = await startNextUltragoal(cwd, { retryFailed: hasFlag(rest, '--retry-failed'), planId });
+      const goalId = positionalText(rest);
+      if (goalId.split(/\s+/).filter(Boolean).length > 1) throw new UltragoalError('Expected at most one positional ultragoal id.');
+      const result = await startNextUltragoal(cwd, { retryFailed: hasFlag(rest, '--retry-failed'), goalId: goalId || undefined, planId });
       if (!result.goal) {
         if (json) printJson({ ok: true, done: result.done, summary: summarizeUltragoalPlan(result.plan) });
         else console.log(result.done ? 'ultragoal: all goals complete' : 'ultragoal: no pending goals (use --retry-failed to retry failed goals)');

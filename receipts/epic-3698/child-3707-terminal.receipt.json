@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "child-terminal",
+  "issue": 3707,
+  "createdAt": "2026-08-13T01:15:00Z",
+  "payload": {
+    "state": "merged",
+    "evidence": "PR #3725 merged 2026-08-13 (merge 94ace9d6b8d615dc45659aca170b49ba753a745d); CI / Test FAILURE at head 6558a9edb3d3d4ee340c2250f430c2e492609be7 (inventory-graph-drift: provenance.sourceSha256 mismatch from #3707's new src/hooks/registry/ files not yet reconciled); 14/17 checks SUCCESS, 2 SKIPPED, 1 FAILURE; issue #3707 CLOSED. The inventory drift was resolved by #3711's closure inventory refresh at dev e84548394."
+  }
+}

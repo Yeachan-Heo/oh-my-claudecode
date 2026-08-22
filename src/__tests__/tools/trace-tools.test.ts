@@ -154,6 +154,21 @@ describe('trace-tools', () => {
       expect(text).toContain('untracked-native-fork agent stop was untracked');
     });
 
+    it('surfaces dirty-worktree stops from abnormal termination (issue #3663)', async () => {
+      appendReplayEvent(testDir, 'dirty-sum', {
+        agent: 'ab12345', event: 'agent_stop', agent_type: 'executor', success: false,
+        dirty_worktree: { tracked: 1, untracked: 2, ignored: 0, worktree_root: '/tmp/wt-1', truncated: false },
+      });
+
+      const result = await traceSummaryTool.handler({ sessionId: 'dirty-sum', workingDirectory: testDir });
+      const text = result.content[0].text;
+
+      expect(text).toContain('1 failed');
+      expect(text).toContain('Dirty worktrees on stop');
+      expect(text).toContain('1 agent(s) terminated leaving uncommitted work');
+      expect(text).toContain('preserve before reset/cleanup');
+    });
+
     it('should show flow trace statistics', async () => {
       appendReplayEvent(testDir, 'flow-sum', { agent: 'system', event: 'hook_fire', hook: 'test' });
       appendReplayEvent(testDir, 'flow-sum', { agent: 'system', event: 'keyword_detected', keyword: 'ultrawork' });

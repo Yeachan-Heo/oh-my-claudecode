@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-vi.mock('child_process', () => ({
+vi.mock('child_process', async (importOriginal) => ({
+    ...(await importOriginal()),
     execSync: vi.fn(),
     execFileSync: vi.fn(),
 }));
@@ -352,6 +353,9 @@ describe('auto-update reconciliation', () => {
             if (normalized.endsWith('/plugins/installed_plugins.json') || normalized === activeRoot.replace(/\\/g, '/')) {
                 return true;
             }
+            if (normalized.endsWith('/bridge/claude-md-coordinator.cjs')) {
+                return false;
+            }
             if (normalized.endsWith('/dist/hooks/skill-bridge.cjs')) {
                 return false;
             }
@@ -361,7 +365,7 @@ describe('auto-update reconciliation', () => {
         expect(result.success).toBe(false);
         expect(result.errors).toEqual(expect.arrayContaining([
             expect.stringContaining('Plugin cache sync failed:'),
-            expect.stringContaining('dist/hooks/skill-bridge.cjs'),
+            expect.stringContaining('bridge/claude-md-coordinator.cjs'),
         ]));
     });
     it('skips plugin cache sync silently when no active plugin roots exist', () => {
@@ -540,7 +544,7 @@ describe('auto-update reconciliation', () => {
             if (normalized.endsWith('/.claude-plugin/plugin.json')) {
                 return true;
             }
-            if (normalized === `${versionedCacheRoot.replace(/\\/g, '/')}/dist/hooks/skill-bridge.cjs`) {
+            if (normalized === `${versionedCacheRoot.replace(/\\/g, '/')}/bridge/claude-md-coordinator.cjs`) {
                 return false;
             }
             return normalized.endsWith('/plugins/cache/omc/oh-my-claudecode')
@@ -550,7 +554,7 @@ describe('auto-update reconciliation', () => {
         });
         const result = syncPluginCache(false);
         expect(result.synced).toBe(false);
-        expect(result.errors).toContain(`${versionedCacheRoot}: Missing required plugin payload file: dist/hooks/skill-bridge.cjs`);
+        expect(result.errors).toContain(`${versionedCacheRoot}: Missing required plugin payload file: bridge/claude-md-coordinator.cjs`);
         expect(mockedWriteFileSync.mock.calls.some(([path]) => String(path).includes('installed_plugins.json.tmp-'))).toBe(false);
         expect(mockedRenameSync).not.toHaveBeenCalledWith(expect.stringContaining('installed_plugins.json.tmp-'), expect.anything());
     });
@@ -594,7 +598,9 @@ describe('auto-update reconciliation', () => {
                     || normalized.endsWith('/package.json')
                     || normalized.endsWith('/.claude-plugin/plugin.json')
                     || normalized.endsWith('/dist/hooks/skill-bridge.cjs')
+                    || normalized.endsWith('/bridge')
                     || normalized.endsWith('/bridge/cli.cjs')
+                    || normalized.endsWith('/bridge/claude-md-coordinator.cjs')
                     || normalized.endsWith('/hooks/hooks.json')
                     || normalized.endsWith('/commands')
                     || normalized.endsWith('/commands/omc-setup.md')
@@ -613,6 +619,7 @@ describe('auto-update reconciliation', () => {
         expect(mockedMkdirSync).toHaveBeenCalledWith(versionedCacheRoot, { recursive: true });
         expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/oh-my-claude-sisyphus/dist', `${versionedCacheRoot}/dist`, expect.objectContaining({ recursive: true, force: true }));
         expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/oh-my-claude-sisyphus/package.json', `${versionedCacheRoot}/package.json`, expect.objectContaining({ recursive: true, force: true }));
+        expect(mockedCpSync).toHaveBeenCalledWith('/usr/lib/node_modules/oh-my-claude-sisyphus/bridge', `${versionedCacheRoot}/bridge`, expect.objectContaining({ recursive: true, force: true }));
         expect(consoleLogSpy).toHaveBeenCalledWith('[omc update] Plugin cache synced');
     });
     it('skips plugin cache sync gracefully when cache dir does not exist', () => {
@@ -672,7 +679,9 @@ describe('auto-update reconciliation', () => {
                     || normalized.endsWith('/package.json')
                     || normalized.endsWith('/.claude-plugin/plugin.json')
                     || normalized.endsWith('/dist/hooks/skill-bridge.cjs')
+                    || normalized.endsWith('/bridge')
                     || normalized.endsWith('/bridge/cli.cjs')
+                    || normalized.endsWith('/bridge/claude-md-coordinator.cjs')
                     || normalized.endsWith('/hooks/hooks.json')
                     || normalized.endsWith('/commands')
                     || normalized.endsWith('/commands/omc-setup.md')
@@ -689,6 +698,7 @@ describe('auto-update reconciliation', () => {
         expect(result.skipped).toBe(false);
         expect(result.errors).toEqual([
             `Failed to sync dist to ${versionedCacheRoot}: copy failed`,
+            `Failed to sync bridge to ${versionedCacheRoot}: copy failed`,
             `Failed to sync skills to ${versionedCacheRoot}: copy failed`,
             `Failed to sync commands to ${versionedCacheRoot}: copy failed`,
             `Failed to sync package.json to ${versionedCacheRoot}: copy failed`,

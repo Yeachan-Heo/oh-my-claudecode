@@ -82,6 +82,14 @@ export interface PurgeCacheResult {
     symlinked: number;
     /** Paths that were converted to symlinks */
     symlinkPaths: string[];
+    /** Number of version directories restored from an interrupted relink */
+    restored: number;
+    /** Version paths that were restored from an interrupted relink */
+    restoredPaths: string[];
+    /** Number of backups left in place because their owning purge is still running */
+    skipped: number;
+    /** Backup paths left to their live owner, with the version path they belong to */
+    skippedPaths: string[];
     /** Errors encountered (non-fatal) */
     errors: string[];
 }
