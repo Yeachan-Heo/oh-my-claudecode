@@ -1842,49 +1842,49 @@
     {
       "pullNumber": 3749,
       "targetRef": "main",
-      "mergeBaseSha": "bb8d38d95f978bad0b524ad74da061e3b8183829",
-      "headSha": "8247ee7a50cf75f770f36a0992254ff90cd97446",
+      "mergeBaseSha": "94e71c3630acbfb4f26dee6df4b78af30bab1563",
+      "headSha": "71f8fffd20f2afea19e62533e429c7bfd96daa5f",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-08-29T00:00:00.000Z",
       "generatedDelta": {
-        "count": 1209,
-        "sha256": "ba45c12b2a2ba470247a7385928148bbb07f225799a866a44b8e4536059ce7e8"
+        "count": 1225,
+        "sha256": "80c2ba8e3e383e8a25b1986c368dd3042ea7641a7ea4b18fc1e1fc86e3a34f77"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/claude-md-coordinator.cjs",
-          "sha": "fc965177b47e2bdcbc2b38cbe3b5045e0693cbcb",
+          "sha": "09490253ccbf7c537a1a36caf96ab477148bcca1",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "bea9acbad953c6b12837628dc80675762bc7f2b4",
+          "sha": "e286a84cd509e336756cc674ad8af1dd0f7d8e87",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/mcp-server.cjs",
-          "sha": "41a5353a7cfdb124a362236cc5b858e59f0e643d",
+          "sha": "fb4ec3b2509df48dcb3ee16e195589c0d138de6f",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/runtime-cli.cjs",
-          "sha": "7aed036b4d52a80997b3eafe5e5ee634e6fe789e",
+          "sha": "fffbef1cf779f6c53d9c9da39803f3ec5a31ec8f",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/team-mcp.cjs",
-          "sha": "72aa7cf6a6c0753b48390a3e3de518491616fc5f",
+          "sha": "64bae2bb42b0eb92c77fbadcdda23d3fc3a047ee",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/team.js",
-          "sha": "e106593d0fc3697574186868673c560025a90310",
+          "sha": "dc0cf0d601843864caed4f5467e505969724ba66",
           "previousFilename": null
         },
         {
@@ -1914,13 +1914,13 @@
         {
           "status": "modified",
           "filename": "dist/__tests__/auto-slash-aliases.test.js",
-          "sha": "43603758dc15b70a4d36eb9e346bc7d6092a571c",
+          "sha": "f27a32090f5d0c7d8d4cd62661360fc8cc067ca5",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/auto-slash-aliases.test.js.map",
-          "sha": "02251ad95a5e80a21ef55cd083efcca9cadd775c",
+          "sha": "15bf43abd7842902a4ebae6f476cabb81b381834",
           "previousFilename": null
         },
         {
@@ -2094,13 +2094,13 @@
         {
           "status": "added",
           "filename": "dist/__tests__/generated-artifact-authorization.test.js",
-          "sha": "5df12ce473aa7f9b23160afe06d02ca629242e33",
+          "sha": "d3b8376f29afac08d246507cec0097dbf7f4b972",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/__tests__/generated-artifact-authorization.test.js.map",
-          "sha": "e907dfa50e004a3b67894f3929d31847dce5ca39",
+          "sha": "584a75c90940c2981fd7e66a03d6e21e8eaf95fa",
           "previousFilename": null
         },
         {
@@ -2506,6 +2506,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/__tests__/package-dir-resolution-regression.test.js",
+          "sha": "9b4542b5ca04fdf650d278f92be15c2522953c48",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/package-dir-resolution-regression.test.js.map",
+          "sha": "c18e4fa6061879b257408609cb51e2b38c45b990",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/__tests__/plugin-shipping-surface.test.d.ts",
           "sha": "40accf3f69562564f3822a0cc3da7549b0f6cdae",
@@ -2736,25 +2748,25 @@
         {
           "status": "added",
           "filename": "dist/__tests__/release-boundary.test.js",
-          "sha": "932a852cc8a443d522211d44774b8ee1765b8c5c",
+          "sha": "c408fe908506a6d41f899c0596c6554aaddbcd19",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/__tests__/release-boundary.test.js.map",
-          "sha": "3da7b5a4d87641f8031968f806584cc6eadefb7e",
+          "sha": "add34053f4969295a2ee5f3f90cd2482409dd1b2",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/release-generation.test.js",
-          "sha": "a7a7b8f01335a29a40ffb736f6b0e945e2082512",
+          "sha": "5920b8fce1efc267a6a723a5c727f0702ec0d256",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/release-generation.test.js.map",
-          "sha": "164eab64cdec36f35b4bea396ff6de806aa55544",
+          "sha": "af4f6f821d6bee3b22011264bc4b1d0c47147064",
           "previousFilename": null
         },
         {
@@ -2914,6 +2926,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-cache-cleanup.test.js",
+          "sha": "4963628a3348fb38478bbf00be2da2d7c858aada",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-cache-cleanup.test.js.map",
+          "sha": "ef2484603e4a04bd30c5b9b0a617edc4b48aabd0",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.d.ts",
           "sha": "e3764db70a992e141b802c72bd1b95b041265cbd",
@@ -2928,13 +2952,13 @@
         {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.js",
-          "sha": "553f9b6e9841127c8655622c4935c99750f74b87",
+          "sha": "6359ed64f5d8a4ea211cf24895e3ddb3ab4afd36",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/__tests__/session-start-precompact-restore.test.js.map",
-          "sha": "3f8733928a27c97dd7b4926bf10f31dc3c416785",
+          "sha": "8fbcf150ced6f09f01a54425dd33d8728c2972ae",
           "previousFilename": null
         },
         {
@@ -3067,6 +3091,18 @@
           "status": "modified",
           "filename": "dist/__tests__/tier0-contracts.test.js.map",
           "sha": "0793443c7585b8d411f7caef7e1edb583698684a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-docs-consistency.test.js",
+          "sha": "0880e4e346fe8b505e21a4902f16da1ceb755414",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-docs-consistency.test.js.map",
+          "sha": "4a7489960e779e755b8f13b20a288c86e93c69ae",
           "previousFilename": null
         },
         {
@@ -4338,13 +4374,13 @@
         {
           "status": "modified",
           "filename": "dist/hooks/__tests__/bridge-routing.test.js",
-          "sha": "4478d58a3d7fb1e0aec6b6ca59aa920ae2790ee3",
+          "sha": "d4ffcb921a26d3f4d5cce8378d44f3e0a9952b78",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/__tests__/bridge-routing.test.js.map",
-          "sha": "189493e7ec0f5096660850c4d139629a691a7774",
+          "sha": "62c11cce7867696ee6947be1fb5441d9572521bd",
           "previousFilename": null
         },
         {
@@ -4374,13 +4410,13 @@
         {
           "status": "added",
           "filename": "dist/hooks/__tests__/precompact-restore.test.js",
-          "sha": "eda029b0c9f764f031af86797e600b3f86ac7cf8",
+          "sha": "cada8e646a5e0e4e2bc093d593ff6a42c90ba7e6",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/__tests__/precompact-restore.test.js.map",
-          "sha": "de3d59e9797d8fb428b1caa30171827cd14a2485",
+          "sha": "289d50d8ec257387a97cb76a1f1084649d80903a",
           "previousFilename": null
         },
         {
@@ -4734,19 +4770,19 @@
         {
           "status": "modified",
           "filename": "dist/hooks/bridge.d.ts.map",
-          "sha": "e4feb6ca36a2097c3e7da9f9e6a851099925e246",
+          "sha": "0a89e8efcbfd7bbcf4d1f8c0e770cd5d1329dca3",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/bridge.js",
-          "sha": "46b8142c241d40a5af402e9cb7a840d5da195b3f",
+          "sha": "7abed6bdbcb06e23e6180f5984053bcee826f37b",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/bridge.js.map",
-          "sha": "5eaf4d34b7a11db72e74c3a5554185de1e643076",
+          "sha": "34514b0b7d3e05a1353f868f337e8fc98359b217",
           "previousFilename": null
         },
         {
@@ -4985,6 +5021,18 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/cancel-race.test.js",
+          "sha": "a80ea75690b0fc332a00779ab1dd7db446181b1a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/cancel-race.test.js.map",
+          "sha": "1476d270a68fff64b279e9fa9205ebee62bbc1e1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js",
           "sha": "d0356dd7d3cc4429d09f376d8743570ea664e0e6",
           "previousFilename": null
@@ -5005,6 +5053,18 @@
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/idle-repo-state.test.js.map",
           "sha": "0388a773c947d3152327e9d4e76ecc88906f75ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/team-ralplan-stop.test.js",
+          "sha": "6a9f70ae1350d30102cdbb98d21304549295a615",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/team-ralplan-stop.test.js.map",
+          "sha": "4e528739c87cd65fb187f9e2b43d0e3a34d7a5c8",
           "previousFilename": null
         },
         {
@@ -5076,61 +5136,61 @@
         {
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/session-isolation.test.js",
-          "sha": "e71cbfe3aa255a998c04a7eae524f78104252c54",
+          "sha": "cc9eb9d003608fb32e361eb3b122c1a6889389d1",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/session-isolation.test.js.map",
-          "sha": "014e1bbe89664aac27fb10a632405ccfa5ab2c27",
+          "sha": "c6520eea997a5f56526c43207214384309310753",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/pre-compact/index.d.ts",
-          "sha": "11ddb9af0e52084de0ae4103e3942d07bc5fa5e6",
+          "sha": "bce4a7cbda8399bc70f2470201962896cb8f3796",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/pre-compact/index.d.ts.map",
-          "sha": "09efbc959c646324f938a5bac81fc9551b8544c7",
+          "sha": "59e6738760659185a0da533674f91e4356571a99",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/pre-compact/index.js",
-          "sha": "b04ef8486bd005e9fea5733ca6e411b2c083ff9d",
+          "sha": "0772ec5276eb6ebcf0b0dd43586bc017ae84bdfb",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/pre-compact/index.js.map",
-          "sha": "c8c00462729a6b10cc45a8ccef6f040a6c7ea2f0",
+          "sha": "8fb17bc6e1a0e996705d87e41ee0a79753b9ebb4",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.d.ts",
-          "sha": "6fa52359b0c79c2a940013d3b1049ba7051023d2",
+          "sha": "9c0cff56a1312695d73c0325fe5f813bc6651a28",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.d.ts.map",
-          "sha": "a892d6b2e129096d172f8d4a19df143c7b02f241",
+          "sha": "b1c2ca5c92c7a3e7d6aa760e941767048e84c4e8",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.js",
-          "sha": "b02f42bd3badbeab67621fa92fa63998262458da",
+          "sha": "ffa784a672b88a71fcca6bb4d0f4afd10a73a39b",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/pre-compact/restore.js.map",
-          "sha": "04a35d0886bd0d8fa40892e8d99195e78255909f",
+          "sha": "477625007c15793939ed140ecea79cc1aa42c1f5",
           "previousFilename": null
         },
         {
@@ -5442,25 +5502,25 @@
         {
           "status": "added",
           "filename": "dist/hooks/registry/cutover.d.ts",
-          "sha": "7165885096f764877694028f3ba46a19fc2950dc",
+          "sha": "efb8ebc0a1c9d49c726ddf420ba8c036d95c921e",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/registry/cutover.d.ts.map",
-          "sha": "591f0906046a098d25f8127c371e30a2cb1866b9",
+          "sha": "aa3d459835fe937d8c5ddaa4d5832a8f4f42b011",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/registry/cutover.js",
-          "sha": "7c7557e28bec88ec66aad389bf09c2a5e4b30953",
+          "sha": "2628d7a210e155d10aac55f2c771edd01b9a9ef0",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/hooks/registry/cutover.js.map",
-          "sha": "c78e2d8f26612fd5d589a84da5b0fa61395eec70",
+          "sha": "ae2440f1e16b8c1fc88d94488ba8a1a4ea25ef53",
           "previousFilename": null
         },
         {
@@ -6372,13 +6432,13 @@
         {
           "status": "modified",
           "filename": "dist/installer/__tests__/hook-templates.test.js",
-          "sha": "4fee5c740c0e4a5a86c74e2885ab40291417b0de",
+          "sha": "f2fb195cc44b7cca8c8cff99b7294d485cfef38b",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/installer/__tests__/hook-templates.test.js.map",
-          "sha": "af2b75e6c82e9896db4eb60445dd2f6da84b3263",
+          "sha": "e7b923945ac8611dd1397e83db94823d49c14296",
           "previousFilename": null
         },
         {
@@ -7440,13 +7500,13 @@
         {
           "status": "modified",
           "filename": "dist/team/__tests__/runtime-v2.dispatch.test.js",
-          "sha": "fc29324bf54825cd32e891d5108c9592011f40e6",
+          "sha": "5893a5a1fc6a7eeb5fdf76dfbf76a3d620786030",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/__tests__/runtime-v2.dispatch.test.js.map",
-          "sha": "43b1e6ae1ae3f853b4cece83de75fceb4c2bcb2b",
+          "sha": "37c8aa8f4c4bce58f02f1ebc43e6ff6a676773bb",
           "previousFilename": null
         },
         {
@@ -8213,8 +8273,14 @@
         },
         {
           "status": "modified",
+          "filename": "dist/team/runtime-v2.js",
+          "sha": "a415c80238ab061a3170b5c16e3d05e731ad82c7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/team/runtime-v2.js.map",
-          "sha": "2f65eaf3449b80e6d62f94248bc8916f69f07255",
+          "sha": "b17208405cc6e847fb4f3a108f610206e2f90b67",
           "previousFilename": null
         },
         {
@@ -8860,6 +8926,18 @@
           "previousFilename": null
         },
         {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/frontmatter.test.js",
+          "sha": "4a5cf35cb70543812a7083dc905e1cb458bc67b7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/frontmatter.test.js.map",
+          "sha": "7eb902ee8e5ab44509dff1daedade461372ed924",
+          "previousFilename": null
+        },
+        {
           "status": "added",
           "filename": "dist/utils/__tests__/jsonc.test.d.ts",
           "sha": "c8c2b8d22f6263cfc5c8a2c26439181984d74b60",
@@ -8886,25 +8964,43 @@
         {
           "status": "added",
           "filename": "dist/utils/cache-occupancy.d.ts",
-          "sha": "0a851bd97569c486197118017a73fd618c0680a7",
+          "sha": "69fe82eebbc85eae207b54a0e43eaa94d90d6f25",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/utils/cache-occupancy.d.ts.map",
-          "sha": "e4263f8a5e4bcc739681ce09fd6e8f4eb452e71d",
+          "sha": "11f127586bd4e1f5e0e5002aac0bb75164bbaa8d",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/utils/cache-occupancy.js",
-          "sha": "a490f176669e506c46e4190c7b8bb6f23a4e0a61",
+          "sha": "90e7aeff57b4bccb2710e1c39fc61811e0b9070f",
           "previousFilename": null
         },
         {
           "status": "added",
           "filename": "dist/utils/cache-occupancy.js.map",
-          "sha": "37cd0581b285024b0f02ea8ec9c6e05e5e5a6a24",
+          "sha": "89aeba3271f08d243042a0f0564ec9d3f942e652",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.d.ts.map",
+          "sha": "db2ee6259828dbe5fab835ea27880001b2c36c19",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.js",
+          "sha": "aee3f71ffa00679c5d6f9cc84835f47ad36b6bb0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/frontmatter.js.map",
+          "sha": "415b52ecc1122f0f055a72cdd9e802d315476978",
           "previousFilename": null
         },
         {
@@ -8916,19 +9012,19 @@
         {
           "status": "modified",
           "filename": "dist/utils/paths.d.ts.map",
-          "sha": "b1867dada899e1f539f3d505059371d6a25a3b8a",
+          "sha": "1119d505eafc84bba18badbbef03aa69a9d766e2",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/utils/paths.js",
-          "sha": "fdbf696ed2f6ecb51635122792f1f6a048c118df",
+          "sha": "b0d4eb2e26c9b45d2671af2a2ee4889b822697f7",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/utils/paths.js.map",
-          "sha": "af5b34febf9eb98e71760e3f5e1783dbfd3cd3fd",
+          "sha": "e5c0da0cf26a591c0c49008cd0db5a35732e4f8f",
           "previousFilename": null
         },
         {
