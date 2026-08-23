@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4357b328c6abdae0dd805b18db641734800cae5e",
-    "sourceSha256": "0763a95a44f57a5f7e050b3c5ba03d2d9a77feb89fbf993b7c5ad61eb72b6b3f",
+    "head": "f44a1044a0e95d1de6ab41786587d8e0cdc20436",
+    "sourceSha256": "7d2761b80e29dd7edc76a36c3831281c6ba461bad5ebeecadc131626f2a4a4fc",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4357b328c6abdae0dd805b18db641734800cae5e",
-  "sourceSha256": "0763a95a44f57a5f7e050b3c5ba03d2d9a77feb89fbf993b7c5ad61eb72b6b3f",
+  "head": "f44a1044a0e95d1de6ab41786587d8e0cdc20436",
+  "sourceSha256": "7d2761b80e29dd7edc76a36c3831281c6ba461bad5ebeecadc131626f2a4a4fc",
   "counts": {
     "public": {
       "skills": 31,
@@ -27,9 +27,9 @@
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
-      "templateHooks": 19,
-      "srcFiles": 1277,
-      "total": 1296
+      "templateHooks": 20,
+      "srcFiles": 1279,
+      "total": 1299
     },
     "generated": {
       "distFiles": 4994,
@@ -617,6 +617,7 @@
       "templates/hooks/lib/config-dir.mjs",
       "templates/hooks/lib/model-routing-override-message.mjs",
       "templates/hooks/lib/precompact-restore.mjs",
+      "templates/hooks/lib/skill-entitlements.mjs",
       "templates/hooks/lib/state-root.mjs",
       "templates/hooks/lib/stdin.mjs",
       "templates/hooks/lib/workflow-profile-runtime.mjs",
@@ -721,6 +722,7 @@
       "scripts/generate-featured-contributors.ts",
       "scripts/generate-inventory-graph.mjs",
       "scripts/generate-prompt-projections.mjs",
+      "scripts/generate-skill-entitlements.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
@@ -740,6 +742,7 @@
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
       "scripts/lib/precompact-restore.mjs",
+      "scripts/lib/skill-entitlements.mjs",
       "scripts/lib/state-root.cjs",
       "scripts/lib/state-root.mjs",
       "scripts/lib/stdin.mjs",
@@ -33003,6 +33006,11 @@
         "path": "scripts/generate-prompt-projections.mjs"
       },
       {
+        "id": "scripts/generate-skill-entitlements.mjs",
+        "kind": "script",
+        "path": "scripts/generate-skill-entitlements.mjs"
+      },
+      {
         "id": "scripts/inventory-issue-3698.mjs",
         "kind": "script",
         "path": "scripts/inventory-issue-3698.mjs"
@@ -33096,6 +33104,11 @@
         "id": "scripts/lib/precompact-restore.mjs",
         "kind": "script",
         "path": "scripts/lib/precompact-restore.mjs"
+      },
+      {
+        "id": "scripts/lib/skill-entitlements.mjs",
+        "kind": "script",
+        "path": "scripts/lib/skill-entitlements.mjs"
       },
       {
         "id": "scripts/lib/state-root.cjs",
@@ -34948,6 +34961,11 @@
         "path": "src/__tests__/shared-state-locking.test.ts"
       },
       {
+        "id": "src/__tests__/skill-entitlements.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/skill-entitlements.test.ts"
+      },
+      {
         "id": "src/__tests__/skill-injector-script.test.ts",
         "kind": "src",
         "path": "src/__tests__/skill-injector-script.test.ts"
@@ -35671,6 +35689,11 @@
         "id": "src/config/__tests__/test-helpers.ts",
         "kind": "src",
         "path": "src/config/__tests__/test-helpers.ts"
+      },
+      {
+        "id": "src/config/builtin-skill-entitlements.json",
+        "kind": "src",
+        "path": "src/config/builtin-skill-entitlements.json"
       },
       {
         "id": "src/config/index.ts",
@@ -40228,6 +40251,11 @@
         "path": "templates/hooks/lib/precompact-restore.mjs"
       },
       {
+        "id": "templates/hooks/lib/skill-entitlements.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/lib/skill-entitlements.mjs"
+      },
+      {
         "id": "templates/hooks/lib/state-root.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/state-root.mjs"
@@ -41295,6 +41323,26 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/generate-skill-entitlements.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/generate-skill-entitlements.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/generate-skill-entitlements.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/generate-skill-entitlements.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/inventory-issue-3698.mjs",
         "to": "external:node:crypto",
         "kind": "imports"
@@ -41962,6 +42010,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "scripts/lib/pre-tool-enforcer-preflight.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/skill-entitlements.mjs",
         "kind": "imports"
       },
       {
@@ -47985,6 +48038,26 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/skill-entitlements.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skill-entitlements.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skill-entitlements.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skill-entitlements.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -51721,6 +51794,11 @@
       },
       {
         "from": "src/features/builtin-skills/skills.ts",
+        "to": "src/config/builtin-skill-entitlements.json",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/builtin-skills/skills.ts",
         "to": "src/features/builtin-skills/runtime-guidance.ts",
         "kind": "imports"
       },
@@ -51852,6 +51930,11 @@
       {
         "from": "src/features/delegation-enforcer.ts",
         "to": "src/agents/definitions.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/delegation-enforcer.ts",
+        "to": "src/config/builtin-skill-entitlements.json",
         "kind": "imports"
       },
       {
@@ -62567,6 +62650,11 @@
       {
         "from": "src/installer/index.ts",
         "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/index.ts",
+        "to": "src/config/builtin-skill-entitlements.json",
         "kind": "imports"
       },
       {
@@ -74135,6 +74223,16 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/lib/skill-entitlements.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/skill-entitlements.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
         "from": "templates/hooks/lib/state-root.mjs",
         "to": "external:crypto",
         "kind": "imports"
@@ -74357,6 +74455,11 @@
       {
         "from": "templates/hooks/pre-tool-use.mjs",
         "to": "templates/hooks/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/pre-tool-use.mjs",
+        "to": "templates/hooks/lib/skill-entitlements.mjs",
         "kind": "imports"
       },
       {
@@ -74906,12 +75009,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6830,
-      "edgeCount": 6886,
-      "importEdgeCount": 5642,
+      "nodeCount": 6835,
+      "edgeCount": 6901,
+      "importEdgeCount": 5655,
       "registerEdgeCount": 52
     }
   },
-  "inventorySha256": "fb7a79660fc8e0567ff1d3b9b1c35cc824ceee60b5a0313f27f45cd531a8e409",
-  "manifestSha256": "ed5dd3b4e4b1013a1acbe13bfca8f57ef7e2b9dc94a7e20994a782a87e22142f"
+  "inventorySha256": "29b32fa25bd49115c6c270c4bbf0bf6932d970ecd2e1dc473992fd03894d2532",
+  "manifestSha256": "0d70619106c79c15cb1f2a8972d86be15aa5ab50006ebae90ae6c4c46cef67cc"
 }
