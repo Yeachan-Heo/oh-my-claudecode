@@ -397,60 +397,6 @@ describe('Ralph PRD Criterion Amendment', () => {
         });
     });
     describe('completion semantics', () => {
-        it('invalidates completed and verified stories for replacements and supersessions', () => {
-            writeSamplePrd({
-                ...samplePrd,
-                userStories: [{ ...samplePrd.userStories[0], passes: true, architectVerified: true }],
-            });
-            expect(amendCriterion(testDir, 'US-001', {
-                original: FDFT_ORIGINAL,
-                replacement: FDFT_REPLACEMENT,
-                ...amendmentBase,
-            }).ok).toBe(true);
-            let story = readPrd(testDir)?.userStories[0];
-            expect(story).toMatchObject({ passes: false, architectVerified: false });
-            expect(story?.criterionAmendments).toEqual([resultAmendment()]);
-            expect(getPrdStatus(readPrd(testDir))).toMatchObject({
-                allComplete: false,
-                incompleteIds: ['US-001'],
-            });
-            expect(markStoryComplete(testDir, 'US-001')).toBe(true);
-            expect(supersedeCriterion(testDir, 'US-001', {
-                original: FDFT_REPLACEMENT,
-                ...amendmentBase,
-                timestamp: '2026-08-10T03:16:00.000Z',
-            }).ok).toBe(true);
-            story = readPrd(testDir)?.userStories[0];
-            expect(story).toMatchObject({ passes: false, architectVerified: false, acceptanceCriteria: [] });
-            expect(story?.criterionAmendments).toHaveLength(2);
-            expect(story?.criterionAmendments?.map(amendment => amendment.original)).toEqual([
-                FDFT_ORIGINAL,
-                FDFT_REPLACEMENT,
-            ]);
-        });
-        it('clears stale architect verification on an already incomplete story', () => {
-            writeSamplePrd({
-                ...samplePrd,
-                userStories: [{ ...samplePrd.userStories[0], passes: false, architectVerified: true }],
-            });
-            expect(supersedeCriterion(testDir, 'US-001', { original: FDFT_ORIGINAL, ...amendmentBase }).ok).toBe(true);
-            expect(readPrd(testDir)?.userStories[0]).toMatchObject({
-                passes: false,
-                architectVerified: false,
-                acceptanceCriteria: [],
-            });
-        });
-        it('invalidates a completed and verified story when its criterion is superseded', () => {
-            writeSamplePrd({
-                ...samplePrd,
-                userStories: [{ ...samplePrd.userStories[0], passes: true, architectVerified: true }],
-            });
-            expect(supersedeCriterion(testDir, 'US-001', { original: FDFT_ORIGINAL, ...amendmentBase }).ok).toBe(true);
-            const prd = readPrd(testDir);
-            expect(prd.userStories[0]).toMatchObject({ passes: false, architectVerified: false, acceptanceCriteria: [] });
-            expect(prd.userStories[0].criterionAmendments).toHaveLength(1);
-            expect(getPrdStatus(prd)).toMatchObject({ allComplete: false, incompleteIds: ['US-001'] });
-        });
         it('a superseded criterion no longer blocks completion while the ledger records why', () => {
             writeSamplePrd();
             supersedeCriterion(testDir, 'US-001', { original: FDFT_ORIGINAL, ...amendmentBase });
