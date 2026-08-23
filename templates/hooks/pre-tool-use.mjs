@@ -11,6 +11,7 @@ import { existsSync, readdirSync, mkdirSync, writeFileSync, renameSync, readFile
 import { fileURLToPath, pathToFileURL } from 'url';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -250,17 +251,6 @@ const CC_NATIVE_SKILL_COMMANDS = new Set([
 function toSafeSkillName(name) {
   const normalized = name.trim();
   return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
-}
-
-// Mirrors the runtime entitlement filter used by the bundled skill loader.
-const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
-
-function isSkininthegamebrosUser() {
-  return process.env.USER_TYPE === 'ant';
-}
-
-function isSkillVisibleToUser(skillName) {
-  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName.toLowerCase()) || isSkininthegamebrosUser();
 }
 
 let cachedCanonicalSkillRegistry = null;

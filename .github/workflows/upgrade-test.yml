@@ -190,7 +190,18 @@ jobs:
         run: |
           set -euo pipefail
           CURRENT_PACKAGE_VERSION="$(node -p "require('./package.json').version")"
-          TARBALL_NAME="$(npm pack --pack-destination "$RUNNER_TEMP" --silent)"
+          PACK_OUTPUT="$RUNNER_TEMP/npm-pack.stdout"
+          npm pack --pack-destination "$RUNNER_TEMP" --silent > "$PACK_OUTPUT"
+          TARBALL_NAME="$(node -e '
+            const fs = require("node:fs");
+            const path = require("node:path");
+            const lines = fs.readFileSync(process.argv[1], "utf8").trim().split(/\r?\n/);
+            const filename = [...lines].reverse().find(line => /^[^/\\]+\.tgz$/.test(line));
+            if (!filename || !fs.existsSync(path.join(process.argv[2], filename))) {
+              throw new Error(`npm pack did not report a tarball filename: ${JSON.stringify(lines)}`);
+            }
+            process.stdout.write(filename);
+          ' "$PACK_OUTPUT" "$RUNNER_TEMP")"
           {
             echo "OMC_UPGRADE_TEST_EXPECTED_VERSION=$CURRENT_PACKAGE_VERSION"
             echo "OMC_UPGRADE_TEST_TARBALL=$RUNNER_TEMP/$TARBALL_NAME"

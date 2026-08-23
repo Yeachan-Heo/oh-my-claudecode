@@ -21,6 +21,7 @@ import { loadConfig } from '../config/loader.js';
 import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
 import { createBuiltinSkills, getSkillsDir } from './builtin-skills/skills.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
+import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
 import type { PluginConfig } from '../shared/types.js';
 
 // ---------------------------------------------------------------------------
@@ -162,14 +163,9 @@ function skillInvocationHint(agentType: string, originalSubagentType?: string): 
   return ` "${agentType}" is a bundled Skill, not an agent — invoke it with the Skill tool (Skill(skill="oh-my-claudecode:${primary}")) instead of Task/Agent subagent_type, and do NOT substitute a similarly-named agent`;
 }
 
-/**
- * Skills exposed only to skininthegamebros users. Mirrors
- * src/features/builtin-skills/skills.ts:SKININTHEGAMEBROS_ONLY_SKILLS.
- *
- * Empty as of 5.0.0 — remember/verify/debug were ungated. Kept for future
- * early-access skills.
- */
-const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>([]);
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>(
+  entitlementManifest.skininthegamebrosOnlySkills,
+);
 
 /**
  * Whether a bundled skill directory is visible to the current user, mirroring
@@ -190,7 +186,7 @@ function isSkillVisibleToUser(skillName: string): boolean {
  * legacy skills/learner directory), while dir-only names such as `plan` fall
  * back to their registered name (`omc-plan`). The same visibility/entitlement
  * filter as the runtime loader applies, failing closed for runtime-hidden
- * skills (`remember`, `verify`, `debug` for non-skininthegamebros users).
+ * skills.
  * Exact match only — no fuzzy substitution.
  */
 function resolveBundledSkillPrimary(

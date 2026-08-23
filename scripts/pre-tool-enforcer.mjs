@@ -20,6 +20,7 @@ import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/stat
 import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
+import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -267,27 +268,10 @@ function toSafeSkillName(name) {
   return CC_NATIVE_SKILL_COMMANDS.has(normalized.toLowerCase()) ? `omc-${normalized}` : normalized;
 }
 /**
- * Skills exposed only to skininthegamebros users. Mirrors
- * src/features/builtin-skills/skills.ts:SKININTHEGAMEBROS_ONLY_SKILLS: the
- * runtime loader deliberately hides these directories from everyone else.
- */
-const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(['remember', 'verify', 'debug']);
-
-function isSkininthegamebrosUser() {
-  return process.env.USER_TYPE === 'ant';
-}
-
-/**
  * Whether a bundled skill directory is visible to the current user, mirroring
  * loadSkillsFromDirectory's entitlement filter. Hidden skills must never be
  * suggested as invocable, even when their directory exists on disk.
  */
-function isSkillVisibleToUser(skillName) {
-  // Case-fold before the Set lookup: identifiers are matched case-insensitively
-  // while filesystem lookup is case-insensitive on Windows/macOS.
-  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(skillName.toLowerCase()) || isSkininthegamebrosUser();
-}
-
 let cachedCanonicalSkillRegistry = null;
 
 /**

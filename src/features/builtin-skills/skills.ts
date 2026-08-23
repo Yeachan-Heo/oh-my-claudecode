@@ -20,6 +20,7 @@ import { renderSkillResourcesGuidance } from '../../utils/skill-resources.js';
 import { renderSkillRuntimeGuidance } from './runtime-guidance.js';
 import { isSkininthegamebrosUser } from '../../utils/skininthegamebros-user.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import entitlementManifest from '../../config/builtin-skill-entitlements.json' with { type: 'json' };
 
 function getPackageDir(): string {
   if (typeof __dirname !== 'undefined' && __dirname) {
@@ -69,19 +70,9 @@ const CC_NATIVE_COMMANDS = new Set([
   'memory',
 ]);
 
-/**
- * Skills exposed only to skininthegamebros users.
- *
- * Empty as of 5.0.0: `remember`, `verify`, and `debug` were ungated. `verify`
- * is a canonical Tier-0 workflow and `remember` is the retirement target for
- * `learner`/`writer-memory`, so gating them left public users without a
- * reachable end of the plan -> execute -> review -> verify chain.
- *
- * The entitlement mechanism is intentionally retained for future early-access
- * skills. Mirrored in src/installer/index.ts and
- * src/features/delegation-enforcer.ts.
- */
-const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>([]);
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>(
+  entitlementManifest.skininthegamebrosOnlySkills,
+);
 
 const DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD = 0.2;
 
@@ -319,7 +310,7 @@ function loadSkillsFromDirectory(): BuiltinSkill[] {
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name) && !isSkininthegamebrosUser()) {
+      if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name.toLowerCase()) && !isSkininthegamebrosUser()) {
         continue;
       }
 

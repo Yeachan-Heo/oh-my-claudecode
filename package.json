@@ -47,7 +47,7 @@
     "prompt-ssot:build": "tsx scripts/build-prompt-ssot.ts",
     "prompt-ssot:check": "tsx scripts/build-prompt-ssot.ts --check",
     "prompt-ssot:measure": "tsx scripts/measure-prompt-ssot.ts",
-    "build": "tsc && node scripts/build-workflow-stage-prompts.mjs && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs && npm run generate:prompt-projections && npm run build:claude-md-coordinator && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
+    "build": "node scripts/generate-skill-entitlements.mjs --verify && tsc && node scripts/build-workflow-stage-prompts.mjs && node scripts/build-skill-bridge.mjs && node scripts/build-mcp-server.mjs && node scripts/build-bridge-entry.mjs && npm run compose-docs && npm run generate:prompt-projections && npm run build:claude-md-coordinator && npm run build:runtime-cli && npm run build:team-server && npm run build:cli",
     "build:bridge": "node scripts/build-skill-bridge.mjs",
     "build:bridge-entry": "node scripts/build-bridge-entry.mjs",
     "build:claude-md-coordinator": "node scripts/build-claude-md-coordinator.mjs",
@@ -82,6 +82,8 @@
     "release": "tsx scripts/release.ts",
     "prepublishOnly": "npm run build",
     "version": "bash scripts/sync-version.sh",
+    "generate:skill-entitlements": "node scripts/generate-skill-entitlements.mjs",
+    "verify:skill-entitlements": "node scripts/generate-skill-entitlements.mjs --verify",
     "generate:prompt-projections": "node scripts/generate-prompt-projections.mjs",
     "verify:prompt-projections": "node scripts/generate-prompt-projections.mjs --verify"
   },
