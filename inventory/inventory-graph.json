@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d6bc07790ba22cbded4231c51e7ae03e95d04623",
-    "sourceSha256": "cfc10b2f944c5f312d6278c05364fdd4be05eb3f3de38f36675742fbc8d8269f",
+    "head": "4875a2eaf9b66f882263ece824d95fcee0cd68f6",
+    "sourceSha256": "0b839bede2f3c1222466dd492aec33025d834fcab2c2b0fb4c7b683b84539fc0",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d6bc07790ba22cbded4231c51e7ae03e95d04623",
-  "sourceSha256": "cfc10b2f944c5f312d6278c05364fdd4be05eb3f3de38f36675742fbc8d8269f",
+  "head": "4875a2eaf9b66f882263ece824d95fcee0cd68f6",
+  "sourceSha256": "0b839bede2f3c1222466dd492aec33025d834fcab2c2b0fb4c7b683b84539fc0",
   "counts": {
     "public": {
       "skills": 31,
@@ -23,25 +23,25 @@
       "total": 78
     },
     "internal": {
-      "hookFiles": 307,
+      "hookFiles": 306,
       "featureFiles": 68,
       "toolFiles": 56,
       "libFiles": 34,
       "templateHooks": 21,
-      "srcFiles": 1280,
-      "total": 1301
+      "srcFiles": 1279,
+      "total": 1300
     },
     "generated": {
-      "distFiles": 4994,
+      "distFiles": 4999,
       "bridgeFiles": 9,
-      "total": 5003
+      "total": 5008
     },
     "prompt": {
       "promptLikeFiles": 63
     },
     "skills": 31,
     "commands": 21,
-    "hookFiles": 307,
+    "hookFiles": 306,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -422,7 +422,6 @@
       "src/hooks/todo-continuation/__tests__/isRateLimitStop.test.ts",
       "src/hooks/todo-continuation/__tests__/isUserAbort.test.ts",
       "src/hooks/todo-continuation/index.ts",
-      "src/hooks/ultraqa/index.ts",
       "src/hooks/ultrawork/__tests__/prompt-truncation.test.ts",
       "src/hooks/ultrawork/index.ts",
       "src/hooks/ultrawork/session-isolation.test.ts",
@@ -787,7 +786,6 @@
       "scripts/sync-metadata.ts",
       "scripts/sync-version.sh",
       "scripts/test-max-attempts.ts",
-      "scripts/test-mutual-exclusion.ts",
       "scripts/test-notepad-integration.ts",
       "scripts/test-pr25.sh",
       "scripts/test-remember-tags.ts",
@@ -1696,6 +1694,14 @@
       "dist/__tests__/shared-state-locking.test.d.ts.map",
       "dist/__tests__/shared-state-locking.test.js",
       "dist/__tests__/shared-state-locking.test.js.map",
+      "dist/__tests__/skill-entitlements-cross-surface.test.d.ts",
+      "dist/__tests__/skill-entitlements-cross-surface.test.d.ts.map",
+      "dist/__tests__/skill-entitlements-cross-surface.test.js",
+      "dist/__tests__/skill-entitlements-cross-surface.test.js.map",
+      "dist/__tests__/skill-entitlements.test.d.ts",
+      "dist/__tests__/skill-entitlements.test.d.ts.map",
+      "dist/__tests__/skill-entitlements.test.js",
+      "dist/__tests__/skill-entitlements.test.js.map",
       "dist/__tests__/skill-injector-script.test.d.ts",
       "dist/__tests__/skill-injector-script.test.d.ts.map",
       "dist/__tests__/skill-injector-script.test.js",
@@ -2260,6 +2266,7 @@
       "dist/config/__tests__/test-helpers.d.ts.map",
       "dist/config/__tests__/test-helpers.js",
       "dist/config/__tests__/test-helpers.js.map",
+      "dist/config/builtin-skill-entitlements.json",
       "dist/config/index.d.ts",
       "dist/config/index.d.ts.map",
       "dist/config/index.js",
@@ -3717,10 +3724,6 @@
       "dist/hooks/todo-continuation/index.d.ts.map",
       "dist/hooks/todo-continuation/index.js",
       "dist/hooks/todo-continuation/index.js.map",
-      "dist/hooks/ultraqa/index.d.ts",
-      "dist/hooks/ultraqa/index.d.ts.map",
-      "dist/hooks/ultraqa/index.js",
-      "dist/hooks/ultraqa/index.js.map",
       "dist/hooks/ultrawork/__tests__/prompt-truncation.test.d.ts",
       "dist/hooks/ultrawork/__tests__/prompt-truncation.test.d.ts.map",
       "dist/hooks/ultrawork/__tests__/prompt-truncation.test.js",
@@ -6099,7 +6102,6 @@
       "src/hooks/todo-continuation/__tests__/isRateLimitStop.test.ts",
       "src/hooks/todo-continuation/__tests__/isUserAbort.test.ts",
       "src/hooks/todo-continuation/index.ts",
-      "src/hooks/ultraqa/index.ts",
       "src/hooks/ultrawork/__tests__/prompt-truncation.test.ts",
       "src/hooks/ultrawork/index.ts",
       "src/hooks/ultrawork/session-isolation.test.ts",
@@ -11668,6 +11670,46 @@
         "path": "dist/__tests__/shared-state-locking.test.js.map"
       },
       {
+        "id": "dist/__tests__/skill-entitlements-cross-surface.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements-cross-surface.test.d.ts"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements-cross-surface.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements-cross-surface.test.d.ts.map"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements-cross-surface.test.js",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements-cross-surface.test.js"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements-cross-surface.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements-cross-surface.test.js.map"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements.test.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements.test.d.ts"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements.test.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements.test.d.ts.map"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements.test.js",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements.test.js"
+      },
+      {
+        "id": "dist/__tests__/skill-entitlements.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/__tests__/skill-entitlements.test.js.map"
+      },
+      {
         "id": "dist/__tests__/skill-injector-script.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/__tests__/skill-injector-script.test.d.ts"
@@ -14486,6 +14528,11 @@
         "id": "dist/config/__tests__/test-helpers.js.map",
         "kind": "generated-dist",
         "path": "dist/config/__tests__/test-helpers.js.map"
+      },
+      {
+        "id": "dist/config/builtin-skill-entitlements.json",
+        "kind": "generated-dist",
+        "path": "dist/config/builtin-skill-entitlements.json"
       },
       {
         "id": "dist/config/index.d.ts",
@@ -21771,26 +21818,6 @@
         "id": "dist/hooks/todo-continuation/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/todo-continuation/index.js.map"
-      },
-      {
-        "id": "dist/hooks/ultraqa/index.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/ultraqa/index.d.ts"
-      },
-      {
-        "id": "dist/hooks/ultraqa/index.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/ultraqa/index.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/ultraqa/index.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/ultraqa/index.js"
-      },
-      {
-        "id": "dist/hooks/ultraqa/index.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/ultraqa/index.js.map"
       },
       {
         "id": "dist/hooks/ultrawork/__tests__/prompt-truncation.test.d.ts",
@@ -33328,11 +33355,6 @@
         "path": "scripts/test-max-attempts.ts"
       },
       {
-        "id": "scripts/test-mutual-exclusion.ts",
-        "kind": "script",
-        "path": "scripts/test-mutual-exclusion.ts"
-      },
-      {
         "id": "scripts/test-notepad-integration.ts",
         "kind": "script",
         "path": "scripts/test-notepad-integration.ts"
@@ -37556,11 +37578,6 @@
         "id": "src/hooks/todo-continuation/index.ts",
         "kind": "hook",
         "path": "src/hooks/todo-continuation/index.ts"
-      },
-      {
-        "id": "src/hooks/ultraqa/index.ts",
-        "kind": "hook",
-        "path": "src/hooks/ultraqa/index.ts"
       },
       {
         "id": "src/hooks/ultrawork/__tests__/prompt-truncation.test.ts",
@@ -42515,31 +42532,6 @@
         "kind": "imports"
       },
       {
-        "from": "scripts/test-mutual-exclusion.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/test-mutual-exclusion.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/test-mutual-exclusion.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/test-mutual-exclusion.ts",
-        "to": "src/hooks/ralph/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/test-mutual-exclusion.ts",
-        "to": "src/hooks/ultraqa/index.ts",
-        "kind": "imports"
-      },
-      {
         "from": "scripts/test-notepad-integration.ts",
         "to": "dist/hooks/notepad/index.js",
         "kind": "imports"
@@ -44031,11 +44023,6 @@
       },
       {
         "from": "src/__tests__/hooks.test.ts",
-        "to": "src/hooks/ralph/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/hooks.test.ts",
         "to": "src/hooks/skill-state/index.ts",
         "kind": "imports"
       },
@@ -44048,11 +44035,6 @@
         "from": "src/__tests__/hooks.test.ts",
         "to": "src/hooks/todo-continuation/index.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/__tests__/hooks.test.ts",
-        "to": "src/hooks/ultraqa/index.ts",
-        "kind": "imports"
       },
       {
         "from": "src/__tests__/hooks/learner/bridge.test.ts",
@@ -53751,7 +53733,7 @@
       },
       {
         "from": "src/hooks/autopilot/__tests__/cancel.test.ts",
-        "to": "src/hooks/ultraqa/index.ts",
+        "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
       {
@@ -54156,11 +54138,6 @@
       },
       {
         "from": "src/hooks/autopilot/cancel.ts",
-        "to": "src/hooks/ultraqa/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/autopilot/cancel.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -54472,11 +54449,6 @@
       {
         "from": "src/hooks/autopilot/state.ts",
         "to": "src/hooks/ralph/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/autopilot/state.ts",
-        "to": "src/hooks/ultraqa/index.ts",
         "kind": "imports"
       },
       {
@@ -55582,16 +55554,6 @@
       {
         "from": "src/hooks/index.ts",
         "to": "src/hooks/todo-continuation/index.ts",
-        "kind": "type-exports"
-      },
-      {
-        "from": "src/hooks/index.ts",
-        "to": "src/hooks/ultraqa/index.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/hooks/index.ts",
-        "to": "src/hooks/ultraqa/index.ts",
         "kind": "type-exports"
       },
       {
@@ -58001,11 +57963,6 @@
       },
       {
         "from": "src/hooks/ralph/loop.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/ralph/loop.ts",
         "to": "external:path",
         "kind": "imports"
       },
@@ -58052,11 +58009,6 @@
       {
         "from": "src/hooks/ralph/loop.ts",
         "to": "src/lib/mode-state-io.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/ralph/loop.ts",
-        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -60292,16 +60244,6 @@
       {
         "from": "src/hooks/todo-continuation/index.ts",
         "to": "src/utils/config-dir.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/ultraqa/index.ts",
-        "to": "src/hooks/ralph/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/ultraqa/index.ts",
-        "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
       {
@@ -75146,12 +75088,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6838,
-      "edgeCount": 6925,
-      "importEdgeCount": 5678,
+      "nodeCount": 6841,
+      "edgeCount": 6910,
+      "importEdgeCount": 5665,
       "registerEdgeCount": 52
     }
   },
-  "inventorySha256": "4eaef9dd6b734acf7c47e6b313fbe4b075bacdf4f3f6bb174263233412aea6a3",
-  "manifestSha256": "849a125829eb6cfd337f787705dfb5c1e4ca6bf093daa4a7cbb6acf994d6bcc7"
+  "inventorySha256": "f87ce5b82ba93aa0f25b13865de71d4acab9d7e6211b33178720a927f2780d32",
+  "manifestSha256": "122786aed5a0d1e67a069c8672523e10cfaac9cc97839d2a7012339bed27f1c4"
 }
