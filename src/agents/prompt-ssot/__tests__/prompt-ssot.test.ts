@@ -180,6 +180,15 @@ describe('metrics', () => {
     expect(tokenize('Hello,  WORLD\nhello')).toEqual(['hello', 'world', 'hello']);
   });
 
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
+    'rejects invalid n-gram size %s before scanning',
+    (nGramSize) => {
+      expect(() => corpusStats(['a b a b'], nGramSize)).toThrow(
+        'nGramSize must be a finite positive integer.',
+      );
+    },
+  );
+
   it('reports zero projection drift for freshly composed bodies', () => {
     const composed = composeAll(PROMPT_SSOT_MANIFEST, PROMPT_SECTIONS);
     for (const p of composed) {

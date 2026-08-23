@@ -34,6 +34,9 @@ export interface CorpusStats {
 }
 
 export function corpusStats(texts: readonly string[], nGramSize = 8): CorpusStats {
+  if (!Number.isFinite(nGramSize) || !Number.isInteger(nGramSize) || nGramSize <= 0) {
+    throw new RangeError('nGramSize must be a finite positive integer.');
+  }
   const tokens = texts.flatMap((t) => tokenize(t));
   const ngramPositions = new Map<string, number[]>();
   for (let i = 0; i + nGramSize <= tokens.length; i++) {
