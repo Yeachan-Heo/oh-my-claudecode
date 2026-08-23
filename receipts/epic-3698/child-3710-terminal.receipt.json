@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3710,
-  "createdAt": "2026-08-13T01:15:00Z",
+  "createdAt": "2026-08-23T04:50:43.895Z",
   "payload": {
     "state": "merged",
-    "evidence": "PR #3719 merged 2026-08-12 (commit eec055401ebd8849246084928300198c85d21db0); 14/14 checks SUCCESS at head; issue #3710 CLOSED. Shipped canonical Tier-0 docs/help, maintainer-only release seam, and one-warning/session seam."
+    "evidence": {
+      "pullRequest": {
+        "number": 3719,
+        "headSha": "c8526e40aee2994d285fa176f7245164cc1d4ec4"
+      },
+      "commit": {
+        "sha": "eec055401ebd8849246084928300198c85d21db0"
+      },
+      "status": {
+        "conclusion": "failure",
+        "sha": "c8526e40aee2994d285fa176f7245164cc1d4ec4"
+      }
+    }
   }
 }

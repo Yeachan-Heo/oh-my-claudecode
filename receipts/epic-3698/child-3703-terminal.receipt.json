@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3703,
-  "createdAt": "2026-08-12T20:30:00Z",
+  "createdAt": "2026-08-23T04:50:37.608Z",
   "payload": {
     "state": "merged",
-    "evidence": "PR #3720 merged 2026-08-12T16:33:16Z (merge eddede493a74c882b913663e3a731ba4fcb00210); 14/14 checks SUCCESS at head 2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a; issue #3703 CLOSED"
+    "evidence": {
+      "pullRequest": {
+        "number": 3720,
+        "headSha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+      },
+      "commit": {
+        "sha": "eddede493a74c882b913663e3a731ba4fcb00210"
+      },
+      "status": {
+        "conclusion": "success",
+        "sha": "2b7c41b1c72dfe864e949c02459f0d3ea0bc2b3a"
+      }
+    }
   }
 }

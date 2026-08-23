@@ -207,13 +207,14 @@ function readCiEvidence(evidencePath) {
 }
 
 const GREEN_CHECK_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
+const COMPLETED_CHECK_CONCLUSIONS = new Set([...GREEN_CHECK_CONCLUSIONS, 'failure', 'cancelled', 'timed_out', 'action_required']);
 
 function normalizeLiveCheck(check, headSha, label) {
   if (!isObject(check)) throw new VerificationError(`${label} must be an object`);
   const name = check.workflowName ? `${check.workflowName} / ${check.name}` : (check.context ?? check.name);
   const conclusion = String(check.conclusion ?? check.state ?? check.status ?? '').toLowerCase();
   if (typeof name !== 'string' || name.length === 0) throw new VerificationError(`${label}.name must be a non-empty string`);
-  if (!GREEN_CHECK_CONCLUSIONS.has(conclusion)) throw new VerificationError(`${label}.conclusion must be success|skipped|neutral, got ${JSON.stringify(conclusion)}`);
+  if (!COMPLETED_CHECK_CONCLUSIONS.has(conclusion)) throw new VerificationError(`${label}.conclusion must be a completed GitHub conclusion, got ${JSON.stringify(conclusion)}`);
   return { name, conclusion, sha: headSha };
 }
 
@@ -610,6 +611,7 @@ function checkExactHeadCi(root, evidencePath) {
   const prs = loaded.prs;
   const directIssues = evidence.directIssues ?? evidence.payload?.directIssues;
   const problems = [];
+  const qualityProblems = [];
   if (evidence.schemaVersion !== 1) problems.push('schemaVersion must be 1');
   if (evidence.kind !== 'ci-evidence') problems.push('kind must be ci-evidence');
   if (evidence.issue !== EPIC_CONTRACT.closureIssue) problems.push(`issue must be ${EPIC_CONTRACT.closureIssue}`);
@@ -648,8 +650,10 @@ function checkExactHeadCi(root, evidencePath) {
       } else if (!isSha(check.sha)) {
         problems.push(`${clabel}.sha must be a 40-char lowercase hex SHA bound to the live PR head`);
       }
-      if (!GREEN_CHECK_CONCLUSIONS.has(check.conclusion)) {
-        problems.push(`${clabel}.conclusion must be success|skipped|neutral, got ${JSON.stringify(check.conclusion)}`);
+      if (!COMPLETED_CHECK_CONCLUSIONS.has(check.conclusion)) {
+        problems.push(`${clabel}.conclusion must be a completed GitHub conclusion, got ${JSON.stringify(check.conclusion)}`);
+      } else if (!GREEN_CHECK_CONCLUSIONS.has(check.conclusion)) {
+        qualityProblems.push(`${clabel}.conclusion is non-green at the exact PR head: ${JSON.stringify(check.conclusion)}`);
       }
     }
   }
@@ -719,12 +723,17 @@ function checkExactHeadCi(root, evidencePath) {
       }
     }
   }
-  if (problems.length > 0) return { id, status: 'fail', details: `${problems.length} exact-head CI problem(s)`, problems, authenticated: false };
+  if (problems.length > 0) {
+    return { id, status: 'fail', details: `${problems.length + qualityProblems.length} exact-head CI problem(s)`, problems: [...problems, ...qualityProblems], authenticated: false };
+  }
   if (!Array.isArray(directIssues) || directIssues.length === 0) return { id, status: 'fail', details: 'direct issue evidence is required for no-PR child closure authentication', problems: ['missing direct issue evidence'], authenticated: false };
   const live = verifyLiveGitHubEvidence(root, evidence, prs, directIssues);
   if (live.unavailable) return { id, status: 'pending', details: live.error, problems: [live.error], authenticated: false };
   if (live.error) return { id, status: 'fail', details: live.error, problems: [live.error], authenticated: false };
   if (live.problems?.length) return { id, status: 'fail', details: `${live.problems.length} live GitHub evidence problem(s)`, problems: live.problems, authenticated: false };
+  if (qualityProblems.length > 0) {
+    return { id, status: 'fail', details: `${qualityProblems.length} exact-head CI check(s) are non-green; terminality remains authenticated`, problems: qualityProblems, authenticated: true, evidence, live };
+  }
   return { id, status: 'pass', details: `${prs.length} PR(s) and direct issue evidence verified against live GitHub`, problems, authenticated: true, evidence, live };
 }
 
@@ -1459,9 +1468,9 @@ function validateReceipt(file, receipt, problems) {
         problems.push(`${label}.payload.evidence.status must be an object`);
       } else {
         if (expectedPr === null) {
-          if (status.state !== 'success') problems.push(`${label}.payload.evidence.status.state must be success when no dedicated PR is expected`);
-        } else if (!['success', 'skipped', 'neutral'].includes(status.conclusion)) {
-          problems.push(`${label}.payload.evidence.status.conclusion must be success|skipped|neutral`);
+          if (!['success', 'pending'].includes(status.state)) problems.push(`${label}.payload.evidence.status.state must be success|pending when no dedicated PR is expected`);
+        } else if (!COMPLETED_CHECK_CONCLUSIONS.has(status.conclusion)) {
+          problems.push(`${label}.payload.evidence.status.conclusion must be a completed GitHub conclusion`);
         }
         if (!isSha(status.sha)) {
           problems.push(`${label}.payload.evidence.status.sha must be a 40-char lowercase hex SHA`);

@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3704,
-  "createdAt": "2026-08-13T00:50:00Z",
+  "createdAt": "2026-08-23T04:50:38.685Z",
   "payload": {
     "state": "merged",
-    "evidence": "PR #3724 merged 2026-08-13T00:48Z (merge 199fa133d4feb9b9277a625cd70b3e586180bb7f); CI / Test FAILURE at head e52fedd161327af502cb858a12d623957b65274b (inventory-graph-drift + generated-artifact-authorization expiry from #3704's new generated/prompt-ssot/ files not yet reconciled); issue #3704 CLOSED but exact-head CI is NOT green — the verifier's exactHeadCi check will reject this head as non-green until the inventory graph is refreshed and the artifact authorization is renewed"
+    "evidence": {
+      "pullRequest": {
+        "number": 3724,
+        "headSha": "e52fedd161327af502cb858a12d623957b65274b"
+      },
+      "commit": {
+        "sha": "199fa133d4feb9b9277a625cd70b3e586180bb7f"
+      },
+      "status": {
+        "conclusion": "failure",
+        "sha": "e52fedd161327af502cb858a12d623957b65274b"
+      }
+    }
   }
 }

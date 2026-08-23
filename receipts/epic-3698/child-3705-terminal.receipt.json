@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3705,
-  "createdAt": "2026-08-13T02:45:00Z",
+  "createdAt": "2026-08-23T04:50:39.736Z",
   "payload": {
     "state": "merged",
-    "evidence": "PR #3716 merged (merge 92590dc06a7395e99621a2c791d30ed888b85e02); 14/14 checks SUCCESS at head 8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4; issue #3705 CLOSED. Shipped prompt projection parity and install migration."
+    "evidence": {
+      "pullRequest": {
+        "number": 3716,
+        "headSha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+      },
+      "commit": {
+        "sha": "92590dc06a7395e99621a2c791d30ed888b85e02"
+      },
+      "status": {
+        "conclusion": "success",
+        "sha": "8118cc67c93cbc70f6564ab1b8bb5864a0cce2d4"
+      }
+    }
   }
 }

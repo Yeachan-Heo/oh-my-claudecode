@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3708,
-  "createdAt": "2026-08-13T03:50:00Z",
+  "createdAt": "2026-08-23T04:50:42.907Z",
   "payload": {
     "state": "merged",
-    "evidence": "PR #3729 merged as commit 2256dce4d; 14/14 checks SUCCESS at head 433c13ad87973b603f67553268d8a98d7d7df0f9; issue #3708 CLOSED. Shipped dispatcher cutover by event family with advisory fail-open."
+    "evidence": {
+      "pullRequest": {
+        "number": 3729,
+        "headSha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+      },
+      "commit": {
+        "sha": "2256dce4d570b7c22fc1cf615e06b4cf12e8dfcb"
+      },
+      "status": {
+        "conclusion": "success",
+        "sha": "433c13ad87973b603f67553268d8a98d7d7df0f9"
+      }
+    }
   }
 }

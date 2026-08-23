@@ -2,9 +2,21 @@
   "schemaVersion": 1,
   "kind": "child-terminal",
   "issue": 3709,
-  "createdAt": "2026-08-13T01:15:00Z",
+  "createdAt": "2026-08-23T04:50:45.676Z",
   "payload": {
     "state": "closed",
-    "evidence": "Issue #3709 (Gate rationalization) CLOSED. Gate rationalization scope addressed through combined work of hook registry and dispatcher shadow mode (#3707/PR #3725), alias retirement and generated closure cleanup (#3711/PR #3723), and routing fix (#3727). The plan's §5 gate taxonomy is implemented: advisory hooks fail open, hard-risk handlers (secrets/privacy, destructive mutation, release/publish authority, proven corruption) fail closed, ceremony gates merged into deterministic checks. No dedicated PR; closed-as-completed with referenced commit 02acde9367a195c419623c05c4d444d64006e3f7."
+    "evidence": {
+      "issue": {
+        "number": 3709,
+        "state": "CLOSED"
+      },
+      "commit": {
+        "sha": "02acde9367a195c419623c05c4d444d64006e3f7"
+      },
+      "status": {
+        "state": "pending",
+        "sha": "02acde9367a195c419623c05c4d444d64006e3f7"
+      }
+    }
   }
 }

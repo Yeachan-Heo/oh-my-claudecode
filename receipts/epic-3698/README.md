@@ -31,9 +31,13 @@ Kind-specific payload requirements enforced by the verifier:
   `byCanonical` counts; canonical share = canonicalUses / (canonicalUses + aliasUses).
   The release-window fields are supplied by #3711 receipts once releases ship.
 - `ci-evidence`: `pullRequests[]` with `number`, `headSha`, and `checks[]`; each check
-  must bind the exact head via `sha` (must equal `headSha`) or `exactHead: true`, and
-  have conclusion `success|skipped|neutral`.
-- `child-terminal`: `state` (`merged|closed`) plus non-empty `evidence`.
+  binds the exact head via `sha` (must equal `headSha`) and records its completed
+  GitHub conclusion. `exactHeadCi` passes only for `success|skipped|neutral`; a
+  recorded non-green conclusion is authenticated truth and keeps that gate failed.
+- `child-terminal`: `state` (`merged|closed`) plus structured `evidence` containing
+  the expected `pullRequest` (except direct child #3709), `commit`, and exact-head
+  `status`. A non-green terminal PR is representable; it proves terminality but
+  never proves green CI.
 - `metrics-snapshot`: public/internal counts plus `measurementSha256`.
 - `install-verification`: scoped command/verdict/evidence rows for pack/install/smoke.
 - `remaining-risk`: the register lives at `remaining-risk.json` (not a `.receipt.json`

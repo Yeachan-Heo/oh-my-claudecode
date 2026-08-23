@@ -91,9 +91,7 @@ function collectPr(issue, number, repository) {
     }))
     .map((check) => [`${check.name}\u0000${check.conclusion}\u0000${check.sha}`, check])).values()];
   if (checks.length === 0) fail(`merged PR #${number} for child issue #${issue} has no completed status checks`);
-  if (checks.some((check) => !['success', 'skipped', 'neutral'].includes(check.conclusion))) {
-    fail(`merged PR #${number} for child issue #${issue} has a non-successful status check`);
-  }
+
   const mergeCommitSha = pr.merge_commit_sha;
   if (typeof mergeCommitSha !== 'string' || !/^[0-9a-f]{40}$/.test(mergeCommitSha)) {
     fail(`merged PR #${number} for child issue #${issue} has no valid merge commit SHA`);

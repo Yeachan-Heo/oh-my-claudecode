@@ -429,7 +429,7 @@ describe('epic-3698 closure verifier (#3712)', () => {
     const problems = check(run, 'exactHeadCi').problems.join(' ');
     expect(run.status).toBe(1);
     expect(problems).toContain('.sha must be a 40-char lowercase hex SHA');
-    expect(problems).toContain('failure');
+    expect(problems).toContain('non-green');
   });
 
   it('rejects unsigned exactHead attestations', () => {
@@ -464,6 +464,42 @@ describe('epic-3698 closure verifier (#3712)', () => {
     expect(run.status).toBe(1);
     expect(check(run, 'childTerminality').status).toBe('fail');
     expect(check(run, 'childTerminality').problems.join(' ')).toContain('structured object');
+  });
+
+  it('records a terminal non-green PR truthfully without passing exact-head CI', () => {
+    buildCompleteFixture(fixture);
+    const evidencePath = join(fixture, 'ci-evidence.json');
+    const evidence = JSON.parse(readFileSync(evidencePath, 'utf8'));
+    const pr = evidence.payload.pullRequests.find((entry: { number: number }) => entry.number === 3724);
+    pr.checks.push({ name: 'CI / Test', conclusion: 'failure', sha: pr.headSha });
+    writeJson(evidencePath, evidence);
+    writeJson(join(fixture, 'receipts', 'epic-3698', 'child-3704-terminal.receipt.json'), {
+      schemaVersion: 1,
+      kind: 'child-terminal',
+      issue: 3704,
+      createdAt: '2026-08-12T00:00:00Z',
+      payload: {
+        state: 'merged',
+        evidence: {
+          pullRequest: { number: 3724, headSha: pr.headSha },
+          commit: { sha: 'b'.repeat(40) },
+          status: { conclusion: 'failure', sha: pr.headSha },
+        },
+      },
+    });
+    const ghFixturePath = join(fixture, 'gh-fixture.json');
+    const ghFixture = JSON.parse(readFileSync(ghFixturePath, 'utf8'));
+    ghFixture.checkRuns[pr.headSha].push({ name: 'CI / Test', status: 'completed', conclusion: 'failure', head_sha: pr.headSha });
+    writeJson(ghFixturePath, ghFixture);
+    const run = runVerifier([
+      '--root', fixture,
+      '--evidence', evidencePath,
+      '--changed-files', join(fixture, 'changed-files.txt'),
+    ]);
+    expect(run.status).toBe(1);
+    expect(check(run, 'migrationReceipts').status).toBe('pass');
+    expect(check(run, 'exactHeadCi').status).toBe('fail');
+    expect(check(run, 'exactHeadCi').problems.join(' ')).toContain('does not exactly match live successful status checks');
   });
 
   it('rejects unrelated or missing child PR substitution in CI evidence', () => {
@@ -602,7 +638,7 @@ describe('epic-3698 closure verifier (#3712)', () => {
       '--changed-files', join(fixture, 'changed-files.txt'),
     ]);
     expect(run.status).toBe(1);
-    expect(check(run, 'exactHeadCi').problems.join(' ')).toContain('failure');
+    expect(check(run, 'exactHeadCi').problems.join(' ')).toContain('does not exactly match live successful status checks');
   });
 
   it('fails closed when direct check-run pagination contains a late failure', () => {
@@ -672,7 +708,7 @@ describe('epic-3698 closure verifier (#3712)', () => {
       '--changed-files', join(fixture, 'changed-files.txt'),
     ]);
     expect(run.status).toBe(1);
-    expect(check(run, 'exactHeadCi').problems.join(' ')).toContain('liveChecks[100].conclusion');
+    expect(check(run, 'exactHeadCi').problems.join(' ')).toContain('does not exactly match live successful status checks');
   });
 
   it('finds direct issue referenced.commit_id after the first timeline page', () => {

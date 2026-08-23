@@ -22,13 +22,13 @@ ships:
 
 | Check | Pass | Pending (temporal) | Fail |
 |---|---|---|---|
-| `exactHeadCi` | every recorded PR green at exact head | no evidence file supplied yet | stale-head check, non-green conclusion, malformed evidence |
+| `exactHeadCi` | every recorded PR green at exact head | no evidence file supplied yet | stale-head check, authenticated non-green conclusion, malformed evidence |
 | `docsLinks` | all relative links in closure docs resolve | no closure docs present | broken relative link / missing owned doc |
 | `shippedMetrics` | epic targets met | target unmet and owning child not terminal | target unmet although every owning child is terminal |
 | `migrationReceipts` | >= 1 schema-valid receipt | receipts dir missing/empty | schema-invalid receipt |
 | `aliasRetirementPolicy` | all alias-usage receipts satisfy the retirement window | no receipts, or window unsatisfied | (never fails: unsatisfied window blocks removal, not the verdict) |
 | `releaseSecurityParity` | change set touches no release/publish authority | — | change set touches release workflows/scripts, `.npmrc`, or `package.json` version |
-| `childTerminality` | all children #3702-#3711 have terminal receipts | any child lacks terminal evidence | — |
+| `childTerminality` | all children #3702-#3711 have authenticated terminal receipts | any child lacks terminal evidence | forged or malformed terminal evidence |
 | `remainingRisk` | register exists, schema-valid, non-empty | — | missing/invalid/empty register |
 
 Exit codes: `0` PASS (all checks pass), `2` PENDING_TEMPORAL (no failures, temporal
@@ -46,7 +46,10 @@ its owner (or the rebase of this lane) only needs to emit the receipt:
   `byAlias`, `byCanonical`). Canonical share derives as
   `canonicalUses / (canonicalUses + aliasUses)`; the verifier's `alias-usage`
   receipt is the durable hand-off shape.
-- **All children #3702-#3711 are terminal.** Terminal receipts exist for all 10 children. #3704 (#3724) and #3707 (#3725) merged with CI failure (inventory-graph-drift, resolved post-merge by #3711); all others merged green.
+- **All children #3702-#3711 are terminal.** Terminal receipts record structured
+  PR/commit/status evidence. #3704 (#3724), #3707 (#3725), and #3710 (#3719)
+  merged with a non-green exact-head Test; those failures remain explicit
+  `exactHeadCi` failures and are never rewritten as green terminality evidence.
 - **Alias retirement window remains pending:** #3711 shipped the executable verifier (`src/alias-retirement/`) but retirement requires >= 2 minor releases AND >= 90 days AND >= 95% canonical usage for 2 consecutive releases AND zero known critical integrations. The verifier reports this as pending and aliases must NOT be removed.
 - **Quantitative metrics not at target:** skills=41, commands=28, workflows=8 (targets: 12-18 commands, 5-6 workflows). The verifier honestly reports FAIL for shipped metrics. Surface reduction depends on the alias retirement window; the children shipped registries/SSOTs/dispatchers/verifiers without deleting surface files.
 
@@ -67,7 +70,8 @@ its owner (or the rebase of this lane) only needs to emit the receipt:
 
 - Install/pack/smoke matrix at exact origin/dev `570028b24edea9878b0d003bcbf1cb184d8fa47c`:
   `receipts/epic-3698/install-verification-2026-08-12.receipt.json`.
-- Exact-head CI for 7 green merged PRs (#3701/#3715/#3716/#3720/#3721/#3723/#3729):
-  `receipts/epic-3698/ci-evidence-merged.receipt.json`. PRs #3724/#3725 excluded (CI failure).
+- Exact-head CI is collected for every expected child PR. Non-green immutable
+  heads are retained as evidence of failed exact-head CI rather than excluded or
+  represented as successful.
 - Measured metrics: `receipts/epic-3698/metrics-2026-08-12.receipt.json`.
 - Remaining risks: `receipts/epic-3698/remaining-risk.json`.
