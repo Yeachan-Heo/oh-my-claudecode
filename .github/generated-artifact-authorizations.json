@@ -10964,6 +10964,1580 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 3827,
+      "targetRef": "dev",
+      "mergeBaseSha": "5e1681239fc59e79760fe4756d8736f04fd44934",
+      "headSha": "fe57b8a8ef1c772542e10202b77fa0b54d516aa2",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-08-30T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 260,
+        "sha256": "8a011dbb45f9560a86e954f640177f8e605a310cd3db27f53579252ab6610662"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "7890ad2ddb354ec0a6182cd47493381755dcbc3b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "ce0ce11f20b7101dcbdb32d7a0e1b41a2cef69ab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "06bfba658ea5e12ce137be3e07a1a46d8802dc92",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "8c3b51525d0a2a4dd92e93bd5920a6037ea09140",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "66bf6f671b64e96de8edf04b850444aa14a9cded",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/delegation-enforcement-levels.test.js",
+          "sha": "353115874412d027108589157adc506bb6066308",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/delegation-enforcement-levels.test.js.map",
+          "sha": "49bb47c994383d52c5e1207e5ab53d46f55bd4a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/generated-artifact-authorization.test.js",
+          "sha": "be988631b59ce4731fcd18007c374333b7f85d17",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/generated-artifact-authorization.test.js.map",
+          "sha": "b9012e1befcd35d975eaeb881a8d39c2e8fb347c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hooks.test.js",
+          "sha": "ae7323b096295efb3c9d22f7ece63e21bfbd2751",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hooks.test.js.map",
+          "sha": "627a8c1b92bf28a109180186bd2a892ec358416b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/omc-state.test.js",
+          "sha": "3dda80ff5b10f5e3397fc58c179bb15c8045ae1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/omc-state.test.js.map",
+          "sha": "2ce4e4d2940b956468f2c5e972f06ce0328b76c0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/watch-mode-init.test.js",
+          "sha": "c23d010a5bcffdd094e70f3344c71df41dc4ca8c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/watch-mode-init.test.js.map",
+          "sha": "efa7a63d479a97b126ac337faad205822c61a5cd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/installer-omc-reference.test.js",
+          "sha": "3df8b3da25ca6e113fa1c6a8138c9aa77f75a5ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/installer-omc-reference.test.js.map",
+          "sha": "3ab849ebf84bbfd565428eda13aa716f509957d0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/issue-2652-runtime-wiring-and-output-contract.test.js",
+          "sha": "a47b8b7a33af23370ffbd183a60f38efd0e690a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/issue-2652-runtime-wiring-and-output-contract.test.js.map",
+          "sha": "6cd271c31c42efc9080e7a64294a5dc9224dde73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-echo-guard.test.js",
+          "sha": "9e0a6a1ef69e617f9793e138b87ce94d6b5ffb0e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-echo-guard.test.js.map",
+          "sha": "c95be1e6309cc8ef82cf53cc90fd5d8616c7cd19",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "8e04fec4f6700c394d9a0df48be20fc70facb94b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "e0906aafd7acbd6eac7a76b460d991f6b7a9254b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/npm-package-bin-surface.test.js",
+          "sha": "0fa47afe780843999f41e3d386397d80bcfe3c05",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/npm-package-bin-surface.test.js.map",
+          "sha": "5162ad5e457c2c7074be8aebfd486dc8d0e7bbac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pipeline-orchestrator.test.js",
+          "sha": "f213aff7211ab51dd910fb3a8f0cae72a1af838a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pipeline-orchestrator.test.js.map",
+          "sha": "713621ae98bccdf2d690fe1dc741c0cd50da5865",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pre-tool-enforcer.test.js",
+          "sha": "25574ac82d02bb2b78d2c4c2ff65ab2abdba50cd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pre-tool-enforcer.test.js.map",
+          "sha": "ab4cd8369c70dcb7b3f73f59b16c0e33fe98b481",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/ralph-prd-amendment.test.js",
+          "sha": "244106b7ea92925bafb8d125d40a0f53e0a25682",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/ralph-prd-amendment.test.js.map",
+          "sha": "f74f7d5182008d0fe0f8dc1aac30c2ca8b3a910f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/ralph-prd-mandatory.test.js",
+          "sha": "8c95c70cb3788841a0d041559b4233a2e0b9851e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/ralph-prd-mandatory.test.js.map",
+          "sha": "15c4f0243d74e48925595f9c123858c0a68037ea",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/release-generation.test.js",
+          "sha": "149b4fc9fa4acf96a47fb07112a3f070ca4f066f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/release-generation.test.js.map",
+          "sha": "95de6384994792ca588a082061a2e50d7450ca81",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-precompact-restore.test.js",
+          "sha": "07d7e202a193b45d091859102a04347f003ea98d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-precompact-restore.test.js.map",
+          "sha": "c6cdaf2b664339e84806979cfc6ee4c70f221c8d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-script-context.test.js",
+          "sha": "d737186cde15627a45aee98341f6539946a723a9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-script-context.test.js.map",
+          "sha": "d302f31647c8336ad50b2e88daae30180b75a872",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js",
+          "sha": "ae90743bd0a93615f89fb3f357e6977471013652",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js.map",
+          "sha": "81c1845c0c3a369b28d5651a0147fe221fe64862",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/smoke-pipeline-edge.test.js",
+          "sha": "078474a015af41d49f9df29caf8a30ec546d0226",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/smoke-pipeline-edge.test.js.map",
+          "sha": "262e33e9dec5fa50fcdbf3829b128c69e8300c13",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/state-root-resolution.test.js",
+          "sha": "7a3ee522cc69e005bf2f12c2c9045f7b2913331a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/state-root-resolution.test.js.map",
+          "sha": "1280c192e779b0d6b1ee900cf0db0a7463fdcb3a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-contracts.test.js",
+          "sha": "1dd1c31b2d3e6cc2d34b48dfc1cfc5601a9b7767",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/tier0-contracts.test.js.map",
+          "sha": "0f3a0dfe7253580ebc1454f43c6fece23dba0f13",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/agents/prompt-ssot/__tests__/prompt-ssot.test.js",
+          "sha": "cb0def6ce6caaaf651048e20ff00eafc268f71cb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/agents/prompt-ssot/__tests__/prompt-ssot.test.js.map",
+          "sha": "bd1a9632d4e3c1bbb723e52af151e6fbc185f360",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/agents/prompt-ssot/metrics.d.ts.map",
+          "sha": "ebd59d62df8f5cec0b50ead2eed695d68bf414c4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/agents/prompt-ssot/metrics.js",
+          "sha": "388e78145722df1ac5cd555ffe8c1543c9a1868b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/agents/prompt-ssot/metrics.js.map",
+          "sha": "72af9665efa6a7e9f630a128567bf943db6569a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/autoresearch/runtime.d.ts",
+          "sha": "914639838668951953dfb751ff4ca92929280568",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/autoresearch/runtime.js",
+          "sha": "834561da02ef53f76e8340a56283322ab1eea528",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/autoresearch/runtime.js.map",
+          "sha": "b535676e81b67ec34478cb4842783a8329935939",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.d.ts.map",
+          "sha": "00c6fd158a787da7f1bede670cf6193a4a77fd50",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "2c8d31861f4e4998f5ac872d5ab499ff8acb10b3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js.map",
+          "sha": "7b41035697c2f5395cd554ea7c7fecbc9d3e898b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/commands/index.d.ts",
+          "sha": "d2a19c8a46114afbf97920165ae152ff21402d6d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/commands/index.js",
+          "sha": "717e0cb4a7508e84f49640cc82bea7b37959641b",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/config/builtin-skill-entitlements.json",
+          "sha": "26d3ceacd334aa96264e6c00c2a33e7f010b9ab3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.d.ts.map",
+          "sha": "0995a4832db14925bf08d0ba67a9202d084094dd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js",
+          "sha": "8101a8dd1523135d3438f62e39c667204ee8a553",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js.map",
+          "sha": "424e09e3b024902f3e6e8760c851d88157116920",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/magic-keywords.test.js",
+          "sha": "a63700b68399c22e9572d137e28045c075bd5e36",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/magic-keywords.test.js.map",
+          "sha": "fd8028855c58a9f3fb39370865b6972a747686db",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.d.ts.map",
+          "sha": "4dddb7a3e74f0344ffbb09494875f13f93def9aa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js",
+          "sha": "f93b665afa235c0570b1a23c6c477981c45bd337",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js.map",
+          "sha": "2a42ca8636626f7c0e6705ff4d1437b383c81b7d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/delegation-enforcer.d.ts.map",
+          "sha": "9cd73bafe41e0526154a2cfa471f543caa5978b7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/delegation-enforcer.js",
+          "sha": "92c123d495d8be1467dd1c5a91fb6c3f9917913a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/delegation-enforcer.js.map",
+          "sha": "be701450e54a77b1d64fc2ed1b6b3351006623ae",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/magic-keywords.d.ts.map",
+          "sha": "2d2354dc51b7234e909ec1a5d2b425be3e6f61a9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/magic-keywords.js",
+          "sha": "9cd8ff9663b96168a7dc8f0a70b2f999d7781818",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/magic-keywords.js.map",
+          "sha": "32fd44d0a44a4550aac2032c6c2af2a511e5a214",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/bridge-routing.test.js",
+          "sha": "2aaca74f76ad6a0d98a698a7a1326ef9732e6ab9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/bridge-routing.test.js.map",
+          "sha": "053c8471882a87c2ba878f19e4198e69e348321d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/precompact-restore.test.js",
+          "sha": "9c9470e2b2f9c8ceee12e25c96c5264a37f51714",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/__tests__/precompact-restore.test.js.map",
+          "sha": "686446180b04d183c3ddbdfe53e9eeffc8007130",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/cancel.test.js",
+          "sha": "f0438cdcd81d85b9cf13eb3630ed9f34dfe809e8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/cancel.test.js.map",
+          "sha": "5fddd728c7dda86bfd76a863523c84127f4fdc82",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/pipeline.test.js",
+          "sha": "558bc2ae6ec11e831df0785d0d88b00f37ecefa8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/pipeline.test.js.map",
+          "sha": "1edb0528f0a96eb86d3bc402c5ca4b7cdf634fcf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/prompts.test.js",
+          "sha": "77cc4f6f617143393f7db6741349952597811f1c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/prompts.test.js.map",
+          "sha": "a2c5cdf456d47d7b49e48a8caa1e334393139b72",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/cancel.d.ts.map",
+          "sha": "27d00131fd0fd684a15afbd680e4dc1b60a8a973",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/cancel.js",
+          "sha": "e123112dba185a9945a10e0ff8967269c07246bc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/cancel.js.map",
+          "sha": "d7e0192a44a03ad3381c21f7f5394bbfe2e1d97b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline-types.d.ts",
+          "sha": "11c229d51152186ddec09b4315b32800f60cc618",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline-types.d.ts.map",
+          "sha": "c3277f3cc138ed6ddb2377f7ae061464ad62ec35",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline-types.js",
+          "sha": "4955a5797290cbf85ef8b89f1eca78f99928ac03",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline-types.js.map",
+          "sha": "8f619a58183bd79ea54c80699062b02092082f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline.d.ts",
+          "sha": "cab938e8867590c5b1d646e7cf3e50f922da23c1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/pipeline.js",
+          "sha": "19e707a36a61d4eb1813ac40ed1c72d3f30e8d63",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/prompts.js",
+          "sha": "dcbb4123470dcbe75d6cdcc955f91306c3d77ee9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/state.d.ts",
+          "sha": "3cdd62ee3dff4c5a9ad3a81a13ddf39a632d3251",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/state.d.ts.map",
+          "sha": "a60684cb509176c647ef1a24b9249889a5696b19",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/state.js",
+          "sha": "733cb64eeca0f9e83dd1353060e56a1f32e258ad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/state.js.map",
+          "sha": "37a36f1e73a03e5eb8c75f2890caeb577eeb0a09",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/types.d.ts",
+          "sha": "c289cee4b3dc99600699e0a98cfe9f89840baad9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/types.d.ts.map",
+          "sha": "d1c632f308ea37b84bf8fb8ffcd6b7e2b521b53c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/types.js",
+          "sha": "0f2e3d15588258b8e0284fa2e477a2116534c3f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/types.js.map",
+          "sha": "ac48f865f39e175851315e5c7a738e16dec04aa8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/bridge.d.ts.map",
+          "sha": "18a638e775b1196d61335fe33a5035b0ca96be7e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/bridge.js",
+          "sha": "8c27d879a376b84abfcb4d353b1ab036d03e401e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/bridge.js.map",
+          "sha": "3298acd68dca68b49877be019dab4fa74cd58840",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.d.ts",
+          "sha": "07437104f75f18a70a3f3b0d7d2e73f076289e38",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.d.ts.map",
+          "sha": "79ba6aeb3de9acfcef18655060a4ae5140a6dcbb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.js",
+          "sha": "3d7fd66d26ae2c0168d03ceb9d040b2f45e29f1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/index.js.map",
+          "sha": "5a0082105d5c20e7eac95a824bae245b9800c6cc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js",
+          "sha": "f737d7813a62422f14165da74c02a5329ebee770",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js.map",
+          "sha": "54b478cd738085ced21164002d2ca1b362c1ab03",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts",
+          "sha": "5d7119552f67b69d238dc556bed28874bc5b92d9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "7e873c60271a275c79ebbf8d107199bcf5aea3d9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "1b6c3c4fddda51f44eefa6a5543a1774f3e01849",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "618b91a9ba1ac2b554751d194b9dc9bb46edac90",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/__tests__/index.test.d.ts",
+          "sha": "121d59b38b6a3c8e8fabd3b46bebfd27aa041e97",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/__tests__/index.test.d.ts.map",
+          "sha": "5ebcd3e29a358644ad1c783c2453caf2e14b56f2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/__tests__/index.test.js",
+          "sha": "28a7484971b2b8cf0960b7b726fa4018c9308944",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/__tests__/index.test.js.map",
+          "sha": "940eaabda5a45e8ef9b103df3ea1e5c2f0988c87",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/antigravity.d.ts",
+          "sha": "d3cacfb133cd3bd87631bd898619de8a25671604",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/antigravity.d.ts.map",
+          "sha": "8a48718ef47b7bfb10d011ea67dd04032241e9c5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/antigravity.js",
+          "sha": "a6e495dd8f552464cecf26a228d1d566dc0be797",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/antigravity.js.map",
+          "sha": "da975863e548457d3a70ca0c2a5201fc58c4e346",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/default.d.ts",
+          "sha": "1fa8cc482b54986bd25acd4b3a047c310edaf3c5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/default.d.ts.map",
+          "sha": "fd90c5a001eddf1d9386f06c1c09cb973ff945d5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/default.js",
+          "sha": "2f3df0fc531b5f4079106f11e52724c26624e00d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/default.js.map",
+          "sha": "b27f40cbadaaf880803cfa100af77fc7f5965215",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gemini.d.ts",
+          "sha": "13192691aff178a3be4bff78e9f85e891f5b4848",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gemini.d.ts.map",
+          "sha": "8fbad37dce0b52ba12464ccbe719181a7a8dd96f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gemini.js",
+          "sha": "928a615fa2bb4445b7a2cb118df556e1ac9a282b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gemini.js.map",
+          "sha": "c2fb983ed017c5aa83e072a2cfb70e95b94258d2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gpt.d.ts",
+          "sha": "020cc0e46af444d3a9392ab12fd76010d0c5cef8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gpt.d.ts.map",
+          "sha": "fd51ccb2a238f41e1799ec08908bd0f60695a18c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gpt.js",
+          "sha": "d1691d5a2ec04d30b19f99da283d18db9b2b01b3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/gpt.js.map",
+          "sha": "a4ed7d8b0c71e589bc7117ae601a1fed15abc2b2",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/index.d.ts",
+          "sha": "bb3122949e512815e6e11cd85644aeb207cc1957",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/index.d.ts.map",
+          "sha": "96f25a363351b3cefbe0f1650b43840240d25d97",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/index.js",
+          "sha": "84f3c1195652015e6eb2cfcdf18187a268722980",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/index.js.map",
+          "sha": "1c53698886150d3448009d01a763fbbe7c67cba3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/planner.d.ts",
+          "sha": "de83ecbe8bbd5fea2fbb6c73a2bb31dee252e035",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/planner.d.ts.map",
+          "sha": "b1852456fd05bece088cd0ff01c79333a718a74c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/planner.js",
+          "sha": "ee32541c99164ae7c24e5186e4be76bcbe145b24",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/planner.js.map",
+          "sha": "73a9b8bad1fe7130b9a0b6203a3bdaf8e75ec45a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/source-detector.d.ts",
+          "sha": "11667561913b720666a17ceb5fcba0a6f9620124",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/source-detector.d.ts.map",
+          "sha": "890367d886549c350017da2b2297949fe4adfd5a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/source-detector.js",
+          "sha": "52b1cac80dbb8d507eb91ec1cf9f5cd909abb42d",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/keyword-detector/ultrawork/source-detector.js.map",
+          "sha": "fa6d3f5ae6eb0dab0925bc0f4116f0b12943044f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/merge-readiness/runtime.d.ts.map",
+          "sha": "db192762ed1fee96e48c3eb5ffb2af3b871eeeb5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/merge-readiness/runtime.js",
+          "sha": "e7777dda40f937ad824bfbd3704536ad2f499e1a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/merge-readiness/runtime.js.map",
+          "sha": "86fee4cc758ade3e46064511547016f616ca41d3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/__tests__/session-isolation.test.js",
+          "sha": "a83e26d768673c19199846cb2332f258cc94e436",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/__tests__/session-isolation.test.js.map",
+          "sha": "fe116b8f39fc497bd652197d9246b06ce7bc5ea1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/index.d.ts.map",
+          "sha": "c3716b039364243af074bc11cddb5333345f5b2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/index.js",
+          "sha": "79602c36b7840777710187955d8fc8b773833a49",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/index.js.map",
+          "sha": "7c8a7b871cd3152657de0168de67f2b99db188b9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/types.d.ts",
+          "sha": "78b44b3b1f3d68e2703a5487c617cd2e3dd21d0e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/mode-registry/types.d.ts.map",
+          "sha": "24f7f9dc3f61b0ef3fbc48fd19bcf134fc8bb98b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.d.ts",
+          "sha": "23578e07794757c15d271c99fc1c50e8829c711f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.d.ts.map",
+          "sha": "7c0b737e8b949a588e53b2861a47a92ef1fc14e8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.js",
+          "sha": "2535baa810e49225025a2eb89133a5bb43e0f355",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.js.map",
+          "sha": "dec640a655e249772c6baa94176d5253caee8e28",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ralph-session-mismatch.test.js",
+          "sha": "e139b3531dec2b2c031a13b1d911f183dd2b1bdf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ralph-session-mismatch.test.js.map",
+          "sha": "f7dda138a27326a24e8829a939782bc002518661",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ralph-verification-flow.test.js",
+          "sha": "11240f4e621de3182a2c67fae8a642e008650223",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ralph-verification-flow.test.js.map",
+          "sha": "31ebec735f106bb9add0a7fc52f1fe7a70a8dc12",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.d.ts",
+          "sha": "ad8160257e2e8af5e353d37b5b4c583da9b0ab28",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.d.ts.map",
+          "sha": "c03064c406f89937c1ec3126538cc995f7a679e2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.js",
+          "sha": "72a789a297f103ff160ed53fbdbf15bb891ef98e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.js.map",
+          "sha": "bef38400234ebe76bab84a9f69a1409aa1e19a6c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/session-isolation.test.js",
+          "sha": "fce841b84ffef8b6b77d8e11b335f34c9e422831",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/session-isolation.test.js.map",
+          "sha": "e75cc1f7a922261520b7350bc93b573fdfdf2291",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/stop-hook-blocking.test.js",
+          "sha": "515a48808559157904ea62d03f562b36041542fe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/stop-hook-blocking.test.js.map",
+          "sha": "525ecc6fe9640d8da393e6521a6882e310acf3d4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.d.ts",
+          "sha": "7fca0cc2686c1f6643df1176cd8b4d0e0cbb1417",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.d.ts.map",
+          "sha": "1fcf9c190a59e36fc2bd8e8b98dad3f12ddf6b3d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.js",
+          "sha": "8875b64965434f0fba097ee2867d1052eb960d0c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/index.js.map",
+          "sha": "76aacab641b1b82f5401c7e2e62019bc3114018a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/restore.d.ts",
+          "sha": "033986bbcd366c8d7a5bc55cbc5cd247070b64bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/restore.d.ts.map",
+          "sha": "6c14f56e54e43027c4808708ab39a84464b0b056",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/restore.js",
+          "sha": "1529aed25b64cca8c4d3beded05be3e615345493",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/pre-compact/restore.js.map",
+          "sha": "7eea57622aff378331ac2fd072a6a62cfac75f35",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.d.ts",
+          "sha": "a22db186d1ac42ae67c2ba021b983a20a0feb158",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.d.ts.map",
+          "sha": "ac13e7c349e709e58caf0f9f431ad5ebc2099f87",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.js",
+          "sha": "aa45d3412d13301a87532c46b2c8eb6692d10ef9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.js.map",
+          "sha": "c96f9664357e339c3d6f1638edbda4be0023dc0e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/loop.d.ts",
+          "sha": "53d631e2f7d209c0cb50a23c58df2d2c3c3efa03",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/loop.d.ts.map",
+          "sha": "b624b7ef1ed5d674392e8fec5eae614cdf218b1b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/loop.js",
+          "sha": "36014bd43db0d3b8b9598933ff278cb2dcc4d5fb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/loop.js.map",
+          "sha": "37a1c17aaeee435dfcace41825d92405d7f62515",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/prd.d.ts.map",
+          "sha": "1ebd8a0bc76596e9655b088e808388712bc7d0c8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/prd.js",
+          "sha": "5ba62acf3532b1c4bb2caeef036724b736da9be0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/prd.js.map",
+          "sha": "9c38a7f622ff38072f944ca0109aec0f208ab280",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/index.d.ts.map",
+          "sha": "177b59c5ef84f8e44bba32fc70eeee928a4af24a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/index.js",
+          "sha": "aecd85a62116e0b7ad02bd1b2c385dc3af3e9c0f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/index.js.map",
+          "sha": "9fca784c49e8ac71748486349b39e12926d055d2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/skill-state/index.d.ts",
+          "sha": "ca734c7dc9420a8ef6853738260b76024f7edce5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/skill-state/index.d.ts.map",
+          "sha": "47354f90346cd10bdc8a21caee4fafe36d1d999a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/skill-state/index.js",
+          "sha": "0b17d14a0e0d568561757278e2a377f3ec5edd72",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/skill-state/index.js.map",
+          "sha": "dfdc0d8c02f71ee58f9aa69a474c0b151ef62863",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/index.test.js",
+          "sha": "043afd301ab169b5d88234acd8c96db7ee4e042e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/index.test.js.map",
+          "sha": "a145d865947001b33ec7cd10e489f2a9e83f17e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/index.d.ts.map",
+          "sha": "e9579cdd11f357103ae3a81e5a421d13aa72c6a2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/index.js",
+          "sha": "3beaab2744633a516362be852e05128a9145a8b2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/index.js.map",
+          "sha": "04f2aff4f683ec8d4d0ae6ae2ff7d23602578fdf",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/__tests__/prompt-truncation.test.d.ts",
+          "sha": "f6543abd24ac6b39e1a6d03320d497a011bf4084",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/__tests__/prompt-truncation.test.d.ts.map",
+          "sha": "ebab38cb4f01d4faf3941c5cf9c9918e38ca4f44",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/__tests__/prompt-truncation.test.js",
+          "sha": "80af6c668c776538713d79fbfa566db45229d1f1",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/__tests__/prompt-truncation.test.js.map",
+          "sha": "3d9aa9579fe96a44d7e88d107ddf27bd0dbfc7f5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/index.d.ts",
+          "sha": "6c6aad0cda8a542411795d1400f26fd86cb6b96b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/index.d.ts.map",
+          "sha": "ea38c507abeaa95b1642b8299ffd420d5d8236df",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/index.js",
+          "sha": "5c6da6d8619301dbc3743835fbc1b576d4e2a933",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/index.js.map",
+          "sha": "64fecf48f5685a5d3ebaa794a1d8d877c1f84d12",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/session-isolation.test.d.ts",
+          "sha": "7fa5627908ecc03f03c4e58542f9b0bdd857a193",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/session-isolation.test.d.ts.map",
+          "sha": "6d50952fd5b693984e534a769ba36a5849a5146a",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/session-isolation.test.js",
+          "sha": "3da9e14ae43ecb6efc4fee037c4386ac8940ea84",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/ultrawork/session-isolation.test.js.map",
+          "sha": "f76a6e80871cb5e107a3189670419f6dcfeadde8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/index.d.ts.map",
+          "sha": "fb1ab14324cd521bb1cd7e983190e8e99ce16614",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/index.js",
+          "sha": "61d0072d349215553a27b8e6b68e845ffc2dd607",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/index.js.map",
+          "sha": "5000fadf49edd996f1c17e8547f3009662e4d0bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.d.ts",
+          "sha": "6b5a0866c57e025fc1a7fdf44b7b73410b4efc32",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.d.ts.map",
+          "sha": "9e6b76e01516bd64cd091ff4cdbd6fa689aada1a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.js",
+          "sha": "dbbd2b30adcb33771d378fec8b4642b9a2416589",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/omc-state.js.map",
+          "sha": "3c7669bdce7c42797f81dc4af7b25e6e9d72213e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/index.d.ts",
+          "sha": "abcbe19d5998873c64809399b2167b0fe74d13ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/index.js",
+          "sha": "d0a5739216ef9b1991705dec4c7aa32ad64ae1ea",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hook-templates.test.js",
+          "sha": "395984b294b945346022722da3e21e38bd3c6064",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hook-templates.test.js.map",
+          "sha": "49cd52f3265425d676ac4b7d86a7e470e1ad097f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/session-start-template.test.js",
+          "sha": "1985e5f14aff54cc10dd037a183435335268b8a9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/session-start-template.test.js.map",
+          "sha": "7be7bf5798c62c79316f924d1b3c2ee10261d73e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/hooks.d.ts",
+          "sha": "2bd51f9ac4ed9ed1db66982ee82b20d8d0e1f93f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/hooks.d.ts.map",
+          "sha": "7b11a4cd3d10538ef5c9490eeb89eddcec571099",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/hooks.js",
+          "sha": "4c53debdaee0eb2282f47e2fcb00544fdf450377",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/hooks.js.map",
+          "sha": "228e5a91cf8ec085e399599aea63b10fc9c01530",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.d.ts.map",
+          "sha": "7aa79fdbe853befbeca643ed34b66af4a4a72d68",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js",
+          "sha": "e26dc2530a53f7832066352722815fd87046a68f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js.map",
+          "sha": "d2e49b830d374dcd30e6ea47bf5fb2b06be2d74b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/mode-names.d.ts",
+          "sha": "f7b5461ba6e1189c056f39f0b5a2340ecab7c850",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/mode-names.d.ts.map",
+          "sha": "150982d449c4d896b7e60052e6d18132ae48e203",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/mode-names.js",
+          "sha": "6c1e9c09e5bd15dc82cc3ab8afe8ea93e79ebdec",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/mode-names.js.map",
+          "sha": "ce5a2a56618c26e21eb7fded8fbaa871b87105c4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/release-generation.js",
+          "sha": "c880ccd143c40b29285c3607e7217c3d9c5c8aee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/release-generation.js.map",
+          "sha": "6c6ea5b80bbd31e499253a40198ad68e3d0f05d1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts",
+          "sha": "9b69e97ffb27b6295211d775621289fba219a8c3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts.map",
+          "sha": "8c139e941bdec54d30a01aa5aa012e771dc701be",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.js.map",
+          "sha": "2fa2fe3e25332200dfa98b6352ac6fadd1b7b927",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.js",
+          "sha": "1715a77484ca7803c07de8cf2f5ce736e75f97cf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/runtime-watchdog-retry.test.js.map",
+          "sha": "b73247e0c22685571c16d10a31fac093c415c1f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime.d.ts",
+          "sha": "668c4a449767f29776612f76e640418fa5e0d813",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime.d.ts.map",
+          "sha": "aff3c326846fff63e8b7ff5bf473ac6689bb400e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime.js",
+          "sha": "2d36788ff9219afc608e8944cc94625f2b6a7f05",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime.js.map",
+          "sha": "5338b773700815fd2d1279a17ee4e13fdd285eca",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-bootstrap.js",
+          "sha": "8ec148fe5b298f28fcbdb5bec7cf858cbd62bf54",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/cancel-integration.test.js",
+          "sha": "fb95a131c90cc1cb50b126d8fdb908fe28d57a59",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/cancel-integration.test.js.map",
+          "sha": "44912db57edfdec6c86749bd9626dc6b09c2b1a8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/state-tools.test.js",
+          "sha": "2f8e0d7818145a3226e3f527759b4c06f0e5cd78",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/state-tools.test.js.map",
+          "sha": "f7b3c58d779cd67a337d176da7d164638ebc99cf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/state-tools.d.ts.map",
+          "sha": "c2754f649496f358fdce94062fcb1038933d1ae4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/state-tools.js",
+          "sha": "bd2394c1df3af67c81456529f85f321018fbb7d8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/state-tools.js.map",
+          "sha": "9c05ce29972917bbfdcd373b3d497787d87d88a2",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
