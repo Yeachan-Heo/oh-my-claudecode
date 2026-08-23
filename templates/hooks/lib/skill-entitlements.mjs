@@ -5,6 +5,6 @@
 const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([]);
 
 export function isSkillVisibleToUser(skillName) {
-  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(String(skillName).toLowerCase())
+  return !SKININTHEGAMEBROS_ONLY_SKILLS.has(String(skillName).trim().toLowerCase())
     || process.env.USER_TYPE === 'ant';
 }

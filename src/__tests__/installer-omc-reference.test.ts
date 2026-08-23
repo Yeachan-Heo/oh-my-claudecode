@@ -99,7 +99,7 @@ function getBundledSkillNames(): string[] {
     readFileSync(join(process.cwd(), 'src', 'config', 'builtin-skill-entitlements.json'), 'utf-8'),
   ) as { skininthegamebrosOnlySkills: string[] };
   const skininthegamebrosOnlySkills = new Set(
-    entitlementManifest.skininthegamebrosOnlySkills.map(skill => skill.toLowerCase()),
+    entitlementManifest.skininthegamebrosOnlySkills.map(skill => skill.trim().toLowerCase()),
   );
 
   return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
