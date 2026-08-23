@@ -150,6 +150,9 @@ function getPackedPackage(): PackedPackage {
     const tarballName = [...stdout.trim().split(/\r?\n/)]
       .reverse()
       .find(line => line === expectedTarballName);
+    if (tarballName === undefined) {
+      throw new Error(`npm pack did not report ${expectedTarballName}`);
+    }
     expect(tarballName).toBe(expectedTarballName);
     expect(basename(tarballName)).toBe(tarballName);
     expect(tarballName).not.toMatch(/[\\/]/);
