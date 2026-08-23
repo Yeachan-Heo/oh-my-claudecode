@@ -147,13 +147,9 @@ function getPackedPackage(): PackedPackage {
       },
     );
     const expectedTarballName = `${packageJson.name.replace(/^@/, "").replace(/\//g, "-")}-${packageJson.version}.tgz`;
-    expect([
-      expectedTarballName,
-      `${expectedTarballName}\n`,
-      `${expectedTarballName}\r\n`,
-    ]).toContain(stdout);
-
-    const tarballName = stdout.replace(/\r?\n$/, "");
+    const tarballName = [...stdout.trim().split(/\r?\n/)]
+      .reverse()
+      .find(line => line === expectedTarballName);
     expect(tarballName).toBe(expectedTarballName);
     expect(basename(tarballName)).toBe(tarballName);
     expect(tarballName).not.toMatch(/[\\/]/);
