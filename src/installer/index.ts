@@ -74,7 +74,7 @@ const CC_NATIVE_COMMANDS = new Set([
 ]);
 
 const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>(
-  entitlementManifest.skininthegamebrosOnlySkills,
+  entitlementManifest.skininthegamebrosOnlySkills.map((skill: string) => skill.trim().toLowerCase()),
 );
 
 function isSafeAgentFilename(filename: string): boolean {

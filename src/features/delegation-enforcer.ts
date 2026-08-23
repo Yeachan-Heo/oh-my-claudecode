@@ -164,7 +164,7 @@ function skillInvocationHint(agentType: string, originalSubagentType?: string): 
 }
 
 const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>(
-  entitlementManifest.skininthegamebrosOnlySkills,
+  entitlementManifest.skininthegamebrosOnlySkills.map((skill: string) => skill.trim().toLowerCase()),
 );
 
 /**

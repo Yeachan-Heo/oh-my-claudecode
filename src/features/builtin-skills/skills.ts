@@ -71,7 +71,7 @@ const CC_NATIVE_COMMANDS = new Set([
 ]);
 
 const SKININTHEGAMEBROS_ONLY_SKILLS = new Set<string>(
-  entitlementManifest.skininthegamebrosOnlySkills,
+  entitlementManifest.skininthegamebrosOnlySkills.map((skill: string) => skill.trim().toLowerCase()),
 );
 
 const DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD = 0.2;

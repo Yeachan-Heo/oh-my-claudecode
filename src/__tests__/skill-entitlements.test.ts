@@ -31,4 +31,18 @@ describe('builtin skill entitlement projections', () => {
       expect(projection).toContain('new Set([])');
     }
   });
+
+  it('normalizes manifest entries before every visibility membership check', () => {
+    const normalizedExpression = 'map((skill: string) => skill.trim().toLowerCase())';
+    for (const path of [
+      join(root, 'src', 'features', 'builtin-skills', 'skills.ts'),
+      join(root, 'src', 'installer', 'index.ts'),
+      join(root, 'src', 'features', 'delegation-enforcer.ts'),
+    ]) {
+      expect(readFileSync(path, 'utf8')).toContain(normalizedExpression);
+    }
+    expect(readFileSync(generator, 'utf8')).toContain(
+      'map(skill => skill.trim().toLowerCase())',
+    );
+  });
 });
