@@ -71,6 +71,23 @@ function ghPaginated(path, field) {
   return records;
 }
 
+const COMPLETED_CONCLUSIONS = new Set([
+  'success', 'skipped', 'neutral', 'failure', 'cancelled', 'timed_out',
+  'action_required', 'stale', 'startup_failure',
+]);
+
+function collectCompletedCheck(record, headSha, label) {
+  const name = record.workflowName ? `${record.workflowName} / ${record.name}` : (record.context ?? record.name);
+  const conclusion = String(record.conclusion ?? record.state ?? '').toLowerCase();
+  if (record.status !== undefined && record.status !== 'completed') {
+    fail(`${label} is not completed (status: ${record.status})`);
+  }
+  if (!name || !COMPLETED_CONCLUSIONS.has(conclusion)) {
+    fail(`${label} has no completed GitHub conclusion`);
+  }
+  return { name, conclusion, sha: headSha };
+}
+
 function collectPr(issue, number, repository) {
   const childIssue = ghJson(['issue', 'view', String(issue), '--json', 'number,state']);
   if (childIssue.number !== issue || childIssue.state !== 'CLOSED') fail(`expected child issue #${issue} is not live and CLOSED while collecting PR #${number}`);
@@ -83,12 +100,7 @@ function collectPr(issue, number, repository) {
   const checkRuns = ghPaginated(`repos/${repository}/commits/${pr.head.sha}/check-runs`, 'check_runs');
   const statuses = ghPaginated(`repos/${repository}/commits/${pr.head.sha}/statuses`, 'statuses');
   const checks = [...new Map([...checkRuns, ...statuses]
-    .filter((c) => (c.workflowName || c.context || c.name) && (c.conclusion || c.state || c.status))
-    .map((c) => ({
-      name: c.workflowName ? `${c.workflowName} / ${c.name}` : (c.context ?? c.name),
-      conclusion: String(c.conclusion ?? c.state ?? c.status).toLowerCase(),
-      sha: pr.head.sha,
-    }))
+    .map((check, index) => collectCompletedCheck(check, pr.head.sha, `PR #${number} check[${index}]`))
     .map((check) => [`${check.name}\u0000${check.conclusion}\u0000${check.sha}`, check])).values()];
   if (checks.length === 0) fail(`merged PR #${number} for child issue #${issue} has no completed status checks`);
 

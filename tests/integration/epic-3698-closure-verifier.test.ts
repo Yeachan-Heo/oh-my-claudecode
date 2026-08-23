@@ -331,6 +331,28 @@ describe('epic-3698 closure verifier (#3712)', () => {
     expect(result.stderr).toContain('unknown argument: --direct-only');
   });
 
+  it('refuses queued or in-progress PR checks instead of emitting completed evidence', () => {
+    buildCompleteFixture(fixture);
+    commitFixture(fixture, 'fixture');
+    const ghFixturePath = join(fixture, 'gh-fixture.json');
+    const ghFixture = JSON.parse(readFileSync(ghFixturePath, 'utf8'));
+    ghFixture.checkRuns['a'.repeat(40)][0].status = 'in_progress';
+    ghFixture.checkRuns['a'.repeat(40)][0].conclusion = null;
+    writeJson(ghFixturePath, ghFixture);
+    const result = spawnSync(process.execPath, [COLLECTOR, '--all-children', '--out', join(fixture, 'collected.json')], {
+      cwd: fixture,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${join(fixture, 'fake-gh')}${delimiter}${process.env.PATH ?? ''}`,
+        EPIC_GH_FIXTURE: ghFixturePath,
+      },
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('not completed');
+    expect(existsSync(join(fixture, 'collected.json'))).toBe(false);
+  });
+
   beforeEach(() => {
     fixture = mkdtempSync(join(tmpdir(), 'epic-3698-fixture-'));
   });

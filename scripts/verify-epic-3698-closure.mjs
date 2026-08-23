@@ -207,7 +207,15 @@ function readCiEvidence(evidencePath) {
 }
 
 const GREEN_CHECK_CONCLUSIONS = new Set(['success', 'skipped', 'neutral']);
-const COMPLETED_CHECK_CONCLUSIONS = new Set([...GREEN_CHECK_CONCLUSIONS, 'failure', 'cancelled', 'timed_out', 'action_required']);
+const COMPLETED_CHECK_CONCLUSIONS = new Set([
+  ...GREEN_CHECK_CONCLUSIONS,
+  'failure',
+  'cancelled',
+  'timed_out',
+  'action_required',
+  'stale',
+  'startup_failure',
+]);
 
 function normalizeLiveCheck(check, headSha, label) {
   if (!isObject(check)) throw new VerificationError(`${label} must be an object`);
