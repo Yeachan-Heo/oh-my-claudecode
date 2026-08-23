@@ -425,7 +425,8 @@ export function getNextStory(directory, sessionId) {
  * removed from `acceptanceCriteria` (a corrected criterion is inserted at the
  * original's position for kind 'replaced'), and the amendment is appended to
  * the story's `criterionAmendments` ledger with bounded proof, reason,
- * authority, and timestamp. There is no silent deletion path: an original can
+ * authority, and timestamp. The changed contract invalidates prior completion
+ * and architecture approval. There is no silent deletion path: an original can
  * only leave the active list through this ledger or a direct hand edit that
  * fails closed on the next read.
  */
@@ -485,6 +486,8 @@ function applyCriterionAmendment(directory, storyId, kind, input, sessionId) {
     }
     story.acceptanceCriteria = nextCriteria;
     story.criterionAmendments = [...ledger, amendment];
+    story.passes = false;
+    story.architectVerified = false;
     if (!writePrd(directory, prd, sessionId)) {
         return { ok: false, error: 'write-failed' };
     }

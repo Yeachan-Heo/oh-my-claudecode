@@ -1203,6 +1203,25 @@ async function checkRalphLoop(
   let verificationState = readVerificationState(workingDir, sessionId);
 
   if (verificationState?.pending) {
+    const prdStatus = getPrdCompletionStatus(workingDir, sessionId);
+    const verifiedStory = verificationState.verification_scope === 'story' && verificationState.story_id
+      ? getStory(workingDir, verificationState.story_id, sessionId)
+      : undefined;
+    const staleVerification = verificationState.verification_scope === 'story'
+      ? !verifiedStory?.passes || verifiedStory.architectVerified === true
+      : prdStatus.hasPrd && !prdStatus.allComplete;
+
+    if (staleVerification) {
+      clearVerificationState(workingDir, sessionId);
+      const refreshedState = readRalphState(workingDir, sessionId);
+      if (refreshedState) {
+        refreshedState.current_story_id = prdStatus.nextStory?.id;
+        writeRalphState(workingDir, refreshedState, sessionId);
+      }
+      verificationState = null;
+    }
+
+    if (verificationState?.pending) {
     // Verification is in progress - check for architect's response
     if (sessionId) {
       // Check for architect approval
@@ -1261,6 +1280,7 @@ async function checkRalphLoop(
           };
         }
       }
+    }
     }
 
     if (verificationState?.pending) {
