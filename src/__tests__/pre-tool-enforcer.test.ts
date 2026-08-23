@@ -2630,16 +2630,12 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     expect(empty.hookSpecificOutput as Record<string, unknown>).not.toHaveProperty('permissionDecision');
   });
   it.each(['remember', 'verify', 'debug'])(
-    'does NOT suggest the runtime-hidden %s skill for a non-skininthegamebros user (USER_TYPE != ant)',
-    (hiddenSkill) => {
-      const namespaced = runTask(`oh-my-claudecode:${hiddenSkill}`, 'Task', {}, { USER_TYPE: '' });
-      const bare = runTask(hiddenSkill, 'Task', {}, { USER_TYPE: '' });
-
-      for (const output of [namespaced, bare]) {
-        expect(output.continue).toBe(true);
-        expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
-        expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
-      }
+    'denies the namespaced %s skill for a non-skininthegamebros user (USER_TYPE != ant)',
+    (skill) => {
+      const output = runTask(`oh-my-claudecode:${skill}`, 'Task', {}, { USER_TYPE: '' });
+      expect(output.continue).toBe(true);
+      expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(output)).toContain(`Skill(skill="oh-my-claudecode:${skill}")`);
     },
   );
 
@@ -2654,13 +2650,13 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     },
   );
 
-  it('still denies visible skills for a non-skininthegamebros user while hidden ones pass through', () => {
+  it('denies every visible skill for a non-skininthegamebros user', () => {
     const visible = runTask('oh-my-claudecode:plan', 'Task', {}, { USER_TYPE: '' });
-    const hidden = runTask('oh-my-claudecode:remember', 'Task', {}, { USER_TYPE: '' });
+    const remember = runTask('oh-my-claudecode:remember', 'Task', {}, { USER_TYPE: '' });
 
     expect((visible.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
     expect(denyReason(visible)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
-    expect((hidden.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+    expect((remember.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
   });
   describe('case-insensitive identifier folding (Windows/macOS semantics, issue #3667)', () => {
     it('does NOT suggest a runtime-hidden skill when a case-variant identifier resolves its directory (case-insensitive-faithful harness)', () => {
@@ -2690,10 +2686,10 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
       const nonAntLower = run('oh-my-claudecode:remember', {});
       const ant = run('oh-my-claudecode:Remember', { USER_TYPE: 'ant' });
 
-      expect((nonAnt.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
-      expect(JSON.stringify(nonAnt)).not.toContain('[SKILL vs AGENT]');
-      expect((nonAntLower.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
-      // Canonical lowercase output spelling is preserved for the entitled user.
+      expect((nonAnt.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(nonAnt)).toContain('Skill(skill="oh-my-claudecode:remember")');
+      expect((nonAntLower.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      // Canonical lowercase output spelling is preserved for every user.
       expect((ant.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
       expect(denyReason(ant)).toContain('Skill(skill="oh-my-claudecode:remember")');
     });
@@ -2711,11 +2707,11 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
     });
 
     it.each(['Remember', 'VERIFY', 'Debug'])(
-      'does NOT suggest the mixed-case runtime-hidden %s skill for a non-ant user',
-      (hiddenSkill) => {
-        const output = runTask(`oh-my-claudecode:${hiddenSkill}`, 'Task', {}, { USER_TYPE: '' });
-        expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
-        expect(JSON.stringify(output)).not.toContain('[SKILL vs AGENT]');
+      'denies the mixed-case visible %s skill for a non-ant user',
+      (skill) => {
+        const output = runTask(`oh-my-claudecode:${skill}`, 'Task', {}, { USER_TYPE: '' });
+        expect((output.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+        expect(denyReason(output)).toContain(`Skill(skill="oh-my-claudecode:${skill.toLowerCase()}")`);
       },
     );
 
@@ -2725,8 +2721,8 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
 
       expect((omcUpper.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
       expect(denyReason(omcUpper)).toContain('Skill(skill="oh-my-claudecode:ai-slop-cleaner")');
-      // Hidden skill with a case-variant full namespace still fails closed.
-      expect((fullUpper.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+      expect((fullUpper.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(fullUpper)).toContain('Skill(skill="oh-my-claudecode:remember")');
     });
 
     it('applies case folding before explicit-model and force-inherit routing', () => {
@@ -2743,13 +2739,14 @@ describe('pre-tool-enforcer skill vs agent namespace guard (issue #3667)', () =>
       expect((forceInheritVisible.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
       expect(denyReason(forceInheritVisible)).toContain('Skill(skill="oh-my-claudecode:omc-plan")');
 
-      const forceInheritHidden = runTask(
+      const forceInheritRemember = runTask(
         'oh-my-claudecode:Remember',
         'Task',
         {},
         { USER_TYPE: '', OMC_ROUTING_FORCE_INHERIT: 'true' },
       );
-      expect((forceInheritHidden.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBeUndefined();
+      expect((forceInheritRemember.hookSpecificOutput as Record<string, unknown>).permissionDecision).toBe('deny');
+      expect(denyReason(forceInheritRemember)).toContain('Skill(skill="oh-my-claudecode:remember")');
     });
   });
   describe('native/session-defined bare agent boundary (issue #3667 P1)', () => {
