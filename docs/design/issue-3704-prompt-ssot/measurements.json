@@ -3,7 +3,7 @@
   "issue": 3704,
   "epic": 3698,
   "sourceRevision": "2026-08-13.1",
-  "measuredAt": "2026-08-13T00:34:53.300Z",
+  "measuredAt": "2026-08-23T06:16:21.876Z",
   "baselineCorpus": [
     "CLAUDE.md",
     "docs/CLAUDE.md",
@@ -29,21 +29,21 @@
     "agents/writer.md"
   ],
   "baseline": {
-    "totalTokens": 23838,
-    "uniqueTokens": 3409,
-    "uniqueNGrams": 21384,
-    "repeatedClauseRatio": 1.1430489134994546,
-    "repeatedTokens": 19576
+    "totalTokens": 23859,
+    "uniqueTokens": 3416,
+    "uniqueNGrams": 21391,
+    "repeatedClauseRatio": 0.18219539796303283,
+    "repeatedTokens": 3107
   },
   "ssot": {
     "totalTokens": 899,
     "uniqueTokens": 448,
     "uniqueNGrams": 875,
-    "repeatedClauseRatio": 0.3025583982202447,
-    "repeatedTokens": 136
+    "repeatedClauseRatio": 0.05339265850945495,
+    "repeatedTokens": 24
   },
-  "repeatedTokenReduction": 0.9931,
-  "repeatedClauseRatioReduction": 0.8405,
+  "repeatedTokenReduction": 0.9923,
+  "repeatedClauseRatioReduction": 0.1288,
   "projectionDrift": {
     "coordinator": 0,
     "role-planner": 0,

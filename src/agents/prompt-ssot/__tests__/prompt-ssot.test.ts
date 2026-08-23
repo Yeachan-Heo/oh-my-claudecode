@@ -187,6 +187,38 @@ describe('metrics', () => {
     }
   });
 
+  it('counts the union of overlapping repeated n-gram positions', () => {
+    expect(corpusStats(['a a a a'], 2)).toMatchObject({
+      totalTokens: 4,
+      repeatedClauseRatio: 1,
+      repeatedTokens: 3,
+    });
+  });
+
+  it('unions positions across distinct overlapping repeated n-grams', () => {
+    expect(corpusStats(['a b a b a b'], 2)).toMatchObject({
+      totalTokens: 6,
+      repeatedClauseRatio: 1,
+      repeatedTokens: 4,
+    });
+  });
+
+  it('counts adjacent repeated n-gram windows once per token position', () => {
+    expect(corpusStats(['a b a b'], 2)).toMatchObject({
+      totalTokens: 4,
+      repeatedClauseRatio: 1,
+      repeatedTokens: 2,
+    });
+  });
+
+  it('counts disjoint repeated n-gram windows independently', () => {
+    expect(corpusStats(['a b x y a b'], 2)).toMatchObject({
+      totalTokens: 6,
+      repeatedClauseRatio: 4 / 6,
+      repeatedTokens: 2,
+    });
+  });
+
   it('measures lower repeated-clause ratio in SSOT sources than legacy corpus', () => {
     const root = join(__dirname, '..', '..', '..', '..');
     const legacyFiles = ['CLAUDE.md', 'docs/CLAUDE.md', '.github/CLAUDE.md'].filter((f) =>
