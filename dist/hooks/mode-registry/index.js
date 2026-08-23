@@ -50,11 +50,6 @@ const MODE_CONFIGS = {
         activeProperty: "active",
         hasGlobalState: false,
     },
-    [MODE_NAMES.ULTRAQA]: {
-        name: "UltraQA",
-        stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.ULTRAQA],
-        activeProperty: "active",
-    },
     [MODE_NAMES.DEEP_INTERVIEW]: {
         name: "Deep Interview",
         stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.DEEP_INTERVIEW],

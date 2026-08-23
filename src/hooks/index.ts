@@ -28,7 +28,6 @@ export {
   clearRalphState,
   clearLinkedUltraworkState,
   incrementRalphIteration,
-  isUltraQAActive,
   // PRD Integration
   hasPrd,
   getPrdCompletionStatus,
@@ -478,23 +477,6 @@ export {
   type PreCommitResult
 } from './plugin-patterns/index.js';
 
-export {
-  // UltraQA Loop (QA cycling workflow)
-  readUltraQAState,
-  writeUltraQAState,
-  clearUltraQAState,
-  startUltraQA,
-  recordFailure,
-  completeUltraQA,
-  stopUltraQA,
-  cancelUltraQA,
-  getGoalCommand,
-  formatProgressMessage,
-  type UltraQAState,
-  type UltraQAGoalType,
-  type UltraQAOptions,
-  type UltraQAResult
-} from './ultraqa/index.js';
 
 export {
   // Notepad (Compaction-Resilient Memory)

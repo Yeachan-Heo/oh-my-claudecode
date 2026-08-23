@@ -8,7 +8,6 @@ export declare const MODES: {
     readonly AUTOPILOT: "autopilot";
     readonly RALPH: "ralph";
     readonly ULTRAWORK: "ultrawork";
-    readonly ULTRAQA: "ultraqa";
     readonly TEAM: "team";
     readonly RALPLAN: "ralplan";
 };

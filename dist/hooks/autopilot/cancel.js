@@ -2,11 +2,10 @@
  * Autopilot Cancellation
  *
  * Handles cancellation of autopilot, cleaning up all related state
- * including any active Ralph or UltraQA modes.
+ * including any active Ralph mode.
  */
 import { readAutopilotState, clearAutopilotState, getAutopilotStateAge, updateAutopilotStateIfCurrent, updateAutopilotStateIfExact, } from './state.js';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
-import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure } from './named-workflow-resume-validator.js';
 import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
 function hasNamedWorkflowMarkers(state) {
@@ -102,9 +101,10 @@ export function cancelAutopilot(directory, sessionId) {
             failedCleanup.push('ralph');
         }
     }
-    const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
-    if (ultraqaState?.active) {
-        const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+    // Bounded cleanup of pre-existing retired ultraqa state (5.0.0 removal).
+    const ultraqaState = readModeState('ultraqa', directory, sessionId);
+    if (ultraqaState?.active === true) {
+        const cleared = clearModeStateFile('ultraqa', directory, sessionId);
         if (cleared)
             cleanedUp.push('ultraqa');
         else
@@ -167,9 +167,10 @@ export function clearAutopilot(directory, sessionId) {
             failedCleanup.push('ralph');
         }
     }
-    const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
+    // Bounded cleanup of pre-existing retired ultraqa state (5.0.0 removal).
+    const ultraqaState = readModeState('ultraqa', directory, sessionId);
     if (ultraqaState) {
-        const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+        const cleared = clearModeStateFile('ultraqa', directory, sessionId);
         if (!cleared)
             failedCleanup.push('ultraqa');
     }

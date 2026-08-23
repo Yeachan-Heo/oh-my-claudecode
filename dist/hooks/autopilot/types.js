@@ -7,7 +7,7 @@
  * 1. Expansion: Analyst + Architect expand the idea into detailed requirements
  * 2. Planning: Architect creates comprehensive execution plan
  * 3. Execution: Ralph + Ultrawork implement the plan
- * 4. QA: UltraQA ensures build/lint/tests pass
+ * 4. QA: build/lint/test cycling ensures the build passes
  * 5. Validation: Multiple specialized architects verify the implementation
  */
 /**

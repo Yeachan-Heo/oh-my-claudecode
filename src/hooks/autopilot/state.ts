@@ -3,7 +3,7 @@
  *
  * Handles:
  * - Persistent state for the autopilot workflow across phases
- * - Phase transitions, especially Ralph → UltraQA and UltraQA → Validation
+ * - Phase transitions, especially Ralph → QA and QA → Validation
  * - State machine operations
  */
 
@@ -37,11 +37,6 @@ import {
   clearRalphState,
   clearLinkedUltraworkState,
 } from "../ralph/index.js";
-import {
-  startUltraQA,
-  clearUltraQAState,
-  readUltraQAState,
-} from "../ultraqa/index.js";
 import { canStartMode } from "../mode-registry/index.js";
 import {
   namedWorkflowRuntimeSupported,
@@ -350,7 +345,6 @@ export function initAutopilot(
     },
 
     qa: {
-      ultraqa_cycles: 0,
       build_status: "pending",
       lint_status: "pending",
       test_status: "pending",
@@ -535,13 +529,13 @@ export interface TransitionResult {
 }
 
 /**
- * Transition from Ralph (Phase 2: Execution) to UltraQA (Phase 3: QA)
+ * Transition from Ralph (Phase 2: Execution) to QA (Phase 3)
  *
- * This handles the mutual exclusion by:
- * 1. Saving Ralph's progress to autopilot state
- * 2. Cleanly terminating Ralph mode (and linked Ultrawork)
- * 3. Starting UltraQA mode
- * 4. Preserving context for potential rollback
+ * This:
+ * 1. Saves Ralph's progress to autopilot state
+ * 2. Cleanly terminates Ralph mode (and linked Ultrawork)
+ * 3. Transitions to the QA phase
+ * 4. Preserves context for potential rollback
  */
 export function transitionRalphToUltraQA(
   directory: string,
@@ -577,8 +571,7 @@ export function transitionRalphToUltraQA(
     };
   }
 
-  // Step 2: Deactivate Ralph (set active=false) so UltraQA's mutual exclusion
-  // check passes, but keep state file on disk for rollback if UltraQA fails.
+  // Step 2: Deactivate Ralph, keeping the state file on disk for rollback.
   if (ralphState) {
     writeRalphState(directory, { ...ralphState, active: false }, sessionId);
   }
@@ -599,26 +592,7 @@ export function transitionRalphToUltraQA(
     };
   }
 
-  // Step 4: Start UltraQA (Ralph is deactivated, mutual exclusion passes)
-  const qaResult = startUltraQA(directory, "tests", sessionId, {
-    maxCycles: 5,
-  });
-
-  if (!qaResult.success) {
-    // Rollback: restore Ralph state and execution phase
-    if (ralphState) {
-      writeRalphState(directory, ralphState, sessionId);
-    }
-    transitionPhase(directory, "execution", sessionId);
-    updateExecution(directory, { ralph_completed_at: undefined }, sessionId);
-
-    return {
-      success: false,
-      error: qaResult.error || "Failed to start UltraQA",
-    };
-  }
-
-  // Step 5: UltraQA started — clear Ralph state fully (best-effort)
+  // Step 4: QA phase owns its own cycling; clear Ralph state (best-effort).
   clearRalphState(directory, sessionId);
 
   return {
@@ -628,7 +602,7 @@ export function transitionRalphToUltraQA(
 }
 
 /**
- * Transition from UltraQA (Phase 3: QA) to Validation (Phase 4)
+ * Transition from QA (Phase 3) to Validation (Phase 4)
  */
 export function transitionUltraQAToValidation(
   directory: string,
@@ -643,13 +617,10 @@ export function transitionUltraQAToValidation(
     };
   }
 
-  const qaState = readUltraQAState(directory, sessionId);
-
   // Preserve QA progress
   const qaUpdated = updateQA(
     directory,
     {
-      ultraqa_cycles: qaState?.cycle ?? autopilotState.qa.ultraqa_cycles,
       qa_completed_at: new Date().toISOString(),
     },
     sessionId,
@@ -661,9 +632,6 @@ export function transitionUltraQAToValidation(
       error: "Failed to update QA state",
     };
   }
-
-  // Terminate UltraQA
-  clearUltraQAState(directory, sessionId);
 
   // Transition to validation
   const newState = transitionPhase(directory, "validation", sessionId);
@@ -731,12 +699,12 @@ export function getTransitionPrompt(
 
 The execution phase is complete. Transitioning to QA phase.
 
-**CRITICAL**: Ralph mode must be cleanly terminated before UltraQA can start.
+**CRITICAL**: Ralph mode must be cleanly terminated before QA starts.
 
 The transition handler has:
 1. Preserved Ralph iteration count and progress
 2. Cleared Ralph state (and linked Ultrawork)
-3. Started UltraQA in 'tests' mode
+3. Transitioned the autopilot phase to QA
 
 You are now in QA phase. Run the QA cycle:
 1. Build: Run the project's build command
@@ -755,9 +723,8 @@ Signal when QA passes: QA_COMPLETE
 All QA checks have passed. Transitioning to validation phase.
 
 The transition handler has:
-1. Preserved UltraQA cycle count
-2. Cleared UltraQA state
-3. Updated phase to 'validation'
+1. Recorded QA completion
+2. Updated phase to 'validation'
 
 You are now in validation phase. Spawn parallel validation architects:
 

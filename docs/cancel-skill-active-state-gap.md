@@ -27,7 +27,7 @@ The cancel skill calls `state_clear(mode=...)` for known modes, but the
 `state_clear` MCP tool's mode enum does not include `skill-active`:
 
 ```
-"autopilot" | "team" | "ralph" | "ultrawork" | "ultraqa"
+"autopilot" | "team" | "ralph" | "ultrawork"
 | "ralplan" | "omc-teams" | "deep-interview"
 ```
 

@@ -699,7 +699,7 @@ Smart cancellation that auto-detects active mode:
 # Or just say: "stop", "cancel", "abort"
 ```
 
-**Auto-detects and cancels:** autopilot, ralph, ultrawork, ultraqa, pipeline
+**Auto-detects and cancels:** autopilot, ralph, ultrawork, pipeline (ultraqa is retired; stale pre-5.0.0 `ultraqa-state.json` is still cleared)
 
 **Deprecation Notice:**
 Individual cancel commands are deprecated but still work:

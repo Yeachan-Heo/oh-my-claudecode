@@ -2,7 +2,7 @@
 
 ## Context
 
-Claude Code exposes `/goal` as a native, session-scoped work loop. OMC can use that loop as an execution surface, but OMC must keep its own durable audit trail, hook safety rules, and Ralph/Team/UltraQA boundaries. The adapter described here is a design contract for future implementation; it does not mutate hidden Claude Code goal state.
+Claude Code exposes `/goal` as a native, session-scoped work loop. OMC can use that loop as an execution surface, but OMC must keep its own durable audit trail, hook safety rules, and Ralph/Team boundaries. The adapter described here is a design contract for future implementation; it does not mutate hidden Claude Code goal state.
 
 ## Source authority boundary
 
@@ -21,7 +21,7 @@ The Claude Code `/goal` adapter is an OMC-facing boundary that renders safe hand
 2. Render a measurable `/goal <completion condition>` handoff prompt instead of writing hidden Claude Code session state directly.
 3. Preserve OMC auditability by recording the requested condition, status snapshots, surfaced evaluator reasons, command evidence, and final review outcome in OMC-owned artifacts.
 4. Refuse or degrade when workspace trust, hook settings, or managed-hook policy makes `/goal` unavailable.
-5. Enforce one active loop authority per session so `/goal` does not compete with Ralph, Team, autopilot, UltraQA, or Stop-hook continuation loops.
+5. Enforce one active loop authority per session so `/goal` does not compete with Ralph, Team, autopilot, or Stop-hook continuation loops.
 
 ## Goal contract subset
 
@@ -33,7 +33,7 @@ Future implementation should map each goal item into the shared durable contract
 | `objective`            | Human-readable outcome.                                                                                         |
 | `completion_condition` | Measurable condition suitable for `/goal <condition>` handoff.                                                  |
 | `runtime_target`       | `claude-code-goal` for native `/goal`, or `artifact-only` fallback.                                             |
-| `loop_authority`       | Exactly one primary authority: `claude-code-goal`, `ralph`, `team`, `ultraqa`, `autopilot`, or `artifact-only`. |
+| `loop_authority`       | Exactly one primary authority: `claude-code-goal`, `ralph`, `team`, `autopilot`, or `artifact-only`. |
 | `conflict_policy`      | One of `refuse`, `adopt_existing`, or `artifact_only`.                                                          |
 | `source_refs`          | Claude Code `/goal` claims cite only Claude Code/Anthropic sources.                                             |
 | `evidence`             | Surfaced command output, docs updates, test output, reviewer verdicts, and status snapshots.                    |
@@ -59,7 +59,7 @@ The adapter must never “warn and continue” with a competing loop. Any unknow
 | Hook-disabling settings block `/goal`                           | Use `refuse` or `artifact_only`; include the hook policy in diagnostics.                  |
 | Managed hooks prevent `/goal`                                   | Use `refuse` or `artifact_only`; do not suggest bypassing policy.                         |
 | Workspace is not trusted                                        | Refuse native handoff until trust is established, or create artifact-only evidence.       |
-| Ralph/autopilot/Stop-hook/Team/UltraQA is already authoritative | Apply `conflict_policy` exactly.                                                          |
+| Ralph/autopilot/Stop-hook/Team is already authoritative | Apply `conflict_policy` exactly.                                                          |
 | Capability cannot be determined                                 | Prefer `artifact_only` unless the user explicitly requests manual native `/goal` handoff. |
 
 ## Handoff rendering contract

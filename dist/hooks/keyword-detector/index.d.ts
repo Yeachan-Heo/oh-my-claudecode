@@ -19,7 +19,7 @@ export interface DetectedKeyword {
  * (rather than imported) to keep the keyword-detector free of cross-module
  * dependencies on skill-state.
  */
-declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "team", "ultrawork", "ultraqa", "deep-interview", "ralplan", "self-improve"];
+declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "team", "ultrawork", "deep-interview", "ralplan", "self-improve"];
 export type CanonicalWorkflowSlashSkill = (typeof CANONICAL_WORKFLOW_SLASH_SKILLS)[number];
 export interface ExplicitWorkflowSlashInvocation {
     /** Canonical workflow skill name (lowercase, no `oh-my-claudecode:` prefix). */

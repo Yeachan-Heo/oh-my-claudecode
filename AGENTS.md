@@ -199,7 +199,6 @@ Workflow Skills:
 - `web-clone`: URL-driven website cloning with visual + functional verification
 - `ecomode`: Token-efficient execution using lightweight models
 - `team`: N coordinated agents on shared task list
-- `ultraqa`: QA cycling -- test, verify, fix, repeat
 - `plan`: Strategic planning with optional RALPLAN-DR consensus mode
 - `deep-interview`: Socratic deep interview with Ouroboros-inspired mathematical ambiguity gating before execution
 - `ralplan`: Iterative consensus planning with RALPLAN-DR structured deliberation (planner + architect + critic); supports `--deliberate` for high-risk work
@@ -387,7 +386,6 @@ Recommended mode fields:
 - `ultrawork`: `active`, `reinforcement_count`, `started_at`
 - `team`: `active`, `current_phase` (`team-plan|team-prd|team-exec|team-verify|team-fix|complete`), `agent_count`, `team_name`
 - `ecomode`: `active`
-- `ultraqa`: `active`, `current_phase`, `iteration`, `started_at`, `completed_at`
 </state_management>
 
 ---

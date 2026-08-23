@@ -672,7 +672,6 @@ const MODE_STATE_FILES = [
   'ralph-state.json',
   'ultragoal-state.json',
   'ultrawork-state.json',
-  'ultraqa-state.json',
   'pipeline-state.json',
   'team-state.json',
   'omc-teams-state.json',
@@ -1476,7 +1475,7 @@ const SKILL_PROTECTION_CONFIGS = {
 const SKILL_PROTECTION_MAP = {
   // === Already have mode state → no additional protection ===
   autopilot: 'none', ralph: 'none', ultragoal: 'none', ultrawork: 'none', team: 'none',
-  'omc-teams': 'none', ultraqa: 'none', cancel: 'none',
+  'omc-teams': 'none', cancel: 'none',
 
   // === Instant / read-only → no protection needed ===
   trace: 'none', hud: 'none', 'omc-doctor': 'none', 'omc-help': 'none',

@@ -143,7 +143,7 @@ export interface PipelineContext {
 }
 /**
  * Interface that each stage adapter must implement.
- * Adapters wrap existing modules (ralplan, team, ralph, ultraqa)
+ * Adapters wrap existing modules (ralplan, team, ralph, qa)
  * into a uniform interface for the pipeline orchestrator.
  */
 export interface PipelineStageAdapter {

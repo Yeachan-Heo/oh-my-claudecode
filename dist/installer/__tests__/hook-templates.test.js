@@ -706,6 +706,22 @@ describe('pre-tool-use packaged artifacts', () => {
                 expect(allowed.continue).toBe(true);
                 expect(allowed.hookSpecificOutput?.permissionDecision).toBeUndefined();
                 expect(JSON.stringify(allowed)).not.toContain('[SKILL vs AGENT]');
+                for (const skill of ['remember', 'verify', 'debug']) {
+                    const visible = runPreToolPayload(scriptPath, {
+                        tool_name: 'Task',
+                        cwd: tempDir,
+                        directory: tempDir,
+                        tool_input: {
+                            subagent_type: `oh-my-claudecode:${skill}`,
+                            description: `Run ${skill}`,
+                            prompt: `Run the ${skill} skill`,
+                        },
+                    }, env);
+                    const visibleHook = visible.hookSpecificOutput;
+                    expect(visible.continue).toBe(true);
+                    expect(visibleHook.permissionDecision).toBe('deny');
+                    expect(String(visibleHook.permissionDecisionReason ?? '')).toContain(`Skill(skill="oh-my-claudecode:${skill}")`);
+                }
             }
         }
         finally {
@@ -756,6 +772,7 @@ describe('pre-tool-use packaged artifacts', () => {
         const sourceConfigHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'config-dir.mjs');
         const sourceStdinHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'stdin.mjs');
         const sourceStateRootHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'state-root.mjs');
+        const sourceSkillEntitlementsPath = join(packageRoot, 'templates', 'hooks', 'lib', 'skill-entitlements.mjs');
         const configDir = mkdtempSync(join(tmpdir(), 'pre-tool-installed-layout-'));
         const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-installed-home-'));
         const installedHookDir = join(configDir, 'hooks');
@@ -768,6 +785,7 @@ describe('pre-tool-use packaged artifacts', () => {
         copyFileSync(sourceConfigHelperPath, join(installedHookDir, 'lib', 'config-dir.mjs'));
         copyFileSync(sourceStdinHelperPath, join(installedHookDir, 'lib', 'stdin.mjs'));
         copyFileSync(sourceStateRootHelperPath, join(installedHookDir, 'lib', 'state-root.mjs'));
+        copyFileSync(sourceSkillEntitlementsPath, join(installedHookDir, 'lib', 'skill-entitlements.mjs'));
         mkdirSync(installedSkillsDir, { recursive: true });
         writeFileSync(join(installedSkillsDir, 'SKILL.md'), '---\nname: ai-slop-cleaner\n---\nBundled skill.\n');
         mkdirSync(installedAgentsDir, { recursive: true });

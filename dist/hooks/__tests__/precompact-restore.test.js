@@ -10,17 +10,41 @@
  *    checkpoint to the same session twice.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, existsSync, linkSync, rmSync, readdirSync, renameSync, symlinkSync, statSync, unlinkSync, utimesSync, writeFileSync, readFileSync, } from 'fs';
+import { mkdtempSync, mkdirSync, existsSync, linkSync, rmSync, readdirSync, renameSync, symlinkSync, statSync, unlinkSync, utimesSync, writeFileSync, readFileSync, realpathSync, } from 'fs';
 import * as nodeFs from 'fs';
-import { join } from 'path';
+import { basename, dirname, join, sep } from 'path';
 import { tmpdir } from 'os';
+import { pathToFileURL } from 'url';
+import { createHash } from 'crypto';
 vi.mock('fs', async () => {
     const actual = await vi.importActual('fs');
     return { ...actual };
 });
 import { processPreCompact, createCompactCheckpoint, formatCompactSummary, } from '../pre-compact/index.js';
 import { findLatestCheckpointForRestore, restorePreCompactCheckpoint, formatCheckpointRestoreContext, markCheckpointRestored, CHECKPOINT_MAX_AGE_MS, CHECKPOINT_MAX_BYTES, } from '../pre-compact/restore.js';
-const SECURE_MARKER_SUPPORTED = process.platform === 'linux';
+// Marker publication is portable across every supported Node platform.
+const SECURE_MARKER_SUPPORTED = true;
+function withPublisherPreload(preloadPath, env, callback) {
+    const previousPreload = process.env.OMC_PRECOMPACT_PUBLISHER_IMPORT;
+    const previous = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
+    process.env.OMC_PRECOMPACT_PUBLISHER_IMPORT = pathToFileURL(preloadPath).href;
+    Object.assign(process.env, env);
+    try {
+        return callback();
+    }
+    finally {
+        if (previousPreload === undefined)
+            delete process.env.OMC_PRECOMPACT_PUBLISHER_IMPORT;
+        else
+            process.env.OMC_PRECOMPACT_PUBLISHER_IMPORT = previousPreload;
+        for (const [key, value] of previous) {
+            if (value === undefined)
+                delete process.env[key];
+            else
+                process.env[key] = value;
+        }
+    }
+}
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -363,37 +387,51 @@ describe('PreCompact restore (issue #3730)', () => {
         const first = await findLatestCheckpointForRestore(tempDir, 'marker-file-symlink');
         expect(first.ok).toBe(true);
         if (first.ok) {
-            expect(markCheckpointRestored(tempDir, 'marker-file-symlink', checkpointPath)).toBe('existing');
+            expect(markCheckpointRestored(tempDir, 'marker-file-symlink', checkpointPath)).toBe('failed');
         }
         expect(JSON.parse(readFileSync(externalMarker, 'utf-8')).checkpoint).toBe(checkpointPath);
     });
-    it('fails closed when the marker parent is replaced after descriptor validation', async () => {
+    it('fails closed when the marker parent is replaced before lock publication', async () => {
         const checkpointPath = writeCheckpoint(tempDir, new Date().toISOString(), { session_id: 'marker-parent-race' });
         const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'marker-parent-race');
         const markerParentBackup = `${markerParent}.backup`;
         const externalMarkerParent = join(tempDir, 'external-marker-parent-race');
+        const signalPath = join(tempDir, 'marker-parent-race-signal');
+        const preloadPath = join(tempDir, 'marker-parent-race-preload.mjs');
         mkdirSync(markerParent, { recursive: true });
         mkdirSync(externalMarkerParent, { recursive: true });
-        let swapped = false;
-        const originalOpenSync = nodeFs.openSync;
-        const openSpy = vi.spyOn(nodeFs, 'openSync').mockImplementation((path, flags, mode) => {
-            if (!swapped && String(path) === markerParent) {
-                const fd = originalOpenSync(path, flags, mode);
-                swapped = true;
-                renameSync(markerParent, markerParentBackup);
-                symlinkSync(externalMarkerParent, markerParent, 'dir');
-                return fd;
-            }
-            return originalOpenSync(path, flags, mode);
-        });
+        writeFileSync(preloadPath, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const originalOpenSync = fs.openSync;
+let swapped = false;
+fs.openSync = function(path, flags, mode) {
+  if (!swapped && String(path).startsWith('.restored-stage-')) {
+    swapped = true;
+    fs.renameSync(process.env.MARKER_PARENT, process.env.MARKER_PARENT_BACKUP);
+    fs.symlinkSync(
+      process.env.EXTERNAL_MARKER_PARENT,
+      process.env.MARKER_PARENT,
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    fs.writeFileSync(process.env.MARKER_SIGNAL, 'swapped');
+  }
+  return originalOpenSync.call(fs, path, flags, mode);
+};
+syncBuiltinESMExports();
+`);
         try {
-            expect(markCheckpointRestored(tempDir, 'marker-parent-race', checkpointPath)).toBe('failed');
-            expect(restorePreCompactCheckpoint(tempDir, 'marker-parent-race')).toBeNull();
-            expect(swapped).toBe(true);
+            const status = withPublisherPreload(preloadPath, {
+                MARKER_PARENT: markerParent,
+                MARKER_PARENT_BACKUP: markerParentBackup,
+                EXTERNAL_MARKER_PARENT: externalMarkerParent,
+                MARKER_SIGNAL: signalPath,
+            }, () => markCheckpointRestored(tempDir, 'marker-parent-race', checkpointPath));
+            expect(status).toBe('failed');
+            if (process.platform !== 'win32')
+                expect(existsSync(signalPath)).toBe(true);
             expect(existsSync(join(externalMarkerParent, 'restored.json'))).toBe(false);
         }
         finally {
-            openSpy.mockRestore();
             if (existsSync(markerParent))
                 rmSync(markerParent, { recursive: true, force: true });
             if (existsSync(markerParentBackup))
@@ -446,7 +484,7 @@ describe('PreCompact restore (issue #3730)', () => {
     });
     it('rejects an ancestor redirect between verification and open', async () => {
         const checkpointPath = writeCheckpoint(tempDir, new Date().toISOString());
-        const checkpointName = checkpointPath.slice(checkpointPath.lastIndexOf('/') + 1);
+        const checkpointName = basename(checkpointPath);
         const omcRoot = getOmcRootForTest(tempDir);
         const statePath = join(omcRoot, 'state');
         const stateBackupPath = `${statePath}.verified-backup`;
@@ -574,13 +612,13 @@ describe('PreCompact restore (issue #3730)', () => {
         const first = restorePreCompactCheckpoint(tempDir, 'marker-advance-session');
         expect(first?.marker_status).toBe('written');
         const markerPath = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'marker-advance-session', 'restored.json');
-        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(checkpointA);
+        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(realpathSync(checkpointA));
         const t2 = new Date().toISOString();
         const checkpointB = writeCheckpoint(tempDir, t2, { session_id: 'marker-advance-session' });
         const second = restorePreCompactCheckpoint(tempDir, 'marker-advance-session');
         expect(second?.marker_status).toBe('written');
         expect(second?.text).toContain(t2);
-        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(checkpointB);
+        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(realpathSync(checkpointB));
         expect(restorePreCompactCheckpoint(tempDir, 'marker-advance-session')).toBeNull();
     });
     it('does not let a delayed older marker claim overwrite a newer checkpoint', () => {
@@ -593,7 +631,7 @@ describe('PreCompact restore (issue #3730)', () => {
         expect(markCheckpointRestored(tempDir, 'marker-monotonic-session', checkpointB, t2)).toBe('written');
         expect(markCheckpointRestored(tempDir, 'marker-monotonic-session', checkpointA, t1)).toBe('existing');
         const markerPath = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'marker-monotonic-session', 'restored.json');
-        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(checkpointB);
+        expect(JSON.parse(readFileSync(markerPath, 'utf-8')).checkpoint).toBe(realpathSync(checkpointB));
     });
     it('advances equal-created-at checkpoints using the same mtime tiebreaker as selection', () => {
         if (!SECURE_MARKER_SUPPORTED)
@@ -785,135 +823,217 @@ describe('PreCompact restore (issue #3730)', () => {
         const sessionId = 'projection-failure-retry';
         const createdAt = new Date().toISOString();
         const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
-        const originalLinkSync = nodeFs.linkSync;
-        let failedProjection = false;
-        const linkSpy = vi.spyOn(nodeFs, 'linkSync').mockImplementation((source, destination) => {
-            if (!failedProjection && String(destination).endsWith('/restored.json')) {
-                failedProjection = true;
-                const error = new Error('projection failure');
-                error.code = 'EIO';
-                throw error;
-            }
-            return originalLinkSync(source, destination);
-        });
-        try {
-            expect(markCheckpointRestored(tempDir, sessionId, checkpoint, createdAt, statSync(checkpoint).mtimeMs)).toBe('failed');
-        }
-        finally {
-            linkSpy.mockRestore();
-        }
+        const signalPath = join(tempDir, 'projection-failure-signal');
+        const preloadPath = join(tempDir, 'projection-failure-preload.mjs');
+        writeFileSync(preloadPath, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const originalRenameSync = fs.renameSync;
+let failed = false;
+fs.renameSync = function(source, destination) {
+  if (!failed && String(destination) === 'restored.json') {
+    failed = true;
+    fs.writeFileSync(process.env.MARKER_SIGNAL, 'failed');
+    const error = new Error('projection failure');
+    error.code = 'EIO';
+    throw error;
+  }
+  return originalRenameSync.call(fs, source, destination);
+};
+syncBuiltinESMExports();
+`);
+        expect(withPublisherPreload(preloadPath, { MARKER_SIGNAL: signalPath }, () => markCheckpointRestored(tempDir, sessionId, checkpoint, createdAt, statSync(checkpoint).mtimeMs))).toBe('failed');
+        expect(existsSync(signalPath)).toBe(true);
         expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
     });
-    it('does not unlink a replacement lock after inspecting a stale inode', () => {
-        if (!SECURE_MARKER_SUPPORTED)
-            return;
+    it('does not treat an unbacked projection as an authoritative claim', () => {
+        const sessionId = 'claim-failure-retry';
         const createdAt = new Date().toISOString();
-        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: 'stale-lock-cas' });
-        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'stale-lock-cas');
-        mkdirSync(markerParent, { recursive: true });
-        const lockPath = join(markerParent, '.restored.json.lock');
-        writeFileSync(lockPath, 'stale');
-        const staleTime = new Date(Date.now() - 60_000);
-        utimesSync(lockPath, staleTime, staleTime);
-        const originalRenameSync = nodeFs.renameSync;
-        let replacementInode = 0;
-        let replaced = false;
-        const renameSpy = vi.spyOn(nodeFs, 'renameSync').mockImplementation((source, destination) => {
-            if (!replaced && String(source).endsWith('/.restored.json.lock')) {
-                replaced = true;
-                unlinkSync(lockPath);
-                writeFileSync(lockPath, 'live');
-                replacementInode = statSync(lockPath).ino;
-            }
-            return originalRenameSync(source, destination);
-        });
-        try {
-            expect(markCheckpointRestored(tempDir, 'stale-lock-cas', checkpoint, createdAt, statSync(checkpoint).mtimeMs)).toBe('contended');
-            expect(replaced).toBe(true);
-            expect(statSync(lockPath).ino).toBe(replacementInode);
-            expect(readFileSync(lockPath, 'utf8')).toBe('live');
-        }
-        finally {
-            renameSpy.mockRestore();
-        }
+        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
+        const signalPath = join(tempDir, 'claim-failure-signal');
+        const preloadPath = join(tempDir, 'claim-failure-preload.mjs');
+        writeFileSync(preloadPath, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const originalLinkSync = fs.linkSync;
+let failed = false;
+fs.linkSync = function(source, destination) {
+  if (!failed && /^restored-[0-9a-f]{64}\\.json$/.test(String(destination))) {
+    failed = true;
+    fs.writeFileSync(process.env.MARKER_SIGNAL, 'failed');
+    const error = new Error('claim failure');
+    error.code = 'EIO';
+    throw error;
+  }
+  return originalLinkSync.call(fs, source, destination);
+};
+syncBuiltinESMExports();
+`);
+        expect(withPublisherPreload(preloadPath, { MARKER_SIGNAL: signalPath }, () => markCheckpointRestored(tempDir, sessionId, checkpoint, createdAt, statSync(checkpoint).mtimeMs))).toBe('failed');
+        expect(existsSync(signalPath)).toBe(true);
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
     });
-    it('reclaims an unchanged genuine stale lock after quarantine rename', () => {
-        if (!SECURE_MARKER_SUPPORTED)
-            return;
+    it('retains an immutable ownership witness instead of racing stage cleanup', () => {
+        const sessionId = 'claim-ownership-witness';
         const createdAt = new Date().toISOString();
-        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: 'genuine-stale-lock' });
-        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'genuine-stale-lock');
-        mkdirSync(markerParent, { recursive: true });
-        const lockPath = join(markerParent, '.restored.json.lock');
-        writeFileSync(lockPath, 'stale');
-        const staleTime = new Date(Date.now() - 60_000);
-        utimesSync(lockPath, staleTime, staleTime);
-        expect(markCheckpointRestored(tempDir, 'genuine-stale-lock', checkpoint, createdAt, statSync(checkpoint).mtimeMs)).toBe('written');
-        expect(readFileSync(lockPath, 'utf8')).toBe('released');
-        expect(existsSync(join(markerParent, 'restored.json'))).toBe(true);
-    });
-    it('does not unlink a replacement lock during final owner cleanup', () => {
-        if (!SECURE_MARKER_SUPPORTED)
-            return;
-        const createdAt = new Date().toISOString();
-        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: 'cleanup-lock-cas' });
-        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', 'cleanup-lock-cas');
-        const lockPath = join(markerParent, '.restored.json.lock');
-        const originalFtruncateSync = nodeFs.ftruncateSync;
-        let replacementInode = 0;
-        let replaced = false;
-        const truncateSpy = vi.spyOn(nodeFs, 'ftruncateSync').mockImplementation((fd, length) => {
-            if (!replaced) {
-                replaced = true;
-                unlinkSync(lockPath);
-                writeFileSync(lockPath, 'live-cleanup-replacement');
-                replacementInode = statSync(lockPath).ino;
-            }
-            return originalFtruncateSync(fd, length);
-        });
-        try {
-            expect(markCheckpointRestored(tempDir, 'cleanup-lock-cas', checkpoint, createdAt, statSync(checkpoint).mtimeMs)).toBe('written');
-            expect(replaced).toBe(true);
-            expect(statSync(lockPath).ino).toBe(replacementInode);
-            expect(readFileSync(lockPath, 'utf8')).toBe('live-cleanup-replacement');
-        }
-        finally {
-            truncateSpy.mockRestore();
-        }
-    });
-    it('repairs the newest marker when a reclaimed paused owner resumes publication', () => {
-        if (!SECURE_MARKER_SUPPORTED)
-            return;
-        const sessionId = 'stale-owner-publication';
-        const t0 = new Date(Date.now() - 4_000).toISOString();
-        const t1 = new Date(Date.now() - 2_000).toISOString();
-        const t2 = new Date().toISOString();
-        const checkpoint0 = writeCheckpoint(tempDir, t0, { session_id: sessionId });
-        const checkpointA = writeCheckpoint(tempDir, t1, { session_id: sessionId });
-        const checkpointB = writeCheckpoint(tempDir, t2, { session_id: sessionId });
-        expect(markCheckpointRestored(tempDir, sessionId, checkpoint0, t0, statSync(checkpoint0).mtimeMs)).toBe('written');
+        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
+        expect(markCheckpointRestored(tempDir, sessionId, checkpoint, createdAt, statSync(checkpoint).mtimeMs)).toBe('written');
         const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
-        const markerPath = join(markerParent, 'restored.json');
-        const lockPath = join(markerParent, '.restored.json.lock');
-        const originalRenameSync = nodeFs.renameSync;
-        let reclaimed = false;
-        const renameSpy = vi.spyOn(nodeFs, 'renameSync').mockImplementation((source, destination) => {
-            if (!reclaimed && String(destination).endsWith('/restored.json') && String(source).endsWith('.tmp')) {
-                reclaimed = true;
-                const staleTime = new Date(Date.now() - 60_000);
-                utimesSync(lockPath, staleTime, staleTime);
-                expect(markCheckpointRestored(tempDir, sessionId, checkpointB, t2, statSync(checkpointB).mtimeMs)).toBe('written');
-            }
-            return originalRenameSync(source, destination);
-        });
-        try {
-            expect(['existing', 'failed']).toContain(markCheckpointRestored(tempDir, sessionId, checkpointA, t1, statSync(checkpointA).mtimeMs));
-            expect(reclaimed).toBe(true);
-            expect(JSON.parse(readFileSync(markerPath, 'utf8')).checkpoint).toBe(checkpointB);
-        }
-        finally {
-            renameSpy.mockRestore();
-        }
+        const claim = readdirSync(markerParent).find((name) => /^restored-[0-9a-f]{64}\.json$/.test(name));
+        const witness = readdirSync(markerParent).find((name) => name.startsWith('.restored-stage-claim-'));
+        expect(claim).toBeDefined();
+        expect(witness).toBeDefined();
+        expect(statSync(join(markerParent, claim)).ino).toBe(statSync(join(markerParent, witness)).ino);
+        expect(statSync(join(markerParent, claim)).nlink).toBeGreaterThanOrEqual(2);
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)).toBeNull();
+    });
+    it('rejects a claim whose deterministic filename does not match its provenance', () => {
+        const sessionId = 'forged-claim-digest';
+        const createdAt = new Date().toISOString();
+        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        const marker = {
+            session_id: sessionId,
+            checkpoint,
+            checkpoint_created_at: createdAt,
+            checkpoint_mtime_ms: statSync(checkpoint).mtimeMs,
+            checkpoint_sha256: createHash('sha256').update(readFileSync(checkpoint)).digest('hex'),
+            claim_id: `restored-${'0'.repeat(64)}.json`,
+        };
+        writeFileSync(join(markerParent, marker.claim_id), JSON.stringify(marker));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
+    });
+    it('rejects a correctly digested claim with a fractional marker mtime', () => {
+        const sessionId = 'fractional-claim-mtime';
+        const createdAt = new Date().toISOString();
+        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
+        const checkpointSha = createHash('sha256').update(readFileSync(checkpoint)).digest('hex');
+        const fractionalMtime = Math.trunc(statSync(checkpoint).mtimeMs) + 0.5;
+        const digest = createHash('sha256').update(`${sessionId}\0${realpathSync(checkpoint)}\0${createdAt}\0${fractionalMtime}\0${checkpointSha}`).digest('hex');
+        const claimName = `restored-${digest}.json`;
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        writeFileSync(join(markerParent, claimName), JSON.stringify({
+            session_id: sessionId,
+            checkpoint: realpathSync(checkpoint),
+            checkpoint_created_at: createdAt,
+            checkpoint_mtime_ms: fractionalMtime,
+            checkpoint_sha256: checkpointSha,
+            claim_id: claimName,
+        }));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
+    });
+    it('rejects a correctly digested claim whose checkpoint spelling is not canonical', () => {
+        const sessionId = 'alias-claim-path';
+        const createdAt = new Date().toISOString();
+        const checkpoint = writeCheckpoint(tempDir, createdAt, { session_id: sessionId });
+        const canonicalCheckpoint = realpathSync(checkpoint);
+        mkdirSync(join(dirname(canonicalCheckpoint), 'alias'));
+        const aliasCheckpoint = `${dirname(canonicalCheckpoint)}${sep}alias${sep}..${sep}${basename(canonicalCheckpoint)}`;
+        const checkpointMtime = Math.trunc(statSync(checkpoint).mtimeMs);
+        const checkpointSha = createHash('sha256').update(readFileSync(checkpoint)).digest('hex');
+        const digest = createHash('sha256').update(`${sessionId}\0${aliasCheckpoint}\0${createdAt}\0${checkpointMtime}\0${checkpointSha}`).digest('hex');
+        const claimName = `restored-${digest}.json`;
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        writeFileSync(join(markerParent, claimName), JSON.stringify({
+            session_id: sessionId,
+            checkpoint: aliasCheckpoint,
+            checkpoint_created_at: createdAt,
+            checkpoint_mtime_ms: checkpointMtime,
+            checkpoint_sha256: checkpointSha,
+            claim_id: claimName,
+        }));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
+    });
+    it('rejects a deterministic claim backed by a malformed checkpoint shape', () => {
+        const sessionId = 'malformed-claim-shape';
+        writeCheckpoint(tempDir, new Date(Date.now() - 2_000).toISOString(), { session_id: sessionId });
+        const checkpointRoot = join(getOmcRootForTest(tempDir), 'state', 'checkpoints');
+        const malformedPath = join(checkpointRoot, 'checkpoint-malformed-claim.json');
+        const createdAt = new Date().toISOString();
+        writeFileSync(malformedPath, JSON.stringify({
+            created_at: createdAt,
+            session_id: sessionId,
+            trigger: 'auto',
+            active_modes: 'invalid',
+            todo_summary: { pending: 1, in_progress: 0, completed: 0 },
+            wisdom_exported: false,
+        }));
+        const checkpointMtime = Math.trunc(statSync(malformedPath).mtimeMs);
+        const checkpointSha = createHash('sha256').update(readFileSync(malformedPath)).digest('hex');
+        const digest = createHash('sha256').update(`${sessionId}\0${realpathSync(malformedPath)}\0${createdAt}\0${checkpointMtime}\0${checkpointSha}`).digest('hex');
+        const claimName = `restored-${digest}.json`;
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        writeFileSync(join(markerParent, claimName), JSON.stringify({
+            session_id: sessionId,
+            checkpoint: realpathSync(malformedPath),
+            checkpoint_created_at: createdAt,
+            checkpoint_mtime_ms: checkpointMtime,
+            checkpoint_sha256: checkpointSha,
+            claim_id: claimName,
+        }));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
+    });
+    it('rejects a deterministic claim backed by a checkpoint outside the canonical root', () => {
+        const sessionId = 'external-claim-provenance';
+        const localCreatedAt = new Date(Date.now() - 2_000).toISOString();
+        writeCheckpoint(tempDir, localCreatedAt, { session_id: sessionId });
+        const externalCheckpoint = join(tempDir, 'external-checkpoint.json');
+        const externalCreatedAt = new Date().toISOString();
+        writeFileSync(externalCheckpoint, JSON.stringify({
+            created_at: externalCreatedAt,
+            session_id: sessionId,
+            trigger: 'auto',
+            active_modes: {},
+            todo_summary: { pending: 1, in_progress: 0, completed: 0 },
+            wisdom_exported: false,
+        }));
+        const externalMtime = statSync(externalCheckpoint).mtimeMs;
+        const externalSha = createHash('sha256').update(readFileSync(externalCheckpoint)).digest('hex');
+        const digest = createHash('sha256').update(`${sessionId}\0${externalCheckpoint}\0${externalCreatedAt}\0${externalMtime}\0${externalSha}`).digest('hex');
+        const claimName = `restored-${digest}.json`;
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        writeFileSync(join(markerParent, claimName), JSON.stringify({
+            session_id: sessionId,
+            checkpoint: externalCheckpoint,
+            checkpoint_created_at: externalCreatedAt,
+            checkpoint_mtime_ms: externalMtime,
+            checkpoint_sha256: externalSha,
+            claim_id: claimName,
+        }));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
+    });
+    it('rejects a deterministic claim backed by a non-checkpoint file inside the checkpoint root', () => {
+        const sessionId = 'non-checkpoint-claim-provenance';
+        writeCheckpoint(tempDir, new Date(Date.now() - 2_000).toISOString(), { session_id: sessionId });
+        const checkpointRoot = join(getOmcRootForTest(tempDir), 'state', 'checkpoints');
+        const forgedPath = join(checkpointRoot, 'evil.json');
+        const forgedCreatedAt = new Date().toISOString();
+        writeFileSync(forgedPath, JSON.stringify({
+            created_at: forgedCreatedAt,
+            session_id: sessionId,
+            trigger: 'auto',
+            active_modes: {},
+            todo_summary: { pending: 1, in_progress: 0, completed: 0 },
+            wisdom_exported: false,
+        }));
+        const forgedMtime = statSync(forgedPath).mtimeMs;
+        const forgedSha = createHash('sha256').update(readFileSync(forgedPath)).digest('hex');
+        const digest = createHash('sha256').update(`${sessionId}\0${forgedPath}\0${forgedCreatedAt}\0${forgedMtime}\0${forgedSha}`).digest('hex');
+        const claimName = `restored-${digest}.json`;
+        const markerParent = join(getOmcRootForTest(tempDir), 'state', 'checkpoints-restored', sessionId);
+        mkdirSync(markerParent, { recursive: true });
+        writeFileSync(join(markerParent, claimName), JSON.stringify({
+            session_id: sessionId,
+            checkpoint: forgedPath,
+            checkpoint_created_at: forgedCreatedAt,
+            checkpoint_mtime_ms: forgedMtime,
+            checkpoint_sha256: forgedSha,
+            claim_id: claimName,
+        }));
+        expect(restorePreCompactCheckpoint(tempDir, sessionId)?.marker_status).toBe('written');
     });
 });
 // ============================================================================
@@ -970,7 +1090,7 @@ describe('writer → restore lifecycle (issue #3730)', () => {
     });
     it('rejects empty and separator session IDs at restore', async () => {
         writeCheckpoint(tempDir, new Date().toISOString());
-        for (const bad of ['', 'a/b', 'a\\b', 'a..b', 'a b']) {
+        for (const bad of ['', 'a/b', 'a\\b', 'a..b', 'a b', 'CON', 'lpt1']) {
             const candidate = await findLatestCheckpointForRestore(tempDir, bad);
             expect(candidate.ok).toBe(false);
             if (!candidate.ok) {

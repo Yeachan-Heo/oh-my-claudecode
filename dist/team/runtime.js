@@ -585,7 +585,7 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     const rollbackStartupFailure = async (startupError, rollbackMessage, taskResetMarker, causeKey) => {
         let paneCleanupError;
         try {
-            await killWorkerPane(runtime, workerNameValue, paneId);
+            await killWorkerPane(runtime, workerNameValue, paneId, { strict: true });
         }
         catch (cleanupError) {
             paneCleanupError = cleanupError;
@@ -728,10 +728,17 @@ export async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
 /**
  * Kill a single worker pane and update runtime state.
  */
-export async function killWorkerPane(runtime, workerNameValue, paneId) {
-    // Propagate pane cleanup failures so startup rollback can fail closed instead
-    // of reporting success while an orphaned worker pane may still be running.
-    await killTeamPane(paneId);
+export async function killWorkerPane(runtime, workerNameValue, paneId, options = {}) {
+    try {
+        await killTeamPane(paneId);
+    }
+    catch (error) {
+        // Watchdog recovery is idempotent: a pane can disappear between the
+        // liveness probe and cleanup. Rollback callers opt into strict cleanup so
+        // an actual kill failure still fails closed instead of hiding an orphan.
+        if (options.strict)
+            throw error;
+    }
     const paneIndex = runtime.workerPaneIds.indexOf(paneId);
     if (paneIndex >= 0) {
         runtime.workerPaneIds.splice(paneIndex, 1);

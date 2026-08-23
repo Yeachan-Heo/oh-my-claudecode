@@ -33,10 +33,6 @@ export interface CompactCheckpoint {
         ultrawork?: {
             original_prompt: string;
         };
-        ultraqa?: {
-            cycle: number;
-            prompt: string;
-        };
     };
     todo_summary: {
         pending: number;

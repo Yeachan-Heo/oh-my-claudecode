@@ -362,7 +362,7 @@ Autonomous execution from idea to validated working code through a 5-phase devel
 1. **Expansion** - Analyst + Architect expand idea into requirements and technical spec
 2. **Planning** - Architect creates execution plan (validated by Critic)
 3. **Execution** - Ralph + Ultrawork implement plan with parallel tasks
-4. **QA** - UltraQA ensures build/lint/tests pass through fix cycles
+4. **QA** - build/lint/test fix cycles until all pass
 5. **Validation** - Specialized architects perform functional, security, and quality reviews
 
 ### Core Types

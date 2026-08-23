@@ -10,7 +10,6 @@ export const MODES = {
   AUTOPILOT: 'autopilot',
   RALPH: 'ralph',
   ULTRAWORK: 'ultrawork',
-  ULTRAQA: 'ultraqa',
   TEAM: 'team',
   RALPLAN: 'ralplan',
 } as const;

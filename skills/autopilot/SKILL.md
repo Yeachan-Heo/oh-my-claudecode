@@ -99,7 +99,7 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - Executor (Opus): Complex tasks
    - Run independent tasks in parallel
 
-4. **Phase 3 - QA**: Cycle until all tests pass (UltraQA mode)
+4. **Phase 3 - QA**: Cycle until all tests pass
    - Build, lint, test, fix failures
    - Repeat up to 5 cycles
    - Stop early if the same error repeats 3 times (indicates a fundamental issue)
@@ -111,7 +111,7 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - All must approve; fix and re-validate on rejection
 
 6. **Phase 5 - Cleanup**: Delete all state files on successful completion
-   - Remove `.omc/state/autopilot-state.json`, `ralph-state.json`, `ultrawork-state.json`, `ultraqa-state.json`
+   - Remove `.omc/state/autopilot-state.json`, `ralph-state.json`, `ultrawork-state.json` (plus stale `ultraqa-state.json` if a retired copy exists)
    - Run `/oh-my-claudecode:cancel` for clean exit
 </Steps>
 

@@ -32,7 +32,6 @@ Hooks intercept Claude Code events to enable:
 | `ralph/` | Persistence until verified | "ralph", "don't stop" |
 | `ultrapilot/` | Parallel autopilot with file ownership | "ultrapilot" |
 | `swarm/` | N coordinated agents with task claiming | "swarm N agents" |
-| `ultraqa/` | QA cycling until goal met | test failures |
 | `mode-registry/` | Tracks active execution mode  | internal |
 | `persistent-mode/` | Maintains mode state across sessions | internal |
 
@@ -246,8 +245,7 @@ return {
 3. Ultrapilot (parallel workers)
 4. Swarm (coordinated agents)
 5. Pipeline (sequential stages)
-6. UltraQA (test cycling)
-7. Ultrawork (parallel execution)
+6. Ultrawork (parallel execution)
 
 **Session isolation**: Hooks only enforce for matching `session_id`. Stale states (>2 hours) are ignored.
 

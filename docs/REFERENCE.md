@@ -13,7 +13,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (29 Total)](#agents-29-total)
-- [Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultraqa-ultragoal)
+- [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
 - [Skills (33 Total)](#skills-33-total)
 - [Slash Commands](#slash-commands)
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -729,7 +729,7 @@ Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
 ---
 
-## Goal Workflow UX: `/goal`, Ralph, Team, UltraQA, Ultragoal
+## Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal
 
 OMC exposes several ways to pursue a goal-shaped task. They are complementary, not interchangeable. Choose one primary loop authority per session and use the others as evidence producers or handoff targets.
 
@@ -738,7 +738,6 @@ OMC exposes several ways to pursue a goal-shaped task. They are complementary, n
 | Claude Code `/goal`     | Claude Code native session loop                   | Keep working toward one stated completion condition           | Evidence surfaced in the conversation for the `/goal` evaluator              | Cite Claude Code/Anthropic docs or changelog only for `/goal` behavior. The evaluator must not be described as independently running commands or reading files. |
 | Ralph                   | OMC skill + Stop-hook enforcement                 | Persistent single-owner implementation until PRD stories pass | Tests/build/lint/typecheck plus reviewer verification                        | Prefer when correctness depends on OMC's PRD, progress, and reviewer gates.                                                                                     |
 | Team                    | OMC native/team or CLI team runtime               | Coordinated multi-agent execution over assigned tasks         | Worker task results, commits, staged `team-verify`/`team-fix` evidence       | Prefer when ownership boundaries and parallel lanes matter.                                                                                                     |
-| UltraQA                 | OMC QA cycling skill                              | Repeat diagnose/fix cycles until a quality gate passes        | Command output from the requested QA goal each cycle                         | Prefer after the implementation target is known but verification still fails.                                                                                   |
 | Artifact-only Ultragoal | Durable goal ledger/checkpoints/handoff artifacts | Track goal state without starting another active loop         | Goal artifact, checkpoints, handoff prompt, attached command/review evidence | Prefer when `/goal` is unavailable, unsafe, or conflicts with an active OMC loop.                                                                               |
 
 ### `/goal` source and evidence boundary
@@ -754,7 +753,7 @@ Do not cite OpenAI/Codex documentation as authority for Claude Code `/goal`. In 
 
 When multiple loops could apply, use this deterministic policy:
 
-1. **refuse**: if Ralph, Team, UltraQA, autopilot, or another Stop-hook loop is already active and a new `/goal` would compete for continuation authority.
+1. **refuse**: if Ralph, Team, autopilot, or another Stop-hook loop is already active and a new `/goal` would compete for continuation authority.
 2. **adopt_existing**: if Claude Code `/goal` is already active and the OMC workflow can attach evidence to that same condition without changing loop ownership.
 3. **artifact_only**: if `/goal` is unavailable because of hooks/trust/settings, or if the user only needs durable planning, checkpointing, and evidence capture.
 
@@ -940,7 +939,7 @@ Key contract points:
 
 - Claude Code `/goal` facts must cite Claude Code or Anthropic sources only. OpenAI/Codex references are comparison sources, not authority for Claude Code behavior.
 - The adapter renders a measurable `/goal <condition>` handoff; it must not mutate hidden Claude Code session state directly.
-- The deterministic conflict policy is exactly one of `refuse`, `adopt_existing`, or `artifact_only`; competing Ralph/autopilot/Stop-hook/Team/UltraQA loops must not continue with only a warning.
+- The deterministic conflict policy is exactly one of `refuse`, `adopt_existing`, or `artifact_only`; competing Ralph/autopilot/Stop-hook/Team loops must not continue with only a warning.
 - `/goal` evaluator success is evidence for OMC final review, not completion by itself; OMC still requires surfaced command/test/docs evidence.
 - OMC stores durable goal ledgers and evidence under OMC-owned logical artifacts and `.omc/`-resolved paths, not hardcoded `.omx/` paths.
 
@@ -970,7 +969,7 @@ For each UserPromptSubmit command, 30s is the outer host fuse, including any lau
 
 The `workflow-drift-guard` blocks only supported source-associated local selection forks with a known minimum of two live alternatives—including exact binary questions and cardinality templates; explicit open input and every unsupported or ambiguous form fail open.
 
-> **Note**: autopilot, ralph, ultrawork, and ultraqa are **skills** (activated via keyword-detector), not hooks. The `persistent-mode.mjs` hook enforces their continuation by blocking the Stop event. A fresh unconfirmed ultragoal does not enforce matching `/goal`; confirmed runs remain fail-closed.
+> **Note**: autopilot, ralph, and ultrawork are **skills** (activated via keyword-detector), not hooks. The `persistent-mode.mjs` hook enforces their continuation by blocking the Stop event. A fresh unconfirmed ultragoal does not enforce matching `/goal`; confirmed runs remain fail-closed.
 
 ### Code Simplifier Hook
 

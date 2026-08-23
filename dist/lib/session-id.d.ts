@@ -2,7 +2,7 @@
  * Session-id resolution for multi-repo workspaces (Wave A).
  *
  * Two callers consume this:
- *  - CLI commands (autopilot, ralph, ultraqa, ultragoal, etc.) running in a
+ *  - CLI commands (autopilot, ralph, ultragoal, etc.) running in a
  *    shell where the only signal is the `OMC_SESSION_ID` env var.
  *  - Hooks (session-start, post-tool-use-failure, etc.) running with a
  *    `data.session_id` payload from Claude Code.

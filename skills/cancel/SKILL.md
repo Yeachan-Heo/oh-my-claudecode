@@ -1,7 +1,7 @@
 ---
 name: cancel
 aliases: [cancel-ralph]
-description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultraqa, ultragoal, swarm, ultrapilot, pipeline, team)
+description: Cancel any active OMC mode (autopilot, ralph, ultrawork, ultragoal, swarm, ultrapilot, pipeline, team)
 argument-hint: "[--force|--all]"
 level: 2
 ---
@@ -22,7 +22,7 @@ Automatically detects which mode is active and cancels it:
 - **Autopilot**: Stops workflow, preserves progress for resume
 - **Ralph**: Stops persistence loop, clears linked ultrawork if applicable
 - **Ultrawork**: Stops parallel execution (standalone or linked)
-- **UltraQA**: Stops QA cycling workflow
+- **UltraQA (retired)**: No live workflow remains; clears stale pre-5.0.0 `ultraqa-state.json` if present
 - **Ultragoal**: Clears the session-scoped ultragoal runtime guard (`.omc/state/.../ultragoal-state.json`) so PreToolUse `/goal` enforcement and Stop reinforcement release. Durable `.omc/ultragoal/` plan/ledger artifacts are preserved.
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
@@ -51,9 +51,9 @@ ToolSearch(query="select:mcp__plugin_oh-my-claudecode_t__state_clear,mcp__plugin
 If `state_clear` is unavailable or fails, use this **bash fallback** as an **emergency
 escape from the stop hook loop**. This is NOT a full replacement for the cancel flow —
 it only removes state files to unblock the session. Linked modes (e.g. ralph→ultrawork,
-autopilot→ralph/ultraqa) must be cleared separately by running the fallback once per mode.
+autopilot→ralph) must be cleared separately by running the fallback once per mode.
 
-Replace `MODE` with the specific mode (e.g. `ralplan`, `ralph`, `ultrawork`, `ultraqa`, `ultragoal`).
+Replace `MODE` with the specific mode (e.g. `ralplan`, `ralph`, `ultrawork`, `ultragoal`).
 
 **WARNING:** Do NOT use this fallback for `autopilot` or `omc-teams`. Autopilot requires
 `state_write(active=false)` to preserve resume data. omc-teams requires tmux session
@@ -110,18 +110,17 @@ fi
 - The default cleanup flow calls `state_clear` with the session id to remove only the matching session files; modes stay bound to their originating session.
 
 Active modes are still cancelled in dependency order:
-1. Autopilot (includes linked ralph/ultraqa/ cleanup)
+1. Autopilot (includes linked ralph/ retired-ultraqa cleanup)
 2. Ralph (cleans its linked ultrawork or )
 3. Ultrawork (standalone)
-4. UltraQA (standalone)
-5. Ultragoal (standalone runtime guard — `state_clear(mode="ultragoal")`; preserves durable `.omc/ultragoal/` artifacts)
-6. Swarm (standalone)
-7. Ultrapilot (standalone)
-8. Pipeline (standalone)
-9. Team (Claude Code native)
-10. OMC Teams (tmux CLI workers)
-11. Plan Consensus (standalone)
-12. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
+4. Ultragoal (standalone runtime guard — `state_clear(mode="ultragoal")`; preserves durable `.omc/ultragoal/` artifacts)
+5. Swarm (standalone)
+6. Ultrapilot (standalone)
+7. Pipeline (standalone)
+8. Team (Claude Code native)
+9. OMC Teams (tmux CLI workers)
+10. Plan Consensus (standalone)
+11. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
 
 ## Force Clear All
 
@@ -276,7 +275,7 @@ Team "{team_name}" cancelled:
 
 #### If Autopilot Active
 
-Autopilot handles its own primary-first cleanup: named workflows additionally remove only their session-owned nested ralplan enforcement state before linked ralph and ultraqa cleanup.
+Autopilot handles its own primary-first cleanup: named workflows additionally remove only their session-owned nested ralplan enforcement state before linked ralph and retired ultraqa cleanup.
 
 1. Read autopilot state via `state_read(mode="autopilot", session_id)` to capture the exact current run, including `workflowRunId` when present.
 2. Pause that exact run with the narrow mutation `state_write(mode="autopilot", session_id, active=false, state={workflowRunId: "<exact run id>"})`. Do **not** replay or copy the state readback. On Linux with `flock`, the tool revalidates the held run and workflow integrity under its mutation lock before changing only `active` to `false`; it preserves workflow, pipeline tracking, and task identity. `target_state_sha256` may be included only when it is the exact SHA-256 of the current serialized state.
@@ -285,7 +284,7 @@ Autopilot handles its own primary-first cleanup: named workflows additionally re
 4. Only after the primary pause commits, check linked ralph via `state_read(mode="ralph", session_id)`:
    - If ralph is active and has `linked_ultrawork: true`, clear ultrawork first and require success.
    - Clear ralph and require success.
-5. Check linked ultraqa via `state_read(mode="ultraqa", session_id)` and clear it if active.
+5. Check for retired ultraqa state via `state_read(mode="ultraqa", session_id)` and clear it if present.
 6. Report every dependent clear failure explicitly; the already-paused autopilot state remains resumable and cleanup may be retried.
 
 Force cancellation follows the same primary-first rule for every autopilot group: clear the exact autopilot primary first, abort its dependent cleanup if the primary clear fails, and never continue as though that group succeeded.
@@ -304,9 +303,11 @@ Force cancellation follows the same primary-first rule for every autopilot group
 2. If `linked_to_ralph: true`, warn user to cancel ralph instead (which cascades)
 3. Otherwise clear: `state_clear(mode="ultrawork", session_id)`
 
-#### If UltraQA Active (standalone)
+#### If UltraQA State Present (retired)
 
-Clear directly: `state_clear(mode="ultraqa", session_id)`
+UltraQA was retired in 5.0.0. No live workflow exists; if a stale
+`ultraqa-state.json` remains from a pre-5.0.0 run, clear it directly:
+`state_clear(mode="ultraqa", session_id)`
 
 #### If Ultragoal Active (standalone)
 
@@ -341,7 +342,7 @@ Mode-specific subsections below describe what extra cleanup each handler perform
 | Autopilot | "Autopilot cancelled at phase: {phase}. Progress preserved for resume." |
 | Ralph | "Ralph cancelled. Persistent mode deactivated." |
 | Ultrawork | "Ultrawork cancelled. Parallel execution mode deactivated." |
-| UltraQA | "UltraQA cancelled. QA cycling workflow stopped." |
+| UltraQA (retired) | "UltraQA retired state cleared." |
 | Ultragoal | "Ultragoal cancelled. Runtime /goal guard released; durable plan/ledger preserved." |
 | Swarm | "Swarm cancelled. Coordinated agents stopped." |
 | Ultrapilot | "Ultrapilot cancelled. Parallel autopilot workers stopped." |
@@ -358,7 +359,6 @@ Mode-specific subsections below describe what extra cleanup each handler perform
 | Autopilot | Yes (phase, files, spec, plan, verdicts) | `/oh-my-claudecode:autopilot` |
 | Ralph | No | N/A |
 | Ultrawork | No | N/A |
-| UltraQA | No | N/A |
 | Ultragoal | Yes (durable plan/ledger under `.omc/ultragoal/`) | Resume via `/ultragoal` / `omc ultragoal complete-goals` |
 | Swarm | No | N/A |
 | Ultrapilot | No | N/A |
@@ -367,7 +367,7 @@ Mode-specific subsections below describe what extra cleanup each handler perform
 
 ## Notes
 
-- **Dependency-aware**: Autopilot cancellation cleans up Ralph and UltraQA
+- **Dependency-aware**: Autopilot cancellation cleans up Ralph and any retired ultraqa state
 - **Link-aware**: Ralph cancellation cleans up linked Ultrawork
 - **Safe**: Only clears linked Ultrawork, preserves standalone Ultrawork
 - **Local-only**: Clears state files in `.omc/state/` directory

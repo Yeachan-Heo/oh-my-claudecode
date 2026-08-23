@@ -7,7 +7,7 @@
  * 1. Expansion: Analyst + Architect expand the idea into detailed requirements
  * 2. Planning: Architect creates comprehensive execution plan
  * 3. Execution: Ralph + Ultrawork implement the plan
- * 4. QA: UltraQA ensures build/lint/tests pass
+ * 4. QA: build/lint/test cycling ensures the build passes
  * 5. Validation: Multiple specialized architects verify the implementation
  */
 import type { PipelineTracking, WorkflowDescriptor } from "./pipeline-types.js";
@@ -87,8 +87,6 @@ export interface AutopilotExecution {
  * State tracking for the QA phase
  */
 export interface AutopilotQA {
-    /** Number of UltraQA test-fix cycles performed */
-    ultraqa_cycles: number;
     /** Current build status */
     build_status: QAStatus;
     /** Current lint status */

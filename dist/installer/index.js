@@ -28,6 +28,7 @@ import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 import { executeClaudeMdTransaction } from './claude-md-transaction.js';
 import { HISTORICAL_AGENT_OWNERSHIP } from './historical-agent-ownership.js';
+import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
 /** Claude Code configuration directory */
 export const CLAUDE_CONFIG_DIR = getClaudeConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
@@ -61,12 +62,7 @@ const CC_NATIVE_COMMANDS = new Set([
     'compact',
     'memory',
 ]);
-/**
- * Skills installed only for skininthegamebros users. Empty as of 5.0.0 —
- * remember/verify/debug were ungated so the canonical Tier-0 chain installs
- * for everyone. Mirrors src/features/builtin-skills/skills.ts.
- */
-const SKININTHEGAMEBROS_ONLY_SKILLS = new Set([]);
+const SKININTHEGAMEBROS_ONLY_SKILLS = new Set(entitlementManifest.skininthegamebrosOnlySkills.map((skill) => skill.trim().toLowerCase()));
 function isSafeAgentFilename(filename) {
     return /^[a-z0-9-]+\.md$/.test(filename);
 }
@@ -1861,7 +1857,7 @@ function syncBundledSkillDefinitions(log, options) {
     for (const entry of readdirSync(skillsDir, { withFileTypes: true })) {
         if (!entry.isDirectory())
             continue;
-        if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name) && !isSkininthegamebrosUser()) {
+        if (SKININTHEGAMEBROS_ONLY_SKILLS.has(entry.name.toLowerCase()) && !isSkininthegamebrosUser()) {
             continue;
         }
         const sourceDir = join(skillsDir, entry.name);

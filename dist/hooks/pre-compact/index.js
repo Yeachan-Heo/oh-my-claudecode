@@ -123,13 +123,6 @@ export async function saveModeSummary(directory) {
                 ? { original_prompt: s.original_prompt || s.prompt || "" }
                 : null,
         },
-        {
-            file: "ultraqa-state.json",
-            key: "ultraqa",
-            extract: (s) => s.active
-                ? { cycle: s.cycle || 0, prompt: s.original_prompt || s.prompt || "" }
-                : null,
-        },
     ];
     const reads = stateFiles.map(async (config) => {
         const path = join(stateDir, config.file);
@@ -328,11 +321,6 @@ export function formatCompactSummary(checkpoint) {
             const uw = checkpoint.active_modes.ultrawork;
             lines.push(`- **Ultrawork**`);
             lines.push(`  Prompt: ${uw.original_prompt}`);
-        }
-        if (checkpoint.active_modes.ultraqa) {
-            const qa = checkpoint.active_modes.ultraqa;
-            lines.push(`- **UltraQA** (Cycle: ${qa.cycle})`);
-            lines.push(`  Prompt: ${qa.prompt}`);
         }
         lines.push("");
     }

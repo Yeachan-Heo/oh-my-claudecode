@@ -84,7 +84,9 @@ export declare function spawnWorkerForTask(runtime: TeamRuntime, workerNameValue
 /**
  * Kill a single worker pane and update runtime state.
  */
-export declare function killWorkerPane(runtime: TeamRuntime, workerNameValue: string, paneId: string): Promise<void>;
+export declare function killWorkerPane(runtime: TeamRuntime, workerNameValue: string, paneId: string, options?: {
+    strict?: boolean;
+}): Promise<void>;
 /**
  * Assign a task to a specific worker via inbox + tmux trigger.
  */

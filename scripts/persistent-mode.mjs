@@ -5,7 +5,7 @@
  * Minimal continuation enforcer for all OMC modes.
  * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
  *
- * Supported modes: ralph, ultragoal, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
+ * Supported modes: ralph, ultragoal, autopilot, ultrapilot, swarm, ultrawork, pipeline, team
  */
 
 import {
@@ -1304,12 +1304,6 @@ async function main() {
       "ultrawork-state.json",
       sessionId,
     );
-    const ultraqa = readStateFileWithSession(
-      stateDir,
-      globalStateDir,
-      "ultraqa-state.json",
-      sessionId,
-    );
     const pipeline = readStateFileWithSession(
       stateDir,
       globalStateDir,
@@ -1774,40 +1768,6 @@ async function main() {
             return;
           }
         }
-      }
-    }
-
-    // Priority 7: UltraQA (QA cycling)
-    if (
-      ultraqa.state?.active &&
-      !isStaleState(ultraqa.state) &&
-      (hasValidSessionId
-        ? ultraqa.state.session_id === sessionId
-        : !ultraqa.state.session_id || ultraqa.state.session_id === sessionId) &&
-      isStateForCurrentProject(ultraqa.state, directory, ultraqa.isGlobal)
-    ) {
-      const cycle = ultraqa.state.cycle || 1;
-      const maxCycles = ultraqa.state.max_cycles || 10;
-      if (cycle < maxCycles && !ultraqa.state.all_passing) {
-        const toolError = readLastToolError(stateDir);
-        const errorGuidance = getToolErrorRetryGuidance(toolError);
-
-        ultraqa.state.cycle = cycle + 1;
-        ultraqa.state.last_checked_at = new Date().toISOString();
-        writeJsonFile(ultraqa.path, ultraqa.state);
-
-        let reason = `[ULTRAQA - Cycle ${cycle + 1}/${maxCycles}] Tests not all passing. Continue fixing. When all tests pass, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`;
-        if (errorGuidance) {
-          reason = errorGuidance + reason;
-        }
-
-        console.log(
-          JSON.stringify({
-            decision: "block",
-            reason,
-          }),
-        );
-        return;
       }
     }
 

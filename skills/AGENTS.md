@@ -22,7 +22,6 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `ultrawork/SKILL.md` | ultrawork | Maximum parallel agent execution |
 | `ralph/SKILL.md` | ralph | Persistence until verified complete |
 | `team/SKILL.md` | team | N coordinated agents with task claiming |
-| `ultraqa/SKILL.md` | ultraqa | QA cycling until goal met |
 
 ### Planning Skills
 
@@ -176,7 +175,7 @@ None - pure markdown files.
 
 | Category | Skills | Trigger Keywords |
 |----------|--------|------------------|
-| Execution | autopilot, ultrawork, ralph, team, ultraqa | "autopilot", "ulw", "ralph", "team" |
+| Execution | autopilot, ultrawork, ralph, team | "autopilot", "ulw", "ralph", "team" |
 | Cleanup | ai-slop-cleaner | "deslop", "anti-slop", cleanup/refactor + slop smells |
 | Planning | omc-plan, ralplan, deep-interview, ralph-init | "plan this", "interview me", "ouroboros" |
 | Exploration | deepinit, sciomc, external-context | "deepinit", "research" |

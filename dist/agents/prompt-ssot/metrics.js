@@ -18,26 +18,36 @@ export function tokenize(text) {
         .filter((t) => t.length > 0);
 }
 export function corpusStats(texts, nGramSize = 8) {
+    if (!Number.isFinite(nGramSize) || !Number.isInteger(nGramSize) || nGramSize <= 0) {
+        throw new RangeError('nGramSize must be a finite positive integer.');
+    }
     const tokens = texts.flatMap((t) => tokenize(t));
-    const ngramCounts = new Map();
+    const ngramPositions = new Map();
     for (let i = 0; i + nGramSize <= tokens.length; i++) {
         const gram = tokens.slice(i, i + nGramSize).join(' ');
-        ngramCounts.set(gram, (ngramCounts.get(gram) ?? 0) + 1);
+        const positions = ngramPositions.get(gram) ?? [];
+        positions.push(i);
+        ngramPositions.set(gram, positions);
     }
-    let repeatedPositions = 0;
-    let extraOccurrences = 0;
-    for (const count of ngramCounts.values()) {
-        if (count > 1) {
-            repeatedPositions += count * nGramSize;
-            extraOccurrences += (count - 1) * nGramSize;
+    const repeatedPositions = new Set();
+    const extraOccurrencePositions = new Set();
+    for (const positions of ngramPositions.values()) {
+        if (positions.length > 1) {
+            for (const [occurrence, start] of positions.entries()) {
+                for (let position = start; position < start + nGramSize; position++) {
+                    repeatedPositions.add(position);
+                    if (occurrence > 0)
+                        extraOccurrencePositions.add(position);
+                }
+            }
         }
     }
     return {
         totalTokens: tokens.length,
         uniqueTokens: new Set(tokens).size,
-        uniqueNGrams: ngramCounts.size,
-        repeatedClauseRatio: tokens.length === 0 ? 0 : repeatedPositions / tokens.length,
-        repeatedTokens: extraOccurrences,
+        uniqueNGrams: ngramPositions.size,
+        repeatedClauseRatio: tokens.length === 0 ? 0 : repeatedPositions.size / tokens.length,
+        repeatedTokens: extraOccurrencePositions.size,
     };
 }
 /**

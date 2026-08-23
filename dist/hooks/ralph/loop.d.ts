@@ -10,7 +10,6 @@
  * Ported from oh-my-opencode's ralph hook.
  */
 import { type PRDStatus, type UserStory } from "./prd.js";
-export declare function isUltraQAActive(directory: string, sessionId?: string): boolean;
 export interface RalphLoopState {
     /** Whether the loop is currently active */
     active: boolean;

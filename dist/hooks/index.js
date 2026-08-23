@@ -15,7 +15,7 @@ detectKeywordsWithType, extractPromptText, removeCodeBlocks } from './keyword-de
 export { 
 // Ralph Hook (consolidated: loop, PRD, progress, verifier)
 // Loop
-createRalphLoopHook, readRalphState, writeRalphState, clearRalphState, clearLinkedUltraworkState, incrementRalphIteration, isUltraQAActive, 
+createRalphLoopHook, readRalphState, writeRalphState, clearRalphState, clearLinkedUltraworkState, incrementRalphIteration, 
 // PRD Integration
 hasPrd, getPrdCompletionStatus, getRalphContext, setCurrentStory, enablePrdMode, recordStoryProgress, recordPattern, shouldCompleteByPrd, 
 // PRD Stale-State Detection & Reconciliation (#3669)
@@ -90,9 +90,6 @@ checkPersistentModes, createHookOutput } from './persistent-mode/index.js';
 export { 
 // Plugin Patterns (Popular Community Patterns)
 getFormatter, isFormatterAvailable, formatFile, getLinter, lintFile, validateCommitMessage, runTypeCheck, runTests, runLint, runPreCommitChecks, getPreCommitReminderMessage, getAutoFormatMessage } from './plugin-patterns/index.js';
-export { 
-// UltraQA Loop (QA cycling workflow)
-readUltraQAState, writeUltraQAState, clearUltraQAState, startUltraQA, recordFailure, completeUltraQA, stopUltraQA, cancelUltraQA, getGoalCommand, formatProgressMessage } from './ultraqa/index.js';
 export { 
 // Notepad (Compaction-Resilient Memory)
 initNotepad, readNotepad, getPriorityContext, getWorkingMemory, getManualSection, setPriorityContext, addWorkingMemoryEntry, addManualEntry, pruneOldEntries, getNotepadStats, formatNotepadContext, formatFullNotepad, getNotepadPath, DEFAULT_CONFIG as NOTEPAD_DEFAULT_CONFIG, NOTEPAD_FILENAME, PRIORITY_HEADER, WORKING_MEMORY_HEADER, MANUAL_HEADER } from './notepad/index.js';

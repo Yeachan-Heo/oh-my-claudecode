@@ -43,7 +43,7 @@ const PROTECTION_CONFIGS = {
 const SKILL_PROTECTION = {
   // Already have mode state → no protection needed
   autopilot: 'none', ralph: 'none', ultrawork: 'none', team: 'none',
-  'omc-teams': 'none', ultraqa: 'none', cancel: 'none',
+  'omc-teams': 'none', cancel: 'none',
   // Instant / read-only → no protection needed
   trace: 'none', hud: 'none', 'omc-doctor': 'none', 'omc-help': 'none',
   'learn-about-omc': 'none', note: 'none',

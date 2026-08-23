@@ -58,12 +58,17 @@ import type { AutopilotState } from '../hooks/autopilot/types.js';
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
 // extra state-only mode handled via the registry-fallback path).
 const EXECUTION_MODES: [string, ...string[]] = [
-  'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'ultraqa', 'deep-interview', 'self-improve'
+  'autopilot', 'autoresearch', 'team', 'ralph', 'ultrawork', 'deep-interview', 'self-improve'
 ];
+
+// ultraqa was retired in 5.0.0; its state stays read/clear-eligible for
+// bounded cleanup of pre-existing retired state, but is not write-eligible.
+const RETIRED_READ_CLEAR_MODES = ['ultraqa'] as const;
 
 // merge-readiness is read/clear-eligible (state_read/status/clear + /cancel work) but NOT write-eligible.
 const STATE_TOOL_MODES: [string, ...string[]] = [
   ...EXECUTION_MODES,
+  ...RETIRED_READ_CLEAR_MODES,
   'ralplan',
   'omc-teams',
   'skill-active',

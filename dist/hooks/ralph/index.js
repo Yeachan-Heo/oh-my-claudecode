@@ -11,7 +11,7 @@ export {
 // State management
 readRalphState, writeRalphState, clearRalphState, clearLinkedUltraworkState, incrementRalphIteration, 
 // Loop control
-createRalphLoopHook, isUltraQAActive, 
+createRalphLoopHook, 
 // PRD flag helpers
 detectNoPrdFlag, stripNoPrdFlag, detectCriticModeFlag, stripCriticModeFlag, normalizeRalphCriticMode, 
 // Team coordination

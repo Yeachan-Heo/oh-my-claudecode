@@ -5,7 +5,7 @@
  * Minimal continuation enforcer for all OMC modes.
  * Stripped down for reliability — no optional imports, no PRD, no notepad pruning.
  *
- * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, ultraqa, pipeline, team
+ * Supported modes: ralph, autopilot, ultrapilot, swarm, ultrawork, pipeline, team
  */
 
 const {
@@ -1091,7 +1091,6 @@ async function main() {
     const autopilot = readStateFileWithSession(stateDir, "autopilot-state.json", sessionId);
     const ultrapilot = readStateFileWithSession(stateDir, "ultrapilot-state.json", sessionId);
     const ultrawork = readStateFileWithSession(stateDir, "ultrawork-state.json", sessionId);
-    const ultraqa = readStateFileWithSession(stateDir, "ultraqa-state.json", sessionId);
     const pipeline = readStateFileWithSession(stateDir, "pipeline-state.json", sessionId);
     const team = readStateFileWithSession(stateDir, "team-state.json", sessionId);
     const ralplan = readStateFileWithSession(stateDir, "ralplan-state.json", sessionId);
@@ -1413,28 +1412,6 @@ async function main() {
           );
           return;
         }
-      }
-    }
-
-    // Priority 7: UltraQA (QA cycling)
-    if (ultraqa.state?.active && !isStaleState(ultraqa.state) && isSessionMatch(ultraqa.state, sessionId)) {
-      const cycle = ultraqa.state.cycle || 1;
-      const maxCycles = ultraqa.state.max_cycles || 10;
-      if (cycle < maxCycles && !ultraqa.state.all_passing) {
-        ultraqa.state.cycle = cycle + 1;
-        ultraqa.state.last_checked_at = new Date().toISOString();
-        writeJsonFile(ultraqa.path, ultraqa.state);
-
-        // Fire-and-forget notification
-        sendStopNotification('ultraqa', ultraqa.state, sessionId, directory).catch(() => {});
-
-        console.log(
-          JSON.stringify({
-            decision: "block",
-            reason: `[ULTRAQA - Cycle ${cycle + 1}/${maxCycles}] Tests not all passing. Continue fixing. When all tests pass, run /oh-my-claudecode:cancel to cleanly exit and clean up state files. If cancel fails, retry with /oh-my-claudecode:cancel --force.`,
-          }),
-        );
-        return;
       }
     }
 

@@ -19,7 +19,6 @@ export {
 
   // Loop control
   createRalphLoopHook,
-  isUltraQAActive,
 
   // PRD flag helpers
   detectNoPrdFlag,

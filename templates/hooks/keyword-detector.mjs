@@ -388,7 +388,6 @@ const SYSTEM_ECHO_BLOCK_PATTERNS = [
   buildEchoBlockRegex('\\[AUTOPILOT[^\\]\\n]*\\]'),
   buildEchoBlockRegex('\\[ULTRAPILOT[^\\]\\n]*\\]'),
   buildEchoBlockRegex('\\[ULTRAWORK[^\\]\\n]*\\]'),
-  buildEchoBlockRegex('\\[ULTRAQA[^\\]\\n]*\\]'),
   buildEchoBlockRegex('\\[PIPELINE[^\\]\\n]*\\]'),
   buildEchoBlockRegex('\\[SWARM[^\\]\\n]*\\]'),
   buildEchoBlockRegex('\\[TOOL ERROR[^\\]\\n]*\\]'),

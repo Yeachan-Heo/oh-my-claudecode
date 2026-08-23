@@ -2,7 +2,7 @@
  * Autopilot Cancellation
  *
  * Handles cancellation of autopilot, cleaning up all related state
- * including any active Ralph or UltraQA modes.
+ * including any active Ralph mode.
  */
 import type { AutopilotState } from './types.js';
 export interface CancelResult {

@@ -2121,6 +2121,17 @@ var init_runtime_guidance = __esm({
   }
 });
 
+// src/config/builtin-skill-entitlements.json
+var builtin_skill_entitlements_default;
+var init_builtin_skill_entitlements = __esm({
+  "src/config/builtin-skill-entitlements.json"() {
+    builtin_skill_entitlements_default = {
+      schemaVersion: 1,
+      skininthegamebrosOnlySkills: []
+    };
+  }
+});
+
 // src/features/builtin-skills/skills.ts
 function getPackageDir2() {
   if (typeof __dirname !== "undefined" && __dirname) {
@@ -2142,7 +2153,7 @@ function getPackageDir2() {
     return process.cwd();
   }
 }
-var import_fs6, import_path8, import_url2, import_meta2, SKILLS_DIR;
+var import_fs6, import_path8, import_url2, import_meta2, SKILLS_DIR, SKININTHEGAMEBROS_ONLY_SKILLS;
 var init_skills = __esm({
   "src/features/builtin-skills/skills.ts"() {
     "use strict";
@@ -2156,8 +2167,12 @@ var init_skills = __esm({
     init_runtime_guidance();
     init_skininthegamebros_user();
     init_config_dir();
+    init_builtin_skill_entitlements();
     import_meta2 = {};
     SKILLS_DIR = (0, import_path8.join)(getPackageDir2(), "skills");
+    SKININTHEGAMEBROS_ONLY_SKILLS = new Set(
+      builtin_skill_entitlements_default.skininthegamebrosOnlySkills.map((skill) => skill.trim().toLowerCase())
+    );
   }
 });
 
@@ -2169,7 +2184,7 @@ function normalizeToCcAlias(model) {
   const family = resolveClaudeFamily(model);
   return family ? FAMILY_TO_ALIAS[family] ?? model : model;
 }
-var import_fs7, import_path9, FAMILY_TO_ALIAS;
+var import_fs7, import_path9, FAMILY_TO_ALIAS, SKININTHEGAMEBROS_ONLY_SKILLS2;
 var init_delegation_enforcer = __esm({
   "src/features/delegation-enforcer.ts"() {
     "use strict";
@@ -2181,12 +2196,16 @@ var init_delegation_enforcer = __esm({
     init_models();
     init_skills();
     init_skininthegamebros_user();
+    init_builtin_skill_entitlements();
     FAMILY_TO_ALIAS = {
       SONNET: "sonnet",
       OPUS: "opus",
       HAIKU: "haiku",
       FABLE: "fable"
     };
+    SKININTHEGAMEBROS_ONLY_SKILLS2 = new Set(
+      builtin_skill_entitlements_default.skininthegamebrosOnlySkills.map((skill) => skill.trim().toLowerCase())
+    );
   }
 });
 
@@ -16057,7 +16076,7 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
   const rollbackStartupFailure = async (startupError, rollbackMessage2, taskResetMarker2, causeKey) => {
     let paneCleanupError;
     try {
-      await killWorkerPane(runtime, workerNameValue, paneId);
+      await killWorkerPane(runtime, workerNameValue, paneId, { strict: true });
     } catch (cleanupError) {
       paneCleanupError = cleanupError;
     }
@@ -16172,8 +16191,12 @@ async function spawnWorkerForTask(runtime, workerNameValue, taskIndex) {
     return await rollbackStartupFailure(error, rollbackMessage, taskResetMarker, rollbackCauseKey);
   }
 }
-async function killWorkerPane(runtime, workerNameValue, paneId) {
-  await killTeamPane(paneId);
+async function killWorkerPane(runtime, workerNameValue, paneId, options = {}) {
+  try {
+    await killTeamPane(paneId);
+  } catch (error) {
+    if (options.strict) throw error;
+  }
   const paneIndex = runtime.workerPaneIds.indexOf(paneId);
   if (paneIndex >= 0) {
     runtime.workerPaneIds.splice(paneIndex, 1);

@@ -877,7 +877,6 @@ describe("Stop Hook Blocking Contract", () => {
       | "ultragoal"
       | "pipeline"
       | "team"
-      | "ultraqa"
       | "swarm";
 
     const stopHookActiveModes: PersistentModeScriptMode[] = [
@@ -887,7 +886,6 @@ describe("Stop Hook Blocking Contract", () => {
       "ultragoal",
       "pipeline",
       "team",
-      "ultraqa",
       "swarm",
     ];
 
@@ -965,12 +963,6 @@ describe("Stop Hook Blocking Contract", () => {
           ...baseState,
           current_phase: "team-exec",
         },
-        ultraqa: {
-          ...baseState,
-          cycle: 1,
-          max_cycles: 10,
-          all_passing: false,
-        },
       };
 
       writeFileSync(
@@ -1027,6 +1019,27 @@ describe("Stop Hook Blocking Contract", () => {
         expect(output.decision).toBe("block");
       },
     );
+    it("does not block on retired ultraqa state (issue #3826)", () => {
+      const caseDir = makeCaseDir("retired-ultraqa-not-blocking");
+      const sessionId = "retired-ultraqa-not-blocking";
+      const sessionDir = join(caseDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(
+        join(sessionDir, "ultraqa-state.json"),
+        JSON.stringify({
+          active: true,
+          cycle: 1,
+          max_cycles: 10,
+          all_passing: false,
+          session_id: sessionId,
+          started_at: new Date().toISOString(),
+        }),
+      );
+
+      const output = runScript({ directory: caseDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).not.toBe("block");
+    });
 
     it("returns continue: true when ralph is awaiting confirmation", () => {
       const sessionId = "ralph-awaiting-confirmation-mjs";
@@ -1437,7 +1450,7 @@ describe("Stop Hook Blocking Contract", () => {
           expansion: { analyst_complete: false, architect_complete: false, spec_path: null, requirements_summary: "", tech_stack: [] },
           planning: { plan_path: null, architect_iterations: 0, approved: false },
           execution: { ralph_iterations: 0, ultrawork_active: false, tasks_completed: 0, tasks_total: 0, files_created: [], files_modified: [] },
-          qa: { ultraqa_cycles: 0, build_status: "pending", lint_status: "pending", test_status: "pending" },
+          qa: { build_status: "pending", lint_status: "pending", test_status: "pending" },
           validation: { architects_spawned: 0, verdicts: [], all_approved: false, validation_rounds: 0 },
           started_at: new Date().toISOString(),
           completed_at: null,
@@ -1541,7 +1554,7 @@ describe("Stop Hook Blocking Contract", () => {
           expansion: { analyst_complete: false, architect_complete: false, spec_path: null, requirements_summary: "", tech_stack: [] },
           planning: { plan_path: null, architect_iterations: 0, approved: false },
           execution: { ralph_iterations: 0, ultrawork_active: false, tasks_completed: 0, tasks_total: 0, files_created: [], files_modified: [] },
-          qa: { ultraqa_cycles: 0, build_status: "pending", lint_status: "pending", test_status: "pending" },
+          qa: { build_status: "pending", lint_status: "pending", test_status: "pending" },
           validation: { architects_spawned: 0, verdicts: [], all_approved: false, validation_rounds: 0 },
           started_at: new Date().toISOString(),
           completed_at: null,

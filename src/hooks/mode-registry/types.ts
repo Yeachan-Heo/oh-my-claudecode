@@ -10,7 +10,6 @@ export type ExecutionMode =
   | 'team'
   | 'ralph'
   | 'ultrawork'
-  | 'ultraqa'
   | 'deep-interview'
   | 'merge-readiness'
   | 'self-improve';

@@ -3,7 +3,7 @@
  *
  * Handles:
  * - Persistent state for the autopilot workflow across phases
- * - Phase transitions, especially Ralph → UltraQA and UltraQA → Validation
+ * - Phase transitions, especially Ralph → QA and QA → Validation
  * - State machine operations
  */
 import type { AutopilotState, AutopilotPhase, AutopilotConfig } from "./types.js";
@@ -80,17 +80,17 @@ export interface TransitionResult {
     state?: AutopilotState;
 }
 /**
- * Transition from Ralph (Phase 2: Execution) to UltraQA (Phase 3: QA)
+ * Transition from Ralph (Phase 2: Execution) to QA (Phase 3)
  *
- * This handles the mutual exclusion by:
- * 1. Saving Ralph's progress to autopilot state
- * 2. Cleanly terminating Ralph mode (and linked Ultrawork)
- * 3. Starting UltraQA mode
- * 4. Preserving context for potential rollback
+ * This:
+ * 1. Saves Ralph's progress to autopilot state
+ * 2. Cleanly terminates Ralph mode (and linked Ultrawork)
+ * 3. Transitions to the QA phase
+ * 4. Preserves context for potential rollback
  */
 export declare function transitionRalphToUltraQA(directory: string, sessionId: string): TransitionResult;
 /**
- * Transition from UltraQA (Phase 3: QA) to Validation (Phase 4)
+ * Transition from QA (Phase 3) to Validation (Phase 4)
  */
 export declare function transitionUltraQAToValidation(directory: string, sessionId?: string): TransitionResult;
 /**

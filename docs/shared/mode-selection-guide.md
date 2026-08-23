@@ -45,7 +45,7 @@ Have many similar independent tasks (e.g., "fix 47 errors")?
 └── YES: team N:executor (N agents claiming from task pool)
 
 Already have one measurable completion condition and want Claude Code to keep the session moving?
-└── YES: Claude Code /goal, unless Ralph/Team/UltraQA/autopilot already owns the loop
+└── YES: Claude Code /goal, unless Ralph/Team/autopilot already owns the loop
 
 Need durable tracking but no active execution loop yet?
 └── YES: artifact-only Ultragoal ledger/checkpoints/evidence
@@ -53,14 +53,13 @@ Need durable tracking but no active execution loop yet?
 
 ## Goal-Oriented Workflow Selection
 
-Claude Code `/goal`, Ralph, Team, UltraQA, and artifact-only Ultragoal all help with "keep going until done" work, but they own different parts of the workflow. Pick one primary loop authority for a session; do not run competing persistence loops at the same time.
+Claude Code `/goal`, Ralph, Team, and artifact-only Ultragoal all help with "keep going until done" work, but they own different parts of the workflow. Pick one primary loop authority for a session; do not run competing persistence loops at the same time.
 
 | Workflow                | Primary authority                      | Best fit                                                                                | Evidence and completion rule                                                                 | Avoid when                                                                                 |
 | ----------------------- | -------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Claude Code `/goal`     | Claude Code native goal loop           | One active session needs a measurable completion condition and cross-turn persistence   | Surface proof in the conversation, then let the `/goal` evaluator judge the stated condition | Ralph, Team, UltraQA, autopilot, or another Stop-hook loop is already driving continuation |
+| Claude Code `/goal`     | Claude Code native goal loop           | One active session needs a measurable completion condition and cross-turn persistence   | Surface proof in the conversation, then let the `/goal` evaluator judge the stated condition | Ralph, Team, autopilot, or another Stop-hook loop is already driving continuation |
 | Ralph                   | OMC persistence loop                   | Single-owner implementation that must finish all PRD stories with reviewer verification | Fresh tests/build/lint plus reviewer approval against PRD criteria                           | Work should be split across several owners first                                           |
 | Team                    | OMC coordinated team pipeline          | Parallel work with explicit task ownership and staged verification                      | Task results, worker commits, team verification/fix loop evidence                            | One person can finish faster than coordination overhead                                    |
-| UltraQA                 | OMC QA cycling loop                    | Repeated test/build/lint/typecheck failures until a quality gate passes                 | Command output for the chosen QA goal on every cycle                                         | Requirements or implementation scope are still undefined                                   |
 | Artifact-only Ultragoal | Durable goal artifacts, no active loop | Planning, handoff, or audit trail when a runtime loop is unavailable or unsafe          | Goal ledger, checkpoints, handoff prompts, and attached evidence                             | The user expects automatic execution without selecting Ralph/Team/`/goal`                  |
 
 ### Claude Code `/goal` source boundary
@@ -75,9 +74,9 @@ Use the deterministic policy names `refuse`, `adopt_existing`, and `artifact_onl
 
 When a goal-like request enters an OMC session:
 
-1. If Ralph, Team, UltraQA, autopilot, or a Stop-hook loop is active, keep that OMC loop as the authority and use `/goal` only as a documented handoff option.
+1. If Ralph, Team, autopilot, or a Stop-hook loop is active, keep that OMC loop as the authority and use `/goal` only as a documented handoff option.
 2. If Claude Code `/goal` is already active, either adopt that existing goal explicitly, refuse to start a competing OMC loop, or degrade to artifact-only Ultragoal documentation.
-3. If hooks, workspace trust, or managed settings make `/goal` unavailable, use Ralph/Team/UltraQA or artifact-only Ultragoal instead of pretending `/goal` is active.
+3. If hooks, workspace trust, or managed settings make `/goal` unavailable, use Ralph/Team or artifact-only Ultragoal instead of pretending `/goal` is active.
 4. Always attach command/test/review evidence before declaring durable OMC completion. `/goal` evaluator success alone is not the OMC final-review gate.
 
 ## Examples

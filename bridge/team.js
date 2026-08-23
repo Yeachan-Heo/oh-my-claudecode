@@ -9041,6 +9041,17 @@ var init_runtime_guidance = __esm({
   }
 });
 
+// src/config/builtin-skill-entitlements.json
+var builtin_skill_entitlements_default;
+var init_builtin_skill_entitlements = __esm({
+  "src/config/builtin-skill-entitlements.json"() {
+    builtin_skill_entitlements_default = {
+      schemaVersion: 1,
+      skininthegamebrosOnlySkills: []
+    };
+  }
+});
+
 // src/features/builtin-skills/skills.ts
 import { existsSync as existsSync15, readdirSync as readdirSync7, readFileSync as readFileSync11 } from "fs";
 import { join as join18, dirname as dirname18, basename as basename10, resolve as resolve6, relative as relative6, isAbsolute as isAbsolute6, win32 as win322 } from "path";
@@ -9065,7 +9076,7 @@ function getPackageDir3() {
     return process.cwd();
   }
 }
-var SKILLS_DIR;
+var SKILLS_DIR, SKININTHEGAMEBROS_ONLY_SKILLS;
 var init_skills = __esm({
   "src/features/builtin-skills/skills.ts"() {
     "use strict";
@@ -9076,7 +9087,11 @@ var init_skills = __esm({
     init_runtime_guidance();
     init_skininthegamebros_user();
     init_config_dir();
+    init_builtin_skill_entitlements();
     SKILLS_DIR = join18(getPackageDir3(), "skills");
+    SKININTHEGAMEBROS_ONLY_SKILLS = new Set(
+      builtin_skill_entitlements_default.skininthegamebrosOnlySkills.map((skill) => skill.trim().toLowerCase())
+    );
   }
 });
 
@@ -9090,7 +9105,7 @@ function normalizeToCcAlias(model) {
   const family = resolveClaudeFamily(model);
   return family ? FAMILY_TO_ALIAS[family] ?? model : model;
 }
-var FAMILY_TO_ALIAS;
+var FAMILY_TO_ALIAS, SKININTHEGAMEBROS_ONLY_SKILLS2;
 var init_delegation_enforcer = __esm({
   "src/features/delegation-enforcer.ts"() {
     "use strict";
@@ -9100,12 +9115,16 @@ var init_delegation_enforcer = __esm({
     init_models();
     init_skills();
     init_skininthegamebros_user();
+    init_builtin_skill_entitlements();
     FAMILY_TO_ALIAS = {
       SONNET: "sonnet",
       OPUS: "opus",
       HAIKU: "haiku",
       FABLE: "fable"
     };
+    SKININTHEGAMEBROS_ONLY_SKILLS2 = new Set(
+      builtin_skill_entitlements_default.skininthegamebrosOnlySkills.map((skill) => skill.trim().toLowerCase())
+    );
   }
 });
 
@@ -16792,9 +16811,6 @@ var init_runtime_v2 = __esm({
         this.cwd = cwd;
         this.threshold = threshold;
       }
-      teamName;
-      cwd;
-      threshold;
       consecutiveFailures = 0;
       tripped = false;
       recordSuccess() {

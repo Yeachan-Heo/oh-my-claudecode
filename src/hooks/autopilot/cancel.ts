@@ -2,7 +2,7 @@
  * Autopilot Cancellation
  *
  * Handles cancellation of autopilot, cleaning up all related state
- * including any active Ralph or UltraQA modes.
+ * including any active Ralph mode.
  */
 
 import {
@@ -13,7 +13,6 @@ import {
   updateAutopilotStateIfExact,
 } from './state.js';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
-import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 import type { AutopilotState } from './types.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowState, validateNamedWorkflowStateStructure } from './named-workflow-resume-validator.js';
 import { clearModeStateFile, readModeState } from '../../lib/mode-state-io.js';
@@ -133,9 +132,10 @@ export function cancelAutopilot(directory: string, sessionId?: string): CancelRe
     }
   }
 
-  const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
-  if (ultraqaState?.active) {
-    const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+  // Bounded cleanup of pre-existing retired ultraqa state (5.0.0 removal).
+  const ultraqaState = readModeState('ultraqa', directory, sessionId);
+  if (ultraqaState?.active === true) {
+    const cleared = clearModeStateFile('ultraqa', directory, sessionId);
     if (cleared) cleanedUp.push('ultraqa');
     else failedCleanup.push('ultraqa');
   }
@@ -199,9 +199,10 @@ export function clearAutopilot(directory: string, sessionId?: string): CancelRes
     }
   }
 
-  const ultraqaState = sessionId ? readUltraQAState(directory, sessionId) : readUltraQAState(directory);
+  // Bounded cleanup of pre-existing retired ultraqa state (5.0.0 removal).
+  const ultraqaState = readModeState('ultraqa', directory, sessionId);
   if (ultraqaState) {
-    const cleared = sessionId ? clearUltraQAState(directory, sessionId) : clearUltraQAState(directory);
+    const cleared = clearModeStateFile('ultraqa', directory, sessionId);
     if (!cleared) failedCleanup.push('ultraqa');
   }
 

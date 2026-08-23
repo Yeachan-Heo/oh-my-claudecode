@@ -638,6 +638,8 @@ describe('Builtin Skills', () => {
     });
     describe('skininthegamebros-only builtin skills', () => {
         it('exposes remember/verify/debug to every user (ungated in 5.0.0)', () => {
+            process.env.USER_TYPE = '';
+            clearSkillsCache();
             const names = listBuiltinSkillNames({ includeAliases: true });
             // verify is a canonical Tier-0 workflow and remember is the retirement
             // target for learner/writer-memory, so neither may be entitlement-gated.

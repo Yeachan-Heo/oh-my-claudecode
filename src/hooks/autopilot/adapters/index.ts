@@ -2,7 +2,7 @@
  * Pipeline Stage Adapters
  *
  * Barrel export for all stage adapters. Each adapter wraps an existing module
- * (ralplan, team, ralph, ultraqa) into the PipelineStageAdapter interface.
+ * (ralplan, team, ralph, qa) into the PipelineStageAdapter interface.
  */
 
 export { ralplanAdapter, RALPLAN_COMPLETION_SIGNAL } from './ralplan-adapter.js';

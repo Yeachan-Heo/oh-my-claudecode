@@ -46,7 +46,6 @@ export interface CompactCheckpoint {
     autopilot?: { phase: string; originalIdea: string };
     ralph?: { iteration: number; prompt: string };
     ultrawork?: { original_prompt: string };
-    ultraqa?: { cycle: number; prompt: string };
   };
   todo_summary: {
     pending: number;
@@ -217,14 +216,6 @@ export async function saveModeSummary(
       extract: (s: any) =>
         s.active
           ? { original_prompt: s.original_prompt || s.prompt || "" }
-          : null,
-    },
-    {
-      file: "ultraqa-state.json",
-      key: "ultraqa",
-      extract: (s: any) =>
-        s.active
-          ? { cycle: s.cycle || 0, prompt: s.original_prompt || s.prompt || "" }
           : null,
     },
   ];
@@ -459,12 +450,6 @@ export function formatCompactSummary(checkpoint: CompactCheckpoint): string {
       const uw = checkpoint.active_modes.ultrawork;
       lines.push(`- **Ultrawork**`);
       lines.push(`  Prompt: ${uw.original_prompt}`);
-    }
-
-    if (checkpoint.active_modes.ultraqa) {
-      const qa = checkpoint.active_modes.ultraqa;
-      lines.push(`- **UltraQA** (Cycle: ${qa.cycle})`);
-      lines.push(`  Prompt: ${qa.prompt}`);
     }
 
     lines.push("");

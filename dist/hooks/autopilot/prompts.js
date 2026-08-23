@@ -218,7 +218,7 @@ When all tasks from the plan are complete: EXECUTION_COMPLETE
 export function getQAPrompt(includeLegacyCompletion = true) {
     return `## AUTOPILOT PHASE 3: QUALITY ASSURANCE
 
-Run UltraQA cycles until build/lint/tests pass.
+Run build/lint/test cycles until all pass.
 
 ### QA Sequence
 

@@ -8,7 +8,6 @@ This document defines the relationships between execution modes and provides gui
 autopilot (autonomous end-to-end)
 ├── includes: ralph (persistence)
 │   └── includes: ultrawork (parallelism)
-├── includes: ultraqa (QA cycling)
 └── includes: plan (strategic thinking)
 
  (token efficiency ONLY)
@@ -28,11 +27,10 @@ ultrawork (parallelism engine)
 
 | Mode | Type | Includes | Mutually Exclusive With |
 |------|------|----------|------------------------|
-| autopilot | Standalone | ralph, ultraqa, plan | - |
+| autopilot | Standalone | ralph, plan | - |
 | ralph | Wrapper | ultrawork | - |
 | ultrawork | Component | - | - |
 |  | Modifier | - | - |
-| ultraqa | Component | - | - |
 
 ## Decision Tree
 
@@ -97,7 +95,6 @@ All mode state files use standardized locations:
 | autopilot | `autopilot-state.json` |
 | ultrawork | `ultrawork-state.json` |
 |  | `-state.json` |
-| ultraqa | `ultraqa-state.json` |
 | pipeline | `pipeline-state.json` |
 
 **Important:** Never store OMC state in `~/.claude/` - that directory is reserved for Claude Code itself.

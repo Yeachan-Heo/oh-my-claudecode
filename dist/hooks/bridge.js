@@ -600,7 +600,6 @@ async function seedAutopilotStartupState(directory, prompt, sessionId) {
             files_modified: [],
         },
         qa: {
-            ultraqa_cycles: 0,
             build_status: "pending",
             lint_status: "pending",
             test_status: "pending",
@@ -1034,7 +1033,7 @@ async function seedModeStateForExplicitWorkflowSlash(skill, directory, promptTex
             await seedAutopilotStartupState(directory, promptText, sessionId);
             return;
         default:
-            // ralph / ultrawork / team / ultraqa / deep-interview / self-improve
+            // ralph / ultrawork / team / deep-interview / self-improve
             // own their state activation inside their own Skill PostToolUse handlers.
             // Pre-Skill seeding for these would clobber existing in-flight state
             // (e.g. nested `autopilot → ralph`); the workflow slot alone is enough
@@ -1068,8 +1067,8 @@ async function processKeywordDetector(input) {
     const sessionId = input.sessionId;
     const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
-    // Unified explicit slash invocation handler — covers all 8 canonical
-    // workflow skills (autopilot, ralph, team, ultrawork, ultraqa,
+    // Unified explicit slash invocation handler — covers the canonical
+    // workflow skills (autopilot, ralph, team, ultrawork,
     // deep-interview, ralplan, self-improve). Seeds the workflow slot via the
     // sanctioned dual-copy helper BEFORE the Skill tool fires, and seeds the
     // mode-specific state file when the mode requires pre-Skill state. The

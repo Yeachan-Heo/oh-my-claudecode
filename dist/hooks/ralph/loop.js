@@ -10,47 +10,13 @@
  * Ported from oh-my-opencode's ralph hook.
  */
 import { execFileSync } from "child_process";
-import { readFileSync } from "fs";
-import { basename, join } from "path";
+import { basename } from "path";
 import { writeModeState, readModeState, clearModeStateFile, } from "../../lib/mode-state-io.js";
 import { ensurePrdForStartup, findPrdPath, readPrd, getPrdStatus, formatNextStoryPrompt, formatPrdStatus, } from "./prd.js";
 import { detectStalePrd, formatStalePrdWarning, reconcileStalePrdForStartup, } from "./stale-prd.js";
 import { findProgressPath, getProgressContext, appendProgress, initProgress, addPattern, } from "./progress.js";
 import { readUltraworkState as readUltraworkStateFromModule, writeUltraworkState as writeUltraworkStateFromModule, } from "../ultrawork/index.js";
-import { resolveSessionStatePath, getOmcRoot, } from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
-// Forward declaration to avoid circular import - check ultraqa state file directly
-export function isUltraQAActive(directory, sessionId) {
-    // When sessionId is provided, ONLY check session-scoped path — no legacy fallback
-    if (sessionId) {
-        const sessionFile = resolveSessionStatePath("ultraqa", sessionId, directory);
-        try {
-            const content = readFileSync(sessionFile, "utf-8");
-            const state = JSON.parse(content);
-            return state && state.active === true;
-        }
-        catch (error) {
-            if (error.code === "ENOENT") {
-                return false;
-            }
-            return false; // NO legacy fallback
-        }
-    }
-    // No sessionId: legacy path (backward compat)
-    const omcDir = getOmcRoot(directory);
-    const stateFile = join(omcDir, "state", "ultraqa-state.json");
-    try {
-        const content = readFileSync(stateFile, "utf-8");
-        const state = JSON.parse(content);
-        return state && state.active === true;
-    }
-    catch (error) {
-        if (error.code === "ENOENT") {
-            return false;
-        }
-        return false;
-    }
-}
 export const RALPH_CRITIC_MODES = ['architect', 'critic', 'codex'];
 const DEFAULT_MAX_ITERATIONS = 10;
 const DEFAULT_RALPH_CRITIC_MODE = 'architect';
@@ -156,11 +122,6 @@ export function stripCriticModeFlag(prompt) {
  */
 export function createRalphLoopHook(directory) {
     const startLoop = (sessionId, prompt, options) => {
-        // Mutual exclusion check: cannot start Ralph Loop if UltraQA is active
-        if (isUltraQAActive(directory, sessionId)) {
-            console.error("Cannot start Ralph Loop while UltraQA is active. Cancel UltraQA first with /oh-my-claudecode:cancel.");
-            return false;
-        }
         const enableUltrawork = !options?.disableUltrawork;
         const now = new Date().toISOString();
         const normalizedPrompt = stripCriticModeFlag(stripNoPrdFlag(prompt));

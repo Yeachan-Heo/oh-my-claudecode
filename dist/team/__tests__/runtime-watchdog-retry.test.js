@@ -137,6 +137,23 @@ describe('watchdogCliWorkers dead-pane retry behavior', () => {
         expect(readTaskFailure(teamName, '1', { cwd })?.retryCount).toBe(1);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('dead pane — requeuing task 1 (retry 1/5)'));
     });
+    it('recovers when the dead pane is already absent during cleanup', async () => {
+        const teamName = 'dead-pane-missing-during-cleanup-team';
+        const root = initTask(cwd, teamName);
+        tmuxMocks.killTeamPane.mockRejectedValueOnce(new Error("can't find pane: %1"));
+        const runtime = makeRuntime(cwd, teamName);
+        const stop = watchdogCliWorkers(runtime, 20);
+        await runTick();
+        await stop();
+        const task = JSON.parse(readFileSync(join(root, 'tasks', '1.json'), 'utf8'));
+        expect(['pending', 'in_progress']).toContain(task.status);
+        expect(task.owner === null || task.owner === 'worker-1').toBe(true);
+        expect(readTaskFailure(teamName, '1', { cwd })?.retryCount).toBe(1);
+        expect(tmuxMocks.splitTeamWorkerPane).toHaveBeenCalledWith('%0', 'right', cwd);
+        expect(tmuxMocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+        expect(runtime.workerPaneIds).toEqual(['%42']);
+        expect(runtime.activeWorkers).toHaveProperty('size', 1);
+    });
     it('reassigns the requeued first task before a later pending task', async () => {
         const teamName = 'multi-task-requeue-team';
         const root = initTask(cwd, teamName);
