@@ -95,13 +95,18 @@ function writeMinimallyCompletePluginPayload(pluginRoot: string): void {
 }
 
 function getBundledSkillNames(): string[] {
-  const skininthegamebrosOnlySkills = new Set(['remember', 'verify', 'debug']);
+  const entitlementManifest = JSON.parse(
+    readFileSync(join(process.cwd(), 'src', 'config', 'builtin-skill-entitlements.json'), 'utf-8'),
+  ) as { skininthegamebrosOnlySkills: string[] };
+  const skininthegamebrosOnlySkills = new Set(
+    entitlementManifest.skininthegamebrosOnlySkills.map(skill => skill.toLowerCase()),
+  );
 
   return readdirSync(join(process.cwd(), 'skills'), { withFileTypes: true })
     .filter(entry => entry.isDirectory())
     .map(entry => entry.name)
     .filter(name => existsSync(join(process.cwd(), 'skills', name, 'SKILL.md')))
-    .filter(name => !skininthegamebrosOnlySkills.has(name))
+    .filter(name => !skininthegamebrosOnlySkills.has(name.toLowerCase()))
     .sort();
 }
 
@@ -155,7 +160,10 @@ describe('installer bundled + standalone skill sync', () => {
       'omc-plan/SKILL.md',
     ]));
 
-    for (const skillName of ['autopilot', 'ralplan', 'team', 'ultragoal', 'execute', 'omc-plan']) {
+    for (const skillName of [
+      'autopilot', 'ralplan', 'team', 'ultragoal', 'execute', 'omc-plan',
+      'remember', 'verify', 'debug',
+    ]) {
       const installedSkillPath = join(claudeConfigDir, 'skills', skillName, 'SKILL.md');
       expect(existsSync(installedSkillPath)).toBe(true);
       expect(readFileSync(installedSkillPath, 'utf-8')).toContain('name:');
