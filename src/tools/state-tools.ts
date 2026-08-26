@@ -13,7 +13,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'pat
 import {
   resolveStatePath,
   ensureOmcDir,
-  validateWorkingDirectory,
+  resolveStateWorkingDirectory,
   resolveSessionStatePath,
   ensureSessionStateDir,
   listSessionIds,
@@ -840,7 +840,7 @@ export const stateReadTool: ToolDefinition<{
     const { mode, workingDirectory, session_id } = args;
 
     try {
-      const root = validateWorkingDirectory(workingDirectory);
+      const root = resolveStateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
 
       // If session_id provided, read from session-scoped path
@@ -1019,7 +1019,7 @@ export const stateWriteTool: ToolDefinition<{
     } = args;
 
     try {
-      const root = validateWorkingDirectory(workingDirectory);
+      const root = resolveStateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
 
       // Validate custom state payload size if provided
@@ -1257,7 +1257,7 @@ export const stateClearTool: ToolDefinition<{
     const { mode, workingDirectory, session_id } = args;
 
     try {
-      const root = validateWorkingDirectory(workingDirectory);
+      const root = resolveStateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
 
       // Merge-readiness is an audit gate, so clearing it must leave a durable
@@ -1815,7 +1815,7 @@ export const stateListActiveTool: ToolDefinition<{
     const { workingDirectory, session_id, all } = args;
 
     try {
-      const root = validateWorkingDirectory(workingDirectory);
+      const root = resolveStateWorkingDirectory(workingDirectory);
 
       // Resolve the effective session ID:
       //   1. Explicit session_id arg wins (back-compat for callers that pass it directly).
@@ -1992,7 +1992,7 @@ export const stateGetStatusTool: ToolDefinition<{
     const { mode, workingDirectory, session_id } = args;
 
     try {
-      const root = validateWorkingDirectory(workingDirectory);
+      const root = resolveStateWorkingDirectory(workingDirectory);
       const sessionId = session_id as string | undefined;
 
       if (mode) {
@@ -2173,7 +2173,7 @@ export const stateTools = [
     },
     handler: async (args: { summary: string; workingDirectory?: string; session_id?: string; baseRef?: string }) => {
       try {
-      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const directory = resolveStateWorkingDirectory(args.workingDirectory);
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
       const blocked = state.result === 'blocked';
@@ -2194,7 +2194,7 @@ export const stateTools = [
     },
     handler: async (args: { why: string; whatChanged: string; tradeoffs: string; risksConsidered: string; teamUnderstanding: string; questions: Array<any>; workingDirectory?: string; session_id?: string }) => {
       try {
-      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const directory = resolveStateWorkingDirectory(args.workingDirectory);
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = setMergeReadinessContent(directory, args, sessionId);
       if (!state || !state.active) {
@@ -2218,7 +2218,7 @@ export const stateTools = [
     },
     handler: async (args: { questionId: string; optionId: string; workingDirectory?: string; session_id?: string }) => {
       try {
-      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const directory = resolveStateWorkingDirectory(args.workingDirectory);
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
       const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
       if (!state) {
@@ -2245,7 +2245,7 @@ export const stateTools = [
     schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
     handler: async (args: { workingDirectory?: string; session_id?: string }) => {
       try {
-      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const directory = resolveStateWorkingDirectory(args.workingDirectory);
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
       const state = readMergeReadinessState(directory, sessionId);
       if (!state) {
@@ -2264,7 +2264,7 @@ export const stateTools = [
     schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
     handler: async (args: { workingDirectory?: string; session_id?: string }) => {
       try {
-      const directory = validateWorkingDirectory(args.workingDirectory || process.cwd());
+      const directory = resolveStateWorkingDirectory(args.workingDirectory);
       const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
       const state = cancelMergeReadiness(directory, sessionId);
       const persistFailed = state?.result === 'blocked' && (state.validation_errors ?? []).some((e) => e.includes('persisted'));

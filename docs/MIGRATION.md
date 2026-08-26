@@ -9,11 +9,35 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v4.x → v5.0: Workflow Retirement](#v4x--v50-workflow-retirement)
 - [Unreleased: Team MCP Runtime Deprecation (CLI-Only)](#unreleased-team-mcp-runtime-deprecation-cli-only)
 - [Unreleased: Native Team Worktree Mode (Opt-In)](#unreleased-native-team-worktree-mode-opt-in)
+- [Unreleased: Git-less State Root Recovery](#unreleased-git-less-state-root-recovery)
 - [v3.5.3 → v3.5.5: Test Fixes & Cleanup](#v353--v355-test-fixes--cleanup)
 - [v3.5.2 → v3.5.3: Skill Consolidation](#v352--v353-skill-consolidation)
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
 - [v3.0 → v3.1: Notepad Wisdom & Enhanced Features](#v30--v31-notepad-wisdom--enhanced-features)
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
+
+---
+
+## Unreleased: Git-less State Root Recovery
+
+### TL;DR
+
+Sessions launched outside a Git repository no longer create a separate `.omc/`
+directory for every cwd. OMC adopts the nearest safe existing state root and
+otherwise uses `~/.omc/`; protected locations such as `~/.ssh`, `~/.claude`,
+and user content directories are never used as anchors.
+
+### Migration and compatibility
+
+- Existing safe non-git `.omc/` roots remain visible through ancestor adoption.
+- Existing state under protected locations is never moved or deleted
+  automatically. Copy only the state you intend to keep into the new safe root.
+- `OMC_STATE_DIR` remains the explicit centralized option. In git-less sessions
+  it uses one fixed `non-git` child rather than hashing each cwd.
+- `workingDirectory` on state tools is honored within the validated context;
+  foreign repositories and failed Git probes are rejected visibly.
+- Session-scoped state remains owned by its `session_id`. No time-based cleanup
+  or cancellation was added.
 
 ---
 

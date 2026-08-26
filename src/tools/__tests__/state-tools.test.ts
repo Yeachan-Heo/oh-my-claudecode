@@ -22,6 +22,9 @@ vi.mock('../../lib/worktree-paths.js', async () => {
     validateWorkingDirectory: vi.fn((workingDirectory?: string) => {
       return workingDirectory || process.cwd();
     }),
+    resolveStateWorkingDirectory: vi.fn((workingDirectory?: string) => {
+      return workingDirectory || process.cwd();
+    }),
   };
 });
 

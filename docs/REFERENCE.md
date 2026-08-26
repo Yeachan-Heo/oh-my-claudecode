@@ -151,9 +151,20 @@ Git handling is intentionally conservative. The repository `.gitignore` keeps `.
 Worktree behavior follows the resolved state root:
 
 - **Default single repo / monorepo**: `getOmcRoot()` uses the git toplevel, so every package below one git root shares `{repo}/.omc/`.
+- **Git-less directories**: OMC reuses the nearest existing safe `.omc/` ancestor so legacy state remains visible. When none exists, all git-less cwd variants anchor at `$HOME/.omc/` instead of creating state in the current directory. Protected home directories such as `~/.ssh`, `~/.claude`, `~/.config`, `~/Downloads`, and `~/Desktop` are never selected as anchors; existing state there is left untouched. This is an anchor change only: session ownership still comes from `session_id`, and no time-based cleanup is performed.
 - **Linked git worktrees**: without `OMC_STATE_DIR`, each linked worktree has its own `{worktree}/.omc/`; removing that worktree removes its local OMC state. Re-run setup from the worktree you are actively using so installed hooks and generated instructions match that checkout.
 - **Persistent state across worktree deletion**: set `OMC_STATE_DIR`; OMC writes to `$OMC_STATE_DIR/{project-id}/`, where the project id is stable across linked worktrees when a remote or primary git dir is available.
 - **Multi-repo workspace**: add `.omc-workspace` to a non-git parent when independent sibling repos should share `{parent}/.omc/`. This is for multi-repo workspaces, not ordinary monorepos.
+
+State MCP tools honor an explicit `workingDirectory`. In a git-less session, the requested existing directory is used for resolution while state storage still follows the safe non-git anchor above; in a git-backed session, repository and linked-worktree boundary checks remain enforced. A path from another repository is rejected rather than silently substituted with the session cwd.
+
+#### Session-scoped state cannot capture another session (#3873)
+
+Mode-state files that carry a `session_id` under `.omc/state/sessions/<id>/` are authoritative only for that session. They cannot attach to, resume, or disarm a different session. Only legacy flat-layout files without a `session_id` can bind to whatever session starts next in that directory.
+
+Do not treat idle time as evidence that a session has ended. OMC performs no time-based cancellation of session-scoped state; cleanup tooling must preserve session-owned files and must not use a time threshold to delete active state.
+
+When migrating to `OMC_STATE_DIR`, remember that setting the variable does not migrate existing contents. Copy or migrate legacy state first, then enable the centralized root; otherwise old plans, notepads, and project memory remain in their original `.omc/` location and are no longer visible.
 
 Plan persistence follows the same rule. Default generated plans under `.omc/plans/` are local operational artifacts and are ignored. If a plan should become durable project documentation, move it to a tracked docs path or configure `planOutput.directory` to a reviewed directory such as `docs/plans`; keep machine-local session state in `.omc/`.
 

@@ -11,7 +11,7 @@
 
 import { createHash } from 'crypto';
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync, unlinkSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, readdirSync, writeFileSync, unlinkSync, statSync, lstatSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { resolve, normalize, relative, sep, join, isAbsolute, basename, dirname } from 'path';
 import { pathToFileURL } from 'url';
@@ -59,6 +59,9 @@ const worktreeCacheMap = new Map<string, string>();
 /** LRU cache for outermost superproject root lookups, including negative results. */
 const superprojectCacheMap = new Map<string, string | null>();
 const canonicalWorkingDirectoryRoots = new WeakMap<object, { providedRoot: string; trustedRoot: string }>();
+
+/** LRU cache for non-git state-anchor lookups. */
+const nonGitAnchorCacheMap = new Map<string, string>();
 
 /**
  * LRU cache for workspace marker lookups.
@@ -205,24 +208,131 @@ function resolveSuperprojectRoot(cwd: string): string | null {
   return anchor;
 }
 
+// ============================================================================
+// NON-GIT STATE ANCHORING (#3873)
+// ============================================================================
+
+const SENSITIVE_DIR_BASENAMES = new Set([
+  '.ssh', '.gnupg', '.aws', '.azure', '.gcloud', '.kube', 'ssh', '.pki',
+  '.config', '.claude', '.claude.json', '.codex', '.gemini', '.cursor',
+  '.vscode', '.ollama', '.docker', '.npm', '.cache', '.local',
+  'desktop', 'documents', 'downloads', 'pictures', 'photos', 'music',
+  'movies', 'videos', 'public', 'library',
+]);
+
+function sensitiveAbsoluteRoots(): string[] {
+  const roots: string[] = [];
+  const home = (() => { try { return resolve(homedir()); } catch { return null; } })();
+  const temp = (() => { try { return resolve(tmpdir()); } catch { return null; } })();
+  if (home) roots.push(home);
+  if (temp) roots.push(temp);
+  if (process.platform === 'win32') {
+    roots.push('C:\\Windows', 'C:\\Program Files', 'C:\\Program Files (x86)', 'C:\\ProgramData');
+    const drive = (home && /^[a-zA-Z]:/.exec(home))?.[0];
+    if (drive) roots.push(`${drive}\\Windows`, `${drive}\\Program Files`, `${drive}\\Program Files (x86)`, `${drive}\\ProgramData`);
+  } else {
+    roots.push('/', '/tmp', '/var', '/usr', '/etc', '/opt', '/private/var', '/private/tmp');
+  }
+  return roots;
+}
+
+function isFilesystemRoot(dir: string): boolean {
+  return dirname(dir) === dir;
+}
+
+/** Return true when state must not be anchored at this directory. */
+export function isSensitiveStateLocation(dir: string): boolean {
+  let candidate: string;
+  try {
+    candidate = resolve(dir);
+  } catch {
+    return true;
+  }
+  const home = (() => { try { return resolve(homedir()); } catch { return null; } })();
+  let cursor = candidate;
+  for (;;) {
+    const name = basename(cursor);
+    const lowerName = name.toLowerCase();
+    if (home && cursor === candidate && (cursor === home || (process.platform === 'win32' && cursor.toLowerCase() === home.toLowerCase()))) return true;
+    if (name.startsWith('.') && name !== OmcPaths.ROOT) return true;
+    if (SENSITIVE_DIR_BASENAMES.has(lowerName)) return true;
+    if (isFilesystemRoot(cursor)) break;
+    cursor = dirname(cursor);
+  }
+  return sensitiveAbsoluteRoots().some((root) => candidate === root || (process.platform === 'win32' && candidate.toLowerCase() === root.toLowerCase()));
+}
+
+function resolveNonGitFallbackRoot(): string {
+  const home = resolve(homedir());
+  if (isFilesystemRoot(home)) {
+    throw new Error('Cannot resolve a safe non-git OMC state root: home resolves to the filesystem root.');
+  }
+  return home;
+}
+
+/**
+ * Resolve a stable anchor directory for a non-git cwd.
+ * Existing safe `.omc/` ancestors are adopted; otherwise `$HOME/.omc` is used.
+ * This function never creates or deletes state.
+ */
+export function resolveNonGitStateAnchor(startDir?: string): string {
+  let current: string;
+  try {
+    current = resolve(startDir || process.cwd());
+    try { current = realpathSync(current); } catch { /* keep lexical path for a missing cwd */ }
+  } catch {
+    current = resolveNonGitFallbackRoot();
+  }
+
+  const cached = nonGitAnchorCacheMap.get(current);
+  if (cached !== undefined) return cached;
+
+  let cursor = current;
+  let anchor: string | undefined;
+  for (let depth = 0; depth < 128; depth++) {
+    if (!isSensitiveStateLocation(cursor)) {
+      try {
+        const candidate = join(cursor, OmcPaths.ROOT);
+        const candidateStat = lstatSync(candidate);
+        const safeSymlink = candidateStat.isSymbolicLink() && (() => {
+          try {
+            return !isSensitiveStateLocation(realpathSync(candidate)) && statSync(candidate).isDirectory();
+          } catch {
+            return false;
+          }
+        })();
+        if (candidateStat.isDirectory() || safeSymlink) {
+          anchor = cursor;
+          break;
+        }
+      } catch {
+        // Missing or inaccessible legacy roots are ignored.
+      }
+    }
+    const parent = dirname(cursor);
+    if (parent === cursor) break;
+    cursor = parent;
+  }
+
+  if (anchor) {
+    if (nonGitAnchorCacheMap.size >= MAX_WORKTREE_CACHE_SIZE) {
+      const oldest = nonGitAnchorCacheMap.keys().next().value;
+      if (oldest !== undefined) nonGitAnchorCacheMap.delete(oldest);
+    }
+    nonGitAnchorCacheMap.set(current, anchor);
+    return anchor;
+  }
+  return resolveNonGitFallbackRoot();
+}
+
 /**
  * Resolve the state-anchor root for an optional worktreeRoot argument.
- *
- * Many callers pass a raw cwd as `worktreeRoot` (e.g. hooks forwarding
- * `process.cwd()`). When that cwd is inside a git submodule we climb to the
- * outermost superproject so `.omc/` anchors to the monorepo root rather than
- * the submodule (#3349).
- *
- * Crucially, when the provided dir is NOT inside a submodule the path is used
- * VERBATIM (the historical contract) — it is NOT resolved up to its git
- * toplevel. Callers that pass an explicit directory (including tests that
- * isolate state under a per-process subdir of the repo) rely on it being the
- * literal `.omc` base; resolving such a subdir up to the repo root would
- * collapse separately-scoped state dirs into one and corrupt them.
+ * Explicit git-backed directories retain the historical literal contract;
+ * non-git directories use the stable non-git anchor.
  */
 function resolveStateAnchorRoot(worktreeRoot?: string): string {
   if (worktreeRoot) return resolveSuperprojectRoot(worktreeRoot) || worktreeRoot;
-  return getWorktreeRoot() || process.cwd();
+  return getWorktreeRoot() || resolveNonGitStateAnchor();
 }
 
 /**
@@ -774,7 +884,10 @@ export function getOmcRoot(worktreeRoot?: string): string {
     // an explicit worktreeRoot keeps its own centralized id rather than merging
     // into the parent project's (preserves submodule identity).
     const root = worktreeRoot || getGitTopLevel() || process.cwd();
-    const projectId = getProjectIdentifier(root);
+    const workspaceRoot = findWorkspaceRoot(root);
+    const projectId = !worktreeRoot && !workspaceRoot && !getGitTopLevel(root)
+      ? 'non-git'
+      : getProjectIdentifier(root);
     const centralizedPath = join(customDir, projectId);
 
     // Log notice if both legacy .omc/ and new centralized dir exist
@@ -795,11 +908,14 @@ export function getOmcRoot(worktreeRoot?: string): string {
   // workspaces where the parent dir is not itself a git repo: all sub-repos
   // share the same .omc/ at the marker location.
   const workspaceAnchor = findWorkspaceRoot(worktreeRoot);
-  if (workspaceAnchor) {
+  if (workspaceAnchor && !isSensitiveStateLocation(workspaceAnchor)) {
     return join(workspaceAnchor, OmcPaths.ROOT);
   }
 
   const root = resolveStateAnchorRoot(worktreeRoot);
+  if (isSensitiveStateLocation(root) && !getGitTopLevel(root)) {
+    return join(resolveNonGitStateAnchor(root), OmcPaths.ROOT);
+  }
   return join(root, OmcPaths.ROOT);
 }
 
@@ -956,6 +1072,7 @@ export function clearWorktreeCache(): void {
   worktreeCacheMap.clear();
   superprojectCacheMap.clear();
   workspaceCacheMap.clear();
+  nonGitAnchorCacheMap.clear();
 }
 
 // ============================================================================
@@ -1581,9 +1698,38 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
     throw new Error(formatOutsideTrustedRootMessage(workingDirectory, trustedRoot));
   }
 
-  // Directory is under trusted root but git failed — return trusted root,
-  // never the subdirectory, to prevent .omc/ creation in subdirs (#576).
-  return trustedRoot;
+  if (trustedRootReal === resolvedReal) {
+    return trustedRoot;
+  }
+
+  // Git-backed sessions still normalize subdirectories to the repository
+  // root. A git-less session has no repository root to normalize to, so keep
+  // the explicitly requested directory; getOmcRoot() applies the stable
+  // non-git anchor and prevents a per-directory .omc/ from being created.
+  if (getGitTopLevel(process.cwd())) {
+    return trustedRoot;
+  }
+  return resolvedReal;
+}
+
+/**
+ * Resolve a state-tool workingDirectory with visible repository-boundary
+ * failures. Git sessions may target the same repository or a linked worktree;
+ * git-less sessions retain an explicit child directory while still rejecting
+ * paths outside the trusted non-git context.
+ */
+export function resolveStateWorkingDirectory(workingDirectory?: string): string {
+  if (!workingDirectory) return validateWorkingDirectory();
+
+  if (getGitTopLevel(process.cwd())) {
+    return validateWorkingDirectoryOrLinkedWorktree(workingDirectory);
+  }
+
+  // Run the strict resolver first so a mixed git/non-git or foreign-repository
+  // request cannot be silently substituted with the startup cwd.
+  validateWorkingDirectoryOrLinkedWorktree(workingDirectory);
+  const validated = validateWorkingDirectory(workingDirectory);
+  return resolveNonGitStateAnchor(validated);
 }
 
 function getGitCommonDir(cwd: string): string | null {
