@@ -11,7 +11,7 @@ import type { PromptSsotManifest } from './types.js';
 
 export const PROMPT_SSOT_MANIFEST: PromptSsotManifest = {
   schemaVersion: 1,
-  sourceRevision: '2026-08-13.1',
+  sourceRevision: '2026-08-26.1',
   requiredSections: ['policy/operating-principles', 'safety/hard-boundaries'],
   projections: [
     {
@@ -19,6 +19,7 @@ export const PROMPT_SSOT_MANIFEST: PromptSsotManifest = {
       description: 'Coordinator (CLAUDE.md-style) system prompt projection',
       sections: [
         'policy/operating-principles',
+        'policy/minimal-code-discipline',
         'policy/delegation-rules',
         'policy/model-routing',
         'task-contract/verification',
@@ -38,6 +39,7 @@ export const PROMPT_SSOT_MANIFEST: PromptSsotManifest = {
       description: `Tier-0 role prompt projection: ${role}`,
       sections: [
         'policy/operating-principles',
+        'policy/minimal-code-discipline',
         'task-contract/verification',
         'task-contract/execution-protocols',
         'safety/hard-boundaries',

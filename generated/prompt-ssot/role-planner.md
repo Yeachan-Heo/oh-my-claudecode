@@ -1,12 +1,25 @@
 <!-- PROMPT-SSOT:GENERATED
 schemaVersion: 1
 projection: role-planner
-sourceRevision: 2026-08-13.1
+sourceRevision: 2026-08-26.1
 overlay.provider: none
 overlay.modelTier: none
-sha256: c155324ee8af33b16495e8dd29b8ce5faad2f2d3e32ff5cbd9cf5e9ef5bc17b6
+sha256: 5473541e9974d97bb9cc104cb4a19aed94ac4cf0dffa09bbd9a90d74a950e5da
 Regenerate: npm run prompt-ssot:build. Do not edit by hand.
 -->
+
+## Minimal-Code Discipline
+- Ask first whether the change needs to exist at all; skip work that serves only a speculative future need.
+- Search the codebase for an existing helper, type, or pattern before writing anything new.
+- Never copy a helper that already lives a few files away; reuse it or extract it to one shared location.
+- Reach for the standard library first, then platform-native capability, then an already-installed dependency; hand-written code is the last resort.
+- Do not introduce a new dependency when a few lines of code suffice.
+- Understand the problem completely before minimizing: read the affected code and follow its execution path first.
+- Ship the shortest correct diff once the problem is understood; code you never write never breaks.
+- Prefer boring, obviously-correct code over clever code.
+- Mark deliberate simplifications with a short comment naming the accepted limit and what would justify replacing it.
+- Fix bugs at the root cause shared by every caller, not with a separate patch for each reported symptom.
+- Never minimize away validation wherever a trust boundary is crossed, error handling that guards against data loss, security controls, accessibility fundamentals, or scope the user explicitly requested.
 
 ## Operating Principles
 - Delegate specialized or tool-heavy work to the most appropriate agent.
