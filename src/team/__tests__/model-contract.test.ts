@@ -392,6 +392,15 @@ describe('model-contract', () => {
       const noModel = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp', extraFlags: ['--foo'] });
       expect(noModel).toEqual(['--force', '--trust', '--foo']);
     });
+    it('cursor keeps required trust flags singular when extra flags repeat them', () => {
+      const args = buildLaunchArgs('cursor', {
+        teamName: 't', workerName: 'w', cwd: '/tmp',
+        extraFlags: ['--trust', '--force', '--trust', '--foo'],
+      });
+      expect(args).toEqual(['--force', '--trust', '--foo']);
+      expect(countArg(args, '--force')).toBe(1);
+      expect(countArg(args, '--trust')).toBe(1);
+    });
     it('cursor worker argv leads with the cursor-agent binary then approval flags', () => {
       const argv = buildWorkerArgv('cursor', {
         teamName: 'cursor-team', workerName: 'w', cwd: '/tmp',

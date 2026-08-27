@@ -303,10 +303,11 @@ const CONTRACTS: Record<CliAgentType, CliAgentContract> = {
       // created per worker, so they always hit that path. `omc ask cursor`
       // already launches with `--force --trust` for the same reason.
       const args = ['--force', '--trust'];
+      const extra = extraFlags.filter(flag => flag !== '--force' && flag !== '--trust');
       // `--model <id>` is a documented global option; ids come from
       // `cursor-agent --list-models` (e.g. cursor-grok-4.6-high, composer-2.5).
       if (model) args.push('--model', model);
-      return [...args, ...extraFlags];
+      return [...args, ...extra];
     },
     parseOutput(rawOutput: string): string {
       return rawOutput.trim();
