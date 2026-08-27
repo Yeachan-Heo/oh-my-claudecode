@@ -401,6 +401,13 @@ describe('model-contract', () => {
       expect(countArg(args, '--force')).toBe(1);
       expect(countArg(args, '--trust')).toBe(1);
     });
+    it('cursor removes documented force aliases from extra flags', () => {
+      const args = buildLaunchArgs('cursor', {
+        teamName: 't', workerName: 'w', cwd: '/tmp',
+        extraFlags: ['-f', '--yolo', '--force', '--trust'],
+      });
+      expect(args).toEqual(['--force', '--trust']);
+    });
     it('cursor worker argv leads with the cursor-agent binary then approval flags', () => {
       const argv = buildWorkerArgv('cursor', {
         teamName: 'cursor-team', workerName: 'w', cwd: '/tmp',

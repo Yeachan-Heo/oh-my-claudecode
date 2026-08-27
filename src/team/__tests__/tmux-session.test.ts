@@ -380,6 +380,17 @@ describe('buildWorkerStartCommand', () => {
     expect(cmd).not.toContain('pane_id=%%2');
   });
 
+  it('rejects CRLF injection in native Windows provider argv', () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+
+    expect(() => buildWorkerStartCommand({
+      teamName: 't', workerName: 'w', envVars: {},
+      launchBinary: 'C:\\Program Files\\Cursor\\cursor-agent.exe',
+      launchArgs: ['--model', 'safe\r\nset PWNED=1'], cwd: 'C:\\repo',
+    })).toThrow('contains CR, LF, or NUL');
+  });
+
   it('escapes psmux cmd.exe env vars and quoted launch args without PowerShell syntax', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('PSMUX_SESSION', 'psmux-session-1');
@@ -756,6 +767,20 @@ describe('pane readiness startup banners', () => {
     // The pane is dead: treating it as ready would hand work to a gone process.
     expect(paneLooksReady(capture, 'cursor')).toBe(false);
     expect(paneHasActiveTask(capture, 'cursor')).toBe(false);
+  });
+
+  it('gives the Cursor trust banner precedence and keeps it provider-scoped', () => {
+    const capture = [
+      '⚠ Workspace Trust Required',
+      'Do you trust the contents of this directory?',
+      '› 1. Yes, continue',
+      '  2. No, quit',
+      "  • Pass --trust, --yolo, or -f if you trust this directory",
+    ].join('\n');
+
+    expect(paneHasTrustPrompt(capture, 'cursor')).toBe(true);
+    expect(paneLooksReady(capture, 'cursor')).toBe(false);
+    expect(paneLooksReady(capture, 'claude')).toBe(true);
   });
 
   it('still treats actual prompt lines as ready', () => {
