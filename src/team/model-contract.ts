@@ -424,12 +424,19 @@ export function validateWorkerLaunchDescriptor(value: unknown): WorkerLaunchDesc
     throw new Error('Invalid worker launch descriptor');
   }
   getContract(descriptor.provider as CliAgentType);
+  const args = descriptor.provider === 'cursor'
+    ? [
+        '--force',
+        '--trust',
+        ...descriptor.args.filter(flag => !['--force', '-f', '--yolo', '--trust'].includes(flag)),
+      ]
+    : [...descriptor.args];
   return {
     schema_version: 1,
     provider: descriptor.provider as CliAgentType,
     model: descriptor.model,
     binary: descriptor.binary,
-    args: [...descriptor.args],
+    args,
   };
 }
 

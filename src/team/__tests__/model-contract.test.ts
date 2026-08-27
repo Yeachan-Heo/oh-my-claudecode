@@ -816,6 +816,17 @@ describe('model-contract', () => {
       validated.args.push('--changed');
       expect(source.args).toEqual(['--flag']);
     });
+
+    it('normalizes persisted Cursor descriptors to the required trust flags', () => {
+      const validated = validateWorkerLaunchDescriptor({
+        schema_version: 1,
+        provider: 'cursor',
+        model: null,
+        binary: '/usr/local/bin/cursor-agent',
+        args: ['--yolo', '--model', 'composer-2.5', '--trust', '--force'],
+      });
+      expect(validated.args).toEqual(['--force', '--trust', '--model', 'composer-2.5']);
+    });
   });
 
 });

@@ -192,4 +192,32 @@ describe('team dispatch provider-aware prompt readiness', () => {
       last_reason: 'tmux_send_keys_confirmed_active_task',
     });
   });
+
+  it('fails closed without sending keys when Cursor exits on the workspace-trust banner', async () => {
+    await seed('cursor');
+    tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'display-message') return { stdout: '0\n', stderr: '' };
+      if (args[0] === 'capture-pane') {
+        return {
+          stdout: [
+            '⚠ Workspace Trust Required',
+            'Do you trust the contents of this directory?',
+            'Pass --trust, --yolo, or -f if you trust this directory',
+          ].join('\n'),
+          stderr: '',
+        };
+      }
+      return { stdout: '', stderr: '' };
+    });
+
+    const { result, request } = await runDefaultInjector();
+
+    expect(result).toMatchObject({ processed: 1, skipped: 0, failed: 1 });
+    expect(request).toMatchObject({
+      status: 'failed',
+      attempt_count: 1,
+      last_reason: 'cursor_workspace_untrusted',
+    });
+    expect(tmuxUtilsMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'send-keys')).toBe(false);
+  });
 });

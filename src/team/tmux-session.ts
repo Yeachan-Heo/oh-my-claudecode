@@ -1628,6 +1628,10 @@ export function paneHasTrustPrompt(captured: string, provider?: CliAgentType): b
   return detectPaneTrustPromptKind(captured, provider) !== null;
 }
 
+export function paneHasCursorWorkspaceTrustPrompt(captured: string): boolean {
+  return detectPaneTrustPromptKind(captured, 'cursor') === 'cursor_workspace_trust';
+}
+
 function paneHasClaudeStartupBanner(captured: string, provider?: CliAgentType): boolean {
   const lines = captured
     .split('\n')
@@ -1858,7 +1862,7 @@ export async function retryStartupInboxSubmit(
   const copyMode = await paneCopyModeObservation(context.ownership.paneId);
   if (copyMode !== false) return 'unavailable';
   const observation = await capturePaneObservation(context.ownership.paneId, { operation: 'startup-submit-retry' });
-  if (!observation.ok || detectPaneTrustPromptKind(observation.captured)) return 'unavailable';
+  if (!observation.ok || detectPaneTrustPromptKind(observation.captured, context.provider)) return 'unavailable';
   if (paneHasActiveTask(observation.captured, context.provider)) return 'pane_busy';
   if (!paneTailContainsLiteralLine(observation.captured, message)) return 'unavailable';
   try {
