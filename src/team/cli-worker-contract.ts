@@ -227,8 +227,26 @@ export function parseCliWorkerVerdict(raw: string): CliWorkerOutputPayload {
 export function cliWorkerOutputFilePath(
   teamStateRootAbs: string,
   workerName: string,
+  scope?: { taskId?: string; assignmentId?: string; launchAttemptId?: string },
 ): string {
   // Intentional forward-slash join — consumed by prompts rendered for CLI
   // workers, matches other team state path conventions.
-  return `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/verdict.json`;
+  const taskId = scope?.taskId;
+  const assignmentId = scope?.assignmentId ?? scope?.launchAttemptId;
+  const fileName = taskId && assignmentId
+    ? `verdict-${encodeURIComponent(taskId)}-${encodeURIComponent(assignmentId)}.json`
+    : 'verdict.json';
+  return `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/${fileName}`;
+}
+
+export function isCliWorkerOutputFilePath(
+  teamStateRootAbs: string,
+  workerName: string,
+  outputFile: string,
+): boolean {
+  const root = `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/`;
+  const normalized = outputFile.replaceAll('\\', '/');
+  return normalized.startsWith(root)
+    && (normalized === `${root}verdict.json`
+      || /^verdict-[^/]+-[^/]+\.json$/.test(normalized.slice(root.length)));
 }

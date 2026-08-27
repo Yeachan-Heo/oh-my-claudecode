@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { TeamPaths, absPath } from '../state-paths.js';
 
 const mocks = vi.hoisted(() => ({
   isWorkerAlive: vi.fn(async () => false),
@@ -91,6 +92,9 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     verdictRole?: string;
     omitVerdictFile?: boolean;
     invalidVerdictJson?: boolean;
+    staleProcessingVerdict?: 'approve' | 'revise' | 'reject';
+    expiredLease?: boolean;
+    delegationRequired?: boolean;
   }): Promise<{ teamRoot: string; outputFile: string; taskPath: string }> {
     const teamName = 'role-routing-team';
     const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
@@ -159,9 +163,12 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
           claim: {
             owner: 'worker-1',
             token: 'tk-1',
-            leased_until: new Date(Date.now() + 60000).toISOString(),
+            leased_until: new Date(Date.now() + (opts.expiredLease ? -60000 : 60000)).toISOString(),
             ...(workerCli === 'cursor' ? { launch_attempt_id: launchAttemptId } : {}),
           },
+          ...(opts.delegationRequired ? {
+            delegation: { mode: 'required', skip_allowed_reason_required: true },
+          } : {}),
           created_at: new Date().toISOString(),
         },
         null,
@@ -188,6 +195,18 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
               : [{ severity: 'major', message: 'fix X' }],
           });
       await writeFile(outputFile, body, 'utf-8');
+      if (opts.staleProcessingVerdict) {
+        await writeFile(join(outputFile + '.processing'), JSON.stringify({
+          role: opts.verdictRole ?? 'code-reviewer',
+          task_id: '1',
+          claim_token: 'tk-1',
+          task_version: 1,
+          launch_attempt_id: launchAttemptId,
+          verdict: opts.staleProcessingVerdict,
+          summary: `stale ${opts.staleProcessingVerdict} summary`,
+          findings: [],
+        }), 'utf-8');
+      }
     }
 
     return { teamRoot, outputFile, taskPath };
@@ -272,6 +291,9 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const eventPath = absPath(cwd, TeamPaths.events('role-routing-team'));
+    let eventsBefore = 0;
+    try { eventsBefore = (await readFile(eventPath, 'utf8')).trim().split('\n').filter(Boolean).length; } catch { /* first event */ }
     const first = await processCliWorkerVerdicts('role-routing-team', cwd);
 
     expect(first).toEqual([expect.objectContaining({
@@ -289,6 +311,12 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
       verdict_role: 'critic',
     });
     await expect(access(outputFile + '.processed')).resolves.toBeUndefined();
+
+    const events = (await readFile(eventPath, 'utf8'))
+      .trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
+    expect(events.slice(eventsBefore).filter(event => event.type === 'task_completed' && event.task_id === '1')).toHaveLength(1);
+    const snapshot = JSON.parse(await readFile(absPath(cwd, TeamPaths.monitorSnapshot('role-routing-team')), 'utf8'));
+    expect(snapshot.completedEventTaskIds['1']).toBe(true);
 
     const second = await processCliWorkerVerdicts('role-routing-team', cwd);
     expect(second).toEqual([]);
@@ -312,6 +340,34 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     expect(results[0]).toMatchObject({ status: 'skipped', reason: 'cursor_verdict_role_mismatch' });
     expect(JSON.parse(await readFile(taskPath, 'utf-8')).status).toBe('in_progress');
     await expect(access(outputFile + '.processed')).resolves.toBeUndefined();
+  });
+
+  it('does not let stale processing output mask the replacement verdict', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-stale-processing-'));
+    const { taskPath } = await bootstrap({
+      verdict: 'revise', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic',
+      staleProcessingVerdict: 'approve',
+    });
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+
+    expect(results[0]).toMatchObject({ status: 'failed', verdict: 'revise' });
+    expect(JSON.parse(await readFile(taskPath, 'utf-8')).metadata?.verdict).toBe('revise');
+  });
+
+  it('routes Cursor completion through lease and delegation invariants', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-invariants-'));
+    const { taskPath } = await bootstrap({
+      verdict: 'approve', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic',
+      expiredLease: true, delegationRequired: true,
+    });
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+
+    expect(results[0]).toMatchObject({ status: 'already_terminal' });
+    expect(JSON.parse(await readFile(taskPath, 'utf-8')).status).toBe('in_progress');
   });
 
   it('waits for explicit alive liveness before consuming a Cursor verdict', async () => {

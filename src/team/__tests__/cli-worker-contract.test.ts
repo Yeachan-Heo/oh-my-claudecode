@@ -108,6 +108,13 @@ describe('cli-worker-contract', () => {
       const p = cliWorkerOutputFilePath('C:\\proj\\.omc\\state\\team\\foo', 'worker-1');
       expect(p).toBe('C:/proj/.omc/state/team/foo/workers/worker-1/verdict.json');
     });
+
+    it('scopes replacement artifacts to the assignment and launch attempt', () => {
+      const p = cliWorkerOutputFilePath('/repo/.omc/state/team/foo', 'worker-1', {
+        taskId: '7', assignmentId: 'recovery-2-attempt-9',
+      });
+      expect(p).toBe('/repo/.omc/state/team/foo/workers/worker-1/verdict-7-recovery-2-attempt-9.json');
+    });
   });
 
   describe('parseCliWorkerVerdict', () => {

@@ -203,6 +203,7 @@ export interface TeamTask {
   owner?: string;
   result?: string;
   error?: string;
+  metadata?: Record<string, unknown>;
   blocked_by?: string[];
   depends_on?: string[];
   version?: number;

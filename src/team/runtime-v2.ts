@@ -125,6 +125,7 @@ import { normalizeDelegationRole } from '../features/delegation-routing/types.js
 import {
   CONTRACT_ROLES,
   cliWorkerOutputFilePath,
+  isCliWorkerOutputFilePath,
   parseCliWorkerVerdict,
   renderCliWorkerOutputContract,
   shouldInjectContract,
@@ -152,7 +153,7 @@ import { parseRecoveryIntent, resolveRuntimeCliPath, type RecoverDeadWorkerOwner
 import { scaleUpFenceBlocks } from './scaling.js';
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
-import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-ops.js';
+import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask, teamTransitionTaskStatus } from './team-ops.js';
 
 function workerInstructionStateRoot(cwd: string, teamName: string): string {
   return process.platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
@@ -832,6 +833,7 @@ interface SpawnV2WorkerOptions {
    * is populated for the completion handler.
    */
   role?: CanonicalTeamRole;
+  verdictAssignmentId?: string;
 }
 
 interface SpawnV2WorkerResult {
@@ -1126,7 +1128,10 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
 
   const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
   const outputFile = injectContract && opts.role
-    ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName)
+    ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName, {
+      taskId: opts.taskId,
+      assignmentId: opts.verdictAssignmentId,
+    })
     : undefined;
   const cliOutputContract = injectContract && opts.role && outputFile
     ? renderCliWorkerOutputContract(opts.role, outputFile)
@@ -2768,7 +2773,10 @@ export async function executeRecoverDeadWorkerV2Owner(
               ...(pending.startupContext ? { launch_attempt_id: pending.startupContext.attempt.attempt_id } : {}),
               ...(pending.agentType === 'cursor'
                 && shouldInjectContract(normalizeDelegationRole(pending.worker.role) as CanonicalTeamRole, pending.agentType)
-                ? { output_file: cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName) }
+                ? { output_file: cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
+                  taskId: pending.worker.assigned_tasks?.[0],
+                  assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                }) }
                 : {}),
             }
           : candidate);
@@ -2897,7 +2905,10 @@ export async function executeRecoverDeadWorkerV2Owner(
               && shouldInjectContract(recoveryRole, pending.agentType)
               ? renderCliWorkerOutputContract(
                 recoveryRole,
-                cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName),
+                cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
+                  taskId: continuation.taskId,
+                  assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                }),
                 {
                   taskId: continuation.taskId,
                   claimToken: continuation.claimToken,
@@ -3350,7 +3361,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
 
   const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
-  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor }>();
+  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor; verdictAssignmentId?: string }>();
   const resolveDefaultModel = (agentType: CliAgentType): string | undefined => {
     if (agentType === 'codex') return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL || process.env.OMC_CODEX_DEFAULT_MODEL || undefined;
     if (agentType === 'gemini') return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || undefined;
@@ -3370,8 +3381,12 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
         resolvedBinaryPaths, fallbackAgent);
     const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
     const worktree = workerWorktrees.get(workerName);
+    const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
     const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
-      ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName) : undefined;
+      ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
+        taskId: String(taskIndex + 1),
+        assignmentId: verdictAssignmentId,
+      }) : undefined;
     const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
     const binary = resolvedBinaryPaths[assignment.agentType];
     if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
@@ -3388,7 +3403,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       model: effectiveModel,
     }, promptArgs);
     preparedLaunches.set(workerName, { agentType: assignment.agentType,
-      ...(assignment.role ? { role: assignment.role } : {}), descriptor });
+      ...(assignment.role ? { role: assignment.role } : {}), descriptor,
+      ...(verdictAssignmentId ? { verdictAssignmentId } : {}) });
   }
 
   // Set up worker state dirs and overlays (with v2 CLI API instructions)
@@ -3592,6 +3608,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       worktreePath: workerInfo.worktree_path,
       autoMerge: Boolean(config.autoMerge),
       ...(prepared.role ? { role: prepared.role } : {}),
+      ...(prepared.verdictAssignmentId ? { verdictAssignmentId: prepared.verdictAssignmentId } : {}),
     });
 
     if (workerLaunch.paneId) {
@@ -3848,11 +3865,11 @@ export interface CliWorkerVerdictResult {
  *   - Reads + validates the JSON payload via `parseCliWorkerVerdict`.
  *   - Locates the worker's in_progress task and writes a terminal status
  *     (completed for `approve`, failed for `revise`/`reject`) plus verdict
- *     metadata directly to the task file — the worker process is gone and
- *     cannot re-enter `transitionTaskStatus` with its claim token.
- *   - Renames `verdict.json` to `verdict.processed.json` so a subsequent
- *     monitor cycle does not reprocess it.
- *   - Emits a team event describing the outcome.
+ *     metadata through the canonical `transitionTaskStatus` path so lease,
+ *     delegation, event, and monitor-snapshot invariants remain authoritative.
+ *   - Renames the assignment-scoped verdict artifact to `.processed` so a
+ *     subsequent monitor cycle does not reprocess it.
+ *   - Quarantines stale `.processing` artifacts when replacement output exists.
  * On parse failure, emits a warning event and leaves the task untouched
  * for human review (per plan AC-7).
  */
@@ -3872,7 +3889,7 @@ export async function processCliWorkerVerdicts(
   const { rename } = await import('fs/promises');
   const { renameSync, readFileSync, writeFileSync, existsSync: fsExistsSync } = await import('fs');
   const { withFileLockSync } = await import('../lib/file-lock.js');
-  const { withTaskClaimLock, writeAtomic } = await import('./team-ops.js');
+
 
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
@@ -3893,8 +3910,7 @@ export async function processCliWorkerVerdicts(
     const processedOutputFile = outputFile + '.processed';
     const processingOutputFile = outputFile + '.processing';
     if (cursorReviewer) {
-      const expectedOutputFile = cliWorkerOutputFilePath(teamStateRoot(cwd, sanitized), worker.name);
-      if (outputFile !== expectedOutputFile) {
+      if (!isCliWorkerOutputFilePath(teamStateRoot(cwd, sanitized), worker.name, outputFile)) {
         results.push({
           workerName: worker.name,
           taskId: null,
@@ -3919,9 +3935,10 @@ export async function processCliWorkerVerdicts(
       }
     }
 
-    let verdictFile = cursorReviewer && fsExistsSync(processingOutputFile)
-      ? processingOutputFile
-      : outputFile;
+    let verdictFile = outputFile;
+    if (cursorReviewer && !fsExistsSync(outputFile) && fsExistsSync(processingOutputFile)) {
+      verdictFile = processingOutputFile;
+    }
     let payload: CliWorkerOutputPayload;
     try {
       if (cursorReviewer && verdictFile === outputFile) {
@@ -3930,8 +3947,17 @@ export async function processCliWorkerVerdicts(
         // `.processing` name lets a later cycle finish an interrupted commit.
         withFileLockSync(outputFile + '.lock', () => {
           if (fsExistsSync(processingOutputFile)) {
-            verdictFile = processingOutputFile;
-            return;
+            // A replacement assignment may publish a fresh verdict while a
+            // previous monitor cycle is still holding an interrupted claim.
+            // The fresh assignment file wins; retain the old claim as audit
+            // evidence instead of allowing it to mask replacement output.
+            if (fsExistsSync(outputFile)) {
+              const stalePath = `${processingOutputFile}.stale`;
+              try { renameSync(processingOutputFile, stalePath); } catch { /* leave it for the next cycle */ }
+            } else {
+              verdictFile = processingOutputFile;
+              return;
+            }
           }
           const raw = readFileSync(outputFile, 'utf-8');
           parseCliWorkerVerdict(raw);
@@ -4083,55 +4109,46 @@ export async function processCliWorkerVerdicts(
     let transitionOk = false;
     try {
       if (cursorReviewer) {
-        const transition = await withTaskClaimLock(sanitized, targetTaskId, cwd, async () => {
-          const raw = await readFile(targetTaskPath!, 'utf-8');
-          const taskData = JSON.parse(raw) as Record<string, unknown>;
-          if (taskData.status !== 'in_progress' || taskData.owner !== worker.name) {
-            return false;
-          }
-          const claim = taskData.claim && typeof taskData.claim === 'object'
-            ? taskData.claim as unknown as Record<string, unknown>
-            : null;
-          if (cursorReviewer && (
-            claim?.owner !== worker.name
-            || claim.token !== payload.claim_token
-            || taskData.version !== payload.task_version
-            || (worker.launch_attempt_id !== undefined && claim.launch_attempt_id !== worker.launch_attempt_id)
-            || (worker.launch_attempt_id !== undefined && payload.launch_attempt_id !== worker.launch_attempt_id)
-          )) {
-            return false;
-          }
-          const prevMetadata = (taskData.metadata && typeof taskData.metadata === 'object')
-            ? taskData.metadata as Record<string, unknown>
-            : {};
-          taskData.status = terminalStatus;
-          taskData.completed_at = new Date().toISOString();
-          taskData.claim = undefined;
-          taskData.metadata = {
-            ...prevMetadata,
-            verdict: payload.verdict,
-            verdict_summary: payload.summary,
-            verdict_findings: payload.findings,
-            verdict_role: payload.role,
-            verdict_source: 'cli_worker_output_contract',
-            ...(cursorReviewer ? {
-              verdict_claim_token: payload.claim_token,
-              verdict_task_version: payload.task_version,
-            } : {}),
-            ...(worker.launch_attempt_id
-              ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
-              : {}),
-          };
-          if (terminalStatus === 'failed') {
-            taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
-          }
-          taskData.version = typeof taskData.version === 'number' && Number.isFinite(taskData.version)
-            ? taskData.version + 1
-            : 2;
-          await writeAtomic(targetTaskPath!, JSON.stringify(taskData, null, 2));
-          return true;
-        });
-        transitionOk = transition.ok && transition.value;
+        const transition = await teamTransitionTaskStatus(
+          sanitized,
+          targetTaskId,
+          'in_progress',
+          terminalStatus,
+          payload.claim_token!,
+          cwd,
+          terminalStatus === 'completed'
+            ? {
+              result: payload.summary,
+              metadata: {
+                verdict: payload.verdict,
+                verdict_summary: payload.summary,
+                verdict_findings: payload.findings,
+                verdict_role: payload.role,
+                verdict_source: 'cli_worker_output_contract',
+                verdict_claim_token: payload.claim_token,
+                verdict_task_version: payload.task_version,
+                ...(worker.launch_attempt_id
+                  ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
+                  : {}),
+              },
+            }
+            : {
+              error: `cli_worker_verdict:${payload.verdict}:${payload.summary}`,
+              metadata: {
+                verdict: payload.verdict,
+                verdict_summary: payload.summary,
+                verdict_findings: payload.findings,
+                verdict_role: payload.role,
+                verdict_source: 'cli_worker_output_contract',
+                verdict_claim_token: payload.claim_token,
+                verdict_task_version: payload.task_version,
+                ...(worker.launch_attempt_id
+                  ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
+                  : {}),
+              },
+            },
+        );
+        transitionOk = transition.ok;
       } else {
         // Preserve the existing post-exit path for non-Cursor providers.
         withFileLockSync(targetTaskPath + '.lock', () => {
@@ -4175,12 +4192,14 @@ export async function processCliWorkerVerdicts(
       continue;
     }
 
-    await appendTeamEvent(sanitized, {
-      type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
-      worker: worker.name,
-      task_id: targetTaskId,
-      reason: `cli_worker_verdict:${payload.verdict}`,
-    }, cwd).catch(logEventFailure);
+    if (!cursorReviewer) {
+      await appendTeamEvent(sanitized, {
+        type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
+        worker: worker.name,
+        task_id: targetTaskId,
+        reason: `cli_worker_verdict:${payload.verdict}`,
+      }, cwd).catch(logEventFailure);
+    }
 
     try {
       await rename(verdictFile, processedOutputFile);

@@ -87,4 +87,24 @@ describe('recovery reservation claim protocol', () => {
     const replay = await adoptRecoveryReservations(['1', '2'], 'replacement', { recoveryId: 'recovery', requestId: 'request', replacementGeneration: 2, adoptionToken: 'adoption-token' }, d);
     expect(replay.map((result) => result.ok && result.replayed)).toEqual([true, true]);
   });
+
+  it('rebinds a replayed adoption to the active replacement launch attempt', async () => {
+    const task: TeamTaskV2 = {
+      ...liveTask(),
+      owner: 'replacement',
+      claim: { owner: 'replacement', token: 'replacement-token', leased_until: '2099-01-01T00:00:00.000Z', launch_attempt_id: 'stale-attempt' },
+      recovery_adoption: {
+        recovery_id: 'recovery', request_id: 'request', continuation_sequence: 4,
+        checkpoint_path: '/checkpoint', checkpoint_hash: 'checkpoint-hash',
+        replacement_worker: 'replacement', replacement_generation: 2,
+        adopted_at: '2026-01-01T00:00:00.000Z',
+      },
+    };
+    const tasks = { '1': task };
+    const adopted = await adoptRecoveryReservations(['1'], 'replacement', {
+      recoveryId: 'recovery', requestId: 'request', replacementGeneration: 2, adoptionToken: 'adoption-token',
+    }, { ...deps(tasks), launchAttemptId: 'active-attempt' });
+
+    expect(adopted[0]).toMatchObject({ ok: true, replayed: true, task: { claim: { launch_attempt_id: 'active-attempt' } } });
+  });
 });
