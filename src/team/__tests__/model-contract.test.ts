@@ -21,6 +21,7 @@ import {
   buildValidatedWorkerLaunchDescriptor,
   validateWorkerLaunchDescriptor,
 } from '../model-contract.js';
+import type { CliAgentType } from '../model-contract.js';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -372,31 +373,50 @@ describe('model-contract', () => {
       const withModel = buildLaunchArgs('grok', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'grok-4-fast' });
       expect(withModel).toEqual(['--always-approve', '--model', 'grok-4-fast']);
     });
-    it('cursor emits no flags without a model and appends --model <m> when given (issue #3880)', () => {
+    it('cursor leads with --force --trust and appends --model <m> when given (issue #3880)', () => {
       const noModel = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp' });
-      expect(noModel).toEqual([]);
+      expect(noModel).toEqual(['--force', '--trust']);
       expect(noModel).not.toContain('--model');
 
       const emptyModel = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp', model: '' });
-      expect(emptyModel).toEqual([]);
+      expect(emptyModel).toEqual(['--force', '--trust']);
       expect(emptyModel).not.toContain('--model');
 
       const withModel = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'cursor-grok-4.6-high' });
-      expect(withModel).toEqual(['--model', 'cursor-grok-4.6-high']);
+      expect(withModel).toEqual(['--force', '--trust', '--model', 'cursor-grok-4.6-high']);
     });
     it('cursor appends extraFlags after the model flag (issue #3880)', () => {
       const args = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'composer-2.5', extraFlags: ['--foo'] });
-      expect(args).toEqual(['--model', 'composer-2.5', '--foo']);
+      expect(args).toEqual(['--force', '--trust', '--model', 'composer-2.5', '--foo']);
 
       const noModel = buildLaunchArgs('cursor', { teamName: 't', workerName: 'w', cwd: '/tmp', extraFlags: ['--foo'] });
-      expect(noModel).toEqual(['--foo']);
+      expect(noModel).toEqual(['--force', '--trust', '--foo']);
     });
-    it('cursor worker argv leads with the cursor-agent binary then --model (issue #3880)', () => {
+    it('cursor worker argv leads with the cursor-agent binary then approval flags', () => {
       const argv = buildWorkerArgv('cursor', {
         teamName: 'cursor-team', workerName: 'w', cwd: '/tmp',
         model: 'cursor-grok-4.6-high', resolvedBinaryPath: '/usr/local/bin/cursor-agent',
       });
-      expect(argv).toEqual(['/usr/local/bin/cursor-agent', '--model', 'cursor-grok-4.6-high']);
+      expect(argv).toEqual([
+        '/usr/local/bin/cursor-agent', '--force', '--trust', '--model', 'cursor-grok-4.6-high',
+      ]);
+    });
+    it('every CLI provider carries an approval-bypass flag so no worker pane can block on a prompt', () => {
+      // A team worker pane has nobody to answer an approval or trust question.
+      // cursor was the sole provider launched bare, which stranded it on
+      // "Workspace Trust Required" in any directory cursor had not seen before.
+      const approvalFlags: Record<string, string> = {
+        claude: '--dangerously-skip-permissions',
+        codex: '--dangerously-bypass-approvals-and-sandbox',
+        gemini: '--approval-mode',
+        grok: '--always-approve',
+        antigravity: '--dangerously-skip-permissions',
+        cursor: '--trust',
+      };
+      for (const [agent, flag] of Object.entries(approvalFlags)) {
+        const args = buildLaunchArgs(agent as CliAgentType, { teamName: 't', workerName: 'w', cwd: '/tmp' });
+        expect(args, `${agent} must bypass approval prompts`).toContain(flag);
+      }
     });
     it('passes model flag when specified', () => {
       const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4' });

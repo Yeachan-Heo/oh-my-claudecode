@@ -735,6 +735,29 @@ describe('pane readiness startup banners', () => {
     expect(paneHasActiveTask(capture)).toBe(false);
   });
 
+  it('detects the cursor-agent workspace-trust banner and refuses to call it ready', () => {
+    // Verbatim capture from `cursor-agent` launched in tmux on an untrusted
+    // directory. It offers no numbered choice and the process exits, unlike
+    // the dismissible Claude/Codex prompts above.
+    const capture = [
+      '⚠ Workspace Trust Required',
+      '',
+      '  Cursor Agent can execute code and access files in this directory.',
+      '  Do you trust the contents of this directory?',
+      '',
+      '    /private/tmp/ct-nf2',
+      '',
+      '  To proceed, you can either:',
+      "    • Run 'agent' interactively to decide",
+      '    • Pass --trust, --yolo, or -f if you trust this directory',
+    ].join('\n');
+
+    expect(paneHasTrustPrompt(capture)).toBe(true);
+    // The pane is dead: treating it as ready would hand work to a gone process.
+    expect(paneLooksReady(capture, 'cursor')).toBe(false);
+    expect(paneHasActiveTask(capture, 'cursor')).toBe(false);
+  });
+
   it('still treats actual prompt lines as ready', () => {
     expect(paneLooksReady('Welcome\n❯ ')).toBe(true);
     expect(paneLooksReady('Welcome\n> ')).toBe(true);

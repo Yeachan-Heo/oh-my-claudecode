@@ -1585,7 +1585,7 @@ export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promi
   await tmuxExecAsync(['kill-pane', '-t', ownership.paneId]);
 }
 
-type PaneTrustPromptKind = 'directory' | 'codex_hooks';
+type PaneTrustPromptKind = 'directory' | 'codex_hooks' | 'cursor_workspace_trust';
 
 function detectPaneTrustPromptKind(captured: string): PaneTrustPromptKind | null {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
@@ -1594,6 +1594,18 @@ function detectPaneTrustPromptKind(captured: string): PaneTrustPromptKind | null
   const hasDirectoryQuestion = tail.some(l => /Do you trust the contents of this directory\?/i.test(l));
   const hasDirectoryChoices = tail.some(l => /Yes,\s*continue|No,\s*quit|Press enter to continue/i.test(l));
   if (hasDirectoryQuestion && hasDirectoryChoices) return 'directory';
+
+  // cursor-agent asks the same question but offers no selectable answer: it
+  // prints "Workspace Trust Required", tells the operator to pass --trust/-f,
+  // and exits. There is nothing to dismiss, so this is reported as its own
+  // kind and never answered with keystrokes. Launch args carry `--force
+  // --trust` precisely so this state is unreachable; seeing it means a pane
+  // was started without them.
+  const hasCursorTrustBanner = tail.some(l => /Workspace Trust Required/i.test(l));
+  const hasCursorTrustHint = tail.some(l => /Pass\s+--trust,\s*--yolo,\s*or\s+-f/i.test(l));
+  if (hasCursorTrustBanner && (hasCursorTrustHint || hasDirectoryQuestion)) {
+    return 'cursor_workspace_trust';
+  }
 
   const hasHookReview = tail.some(l => /Hooks need review/i.test(l));
   const hasHookTrustChoice = tail.some(l => /Continue without trusting/i.test(l));
@@ -1660,6 +1672,10 @@ export function paneLooksReady(captured: string, provider?: CliAgentType): boole
     .map(line => line.replace(/\r/g, '').trimEnd())
     .filter(line => line.trim() !== '');
   if (lines.length === 0) return false;
+  // A dismissible trust prompt still means the CLI is up and answering. The
+  // cursor workspace-trust banner is the opposite: the process already exited,
+  // so the pane is not ready and never will be without `--trust`.
+  if (detectPaneTrustPromptKind(content) === 'cursor_workspace_trust') return false;
   if (paneHasTrustPrompt(content)) return true;
   if (paneIsBootstrapping(content, provider)) return false;
 
@@ -1726,7 +1742,7 @@ async function paneInCopyMode(paneId: string): Promise<boolean> {
 
 export type StartupPaneReadyResult =
   | { ok: true }
-  | { ok: false; reason: 'attempt_inactive' | 'ownership_mismatch' | 'copy_mode' | 'copy_mode_unknown' | 'capture_failed' | 'selector_unsupported' | 'selector_persistent' | 'pane_busy' | 'readiness_timeout' };
+  | { ok: false; reason: 'attempt_inactive' | 'ownership_mismatch' | 'copy_mode' | 'copy_mode_unknown' | 'capture_failed' | 'selector_unsupported' | 'selector_persistent' | 'cursor_workspace_untrusted' | 'pane_busy' | 'readiness_timeout' };
 
 async function sendLiteralPaneText(paneId: string, text: string): Promise<void> {
   if (isCmuxSurfaceTarget(paneId)) {
@@ -1765,6 +1781,12 @@ export async function waitForStartupPaneReady(
     const captured = observation.captured;
     const selector = detectPaneTrustPromptKind(captured);
     if (selector) {
+      // cursor-agent's workspace-trust banner has no selectable answer and the
+      // process is already gone, so there is nothing to drive. Report it under
+      // its own reason instead of blocking until readiness_timeout.
+      if (selector === 'cursor_workspace_trust') {
+        return { ok: false, reason: 'cursor_workspace_untrusted' };
+      }
       const providerSupportsSelector = selector === 'codex_hooks'
         ? context.provider === 'codex'
         : context.provider === 'codex' || context.provider === 'claude';
@@ -1890,6 +1912,11 @@ export async function sendToWorker(
     const paneBusy = paneHasActiveTask(initialCapture);
 
     const trustPromptKind = detectPaneTrustPromptKind(initialCapture);
+    if (trustPromptKind === 'cursor_workspace_trust') {
+      // Nothing to dismiss: cursor-agent printed the banner and exited. Sending
+      // keys here would type into a dead pane.
+      return false;
+    }
     if (trustPromptKind === 'directory') {
       await sendKey('C-m');
       await sleep(120);
