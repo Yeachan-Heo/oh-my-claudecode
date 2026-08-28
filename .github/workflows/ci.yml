@@ -455,7 +455,7 @@ jobs:
         run: |
           git cat-file -e HEAD:.github/release-body.md
           test -s .github/release-body.md
-          cp .github/release-body.md release-notes.md
+          cp .github/release-body.md "$RUNNER_TEMP/release-notes.md"
 
       - name: Verify plugin shipping surface
         run: npm run plugin:shipping:verify
@@ -480,10 +480,9 @@ jobs:
 
       - name: Assert clean deterministic tracked tree before archive
         run: |
-          # Build/test/package preparation may regenerate ignored or tracked
-          # projections. Restore only generated build products and the known
-          # test-mutated hook projection, then fail closed on any remaining
-          # tracked drift before archive or publish.
+          # Build/test preparation may regenerate the known tracked build
+          # closure and the hook projection. Restore only those known paths;
+          # the release-notes copy lives outside the checkout.
           git restore --worktree dist bridge hooks/hooks.json
           git clean -fdX dist
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -598,7 +597,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          body_path: release-notes.md
+          body_path: ${{ runner.temp }}/release-notes.md
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
         env:

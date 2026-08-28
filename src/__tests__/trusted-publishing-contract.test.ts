@@ -141,7 +141,7 @@ describe('npm trusted publishing contract', () => {
       'node scripts/release-boundary.mjs assert-npm-absent --package oh-my-claude-sisyphus --version "$VERSION"',
     );
     expect(releaseJob).toContain('git cat-file -e HEAD:.github/release-body.md');
-    expect(releaseJob).toContain('cp .github/release-body.md release-notes.md');
+    expect(releaseJob).toContain('cp .github/release-body.md "$RUNNER_TEMP/release-notes.md"');
     expect(releaseJob).toContain(
       'node scripts/release-boundary.mjs prepare-stage --seed-tarball "$SEED_TARBALL" --stage "$STAGE" --git-head "$GITHUB_SHA"',
     );
@@ -156,7 +156,7 @@ describe('npm trusted publishing contract', () => {
     expect(releaseJob).toContain(
       'node scripts/release-boundary.mjs verify-registry --package oh-my-claude-sisyphus --version "$VERSION" --tag "$GITHUB_REF_NAME" --sha "$GITHUB_SHA" --evidence "$EVIDENCE_JSON" --tarball "$FINAL_TARBALL" --provenance required --audit "$AUDIT_JSON"',
     );
-    expect(releaseJob).toContain('body_path: release-notes.md');
+    expect(releaseJob).toContain('body_path: ${{ runner.temp }}/release-notes.md');
     expect(releaseJob).toContain('Assert clean deterministic tracked tree before archive');
     expect(releaseJob).toContain('git restore --worktree dist bridge hooks/hooks.json');
     expect(releaseJob).toContain('GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}');
