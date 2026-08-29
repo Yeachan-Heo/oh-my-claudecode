@@ -32,7 +32,7 @@ Launch is a **stateless composition over OMC's existing lifecycle** — it owns 
 
 - Team owns task statuses, transitions, cancellation, and runtime cleanup; Launch never mutates them outside Team's contract.
 - The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `.omc/specs/<feature-slug>/`, `CONTEXT.md`, `docs/adr/`, and `docs/business/`.
-- "Resume" after an interruption is allowed only at a batch boundary: re-read the artifacts and current Team status, then dispatch pending tasks whose numeric `blockedBy` dependencies are completed. Never infer a human approval or replay an `in_progress` task.
+- Launch has no automatic resume. After interruption, re-read the artifacts and current Team status, but continue only through a new explicit Launch invocation after the owning Team lifecycle has reached a supported terminal/cleanup boundary. Never infer a human approval or replay an `in_progress` task.
 - Launch adds no approval receipt, revision counter, replay log, cancellation path, rollback mechanism, or cleanup lifecycle of its own.
 
 Any durability claim in this skill is a claim about the files on disk, not about a hidden runtime.
@@ -93,9 +93,9 @@ The frontier is every ticket whose blockers are all complete.
 
 **Serial (single ticket, or `--serial`).** Delegate one ticket at a time to an executor subagent; same review gate.
 
-**C4 — decisions that emerge mid-run.** When a parallel Team worker hits a decision passing the ADR test, it stops before decision-dependent mutation, records the question (options, recommendation, reversibility note) in the task result and `.omc/specs/<feature-slug>/decisions-pending.md`, and exits through Team's supported `in_progress` → `failed` transition. That Team batch is terminal failed evidence: do not reopen the task, create an in-run successor, or force normal shutdown/cleanup. Resolve the human decision at the next batch boundary, then start a fresh Team run with a new team name and tasks derived from the recorded artifacts.
+**C4 — decisions that emerge mid-run.** When a parallel Team worker hits a decision passing the ADR test, it stops before decision-dependent mutation, records the question (options, recommendation, reversibility note) in the failed transition's `error` field and `.omc/specs/<feature-slug>/decisions-pending.md`, and exits through Team's supported `in_progress` → `failed` transition. This is a terminal Launch outcome: do not reopen the task, create an in-run successor, force cleanup, or start another Team from this invocation. Surface the blocker with pointers to the failed task and decision artifact.
 
-Before any dispatch in the fresh batch, create each question as a normal numeric Team decision task and pre-assign it to a configured Team worker (for example, the designated reviewer/decision worker). The decision task follows Team's supported `pending` → `in_progress` → `completed` lifecycle. Create the replacement implementation task separately in `pending` with the decision task ID in the public Team `blocked_by` field. The configured worker claims the decision task, the lead presents the question batch to the human and records the answer in the decision log/ADR, then the worker completes the decision task from that recorded answer. Team's existing task-ID dependency resolution rejects an early implementation claim and makes it eligible only after the decision task is completed. The team lead never claims a task unless it is explicitly registered as a Team worker. If a decision is visible before first dispatch, create this dependency pair in the current fresh run. All dependencies are declared at task creation, before any worker claim; Launch never dynamically mutates a claimed task's dependencies.
+On a later explicit Launch invocation, first require the owning Team lifecycle to be terminal and cleaned up through its supported owner. Then batch every pending C4 question for the human, record the answers in the decision log/ADRs, and rebuild the ticket frontier before starting execution. All ticket dependencies are declared before dispatch: ticket `blockedBy` metadata maps to the public Team `blocked_by` field with numeric task IDs when tasks are created through the Team task API. Team's existing task-ID dependency resolution rejects early claims and makes dependents eligible only after their predecessors complete. The team lead never claims a task unless it is explicitly registered as a Team worker. Launch never dynamically mutates a claimed task's dependencies and never promises automatic re-dispatch after C4.
 
 **Serial C4 (`--serial`).** The executor stops before decision-dependent mutation and returns the question without claiming completion. Record and resolve the human question at the batch boundary, then start a fresh executor successor with the recorded answer and remaining acceptance criteria. Do not replay or resume the interrupted executor context, and do not manufacture Team tasks when Team is not active.
 
@@ -113,7 +113,7 @@ Before any dispatch in the fresh batch, create each question as a normal numeric
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
 - Handoffs pass pointers, never content.
-- Session died mid-run: resume only at a batch boundary using the lifecycle posture above; pending C4 questions survive in `decisions-pending.md`, while Team remains authoritative for runtime state.
+- Session died mid-run: preserve the artifacts and stop. A later explicit invocation may continue only after the owning Team lifecycle reaches its supported terminal/cleanup boundary; Team remains authoritative for runtime state.
 
 ## Completion definition
 

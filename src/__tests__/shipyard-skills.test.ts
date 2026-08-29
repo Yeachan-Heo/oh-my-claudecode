@@ -53,22 +53,21 @@ describe('shipyard skills — behavior & packaging contract', () => {
       expect(TEAM_TASK_STATUSES as readonly string[]).toContain(t);
     }
     expect(LAUNCH).toContain('`in_progress` → `failed`');
-    expect(LAUNCH).toContain('That Team batch is terminal failed evidence');
-    expect(LAUNCH).toContain('start a fresh Team run with a new team name');
-    expect(LAUNCH).toContain('normal numeric Team decision task');
-    expect(LAUNCH).toContain('pre-assign it to a configured Team worker');
-    expect(LAUNCH).toContain('The configured worker claims the decision task');
+    expect(LAUNCH).toContain("failed transition's `error` field");
+    expect(LAUNCH).toContain('This is a terminal Launch outcome');
+    expect(LAUNCH).toContain('never promises automatic re-dispatch after C4');
+    expect(LAUNCH).toContain('later explicit Launch invocation');
+    expect(LAUNCH).toContain('owning Team lifecycle to be terminal and cleaned up through its supported owner');
     expect(LAUNCH).toContain('The team lead never claims a task unless it is explicitly registered as a Team worker');
     expect(LAUNCH).toContain('public Team `blocked_by` field');
-    expect(LAUNCH).toContain('`pending` → `in_progress` → `completed`');
-    expect(LAUNCH).toContain('All dependencies are declared at task creation, before any worker claim');
+    expect(LAUNCH).toContain('All ticket dependencies are declared before dispatch');
     expect(LAUNCH).toContain('never dynamically mutates a claimed task\'s dependencies');
     expect(LAUNCH).toContain('**Serial C4 (`--serial`).**');
     expect(LAUNCH).toContain('start a fresh executor successor');
     expect(LAUNCH).toContain('do not manufacture Team tasks when Team is not active');
   });
 
-  it('Team API enforces the documented pre-dispatch C4 decision dependency', async () => {
+  it('Team API enforces pre-dispatch ticket dependencies and persists C4 failure evidence', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'omc-launch-c4-'));
     const teamName = 'launch-c4';
     const previousHome = process.env.HOME;
@@ -84,12 +83,12 @@ describe('shipyard skills — behavior & packaging contract', () => {
       mkdirSync(join(teamRoot, 'events'), { recursive: true });
       writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
         name: teamName,
-        task: 'C4 dependency contract',
+        task: 'Launch dependency contract',
         agent_type: 'executor',
         worker_count: 2,
         max_workers: 20,
         workers: [
-          { name: 'decision-worker', index: 1, role: 'reviewer', assigned_tasks: [] },
+          { name: 'predecessor-worker', index: 1, role: 'executor', assigned_tasks: [] },
           { name: 'executor-worker', index: 2, role: 'executor', assigned_tasks: [] },
         ],
         created_at: new Date().toISOString(),
@@ -97,22 +96,22 @@ describe('shipyard skills — behavior & packaging contract', () => {
         next_task_id: 1,
       }, null, 2));
 
-      const decision = await executeTeamApiOperation('create-task', {
+      const predecessor = await executeTeamApiOperation('create-task', {
         team_name: teamName,
-        subject: 'Resolve C4 decision',
-        description: 'Record the approved decision',
-        owner: 'decision-worker',
+        subject: 'Predecessor ticket',
+        description: 'Complete before the dependent ticket',
+        owner: 'predecessor-worker',
       }, cwd);
-      expect(decision.ok).toBe(true);
-      if (!decision.ok) return;
-      const decisionId = String((decision.data as { task: { id: string } }).task.id);
+      expect(predecessor.ok).toBe(true);
+      if (!predecessor.ok) return;
+      const predecessorId = String((predecessor.data as { task: { id: string } }).task.id);
 
       const implementation = await executeTeamApiOperation('create-task', {
         team_name: teamName,
-        subject: 'Implement after C4 decision',
-        description: 'Continue only after the decision task completes',
+        subject: 'Dependent ticket',
+        description: 'Continue only after the predecessor completes',
         owner: 'executor-worker',
-        blocked_by: [decisionId],
+        blocked_by: [predecessorId],
       }, cwd);
       expect(implementation.ok).toBe(true);
       if (!implementation.ok) return;
@@ -129,31 +128,31 @@ describe('shipyard skills — behavior & packaging contract', () => {
 
       const leaderClaim = await executeTeamApiOperation('claim-task', {
         team_name: teamName,
-        task_id: decisionId,
+        task_id: predecessorId,
         worker: 'leader-fixed',
       }, cwd);
       expect(leaderClaim.ok).toBe(true);
       if (!leaderClaim.ok) return;
       expect((leaderClaim.data as { error?: string }).error).toBe('worker_not_found');
 
-      const decisionClaim = await executeTeamApiOperation('claim-task', {
+      const predecessorClaim = await executeTeamApiOperation('claim-task', {
         team_name: teamName,
-        task_id: decisionId,
-        worker: 'decision-worker',
+        task_id: predecessorId,
+        worker: 'predecessor-worker',
       }, cwd);
-      expect(decisionClaim.ok).toBe(true);
-      if (!decisionClaim.ok) return;
-      const claimData = decisionClaim.data as { ok?: boolean; claimToken?: string };
+      expect(predecessorClaim.ok).toBe(true);
+      if (!predecessorClaim.ok) return;
+      const claimData = predecessorClaim.data as { ok?: boolean; claimToken?: string };
       expect(claimData.ok).toBe(true);
       expect(claimData.claimToken).toBeTruthy();
 
       const completed = await executeTeamApiOperation('transition-task-status', {
         team_name: teamName,
-        task_id: decisionId,
+        task_id: predecessorId,
         from: 'in_progress',
         to: 'completed',
         claim_token: claimData.claimToken,
-        result: 'Human decision recorded in ADR',
+        result: 'Predecessor complete',
       }, cwd);
       expect(completed.ok).toBe(true);
       if (!completed.ok) return;
@@ -167,6 +166,30 @@ describe('shipyard skills — behavior & packaging contract', () => {
       expect(eligible.ok).toBe(true);
       if (!eligible.ok) return;
       expect((eligible.data as { ok?: boolean }).ok).toBe(true);
+
+      const eligibleData = eligible.data as { claimToken?: string };
+      const failed = await executeTeamApiOperation('transition-task-status', {
+        team_name: teamName,
+        task_id: implementationId,
+        from: 'in_progress',
+        to: 'failed',
+        claim_token: eligibleData.claimToken,
+        error: 'C4 decision required; see decisions-pending.md',
+      }, cwd);
+      expect(failed.ok).toBe(true);
+      if (!failed.ok) return;
+      expect((failed.data as { ok?: boolean }).ok).toBe(true);
+
+      const readFailed = await executeTeamApiOperation('read-task', {
+        team_name: teamName,
+        task_id: implementationId,
+      }, cwd);
+      expect(readFailed.ok).toBe(true);
+      if (!readFailed.ok) return;
+      expect((readFailed.data as { task?: { status?: string; error?: string } }).task).toMatchObject({
+        status: 'failed',
+        error: 'C4 decision required; see decisions-pending.md',
+      });
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
@@ -178,9 +201,10 @@ describe('shipyard skills — behavior & packaging contract', () => {
     }
   });
 
-  it('launch is stateless and resumes only at a safe batch boundary', () => {
+  it('launch is stateless and requires explicit reinvocation after Team cleanup', () => {
     expect(LAUNCH).toContain('Launch adds no approval receipt, revision counter, replay log, cancellation path, rollback mechanism, or cleanup lifecycle of its own');
-    expect(LAUNCH).toContain('allowed only at a batch boundary');
+    expect(LAUNCH).toContain('Launch has no automatic resume');
+    expect(LAUNCH).toContain('new explicit Launch invocation after the owning Team lifecycle has reached a supported terminal/cleanup boundary');
     expect(LAUNCH).toContain('Never infer a human approval or replay an `in_progress` task');
     expect(LAUNCH).toContain('Team remains authoritative for runtime state');
   });
