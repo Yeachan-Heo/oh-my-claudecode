@@ -10,6 +10,8 @@ const ROOT = join(__dirname, '..', '..');
 const LAUNCH = readFileSync(join(ROOT, 'skills', 'launch', 'SKILL.md'), 'utf-8');
 const DRYDOCK = readFileSync(join(ROOT, 'skills', 'drydock', 'SKILL.md'), 'utf-8');
 const PLUGIN = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf-8'));
+const TEAM_API = readFileSync(join(ROOT, 'src', 'team', 'api-interop.ts'), 'utf-8');
+const TEAM_TASKS = readFileSync(join(ROOT, 'src', 'team', 'state', 'tasks.ts'), 'utf-8');
 
 function frontmatter(src: string): Record<string, string> {
   const m = src.match(/^---\n([\s\S]*?)\n---/);
@@ -50,14 +52,23 @@ describe('shipyard skills — behavior & packaging contract', () => {
     for (const t of statusTokens) {
       expect(TEAM_TASK_STATUSES as readonly string[]).toContain(t);
     }
+    expect(LAUNCH).toContain('`release-task-claim` operation');
+    expect(LAUNCH).toContain('atomically return that task to `pending` and clear its owner/claim');
+    expect(LAUNCH).not.toContain('`in_progress` → `failed`');
+    expect(TEAM_API).toContain("case 'release-task-claim':");
+    expect(TEAM_TASKS).toContain("status: 'pending'");
+    expect(TEAM_TASKS).toContain('owner: undefined');
+    expect(TEAM_TASKS).toContain('claim: undefined');
     expect(LAUNCH).toContain('normal numeric Team decision task');
     expect(LAUNCH).toContain('pre-assign it to a configured Team worker');
     expect(LAUNCH).toContain('that configured worker claims it');
     expect(LAUNCH).toContain('The team lead never claims a task unless it is explicitly registered as a Team worker');
-    expect(LAUNCH).toContain('decision task ID in `blockedBy`');
+    expect(LAUNCH).toContain("decision task ID to the released implementation task's `blockedBy`");
     expect(LAUNCH).toContain('`pending` → `in_progress` → `completed`');
-    expect(LAUNCH).toContain('never reopen or re-dispatch that failed task');
-    expect(LAUNCH).toContain('No mid-flight `in_progress` → `blocked` or `in_progress` → `pending` transition is promised');
+    expect(LAUNCH).toContain('never requests a generic `in_progress` → `blocked` or `in_progress` → `pending` status transition');
+    expect(LAUNCH).toContain('**Serial C4 (`--serial`).**');
+    expect(LAUNCH).toContain('start a fresh executor successor');
+    expect(LAUNCH).toContain('do not manufacture Team tasks when Team is not active');
   });
 
   it('launch is stateless and resumes only at a safe batch boundary', () => {
