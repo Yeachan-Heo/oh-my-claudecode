@@ -90,7 +90,7 @@ Seed A — CLAUDE.md (thin entry; extend in place if the file exists):
 - 术语: CONTEXT.md ｜ 业务知识: docs/business/ ｜ 决策背景: docs/adr/
 
 ## Agent 指南
-- 交付走 /oh-my-claudecode:launch（spec → tickets → frontier 执行）
+- 交付遵循 canonical 工作流 plan → execute → review → verify；`/oh-my-claudecode:launch` 是可选的受治理交付管道（opt-in，需要时显式调用）
 - 术语冲突以 CONTEXT.md 为准；新术语当场补录
 - 可复用能力沉淀到 .omc/skills/；UI 模式沉淀到 design-system/
 ```
@@ -145,7 +145,16 @@ Seed F — .omc/skills/README.md:
 # Project Skills
 
 本项目沉淀的可复用能力：专用工具、提示词模板、专用实践。
-一个技能一个文件 `<name>.md`，frontmatter 必须含 name + description。
+一个技能一个文件 `<name>.md`，frontmatter 必须含 name + description +
+**非空 triggers**（loader 校验硬性要求：缺失或为空则技能不会被加载）：
+```yaml
+---
+name: <skill-name>
+description: <一句话>
+triggers:
+  - <触发词或短语>
+---
+```
 判断标准与 Matt 的 skillify 一致：5 分钟能 Google 到的不配做技能；
 写"本项目特有的决策纪律"，不写通用教程。
 ```

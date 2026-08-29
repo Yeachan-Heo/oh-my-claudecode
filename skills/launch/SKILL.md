@@ -26,6 +26,17 @@ Launch assumes the shipyard keel exists (CONTEXT.md, conventions, standards). If
 
 Between checkpoints the pipeline never idles: agents keep working every frontier ticket that does not depend on a pending human answer.
 
+## Lifecycle posture
+
+Launch is a **stateless composition over OMC's existing lifecycle** — it owns no runtime state machine:
+
+- execution state belongs to team (task statuses and transitions) and is never mutated outside team's contract;
+- history belongs to git, decisions belong to ADRs, and the working artifacts (spec, tickets, decisions-pending) are plain markdown re-read from disk;
+- "resume" after an interruption means re-deriving state by reading the artifacts — there is no runtime session to restore, no revision counter, no replay log;
+- cancel/rollback = OMC cancel plus git semantics; cleanup = closing out artifacts per C5.
+
+Any durability claim in this skill is a claim about the files on disk, not about a hidden runtime.
+
 ## Phase 0 — Entry
 
 - Brief self-check before anything else: does the brief name an objective, a scope boundary, and non-goals? If two or more are missing, say so and ask for one sharpening pass — running the pipeline on a soft brief converts ambiguity into confident-looking output.
@@ -82,7 +93,7 @@ The frontier is every ticket whose blockers are all complete.
 
 **Serial (single ticket, or `--serial`).** Delegate one ticket at a time to an executor subagent; same review gate.
 
-**C4 — decisions that emerge mid-run.** When a worker hits a decision passing the ADR test, it does not guess and does not block the pipeline: mark the ticket `blocked-on-decision`, write the question (options, recommendation, reversibility note) into `.omc/specs/<feature-slug>/decisions-pending.md`, and move to other frontier tickets. Human answers in batch when they return; answered tickets re-enter the frontier. The pipeline routes around open questions — it only truly stops when every remaining ticket is behind one.
+**C4 — decisions that emerge mid-run.** When a worker hits a decision passing the ADR test, it exits its attempt through Team's supported transition — `in_progress → failed`, with the decision question (options, recommendation, reversibility note) recorded in the ticket and in `.omc/specs/<feature-slug>/decisions-pending.md`. The orchestrator then dispatches a successor task (`pending`, `blockedBy` the decision's resolution) — a creation-time dependency, not a mid-flight state mutation. The human answers C4 questions in batch; answered successors re-enter the frontier. Where a decision is visible before dispatch, prefer holding the ticket out of the frontier via its `blockedBy` edge instead. The pipeline routes around open questions — it only truly stops when every remaining ticket is behind one.
 
 **Repeated failure stop.** The same verification failure surviving three repair attempts halts that lane with a root-cause hypothesis for the human. This is the one condition that interrupts C4's batching immediately.
 
@@ -98,7 +109,7 @@ The frontier is every ticket whose blockers are all complete.
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
 - Handoffs pass pointers, never content.
-- Session died mid-run: everything is on disk — spec, tickets, decision states. Read `.omc/specs/<feature-slug>/`, count terminal tickets, resume at the frontier; pending C4 questions survive in `decisions-pending.md`.
+- Session died mid-run: re-read `.omc/specs/<feature-slug>/` (spec, tickets, decision notes), count terminal tickets, resume at the frontier — state is re-derived from the artifacts, not restored; pending C4 questions survive in `decisions-pending.md`.
 
 ## Completion definition
 
