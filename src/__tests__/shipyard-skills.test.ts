@@ -51,6 +51,9 @@ describe('shipyard skills — behavior & packaging contract', () => {
       expect(TEAM_TASK_STATUSES as readonly string[]).toContain(t);
     }
     expect(LAUNCH).toContain('normal numeric Team decision task');
+    expect(LAUNCH).toContain('pre-assign it to a configured Team worker');
+    expect(LAUNCH).toContain('that configured worker claims it');
+    expect(LAUNCH).toContain('The team lead never claims a task unless it is explicitly registered as a Team worker');
     expect(LAUNCH).toContain('decision task ID in `blockedBy`');
     expect(LAUNCH).toContain('`pending` → `in_progress` → `completed`');
     expect(LAUNCH).toContain('never reopen or re-dispatch that failed task');
