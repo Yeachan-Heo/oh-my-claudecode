@@ -5,13 +5,13 @@ import { tmpdir } from 'os';
 import { TEAM_TASK_STATUSES } from '../team/contracts.js';
 import { parseSkillFile } from '../hooks/learner/parser.js';
 import { loadAllSkills } from '../hooks/learner/loader.js';
+import { getOmcRoot } from '../lib/worktree-paths.js';
+import { executeTeamApiOperation } from '../team/api-interop.js';
 
 const ROOT = join(__dirname, '..', '..');
 const LAUNCH = readFileSync(join(ROOT, 'skills', 'launch', 'SKILL.md'), 'utf-8');
 const DRYDOCK = readFileSync(join(ROOT, 'skills', 'drydock', 'SKILL.md'), 'utf-8');
 const PLUGIN = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf-8'));
-const TEAM_API = readFileSync(join(ROOT, 'src', 'team', 'api-interop.ts'), 'utf-8');
-const TEAM_TASKS = readFileSync(join(ROOT, 'src', 'team', 'state', 'tasks.ts'), 'utf-8');
 
 function frontmatter(src: string): Record<string, string> {
   const m = src.match(/^---\n([\s\S]*?)\n---/);
@@ -52,23 +52,125 @@ describe('shipyard skills — behavior & packaging contract', () => {
     for (const t of statusTokens) {
       expect(TEAM_TASK_STATUSES as readonly string[]).toContain(t);
     }
-    expect(LAUNCH).toContain('`release-task-claim` operation');
-    expect(LAUNCH).toContain('atomically return that task to `pending` and clear its owner/claim');
-    expect(LAUNCH).not.toContain('`in_progress` → `failed`');
-    expect(TEAM_API).toContain("case 'release-task-claim':");
-    expect(TEAM_TASKS).toContain("status: 'pending'");
-    expect(TEAM_TASKS).toContain('owner: undefined');
-    expect(TEAM_TASKS).toContain('claim: undefined');
+    expect(LAUNCH).toContain('`in_progress` → `failed`');
+    expect(LAUNCH).toContain('That Team batch is terminal failed evidence');
+    expect(LAUNCH).toContain('start a fresh Team run with a new team name');
     expect(LAUNCH).toContain('normal numeric Team decision task');
     expect(LAUNCH).toContain('pre-assign it to a configured Team worker');
-    expect(LAUNCH).toContain('that configured worker claims it');
+    expect(LAUNCH).toContain('The configured worker claims the decision task');
     expect(LAUNCH).toContain('The team lead never claims a task unless it is explicitly registered as a Team worker');
-    expect(LAUNCH).toContain("decision task ID to the released implementation task's `blockedBy`");
+    expect(LAUNCH).toContain('public Team `blocked_by` field');
     expect(LAUNCH).toContain('`pending` → `in_progress` → `completed`');
-    expect(LAUNCH).toContain('never requests a generic `in_progress` → `blocked` or `in_progress` → `pending` status transition');
+    expect(LAUNCH).toContain('All dependencies are declared at task creation, before any worker claim');
+    expect(LAUNCH).toContain('never dynamically mutates a claimed task\'s dependencies');
     expect(LAUNCH).toContain('**Serial C4 (`--serial`).**');
     expect(LAUNCH).toContain('start a fresh executor successor');
     expect(LAUNCH).toContain('do not manufacture Team tasks when Team is not active');
+  });
+
+  it('Team API enforces the documented pre-dispatch C4 decision dependency', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'omc-launch-c4-'));
+    const teamName = 'launch-c4';
+    const previousHome = process.env.HOME;
+    const previousUserProfile = process.env.USERPROFILE;
+    const previousStateDir = process.env.OMC_STATE_DIR;
+
+    try {
+      process.env.HOME = cwd;
+      process.env.USERPROFILE = cwd;
+      delete process.env.OMC_STATE_DIR;
+      const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
+      mkdirSync(join(teamRoot, 'tasks'), { recursive: true });
+      mkdirSync(join(teamRoot, 'events'), { recursive: true });
+      writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+        name: teamName,
+        task: 'C4 dependency contract',
+        agent_type: 'executor',
+        worker_count: 2,
+        max_workers: 20,
+        workers: [
+          { name: 'decision-worker', index: 1, role: 'reviewer', assigned_tasks: [] },
+          { name: 'executor-worker', index: 2, role: 'executor', assigned_tasks: [] },
+        ],
+        created_at: new Date().toISOString(),
+        tmux_session: 'test:0',
+        next_task_id: 1,
+      }, null, 2));
+
+      const decision = await executeTeamApiOperation('create-task', {
+        team_name: teamName,
+        subject: 'Resolve C4 decision',
+        description: 'Record the approved decision',
+        owner: 'decision-worker',
+      }, cwd);
+      expect(decision.ok).toBe(true);
+      if (!decision.ok) return;
+      const decisionId = String((decision.data as { task: { id: string } }).task.id);
+
+      const implementation = await executeTeamApiOperation('create-task', {
+        team_name: teamName,
+        subject: 'Implement after C4 decision',
+        description: 'Continue only after the decision task completes',
+        owner: 'executor-worker',
+        blocked_by: [decisionId],
+      }, cwd);
+      expect(implementation.ok).toBe(true);
+      if (!implementation.ok) return;
+      const implementationId = String((implementation.data as { task: { id: string } }).task.id);
+
+      const premature = await executeTeamApiOperation('claim-task', {
+        team_name: teamName,
+        task_id: implementationId,
+        worker: 'executor-worker',
+      }, cwd);
+      expect(premature.ok).toBe(true);
+      expect((premature.data as { error?: string }).error).toBe('blocked_dependency');
+
+      const leaderClaim = await executeTeamApiOperation('claim-task', {
+        team_name: teamName,
+        task_id: decisionId,
+        worker: 'leader-fixed',
+      }, cwd);
+      expect(leaderClaim.ok).toBe(true);
+      expect((leaderClaim.data as { error?: string }).error).toBe('worker_not_found');
+
+      const decisionClaim = await executeTeamApiOperation('claim-task', {
+        team_name: teamName,
+        task_id: decisionId,
+        worker: 'decision-worker',
+      }, cwd);
+      expect(decisionClaim.ok).toBe(true);
+      const claimData = decisionClaim.data as { ok?: boolean; claimToken?: string };
+      expect(claimData.ok).toBe(true);
+      expect(claimData.claimToken).toBeTruthy();
+
+      const completed = await executeTeamApiOperation('transition-task-status', {
+        team_name: teamName,
+        task_id: decisionId,
+        from: 'in_progress',
+        to: 'completed',
+        claim_token: claimData.claimToken,
+        result: 'Human decision recorded in ADR',
+      }, cwd);
+      expect(completed.ok).toBe(true);
+      expect((completed.data as { ok?: boolean }).ok).toBe(true);
+
+      const eligible = await executeTeamApiOperation('claim-task', {
+        team_name: teamName,
+        task_id: implementationId,
+        worker: 'executor-worker',
+      }, cwd);
+      expect(eligible.ok).toBe(true);
+      expect((eligible.data as { ok?: boolean }).ok).toBe(true);
+    } finally {
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
+      if (previousUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = previousUserProfile;
+      if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = previousStateDir;
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it('launch is stateless and resumes only at a safe batch boundary', () => {
