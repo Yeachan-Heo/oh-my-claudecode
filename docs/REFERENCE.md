@@ -859,10 +859,12 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/deep-interview`                           |
+| `drydock`                 | Shipyard harness scaffold: 4-pillar shared environment, --check drift audit    | `/oh-my-claudecode:drydock`                 |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
+| `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `minimal-code-discipline` | YAGNI-ladder writing-time discipline: reuse first, shortest correct diff        | `/oh-my-claudecode:minimal-code-discipline` |
 | `omc-doctor`              | Diagnose and fix installation issues                                           | `/oh-my-claudecode:omc-doctor`              |
 | `omc-plan`                | Strategic planning with optional interview and consensus modes                 | `/oh-my-claudecode:omc-plan`               |
@@ -908,6 +910,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Inte
 | `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
+| `/oh-my-claudecode:launch <brief\|spec-path>`           | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |
 | `/oh-my-claudecode:minimal-code-discipline`              | Apply the YAGNI-ladder writing-time discipline while implementing                              |
 | `/oh-my-claudecode:omc-doctor`                           | Diagnose and fix installation issues                                                          |
 | `/oh-my-claudecode:omc-plan <description>`               | Start planning session (supports consensus structured deliberation)                           |
