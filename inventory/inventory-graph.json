@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "12731a09eeda871d625855700fa7bcccf96fd5b6",
-    "sourceSha256": "d11fb1d926000c0baafd77a5130e13c891ccde6be24ba4af2d8ce8fbf26517f9",
+    "head": "a29c8c82634a965518d716e4a7a9a99b6efb313c",
+    "sourceSha256": "dcf805ae2ccbe51ddf854c358cf8d91d3aee772375aa24eb3a871469a1c49549",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "12731a09eeda871d625855700fa7bcccf96fd5b6",
-  "sourceSha256": "d11fb1d926000c0baafd77a5130e13c891ccde6be24ba4af2d8ce8fbf26517f9",
+  "head": "a29c8c82634a965518d716e4a7a9a99b6efb313c",
+  "sourceSha256": "dcf805ae2ccbe51ddf854c358cf8d91d3aee772375aa24eb3a871469a1c49549",
   "counts": {
     "public": {
       "skills": 35,
@@ -28,8 +28,8 @@
       "toolFiles": 60,
       "libFiles": 37,
       "templateHooks": 21,
-      "srcFiles": 1309,
-      "total": 1330
+      "srcFiles": 1310,
+      "total": 1331
     },
     "generated": {
       "distFiles": 4955,
@@ -34775,6 +34775,11 @@
         "path": "src/__tests__/shared-state-locking.test.ts"
       },
       {
+        "id": "src/__tests__/shipyard-skills.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/shipyard-skills.test.ts"
+      },
+      {
         "id": "src/__tests__/skill-entitlements-cross-surface.test.ts",
         "kind": "src",
         "path": "src/__tests__/skill-entitlements-cross-surface.test.ts"
@@ -48149,6 +48154,41 @@
       {
         "from": "src/__tests__/shared-state-locking.test.ts",
         "to": "src/interop/shared-state.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "src/hooks/learner/loader.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "src/hooks/learner/parser.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-skills.test.ts",
+        "to": "src/team/contracts.ts",
         "kind": "imports"
       },
       {
@@ -76483,12 +76523,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6837,
-      "edgeCount": 7203,
-      "importEdgeCount": 5913,
+      "nodeCount": 6838,
+      "edgeCount": 7210,
+      "importEdgeCount": 5920,
       "registerEdgeCount": 56
     }
   },
-  "inventorySha256": "b2db545abd8d4551fb5613a01a1ff9351107b3d46d3605669f02f4cc09396618",
-  "manifestSha256": "c8301cb725d42f42ea09df77a209737fa5141f4778797333360f951490b9ec8c"
+  "inventorySha256": "c56f8abade4e2f50543755ab36df00439ddf6fb2b12d8d2388881a43e9d74e49",
+  "manifestSha256": "29d55c1ccd9ba79a87fc37600e2e7728fbd2a2d0091d8e887957cf99169e31d9"
 }

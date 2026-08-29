@@ -103,9 +103,9 @@ Seed B — CONTEXT.md:
 One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming.
 
 ## <term>
-- 定义: 
+- 定义:
 - 边界: （是 X，不是 Y）
-- 已解决的歧义: 
+- 已解决的歧义:
 ```
 
 Seed C — docs/standards/architecture.md (data.md / process.md same shape):
@@ -141,23 +141,28 @@ Seed E — design-system/README.md:
 
 Seed F — .omc/skills/README.md:
 
-```markdown
+````markdown
 # Project Skills
 
 本项目沉淀的可复用能力：专用工具、提示词模板、专用实践。
-一个技能一个文件 `<name>.md`，frontmatter 必须含 name + description +
+一个技能一个文件 `.omc/skills/<name>.md`，frontmatter 必须含 name + description +
 **非空 triggers**（loader 校验硬性要求：缺失或为空则技能不会被加载）：
-```yaml
+
+```markdown
 ---
-name: <skill-name>
-description: <一句话>
+name: project-release-check
+description: Apply this repository's release readiness rules
 triggers:
-  - <触发词或短语>
+  - "project release check"
 ---
+
+# Project Release Check
+
+Follow the repository-specific release checklist and report evidence.
 ```
 判断标准与 Matt 的 skillify 一致：5 分钟能 Google 到的不配做技能；
 写"本项目特有的决策纪律"，不写通用教程。
-```
+````
 
 `.mcp.json` seed: `{"mcpServers": {}}` — servers get added when a tool integration is actually needed, not speculatively.
 

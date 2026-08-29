@@ -30,10 +30,10 @@ Between checkpoints the pipeline never idles: agents keep working every frontier
 
 Launch is a **stateless composition over OMC's existing lifecycle** — it owns no runtime state machine:
 
-- execution state belongs to team (task statuses and transitions) and is never mutated outside team's contract;
-- history belongs to git, decisions belong to ADRs, and the working artifacts (spec, tickets, decisions-pending) are plain markdown re-read from disk;
-- "resume" after an interruption means re-deriving state by reading the artifacts — there is no runtime session to restore, no revision counter, no replay log;
-- cancel/rollback = OMC cancel plus git semantics; cleanup = closing out artifacts per C5.
+- Team owns task statuses, transitions, cancellation, and runtime cleanup; Launch never mutates them outside Team's contract.
+- The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `.omc/specs/<feature-slug>/`, `CONTEXT.md`, `docs/adr/`, and `docs/business/`.
+- "Resume" after an interruption is allowed only at a batch boundary: re-read the artifacts and current Team status, then dispatch pending tasks whose numeric `blockedBy` dependencies are completed. Never infer a human approval or replay an `in_progress` task.
+- Launch adds no approval receipt, revision counter, replay log, cancellation path, rollback mechanism, or cleanup lifecycle of its own.
 
 Any durability claim in this skill is a claim about the files on disk, not about a hidden runtime.
 
@@ -93,7 +93,9 @@ The frontier is every ticket whose blockers are all complete.
 
 **Serial (single ticket, or `--serial`).** Delegate one ticket at a time to an executor subagent; same review gate.
 
-**C4 — decisions that emerge mid-run.** When a worker hits a decision passing the ADR test, it exits its attempt through Team's supported transition — `in_progress → failed`, with the decision question (options, recommendation, reversibility note) recorded in the ticket and in `.omc/specs/<feature-slug>/decisions-pending.md`. The orchestrator then dispatches a successor task (`pending`, `blockedBy` the decision's resolution) — a creation-time dependency, not a mid-flight state mutation. The human answers C4 questions in batch; answered successors re-enter the frontier. Where a decision is visible before dispatch, prefer holding the ticket out of the frontier via its `blockedBy` edge instead. The pipeline routes around open questions — it only truly stops when every remaining ticket is behind one.
+**C4 — decisions that emerge mid-run.** When a worker hits a decision passing the ADR test, it stops before decision-dependent mutation and exits through Team's supported `in_progress` → `failed` transition. Record the question (options, recommendation, reversibility note) in the failed task evidence and in `.omc/specs/<feature-slug>/decisions-pending.md`; never reopen or re-dispatch that failed task.
+
+At the next batch boundary, assign each unresolved question a normal numeric Team decision task. It follows only the supported lifecycle `pending` → `in_progress` → `completed`: the lead claims it, presents the question batch to the human, records the answer in the decision log/ADR, and completes it. Create a new numeric successor implementation task in `pending` with the decision task ID in `blockedBy`. Team's existing dependency resolution makes the successor eligible for dispatch only after the decision task is completed. If a decision is visible before first dispatch, create this dependency pair immediately and keep the implementation task out of the frontier. No mid-flight `in_progress` → `blocked` or `in_progress` → `pending` transition is promised.
 
 **Repeated failure stop.** The same verification failure surviving three repair attempts halts that lane with a root-cause hypothesis for the human. This is the one condition that interrupts C4's batching immediately.
 
@@ -109,7 +111,7 @@ The frontier is every ticket whose blockers are all complete.
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
 - Handoffs pass pointers, never content.
-- Session died mid-run: re-read `.omc/specs/<feature-slug>/` (spec, tickets, decision notes), count terminal tickets, resume at the frontier — state is re-derived from the artifacts, not restored; pending C4 questions survive in `decisions-pending.md`.
+- Session died mid-run: resume only at a batch boundary using the lifecycle posture above; pending C4 questions survive in `decisions-pending.md`, while Team remains authoritative for runtime state.
 
 ## Completion definition
 
