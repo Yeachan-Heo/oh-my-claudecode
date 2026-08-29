@@ -124,6 +124,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
         worker: 'executor-worker',
       }, cwd);
       expect(premature.ok).toBe(true);
+      if (!premature.ok) return;
       expect((premature.data as { error?: string }).error).toBe('blocked_dependency');
 
       const leaderClaim = await executeTeamApiOperation('claim-task', {
@@ -132,6 +133,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
         worker: 'leader-fixed',
       }, cwd);
       expect(leaderClaim.ok).toBe(true);
+      if (!leaderClaim.ok) return;
       expect((leaderClaim.data as { error?: string }).error).toBe('worker_not_found');
 
       const decisionClaim = await executeTeamApiOperation('claim-task', {
@@ -140,6 +142,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
         worker: 'decision-worker',
       }, cwd);
       expect(decisionClaim.ok).toBe(true);
+      if (!decisionClaim.ok) return;
       const claimData = decisionClaim.data as { ok?: boolean; claimToken?: string };
       expect(claimData.ok).toBe(true);
       expect(claimData.claimToken).toBeTruthy();
@@ -153,6 +156,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
         result: 'Human decision recorded in ADR',
       }, cwd);
       expect(completed.ok).toBe(true);
+      if (!completed.ok) return;
       expect((completed.data as { ok?: boolean }).ok).toBe(true);
 
       const eligible = await executeTeamApiOperation('claim-task', {
@@ -161,6 +165,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
         worker: 'executor-worker',
       }, cwd);
       expect(eligible.ok).toBe(true);
+      if (!eligible.ok) return;
       expect((eligible.data as { ok?: boolean }).ok).toBe(true);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
