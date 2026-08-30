@@ -17,13 +17,13 @@ It is not "let agents do as much as possible" — it is "delegate exactly what c
 
 ## The four pillars → five surfaces
 
-A repo that humans and agents both build on carries four pillars across five surfaces. `/oh-my-claudecode:drydock` lays them; every later session inherits them by reading.
+A repo that humans and agents both build on carries four pillars across five conceptual surfaces, represented by the concrete paths below. `/oh-my-claudecode:drydock` lays them; every later session inherits them by reading.
 
 | Surface | Carries | Filled by |
 | --- | --- | --- |
 | `CLAUDE.md` | Thin entry: project conventions / architecture principles / standards index / load-bearing decision pointers | drydock seed; retro & reviews sediment |
 | `CONTEXT.md` | Glossary (the slot agents write into the moment a term settles; vocabulary is law) | launch Phase 1; domain-modeling |
-| `docs/adr/` | Decision records in full (the logbook) | launch C4; domain-modeling |
+| `docs/adr/` | Decision records in full (the logbook) | launch convergence and C4 follow-up; domain-modeling |
 | `docs/standards/` | architecture.md / data.md / process.md | retro & code-review sediment |
 | `docs/business/` | Business knowledge (one article answers one business question) | launch Phase 1 |
 | `design-system/` | tokens/ + components/ + patterns/ | frontend review sediment |
@@ -44,14 +44,14 @@ A repo that humans and agents both build on carries four pillars across five sur
 ## The three skills compose
 
 - **`drydock`** lays the keel once per repo (surfaces + seeds + `--check` drift audit).
-- **`launch`** runs delivery per feature (C1 brief → C2 spec+seams → C3 tickets → C4 frontier execution → C5 closeout), with the human at exactly the checkpoints that fail expensively.
-- **`minimal-code-discipline`** governs how the code inside every ticket gets written (YAGNI ladder, smallest correct diff).
+- **`launch`** runs delivery per feature (C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout), with the human at exactly the checkpoints that fail expensively.
+- **`minimal-code-discipline`** is an opt-in discipline for code written inside tickets (YAGNI ladder, smallest correct diff).
 
 They share one rule of thumb: **starting needs no permission; landing goes into a shipyard slot.** A change that cannot say which slot it lands in (or explicitly none) is the smell.
 
 ## The feedback loop
 
-Shipyard corrects itself through evidence: friction observed during any run is recorded as a finding (phase-tagged), reviewed at closeout, and either fixed in the skill files or explicitly wontfixed with a reason. A fix is `shipped` only when a later run verifies it took effect. The ledger lives in each project's findings store; the audit is mechanical (`sy check`/`context-lint` style tools, or by hand).
+Shipyard corrects itself through its plain-file paper trail: launch closeout reconciles the spec, `CONTEXT.md`, ADRs, and business docs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through retros and reviews. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
 
 ## When to reach for what
 
