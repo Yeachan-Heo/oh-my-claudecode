@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f568a70135e70873938379c7efd2c60df2012653",
-    "sourceSha256": "f6bfa8a457a0fdb83ece212326b5d3724909bb5ce90687dee9dbf24449a6afd4",
+    "head": "de290de483674711671afb1da9d3fb0b27e41bca",
+    "sourceSha256": "4a5f68823f8f489e7d1c0cc6d4d773f0435d6bb21e82216629792a8e8474893c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f568a70135e70873938379c7efd2c60df2012653",
-  "sourceSha256": "f6bfa8a457a0fdb83ece212326b5d3724909bb5ce90687dee9dbf24449a6afd4",
+  "head": "de290de483674711671afb1da9d3fb0b27e41bca",
+  "sourceSha256": "4a5f68823f8f489e7d1c0cc6d4d773f0435d6bb21e82216629792a8e8474893c",
   "counts": {
     "public": {
       "skills": 35,
@@ -54353,6 +54353,16 @@
       },
       {
         "from": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
         "to": "external:path",
         "kind": "imports"
       },
@@ -54364,6 +54374,11 @@
       {
         "from": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/pre-tool-use-template-source-ext.test.ts",
+        "to": "src/hooks/omc-orchestrator/index.ts",
         "kind": "imports"
       },
       {
@@ -57453,6 +57468,11 @@
       },
       {
         "from": "src/hooks/omc-orchestrator/index.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/index.ts",
         "to": "external:path",
         "kind": "imports"
       },
@@ -57489,11 +57509,6 @@
       {
         "from": "src/hooks/omc-orchestrator/index.ts",
         "to": "src/utils/config-dir.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/omc-orchestrator/index.ts",
-        "to": "src/utils/paths.ts",
         "kind": "imports"
       },
       {
@@ -76574,11 +76589,11 @@
     ],
     "stats": {
       "nodeCount": 6840,
-      "edgeCount": 7218,
-      "importEdgeCount": 5928,
+      "edgeCount": 7221,
+      "importEdgeCount": 5931,
       "registerEdgeCount": 56
     }
   },
   "inventorySha256": "f5ea9ebf29ba491f17b39431660e07f71eb3d78399d481c1c2b00fc34cf2ab50",
-  "manifestSha256": "dced783d9b9bead63c7907c9dac2d7cd59c59b112cdca91fbb412065fae44018"
+  "manifestSha256": "d87423e6fc2dd83ecad05e6256ebfa1a1cf26cb5bc86ad6ca92c0b85d8441bde"
 }

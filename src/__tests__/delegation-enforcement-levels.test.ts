@@ -11,6 +11,7 @@ import { join } from 'path';
 import {
   processOrchestratorPreTool,
   isAllowedPath,
+  isTempOrScratchpadPath,
   isSourceFile,
   isWriteEditTool,
   clearEnforcementCache,
@@ -620,6 +621,36 @@ describe('delegation-enforcement-levels', () => {
 
     it('returns true for .claude/ paths', () => {
       expect(isAllowedPath('.claude/settings.json')).toBe(true);
+    });
+
+    it('returns true for temporary and scratchpad paths', () => {
+      expect(isAllowedPath('/tmp/test.py')).toBe(true);
+      expect(isAllowedPath('/private/tmp/claude-501/project/session/scratchpad/test.py')).toBe(true);
+      expect(isAllowedPath('/var/tmp/script.sh')).toBe(true);
+    });
+
+    it.each([
+      ['/tmp/test.py', '/home/project', true],
+      ['/private/tmp/test.py', '/home/project', true],
+      ['/var/tmp/test.py', '/home/project', true],
+      ['/private/var/tmp/test.py', '/home/project', true],
+      ['/tmp/project/src/app.ts', '/tmp/project', false],
+      ['/tmp/project2/src/app.ts', '/tmp/project', true],
+      ['/tmpfoo/src/app.ts', '/home/project', false],
+      ['scratchpad/src/app.ts', '/home/project', false],
+      ['C:\\Windows\\Temp\\fixture.ts', '/home/project', true],
+      ['C:\\Users\\alice\\AppData\\Local\\Temp\\fixture.ts', '/home/project', true],
+      ['\\\\server\\share\\fixture.ts', '/home/project', false],
+      ['.omc\\..\\src\\app.ts', '/home/project', false],
+    ] as const)('uses bounded cross-platform temp paths: %s from %s', (filePath, directory, expected) => {
+      expect(isTempOrScratchpadPath(filePath, directory)).toBe(expected);
+      expect(isAllowedPath(filePath, directory)).toBe(expected);
+    });
+
+    it('does not allow an absolute temp path that resolves inside the project', () => {
+      const directory = '/tmp/project';
+      expect(isTempOrScratchpadPath('/tmp/project/../project/src/app.ts', directory)).toBe(false);
+      expect(isAllowedPath('/tmp/project/../project/src/app.ts', directory)).toBe(false);
     });
 
     it('returns true for absolute paths under CLAUDE_CONFIG_DIR', () => {
