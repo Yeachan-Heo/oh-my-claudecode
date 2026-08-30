@@ -793,6 +793,10 @@ describe('pre-tool-use packaged artifacts', () => {
     expect(JSON.stringify(runPreToolHook(scriptPath, 'cat fixture.txt > src/app.js'))).toContain(
       'Bash command may modify source files',
     );
+
+    expect(JSON.stringify(runPreToolHook(scriptPath, 'printf x | tee -- -generated.ts'))).toContain(
+      'Bash command may modify source files',
+    );
   });
 
   it('keeps the Skill-vs-Agent guard in parity with the runtime enforcer', () => {

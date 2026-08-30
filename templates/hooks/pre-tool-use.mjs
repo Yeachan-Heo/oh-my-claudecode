@@ -561,6 +561,19 @@ function writeTarget(token, directory) { return !token || token.type !== 'word' 
 function wordsFor(segment, targets) { return segment.map((token, index) => ({ token, index })).filter(entry => entry.token.type === 'word' && !targets.has(entry.index)); }
 function executable(words) { for (let i = 0; i < words.length; i += 1) { const value = words[i].token.value; if (words[i].token.dynamic) return { index: i, base: null }; if (value.includes('=') || COMMAND_WRAPPERS.has(shellBase(value))) continue; return { index: i, base: shellBase(value) }; } return null; }
 function argsAfter(words, start) { return words.slice(start + 1).map(entry => entry.token).filter(token => token.value !== '--' && !token.value.startsWith('-')); }
+function teeOperands(tokens) {
+  const operands = []; let optionsEnded = false;
+  for (const token of tokens) {
+    if (token.dynamic) return null;
+    if (!optionsEnded) {
+      if (token.value === '--') { optionsEnded = true; continue; }
+      if (/^-[aip]+$/.test(token.value) || /^(?:--append|--ignore-interrupts|--output-error(?:=.*)?|--help|--version)$/.test(token.value)) continue;
+      if (token.value.startsWith('-') && token.value !== '-') return null;
+    }
+    operands.push(token);
+  }
+  return operands;
+}
 function checkSegment(segment, directory) {
   const targets = targetIndices(segment);
   for (let i = 0; i < segment.length; i += 1) {
@@ -574,11 +587,16 @@ function checkSegment(segment, directory) {
     }
   }
   const words = wordsFor(segment, targets);
-  const cmd = executable(words); if (!cmd?.base) return false;
-  if (SHELL_COMMANDS.has(cmd.base)) { const flag = words.slice(cmd.index + 1).findIndex(entry => entry.token.value === '--command' || /^-[^-]*c/.test(entry.token.value)); if (flag >= 0) { const code = words[cmd.index + 2 + flag]?.token; return !code || code.dynamic || checkBashCommand(code.value, directory); } }
+  const cmd = executable(words); if (!cmd) return false; if (!cmd.base) return true;
+  if (SHELL_COMMANDS.has(cmd.base)) {
+    const shellArgs = words.slice(cmd.index + 1);
+    if (shellArgs.some(entry => entry.token.dynamic)) return true;
+    const flag = shellArgs.findIndex(entry => entry.token.value === '--command' || /^-[^-]*c/.test(entry.token.value));
+    if (flag >= 0) { const code = shellArgs[flag + 1]?.token; return !code || checkBashCommand(code.value, directory); }
+  }
   if (cmd.base === 'eval') { const code = words.slice(cmd.index + 1); return code.some(entry => entry.token.dynamic) || (code.length > 0 && checkBashCommand(code.map(entry => entry.token.value).join(' '), directory)); }
   const args = argsAfter(words, cmd.index);
-  if (cmd.base === 'tee') return args.some(token => writeTarget(token, directory));
+  if (cmd.base === 'tee') { const operands = teeOperands(words.slice(cmd.index + 1).map(entry => entry.token)); return !operands || operands.some(token => writeTarget(token, directory)); }
   if (new Set(['rm', 'mv', 'touch', 'truncate']).has(cmd.base)) return args.some(token => writeTarget(token, directory));
   if (cmd.base === 'cp' || cmd.base === 'install') return writeTarget(args.at(-1), directory);
   if (cmd.base === 'sed' || cmd.base === 'perl') {
