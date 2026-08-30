@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0b89b1361e66ddbb122ff31a4854b809641f7c51",
-    "sourceSha256": "ac66582549425989d8738007308a61baaaa69392594ac60f5a844a654a9e8aac",
+    "head": "7f806077976294ead9115eb7598b8f84ac46710e",
+    "sourceSha256": "27a37d2c7cddb0b2757e5ed618b5a465510db097b8eb28d7b1083e9017da5b7f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0b89b1361e66ddbb122ff31a4854b809641f7c51",
-  "sourceSha256": "ac66582549425989d8738007308a61baaaa69392594ac60f5a844a654a9e8aac",
+  "head": "7f806077976294ead9115eb7598b8f84ac46710e",
+  "sourceSha256": "27a37d2c7cddb0b2757e5ed618b5a465510db097b8eb28d7b1083e9017da5b7f",
   "counts": {
     "public": {
       "skills": 35,
@@ -28,8 +28,8 @@
       "toolFiles": 60,
       "libFiles": 37,
       "templateHooks": 21,
-      "srcFiles": 1310,
-      "total": 1331
+      "srcFiles": 1311,
+      "total": 1332
     },
     "generated": {
       "distFiles": 4955,
@@ -34780,6 +34780,11 @@
         "path": "src/__tests__/shared-state-locking.test.ts"
       },
       {
+        "id": "src/__tests__/shipyard-seed-locale.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/shipyard-seed-locale.test.ts"
+      },
+      {
         "id": "src/__tests__/shipyard-skills.test.ts",
         "kind": "src",
         "path": "src/__tests__/shipyard-skills.test.ts"
@@ -48159,6 +48164,26 @@
       {
         "from": "src/__tests__/shared-state-locking.test.ts",
         "to": "src/interop/shared-state.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "src/hooks/learner/parser.ts",
         "kind": "imports"
       },
       {
@@ -76538,12 +76563,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6839,
-      "edgeCount": 7212,
-      "importEdgeCount": 5922,
+      "nodeCount": 6840,
+      "edgeCount": 7216,
+      "importEdgeCount": 5926,
       "registerEdgeCount": 56
     }
   },
-  "inventorySha256": "f3b1f52c7615447741858120743b2d57d912e7e11a797dba721324b6d86b846c",
-  "manifestSha256": "f9a3b9a53129305229d8926863e691c1a664e340df80846b54b59b638161070a"
+  "inventorySha256": "f5ea9ebf29ba491f17b39431660e07f71eb3d78399d481c1c2b00fc34cf2ab50",
+  "manifestSha256": "fb3808b7177c21f6c3e53601641483b0d8be5d2d68aa482e706020c69e15724d"
 }
