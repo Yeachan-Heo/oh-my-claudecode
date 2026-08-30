@@ -152,17 +152,31 @@ function withinPath(target: string, root: string): boolean {
 function canonicalPath(value: string): string {
   const clean = portablePath(value);
   if (!isAbsolutePath(clean) || isWindowsPath(clean) !== (process.platform === 'win32')) return clean;
-  let probe = clean; const tail: string[] = [];
-  while (true) {
-    try { return portablePath([realpathSync(probe), ...tail].join('/')); } catch {
-      const parent = path.dirname(probe); if (parent === probe) return clean;
-      tail.unshift(path.basename(probe)); probe = parent;
-    }
+  const raw = String(value); const parsed = path.parse(raw); const parts = raw.slice(parsed.root.length).split(path.sep);
+  let resolved = parsed.root;
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (!part || part === '.') continue;
+    if (part === '..') { resolved = path.dirname(resolved); continue; }
+    const candidate = path.join(resolved, part);
+    try { resolved = realpathSync(candidate); }
+    catch { return portablePath(path.resolve(resolved, ...parts.slice(i))); }
   }
+  return portablePath(resolved);
 }
 function nearestGitRoot(directory: string): string | null {
   let probe = canonicalPath(absolutePortable(directory));
   if (!isAbsolutePath(probe) || isWindowsPath(probe) !== (process.platform === 'win32')) return null;
+  try {
+    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: probe,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
+      timeout: 5000,
+    }).trim();
+    if (root) return canonicalPath(root);
+  } catch { /* fall back to bounded ancestor probing */ }
   while (true) {
     if (existsSync(path.join(probe, '.git'))) return probe;
     const parent = path.dirname(probe); if (parent === probe) return null; probe = parent;
@@ -188,7 +202,7 @@ function approvedTempRoots(): string[] {
 export function isTempOrScratchpadPath(filePath: string, directory?: string): boolean {
   const target = portablePath(filePath);
   if (!filePath || !isAbsolutePath(target)) return false;
-  const canonical = canonicalPath(target), roots = projectRoots(directory), canonicalRoots = roots.map(canonicalPath);
+  const canonical = canonicalPath(filePath), roots = projectRoots(directory);
   if (roots.some(root => withinPath(target, root) || withinPath(canonical, canonicalPath(root))) || hasGitAncestor(canonical)) return false;
   const temps = approvedTempRoots(), canonicalTemps = temps.map(canonicalPath);
   const lexical = temps.some(root => withinPath(target, root)) || WINDOWS_TEMP.some(pattern => pattern.test(target));

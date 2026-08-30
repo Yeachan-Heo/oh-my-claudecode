@@ -148,6 +148,24 @@ describe('pre-tool-use template source extension detection', () => {
       expect(hasDelegationNotice(output)).toBe(false);
       expect(hasDelegationNotice(runPreToolUseHookRaw('Write', { file_path: rejected }, '/home/project', env))).toBe(true);
     });
+
+    it('keeps absolute project metadata and CLAUDE_CONFIG_DIR decisions in parity', () => {
+      const project = mkdtempSync(join(tmpdir(), 'omc-parity-project-'));
+      const config = mkdtempSync(join(tmpdir(), 'omc-parity-config-'));
+      const previousConfig = process.env.CLAUDE_CONFIG_DIR;
+      process.env.CLAUDE_CONFIG_DIR = config;
+      try {
+        for (const target of [join(project, '.omc', 'state.ts'), join(config, 'agents', 'worker.ts')]) {
+          expect(isAllowedPath(target, project)).toBe(true);
+          expect(hasDelegationNotice(runPreToolUseHookRaw('Write', { file_path: target }, project, { CLAUDE_CONFIG_DIR: config }))).toBe(false);
+        }
+      } finally {
+        if (previousConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+        else process.env.CLAUDE_CONFIG_DIR = previousConfig;
+        rmSync(project, { recursive: true, force: true });
+        rmSync(config, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('canonical project and nested-repository rejection', () => {
@@ -189,6 +207,50 @@ describe('pre-tool-use template source extension detection', () => {
         expect(isTempOrScratchpadPath(target, project)).toBe(false);
         expect(isAllowedPath(target, project)).toBe(false);
         expect(hasDelegationNotice(runPreToolUseHookRaw('Write', { file_path: target }, project))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects symlink-plus-parent traversal that escapes the lexical temp root', () => {
+      const root = mkdtempSync(join(tmpdir(), 'omc-symlink-parent-'));
+      const alias = join(root, 'alias');
+      try {
+        try {
+          symlinkSync('/opt', alias, 'dir');
+        } catch {
+          return;
+        }
+        const target = `${alias}/../etc/app.ts`;
+        expect(isTempOrScratchpadPath(target, '/home/project')).toBe(false);
+        expect(isAllowedPath(target, '/home/project')).toBe(false);
+        expect(hasDelegationNotice(runPreToolUseHookRaw('Write', { file_path: target }, '/home/project'))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('resolves GIT_DIR and GIT_WORK_TREE when cwd is a project subdirectory', () => {
+      const root = mkdtempSync(join(tmpdir(), 'omc-git-env-'));
+      const project = join(root, 'project');
+      const subdir = join(project, 'nested');
+      const gitDir = join(root, 'repo.git');
+      mkdirSync(subdir, { recursive: true });
+      try {
+        execFileSync('git', ['init', '--bare', '--quiet', gitDir]);
+        const target = join(project, 'src', 'app.ts');
+        const env = { GIT_DIR: gitDir, GIT_WORK_TREE: project };
+        const previousGitDir = process.env.GIT_DIR;
+        const previousGitWorkTree = process.env.GIT_WORK_TREE;
+        process.env.GIT_DIR = gitDir;
+        process.env.GIT_WORK_TREE = project;
+        try {
+          expect(isAllowedPath(target, subdir)).toBe(false);
+        } finally {
+          if (previousGitDir === undefined) delete process.env.GIT_DIR; else process.env.GIT_DIR = previousGitDir;
+          if (previousGitWorkTree === undefined) delete process.env.GIT_WORK_TREE; else process.env.GIT_WORK_TREE = previousGitWorkTree;
+        }
+        expect(hasDelegationNotice(runPreToolUseHookRaw('Write', { file_path: target }, subdir, env))).toBe(true);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
@@ -271,12 +333,17 @@ describe('pre-tool-use template source extension detection', () => {
       ['subshell log write', '(echo x > output.txt)', false],
       ['shell -c log write', "bash -c 'echo x > /tmp/inner.log'", false],
       ['eval log write', "eval 'echo x > results.txt'", false],
+      ['timeout wrapper with literal script log write', 'timeout 30 bash verify.sh > results.txt', false],
+      ['sudo wrapper with literal script log write', 'sudo -n bash verify.sh > results.txt', false],
+      ['env wrapper with literal script log write', 'env -i bash verify.sh > results.txt', false],
       ['copy source into a log file', 'cp src/input.ts results.txt', false],
       ['install source into a log file', 'install src/input.ts results.txt', false],
       ['non-in-place perl read', "perl -e 'print' src/input.ts", false],
       ['read-only sed with --quiet', "sed --quiet -e '/foo/p' src/app.ts", false],
       ['read-only sed with --silent', "sed --silent -e '/foo/p' src/app.ts", false],
       ['read-only sed with -n', "sed -n -e 's/foo/bar/p' src/app.ts", false],
+      ['comment containing redirect syntax', 'printf x > build.log # > src/app.ts', false],
+      ['heredoc body containing redirect syntax', "cat <<'EOF' > build.log\n> src/app.ts\nEOF", false],
     ] as const)('stays quiet: %s', (_label, command, expectedWarning) => {
       expect(hasDelegationNotice(runPreToolUseHook(command))).toBe(expectedWarning);
     });
@@ -300,6 +367,9 @@ describe('pre-tool-use template source extension detection', () => {
       ['dynamic shell executable', "$SHELL -c 'echo x > src/app.ts'", true],
       ['eval source write', "eval 'echo x > src/app.ts'", true],
       ['eval dynamic code', 'eval "$CODE"', true],
+      ['timeout wrapper source mutation', 'timeout 30 sed -i s/a/b/ src/app.ts', true],
+      ['sudo wrapper source mutation', 'sudo -n sed -i s/a/b/ src/app.ts', true],
+      ['env wrapper source mutation', 'env -i sed -i s/a/b/ src/app.ts', true],
       ['environment output target', 'echo x > "$OUT"', true],
       ['command substitution output target', 'echo x > $(printf src/app.ts)', true],
       ['process substitution output target', 'echo x > >(tee src/app.ts)', true],
@@ -307,6 +377,8 @@ describe('pre-tool-use template source extension detection', () => {
       ['rm source target', 'rm -f src/app.ts', true],
       ['mv source target', 'mv src/app.ts results.txt', true],
       ['cp source destination', 'cp src/input.txt src/app.ts', true],
+      ['cp target-directory source operand', 'cp -t src generated.ts', true],
+      ['install long target-directory source operand', 'install --target-directory=src generated.ts', true],
       ['install source destination', 'install src/input.txt src/app.ts', true],
       ['touch source target', 'touch src/app.ts', true],
       ['truncate source target', 'truncate -s 0 src/app.ts', true],
@@ -314,6 +386,8 @@ describe('pre-tool-use template source extension detection', () => {
       ['in-place sed attached backup suffix', "sed -ibak 's/a/b/' src/app.ts", true],
       ['in-place sed dotted backup suffix', "sed -i.bak 's/a/b/' src/app.ts", true],
       ['in-place sed long backup suffix', "sed --in-place=bak 's/a/b/' src/app.ts", true],
+      ['in-place sed dynamic option', 'FLAGS=-i; sed "$FLAGS" s/a/b/ src/app.ts', true],
+      ['BSD in-place sed option', "sed -I.bak 's/a/b/' src/app.ts", true],
       ['in-place perl source target', "perl -pi -e 's/a/b/' src/app.ts", true],
     ] as const)('warns: %s', (_label, command, expectedWarning) => {
       expect(hasDelegationNotice(runPreToolUseHook(command))).toBe(expectedWarning);
