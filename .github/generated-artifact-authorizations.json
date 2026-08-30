@@ -13516,6 +13516,236 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 3912,
+      "targetRef": "main",
+      "mergeBaseSha": "adf4bf3280c8a8d7b932d5c11aef84ba22d6a11d",
+      "headSha": "c390c2109ec153c84ca5b85455052c7de91d7b9f",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-09-29T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 36,
+        "sha256": "070939e1e5594fb2594c6b2f35bc051afa93c654230784d511869d58c068de93"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "a923e7cefb918e3c8c11fc7a5b2d60e778b2dd0c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "13f0c4cb73bfaed5088d8554a991b54c38c783c4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "8ec88f6d64af4bd96635ee41672d6a21213e3f4c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "84006aafeb2c5dbf6c4081ee1878234860cd766b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "14227dd7197349e86ef0172ae0e8701b5408b464",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "6fe213059771a69ccb520a6d135ad878ee8eddfa",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/graph.d.ts",
+          "sha": "2d8c63d47f201e1e73061c9970f6d3b8d27113da",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js",
+          "sha": "b8bdeef91c565ce883d8171dcf59507c7f1caa62",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/approval.d.ts",
+          "sha": "b0290d0c536325312c8b59658b64c8158c99d955",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/executors/agent.d.ts",
+          "sha": "89c92b101650d9c24bd8bf5904bd43be928d67fe",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/executors/authority.d.ts",
+          "sha": "112c3dbf5bc4fbf713dc8cec74f3ba4e6b2dd365",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/executors/command.d.ts",
+          "sha": "0b998d9a29d545cbd01552ea620ee537c7ad40b6",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/fence.d.ts",
+          "sha": "297afee9653b6a0a68764962e1bc5f543960436b",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/journal.d.ts",
+          "sha": "c3bf795a7cc0d55c9866890091eb16c74e965ed6",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/progress.d.ts",
+          "sha": "26f5092cdb6c3ab0999b5148223d4fa0b2633478",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/run-dir.d.ts",
+          "sha": "63e515cb4744ba0aef10df134cc4e4a392f9d92a",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/runner.d.ts",
+          "sha": "867e4fcb7c2e55d433314e0706e5508f318f324f",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/safe-fs.d.ts",
+          "sha": "7bd30dc5847bb204e3868decc37316880b73d23d",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/store.d.ts",
+          "sha": "7745cf38f87ca11c6419267d42138511b9b6c4d2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/graph/runtime/store.js",
+          "sha": "2c94f7c4b3bb01e5f557d556b766df3766f5fc41",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/graph/runtime/types.d.ts",
+          "sha": "fd4864a6ba52383ef7e7040a8f10b90e21c931bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/omc-orchestrator/index.d.ts",
+          "sha": "33248725634b367d7bafd31aeb34888320bf35b1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/omc-orchestrator/index.js",
+          "sha": "944fc00c4b1f6daa27aaba4632040e2c560d0ba2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/atomic-write.d.ts",
+          "sha": "2d9c71e022893120b93e2bb9dca3a19b373fdfc6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts",
+          "sha": "874dc0f5c10a1fa709de9f43e01b0f21e9ecd6ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/model-contract.d.ts",
+          "sha": "6a47bcf429c95ed62c3d37980b34bb99f2619eb0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/model-contract.js",
+          "sha": "8142a56e3e885245d0753b81c5f4fdd96054c37a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/monitor.js",
+          "sha": "6b7c10dd6072c94fce574527f873056c0a7e6530",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.js",
+          "sha": "f7b17ea01268afb8adeafa809ba654cedd90f671",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime.js",
+          "sha": "ee52ab4968fc2a5934b5ef1b31cff05cd4fa6fd7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js",
+          "sha": "b10d9b76a61acd980f7895f8bed7560e49da97a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/stage-router.js",
+          "sha": "eefc4fe1d755343dbc79900b730e332fff175a3a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/team-ops.js",
+          "sha": "74ff8be5f5149d52db55c230eff04dd9f1365855",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/team-state-reader.js",
+          "sha": "ca6aabe19ce241ca89753ac495f152a96f82038f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/types.d.ts",
+          "sha": "a877039af8a0cf0a92ff72115e4cfc546c199e2c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js",
+          "sha": "6dede2edf9700ff58de673ca29a875b973dac938",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
