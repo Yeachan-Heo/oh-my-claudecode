@@ -16,6 +16,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
 - [Skills (35 Total)](#skills-35-total)
 - [Slash Commands](#slash-commands)
+- [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
 - [Hooks System](#hooks-system)
 - [Magic Keywords](#magic-keywords)
