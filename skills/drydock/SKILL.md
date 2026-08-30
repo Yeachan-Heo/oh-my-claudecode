@@ -45,11 +45,12 @@ Report the map first, then act.
 
 ### 2. Ask (only what detection cannot answer)
 
+- **document language for the generated harness files** — the human reads and maintains them, so they follow the human: ask once, or infer from the target repo's existing CLAUDE.md/README; record the choice in the init report. Prose and field labels follow this language; structural keys stay language-stable (file paths, frontmatter keys, `blockedBy:`, status enums, ID formats).
 - package/tech stack (for standards and design-system seeds)
 - does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
 - issue tracker location (GitHub / GitLab / local `.scratch/`) — recorded for launch/triage flows
 
-### 3. Scaffold (create missing surfaces with the seeds below)
+### 3. Scaffold (create missing surfaces — seeds render in the document language)
 
 ```
 CLAUDE.md                      # thin entry — see seed A
@@ -67,10 +68,40 @@ design-system/tokens/README.md
 scripts/README.md
 ```
 
-Seed A — CLAUDE.md (thin entry; extend in place if the file exists):
+Seed exemplars below are shown in **English** (canonical structure) with a **zh (中文) companion** for the seeds whose field labels are load-bearing (Seed A headings, Seed B labels). Whichever document language was chosen, the agent renders all seed prose in that language — structure and keys stay as documented.
+
+Seed A — CLAUDE.md, en (thin entry; extend in place if the file exists):
 
 ```markdown
 # <Project> — Agent & Human Shipyard
+
+## Project conventions
+- <language/framework/package manager/naming — list what matters, skip the rest>
+
+## Architecture principles
+- <the 3-5 principles most often violated in this project>
+
+## Standards index (full text in docs/standards/)
+- Architecture: docs/standards/architecture.md
+- Data: docs/standards/data.md
+- Process: docs/standards/process.md
+
+## Decision records (full text in docs/adr/; load-bearing ones listed here)
+- ADR-0001: adopt shipyard harness
+
+## Shared background
+- Glossary: CONTEXT.md ｜ Business knowledge: docs/business/ ｜ Decision context: docs/adr/
+
+## Agent guide
+- Delivery follows the canonical workflow plan → execute → review → verify; `/oh-my-claudecode:launch` is an optional governed delivery pipeline (opt-in, invoke explicitly)
+- On term conflicts CONTEXT.md wins; new terms are recorded the moment they settle
+- Reusable capability goes to .omc/skills/; UI patterns go to design-system/
+```
+
+Seed A — zh companion (结构一致，二选一按文档语言渲染):
+
+```markdown
+# <项目> — Agent & Human Shipyard
 
 ## 项目约定
 - <语言/框架/包管理器/命名惯例 —— 逐条列，宁缺毋滥>
@@ -95,7 +126,9 @@ Seed A — CLAUDE.md (thin entry; extend in place if the file exists):
 - 可复用能力沉淀到 .omc/skills/；UI 模式沉淀到 design-system/
 ```
 
-Seed B — CONTEXT.md:
+Seed B — CONTEXT.md (field labels are load-bearing; both languages documented):
+
+en:
 
 ```markdown
 # Glossary
@@ -103,21 +136,34 @@ Seed B — CONTEXT.md:
 One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming.
 
 ## <term>
+- Definition:
+- Boundary: (is X, not Y)
+- Resolved ambiguity:
+```
+
+zh:
+
+```markdown
+# 术语表
+
+一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。
+
+## <术语>
 - 定义:
 - 边界: （是 X，不是 Y）
 - 已解决的歧义:
 ```
 
-Seed C — docs/standards/architecture.md (data.md / process.md same shape):
+Seed C — docs/standards/architecture.md (data.md / process.md same shape; prose renders in the document language):
 
 ```markdown
 # Architecture Standards
 
-规则化、可检查的写；每条带一个"为什么"。空节是合法的——沉淀是渐进的。
+Rule-shaped, checkable writing; every rule carries a "why". Empty sections are legal — sediment is gradual.
 
-## 模块边界
-## 错误处理
-## 依赖方向
+## Module boundaries
+## Error handling
+## Dependency direction
 ```
 
 Seed D — docs/business/README.md:
@@ -125,8 +171,8 @@ Seed D — docs/business/README.md:
 ```markdown
 # Business Knowledge
 
-决策背景与业务规则。格式建议：一篇文章回答一个业务问题，开头一段"为什么这事重要"。
-新来的同事（人或 agent）读完这一目录，应该能回答"我们为什么做这个产品方向"。
+Decision background and business rules. Format suggestion: one article answers one business question, opening paragraph states why it matters.
+A new teammate (human or agent) reading this directory should be able to answer "why does this product direction exist".
 ```
 
 Seed E — design-system/README.md:
@@ -134,9 +180,9 @@ Seed E — design-system/README.md:
 ```markdown
 # Design System
 
-## tokens/    设计令牌（颜色/字号/间距，机器可读 JSON 优先）
-## components/ 组件约定（每个组件：用途、变体、禁用场景）
-## patterns/  交互模式（表单、反馈、加载、空状态——沉淀复用过的模式）
+## tokens/    Design tokens (colors/type/spacing, machine-readable JSON preferred)
+## components/ Component contracts (purpose, variants, misuse)
+## patterns/  Interaction patterns (forms, feedback, loading, empty states — sediment reused patterns)
 ```
 
 Seed F — .omc/skills/README.md:
@@ -144,9 +190,9 @@ Seed F — .omc/skills/README.md:
 ````markdown
 # Project Skills
 
-本项目沉淀的可复用能力：专用工具、提示词模板、专用实践。
-一个技能一个文件 `.omc/skills/<name>.md`，frontmatter 必须含 name + description +
-**非空 triggers**（loader 校验硬性要求：缺失或为空则技能不会被加载）：
+Reusable capabilities sedimented by this project: specialized tools, prompt templates, specialized practices.
+One skill per file `.omc/skills/<name>.md`, frontmatter must contain name + description +
+**non-empty triggers** (loader validation hard requirement: missing or empty means the skill is never loaded):
 
 ```markdown
 ---
@@ -160,8 +206,8 @@ triggers:
 
 Follow the repository-specific release checklist and report evidence.
 ```
-判断标准与 Matt 的 skillify 一致：5 分钟能 Google 到的不配做技能；
-写"本项目特有的决策纪律"，不写通用教程。
+Bar for admission matches skillify: if it can be Googled in 5 minutes it is not a skill;
+write "this project's specific decision discipline", not generic tutorials.
 ````
 
 `.mcp.json` seed: `{"mcpServers": {}}` — servers get added when a tool integration is actually needed, not speculatively.

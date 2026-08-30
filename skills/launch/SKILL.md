@@ -71,6 +71,8 @@ Synthesize `.omc/specs/<feature-slug>/spec.md`:
 
 Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis); the human confirms or corrects the list — a seam the human has not approved gets no tests.
 
+Language rule: every launch-authored artifact (spec, tickets, ADRs, CONTEXT.md entries, completion report) is written in the human's document language — the one chosen at drydock init, or the human's own language when drydock did not run. The human reads and maintains these files; agents are language-agnostic.
+
 Durability gate (agent-enforced, no approval needed): spec and tickets carry contracts, never coordinates — no file paths, no line numbers. Fragments encoding a decision better than prose (state machines, reducers, schemas) are the exception and state their origin.
 
 ## Phase 3 — Ticket decomposition (agent drafts → C3 approves)

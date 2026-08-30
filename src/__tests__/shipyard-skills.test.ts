@@ -242,6 +242,22 @@ describe('shipyard skills — behavior & packaging contract', () => {
     }
   });
 
+  it('drydock makes the document language a first-class decision with en + zh seed companions', () => {
+    // user-language principle: generated harness files follow the human's language
+    expect(DRYDOCK).toMatch(/document language for the generated harness files/);
+    expect(DRYDOCK).toMatch(/structural keys stay language-stable/);
+    // both language companions present for the load-bearing seeds
+    expect(DRYDOCK).toContain('## Project conventions');
+    expect(DRYDOCK).toContain('## 项目约定');
+    expect(DRYDOCK).toContain('- Definition:');
+    expect(DRYDOCK).toContain('- 定义:');
+  });
+
+  it('launch states the user-language rule for authored artifacts', () => {
+    expect(LAUNCH).toMatch(/document language/);
+    expect(LAUNCH).toMatch(/agents are language-agnostic/);
+  });
+
   it('plugin.json ships both skills and every path exists on disk', () => {
     for (const name of ['launch', 'drydock']) {
       const entry = `./skills/${name}/`;
