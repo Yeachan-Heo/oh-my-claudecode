@@ -43,14 +43,44 @@ Inventory what exists before writing anything:
 
 Report the map first, then act.
 
-### 2. Ask (only what detection cannot answer)
+### 2. Resolve document language, then ask only what detection cannot answer
 
-- **document language for the generated harness files**, resolved in this fixed order:
-  1. **Explicit human override in the current request** — the human names a language; it wins over everything, and the durable tag below is updated to match.
-  2. **Durable tag** — the `language:` field in `CONTEXT.md` frontmatter (e.g. `language: zh-Hans`); created at init, read by every later launch.
-  3. **Inference** — only when no durable tag exists: the dominant language of the target repo's existing CLAUDE.md/README, accepted only when unambiguous across inspected files.
-  4. **Ambiguity branch** — mixed-language or missing files → ask once, record the answer into the durable tag. Locale/script variants are explicit tags (`zh-Hans`, `zh-Hant`, `en`); bare `zh` is not a valid tag.
-  Prose and field labels follow the resolved language; structural keys stay language-stable (file paths, frontmatter keys, `blockedBy:`, status enums, ID formats).
+The document language for the generated harness files is a file-backed decision, not conversation state. Use this contract exactly:
+
+<!-- shipyard-document-language-contract:start -->
+```json
+{
+  "schemaVersion": 1,
+  "authority": { "path": "CONTEXT.md", "frontmatterKey": "documentLanguage" },
+  "canonicalSources": ["CLAUDE.md", "README.md"],
+  "askOn": ["missing", "mixed", "conflict", "low-confidence", "invalid-explicit", "script-ambiguous"],
+  "tagPattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$",
+  "scriptVariants": ["zh-Hans", "zh-Hant"],
+  "seedCompanionPrefixes": { "en": "en", "zh-Hans": "zh-Hans", "zh-Hant": "zh-Hant" },
+  "stableTokens": [
+    "CONTEXT.md", "documentLanguage", "/oh-my-claudecode:launch", "--serial",
+    "plan", "execute", "review", "verify", "blockedBy", "blocked_by",
+    "pending", "in_progress", "completed", "failed", "ready-for-agent",
+    "id", "name", "description", "triggers", "mcpServers", "```",
+    "<Project>", "<term>", "<feature-slug>"
+  ]
+}
+```
+<!-- shipyard-document-language-contract:end -->
+
+Resolution order:
+
+1. An explicit human choice in the current invocation wins when valid. Normalize it to a stable BCP-47-style tag: lowercase language, Title-Case script, uppercase region. Invalid explicit input must be asked once rather than guessed.
+2. Otherwise, read `documentLanguage` from the YAML frontmatter at the top of `CONTEXT.md`. A valid, script-unambiguous tag is authoritative for fresh Drydock and Launch invocations. If the persisted tag is bare or region-only Chinese, ask once at this authority tier; never bypass it with source inference.
+3. If the marker is absent or invalid, inspect canonical sources in this order: `CLAUDE.md`, then `README.md`. Infer only when every usable source has one unambiguous dominant language and all usable sources agree on the same normalized tag. One unambiguous source is sufficient when the other is missing or empty.
+4. Chinese must resolve to an explicit script-qualified tag: `zh-Hans` or `zh-Hant` (optionally followed by a region). Bare `zh` and region-only Chinese tags are script-ambiguous and must be asked once rather than selecting a companion. Companion selection uses the longest language/script prefix: `zh-Hans-*` selects the `zh-Hans` companion and `zh-Hant-*` selects `zh-Hant`; preserve the full normalized tag (for example `zh-Hans-CN`) in `CONTEXT.md`.
+5. Missing usable sources, mixed-language content, conflicting tags, low-confidence inference, invalid explicit input, or script-ambiguous Chinese must trigger one batched language question. Do not guess. If no answer is available, stop before writing localized artifacts.
+6. Before scaffolding, write the resolved tag to the exact stable frontmatter key `documentLanguage` in `CONTEXT.md` (creating or extending its frontmatter without translating the key). This visible file is the init report's language authority; no daemon, hidden ledger, or runtime state is created.
+
+Only prose and human-facing labels/localizable values follow the selected language; structural keys stay language-stable. Keep paths, slash commands, flags, code fences, placeholders, frontmatter keys and machine-semantic values, YAML/JSON keys, lifecycle tokens, status enums, IDs, `blockedBy`, public Team `blocked_by`, and parser/control tokens byte-for-byte stable.
+
+Ask the remaining questions only after language is resolved:
+
 - package/tech stack (for standards and design-system seeds)
 - does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
 - issue tracker location (GitHub / GitLab / local `.scratch/`) — recorded for launch/triage flows
@@ -73,10 +103,11 @@ design-system/tokens/README.md
 scripts/README.md
 ```
 
-Seed exemplars below are shown in **English** (canonical structure) with a **zh (中文) companion** for the seeds whose field labels are load-bearing (Seed A headings, Seed B labels). Whichever document language was chosen, the agent renders all seed prose in that language — structure and keys stay as documented.
+Seed exemplars are reference companions, never a combined payload. Select exactly one companion after resolving `documentLanguage`; do not emit duplicate headings or labels from another companion. Use the longest matching language/script prefix: `en-*` uses English, `zh-Hans-*` uses Simplified Chinese, and `zh-Hant-*` uses Traditional Chinese, while Seed B writes the full resolved tag into `documentLanguage`. For any other valid tag, translate the English canonical companion once while preserving every stable token above.
 
 Seed A — CLAUDE.md, en (thin entry; extend in place if the file exists):
 
+<!-- shipyard-seed-a:en:start -->
 ```markdown
 # <Project> — Agent & Human Shipyard
 
@@ -102,17 +133,19 @@ Seed A — CLAUDE.md, en (thin entry; extend in place if the file exists):
 - On term conflicts CONTEXT.md wins; new terms are recorded the moment they settle
 - Reusable capability goes to .omc/skills/; UI patterns go to design-system/
 ```
+<!-- shipyard-seed-a:en:end -->
 
-Seed A — zh companion (结构一致，二选一按文档语言渲染):
+Seed A — zh-Hans companion (结构一致，二选一按文档语言渲染):
 
+<!-- shipyard-seed-a:zh-Hans:start -->
 ```markdown
-# <项目> — Agent & Human Shipyard
+# <Project> — Agent & Human Shipyard
 
 ## 项目约定
-- <语言/框架/包管理器/命名惯例 —— 逐条列，宁缺毋滥>
+- <language/framework/package manager/naming — list what matters, skip the rest>
 
 ## 架构原则
-- <本项目最高频违反的 3-5 条原则>
+- <the 3-5 principles most often violated in this project>
 
 ## 规范索引（全文在 docs/standards/）
 - 架构规范: docs/standards/architecture.md
@@ -130,14 +163,46 @@ Seed A — zh companion (结构一致，二选一按文档语言渲染):
 - 术语冲突以 CONTEXT.md 为准；新术语当场补录
 - 可复用能力沉淀到 .omc/skills/；UI 模式沉淀到 design-system/
 ```
+<!-- shipyard-seed-a:zh-Hans:end -->
 
-Seed B — CONTEXT.md, en (field labels are load-bearing; both languages documented):
+Seed A — zh-Hant companion（結構一致，只渲染此版本）:
+
+<!-- shipyard-seed-a:zh-Hant:start -->
+```markdown
+# <Project> — Agent & Human Shipyard
+
+## 專案約定
+- <language/framework/package manager/naming — list what matters, skip the rest>
+
+## 架構原則
+- <the 3-5 principles most often violated in this project>
+
+## 規範索引（全文在 docs/standards/）
+- 架構規範: docs/standards/architecture.md
+- 資料規範: docs/standards/data.md
+- 流程規範: docs/standards/process.md
+
+## 決策記錄（全文在 docs/adr/，此處只列 load-bearing 項目）
+- ADR-0001: adopt shipyard harness
+
+## 共享背景
+- 詞彙: CONTEXT.md ｜ 業務知識: docs/business/ ｜ 決策背景: docs/adr/
+
+## Agent 指南
+- 交付遵循 canonical 工作流 plan → execute → review → verify；`/oh-my-claudecode:launch` 是可選的治理交付管道（opt-in，必須明確呼叫）
+- 術語衝突以 CONTEXT.md 為準；新術語確定時立即補錄
+- 可重用能力沉澱到 .omc/skills/；UI 模式沉澱到 design-system/
+```
+<!-- shipyard-seed-a:zh-Hant:end -->
+
+Seed B — CONTEXT.md (the stable frontmatter key is the language authority):
 
 en:
 
+<!-- shipyard-seed-b:en:start -->
 ```markdown
 ---
-language: en
+documentLanguage: en
 ---
 
 # Glossary
@@ -149,23 +214,45 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Boundary: (is X, not Y)
 - Resolved ambiguity:
 ```
+<!-- shipyard-seed-b:en:end -->
 
-Seed B — CONTEXT.md, zh:
+zh-Hans:
 
+<!-- shipyard-seed-b:zh-Hans:start -->
 ```markdown
 ---
-language: zh-Hans
+documentLanguage: zh-Hans
 ---
 
 # 术语表
 
 一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。
 
-## <术语>
+## <term>
 - 定义:
 - 边界: （是 X，不是 Y）
 - 已解决的歧义:
 ```
+<!-- shipyard-seed-b:zh-Hans:end -->
+
+zh-Hant:
+
+<!-- shipyard-seed-b:zh-Hant:start -->
+```markdown
+---
+documentLanguage: zh-Hant
+---
+
+# 詞彙表
+
+每個術語一個條目：定義、邊界、一個已解決的歧義。術語確定時立即寫入。這裡的詞彙是所有 spec、ticket 與程式碼命名的準則。
+
+## <term>
+- 定義:
+- 邊界: （是 X，不是 Y）
+- 已解決的歧義:
+```
+<!-- shipyard-seed-b:zh-Hant:end -->
 
 Seed C — docs/standards/architecture.md (data.md / process.md same shape; prose renders in the document language):
 
@@ -204,7 +291,8 @@ Seed F — .omc/skills/README.md:
 # Project Skills
 
 Reusable capabilities sedimented by this project: specialized tools, prompt templates, specialized practices.
-One skill per file `.omc/skills/<name>.md`, frontmatter must contain a **literal Latin `id`** + name + description + non-empty triggers (loader validation hard requirement: missing or empty means the skill is never loaded; the production parser derives `id` from `name` only when `id` is missing — a localized `name` would strip to an empty ID, so the literal `id` is the stability guarantee). `id` is machine-semantic and never localized; `name`/`description` may follow the document language:
+One skill per file `.omc/skills/<name>.md`, frontmatter must contain a stable ASCII `id` plus name + description +
+**non-empty triggers** (loader validation hard requirement: missing or empty means the skill is never loaded):
 
 ```markdown
 ---
@@ -219,6 +307,7 @@ triggers:
 
 Follow the repository-specific release checklist and report evidence.
 ```
+The literal YAML keys `id`, `name`, `description`, and `triggers` never localize. `id` and other machine-semantic values stay ASCII and stable; the scalar display values for `name`, `description`, and `triggers`, plus Markdown headings and prose, may localize. A non-Latin display name remains loadable because the explicit ASCII `id` is stable.
 Bar for admission matches skillify: if it can be Googled in 5 minutes it is not a skill;
 write "this project's specific decision discipline", not generic tutorials.
 ````
@@ -239,9 +328,10 @@ The rule that keeps 先动手 aligned: **starting needs no permission; landing g
 ### 5. Report
 
 - created / extended / deliberately skipped (each with why)
+- resolved document language as `CONTEXT.md` frontmatter `documentLanguage: <tag>`, including whether it came from explicit choice, the persisted marker, or unanimous inference
 - the 3 surfaces that most need human content next (usually CLAUDE.md conventions, architecture.md, CONTEXT.md first terms)
 - reminder: re-run with `--check` any time to see drift between filesystem and harness
 
 ## `--check` mode
 
-Diff actual repo state against the shipyard map; report: missing surfaces, CLAUDE.md sections that point at dead paths, CONTEXT.md terms unused in code, standards never referenced. Read-only.
+Diff actual repo state against the shipyard map; report: missing surfaces, a missing or invalid `CONTEXT.md` frontmatter `documentLanguage` tag, CLAUDE.md sections that point at dead paths, CONTEXT.md terms unused in code, and standards never referenced. Read-only.
