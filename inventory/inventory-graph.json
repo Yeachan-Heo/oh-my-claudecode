@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "7f806077976294ead9115eb7598b8f84ac46710e",
-    "sourceSha256": "27a37d2c7cddb0b2757e5ed618b5a465510db097b8eb28d7b1083e9017da5b7f",
+    "head": "8a817215636a4ba79b3f7cdfddb1259fe2d35577",
+    "sourceSha256": "f6bfa8a457a0fdb83ece212326b5d3724909bb5ce90687dee9dbf24449a6afd4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "7f806077976294ead9115eb7598b8f84ac46710e",
-  "sourceSha256": "27a37d2c7cddb0b2757e5ed618b5a465510db097b8eb28d7b1083e9017da5b7f",
+  "head": "8a817215636a4ba79b3f7cdfddb1259fe2d35577",
+  "sourceSha256": "f6bfa8a457a0fdb83ece212326b5d3724909bb5ce90687dee9dbf24449a6afd4",
   "counts": {
     "public": {
       "skills": 35,
@@ -48173,12 +48173,22 @@
       },
       {
         "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
         "to": "external:path",
         "kind": "imports"
       },
       {
         "from": "src/__tests__/shipyard-seed-locale.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/shipyard-seed-locale.test.ts",
+        "to": "src/hooks/learner/loader.ts",
         "kind": "imports"
       },
       {
@@ -76564,11 +76574,11 @@
     ],
     "stats": {
       "nodeCount": 6840,
-      "edgeCount": 7216,
-      "importEdgeCount": 5926,
+      "edgeCount": 7218,
+      "importEdgeCount": 5928,
       "registerEdgeCount": 56
     }
   },
   "inventorySha256": "f5ea9ebf29ba491f17b39431660e07f71eb3d78399d481c1c2b00fc34cf2ab50",
-  "manifestSha256": "fb3808b7177c21f6c3e53601641483b0d8be5d2d68aa482e706020c69e15724d"
+  "manifestSha256": "8bf7e76cd187453fef74b71f6c1fc5867ae0e39867c7db2f70f2fda4b498293c"
 }
