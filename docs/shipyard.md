@@ -21,25 +21,25 @@ A repo that humans and agents both build on carries four pillars across five sur
 
 | Surface | Carries | Filled by |
 | --- | --- | --- |
-| `CLAUDE.md` | 薄入口：项目约定 / 架构原则 / 规范索引 / load-bearing 决策指针 | drydock seed; retro & reviews sediment |
-| `CONTEXT.md` | 术语词典（agent 当场落盘的格子；词汇即法律） | launch Phase 1; domain-modeling |
-| `docs/adr/` | 决策记录全文（航海日志） | launch C4; domain-modeling |
+| `CLAUDE.md` | Thin entry: project conventions / architecture principles / standards index / load-bearing decision pointers | drydock seed; retro & reviews sediment |
+| `CONTEXT.md` | Glossary (the slot agents write into the moment a term settles; vocabulary is law) | launch Phase 1; domain-modeling |
+| `docs/adr/` | Decision records in full (the logbook) | launch C4; domain-modeling |
 | `docs/standards/` | architecture.md / data.md / process.md | retro & code-review sediment |
-| `docs/business/` | 业务知识（一篇回答一个业务问题） | launch Phase 1 |
+| `docs/business/` | Business knowledge (one article answers one business question) | launch Phase 1 |
 | `design-system/` | tokens/ + components/ + patterns/ | frontend review sediment |
-| `.omc/skills/` | 项目技能：可复用能力 / 专用工具 / 提示词模板 / 专用实践 | anyone (skillify quality gate) |
-| `.mcp.json` + `scripts/` | MCP servers + CLI 工具链 / 自动化脚本 | PR |
+| `.omc/skills/` | Project skills: reusable capabilities / specialized tools / prompt templates / specialized practices | anyone (skillify quality gate) |
+| `.mcp.json` + `scripts/` | MCP servers + CLI toolchain / automation scripts | PR |
 
 ## The metaphor family (for teaching the system)
 
-| 隐喻 | 对应物 | 一句话 |
+| Metaphor | Maps to | In one line |
 | --- | --- | --- |
-| 船坞 shipyard | 整套 harness | 共享设施，人人来造船 |
-| 龙骨 keel | `CLAUDE.md` + `CONTEXT.md` | 先铺骨架，船体往上长 |
-| 船级社 classification society | `docs/standards/` + `design-system/` | 船要入级才能出海 = 变更要过标准才能合并 |
-| 海图 charts | specs + tickets | launch 的产物，照图施工 |
-| 航海日志 logbook | `docs/adr/` | 决策记录，事后可查 |
-| 下水 launch | `/oh-my-claudecode:launch` | 人人可以下水，船级社的检查一项不能少 |
+| The shipyard | The whole harness | A shared facility; everyone comes here to build |
+| The keel | `CLAUDE.md` + `CONTEXT.md` | Lay the skeleton first; the hull grows upward |
+| The classification society | `docs/standards/` + `design-system/` | A ship must pass class to sail = changes must pass standards to merge |
+| The charts | specs + tickets | Launch's output; build from the chart |
+| The logbook | `docs/adr/` | Decisions, auditable after the fact |
+| The launch | `/oh-my-claudecode:launch` | Everyone may launch — and not one class check may be skipped |
 
 ## The three skills compose
 
