@@ -545,6 +545,7 @@ function heredocDelimiter(line) {
     if (quote) { if (ch === '\\') i += 1; else if (ch === quote) quote = null; continue; }
     if (ch === "'" || ch === '"') { quote = ch; continue; }
     if (ch === '\\') { i += 1; continue; }
+    if (ch === '#' && (i === 0 || /[\s;|&()]/.test(line[i - 1]))) return null;
     if (ch !== '<' || line[i + 1] !== '<') continue;
     const match = line.slice(i + 2).match(/^(-)?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/);
     if (match) return { delimiter: match[3], stripTabs: Boolean(match[1]) };
@@ -566,8 +567,8 @@ function stripHeredocBodies(command) {
 }
 
 function tokenizeShell(command) {
-  const tokens = []; let value = ''; let dynamic = false; let nested = []; let quote = null;
-  const flush = () => { if (value || dynamic || quote) tokens.push({ type: 'word', value, dynamic, nested }); value = ''; dynamic = false; nested = []; };
+  const tokens = []; let value = ''; let dynamic = false; let ambiguous = false; let nested = []; let quote = null;
+  const flush = () => { if (value || dynamic || quote) tokens.push({ type: 'word', value, dynamic, ambiguous, nested }); value = ''; dynamic = false; ambiguous = false; nested = []; };
   const op = (value, kind) => { flush(); tokens.push({ type: 'op', value, kind }); };
   const text = stripHeredocBodies(command);
   for (let i = 0; i < text.length;) {
@@ -585,11 +586,13 @@ function tokenizeShell(command) {
     if (ch === '"') { quote = '"'; i += 1; continue; }
     if (ch === '\\') { if (i + 1 < text.length) value += text[i + 1]; i += 2; continue; }
     if (ch === '#' && value === '') { while (i < text.length && text[i] !== '\n') i += 1; continue; }
+    if (ch === '\n') { op(';', 'sep'); i += 1; continue; }
     if (/\s/.test(ch)) { flush(); i += 1; continue; }
     if (ch === '$' && text[i + 1] === '(') { const g = shellGroup(text, i + 1); value += text.slice(i, g.end + 1); dynamic = true; nested.push(g.inner); i = g.end + 1; continue; }
     if ((ch === '<' || ch === '>') && text[i + 1] === '(') { const g = shellGroup(text, i + 1); value += text.slice(i, g.end + 1); dynamic = true; nested.push(g.inner); i = g.end + 1; continue; }
     if (ch === '`') { const end = text.indexOf('`', i + 1); value += text.slice(i, end < 0 ? text.length : end + 1); dynamic = true; if (end >= 0) nested.push(text.slice(i + 1, end)); i = end < 0 ? text.length : end + 1; continue; }
     if (ch === '$') { value += ch; dynamic = true; i += 1; continue; }
+    if ('*?[]{}'.includes(ch)) ambiguous = true;
     const two = text.slice(i, i + 2), three = text.slice(i, i + 3);
     if (three === '<<<') { op(three, 'in'); i += 3; }
     else if (two === '>>' || two === '>&' || two === '&>' || two === '>|' || two === '<>') { op(two, 'out'); i += 2; }
@@ -608,7 +611,7 @@ const SHELL_COMMANDS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'fish', 'ash
 function shellBase(value) { const clean = String(value || '').replace(/\\/g, '/'); return clean.slice(clean.lastIndexOf('/') + 1).toLowerCase(); }
 function splitSegments(tokens) { const out = []; let segment = []; for (const token of tokens) { if (token.type === 'op' && token.kind === 'sep') { if (segment.length) out.push(segment); segment = []; } else segment.push(token); } if (segment.length) out.push(segment); return out; }
 function targetIndices(segment) { const out = new Set(); for (let i = 0; i < segment.length; i += 1) if (segment[i].type === 'op' && (segment[i].kind === 'in' || segment[i].kind === 'out') && segment[i + 1]?.type === 'word') out.add(i + 1); return out; }
-function writeTarget(token, directory) { return !token || token.type !== 'word' || token.dynamic || !token.value || (isSourceFile(token.value) && !isAllowedPath(token.value, directory)); }
+function writeTarget(token, directory) { return !token || token.type !== 'word' || token.dynamic || token.ambiguous || !token.value || (isSourceFile(token.value) && !isAllowedPath(token.value, directory)); }
 function wordsFor(segment, targets) { return segment.map((token, index) => ({ token, index })).filter(entry => entry.token.type === 'word' && !targets.has(entry.index)); }
 function consumeWrapper(words, index, base) {
   let i = index + 1;
@@ -695,7 +698,11 @@ function checkSegment(segment, directory) {
     const rawArgs = words.slice(cmd.index + 1).map(entry => entry.token);
     const targetDir = rawArgs.findIndex(token => token.value === '-t' || token.value === '--target-directory');
     if (targetDir >= 0) return !rawArgs[targetDir + 1] || writeTarget(rawArgs[targetDir + 1], directory) || args.some(token => writeTarget(token, directory));
-    if (rawArgs.some(token => token.value.startsWith('--target-directory='))) return args.some(token => writeTarget(token, directory));
+    const joinedTargetDir = rawArgs.find(token => token.value.startsWith('--target-directory='));
+    if (joinedTargetDir) {
+      const target = { ...joinedTargetDir, value: joinedTargetDir.value.slice('--target-directory='.length) };
+      return writeTarget(target, directory) || args.some(token => writeTarget(token, directory));
+    }
     return writeTarget(args.at(-1), directory);
   }
   if (cmd.base === 'sed' || cmd.base === 'perl') {

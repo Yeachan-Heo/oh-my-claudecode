@@ -378,7 +378,11 @@ describe('pre-tool-use template source extension detection', () => {
       ['mv source target', 'mv src/app.ts results.txt', true],
       ['cp source destination', 'cp src/input.txt src/app.ts', true],
       ['cp target-directory source operand', 'cp -t src generated.ts', true],
+      ['cp joined target-directory source path', 'cp --target-directory=src/app.ts input.txt', true],
+      ['cp dynamic joined target-directory', 'cp --target-directory="$DEST" input.txt', true],
       ['install long target-directory source operand', 'install --target-directory=src generated.ts', true],
+      ['install joined target-directory source path', 'install --target-directory=src/app.ts input.txt', true],
+      ['install dynamic joined target-directory', 'install --target-directory="$DEST" input.txt', true],
       ['install source destination', 'install src/input.txt src/app.ts', true],
       ['touch source target', 'touch src/app.ts', true],
       ['truncate source target', 'truncate -s 0 src/app.ts', true],
@@ -389,6 +393,16 @@ describe('pre-tool-use template source extension detection', () => {
       ['in-place sed dynamic option', 'FLAGS=-i; sed "$FLAGS" s/a/b/ src/app.ts', true],
       ['BSD in-place sed option', "sed -I.bak 's/a/b/' src/app.ts", true],
       ['in-place perl source target', "perl -pi -e 's/a/b/' src/app.ts", true],
+      ['redirect glob-expanded source target', 'printf x > src/*.ts', true],
+      ['redirect brace-expanded source target', 'printf x > src/{a,b}.ts', true],
+      ['rm glob-expanded source target', 'rm src/*.ts', true],
+      ['mv brace-expanded source target', 'mv generated.ts src/{a,b}.ts', true],
+      ['sed glob-expanded source target', 'sed -i s/a/b/ src/*.ts', true],
+      ['tee glob-expanded source target', 'printf x | tee src/*.ts', true],
+      ['cp brace-expanded source destination', 'cp generated.txt src/{a,b}.ts', true],
+      ['install glob-expanded source destination', 'install generated.txt src/*.ts', true],
+      ['touch brace-expanded source target', 'touch src/{a,b}.ts', true],
+      ['commented heredoc marker cannot hide following mutation', ': # <<EOF\nrm src/app.ts', true],
     ] as const)('warns: %s', (_label, command, expectedWarning) => {
       expect(hasDelegationNotice(runPreToolUseHook(command))).toBe(expectedWarning);
     });
