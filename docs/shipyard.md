@@ -17,25 +17,22 @@ It is not "let agents do as much as possible" — it is "delegate exactly what c
 
 ## The four pillars → five surfaces
 
-A repo that humans and agents both build on carries four pillars across five conceptual surfaces, represented by the concrete paths below. `/oh-my-claudecode:drydock` lays them; every later session inherits them by reading.
+A repo that humans and agents both build on carries four pillars across five conceptual surfaces. `/oh-my-claudecode:drydock` lays them; every later session inherits them by reading.
 
-| Surface | Carries | Filled by |
+| Conceptual surface | Concrete paths | Carries / filled by |
 | --- | --- | --- |
-| `CLAUDE.md` | Thin entry: project conventions / architecture principles / standards index / load-bearing decision pointers | drydock seed; retro & reviews sediment |
-| `CONTEXT.md` | Glossary (the slot agents write into the moment a term settles; vocabulary is law) | launch Phase 1; domain-modeling |
-| `docs/adr/` | Decision records in full (the logbook) | launch convergence and C4 follow-up; domain-modeling |
-| `docs/standards/` | architecture.md / data.md / process.md | retro & code-review sediment |
-| `docs/business/` | Business knowledge (one article answers one business question) | launch Phase 1 |
-| `design-system/` | tokens/ + components/ + patterns/ | frontend review sediment |
-| `.omc/skills/` | Project skills: reusable capabilities / specialized tools / prompt templates / specialized practices | anyone (skillify quality gate) |
-| `.mcp.json` + `scripts/` | MCP servers + CLI toolchain / automation scripts | PR |
+| Shared context | `CONTEXT.md` + `docs/business/` + `docs/adr/` + OMC wiki | Glossary, business knowledge, and decision records; launch writes the file-backed paper trail and wiki compounds session knowledge |
+| Rules | `CLAUDE.md` + `docs/standards/` | Thin conventions/principles/index plus architecture, data, and process standards; drydock seeds them and retros/reviews sediment recurring corrections |
+| Project skills | `.omc/skills/` | Reusable project capabilities and practices; contributors add them through the skillify quality gate |
+| Design system | `design-system/` | Tokens, components, and patterns; drydock seeds it for UI repos and may create a stub or skip it for non-UI repos |
+| MCP / CLI tools | `.mcp.json` + `scripts/` | MCP servers and repository automation; drydock seeds empty tool surfaces and integrations are added only when needed |
 
 ## The metaphor family (for teaching the system)
 
 | Metaphor | Maps to | In one line |
 | --- | --- | --- |
 | The shipyard | The whole harness | A shared facility; everyone comes here to build |
-| The keel | `CLAUDE.md` + `CONTEXT.md` | Lay the skeleton first; the hull grows upward |
+| The keel | Shared context + rules surfaces | Lay the skeleton first; the hull grows upward |
 | The classification society | `docs/standards/` + `design-system/` | A ship must pass class to sail = changes must pass standards to merge |
 | The charts | specs + tickets | Launch's output; build from the chart |
 | The logbook | `docs/adr/` | Decisions, auditable after the fact |
@@ -51,7 +48,7 @@ They share one rule of thumb: **starting needs no permission; landing goes into 
 
 ## The feedback loop
 
-Shipyard corrects itself through its plain-file paper trail: launch closeout reconciles the spec, `CONTEXT.md`, ADRs, and business docs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through retros and reviews. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
+Shipyard corrects itself through its file-backed paper trail: launch closeout reconciles the spec, `CONTEXT.md`, and ADRs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through retros and reviews. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
 
 ## When to reach for what
 
@@ -60,4 +57,4 @@ Shipyard corrects itself through its plain-file paper trail: launch closeout rec
 - new repo, or a repo where knowledge lives in heads → `drydock` first
 - writing-time code discipline inside any of the above → `minimal-code-discipline`
 
-Shipyard adds no daemon, no mode, no always-on behavior: the surfaces are plain markdown, the skills are plain instructions, and the canonical `plan → execute → review → verify` spine remains the default path. Shipyard is opt-in at every door.
+Shipyard adds no daemon, no mode, no always-on behavior: the surfaces are ordinary repository files, the skills are plain instructions, and the canonical `plan → execute → review → verify` spine remains the default path. Shipyard is opt-in at every door.
