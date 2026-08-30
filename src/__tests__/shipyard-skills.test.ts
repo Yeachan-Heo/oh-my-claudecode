@@ -217,7 +217,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
   });
 
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {
-    const example = DRYDOCK.match(/```markdown\n(---\nname: project-release-check[\s\S]*?)\n```/)?.[1];
+    const example = DRYDOCK.match(/```markdown\n(---\nid: project-release-check\nname: project-release-check[\s\S]*?)\n```/)?.[1];
     expect(example).toBeDefined();
 
     const parsed = parseSkillFile(example!);

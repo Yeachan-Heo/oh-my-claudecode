@@ -45,7 +45,12 @@ Report the map first, then act.
 
 ### 2. Ask (only what detection cannot answer)
 
-- **document language for the generated harness files** — the human reads and maintains them, so they follow the human: ask once, or infer from the target repo's existing CLAUDE.md/README; record the choice in the init report. Prose and field labels follow this language; structural keys stay language-stable (file paths, frontmatter keys, `blockedBy:`, status enums, ID formats).
+- **document language for the generated harness files**, resolved in this fixed order:
+  1. **Explicit human override in the current request** — the human names a language; it wins over everything, and the durable tag below is updated to match.
+  2. **Durable tag** — the `language:` field in `CONTEXT.md` frontmatter (e.g. `language: zh-Hans`); created at init, read by every later launch.
+  3. **Inference** — only when no durable tag exists: the dominant language of the target repo's existing CLAUDE.md/README, accepted only when unambiguous across inspected files.
+  4. **Ambiguity branch** — mixed-language or missing files → ask once, record the answer into the durable tag. Locale/script variants are explicit tags (`zh-Hans`, `zh-Hant`, `en`); bare `zh` is not a valid tag.
+  Prose and field labels follow the resolved language; structural keys stay language-stable (file paths, frontmatter keys, `blockedBy:`, status enums, ID formats).
 - package/tech stack (for standards and design-system seeds)
 - does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
 - issue tracker location (GitHub / GitLab / local `.scratch/`) — recorded for launch/triage flows
@@ -126,11 +131,15 @@ Seed A — zh companion (结构一致，二选一按文档语言渲染):
 - 可复用能力沉淀到 .omc/skills/；UI 模式沉淀到 design-system/
 ```
 
-Seed B — CONTEXT.md (field labels are load-bearing; both languages documented):
+Seed B — CONTEXT.md, en (field labels are load-bearing; both languages documented):
 
 en:
 
 ```markdown
+---
+language: en
+---
+
 # Glossary
 
 One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming.
@@ -141,9 +150,13 @@ One entry per term: definition, boundaries, one resolved ambiguity. Agents write
 - Resolved ambiguity:
 ```
 
-zh:
+Seed B — CONTEXT.md, zh:
 
 ```markdown
+---
+language: zh-Hans
+---
+
 # 术语表
 
 一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。
@@ -191,11 +204,11 @@ Seed F — .omc/skills/README.md:
 # Project Skills
 
 Reusable capabilities sedimented by this project: specialized tools, prompt templates, specialized practices.
-One skill per file `.omc/skills/<name>.md`, frontmatter must contain name + description +
-**non-empty triggers** (loader validation hard requirement: missing or empty means the skill is never loaded):
+One skill per file `.omc/skills/<name>.md`, frontmatter must contain a **literal Latin `id`** + name + description + non-empty triggers (loader validation hard requirement: missing or empty means the skill is never loaded; the production parser derives `id` from `name` only when `id` is missing — a localized `name` would strip to an empty ID, so the literal `id` is the stability guarantee). `id` is machine-semantic and never localized; `name`/`description` may follow the document language:
 
 ```markdown
 ---
+id: project-release-check
 name: project-release-check
 description: Apply this repository's release readiness rules
 triggers:
