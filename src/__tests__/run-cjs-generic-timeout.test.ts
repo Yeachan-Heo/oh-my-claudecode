@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { isProcessAlive } from '../platform/process-utils.js';
 
 const runCjs = require('../../scripts/run.cjs');
 const RUN_CJS_PATH = join(process.cwd(), 'scripts', 'run.cjs');
@@ -26,12 +27,7 @@ function killIfAlive(pid: number | undefined): void {
 async function waitForDeath(pid: number, timeoutMs = 2000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return;
-      throw error;
-    }
+    if (!isProcessAlive(pid)) return;
     await new Promise(resolve => setTimeout(resolve, 25));
   }
   throw new Error(`PID ${pid} survived process-tree reap`);

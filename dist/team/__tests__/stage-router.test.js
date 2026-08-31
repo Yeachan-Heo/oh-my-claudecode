@@ -109,11 +109,15 @@ describe('stage-router resolveRoleAssignment', () => {
             expect(out.model).not.toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
             expect(out.agent).toBe('executor');
         });
-        it('rejects provider=cursor for reviewer/verdict roles', () => {
-            const cfg = {
-                team: { roleRouting: { 'code-reviewer': { provider: 'cursor' } } },
-            };
-            expect(() => resolveRoleAssignment('code-reviewer', cfg)).toThrow(/cursor is only supported for executor-style roles/);
+        it('accepts provider=cursor for reviewer/verdict roles (issue #3880)', () => {
+            // Cursor reviewers emit the verdict-file contract like every other
+            // non-Claude provider, so the role gate that used to throw here is gone.
+            for (const role of ['code-reviewer', 'critic', 'security-reviewer', 'test-engineer']) {
+                const cfg = {
+                    team: { roleRouting: { [role]: { provider: 'cursor' } } },
+                };
+                expect(resolveRoleAssignment(role, cfg).provider).toBe('cursor');
+            }
         });
         it('grok resolves configured externalModels.defaults.grokModel when model omitted', () => {
             const cfg = {
@@ -123,6 +127,37 @@ describe('stage-router resolveRoleAssignment', () => {
             const out = resolveRoleAssignment('code-reviewer', cfg);
             expect(out.provider).toBe('grok');
             expect(out.model).toBe('grok-code-fast-1');
+        });
+        it('cursor resolves configured externalModels.defaults.cursorModel when model omitted', () => {
+            const cfg = {
+                externalModels: { defaults: { cursorModel: 'cursor-grok-4.6-high' } },
+                team: { roleRouting: { 'code-reviewer': { provider: 'cursor' } } },
+            };
+            const out = resolveRoleAssignment('code-reviewer', cfg);
+            expect(out.provider).toBe('cursor');
+            expect(out.model).toBe('cursor-grok-4.6-high');
+        });
+        it('tier name on cursor provider falls back to configured cursorModel', () => {
+            // Previously a tier resolved to '' with no diagnostic, so a user asking
+            // for HIGH silently got whatever cursor-agent defaults to.
+            const cfg = {
+                externalModels: { defaults: { cursorModel: 'cursor-grok-4.6-high' } },
+                team: { roleRouting: { executor: { provider: 'cursor', model: 'HIGH' } } },
+            };
+            expect(resolveRoleAssignment('executor', cfg).model).toBe('cursor-grok-4.6-high');
+        });
+        it('explicit cursor model id outranks the configured default', () => {
+            const cfg = {
+                externalModels: { defaults: { cursorModel: 'composer-2.5' } },
+                team: { roleRouting: { executor: { provider: 'cursor', model: 'cursor-grok-4.6-xhigh' } } },
+            };
+            expect(resolveRoleAssignment('executor', cfg).model).toBe('cursor-grok-4.6-xhigh');
+        });
+        it('unconfigured cursor stays empty so cursor-agent picks its own model', () => {
+            const cfg = {
+                team: { roleRouting: { executor: { provider: 'cursor' } } },
+            };
+            expect(resolveRoleAssignment('executor', cfg).model).toBe('');
         });
         it('tier name on grok provider falls back to provider default (tiers are claude-centric)', () => {
             const cfg = {

@@ -45,6 +45,7 @@ export interface ParsedTeamArgs {
     workerCount: number;
     agentTypes: string[];
     workerSpecs: ParsedWorkerSpec[];
+    workerProviderExplicit: boolean[];
     role?: string;
     task: string;
     teamName: string;

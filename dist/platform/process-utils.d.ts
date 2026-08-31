@@ -28,10 +28,21 @@ export declare function terminateOwnedProcessGroup(options: TerminateOwnedProces
 export declare function killProcessTree(pid: number, signal?: NodeJS.Signals): Promise<boolean>;
 /**
  * Check if a process is alive.
- * Works cross-platform by attempting signal 0.
+ * Works cross-platform by attempting signal 0. On Linux, a successfully
+ * signalled process is still treated as non-live when proc state is Z or X.
  * EPERM means the process exists but we lack permission to signal it.
  */
 export declare function isProcessAlive(pid: number): boolean;
+/** @internal Exported for deterministic Linux proc-state parsing tests. */
+export declare function linuxProcStateFromStat(stat: string): string | null;
+/**
+ * Return true when a Linux process group has no live members other than
+ * terminal zombie/dead states. Other POSIX platforms can prove quiescence
+ * only when signal-0 reports that the group is absent.
+ * Linux keeps zombie group members visible to signal-0 until their parent
+ * reaps them, so signal-0 alone cannot prove a group is still executing.
+ */
+export declare function isProcessGroupQuiescent(processGroupId: number): boolean;
 /**
  * Get process start time for PID reuse detection.
  * Returns milliseconds timestamp on macOS/Windows, jiffies on Linux.

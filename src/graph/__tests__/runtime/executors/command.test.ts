@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from "vitest";
 
+import { isProcessAlive } from "../../../../platform/process-utils.js";
 import { CommandNodeExecutor } from "../../../runtime/executors/command.js";
 import type { CommandExecutionOutput } from "../../../runtime/executors/command.js";
 import type { NodeExecutionContext } from "../../../runtime/types.js";
@@ -121,16 +122,14 @@ describe("CommandNodeExecutor", () => {
     );
     expect(gpid).toBeGreaterThan(0);
     const deadline = Date.now() + 2_000;
-    let gone = false;
-    while (Date.now() < deadline && !gone) {
-      try {
-        process.kill(gpid, 0);
+    let quiescent = false;
+    while (Date.now() < deadline && !quiescent) {
+      quiescent = !isProcessAlive(gpid);
+      if (!quiescent) {
         await new Promise((resolve) => setTimeout(resolve, 50));
-      } catch {
-        gone = true;
       }
     }
-    expect(gone).toBe(true);
+    expect(quiescent).toBe(true);
   }, 20_000);
 
   it("substitutes idempotency key tokens for idempotent policies", async () => {

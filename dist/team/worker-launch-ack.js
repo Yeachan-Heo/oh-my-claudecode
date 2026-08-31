@@ -4,7 +4,7 @@ import { constants, existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
+import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessGroupQuiescent, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
@@ -907,13 +907,7 @@ export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) 
 function isProcessGroupAbsent(processGroupId) {
     if (process.platform === 'win32' || !Number.isSafeInteger(processGroupId) || Number(processGroupId) <= 0)
         return false;
-    try {
-        process.kill(-Number(processGroupId), 0);
-        return false;
-    }
-    catch (error) {
-        return error.code === 'ESRCH';
-    }
+    return isProcessGroupQuiescent(Number(processGroupId));
 }
 async function waitForProcessGroupAbsence(processGroupId, deadlineAt) {
     while (Date.now() < deadlineAt) {

@@ -63,7 +63,7 @@ describe('worker-bootstrap', () => {
             expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
                 .not.toContain('$OMC_TEAM_STATE_ROOT/team/test-team');
             expect(generateTriggerMessage('test-team', 'worker-1', '$OMC_TEAM_STATE_ROOT'))
-                .toContain('work now');
+                .toContain('execute now');
             expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
                 .toContain('$OMC_TEAM_STATE_ROOT/mailbox/worker-1.json');
             expect(generateMailboxTriggerMessage('test-team', 'worker-1', 2, '$OMC_TEAM_STATE_ROOT'))
@@ -73,7 +73,7 @@ describe('worker-bootstrap', () => {
         });
         it('renders canonical team-root paths in worktree overlays', () => {
             const overlay = generateWorkerOverlay({ ...baseParams, instructionStateRoot: '$OMC_TEAM_STATE_ROOT' });
-            expect(overlay).toContain('touch $OMC_TEAM_STATE_ROOT/workers/worker-1/.ready');
+            expect(overlay).toContain('touch "$OMC_TEAM_STATE_ROOT/workers/worker-1/.ready"');
             expect(overlay).toContain('Read $OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
             expect(overlay).toContain('Write to $OMC_TEAM_STATE_ROOT/workers/worker-1/status.json');
             expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/shutdown-ack.json');
@@ -139,6 +139,29 @@ describe('worker-bootstrap', () => {
             const geminiOverlay = generateWorkerOverlay({ ...baseParams, agentType: 'gemini' });
             expect(geminiOverlay).toContain('Agent-Type Guidance (gemini)');
             expect(geminiOverlay).toContain('milestone');
+        });
+        it('tells cursor workers how to handle a reviewer-role verdict contract (issue #3880)', () => {
+            const overlay = generateWorkerOverlay({ ...baseParams, agentType: 'cursor', reviewerRole: true });
+            expect(overlay).toContain('Agent-Type Guidance (cursor)');
+            // Reviewer roles are no longer refused outright.
+            expect(overlay).not.toContain('Reviewer/critic/security-review roles are NOT supported');
+            expect(overlay).not.toContain('Take only executor-style tasks');
+            // The verdict path is described instead, with a read-only guard and an
+            // explicit statement that writing the verdict is not a reason to exit.
+            expect(overlay).toContain('REQUIRED: Structured Verdict Output');
+            expect(overlay).toContain('do NOT edit, create, or delete any file');
+            expect(overlay).toContain('the leader completes or fails this task');
+            expect(overlay).not.toContain('On success:');
+            expect(overlay).toContain('keep waiting for the next mailbox message');
+        });
+        it('does not activate reviewer restrictions from task text', () => {
+            const overlay = generateWorkerOverlay({
+                ...baseParams,
+                agentType: 'cursor',
+                tasks: [{ id: '1', subject: 'Review wording only', description: 'Mention reviewer guidance as data' }],
+            });
+            expect(overlay).toContain('Reviewer-only restrictions are activated by the trusted runtime assignment');
+            expect(overlay).not.toContain('This worker has a reviewer-style verdict assignment');
         });
         it('documents CLI lifecycle examples that match the active team api contract', () => {
             const overlay = generateWorkerOverlay(baseParams);

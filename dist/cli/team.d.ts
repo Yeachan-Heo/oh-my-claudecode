@@ -14,6 +14,7 @@ export interface TeamTaskInput {
 export interface TeamStartInput {
     teamName: string;
     agentTypes: string[];
+    workerProviderExplicit?: boolean[];
     tasks: TeamTaskInput[];
     cwd: string;
     newWindow?: boolean;

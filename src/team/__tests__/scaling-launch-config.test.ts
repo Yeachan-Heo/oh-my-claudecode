@@ -340,6 +340,61 @@ describe('scaleUp launch config', () => {
     );
   });
 
+  it.each(['codex', 'claude'] as const)(
+    'keeps an explicit %s scale-up provider when the persisted route conflicts',
+    async (agentType) => {
+      modelContractMocks.resolveDefaultWorkerModel.mockReturnValue(`${agentType}-model`);
+      modelContractMocks.buildWorkerArgv.mockReturnValue([`/usr/bin/${agentType}`, '--model', `${agentType}-model`]);
+      config = makeConfig({
+        resolved_routing: {
+          executor: {
+            primary: { provider: 'gemini', model: 'gemini-route-model', agent: 'executor' },
+            fallback: { provider: 'claude', model: '', agent: 'executor' },
+          },
+        } as TeamConfig['resolved_routing'],
+        resolved_routing_roles: ['executor'],
+      });
+
+      const result = await scaleUp(
+        'demo-team',
+        1,
+        agentType,
+        [{ subject: 'demo', description: 'demo task', owner: 'worker-1', role: 'executor' }],
+        cwd,
+        { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+      );
+
+      expect(result).toMatchObject({ ok: true });
+      expect(modelContractMocks.buildWorkerArgv).toHaveBeenCalledWith(
+        agentType,
+        expect.objectContaining({ model: `${agentType}-model` }),
+      );
+    },
+  );
+
+  it('persists the trusted verdict contract for an explicitly scaled Cursor reviewer', async () => {
+    modelContractMocks.resolveDefaultWorkerModel.mockReturnValue('cursor-review-model');
+    modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/cursor-agent']);
+
+    const result = await scaleUp(
+      'demo-team',
+      1,
+      'cursor',
+      [{ subject: 'Review code', description: 'Return a verdict', owner: 'worker-1', role: 'code-reviewer' }],
+      cwd,
+      { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv,
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    const worker = monitorMocks.currentConfig?.workers.find(candidate => candidate.name === 'worker-1');
+    expect(worker).toMatchObject({
+      worker_cli: 'cursor',
+      role: 'code-reviewer',
+      assigned_tasks: ['1'],
+    });
+    expect(worker?.output_file).toContain('/workers/worker-1/verdict-1-');
+  });
+
   it('does not adopt a newly introduced environment default after an empty snapshot', async () => {
     modelContractMocks.resolveDefaultWorkerModel.mockReturnValue(undefined);
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/cursor']);
@@ -374,6 +429,7 @@ describe('scaleUp launch config', () => {
     expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
     expect(gitWorktreeMocks.ensureWorkerWorktree).not.toHaveBeenCalled();
     expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
+    expect(monitorMocks.currentConfig?.active_scale_up).toBeUndefined();
     expect(existsSync(join(resolve(cwd), '.omc', 'state', 'team', 'demo-team', 'workers', 'worker-1'))).toBe(false);
   });
 

@@ -267,6 +267,7 @@ export async function startTeamJob(input) {
         teamName: input.teamName,
         workerCount: input.workerCount,
         agentTypes: input.agentTypes,
+        workerProviderExplicit: input.workerProviderExplicit,
         tasks: input.tasks,
         cwd: input.cwd,
         newWindow: input.newWindow,
@@ -795,6 +796,7 @@ function parseStartArgs(args) {
         input: {
             teamName: resolvedTeamName,
             agentTypes,
+            workerProviderExplicit: agentTypes.map(() => true),
             tasks,
             cwd,
             ...(newWindow ? { newWindow: true } : {}),
@@ -1148,6 +1150,7 @@ export async function teamCommand(argv) {
                 teamName: legacy.teamName,
                 workerCount: legacy.workerCount,
                 agentTypes: Array.from({ length: legacy.workerCount }, () => legacy.agentType),
+                workerProviderExplicit: Array.from({ length: legacy.workerCount }, () => true),
                 tasks,
                 cwd: legacy.cwd,
                 ...(legacy.newWindow ? { newWindow: true } : {}),

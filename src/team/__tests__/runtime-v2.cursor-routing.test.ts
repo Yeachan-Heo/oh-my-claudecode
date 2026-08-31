@@ -2,13 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveTaskAssignment } from '../runtime-v2.js';
 import { buildResolvedRoutingSnapshot } from '../stage-router.js';
-import type { CliAgentType } from '../model-contract.js';
 
 const resolvedRouting = buildResolvedRoutingSnapshot({});
-const binaries: Partial<Record<CliAgentType, string>> = {
-  claude: '/usr/bin/claude',
-  cursor: '/usr/bin/cursor-agent',
-};
 
 /**
  * Cursor used to be pinned to the executor role: reviewer-style roles threw,
@@ -23,7 +18,6 @@ describe('runtime-v2 cursor task assignment', () => {
       { subject: 'Implement plan', description: 'apply the implementation plan' },
       resolvedRouting,
       undefined,
-      binaries,
       'cursor',
     );
 
@@ -44,7 +38,6 @@ describe('runtime-v2 cursor task assignment', () => {
         { subject: description, description },
         resolvedRouting,
         undefined,
-        binaries,
         'cursor',
       );
 
@@ -57,7 +50,6 @@ describe('runtime-v2 cursor task assignment', () => {
       { subject: 'Executor task', description: 'apply the implementation plan', role: 'executor' },
       resolvedRouting,
       undefined,
-      binaries,
       'cursor',
     );
 
@@ -70,7 +62,6 @@ describe('runtime-v2 cursor task assignment', () => {
         { subject: 'Review the change', description: 'inspect without editing', role },
         resolvedRouting,
         undefined,
-        binaries,
         'cursor',
       );
 
@@ -88,7 +79,7 @@ describe('runtime-v2 cursor task assignment', () => {
 
     for (const task of cases) {
       expect(() =>
-        resolveTaskAssignment(task, resolvedRouting, undefined, binaries, 'cursor'),
+        resolveTaskAssignment(task, resolvedRouting, undefined, 'cursor'),
       ).not.toThrow();
     }
   });
@@ -101,7 +92,6 @@ describe('runtime-v2 cursor task assignment', () => {
       { subject: 'Review auth', description: 'review the auth module for maintainability' },
       resolvedRouting,
       undefined,
-      binaries,
       'cursor',
     );
 

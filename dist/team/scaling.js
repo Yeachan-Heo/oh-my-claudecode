@@ -14,14 +14,11 @@ import { mkdir, readFile, rm } from 'fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { tmuxSpawn } from '../cli/tmux-utils.js';
-import { buildWorkerArgv, clearResolvedPathCache, getWorkerEnv as getModelWorkerEnv, resolveClaudeWorkerModel, assertHeadlessSupported, resolveValidatedBinaryPath, validateWorkerLaunchDescriptor, } from './model-contract.js';
-import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
-import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
-import { routeTaskToRole } from './role-router.js';
+import { buildWorkerArgv, clearResolvedPathCache, getWorkerEnv as getModelWorkerEnv, resolveDefaultWorkerModel, assertHeadlessSupported, resolveValidatedBinaryPath, validateWorkerLaunchDescriptor, } from './model-contract.js';
 import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, writeAtomic, } from './team-ops.js';
 import { withScalingLock, migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
 import { adoptWorkerPaneOwnership, sanitizeName, getWorkerLiveness, killOwnedWorkerPane, spawnOwnedWorkerInPane, waitForPaneReady, } from './tmux-session.js';
-import { TeamPaths, absPath } from './state-paths.js';
+import { TeamPaths, absPath, teamStateRoot as resolveTeamStateRoot } from './state-paths.js';
 import { writeWorkerOverlay } from './worker-bootstrap.js';
 import { ensureWorkerWorktree, installWorktreeRootAgents, prepareWorkerWorktreeForRemoval, removeWorkerWorktree, restoreWorktreeRootAgents, } from './git-worktree.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
@@ -29,6 +26,8 @@ import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
 import { resolveRuntimeCliPath } from './runtime-owner-client.js';
 import { loadWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
+import { cliWorkerOutputFilePath, renderCliWorkerOutputContract, shouldInjectContract, } from './cli-worker-contract.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -132,6 +131,21 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 error: `Cannot add ${count} workers: would exceed max_workers (${currentCount} + ${count} > ${maxWorkers})`,
             };
         }
+        const scaleEnv = config.external_models_defaults === undefined ? env : {};
+        const preparedWorkerModel = resolveDefaultWorkerModel(cliAgentType, scaleEnv, config.external_models_defaults);
+        let preparedLaunchBinary;
+        try {
+            assertHeadlessSupported(cliAgentType);
+            clearResolvedPathCache();
+            preparedLaunchBinary = resolveValidatedBinaryPath(cliAgentType);
+        }
+        catch (error) {
+            const workerName = `worker-${config.next_worker_index ?? config.workers.length + 1}`;
+            return {
+                ok: false,
+                error: `Failed strict provider preflight for ${workerName} (${cliAgentType}): ${error instanceof Error ? error.message : String(error)}`,
+            };
+        }
         const operationId = randomUUID();
         const workspaceHash = createHash('sha256').update(leaderCwd).digest('hex');
         const lifecycleLock = absPath(leaderCwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
@@ -161,6 +175,8 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     || current.config.lifecycle_state === 'shutting_down' || current.config.lifecycle_state === 'stopped') {
                     throw new Error('team_mutation_busy');
                 }
+                if (current.stateRevision !== configRevision)
+                    throw new Error('team_mutation_busy');
                 const existing = scaleUpAttempt(current.config);
                 // Only a positively dead reservation can be safely replaced: no worker,
                 // pane, worktree, or identity effects have begun in this phase. Effects
@@ -231,7 +247,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             const released = await releaseScaleUpReservation().catch(() => false);
             return { ok: false, error: released ? 'team_mutation_busy' : 'scale_up_fence_release_failed' };
         }
-        const teamStateRoot = config.team_state_root ?? `${leaderCwd}/.omc/state/team/${sanitized}`;
+        const teamStateRoot = config.team_state_root ?? resolveTeamStateRoot(leaderCwd, sanitized);
         const worktreeMode = config.worktree_mode ?? 'disabled';
         // Resolve the monotonic worker index counter
         let nextIndex = config.next_worker_index ?? (currentCount + 1);
@@ -441,55 +457,11 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 return await rollbackScaleUp(splitTargetError);
             }
             try {
-                // Resolve per-worker provider/model from the team's routing snapshot
-                // (Option E stickiness — snapshot is immutable, never re-resolved).
-                // Worker's inferred role comes from the owned-task `role` field when all
-                // owned tasks agree on a single role; otherwise falls back to the
-                // caller-supplied agentType default.
-                const workerTasks = tasks.filter(t => t.owner === workerName);
-                const ownedRoles = Array.from(new Set(workerTasks.map(t => t.role).filter(Boolean)));
-                const inferredRole = ownedRoles.length === 1
-                    ? ownedRoles[0]
-                    : (workerTasks[0]
-                        ? routeTaskToRole(workerTasks[0].subject, workerTasks[0].description, 'executor').role
-                        : undefined);
-                const canonicalRoleSet = new Set(CANONICAL_TEAM_ROLES);
-                const canonical = inferredRole
-                    ? (() => {
-                        const normalized = normalizeDelegationRole(inferredRole);
-                        return canonicalRoleSet.has(normalized) ? normalized : null;
-                    })()
-                    : null;
-                let workerAgentType = cliAgentType;
-                let workerModel;
-                // Only override caller's agentType when the worker's inferred role came
-                // from an explicit `task.role` (user opt-in). Pre-patch semantics: callers
-                // passing `--agent-type codex` stay on codex regardless of task text.
-                const hasExplicitOwnedRole = ownedRoles.length === 1;
-                const routedPair = hasExplicitOwnedRole && canonical
-                    ? config.resolved_routing?.[canonical]
-                    : undefined;
-                if (routedPair) {
-                    const { primary } = routedPair;
-                    const primaryProvider = primary.provider;
-                    if (CLI_AGENT_TYPES.has(primaryProvider)) {
-                        workerAgentType = primaryProvider;
-                        workerModel = primary.model;
-                    }
-                }
-                else if (cliAgentType === 'claude') {
-                    // Honor Bedrock/Vertex default-model resolution for non-routed claude workers.
-                    workerModel = resolveClaudeWorkerModel(env);
-                }
-                let launchBinary;
-                try {
-                    assertHeadlessSupported(workerAgentType);
-                    clearResolvedPathCache();
-                    launchBinary = resolveValidatedBinaryPath(workerAgentType);
-                }
-                catch (error) {
-                    return await rollbackScaleUp(`Failed strict provider preflight for ${workerName} (${workerAgentType}): ${error instanceof Error ? error.message : String(error)}`);
-                }
+                const workerAgentType = cliAgentType;
+                // The scale-up agentType argument is an explicit provider selection.
+                // Persisted role routing never replaces it, including explicit Claude.
+                const workerModel = preparedWorkerModel;
+                const launchBinary = preparedLaunchBinary;
                 pendingIdentities.add(workerName);
                 const workerDirPath = absPath(leaderCwd, TeamPaths.workerDir(sanitized, workerName));
                 await mkdir(workerDirPath, { recursive: true });
@@ -533,10 +505,22 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 const workerTaskRoles = tasks.filter(t => t.owner === workerName).map(t => t.role).filter(Boolean);
                 const uniqueTaskRoles = new Set(workerTaskRoles);
                 const workerRole = workerTaskRoles.length > 0 && uniqueTaskRoles.size === 1 ? workerTaskRoles[0] : agentType;
+                const assignedTaskIds = tasks.flatMap((task, index) => task.owner === workerName ? [String(index + 1)] : []);
+                const canonicalWorkerRole = normalizeDelegationRole(workerRole);
+                const reviewerOutputFile = shouldInjectContract(canonicalWorkerRole, workerAgentType) && assignedTaskIds[0]
+                    ? cliWorkerOutputFilePath(teamStateRoot, workerName, {
+                        taskId: assignedTaskIds[0],
+                        assignmentId: randomUUID(),
+                    })
+                    : undefined;
+                const reviewerContract = reviewerOutputFile
+                    ? renderCliWorkerOutputContract(canonicalWorkerRole, reviewerOutputFile)
+                    : undefined;
                 const reservedWorker = {
-                    name: workerName, index: workerIndex, role: workerRole, assigned_tasks: [],
+                    name: workerName, index: workerIndex, role: workerRole, assigned_tasks: assignedTaskIds,
                     worker_cli: launchDescriptor.provider, launch_descriptor: launchDescriptor, operational_state: 'starting',
                     working_dir: workerCwd, team_state_root: teamStateRoot,
+                    ...(reviewerOutputFile ? { output_file: reviewerOutputFile } : {}),
                     ...(worktree ? { worktree_repo_root: leaderCwd, worktree_path: worktree.path, worktree_branch: worktree.branch,
                         worktree_detached: worktree.detached, worktree_created: worktree.created } : {}),
                 };
@@ -549,7 +533,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 configRevision += 1;
                 reservedWorkerNames.add(workerName);
                 reservedLaunchDescriptors.set(workerName, launchDescriptor);
-                // Rebuild env using the final agentType (fallback may have swapped it).
+                // Rebuild env using the authoritative selected primary provider.
                 const extraEnv = {
                     ...getModelWorkerEnv(sanitized, workerName, workerAgentType, env),
                     OMC_TEAM_STATE_ROOT: teamStateRoot,
@@ -569,6 +553,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                             })),
                             cwd: leaderCwd,
                             instructionStateRoot: '$OMC_TEAM_STATE_ROOT',
+                            ...(reviewerContract ? { reviewerRole: true, bootstrapInstructions: reviewerContract } : {}),
                         };
                         const overlayPath = await writeWorkerOverlay(workerOverlayParams);
                         const overlayContent = await readFile(overlayPath, 'utf-8');
@@ -636,7 +621,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     name: workerName,
                     index: workerIndex,
                     role: workerRole,
-                    assigned_tasks: [],
+                    assigned_tasks: assignedTaskIds,
                     worker_cli: launchDescriptor.provider,
                     launch_descriptor: launchDescriptor,
                     operational_state: 'active',
@@ -645,6 +630,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     launch_attempt_id: startupContext.attempt.attempt_id,
                     working_dir: workerCwd,
                     team_state_root: teamStateRoot,
+                    ...(reviewerOutputFile ? { output_file: reviewerOutputFile } : {}),
                     ...(worktree ? {
                         worktree_repo_root: leaderCwd,
                         worktree_path: worktree.path,

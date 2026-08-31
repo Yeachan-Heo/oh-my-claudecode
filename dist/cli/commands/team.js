@@ -18,7 +18,6 @@ const HELP_TOKENS = new Set(['--help', '-h', 'help']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
 const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
-const CURSOR_ALLOWED_TEAM_ROLES = new Set(['executor']);
 const DEFAULT_TEAM_CLI_AGENT_TYPE = 'claude';
 const TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
@@ -51,8 +50,6 @@ Auto-merge (v2-only):
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
-
-Cursor workers are executor-style only; use 1:cursor or 1:cursor:executor, not reviewer/critic/security/verdict roles.
 `;
 const TEAM_API_HELP = `
 Usage: omc team api <operation> [--input <json>] [--json]
@@ -290,7 +287,7 @@ function normalizeWorkerSpecSegment(match) {
     const token = match[2]?.toLowerCase();
     const explicitRole = match[3]?.toLowerCase();
     if (!token) {
-        return { count, agentType: 'claude' };
+        return { count, agentType: 'claude', providerExplicit: false };
     }
     if (explicitRole) {
         if (!VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
@@ -298,16 +295,12 @@ function normalizeWorkerSpecSegment(match) {
                 `Expected one of: ${[...VALID_TEAM_CLI_AGENT_TYPES].join(', ')}. ` +
                 `For a role-only shorthand on the default agent, use "${count}:${explicitRole}".`);
         }
-        if (token === 'cursor' && !CURSOR_ALLOWED_TEAM_ROLES.has(explicitRole)) {
-            throw new Error(`Invalid Cursor worker role "${explicitRole}" in worker spec "${match[0]}". ` +
-                `Cursor workers are executor-style only; use "${count}:cursor" or "${count}:cursor:executor".`);
-        }
-        return { count, agentType: token, role: explicitRole };
+        return { count, agentType: token, role: explicitRole, providerExplicit: true };
     }
     if (VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
-        return { count, agentType: token };
+        return { count, agentType: token, providerExplicit: true };
     }
-    return { count, agentType: 'claude', role: token };
+    return { count, agentType: 'claude', role: token, providerExplicit: false };
 }
 /** @internal Exported for testing */
 export function parseTeamArgs(tokens, defaultAgentType = 'claude') {
@@ -315,6 +308,7 @@ export function parseTeamArgs(tokens, defaultAgentType = 'claude') {
     let workerCount = 3;
     let agentTypes = [];
     let workerSpecs = [];
+    let workerProviderExplicit = [];
     let json = false;
     let newWindow = false;
     let autoMerge = process.env.OMC_TEAMS_AUTO_MERGE === '1';
@@ -365,6 +359,7 @@ export function parseTeamArgs(tokens, defaultAgentType = 'claude') {
                 for (let i = 0; i < seg.count; i++) {
                     agentTypes.push(seg.agentType);
                     workerSpecs.push({ agentType: seg.agentType, ...(seg.role ? { role: seg.role } : {}) });
+                    workerProviderExplicit.push(seg.providerExplicit);
                 }
             }
             if (workerCount > MAX_WORKER_COUNT) {
@@ -392,6 +387,7 @@ export function parseTeamArgs(tokens, defaultAgentType = 'claude') {
                 agentType: normalized.agentType,
                 ...(role ? { role } : {}),
             }));
+            workerProviderExplicit = Array.from({ length: workerCount }, () => normalized.providerExplicit);
             explicitWorkerSpec = true;
             filteredArgs.shift();
         }
@@ -408,13 +404,27 @@ export function parseTeamArgs(tokens, defaultAgentType = 'claude') {
     if (agentTypes.length === 0) {
         agentTypes = Array.from({ length: workerCount }, () => normalizedDefaultAgentType);
         workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: normalizedDefaultAgentType }));
+        workerProviderExplicit = Array.from({ length: workerCount }, () => false);
     }
     const task = filteredArgs.join(' ').trim();
     if (!task) {
         throw new Error('Usage: omc team [N:agent-type] "<task description>"');
     }
     const teamName = slugifyTask(task);
-    return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge, explicitWorkerSpec, noDecompose };
+    return {
+        workerCount,
+        agentTypes,
+        workerSpecs,
+        workerProviderExplicit,
+        role,
+        task,
+        teamName,
+        json,
+        newWindow,
+        autoMerge,
+        explicitWorkerSpec,
+        noDecompose,
+    };
 }
 export function buildStartupTasks(parsed) {
     return Array.from({ length: parsed.workerCount }, (_, index) => {
@@ -622,6 +632,7 @@ async function handleTeamStart(parsed, cwd) {
             cwd,
             newWindow: parsed.newWindow,
             workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
+            workerProviderExplicit: parsed.workerProviderExplicit,
             ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
             ...(parsed.autoMerge ? { autoMerge: true } : {}),
         });

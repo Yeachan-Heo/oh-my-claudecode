@@ -113,7 +113,7 @@ Each pipeline stage uses **specialized agents** -- not just executors. The lead 
 **Routing rules:**
 
 1. **The lead picks agents per stage, not the user.** The user's `N:agent-type` parameter only overrides the `team-exec` stage worker type. All other stages use stage-appropriate specialists.
-2. **Specialist agents complement executor agents.** Route analysis/review to architect/critic Claude agents and UI work to designer agents. Tmux CLI workers are one-shot and don't participate in team communication.
+2. **Specialist agents complement executor agents.** Route analysis/review to architect/critic Claude agents and UI work to designer agents. Prompt-mode tmux CLI workers are one-shot; interactive Cursor workers stay persistent and receive mailbox instructions.
 3. **Cost mode affects model tier.** In downgrade: `opus` agents to `sonnet`, `sonnet` to `haiku` where quality permits. `team-verify` always uses at least `sonnet`.
 4. **Risk level escalates review.** Security-sensitive or >20 file changes must include `security-reviewer` + `code-reviewer` (opus) in `team-verify`.
 
@@ -610,7 +610,7 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 
 - CLI workers operate via tmux, not Claude Code's tool system
 - They cannot use Claude Code's native task-list or team messaging surfaces
-- They run as one-shot autonomous jobs, not persistent teammates
+- Prompt-mode providers run as one-shot autonomous jobs; interactive Cursor workers remain persistent
 - The lead manages their lifecycle (spawn, monitor, collect results)
 
 ### When to Route Where
@@ -897,7 +897,7 @@ Optional settings live in `.claude/omc.jsonc` (project) or `~/.config/claude-omc
 
 > **Scope:** Applies to `/team` only. Task-based delegation uses `delegationRouting` (see separate docs). The two systems coexist by design.
 
-Declare which provider (`claude`, `codex`, `gemini`, `antigravity`, `grok`, `cursor`) and which model tier should back each canonical role. Routing is resolved **once** at team creation and persisted in `TeamConfig.resolved_routing` — spawn, scale-up, and restart all read from the snapshot, so a role's worker CLI and model are stable for the lifetime of the team.
+Declare which provider (`claude`, `codex`, `gemini`, `antigravity`, `grok`, `cursor`) and which model tier should back each canonical role. Routing is resolved **once** at team creation and persisted in `TeamConfig.resolved_routing`. Initial role-routed spawn and restart read that snapshot. Scale-up keeps its explicitly supplied provider authoritative and reads provider model defaults from the immutable team snapshot.
 
 ### Example — user target mapping
 
@@ -954,13 +954,13 @@ OMC_TEAM_ROLE_OVERRIDES='{"critic":{"provider":"codex"},"code-reviewer":{"provid
 
 Precedence: `OMC_TEAM_ROLE_OVERRIDES` > `.claude/omc.jsonc` (project) > `~/.config/claude-omc/config.jsonc` (user) > built-in defaults. Invalid JSON logs a warning and is ignored — env overrides are best-effort and never abort the run.
 
-### Fallback when a CLI is missing
+### Provider availability
 
-If the CLI for a configured provider is absent from `PATH` at spawn time, `buildLaunchArgs()` throws, the team lead emits a visible team/conversation warning, and the runtime falls back to a deterministic Claude assignment pre-computed by `buildResolvedRoutingSnapshot` (same tier + same agent, `provider: "claude"`) only when the Claude CLI is resolvable. If the Claude CLI is unavailable, no runnable fallback exists: orchestration/startup is unavailable and the warning stays loud rather than claiming a fallback. Probe provider availability with `omc doctor --team-routing`.
+If the CLI for a selected provider is absent from `PATH` at spawn time, startup fails before launching a worker. OMC never substitutes another provider: an explicitly selected provider remains reproducible, and a configured route remains bound to its resolved primary. Probe provider availability with `omc doctor --team-routing`.
 
 ### Stickiness — resolved once, reused everywhere
 
-Resolved routing is immutable per team. Editing config mid-team-lifetime does not affect running teams; a new `/team` invocation picks up the new mapping. This guarantees that spawn, scale-up, and worker-restart all see identical routing, including across worktree detaches (the snapshot travels with `TeamConfig`).
+Resolved routing is immutable per team. Editing config mid-team-lifetime does not affect running teams; a new `/team` invocation picks up the new mapping. Initial role-routed spawn and worker restart reuse the same routing. Scale-up does not reroute its explicit provider argument, while its provider-specific model defaults remain pinned by the team snapshot.
 
 ### Zero-config behavior
 
@@ -1038,7 +1038,7 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 
 10. **Broadcast is expensive** -- Each broadcast sends a separate message to every teammate. Use `message` (DM) by default. Only broadcast for truly team-wide critical alerts.
 
-11. **CLI workers are one-shot, not persistent** -- Tmux CLI workers have full filesystem access and CAN make code changes. However, they run as autonomous one-shot jobs -- they cannot use Claude Code's native task-list or team messaging surfaces. The lead must manage their lifecycle: write prompt_file, spawn CLI worker, read output_file, mark task complete. They don't participate in team communication like Claude teammates do.
+11. **CLI lifecycle is provider-specific** -- Tmux CLI workers have full filesystem access and CAN make code changes. Prompt-mode providers run as autonomous one-shot jobs and return output files. Interactive Cursor workers stay in their panes, receive mailbox instructions, and return structured reviewer verdicts when assigned reviewer roles. Neither uses Claude Code's native task-list or team messaging surfaces; the lead owns lifecycle and task transitions.
 
 ## Parallel session caveats
 

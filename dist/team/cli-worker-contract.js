@@ -1,19 +1,24 @@
 /**
  * CLI-worker output contract (Option E, plan AC-7).
  *
- * When a /team critic/reviewer stage is routed to an external CLI worker
- * (codex or gemini), the worker may not call TaskUpdate directly. To surface
- * a structured verdict back to the team leader, the worker writes a JSON
- * payload to a pre-agreed file path. The leader's worker-completion handler
- * in runtime-v2 reads the file and calls TaskUpdate with verdict metadata.
+ * When a /team critic/reviewer stage is routed to an external CLI worker,
+ * the worker may not call TaskUpdate directly. To surface a structured
+ * verdict back to the team leader, the worker writes a JSON payload to a
+ * pre-agreed file path. The leader's worker-completion handler in
+ * runtime-v2 reads the file and calls TaskUpdate with verdict metadata.
  *
  * Applies to roles in CONTRACT_ROLES (critic, code-reviewer,
- * security-reviewer, test-engineer) when the resolved provider is
- * `codex` or `gemini`. Claude workers participate in team messaging
- * directly and do not use this contract. Codex team workers are launched as
- * persistent `codex` panes, not `codex exec`; they still receive this verdict
- * contract in their inbox when assigned reviewer-style roles.
+ * security-reviewer, test-engineer) on every non-Claude provider. Claude
+ * workers participate in team messaging directly and do not use this
+ * contract.
+ *
+ * The contract does not require a one-shot CLI. It is a prompt instruction
+ * plus a file the leader polls, so persistent interactive panes satisfy it:
+ * codex and cursor team workers are launched as long-lived panes (not
+ * `codex exec` / `cursor-agent -p`) and still receive this verdict contract
+ * in their inbox when assigned reviewer-style roles.
  */
+import { TASK_ID_SAFE_PATTERN } from './contracts.js';
 /** Roles that emit a structured verdict and therefore use the output-file contract. */
 export const CONTRACT_ROLES = new Set([
     'critic',
@@ -25,35 +30,31 @@ const VALID_VERDICTS = new Set(['approve', 'revise', 'reject']);
 const VALID_SEVERITIES = new Set(['critical', 'major', 'minor', 'nit']);
 /**
  * Returns true when a role + provider pair requires the verdict-output contract.
- * External providers (codex/gemini/grok) on reviewer-style roles need it; Claude
- * teammates speak through the team messaging API directly.
+ * Every external provider (codex/gemini/grok/cursor/antigravity) on a
+ * reviewer-style role needs it; Claude teammates speak through the team
+ * messaging API directly.
  */
 export function shouldInjectContract(role, provider) {
     if (!role || !provider)
         return false;
     // Claude workers speak through the team messaging API directly.
-    // Cursor workers run as interactive REPLs — they cannot perform the
-    // write-verdict-and-exit dance the contract requires, so reviewer
-    // roles must not be assigned to cursor in the first place. The
-    // role-router and worker-bootstrap guidance both flag this; here we
-    // simply skip contract injection if a cursor worker somehow lands on
-    // a CONTRACT_ROLES role rather than emit instructions it cannot follow.
-    if (provider === 'claude' || provider === 'cursor')
+    if (provider === 'claude')
         return false;
     return CONTRACT_ROLES.has(role);
 }
 /**
  * Render the prompt fragment that instructs the CLI worker to emit a
- * structured verdict JSON to `output_file` before exiting. Appended to
- * the task instruction + startup prompt for reviewer roles.
+ * structured verdict JSON to `output_file` before exiting or yielding the
+ * reviewer turn. Appended to the task instruction + startup prompt for
+ * reviewer roles.
  */
-export function renderCliWorkerOutputContract(role, output_file) {
+export function renderCliWorkerOutputContract(role, output_file, identity = {}) {
     return [
         '',
         '---',
         '## REQUIRED: Structured Verdict Output',
         '',
-        `You are acting in the \`${role}\` role. Before you exit, write a JSON verdict to:`,
+        `You are acting in the \`${role}\` role. Before you exit or yield this reviewer turn, write a JSON verdict to:`,
         '',
         `    ${output_file}`,
         '',
@@ -62,7 +63,10 @@ export function renderCliWorkerOutputContract(role, output_file) {
         '```json',
         '{',
         `  "role": "${role}",`,
-        '  "task_id": "<task id from the assignment above>",',
+        `  "task_id": "${identity.taskId ?? '<task id from the assignment above>'}",`,
+        `  "claim_token": "${identity.claimToken ?? '<claim token from the claim response>'}",`,
+        `  "task_version": ${identity.taskVersion ?? '<task version from the claim response>'},`,
+        `  "launch_attempt_id": "${identity.launchAttemptId ?? '<exact OMC_WORKER_LAUNCH_ATTEMPT_ID>'}",`,
         '  "verdict": "approve" | "revise" | "reject",',
         '  "summary": "one- or two-sentence overall assessment",',
         '  "findings": [',
@@ -82,6 +86,7 @@ export function renderCliWorkerOutputContract(role, output_file) {
         '- Each finding MUST carry a `severity` from the enum above.',
         '- Use `approve` only when you have no blocking concerns.',
         '- If you cannot produce a verdict, write `{"verdict":"revise", ...}` with an explanatory finding rather than exiting silently.',
+        '- Writing the verdict does not itself authorize leaving a persistent interactive worker session; remain available for further mailbox instructions unless the leader explicitly shuts you down.',
         '- The team leader reads this file to mark the task complete; omitting it leaves the task stuck in_progress pending human review.',
         '',
     ].join('\n');
@@ -110,6 +115,21 @@ export function parseCliWorkerVerdict(raw) {
     const taskId = obj.task_id;
     if (typeof taskId !== 'string' || !taskId) {
         throw new Error('verdict_missing_task_id');
+    }
+    if (!TASK_ID_SAFE_PATTERN.test(taskId)) {
+        throw new Error(`verdict_invalid_task_id:${taskId}`);
+    }
+    const claimToken = obj.claim_token;
+    if (claimToken !== undefined && (typeof claimToken !== 'string' || !claimToken)) {
+        throw new Error('verdict_invalid_claim_token');
+    }
+    const taskVersion = obj.task_version;
+    if (taskVersion !== undefined && (typeof taskVersion !== 'number' || !Number.isInteger(taskVersion) || taskVersion < 0)) {
+        throw new Error('verdict_invalid_task_version');
+    }
+    const launchAttemptId = obj.launch_attempt_id;
+    if (launchAttemptId !== undefined && (typeof launchAttemptId !== 'string' || !launchAttemptId)) {
+        throw new Error('verdict_invalid_launch_attempt_id');
     }
     const verdict = obj.verdict;
     if (typeof verdict !== 'string' || !VALID_VERDICTS.has(verdict)) {
@@ -152,15 +172,30 @@ export function parseCliWorkerVerdict(raw) {
         verdict: verdict,
         summary,
         findings,
+        ...(claimToken !== undefined ? { claim_token: claimToken } : {}),
+        ...(taskVersion !== undefined ? { task_version: taskVersion } : {}),
+        ...(launchAttemptId !== undefined ? { launch_attempt_id: launchAttemptId } : {}),
     };
 }
 /**
  * Compute the conventional verdict-output file path for a team worker.
  * Kept as a single source of truth so spawn and completion handler agree.
  */
-export function cliWorkerOutputFilePath(teamStateRootAbs, workerName) {
+export function cliWorkerOutputFilePath(teamStateRootAbs, workerName, scope) {
     // Intentional forward-slash join — consumed by prompts rendered for CLI
     // workers, matches other team state path conventions.
-    return `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/verdict.json`;
+    const taskId = scope?.taskId;
+    const assignmentId = scope?.assignmentId ?? scope?.launchAttemptId;
+    const fileName = taskId && assignmentId
+        ? `verdict-${encodeURIComponent(taskId)}-${encodeURIComponent(assignmentId)}.json`
+        : 'verdict.json';
+    return `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/${fileName}`;
+}
+export function isCliWorkerOutputFilePath(teamStateRootAbs, workerName, outputFile) {
+    const root = `${teamStateRootAbs.replaceAll('\\', '/')}/workers/${workerName}/`;
+    const normalized = outputFile.replaceAll('\\', '/');
+    return normalized.startsWith(root)
+        && (normalized === `${root}verdict.json`
+            || /^verdict-[^/]+-[^/]+\.json$/.test(normalized.slice(root.length)));
 }
 //# sourceMappingURL=cli-worker-contract.js.map

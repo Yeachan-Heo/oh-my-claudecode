@@ -79,7 +79,7 @@ describe('doctorTeamRoutingCommand', () => {
         expect(text).not.toContain('missing');
         expect(text).not.toContain('fallback');
     });
-    it('says an external route can fall back when Claude is found', async () => {
+    it('says selected external workers fail before launch when Claude is found', async () => {
         mocks.loadConfig.mockReturnValue(configWithProviders(['codex']));
         mocks.probeCli.mockImplementation((binary) => binary === 'claude'
             ? { found: true, path: '/opt/claude' }
@@ -88,22 +88,21 @@ describe('doctorTeamRoutingCommand', () => {
         const text = output(logSpy);
         expect(exitCode).toBe(0);
         expect(text).toContain('codex: not found on PATH');
-        expect(text).toContain('can fall back to Claude');
-        expect(text).not.toContain('no available Claude fallback');
-        expect(text).not.toContain('orchestrator/fallback unavailable');
+        expect(text).toContain('selected for codex fail before launch');
+        expect(text).not.toContain('fallback');
     });
-    it('reports no available Claude fallback when an external route and Claude are missing', async () => {
+    it('reports strict selected-provider failures when an external route and Claude are missing', async () => {
         mocks.loadConfig.mockReturnValue(configWithProviders(['codex']));
         mocks.probeCli.mockReturnValue({ found: false, error: 'CLI resolver failed' });
         const exitCode = await doctorTeamRoutingCommand({});
         const text = output(logSpy);
         expect(exitCode).toBe(0);
         expect(text).toContain('codex: not found on PATH');
-        expect(text).toContain('no available Claude fallback');
-        expect(text).toContain('orchestrator/fallback unavailable');
-        expect(text).not.toContain('can fall back to Claude');
+        expect(text).toContain('selected for codex fail before launch');
+        expect(text).toContain('orchestrator unavailable');
+        expect(text).not.toContain('fallback');
     });
-    it('reports orchestrator and fallback unavailability without promising Claude fallback', async () => {
+    it('reports orchestrator unavailability without promising a fallback', async () => {
         mocks.loadConfig.mockReturnValue(configWithProviders(['codex']));
         mocks.probeCli.mockImplementation((binary) => binary === 'claude'
             ? { found: false, error: 'CLI resolver failed' }
@@ -112,8 +111,8 @@ describe('doctorTeamRoutingCommand', () => {
         const text = output(logSpy);
         expect(exitCode).toBe(0);
         expect(text).toContain('claude: not found on PATH');
-        expect(text).toContain('orchestrator/fallback unavailable');
-        expect(text).not.toContain('Claude falls back to Claude');
+        expect(text).toContain('orchestrator unavailable');
+        expect(text).not.toContain('fallback');
     });
     it('keeps resolved providers found when version enrichment fails or returns blank output', async () => {
         mocks.loadConfig.mockReturnValue(configWithProviders(['codex']));

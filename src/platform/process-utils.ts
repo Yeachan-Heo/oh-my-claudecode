@@ -4,7 +4,7 @@
  */
 
 import { execFileSync, execFile, spawnSync } from 'child_process';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { promisify } from 'util';
 import * as fsPromises from 'fs/promises';
 
@@ -21,11 +21,7 @@ function processGroupIdSync(pid: number): number | null {
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const closeParen = stat.lastIndexOf(')');
-      if (closeParen === -1) return null;
-      const fields = stat.substring(closeParen + 2).split(' ');
-      const group = Number(fields[2]);
-      return Number.isInteger(group) && group > 0 ? group : null;
+      return linuxProcRecordFromStat(stat)?.processGroupId ?? null;
     } catch {
       return null;
     }
@@ -69,10 +65,11 @@ export async function terminateOwnedProcessGroup(
   if (deadline === undefined || isDeadlineExceeded(deadline)) return 'deadline-exceeded';
   if (process.platform === 'win32') return 'unknown';
   if (!Number.isInteger(options.processGroupId) || options.processGroupId <= 0) return 'unknown';
-  if (!isProcessAlive(options.pid)) return 'already-dead';
   const identity = getProcessStartIdentitySync(options.pid);
   const group = processGroupIdSync(options.pid);
-  if (!identity || !group) return 'unknown';
+  if (!identity || !group) {
+    return isProcessGroupQuiescent(options.processGroupId) ? 'already-dead' : 'unknown';
+  }
   if (identity !== options.expectedStartIdentity || group !== options.processGroupId) return 'identity-mismatch';
   if (isDeadlineExceeded(deadline)) return 'deadline-exceeded';
   try {
@@ -80,7 +77,9 @@ export async function terminateOwnedProcessGroup(
     return 'terminated';
   } catch (error: unknown) {
     const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'ESRCH') return isProcessAlive(options.pid) ? 'unknown' : 'already-dead';
+    if (code === 'ESRCH') {
+      return isProcessGroupQuiescent(options.processGroupId) ? 'already-dead' : 'unknown';
+    }
     return 'unknown';
   }
 }
@@ -154,7 +153,8 @@ function killProcessTreeUnix(pid: number, signal: NodeJS.Signals): boolean {
 
 /**
  * Check if a process is alive.
- * Works cross-platform by attempting signal 0.
+ * Works cross-platform by attempting signal 0. On Linux, a successfully
+ * signalled process is still treated as non-live when proc state is Z or X.
  * EPERM means the process exists but we lack permission to signal it.
  */
 export function isProcessAlive(pid: number): boolean {
@@ -162,12 +162,91 @@ export function isProcessAlive(pid: number): boolean {
 
   try {
     process.kill(pid, 0);
+    if (process.platform === 'linux') {
+      const state = readLinuxProcState(pid);
+      if (state === 'Z' || state === 'X') return false;
+    }
     return true;
   } catch (e: unknown) {
     if (e && typeof e === 'object' && 'code' in e && (e as NodeJS.ErrnoException).code === 'EPERM') {
       return true;
     }
     return false;
+  }
+}
+
+/** @internal Exported for deterministic Linux proc-state parsing tests. */
+export function linuxProcStateFromStat(stat: string): string | null {
+  return linuxProcRecordFromStat(stat)?.state ?? null;
+}
+
+function linuxProcRecordFromStat(stat: string): {
+  state: string;
+  processGroupId: number;
+  startTime: number | null;
+} | null {
+  const closeParen = stat.lastIndexOf(')');
+  if (closeParen === -1) return null;
+  const fields = stat.substring(closeParen + 2).split(' ');
+  const state = fields[0];
+  const processGroupId = Number(fields[2]);
+  if (!state || state.length !== 1 || !Number.isInteger(processGroupId) || processGroupId <= 0) return null;
+  const parsedStartTime = Number.parseInt(fields[19] ?? '', 10);
+  return {
+    state,
+    processGroupId,
+    startTime: Number.isNaN(parsedStartTime) ? null : parsedStartTime,
+  };
+}
+
+function readLinuxProcState(pid: number): string | null {
+  try {
+    return linuxProcStateFromStat(readFileSync(`/proc/${pid}/stat`, 'utf8'));
+  } catch {
+    // signal-0 already proved that the process exists. Procfs uncertainty must
+    // not weaken cleanup fencing by inventing proof of death.
+    return null;
+  }
+}
+
+/**
+ * Return true when a Linux process group has no live members other than
+ * terminal zombie/dead states. Other POSIX platforms can prove quiescence
+ * only when signal-0 reports that the group is absent.
+ * Linux keeps zombie group members visible to signal-0 until their parent
+ * reaps them, so signal-0 alone cannot prove a group is still executing.
+ */
+export function isProcessGroupQuiescent(processGroupId: number): boolean {
+  if (!Number.isSafeInteger(processGroupId) || processGroupId <= 0) return false;
+
+  if (process.platform === 'linux') {
+    try {
+      for (const entry of readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        let stat: string;
+        try {
+          stat = readFileSync(`/proc/${entry}/stat`, 'utf8');
+        } catch (error) {
+          // Proc entries may vanish between enumeration and read. That race is
+          // proof that this member exited, not uncertainty about a live member.
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          return false;
+        }
+        const record = linuxProcRecordFromStat(stat);
+        if (!record) return false;
+        if (record.processGroupId === processGroupId && record.state !== 'Z' && record.state !== 'X') return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  try {
+    process.kill(-processGroupId, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
   }
 }
 
@@ -293,12 +372,7 @@ async function getProcessStartTimeLinux(pid: number, deadlineAt?: number): Promi
   if (isDeadlineExceeded(deadlineAt)) return undefined;
   try {
     const stat = await fsPromises.readFile(`/proc/${pid}/stat`, 'utf8');
-    const closeParen = stat.lastIndexOf(')');
-    if (closeParen === -1) return undefined;
-
-    const fields = stat.substring(closeParen + 2).split(' ');
-    const startTime = parseInt(fields[19], 10);
-    return isNaN(startTime) ? undefined : startTime;
+    return linuxProcRecordFromStat(stat)?.startTime ?? undefined;
   } catch {
     return undefined;
   }
@@ -321,11 +395,8 @@ export function getProcessStartIdentitySync(pid: number): string | null {
   if (process.platform === 'linux') {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const closeParen = stat.lastIndexOf(')');
-      if (closeParen === -1) return null;
-      const fields = stat.substring(closeParen + 2).split(' ');
-      const startTime = parseInt(fields[19] ?? '', 10);
-      return Number.isNaN(startTime) ? null : String(startTime);
+      const startTime = linuxProcRecordFromStat(stat)?.startTime;
+      return startTime === null || startTime === undefined ? null : String(startTime);
     } catch {
       return null;
     }

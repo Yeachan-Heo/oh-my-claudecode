@@ -19,6 +19,11 @@ const launchMocks = vi.hoisted(() => ({
   withWorkerLaunchAttemptFence: vi.fn(async (_attempt: unknown, fn: () => Promise<unknown>) => ({ ok: true as const, value: await fn() })),
 }));
 
+const overlayMocks = vi.hoisted(() => ({
+  writeWorkerOverlay: vi.fn(async (params: { cwd: string; teamName: string; workerName: string }) =>
+    join(params.cwd, '.omc', 'state', 'team', params.teamName, 'workers', params.workerName, 'AGENTS.md')),
+}));
+
 const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn((agentType?: string, config?: { resolvedBinaryPath?: string }) => [config?.resolvedBinaryPath ?? agentType ?? 'claude']),
   resolveValidatedBinaryPath: vi.fn((agentType?: string) => {
@@ -45,6 +50,11 @@ vi.mock('../worker-launch-ack.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../worker-launch-ack.js')>();
   return { ...actual, withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence };
 });
+
+vi.mock('../worker-bootstrap.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../worker-bootstrap.js')>(),
+  writeWorkerOverlay: overlayMocks.writeWorkerOverlay,
+}));
 
 vi.mock('../../cli/tmux-utils.js', () => ({
   tmuxExecAsync: mocks.tmuxExecAsync,
@@ -91,6 +101,12 @@ describe('runtime-v2 Gemini preflight routing', () => {
 
   beforeEach(() => {
     vi.resetModules();
+    vi.clearAllMocks();
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+      if (agentType === 'gemini') throw new Error('Resolved CLI binary \'gemini\' to untrusted location: /tmp/gemini');
+      return `/usr/bin/${agentType ?? 'claude'}`;
+    });
+    overlayMocks.writeWorkerOverlay.mockClear();
     mocks.createTeamSession.mockResolvedValue({
       sessionName: 'issue2675-session',
       leaderPaneId: '%1',
@@ -150,10 +166,10 @@ describe('runtime-v2 Gemini preflight routing', () => {
     expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
     expect(modelContractMocks.buildWorkerArgv).not.toHaveBeenCalled();
   });
-  it('fails a routed-only provider before state or session side effects', async () => {
+  it('fails a routed-only missing provider before state or session side effects', async () => {
     cwd = await mkdtemp(join(tmpdir(), 'routed-provider-preflight-'));
     modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
-      if (agentType === 'gemini') throw new Error("Resolved CLI binary 'gemini' to untrusted location: /tmp/shadow/gemini");
+      if (agentType === 'gemini') throw new Error("CLI binary 'gemini' not found in PATH");
       return `/usr/bin/${agentType ?? 'claude'}`;
     });
     const { startTeamV2 } = await import('../runtime-v2.js');
@@ -165,11 +181,70 @@ describe('runtime-v2 Gemini preflight routing', () => {
       tasks: [{ subject: 'Review code', description: 'Review code', role: 'executor' }],
       cwd,
       pluginConfig: { team: { roleRouting: { executor: { provider: 'gemini' } } } } as any,
-    })).rejects.toThrow("cli_binary_preflight_failed:gemini:Resolved CLI binary 'gemini' to untrusted location");
+    })).rejects.toThrow("cli_binary_preflight_failed:gemini:CLI binary 'gemini' not found in PATH");
     expect(mocks.createTeamSession).not.toHaveBeenCalled();
     expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
     await expect(import('node:fs/promises').then(fs => fs.access(join(cwd, '.omc', 'state', 'team', 'routed-preflight-team'))))
       .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    ['gemini', 'codex'],
+    ['claude', 'gemini'],
+  ] as const)(
+    'does not preflight an unavailable %s route when %s was explicitly selected',
+    async (routeProvider, explicitProvider) => {
+      cwd = await mkdtemp(join(tmpdir(), 'explicit-provider-preflight-'));
+      modelContractMocks.resolveValidatedBinaryPath.mockClear();
+      mocks.createTeamSession.mockClear();
+      modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+        if (agentType === routeProvider) throw new Error(`CLI binary '${routeProvider}' not found in PATH`);
+        return `/usr/bin/${agentType ?? 'claude'}`;
+      });
+      const { startTeamV2 } = await import('../runtime-v2.js');
+
+      const startupError = await startTeamV2({
+        teamName: 'explicit-provider-team',
+        workerCount: 1,
+        agentTypes: [explicitProvider],
+        workerProviderExplicit: [true],
+        tasks: [{ subject: 'Review code', description: 'Review code', role: 'executor' }],
+        cwd,
+        pluginConfig: {
+          team: { roleRouting: { executor: { provider: routeProvider } } },
+        } as any,
+      }).then(() => null, error => error as Error);
+      if (startupError) expect(startupError.message).toBe('stale_state_revision');
+
+      expect(modelContractMocks.resolveValidatedBinaryPath).toHaveBeenCalledWith(explicitProvider);
+      expect(modelContractMocks.resolveValidatedBinaryPath).not.toHaveBeenCalledWith(routeProvider);
+      expect(mocks.createTeamSession).toHaveBeenCalled();
+      expect(overlayMocks.writeWorkerOverlay).toHaveBeenCalledWith(
+        expect.objectContaining({ agentType: explicitProvider }),
+      );
+    },
+  );
+
+  it('validates the complete launch descriptor before filesystem or session effects', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'descriptor-preparation-'));
+    modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockImplementationOnce(() => {
+      throw new Error('invalid prepared descriptor');
+    });
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'descriptor-preparation-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      workerProviderExplicit: [true],
+      tasks: [{ subject: 'Run task', description: 'Run task' }],
+      cwd,
+    })).rejects.toThrow('invalid prepared descriptor');
+
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    await expect(import('node:fs/promises').then(fs => fs.access(
+      join(cwd, '.omc', 'state', 'team', 'descriptor-preparation-team'),
+    ))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
 });

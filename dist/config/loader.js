@@ -8,7 +8,7 @@
  */
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
-import { CANONICAL_TEAM_ROLES, CURSOR_EXECUTOR_TEAM_ROLES, KNOWN_AGENT_NAMES, } from "../shared/types.js";
+import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES, } from "../shared/types.js";
 import { getConfigDir } from "../utils/paths.js";
 import { parseJsonc } from "../utils/jsonc.js";
 import { getDefaultTierModels, BUILTIN_EXTERNAL_MODEL_DEFAULTS, shouldAutoForceInherit, } from "./models.js";
@@ -348,6 +348,14 @@ export function loadEnvConfig() {
         // Legacy fallback
         externalModelsDefaults.grokModel = process.env.OMC_GROK_DEFAULT_MODEL;
     }
+    if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_CURSOR_MODEL) {
+        externalModelsDefaults.cursorModel =
+            process.env.OMC_EXTERNAL_MODELS_DEFAULT_CURSOR_MODEL;
+    }
+    else if (process.env.OMC_CURSOR_DEFAULT_MODEL) {
+        // Legacy fallback
+        externalModelsDefaults.cursorModel = process.env.OMC_CURSOR_DEFAULT_MODEL;
+    }
     if (process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL) {
         externalModelsDefaults.antigravityModel =
             process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL;
@@ -433,7 +441,6 @@ function warnOnDeprecatedDelegationRouting(config) {
  * Throws a descriptive error naming offending key + allowed values.
  */
 const CANONICAL_TEAM_ROLE_SET = new Set(CANONICAL_TEAM_ROLES);
-const CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 const KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
 // /team CLI workers — codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
 const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
@@ -484,9 +491,6 @@ export function validateTeamConfig(config) {
         if (spec.provider !== undefined) {
             if (typeof spec.provider !== "string" || !TEAM_ROLE_PROVIDERS.has(spec.provider)) {
                 throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.provider: invalid value "${String(spec.provider)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`);
-            }
-            if (spec.provider === "cursor" && !CURSOR_EXECUTOR_TEAM_ROLE_SET.has(normalized)) {
-                throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET].join(", ")})`);
             }
         }
         if (spec.model !== undefined && !isValidModelValue(spec.model)) {
@@ -1045,6 +1049,10 @@ export function generateConfigSchema() {
                                 type: "string",
                                 default: BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel,
                                 description: "Default Antigravity model",
+                            },
+                            cursorModel: {
+                                type: "string",
+                                description: "Default Cursor model (ids from `cursor-agent --list-models`)",
                             },
                         },
                     },

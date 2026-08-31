@@ -485,6 +485,7 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
       { agentType: 'claude', role: 'executor' },
       { agentType: 'claude', role: 'executor' },
     ]);
+    expect(parsed.workerProviderExplicit).toEqual([false, false]);
     expect(parsed.role).toBe('executor');
     expect(parsed.task).toBe('fix the bug');
   });
@@ -494,6 +495,7 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
     expect(parsed.workerCount).toBe(2);
     expect(parsed.agentTypes).toEqual(['codex', 'gemini']);
     expect(parsed.workerSpecs).toEqual([{ agentType: 'codex' }, { agentType: 'gemini' }]);
+    expect(parsed.workerProviderExplicit).toEqual([true, true]);
     expect(parsed.task).toBe('do the task');
   });
 

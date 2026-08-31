@@ -1,8 +1,8 @@
 /**
  * `omc doctor team-routing` — probe configured /team role-routing providers.
  *
- * Iterates every unique provider referenced by `team.roleRouting` (falling back
- * to `claude` when config is empty) and checks CLI presence on PATH.
+ * Iterates every unique provider referenced by `team.roleRouting` (always
+ * including `claude` for orchestrator/default routes) and checks CLI presence on PATH.
  * Emits warnings (not errors) for missing binaries — AC-11.
  */
 import { colors } from '../utils/formatting.js';
@@ -56,7 +56,6 @@ export async function doctorTeamRoutingCommand(options) {
         }, null, 2));
     }
     else {
-        const claudeFound = probes.some((probe) => probe.provider === 'claude' && probe.found);
         console.log(colors.bold('Team role routing — provider CLI probe'));
         for (const p of probes) {
             if (p.found) {
@@ -65,22 +64,17 @@ export async function doctorTeamRoutingCommand(options) {
                 console.log(`  ${colors.green('✓')} ${p.provider}${resolvedPath}${version}`);
             }
             else {
-                const fallback = p.provider === 'claude'
-                    ? 'orchestrator/fallback unavailable'
-                    : claudeFound
-                        ? `/team tasks routed to ${p.provider} can fall back to Claude`
-                        : 'no available Claude fallback';
-                console.log(`  ${colors.yellow('⚠')} ${p.provider}: not found on PATH — ${fallback}`);
+                const consequence = p.provider === 'claude'
+                    ? 'orchestrator unavailable'
+                    : `/team tasks selected for ${p.provider} fail before launch`;
+                console.log(`  ${colors.yellow('⚠')} ${p.provider}: not found on PATH — ${consequence}`);
             }
         }
         if (missing.length === 0) {
             console.log(colors.green('\nAll configured providers are available.'));
         }
-        else if (!claudeFound) {
-            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — no available Claude fallback; orchestrator/fallback unavailable).`));
-        }
         else {
-            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — /team can fall back to Claude).`));
+            console.log(colors.yellow(`\n${missing.length} provider${missing.length === 1 ? '' : 's'} missing (warn only — selected /team workers fail before launch).`));
         }
     }
     // Never error on missing providers — AC-11 says warn, not error.

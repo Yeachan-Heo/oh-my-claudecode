@@ -334,6 +334,7 @@ export interface ExternalModelsDefaults {
     geminiModel?: string;
     grokModel?: string;
     antigravityModel?: string;
+    cursorModel?: string;
 }
 /**
  * External models fallback policy
@@ -420,8 +421,6 @@ export interface ResolveDelegationOptions {
 /** Canonical role names accepted in `team.roleRouting` (source of truth). */
 export declare const CANONICAL_TEAM_ROLES: readonly ["orchestrator", "planner", "analyst", "architect", "executor", "debugger", "critic", "code-reviewer", "security-reviewer", "test-engineer", "designer", "writer", "code-simplifier", "explore", "document-specialist"];
 export type CanonicalTeamRole = typeof CANONICAL_TEAM_ROLES[number];
-/** Cursor team workers are currently supported only for executor-style tasks. */
-export declare const CURSOR_EXECUTOR_TEAM_ROLES: readonly ["executor"];
 /** Provider for /team role routing. */
 export type TeamRoleProvider = 'claude' | 'codex' | 'gemini' | 'grok' | 'cursor' | 'antigravity';
 /** Tier name accepted in role-assignment `model` field. */

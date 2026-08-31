@@ -1,5 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dmtfCreationDateToTicks, terminateOwnedProcessGroup } from '../process-utils.js';
+import { dmtfCreationDateToTicks, isProcessAlive, linuxProcStateFromStat, terminateOwnedProcessGroup, } from '../process-utils.js';
+describe('Linux process liveness parsing', () => {
+    it.each(['Z', 'X'])('recognizes terminal %s proc states', state => {
+        expect(linuxProcStateFromStat(`123 (worker name) ${state} 1 123 123 0`)).toBe(state);
+    });
+    it('returns unknown for malformed proc stat instead of inventing a terminal state', () => {
+        expect(linuxProcStateFromStat('malformed')).toBeNull();
+    });
+    it('keeps the current live Linux process classified as alive', () => {
+        if (process.platform !== 'linux')
+            return;
+        expect(isProcessAlive(process.pid)).toBe(true);
+    });
+});
 describe('Windows process start identity formats', () => {
     it('converts DMTF creation dates to ticks with full 100ns precision', () => {
         // 2024-01-15 12:30:45.123456 UTC

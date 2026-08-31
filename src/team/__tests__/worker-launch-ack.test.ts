@@ -28,7 +28,7 @@ import {
   materializeProviderSpawnInvocation,
   quoteWindowsCreateProcessArgument,
 } from '../worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../../platform/process-utils.js';
+import { getProcessStartIdentity, isProcessAlive, isProcessGroupQuiescent, terminateOwnedProcessTree } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 let cwd = '';
@@ -488,7 +488,7 @@ describe('worker launch acknowledgement', () => {
       expect(isProcessAlive(pids.parent)).toBe(false);
       expect(isProcessAlive(pids.child)).toBe(false);
       expect(isProcessAlive(process.pid)).toBe(true);
-      expect(() => process.kill(-started.process_group_id, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      expect(isProcessGroupQuiescent(started.process_group_id)).toBe(true);
       return true;
     });
     await expect(retireAndCleanupCurrentWorkerLaunchAttempt(

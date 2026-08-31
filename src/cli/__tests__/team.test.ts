@@ -199,9 +199,11 @@ describe('team cli', () => {
     // Verify stdin payload sent to runtime-cli
     const stdinPayload = JSON.parse(write.mock.calls[0][0] as string) as {
       agentTypes: string[];
+      workerProviderExplicit: boolean[];
       tasks: Array<{ subject: string; description: string }>;
     };
     expect(stdinPayload.agentTypes).toEqual(['codex']);
+    expect(stdinPayload.workerProviderExplicit).toEqual([true]);
     expect(stdinPayload.tasks).toHaveLength(1);
     expect(stdinPayload.tasks[0].description).toBe('review auth flow');
     expect((stdinPayload as { newWindow?: boolean }).newWindow).toBeUndefined();

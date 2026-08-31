@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a02c57610668e7298e75574dc219d405f411e8bc",
-    "sourceSha256": "5ea7e65cc0d308e4253e99e8031ba0352d9a130e6d8120030c65456821aaa055",
+    "head": "5bacbf808698ab299a7136fad342b3a9eb95a096",
+    "sourceSha256": "7b0449175985c0ef2c64488ae30283cd509514545017443a7380856069d1fee3",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a02c57610668e7298e75574dc219d405f411e8bc",
-  "sourceSha256": "5ea7e65cc0d308e4253e99e8031ba0352d9a130e6d8120030c65456821aaa055",
+  "head": "5bacbf808698ab299a7136fad342b3a9eb95a096",
+  "sourceSha256": "7b0449175985c0ef2c64488ae30283cd509514545017443a7380856069d1fee3",
   "counts": {
     "public": {
       "skills": 35,
@@ -47622,6 +47622,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/run-cjs-generic-timeout.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/run-cjs-graceful-fallback.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -49094,6 +49099,11 @@
       {
         "from": "src/__tests__/windows-prompt-hook-runner.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/windows-prompt-hook-runner.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -53275,6 +53285,11 @@
         "from": "src/graph/__tests__/runtime/executors/command.test.ts",
         "to": "src/graph/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/executors/command.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
       },
       {
         "from": "src/graph/__tests__/runtime/fence.test.ts",
@@ -69038,11 +69053,6 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.cursor-routing.test.ts",
-        "to": "src/team/model-contract.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.cursor-routing.test.ts",
         "to": "src/team/runtime-v2.ts",
         "kind": "imports"
       },
@@ -69095,11 +69105,6 @@
         "from": "src/team/__tests__/runtime-v2.explicit-provider-routing.test.ts",
         "to": "external:vitest",
         "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.explicit-provider-routing.test.ts",
-        "to": "src/team/model-contract.ts",
-        "kind": "type-imports"
       },
       {
         "from": "src/team/__tests__/runtime-v2.explicit-provider-routing.test.ts",
@@ -72574,12 +72579,12 @@
       {
         "from": "src/team/scaling.ts",
         "to": "src/shared/types.ts",
-        "kind": "imports"
+        "kind": "type-imports"
       },
       {
         "from": "src/team/scaling.ts",
-        "to": "src/shared/types.ts",
-        "kind": "type-imports"
+        "to": "src/team/cli-worker-contract.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/scaling.ts",
@@ -72609,11 +72614,6 @@
       {
         "from": "src/team/scaling.ts",
         "to": "src/team/process-identity-lock.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/scaling.ts",
-        "to": "src/team/role-router.ts",
         "kind": "imports"
       },
       {
@@ -76595,10 +76595,10 @@
     "stats": {
       "nodeCount": 6840,
       "edgeCount": 7222,
-      "importEdgeCount": 5932,
+      "importEdgeCount": 5934,
       "registerEdgeCount": 56
     }
   },
   "inventorySha256": "f5ea9ebf29ba491f17b39431660e07f71eb3d78399d481c1c2b00fc34cf2ab50",
-  "manifestSha256": "ef67e39a9e99974251b2ce67056d9798eea44a05a9c932d9e9a8f4b23daf98a3"
+  "manifestSha256": "c27d836d45e13fde73e2d8b75f2d0be9f732915438fa2de9712608f6480050fd"
 }

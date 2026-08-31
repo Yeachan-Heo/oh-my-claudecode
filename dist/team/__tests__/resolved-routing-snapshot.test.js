@@ -40,7 +40,7 @@ describe('buildResolvedRoutingSnapshot', () => {
         }
         expect(Object.keys(snap)).toHaveLength(CANONICAL_TEAM_ROLES.length);
     });
-    it('fallback is always a Claude worker even for codex/gemini primaries', () => {
+    it('stores an inactive Claude structural slot for every primary', () => {
         const cfg = {
             team: {
                 roleRouting: {
@@ -58,7 +58,7 @@ describe('buildResolvedRoutingSnapshot', () => {
         expect(snap.executor.primary.provider).toBe('claude');
         expect(snap.executor.fallback.provider).toBe('claude');
     });
-    it('fallback shares the agent with primary', () => {
+    it('stores the inactive structural slot with the primary agent', () => {
         const cfg = {
             team: { roleRouting: { critic: { provider: 'codex', agent: 'analyst' } } },
         };
@@ -66,27 +66,27 @@ describe('buildResolvedRoutingSnapshot', () => {
         expect(snap.critic.primary.agent).toBe('analyst');
         expect(snap.critic.fallback.agent).toBe('analyst');
     });
-    it('fallback resolves Claude tier model rather than echoing external model id', () => {
+    it('stores the inactive structural slot with a Claude tier model', () => {
         const cfg = {
             team: { roleRouting: { critic: { provider: 'codex', model: 'gpt-5.3-codex' } } },
         };
         const snap = buildResolvedRoutingSnapshot(cfg);
         // primary is the explicit codex model
         expect(snap.critic.primary.model).toBe('gpt-5.3-codex');
-        // fallback is claude — must NOT echo the codex id; resolves to claude tier default for critic (HIGH = opus)
+        // The inactive Claude slot does not echo an external model ID.
         expect(snap.critic.fallback.model).toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
     });
-    it('fallback respects tier when primary spec uses a tier name', () => {
+    it('stores the inactive structural slot with a Claude tier for tier input', () => {
         const cfg = {
             team: { roleRouting: { executor: { provider: 'codex', model: 'HIGH' } } },
         };
         const snap = buildResolvedRoutingSnapshot(cfg);
         // primary on codex: tier maps to codex builtin (tiers are claude-centric)
         expect(snap.executor.primary.model).toBe(BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel);
-        // fallback on claude with same tier "HIGH" → claude opus
+        // The inactive Claude slot resolves tier input independently.
         expect(snap.executor.fallback.model).toBe(CLAUDE_FAMILY_DEFAULTS.OPUS);
     });
-    it('orchestrator primary AND fallback are both claude (provider pinned)', () => {
+    it('stores Claude in both orchestrator primary and inactive slot', () => {
         const cfg = {
             team: { roleRouting: { orchestrator: { model: 'HIGH' } } },
         };

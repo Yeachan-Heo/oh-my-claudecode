@@ -88,6 +88,7 @@ export interface TeamTaskInput {
 export interface TeamStartInput {
   teamName: string;
   agentTypes: string[];
+  workerProviderExplicit?: boolean[];
   tasks: TeamTaskInput[];
   cwd: string;
   newWindow?: boolean;
@@ -417,6 +418,7 @@ export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResu
     teamName: input.teamName,
     workerCount: input.workerCount,
     agentTypes: input.agentTypes,
+    workerProviderExplicit: input.workerProviderExplicit,
     tasks: input.tasks,
     cwd: input.cwd,
     newWindow: input.newWindow,
@@ -1024,6 +1026,7 @@ function parseStartArgs(args: string[]): StartArgsParsed {
     input: {
       teamName: resolvedTeamName,
       agentTypes,
+      workerProviderExplicit: agentTypes.map(() => true),
       tasks,
       cwd,
       ...(newWindow ? { newWindow: true } : {}),
@@ -1424,6 +1427,7 @@ export async function teamCommand(argv: string[]): Promise<void> {
         teamName: legacy.teamName,
         workerCount: legacy.workerCount,
         agentTypes: Array.from({ length: legacy.workerCount }, () => legacy.agentType),
+        workerProviderExplicit: Array.from({ length: legacy.workerCount }, () => true),
         tasks,
         cwd: legacy.cwd,
         ...(legacy.newWindow ? { newWindow: true } : {}),

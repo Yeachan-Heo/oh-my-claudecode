@@ -110,6 +110,7 @@ import {
   cleanupTeamWorktrees,
   inspectTeamWorktreeCleanupSafety,
   ensureWorkerWorktree,
+  getWorktreePath,
   installWorktreeRootAgents,
   normalizeTeamWorktreeMode,
   type TeamWorktreeMode,
@@ -552,20 +553,23 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
  * Resolve a per-task routing assignment from the team's routing snapshot.
  *
  * Resolution order:
- *   1. Explicit `task.role` (if present) → normalize alias → snapshot lookup.
- *   2. `routeTaskToRole(subject, description, fallbackRole)` intent inference.
- *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
+ *   1. Preserve an explicitly selected provider and normalize its task role.
+ *   2. Otherwise normalize explicit `task.role`, or infer a role from task text.
+ *   3. Apply an explicitly configured snapshot route for that canonical role.
+ *   4. Fall back to the `fallbackAgent` round-robin pick if snapshot lookup
  *      fails (role outside canonical vocabulary or snapshot missing).
  *
- * Returns the primary assignment by default; callers swap to the Claude
- * fallback if the primary provider's CLI binary is missing at spawn time.
+ * Returns the effective primary assignment. An explicitly selected
+ * `fallbackAgent` remains authoritative even when a canonical route exists;
+ * otherwise the canonical snapshot primary applies. Unavailable selected
+ * providers fail preflight instead of being replaced.
  */
 export function resolveTaskAssignment(
   task: { subject: string; description: string; role?: string },
   resolvedRouting: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>,
   roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined,
-  resolvedBinaryPaths: Partial<Record<CliAgentType, string>>,
   fallbackAgent: CliAgentType,
+  providerExplicit: boolean = fallbackAgent !== 'claude',
 ): { agentType: CliAgentType; model: string; role: CanonicalTeamRole | null } {
   const canonicalRoles = new Set<string>(CANONICAL_TEAM_ROLES as readonly string[]);
   const hasExplicitRole = typeof task.role === 'string' && task.role.length > 0;
@@ -579,6 +583,10 @@ export function resolveTaskAssignment(
     return { agentType: fallbackAgent, model: '', role: null };
   }
 
+  if (providerExplicit) {
+    return { agentType: fallbackAgent, model: '', role: canonical };
+  }
+
   // Snapshot routing only overrides the caller's CLI agentType when the user
   // has explicitly opted in — either by setting `task.role` or by configuring
   // `team.roleRouting[<canonicalRole>]` in PluginConfig. This preserves the
@@ -589,17 +597,6 @@ export function resolveTaskAssignment(
     canonical,
   );
   if (!hasExplicitRole && !hasConfigForRole) {
-    return { agentType: fallbackAgent, model: '', role: canonical };
-  }
-
-  // Explicit provider + explicit role with NO per-role routing config: the user
-  // named the provider directly on the worker spec (e.g. `1:antigravity:executor`
-  // or `1:gemini:reviewer`), so honor that provider and treat the role as the
-  // prompt role, not a routing key. Without this, an explicit role would always
-  // opt into resolved_routing, whose default executor primary is Claude — silently
-  // launching Claude instead of the requested CLI provider. When `team.roleRouting`
-  // *is* configured for the role, that deliberate config still wins (below).
-  if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== 'claude') {
     return { agentType: fallbackAgent, model: '', role: canonical };
   }
 
@@ -691,6 +688,7 @@ export interface StartTeamV2Config {
   cwd: string;
   newWindow?: boolean;
   workerRoles?: string[];
+  workerProviderExplicit?: boolean[];
   roleName?: string;
   rolePrompt?: string;
   /**
@@ -3221,13 +3219,67 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
 
   const workspaceMode = worktreeMode === 'disabled' ? 'single' as const : 'worktree' as const;
 
-  // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
-  // Unsupported, relative, missing, or untrusted providers fail before any team
-  // state or multiplexer side effect is created.
   const agentTypes = config.agentTypes as CliAgentType[];
+  const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
+  const workerNameSet = new Set(workerNames);
+  const startupAllocations: Array<{ workerName: string; taskIndex: number }> = [];
+  const unownedTaskIndices: number[] = [];
+  for (let i = 0; i < config.tasks.length; i++) {
+    const owner = config.tasks[i]?.owner;
+    if (typeof owner === 'string' && workerNameSet.has(owner)) {
+      startupAllocations.push({ workerName: owner, taskIndex: i });
+    } else {
+      unownedTaskIndices.push(i);
+    }
+  }
+  if (unownedTaskIndices.length > 0) {
+    const allocationTasks: TaskAllocationInput[] = unownedTaskIndices.map(idx => ({
+      id: String(idx),
+      subject: config.tasks[idx].subject,
+      description: config.tasks[idx].description,
+      ...(config.tasks[idx].role ? { role: config.tasks[idx].role } : {}),
+    }));
+    const allocationWorkers: WorkerAllocationInput[] = workerNames.map((name, i) => ({
+      name,
+      role: config.workerRoles?.[i]
+        ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
+      currentLoad: 0,
+    }));
+    for (const r of allocateTasksToWorkers(allocationTasks, allocationWorkers)) {
+      startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
+    }
+  }
+  const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
+
+  // Prepare effective provider identities before any filesystem or multiplexer
+  // effect, then preflight exactly the providers that will launch. Unselected
+  // configured routes must not make an explicit-provider team availability-coupled.
+  const selectedProviders = new Set<CliAgentType>();
+  const effectiveAssignments = new Map<string, {
+    agentType: CliAgentType;
+    model: string;
+    role: CanonicalTeamRole | null | undefined;
+  }>();
+  for (let i = 0; i < workerNames.length; i++) {
+    const workerName = workerNames[i]!;
+    const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as CliAgentType;
+    const taskIndex = startupByWorker.get(workerName);
+    const assignment = taskIndex === undefined
+      ? { agentType: fallbackAgent, model: '', role: undefined }
+      : resolveTaskAssignment(
+        config.tasks[taskIndex]!,
+        resolvedRouting,
+        pluginCfg.team?.roleRouting as Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined,
+        fallbackAgent,
+        config.workerProviderExplicit?.[i] ?? fallbackAgent !== 'claude',
+      );
+    effectiveAssignments.set(workerName, assignment);
+    selectedProviders.add(assignment.agentType);
+  }
+
   const resolvedBinaryPaths: Partial<Record<CliAgentType, string>> = {};
   const missingBinaryReasons: Array<{ agentType: CliAgentType; reason: string }> = [];
-  for (const agentType of [...new Set(agentTypes)]) {
+  for (const agentType of selectedProviders) {
     try {
       resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
     } catch (err) {
@@ -3239,22 +3291,59 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
     throw new Error(`cli_binary_preflight_failed:${missing}`);
   }
-  // Resolve extra providers referenced by routing snapshots. A selected route
-  // without an exact validated path fails before worker launch.
-  for (const { primary } of Object.values(resolvedRouting)) {
-    const provider = primary.provider as CliAgentType;
-    if (resolvedBinaryPaths[provider]) continue;
-    if (missingBinaryReasons.some((m) => m.agentType === provider)) continue;
-    try {
-      resolvedBinaryPaths[provider] = resolvePreflightBinaryPath(provider).path;
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      missingBinaryReasons.push({ agentType: provider, reason });
-    }
-  }
-  if (missingBinaryReasons.length > 0) {
-    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
-    throw new Error(`cli_binary_preflight_failed:${missing}`);
+
+  const preparedLaunches = new Map<string, {
+    agentType: CliAgentType;
+    role?: CanonicalTeamRole;
+    descriptor: WorkerLaunchDescriptor;
+    verdictAssignmentId?: string;
+  }>();
+  const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
+  const resolveDefaultModel = (agentType: CliAgentType): string | undefined => {
+    return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
+  };
+  for (let i = 0; i < workerNames.length; i++) {
+    const workerName = workerNames[i]!;
+    const taskIndex = startupByWorker.get(workerName);
+    const assignment = effectiveAssignments.get(workerName)!;
+    const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
+    const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
+    const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
+      ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
+        taskId: String(taskIndex + 1),
+        assignmentId: verdictAssignmentId,
+      }) : undefined;
+    const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
+    const binary = resolvedBinaryPaths[assignment.agentType];
+    if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
+    const startupPrompt = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
+      ? generatePromptModeStartupPrompt(
+        sanitized,
+        workerName,
+        workerInstructionStateRoot(leaderCwd, sanitized),
+        outputContract,
+      )
+      : undefined;
+    const transportPrompt = startupPrompt && process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
+      ? startupPrompt.replace(/\s*\r?\n\s*/g, ' ')
+      : startupPrompt;
+    const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
+    const workerCwd = worktreeMode === 'disabled'
+      ? leaderCwd
+      : getWorktreePath(leaderCwd, sanitized, workerName);
+    const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
+      teamName: sanitized,
+      workerName,
+      cwd: workerCwd,
+      resolvedBinaryPath: binary,
+      model: effectiveModel,
+    }, promptArgs);
+    preparedLaunches.set(workerName, {
+      agentType: assignment.agentType,
+      ...(assignment.role ? { role: assignment.role } : {}),
+      descriptor,
+      ...(verdictAssignmentId ? { verdictAssignmentId } : {}),
+    });
   }
 
   // Create state directories
@@ -3282,7 +3371,6 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
 
   // Build allocation inputs for the new role-aware allocator
-  const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
   const workerWorktrees = new Map<string, NonNullable<ReturnType<typeof ensureWorkerWorktree>>>();
   try {
     if (worktreeMode !== 'disabled') {
@@ -3298,86 +3386,11 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
-  const workerNameSet = new Set(workerNames);
-
-  // Respect explicit owner fields first, then allocate remaining tasks
-  const startupAllocations: Array<{ workerName: string; taskIndex: number }> = [];
-  const unownedTaskIndices: number[] = [];
-  for (let i = 0; i < config.tasks.length; i++) {
-    const owner = config.tasks[i]?.owner;
-    if (typeof owner === 'string' && workerNameSet.has(owner)) {
-      startupAllocations.push({ workerName: owner, taskIndex: i });
-    } else {
-      unownedTaskIndices.push(i);
-    }
-  }
-
-  if (unownedTaskIndices.length > 0) {
-    const allocationTasks: TaskAllocationInput[] = unownedTaskIndices.map(idx => ({
-      id: String(idx),
-      subject: config.tasks[idx].subject,
-      description: config.tasks[idx].description,
-      ...(config.tasks[idx].role ? { role: config.tasks[idx].role } : {}),
-    }));
-    const allocationWorkers: WorkerAllocationInput[] = workerNames.map((name, i) => ({
-      name,
-      role: config.workerRoles?.[i]
-        ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
-      currentLoad: 0,
-    }));
-    for (const r of allocateTasksToWorkers(allocationTasks, allocationWorkers)) {
-      startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
-    }
-  }
-
-  const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
-  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor; verdictAssignmentId?: string }>();
-  const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
-  const resolveDefaultModel = (agentType: CliAgentType): string | undefined => {
-    return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
-  };
-  for (let i = 0; i < workerNames.length; i++) {
-    const workerName = workerNames[i]!;
-    const taskIndex = startupByWorker.get(workerName);
-    const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as CliAgentType;
-    const assignment = taskIndex === undefined
-      ? { agentType: fallbackAgent, model: resolveDefaultModel(fallbackAgent), role: undefined }
-      : resolveTaskAssignment(config.tasks[taskIndex]!, resolvedRouting,
-        pluginCfg.team?.roleRouting as Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined,
-        resolvedBinaryPaths, fallbackAgent);
-    const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
-    const worktree = workerWorktrees.get(workerName);
-    const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
-    const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
-      ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
-        taskId: String(taskIndex + 1),
-        assignmentId: verdictAssignmentId,
-      }) : undefined;
-    const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
-    const binary = resolvedBinaryPaths[assignment.agentType];
-    if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
-    const startupPrompt = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
-      ? generatePromptModeStartupPrompt(sanitized, workerName,
-        workerInstructionStateRoot(leaderCwd, sanitized), outputContract)
-      : undefined;
-    const transportPrompt = startupPrompt && process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
-      ? startupPrompt.replace(/\s*\r?\n\s*/g, ' ')
-      : startupPrompt;
-    const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
-    const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
-      teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
-      model: effectiveModel,
-    }, promptArgs);
-    preparedLaunches.set(workerName, { agentType: assignment.agentType,
-      ...(assignment.role ? { role: assignment.role } : {}), descriptor,
-      ...(verdictAssignmentId ? { verdictAssignmentId } : {}) });
-  }
-
   // Set up worker state dirs and overlays (with v2 CLI API instructions)
   try {
     for (let i = 0; i < workerNames.length; i++) {
       const wName = workerNames[i];
-      const agentType = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as CliAgentType;
+      const agentType = preparedLaunches.get(wName)!.agentType;
       await ensureWorkerStateDir(sanitized, wName, leaderCwd);
       const overlayPath = await writeWorkerOverlay({
         teamName: sanitized, workerName: wName, agentType,

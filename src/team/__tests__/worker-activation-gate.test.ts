@@ -13,7 +13,7 @@ import {
   retireAndCleanupCurrentWorkerLaunchAttempt,
   runWorkerLaunchBootstrap,
 } from '../worker-launch-ack.js';
-import { isProcessAlive } from '../../platform/process-utils.js';
+import { isProcessAlive, isProcessGroupQuiescent } from '../../platform/process-utils.js';
 
 
 let cwd: string;
@@ -176,7 +176,7 @@ describe('worker recovery activation gate', () => {
       await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
       await expect.poll(() => isProcessAlive(childPid), { timeout: 2_000, interval: 20 }).toBe(false);
       await expect.poll(() => isProcessAlive(launched.provider_pid), { timeout: 2_000, interval: 20 }).toBe(false);
-      expect(() => process.kill(-started.process_group_id, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      expect(isProcessGroupQuiescent(started.process_group_id)).toBe(true);
     } finally {
       if (!rollbackComplete) {
         await retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'nested_bootstrap_rollback_cleanup', async () => true).catch(() => false);

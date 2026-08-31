@@ -22,8 +22,6 @@ export const CANONICAL_TEAM_ROLES = [
     'explore',
     'document-specialist',
 ];
-/** Cursor team workers are currently supported only for executor-style tasks. */
-export const CURSOR_EXECUTOR_TEAM_ROLES = ["executor"];
 /** Known agent names derived from `buildDefaultConfig().agents` keys in src/config/loader.ts. */
 export const KNOWN_AGENT_NAMES = [
     'omc',

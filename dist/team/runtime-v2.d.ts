@@ -115,13 +115,16 @@ export type ShutdownTeamV2Result = {
  * Resolve a per-task routing assignment from the team's routing snapshot.
  *
  * Resolution order:
- *   1. Explicit `task.role` (if present) → normalize alias → snapshot lookup.
- *   2. `routeTaskToRole(subject, description, fallbackRole)` intent inference.
- *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
+ *   1. Preserve an explicitly selected provider and normalize its task role.
+ *   2. Otherwise normalize explicit `task.role`, or infer a role from task text.
+ *   3. Apply an explicitly configured snapshot route for that canonical role.
+ *   4. Fall back to the `fallbackAgent` round-robin pick if snapshot lookup
  *      fails (role outside canonical vocabulary or snapshot missing).
  *
- * Returns the primary assignment by default; callers swap to the Claude
- * fallback if the primary provider's CLI binary is missing at spawn time.
+ * Returns the effective primary assignment. An explicitly selected
+ * `fallbackAgent` remains authoritative even when a canonical route exists;
+ * otherwise the canonical snapshot primary applies. Unavailable selected
+ * providers fail preflight instead of being replaced.
  */
 export declare function resolveTaskAssignment(task: {
     subject: string;
@@ -130,7 +133,7 @@ export declare function resolveTaskAssignment(task: {
 }, resolvedRouting: Record<CanonicalTeamRole, {
     primary: RoleAssignment;
     fallback: RoleAssignment;
-}>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, resolvedBinaryPaths: Partial<Record<CliAgentType, string>>, fallbackAgent: CliAgentType): {
+}>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, fallbackAgent: CliAgentType, providerExplicit?: boolean): {
     agentType: CliAgentType;
     model: string;
     role: CanonicalTeamRole | null;
@@ -150,6 +153,7 @@ export interface StartTeamV2Config {
     cwd: string;
     newWindow?: boolean;
     workerRoles?: string[];
+    workerProviderExplicit?: boolean[];
     roleName?: string;
     rolePrompt?: string;
     /**
@@ -264,17 +268,18 @@ export interface CliWorkerVerdictResult {
     reason?: string;
 }
 /**
- * Post-exit handler for CLI workers that emitted a structured verdict
- * (AC-7). Scans workers whose panes have exited and whose WorkerInfo
+ * Completion handler for CLI workers that emitted a structured verdict
+ * (AC-7). Scans workers whose panes have exited, plus live Cursor panes whose
+ * persistent reviewer session has published a verdict, and whose WorkerInfo
  * carries `output_file`. For each:
  *   - Reads + validates the JSON payload via `parseCliWorkerVerdict`.
  *   - Locates the worker's in_progress task and writes a terminal status
  *     (completed for `approve`, failed for `revise`/`reject`) plus verdict
- *     metadata directly to the task file — the worker process is gone and
- *     cannot re-enter `transitionTaskStatus` with its claim token.
- *   - Renames `verdict.json` to `verdict.processed.json` so a subsequent
- *     monitor cycle does not reprocess it.
- *   - Emits a team event describing the outcome.
+ *     metadata through the canonical `transitionTaskStatus` path so lease,
+ *     delegation, event, and monitor-snapshot invariants remain authoritative.
+ *   - Renames the assignment-scoped verdict artifact to `.processed` so a
+ *     subsequent monitor cycle does not reprocess it.
+ *   - Quarantines stale `.processing` artifacts when replacement output exists.
  * On parse failure, emits a warning event and leaves the task untouched
  * for human review (per plan AC-7).
  */

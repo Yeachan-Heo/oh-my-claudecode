@@ -282,6 +282,7 @@ export interface ParsedTeamArgs {
   workerCount: number;
   agentTypes: string[];
   workerSpecs: ParsedWorkerSpec[];
+  workerProviderExplicit: boolean[];
   role?: string;
   task: string;
   teamName: string;
@@ -296,6 +297,7 @@ interface NormalizedWorkerSpecSegment {
   count: number;
   agentType: string;
   role?: string;
+  providerExplicit: boolean;
 }
 
 function isTeamStateLive(config: { tmux_session?: string } | null): boolean {
@@ -365,7 +367,7 @@ function normalizeWorkerSpecSegment(match: RegExpMatchArray): NormalizedWorkerSp
   const token = match[2]?.toLowerCase();
   const explicitRole = match[3]?.toLowerCase();
   if (!token) {
-    return { count, agentType: 'claude' };
+    return { count, agentType: 'claude', providerExplicit: false };
   }
 
   if (explicitRole) {
@@ -376,14 +378,14 @@ function normalizeWorkerSpecSegment(match: RegExpMatchArray): NormalizedWorkerSp
         `For a role-only shorthand on the default agent, use "${count}:${explicitRole}".`,
       );
     }
-    return { count, agentType: token, role: explicitRole };
+    return { count, agentType: token, role: explicitRole, providerExplicit: true };
   }
 
   if (VALID_TEAM_CLI_AGENT_TYPES.has(token)) {
-    return { count, agentType: token };
+    return { count, agentType: token, providerExplicit: true };
   }
 
-  return { count, agentType: 'claude', role: token };
+  return { count, agentType: 'claude', role: token, providerExplicit: false };
 }
 
 /** @internal Exported for testing */
@@ -392,6 +394,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   let workerCount = 3;
   let agentTypes: string[] = [];
   let workerSpecs: ParsedWorkerSpec[] = [];
+  let workerProviderExplicit: boolean[] = [];
   let json = false;
   let newWindow = false;
   let autoMerge: boolean = process.env.OMC_TEAMS_AUTO_MERGE === '1';
@@ -441,6 +444,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
         for (let i = 0; i < seg.count; i++) {
           agentTypes.push(seg.agentType);
           workerSpecs.push({ agentType: seg.agentType, ...(seg.role ? { role: seg.role } : {}) });
+          workerProviderExplicit.push(seg.providerExplicit);
         }
       }
       if (workerCount > MAX_WORKER_COUNT) {
@@ -468,6 +472,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
         agentType: normalized.agentType,
         ...(role ? { role } : {}),
       }));
+      workerProviderExplicit = Array.from({ length: workerCount }, () => normalized.providerExplicit);
       explicitWorkerSpec = true;
       filteredArgs.shift();
     }
@@ -488,6 +493,7 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   if (agentTypes.length === 0) {
     agentTypes = Array.from({ length: workerCount }, () => normalizedDefaultAgentType);
     workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: normalizedDefaultAgentType }));
+    workerProviderExplicit = Array.from({ length: workerCount }, () => false);
   }
 
   const task = filteredArgs.join(' ').trim();
@@ -496,7 +502,20 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   }
 
   const teamName = slugifyTask(task);
-  return { workerCount, agentTypes, workerSpecs, role, task, teamName, json, newWindow, autoMerge, explicitWorkerSpec, noDecompose };
+  return {
+    workerCount,
+    agentTypes,
+    workerSpecs,
+    workerProviderExplicit,
+    role,
+    task,
+    teamName,
+    json,
+    newWindow,
+    autoMerge,
+    explicitWorkerSpec,
+    noDecompose,
+  };
 }
 
 export function buildStartupTasks(parsed: ParsedTeamArgs): Array<{ subject: string; description: string; owner?: string; delegation?: TeamTaskDelegationPlan }> {
@@ -744,6 +763,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       cwd,
       newWindow: parsed.newWindow,
       workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
+      workerProviderExplicit: parsed.workerProviderExplicit,
       ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
       ...(parsed.autoMerge ? { autoMerge: true } : {}),
     });

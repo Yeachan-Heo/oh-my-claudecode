@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { isProcessAlive } from '../platform/process-utils.js';
 
 const NODE = process.execPath;
 const RUN_CJS_PATH = join(process.cwd(), 'scripts', 'run.cjs');
@@ -163,16 +164,10 @@ describe('Windows-safe prompt hook runner paths', () => {
       expect(grandchildPid).toBeGreaterThan(0);
 
       const deadline = Date.now() + 2000;
-      while (Date.now() < deadline) {
-        try {
-          process.kill(grandchildPid!, 0);
-        } catch (error: unknown) {
-          if ((error as NodeJS.ErrnoException).code === 'ESRCH') break;
-          throw error;
-        }
+      while (Date.now() < deadline && isProcessAlive(grandchildPid!)) {
         await new Promise(resolve => setTimeout(resolve, 25));
       }
-      expect(() => process.kill(grandchildPid!, 0)).toThrow();
+      expect(isProcessAlive(grandchildPid!)).toBe(false);
     } finally {
       if (grandchildPid) {
         try {

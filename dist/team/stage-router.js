@@ -10,7 +10,7 @@
  * Config edits mid-team-life do NOT change routing; user must create a new
  * team to pick up new routing. Enforced by runtime-v2 / scaling consumers.
  */
-import { CANONICAL_TEAM_ROLES, CURSOR_EXECUTOR_TEAM_ROLES } from '../shared/types.js';
+import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
 import { BUILTIN_EXTERNAL_MODEL_DEFAULTS, getDefaultTierModels, } from '../config/models.js';
 /** Map canonical team role → KnownAgentName key (matches PluginConfig.agents.*). */
@@ -50,7 +50,6 @@ const ROLE_DEFAULT_TIER = {
     'document-specialist': 'MEDIUM',
 };
 const TIER_SET = new Set(['HIGH', 'MEDIUM', 'LOW']);
-const CURSOR_EXECUTOR_TEAM_ROLE_SET = new Set(CURSOR_EXECUTOR_TEAM_ROLES);
 function isTier(value) {
     return TIER_SET.has(value);
 }
@@ -82,8 +81,8 @@ export function getRoleRoutingSpec(roleRouting, role) {
  */
 function resolveTierToModelId(tier, cfg) {
     const fromCfg = cfg.routing?.tierModels?.[tier];
-    if (typeof fromCfg === 'string' && fromCfg.length > 0)
-        return fromCfg;
+    if (typeof fromCfg === 'string' && fromCfg.trim().length > 0)
+        return fromCfg.trim();
     return getDefaultTierModels()[tier];
 }
 /**
@@ -92,8 +91,9 @@ function resolveTierToModelId(tier, cfg) {
  * undefined falls back to the role's default tier.
  */
 function resolveClaudeModel(role, raw, cfg) {
-    if (typeof raw === 'string' && raw.length > 0) {
-        return isTier(raw) ? resolveTierToModelId(raw, cfg) : raw;
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+        const value = raw.trim();
+        return isTier(value) ? resolveTierToModelId(value, cfg) : value;
     }
     return resolveTierToModelId(ROLE_DEFAULT_TIER[role], cfg);
 }
@@ -105,23 +105,28 @@ function resolveClaudeModel(role, raw, cfg) {
  * an explicit non-tier model ID is passed through.
  */
 function resolveExternalModel(provider, raw, cfg) {
-    if (typeof raw === 'string' && raw.length > 0 && !isTier(raw)) {
-        return raw;
+    if (typeof raw === 'string' && raw.trim().length > 0 && !isTier(raw.trim())) {
+        return raw.trim();
     }
     const defaults = cfg.externalModels?.defaults;
+    const model = (value) => typeof value === 'string' && value.trim() ? value.trim() : undefined;
     if (provider === 'codex') {
-        return defaults?.codexModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
+        return model(defaults?.codexModel) ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.codexModel;
     }
     if (provider === 'grok') {
-        return defaults?.grokModel ?? '';
+        return model(defaults?.grokModel) ?? '';
     }
     if (provider === 'cursor') {
-        return '';
+        // No builtin default: cursor-agent picks its own model when `--model` is
+        // omitted, and pinning one here would override that for every user. The
+        // config hook still has to exist, or `externalModels.defaults.cursorModel`
+        // and a tier name both resolve to nothing with no diagnostic.
+        return model(defaults?.cursorModel) ?? '';
     }
     if (provider === 'antigravity') {
-        return defaults?.antigravityModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
+        return model(defaults?.antigravityModel) ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.antigravityModel;
     }
-    return defaults?.geminiModel ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
+    return model(defaults?.geminiModel) ?? BUILTIN_EXTERNAL_MODEL_DEFAULTS.geminiModel;
 }
 /**
  * Pure resolver: (canonical role, PluginConfig) → concrete RoleAssignment.
@@ -144,9 +149,6 @@ export function resolveRoleAssignment(role, cfg) {
     const provider = isOrchestrator
         ? 'claude'
         : (spec?.provider ?? 'claude');
-    if (provider === 'cursor' && !CURSOR_EXECUTOR_TEAM_ROLE_SET.has(canonical)) {
-        throw new Error(`team.roleRouting.${canonical}.provider: cursor is only supported for executor-style roles (${[...CURSOR_EXECUTOR_TEAM_ROLE_SET].join(', ')})`);
-    }
     const model = provider === 'claude'
         ? resolveClaudeModel(canonical, spec?.model, cfg)
         : resolveExternalModel(provider, spec?.model, cfg);
@@ -159,9 +161,9 @@ function isCanonicalRole(value) {
 /**
  * Pre-resolve EVERY canonical role into a `{ primary, fallback }` pair.
  *
- * Fallback is always a Claude worker with the same model + agent as primary,
- * used when the primary provider's CLI binary is missing at spawn time
- * (AC-8). Persisted to `TeamConfig.resolved_routing` at team creation by
+ * Fallback is retained structural snapshot data with the same agent as primary
+ * and an independently resolved Claude-tier model. Availability failures never
+ * substitute it for the selected primary. Persisted to `TeamConfig.resolved_routing` at team creation by
  * `startTeamV2`; read (never re-resolved) by spawn / scaleUp / restart paths.
  */
 export function buildResolvedRoutingSnapshot(cfg) {
@@ -169,12 +171,9 @@ export function buildResolvedRoutingSnapshot(cfg) {
     const roleRouting = cfg.team?.roleRouting;
     for (const role of CANONICAL_TEAM_ROLES) {
         const primary = resolveRoleAssignment(role, cfg);
-        // Fallback is always a Claude worker. Its model is the Claude-tier
-        // resolution of the role's spec (so tier stickiness survives fallback),
-        // NOT primary.model (which may be a codex/gemini model ID).
-        // When primary is external and spec.model is an explicit non-tier id
-        // (e.g., 'gpt-5.3-codex'), drop it for fallback so claude doesn't
-        // receive an external model id; tier names always survive.
+        // Fallback is retained structural snapshot data. Its Claude-tier model is
+        // kept independent from primary.model, which may be an external model ID.
+        // It is never selected to replace an unavailable primary provider.
         const spec = getRoleRoutingSpec(roleRouting, role);
         const isExternalPrimary = primary.provider !== 'claude';
         const fallbackModelInput = isExternalPrimary && spec?.model && !isTier(spec.model)

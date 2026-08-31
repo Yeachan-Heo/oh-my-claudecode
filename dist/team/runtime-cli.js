@@ -16,7 +16,7 @@ import { waitForSentinelReadiness } from './sentinel-gate.js';
 import { isRuntimeV2Enabled, startTeamV2, monitorTeamV2, shutdownTeamV2, executeRecoverDeadWorkerV2Owner, prepareRecoveryOwnerBootstrap, reconcileCommittedTeamServices } from './runtime-v2.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
 import { parseRecoveryIntent, setRuntimeOwnerDispatch } from './runtime-owner-client.js';
-import { absPath, TeamPaths } from './state-paths.js';
+import { absPath, TeamPaths, teamStateRoot } from './state-paths.js';
 import { canonicalRecoveryPayloadHash, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation } from './recovery-request-store.js';
 import { runWorkerActivationGate } from './worker-activation-gate.js';
 import { readAndConsumeWorkerLaunchDescriptor, runWorkerLaunchBootstrap } from './worker-launch-ack.js';
@@ -752,9 +752,9 @@ async function main() {
         process.stderr.write(`[runtime-cli] Missing required fields: ${missing.join(', ')}\n`);
         process.exit(1);
     }
-    const { teamName, agentTypes, tasks, cwd, newWindow = false, pollIntervalMs = 5000, sentinelGateTimeoutMs = 30_000, sentinelGatePollIntervalMs = 250, autoMerge = false, } = input;
+    const { teamName, agentTypes, workerProviderExplicit, tasks, cwd, newWindow = false, pollIntervalMs = 5000, sentinelGateTimeoutMs = 30_000, sentinelGatePollIntervalMs = 250, autoMerge = false, } = input;
     const workerCount = input.workerCount ?? agentTypes.length;
-    const stateRoot = join(cwd, `.omc/state/team/${teamName}`);
+    const stateRoot = teamStateRoot(cwd, teamName);
     const config = {
         teamName,
         workerCount,
@@ -845,6 +845,7 @@ async function main() {
                 teamName,
                 workerCount,
                 agentTypes,
+                workerProviderExplicit,
                 tasks,
                 cwd,
                 newWindow,

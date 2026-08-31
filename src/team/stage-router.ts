@@ -204,9 +204,9 @@ function isCanonicalRole(value: string): value is CanonicalTeamRole {
 /**
  * Pre-resolve EVERY canonical role into a `{ primary, fallback }` pair.
  *
- * Fallback is always a Claude worker with the same model + agent as primary,
- * used when the primary provider's CLI binary is missing at spawn time
- * (AC-8). Persisted to `TeamConfig.resolved_routing` at team creation by
+ * Fallback is retained structural snapshot data with the same agent as primary
+ * and an independently resolved Claude-tier model. Availability failures never
+ * substitute it for the selected primary. Persisted to `TeamConfig.resolved_routing` at team creation by
  * `startTeamV2`; read (never re-resolved) by spawn / scaleUp / restart paths.
  */
 export function buildResolvedRoutingSnapshot(
@@ -219,12 +219,9 @@ export function buildResolvedRoutingSnapshot(
 
   for (const role of CANONICAL_TEAM_ROLES) {
     const primary = resolveRoleAssignment(role, cfg);
-    // Fallback is always a Claude worker. Its model is the Claude-tier
-    // resolution of the role's spec (so tier stickiness survives fallback),
-    // NOT primary.model (which may be a codex/gemini model ID).
-    // When primary is external and spec.model is an explicit non-tier id
-    // (e.g., 'gpt-5.3-codex'), drop it for fallback so claude doesn't
-    // receive an external model id; tier names always survive.
+    // Fallback is retained structural snapshot data. Its Claude-tier model is
+    // kept independent from primary.model, which may be an external model ID.
+    // It is never selected to replace an unavailable primary provider.
     const spec = getRoleRoutingSpec(roleRouting, role);
     const isExternalPrimary = primary.provider !== 'claude';
     const fallbackModelInput = isExternalPrimary && spec?.model && !isTier(spec.model)

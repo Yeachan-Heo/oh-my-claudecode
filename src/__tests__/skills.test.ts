@@ -629,12 +629,11 @@ describe('Builtin Skills', () => {
       expect(skill?.template).toContain('Only when no tmux-compatible binary is available');
     });
 
-    it('conditions team Claude fallback guidance on Claude CLI availability', () => {
+    it('documents strict Team provider availability behavior', () => {
       const skill = getBuiltinSkill('team');
       expect(skill).toBeDefined();
-      expect(skill?.template).toContain('only when the Claude CLI is resolvable');
-      expect(skill?.template).toContain('no runnable fallback exists');
-      expect(skill?.template).toContain('orchestration/startup is unavailable');
+      expect(skill?.template).toContain('startup fails before launching a worker');
+      expect(skill?.template).toContain('never substitutes another provider');
       expect(skill?.template).toContain('omc doctor --team-routing');
     });
 

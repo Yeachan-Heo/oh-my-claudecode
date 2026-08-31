@@ -28,20 +28,20 @@ import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
 import { inferPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
-import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
-import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveClaudeWorkerModel, assertHeadlessSupported, } from './model-contract.js';
+import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
+import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveDefaultWorkerModel, resolveExternalModelsDefaults, assertHeadlessSupported, } from './model-contract.js';
 import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, verifyTeamTargetOwnership, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToProviderTarget, } from './tmux-session.js';
-import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, } from './worker-bootstrap.js';
+import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, renderCursorWorkerGuidance, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
-import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
+import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, getWorktreePath, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
-import { CANONICAL_TEAM_ROLES, CURSOR_EXECUTOR_TEAM_ROLES } from '../shared/types.js';
+import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { loadConfig } from '../config/loader.js';
 import { buildResolvedRoutingSnapshot, getRoleRoutingSpec } from './stage-router.js';
-import { inferLaneIntent, routeTaskToRole } from './role-router.js';
+import { routeTaskToRole } from './role-router.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
-import { cliWorkerOutputFilePath, parseCliWorkerVerdict, renderCliWorkerOutputContract, shouldInjectContract, } from './cli-worker-contract.js';
+import { CONTRACT_ROLES, cliWorkerOutputFilePath, isCliWorkerOutputFilePath, parseCliWorkerVerdict, renderCliWorkerOutputContract, shouldInjectContract, } from './cli-worker-contract.js';
 import { startMergeOrchestrator, recoverFromRestart, } from './merge-orchestrator.js';
 import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
 import { execFileSync } from 'node:child_process';
@@ -53,7 +53,10 @@ import { parseRecoveryIntent, resolveRuntimeCliPath } from './runtime-owner-clie
 import { scaleUpFenceBlocks } from './scaling.js';
 import { runRecoverySaga } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
-import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask } from './team-ops.js';
+import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask, teamTransitionTaskStatus } from './team-ops.js';
+function workerInstructionStateRoot(cwd, teamName) {
+    return process.platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
+}
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity } from './team-owner-epoch.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { waitForRecoveryGateRecord } from './worker-activation-gate.js';
@@ -109,23 +112,6 @@ export function readRecoverDeadWorkerV2Outcome(cwd, requestId) {
 // runtime-cli process). Lives at module scope so shutdownTeamV2 can find it.
 // ---------------------------------------------------------------------------
 const orchestratorByTeam = new Map();
-const CURSOR_UNSUPPORTED_REVIEW_INTENT_RE = /\b(?:review|audit|critic|critique|security|vulnerabilit|cve|owasp|xss|csrf|sqli|verdict|approval|approve|final\s+decision)\b/i;
-const CURSOR_EXECUTOR_CONTEXT_RE = /\b(?:implement|implementation|apply|edit|patch|fix|build|ci|lint|compile|tsc|type.?check|test|tests|debug|troubleshoot|investigate|root.?cause|diagnos|refactor|clean\s*up|simplif)\b/i;
-const CURSOR_EXECUTOR_CONTEXT_INTENTS = new Set([
-    'implementation',
-    'build-fix',
-    'debug',
-    'cleanup',
-    'verification',
-]);
-function isCursorExecutorContextTask(task) {
-    const text = `${task.subject} ${task.description}`.trim();
-    if (!text || CURSOR_UNSUPPORTED_REVIEW_INTENT_RE.test(text))
-        return false;
-    if (!CURSOR_EXECUTOR_CONTEXT_RE.test(text))
-        return false;
-    return CURSOR_EXECUTOR_CONTEXT_INTENTS.has(inferLaneIntent(text));
-}
 const cadenceByTeam = new Map();
 function registerTeamOrchestrator(teamName, handle, service) {
     orchestratorByTeam.set(teamName, { handle, ...service, registeredWorkers: new Set() });
@@ -366,15 +352,18 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
  * Resolve a per-task routing assignment from the team's routing snapshot.
  *
  * Resolution order:
- *   1. Explicit `task.role` (if present) → normalize alias → snapshot lookup.
- *   2. `routeTaskToRole(subject, description, fallbackRole)` intent inference.
- *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
+ *   1. Preserve an explicitly selected provider and normalize its task role.
+ *   2. Otherwise normalize explicit `task.role`, or infer a role from task text.
+ *   3. Apply an explicitly configured snapshot route for that canonical role.
+ *   4. Fall back to the `fallbackAgent` round-robin pick if snapshot lookup
  *      fails (role outside canonical vocabulary or snapshot missing).
  *
- * Returns the primary assignment by default; callers swap to the Claude
- * fallback if the primary provider's CLI binary is missing at spawn time.
+ * Returns the effective primary assignment. An explicitly selected
+ * `fallbackAgent` remains authoritative even when a canonical route exists;
+ * otherwise the canonical snapshot primary applies. Unavailable selected
+ * providers fail preflight instead of being replaced.
  */
-export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
+export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, fallbackAgent, providerExplicit = fallbackAgent !== 'claude') {
     const canonicalRoles = new Set(CANONICAL_TEAM_ROLES);
     const hasExplicitRole = typeof task.role === 'string' && task.role.length > 0;
     const rawRole = hasExplicitRole
@@ -385,34 +374,16 @@ export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, 
     if (!canonical) {
         return { agentType: fallbackAgent, model: '', role: null };
     }
+    if (providerExplicit) {
+        return { agentType: fallbackAgent, model: '', role: canonical };
+    }
     // Snapshot routing only overrides the caller's CLI agentType when the user
     // has explicitly opted in — either by setting `task.role` or by configuring
     // `team.roleRouting[<canonicalRole>]` in PluginConfig. This preserves the
     // pre-patch contract: `/team N:codex ...` stays on codex when config has no
     // per-role routing, even if the task text incidentally mentions "reviewer".
     const hasConfigForRole = !!getRoleRoutingSpec(roleRoutingConfig, canonical);
-    if (fallbackAgent === 'cursor') {
-        if (CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
-            return { agentType: fallbackAgent, model: '', role: canonical };
-        }
-        if (!hasExplicitRole && !hasConfigForRole && isCursorExecutorContextTask(task)) {
-            return { agentType: fallbackAgent, model: '', role: 'executor' };
-        }
-    }
     if (!hasExplicitRole && !hasConfigForRole) {
-        if (fallbackAgent === 'cursor' && !CURSOR_EXECUTOR_TEAM_ROLES.includes(canonical)) {
-            throw new Error(`Cursor workers are executor-style only; inferred role "${canonical}" for task "${task.subject}" must run on a native Claude/OMC reviewer agent or another supported CLI worker.`);
-        }
-        return { agentType: fallbackAgent, model: '', role: canonical };
-    }
-    // Explicit provider + explicit role with NO per-role routing config: the user
-    // named the provider directly on the worker spec (e.g. `1:antigravity:executor`
-    // or `1:gemini:reviewer`), so honor that provider and treat the role as the
-    // prompt role, not a routing key. Without this, an explicit role would always
-    // opt into resolved_routing, whose default executor primary is Claude — silently
-    // launching Claude instead of the requested CLI provider. When `team.roleRouting`
-    // *is* configured for the role, that deliberate config still wins (below).
-    if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== 'claude') {
         return { agentType: fallbackAgent, model: '', role: canonical };
     }
     const pair = resolvedRouting[canonical];
@@ -485,10 +456,24 @@ function getMissingDependencyIds(task, taskById) {
  * Build the initial task instruction for v2 workers.
  * Workers use `omc team api` CLI commands for all lifecycle transitions.
  */
-function buildV2TaskInstruction(teamName, workerName, task, taskId, cliOutputContract) {
+function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, cliOutputContract) {
     const claimTaskCommand = formatOmcCliInvocation(`team api claim-task --input '${JSON.stringify({ team_name: teamName, task_id: taskId, worker: workerName })}' --json`, {});
     const completeTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'completed', claim_token: '<claim_token>', result: 'Summary: <what changed>\\nVerification: <tests/checks run>\\nSubagent skip reason: worker protocol forbids nested subagents; completed focused probe in-session' })}' --json`);
     const failTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'failed', claim_token: '<claim_token>' })}' --json`);
+    const cursorReviewer = agentType === 'cursor' && Boolean(cliOutputContract);
+    const lifecycleInstructions = cursorReviewer
+        ? [
+            `3. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
+            `4. ACK/progress replies are not a stop signal. Keep the Cursor session alive for further mailbox instructions; the leader transitions this task after consuming the verdict.`,
+        ]
+        : [
+            `3. On completion (use claim_token from step 1):`,
+            `   ${completeTaskCommand}`,
+            `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
+            `4. On failure (use claim_token from step 1):`,
+            `   ${failTaskCommand}`,
+            `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
+        ];
     return [
         `## REQUIRED: Task Lifecycle Commands`,
         `You MUST run these commands. Do NOT skip any step.`,
@@ -497,12 +482,7 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, cliOutputCon
         `   ${claimTaskCommand}`,
         `   Save the claim_token from the response.`,
         `2. Do the work described below.`,
-        `3. On completion (use claim_token from step 1):`,
-        `   ${completeTaskCommand}`,
-        `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
-        `4. On failure (use claim_token from step 1):`,
-        `   ${failTaskCommand}`,
-        `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
+        ...lifecycleInstructions,
         ``,
         `## Task Assignment`,
         `Task ID: ${taskId}`,
@@ -511,7 +491,10 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, cliOutputCon
         ``,
         task.description,
         ``,
-        `REMINDER: You MUST run transition-task-status before exiting. Do NOT write done.json or edit task files directly.`,
+        cursorReviewer
+            ? `REMINDER: Write the verdict before yielding the review turn. Do NOT run transition-task-status or write done.json; the leader owns the terminal transition.`
+            : `REMINDER: You MUST run transition-task-status before exiting. Do NOT write done.json or edit task files directly.`,
+        ...(agentType === 'cursor' ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))] : []),
         ...(cliOutputContract ? [cliOutputContract] : []),
     ].join('\n');
 }
@@ -727,13 +710,16 @@ async function spawnV2Worker(opts) {
     const usePromptMode = isPromptModeAgent(opts.agentType);
     const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
     const outputFile = injectContract && opts.role
-        ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName)
+        ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName, {
+            taskId: opts.taskId,
+            assignmentId: opts.verdictAssignmentId,
+        })
         : undefined;
     const cliOutputContract = injectContract && opts.role && outputFile
         ? renderCliWorkerOutputContract(opts.role, outputFile)
         : undefined;
-    const instruction = buildV2TaskInstruction(opts.teamName, opts.workerName, opts.task, opts.taskId, cliOutputContract);
-    const instructionStateRoot = opts.worktreePath ? '$OMC_TEAM_STATE_ROOT' : undefined;
+    const instruction = buildV2TaskInstruction(opts.teamName, opts.workerName, opts.task, opts.taskId, opts.agentType, cliOutputContract);
+    const instructionStateRoot = workerInstructionStateRoot(opts.cwd, opts.teamName);
     const startupBaseline = await captureWorkerStartupBaseline(opts.teamName, opts.workerName, opts.taskId, opts.cwd);
     if (usePromptMode) {
         await composeInitialInbox(opts.teamName, opts.workerName, instruction, opts.cwd, cliOutputContract);
@@ -2174,6 +2160,13 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         replacement_generation: sagaInput.replacementGeneration,
                         operational_state: 'active',
                         ...(pending.startupContext ? { launch_attempt_id: pending.startupContext.attempt.attempt_id } : {}),
+                        ...(pending.agentType === 'cursor'
+                            && shouldInjectContract(normalizeDelegationRole(pending.worker.role), pending.agentType)
+                            ? { output_file: cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
+                                    taskId: pending.worker.assigned_tasks?.[0],
+                                    assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                                }) }
+                            : {}),
                     }
                     : candidate);
                 const nextRevision = current.stateRevision + 1;
@@ -2218,9 +2211,10 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                 const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
                 if (!pending?.startupContext)
                     return { ok: false, error: 'worker_activation_failed' };
+                const startupAttemptId = pending.startupContext.attempt.attempt_id;
                 const adoption = await withWorkerLaunchAttemptFence(pending.startupContext.attempt, async () => {
                     await ensureFence();
-                    return teamAdoptRecoveryReservations(input.teamName, input.cwd, taskIds, sagaInput.workerName, proof);
+                    return teamAdoptRecoveryReservations(input.teamName, input.cwd, taskIds, sagaInput.workerName, proof, startupAttemptId);
                 });
                 if (!adoption.ok)
                     return { ok: false, error: 'worker_activation_failed' };
@@ -2262,15 +2256,31 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                     : waitForWorkerStatusTransition(input.teamName, sagaInput.workerName, input.cwd, statusBaseline, startupAttemptId, budgetMs);
                 const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
                 const instruction = continuations.length > 0
-                    ? continuations.map(continuation => renderRecoveryContinuationInstruction({
-                        teamName: input.teamName,
-                        workerName: sagaInput.workerName,
-                        taskId: continuation.taskId,
-                        taskVersion: continuation.taskVersion,
-                        claimToken: continuation.claimToken,
-                        sequence: continuation.sequence,
-                        resumePayload: continuation.payload,
-                    })).join('\n\n')
+                    ? continuations.map(continuation => {
+                        const continuationInstruction = renderRecoveryContinuationInstruction({
+                            teamName: input.teamName,
+                            workerName: sagaInput.workerName,
+                            taskId: continuation.taskId,
+                            taskVersion: continuation.taskVersion,
+                            claimToken: continuation.claimToken,
+                            sequence: continuation.sequence,
+                            resumePayload: continuation.payload,
+                        });
+                        const recoveryRole = normalizeDelegationRole(pending.worker.role);
+                        const recoveryContract = pending.agentType === 'cursor'
+                            && shouldInjectContract(recoveryRole, pending.agentType)
+                            ? renderCliWorkerOutputContract(recoveryRole, cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
+                                taskId: continuation.taskId,
+                                assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                            }), {
+                                taskId: continuation.taskId,
+                                claimToken: continuation.claimToken,
+                                taskVersion: continuation.taskVersion,
+                                launchAttemptId: startupAttemptId,
+                            })
+                            : '';
+                        return `${continuationInstruction}${recoveryContract ? `\n${recoveryContract}` : ''}`;
+                    }).join('\n\n')
                     : 'Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.';
                 const inboxPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
                     await ensureFence();
@@ -2334,7 +2344,7 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                         // would turn a successful idle recovery into a deterministic timeout.
                     }
                     else {
-                        const recoveryTriggerMessage = `${generateTriggerMessage(input.teamName, sagaInput.workerName, pending.worker.worktree_path ? '$OMC_TEAM_STATE_ROOT' : undefined)} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
+                        const recoveryTriggerMessage = `${generateTriggerMessage(input.teamName, sagaInput.workerName, workerInstructionStateRoot(input.cwd, input.teamName))} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
                         const outcome = await queueInboxInstruction({
                             teamName: input.teamName,
                             workerName: sagaInput.workerName,
@@ -2577,88 +2587,9 @@ export async function startTeamV2(config) {
         }
     }
     const workspaceMode = worktreeMode === 'disabled' ? 'single' : 'worktree';
-    // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
-    // Unsupported, relative, missing, or untrusted providers fail before any team
-    // state or multiplexer side effect is created.
     const agentTypes = config.agentTypes;
-    const resolvedBinaryPaths = {};
-    const missingBinaryReasons = [];
-    for (const agentType of [...new Set(agentTypes)]) {
-        try {
-            resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
-        }
-        catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            missingBinaryReasons.push({ agentType, reason });
-        }
-    }
-    if (missingBinaryReasons.length > 0) {
-        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
-        throw new Error(`cli_binary_preflight_failed:${missing}`);
-    }
-    // Resolve extra providers referenced by routing snapshots. A selected route
-    // without an exact validated path fails before worker launch.
-    for (const { primary } of Object.values(resolvedRouting)) {
-        const provider = primary.provider;
-        if (resolvedBinaryPaths[provider])
-            continue;
-        if (missingBinaryReasons.some((m) => m.agentType === provider))
-            continue;
-        try {
-            resolvedBinaryPaths[provider] = resolvePreflightBinaryPath(provider).path;
-        }
-        catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            missingBinaryReasons.push({ agentType: provider, reason });
-        }
-    }
-    if (missingBinaryReasons.length > 0) {
-        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
-        throw new Error(`cli_binary_preflight_failed:${missing}`);
-    }
-    // Create state directories
-    await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-    await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-    await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
-    // Write task files
-    for (let i = 0; i < config.tasks.length; i++) {
-        const taskId = String(i + 1);
-        const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-        await mkdir(join(taskFilePath, '..'), { recursive: true });
-        await writeFile(taskFilePath, JSON.stringify({
-            id: taskId,
-            subject: config.tasks[i].subject,
-            description: config.tasks[i].description,
-            status: 'pending',
-            owner: null,
-            result: null,
-            ...(config.tasks[i].role ? { role: config.tasks[i].role } : {}),
-            ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
-            created_at: new Date().toISOString(),
-        }, null, 2), 'utf-8');
-    }
-    // Build allocation inputs for the new role-aware allocator
     const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
-    const workerWorktrees = new Map();
-    try {
-        if (worktreeMode !== 'disabled') {
-            for (const workerName of workerNames) {
-                const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
-                    mode: worktreeMode,
-                    requireCleanLeader: true,
-                });
-                if (worktree)
-                    workerWorktrees.set(workerName, worktree);
-            }
-        }
-    }
-    catch (error) {
-        if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error))
-            throw startupCleanupIncompleteError(error);
-        throw error;
-    }
     const workerNameSet = new Set(workerNames);
-    // Respect explicit owner fields first, then allocate remaining tasks
     const startupAllocations = [];
     const unownedTaskIndices = [];
     for (let i = 0; i < config.tasks.length; i++) {
@@ -2688,54 +2619,125 @@ export async function startTeamV2(config) {
         }
     }
     const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
+    // Prepare effective provider identities before any filesystem or multiplexer
+    // effect, then preflight exactly the providers that will launch. Unselected
+    // configured routes must not make an explicit-provider team availability-coupled.
+    const selectedProviders = new Set();
+    const effectiveAssignments = new Map();
+    for (let i = 0; i < workerNames.length; i++) {
+        const workerName = workerNames[i];
+        const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
+        const taskIndex = startupByWorker.get(workerName);
+        const assignment = taskIndex === undefined
+            ? { agentType: fallbackAgent, model: '', role: undefined }
+            : resolveTaskAssignment(config.tasks[taskIndex], resolvedRouting, pluginCfg.team?.roleRouting, fallbackAgent, config.workerProviderExplicit?.[i] ?? fallbackAgent !== 'claude');
+        effectiveAssignments.set(workerName, assignment);
+        selectedProviders.add(assignment.agentType);
+    }
+    const resolvedBinaryPaths = {};
+    const missingBinaryReasons = [];
+    for (const agentType of selectedProviders) {
+        try {
+            resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
+        }
+        catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            missingBinaryReasons.push({ agentType, reason });
+        }
+    }
+    if (missingBinaryReasons.length > 0) {
+        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
+        throw new Error(`cli_binary_preflight_failed:${missing}`);
+    }
     const preparedLaunches = new Map();
+    const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
     const resolveDefaultModel = (agentType) => {
-        if (agentType === 'codex')
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL || process.env.OMC_CODEX_DEFAULT_MODEL || undefined;
-        if (agentType === 'gemini')
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL || process.env.OMC_GEMINI_DEFAULT_MODEL || undefined;
-        if (agentType === 'antigravity')
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL || process.env.OMC_ANTIGRAVITY_DEFAULT_MODEL || undefined;
-        if (agentType === 'grok')
-            return process.env.OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL || process.env.OMC_GROK_DEFAULT_MODEL || undefined;
-        if (agentType === 'cursor')
-            return undefined;
-        return resolveClaudeWorkerModel();
+        return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
     };
     for (let i = 0; i < workerNames.length; i++) {
         const workerName = workerNames[i];
         const taskIndex = startupByWorker.get(workerName);
-        const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
-        const assignment = taskIndex === undefined
-            ? { agentType: fallbackAgent, model: resolveDefaultModel(fallbackAgent), role: undefined }
-            : resolveTaskAssignment(config.tasks[taskIndex], resolvedRouting, pluginCfg.team?.roleRouting, resolvedBinaryPaths, fallbackAgent);
+        const assignment = effectiveAssignments.get(workerName);
         const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
-        const worktree = workerWorktrees.get(workerName);
+        const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
         const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
-            ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName) : undefined;
+            ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
+                taskId: String(taskIndex + 1),
+                assignmentId: verdictAssignmentId,
+            }) : undefined;
         const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
         const binary = resolvedBinaryPaths[assignment.agentType];
         if (!binary)
             throw new Error(`No validated binary available for ${assignment.agentType}`);
         const startupPrompt = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
-            ? generatePromptModeStartupPrompt(sanitized, workerName, worktree ? '$OMC_TEAM_STATE_ROOT' : undefined, outputContract)
+            ? generatePromptModeStartupPrompt(sanitized, workerName, workerInstructionStateRoot(leaderCwd, sanitized), outputContract)
             : undefined;
         const transportPrompt = startupPrompt && process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
             ? startupPrompt.replace(/\s*\r?\n\s*/g, ' ')
             : startupPrompt;
         const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
+        const workerCwd = worktreeMode === 'disabled'
+            ? leaderCwd
+            : getWorktreePath(leaderCwd, sanitized, workerName);
         const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
-            teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
+            teamName: sanitized,
+            workerName,
+            cwd: workerCwd,
+            resolvedBinaryPath: binary,
             model: effectiveModel,
         }, promptArgs);
-        preparedLaunches.set(workerName, { agentType: assignment.agentType,
-            ...(assignment.role ? { role: assignment.role } : {}), descriptor });
+        preparedLaunches.set(workerName, {
+            agentType: assignment.agentType,
+            ...(assignment.role ? { role: assignment.role } : {}),
+            descriptor,
+            ...(verdictAssignmentId ? { verdictAssignmentId } : {}),
+        });
+    }
+    // Create state directories
+    await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
+    await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
+    await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
+    // Write task files
+    for (let i = 0; i < config.tasks.length; i++) {
+        const taskId = String(i + 1);
+        const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
+        await mkdir(join(taskFilePath, '..'), { recursive: true });
+        await writeFile(taskFilePath, JSON.stringify({
+            id: taskId,
+            subject: config.tasks[i].subject,
+            description: config.tasks[i].description,
+            status: 'pending',
+            owner: null,
+            result: null,
+            ...(config.tasks[i].role ? { role: config.tasks[i].role } : {}),
+            ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
+            created_at: new Date().toISOString(),
+        }, null, 2), 'utf-8');
+    }
+    // Build allocation inputs for the new role-aware allocator
+    const workerWorktrees = new Map();
+    try {
+        if (worktreeMode !== 'disabled') {
+            for (const workerName of workerNames) {
+                const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+                    mode: worktreeMode,
+                    requireCleanLeader: true,
+                });
+                if (worktree)
+                    workerWorktrees.set(workerName, worktree);
+            }
+        }
+    }
+    catch (error) {
+        if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error))
+            throw startupCleanupIncompleteError(error);
+        throw error;
     }
     // Set up worker state dirs and overlays (with v2 CLI API instructions)
     try {
         for (let i = 0; i < workerNames.length; i++) {
             const wName = workerNames[i];
-            const agentType = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
+            const agentType = preparedLaunches.get(wName).agentType;
             await ensureWorkerStateDir(sanitized, wName, leaderCwd);
             const overlayPath = await writeWorkerOverlay({
                 teamName: sanitized, workerName: wName, agentType,
@@ -2744,7 +2746,8 @@ export async function startTeamV2(config) {
                 })),
                 cwd: leaderCwd,
                 ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
-                ...(workerWorktrees.has(wName) ? { instructionStateRoot: '$OMC_TEAM_STATE_ROOT' } : {}),
+                instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
+                ...(preparedLaunches.get(wName)?.role && shouldInjectContract(preparedLaunches.get(wName).role, preparedLaunches.get(wName).agentType) ? { reviewerRole: true } : {}),
             });
             const worktree = workerWorktrees.get(wName);
             if (worktree) {
@@ -2780,7 +2783,8 @@ export async function startTeamV2(config) {
         return {
             name: wName,
             index: i + 1,
-            role: config.workerRoles?.[i]
+            role: preparedLaunches.get(wName)?.role
+                ?? config.workerRoles?.[i]
                 ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude'),
             worker_cli: preparedLaunches.get(wName).descriptor.provider,
             launch_descriptor: preparedLaunches.get(wName).descriptor,
@@ -2819,6 +2823,10 @@ export async function startTeamV2(config) {
         resize_hook_name: null,
         resize_hook_target: null,
         resolved_routing: resolvedRouting,
+        resolved_routing_roles: Object.keys(pluginCfg.team?.roleRouting ?? {})
+            .map(role => normalizeDelegationRole(role))
+            .filter((role) => CANONICAL_TEAM_ROLES.includes(role)),
+        external_models_defaults: externalModelsDefaults,
         workspace_mode: workspaceMode,
         worktree_mode: worktreeMode,
         service_descriptor: config.autoMerge
@@ -2874,6 +2882,9 @@ export async function startTeamV2(config) {
         resize_hook_name: null,
         resize_hook_target: null,
         next_worker_index: teamConfig.next_worker_index,
+        resolved_routing: teamConfig.resolved_routing,
+        resolved_routing_roles: teamConfig.resolved_routing_roles,
+        external_models_defaults: teamConfig.external_models_defaults,
         service_descriptor: teamConfig.service_descriptor,
     };
     try {
@@ -2933,6 +2944,7 @@ export async function startTeamV2(config) {
                 worktreePath: workerInfo.worktree_path,
                 autoMerge: Boolean(config.autoMerge),
                 ...(prepared.role ? { role: prepared.role } : {}),
+                ...(prepared.verdictAssignmentId ? { verdictAssignmentId: prepared.verdictAssignmentId } : {}),
             });
             if (workerLaunch.paneId) {
                 if (workerLaunch.startupAssigned)
@@ -3010,7 +3022,7 @@ export async function startTeamV2(config) {
             await ensureLeaderInbox(sanitized, leaderCwd);
             // Seed an introductory leader-inbox note so the leader knows the inbox
             // exists and where to read it. This mirrors the worker bootstrap pattern.
-            await appendToLeaderInbox(sanitized, extendLeaderBootstrapPrompt(sanitized), leaderCwd);
+            await appendToLeaderInbox(sanitized, extendLeaderBootstrapPrompt(sanitized, leaderCwd), leaderCwd);
             // M6: try to recover from a previous run before starting fresh.
             try {
                 await recoverFromRestart({
@@ -3134,17 +3146,18 @@ export async function requeueDeadWorkerTasks(teamName, deadWorkerNames, cwd) {
     return [...requeued];
 }
 /**
- * Post-exit handler for CLI workers that emitted a structured verdict
- * (AC-7). Scans workers whose panes have exited and whose WorkerInfo
+ * Completion handler for CLI workers that emitted a structured verdict
+ * (AC-7). Scans workers whose panes have exited, plus live Cursor panes whose
+ * persistent reviewer session has published a verdict, and whose WorkerInfo
  * carries `output_file`. For each:
  *   - Reads + validates the JSON payload via `parseCliWorkerVerdict`.
  *   - Locates the worker's in_progress task and writes a terminal status
  *     (completed for `approve`, failed for `revise`/`reject`) plus verdict
- *     metadata directly to the task file — the worker process is gone and
- *     cannot re-enter `transitionTaskStatus` with its claim token.
- *   - Renames `verdict.json` to `verdict.processed.json` so a subsequent
- *     monitor cycle does not reprocess it.
- *   - Emits a team event describing the outcome.
+ *     metadata through the canonical `transitionTaskStatus` path so lease,
+ *     delegation, event, and monitor-snapshot invariants remain authoritative.
+ *   - Renames the assignment-scoped verdict artifact to `.processed` so a
+ *     subsequent monitor cycle does not reprocess it.
+ *   - Quarantines stale `.processing` artifacts when replacement output exists.
  * On parse failure, emits a warning event and leaves the task untouched
  * for human review (per plan AC-7).
  */
@@ -3156,22 +3169,89 @@ export async function processCliWorkerVerdicts(teamName, cwd) {
     const results = [];
     const logEventFailure = createSwallowedErrorLogger('team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed');
     const { rename } = await import('fs/promises');
-    const { readFileSync, writeFileSync, existsSync: fsExistsSync } = await import('fs');
+    const { renameSync, readFileSync, writeFileSync, existsSync: fsExistsSync } = await import('fs');
     const { withFileLockSync } = await import('../lib/file-lock.js');
     for (const worker of config.workers) {
         const outputFile = worker.output_file;
         if (!outputFile)
             continue;
         const liveness = await getWorkerPaneLiveness(worker.pane_id);
-        if (liveness !== 'dead')
+        const workerRole = normalizeDelegationRole(worker.role);
+        const cursorReviewer = worker.worker_cli === 'cursor'
+            && CONTRACT_ROLES.has(workerRole);
+        const liveCursorReviewer = liveness === 'alive'
+            && worker.worker_cli === 'cursor'
+            && CONTRACT_ROLES.has(workerRole);
+        // Cursor reviewers remain in their interactive pane after publishing a
+        // verdict. A valid output file is the explicit completion signal for that
+        // reviewer task; do not wait for the pane to exit. Other providers retain
+        // the post-exit contract so their live output cannot be consumed early.
+        if (liveness !== 'dead' && !liveCursorReviewer)
             continue;
+        const processedOutputFile = outputFile + '.processed';
+        const processingOutputFile = outputFile + '.processing';
+        if (cursorReviewer) {
+            if (!isCliWorkerOutputFilePath(teamStateRoot(cwd, sanitized), worker.name, outputFile)) {
+                results.push({
+                    workerName: worker.name,
+                    taskId: null,
+                    status: 'skipped',
+                    reason: 'cursor_verdict_output_path_unverified',
+                });
+                continue;
+            }
+        }
         if (!fsExistsSync(outputFile)) {
-            results.push({ workerName: worker.name, taskId: null, status: 'file_missing' });
-            continue;
+            if (cursorReviewer && fsExistsSync(processingOutputFile)) {
+                // A prior cycle claimed the file and may have crashed after the task
+                // transition. Reuse that durable in-flight artifact instead of waiting
+                // for a replacement verdict.
+            }
+            else {
+                // A processed verdict is an intentional no-op on later monitor cycles,
+                // not a missing verdict. This keeps the handler idempotent for persistent
+                // Cursor panes and avoids repeated file_missing results/events.
+                if (liveCursorReviewer && fsExistsSync(processedOutputFile))
+                    continue;
+                results.push({ workerName: worker.name, taskId: null, status: 'file_missing' });
+                continue;
+            }
+        }
+        let verdictFile = outputFile;
+        if (cursorReviewer && !fsExistsSync(outputFile) && fsExistsSync(processingOutputFile)) {
+            verdictFile = processingOutputFile;
         }
         let payload;
         try {
-            const raw = await readFile(outputFile, 'utf-8');
+            if (cursorReviewer && verdictFile === outputFile) {
+                // Claim a complete verdict before mutating task state. The per-output
+                // lock makes concurrent monitor cycles single-consumer and the
+                // `.processing` name lets a later cycle finish an interrupted commit.
+                withFileLockSync(outputFile + '.lock', () => {
+                    if (fsExistsSync(processingOutputFile)) {
+                        // A replacement assignment may publish a fresh verdict while a
+                        // previous monitor cycle is still holding an interrupted claim.
+                        // The fresh assignment file wins; retain the old claim as audit
+                        // evidence instead of allowing it to mask replacement output.
+                        if (fsExistsSync(outputFile)) {
+                            const stalePath = `${processingOutputFile}.stale`;
+                            try {
+                                renameSync(processingOutputFile, stalePath);
+                            }
+                            catch { /* leave it for the next cycle */ }
+                        }
+                        else {
+                            verdictFile = processingOutputFile;
+                            return;
+                        }
+                    }
+                    const raw = readFileSync(outputFile, 'utf-8');
+                    parseCliWorkerVerdict(raw);
+                    renameSync(outputFile, processingOutputFile);
+                    verdictFile = processingOutputFile;
+                });
+            }
+            const raw = await readFile(verdictFile, 'utf-8');
             payload = parseCliWorkerVerdict(raw);
         }
         catch (err) {
@@ -3184,21 +3264,60 @@ export async function processCliWorkerVerdicts(teamName, cwd) {
             results.push({ workerName: worker.name, taskId: null, status: 'parse_failed', reason });
             continue;
         }
+        if (cursorReviewer && payload.role !== workerRole) {
+            await appendTeamEvent(sanitized, {
+                type: 'team_leader_nudge',
+                worker: 'leader-fixed',
+                reason: `cli_worker_verdict_role_mismatch:${worker.name}:expected=${workerRole}:actual=${payload.role}`,
+            }, cwd).catch(logEventFailure);
+            if (verdictFile === processingOutputFile) {
+                try {
+                    await rename(verdictFile, processedOutputFile);
+                }
+                catch { /* best-effort quarantine */ }
+            }
+            results.push({
+                workerName: worker.name,
+                taskId: payload.task_id,
+                status: 'skipped',
+                verdict: payload.verdict,
+                reason: 'cursor_verdict_role_mismatch',
+            });
+            continue;
+        }
         const candidateTaskIds = new Set();
         if (payload.task_id)
             candidateTaskIds.add(payload.task_id);
-        for (const id of worker.assigned_tasks ?? [])
-            candidateTaskIds.add(id);
+        if (!cursorReviewer) {
+            for (const id of worker.assigned_tasks ?? [])
+                candidateTaskIds.add(id);
+        }
         let targetTaskId = null;
         let targetTaskPath = null;
         for (const taskId of candidateTaskIds) {
+            if (!TASK_ID_SAFE_PATTERN.test(taskId))
+                continue;
             const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, taskId));
             if (!fsExistsSync(taskPath))
                 continue;
             try {
                 const taskRaw = readFileSync(taskPath, 'utf-8');
                 const taskData = JSON.parse(taskRaw);
-                if (taskData.owner === worker.name && taskData.status === 'in_progress') {
+                const taskRole = typeof taskData.role === 'string'
+                    ? normalizeDelegationRole(taskData.role)
+                    : null;
+                const claim = taskData.claim && typeof taskData.claim === 'object'
+                    ? taskData.claim
+                    : null;
+                const claimMatchesCursorWorker = !cursorReviewer || (claim?.owner === worker.name
+                    && payload.claim_token === claim.token
+                    && payload.task_version === taskData.version
+                    && (worker.launch_attempt_id === undefined || claim.launch_attempt_id === worker.launch_attempt_id)
+                    && (worker.launch_attempt_id === undefined || payload.launch_attempt_id === worker.launch_attempt_id));
+                if (taskData.owner === worker.name
+                    && taskData.status === 'in_progress'
+                    && (!cursorReviewer || taskRole === workerRole)
+                    && claimMatchesCursorWorker) {
                     targetTaskId = taskId;
                     targetTaskPath = taskPath;
                     break;
@@ -3209,6 +3328,65 @@ export async function processCliWorkerVerdicts(teamName, cwd) {
             }
         }
         if (!targetTaskId || !targetTaskPath) {
+            if (cursorReviewer && verdictFile === processingOutputFile) {
+                const processedTaskPath = absPath(cwd, TeamPaths.taskFile(sanitized, payload.task_id));
+                try {
+                    const processedTask = JSON.parse(readFileSync(processedTaskPath, 'utf-8'));
+                    const metadata = processedTask.metadata && typeof processedTask.metadata === 'object'
+                        ? processedTask.metadata
+                        : undefined;
+                    const processedTaskRole = typeof processedTask.role === 'string'
+                        ? normalizeDelegationRole(processedTask.role)
+                        : null;
+                    const taskAlreadyRecorded = processedTask.owner === worker.name
+                        && (processedTask.status === 'completed' || processedTask.status === 'failed')
+                        && (!cursorReviewer || processedTaskRole === workerRole)
+                        && metadata?.verdict_source === 'cli_worker_output_contract'
+                        && (!cursorReviewer
+                            || (metadata.verdict_claim_token === payload.claim_token
+                                && metadata.verdict_task_version === payload.task_version))
+                        && (worker.launch_attempt_id === undefined
+                            || metadata.verdict_worker_launch_attempt_id === worker.launch_attempt_id)
+                        && metadata.verdict === payload.verdict;
+                    if (taskAlreadyRecorded) {
+                        try {
+                            await rename(verdictFile, processedOutputFile);
+                        }
+                        catch { /* best-effort */ }
+                        results.push({
+                            workerName: worker.name,
+                            taskId: payload.task_id,
+                            status: 'already_terminal',
+                            verdict: payload.verdict,
+                        });
+                        continue;
+                    }
+                    const currentClaim = processedTask.claim && typeof processedTask.claim === 'object'
+                        ? processedTask.claim
+                        : null;
+                    const activeClaimMismatch = processedTask.owner === worker.name
+                        && processedTask.status === 'in_progress'
+                        && currentClaim?.owner === worker.name
+                        && (!cursorReviewer || processedTaskRole === workerRole);
+                    if (activeClaimMismatch) {
+                        try {
+                            await rename(verdictFile, processedOutputFile);
+                        }
+                        catch { /* best-effort quarantine */ }
+                        results.push({
+                            workerName: worker.name,
+                            taskId: payload.task_id,
+                            status: 'skipped',
+                            verdict: payload.verdict,
+                            reason: 'cursor_verdict_claim_mismatch',
+                        });
+                        continue;
+                    }
+                }
+                catch {
+                    // Fall through to the existing no-in-progress warning.
+                }
+            }
             await appendTeamEvent(sanitized, {
                 type: 'team_leader_nudge',
                 worker: 'leader-fixed',
@@ -3225,32 +3403,69 @@ export async function processCliWorkerVerdicts(teamName, cwd) {
         const terminalStatus = payload.verdict === 'approve' ? 'completed' : 'failed';
         let transitionOk = false;
         try {
-            withFileLockSync(targetTaskPath + '.lock', () => {
-                const raw = readFileSync(targetTaskPath, 'utf-8');
-                const taskData = JSON.parse(raw);
-                if (taskData.status !== 'in_progress' || taskData.owner !== worker.name) {
-                    return;
-                }
-                const prevMetadata = (taskData.metadata && typeof taskData.metadata === 'object')
-                    ? taskData.metadata
-                    : {};
-                taskData.status = terminalStatus;
-                taskData.completed_at = new Date().toISOString();
-                taskData.claim = undefined;
-                taskData.metadata = {
-                    ...prevMetadata,
-                    verdict: payload.verdict,
-                    verdict_summary: payload.summary,
-                    verdict_findings: payload.findings,
-                    verdict_role: payload.role,
-                    verdict_source: 'cli_worker_output_contract',
-                };
-                if (terminalStatus === 'failed') {
-                    taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
-                }
-                writeFileSync(targetTaskPath, JSON.stringify(taskData, null, 2), 'utf-8');
-                transitionOk = true;
-            });
+            if (cursorReviewer) {
+                const transition = await teamTransitionTaskStatus(sanitized, targetTaskId, 'in_progress', terminalStatus, payload.claim_token, cwd, terminalStatus === 'completed'
+                    ? {
+                        result: payload.summary,
+                        metadata: {
+                            verdict: payload.verdict,
+                            verdict_summary: payload.summary,
+                            verdict_findings: payload.findings,
+                            verdict_role: payload.role,
+                            verdict_source: 'cli_worker_output_contract',
+                            verdict_claim_token: payload.claim_token,
+                            verdict_task_version: payload.task_version,
+                            ...(worker.launch_attempt_id
+                                ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
+                                : {}),
+                        },
+                    }
+                    : {
+                        error: `cli_worker_verdict:${payload.verdict}:${payload.summary}`,
+                        metadata: {
+                            verdict: payload.verdict,
+                            verdict_summary: payload.summary,
+                            verdict_findings: payload.findings,
+                            verdict_role: payload.role,
+                            verdict_source: 'cli_worker_output_contract',
+                            verdict_claim_token: payload.claim_token,
+                            verdict_task_version: payload.task_version,
+                            ...(worker.launch_attempt_id
+                                ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
+                                : {}),
+                        },
+                    });
+                transitionOk = transition.ok;
+            }
+            else {
+                // Preserve the existing post-exit path for non-Cursor providers.
+                withFileLockSync(targetTaskPath + '.lock', () => {
+                    const raw = readFileSync(targetTaskPath, 'utf-8');
+                    const taskData = JSON.parse(raw);
+                    if (taskData.status !== 'in_progress' || taskData.owner !== worker.name) {
+                        return;
+                    }
+                    const prevMetadata = (taskData.metadata && typeof taskData.metadata === 'object')
+                        ? taskData.metadata
+                        : {};
+                    taskData.status = terminalStatus;
+                    taskData.completed_at = new Date().toISOString();
+                    taskData.claim = undefined;
+                    taskData.metadata = {
+                        ...prevMetadata,
+                        verdict: payload.verdict,
+                        verdict_summary: payload.summary,
+                        verdict_findings: payload.findings,
+                        verdict_role: payload.role,
+                        verdict_source: 'cli_worker_output_contract',
+                    };
+                    if (terminalStatus === 'failed') {
+                        taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
+                    }
+                    writeFileSync(targetTaskPath, JSON.stringify(taskData, null, 2), 'utf-8');
+                    transitionOk = true;
+                });
+            }
         }
         catch {
             // lock or filesystem failure — leave task in_progress, do not rename verdict file
@@ -3264,14 +3479,16 @@ export async function processCliWorkerVerdicts(teamName, cwd) {
             });
             continue;
         }
-        await appendTeamEvent(sanitized, {
-            type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
-            worker: worker.name,
-            task_id: targetTaskId,
-            reason: `cli_worker_verdict:${payload.verdict}`,
-        }, cwd).catch(logEventFailure);
+        if (!cursorReviewer) {
+            await appendTeamEvent(sanitized, {
+                type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
+                worker: worker.name,
+                task_id: targetTaskId,
+                reason: `cli_worker_verdict:${payload.verdict}`,
+            }, cwd).catch(logEventFailure);
+        }
         try {
-            await rename(outputFile, outputFile + '.processed');
+            await rename(verdictFile, processedOutputFile);
         }
         catch {
             // best-effort; reprocess is idempotent (already_terminal on rerun)
@@ -3715,9 +3932,8 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             await writeShutdownRequest(sanitized, w.name, 'leader-fixed', cwd);
             shutdownRequestTimes.set(w.name, requestedAt);
             // Write shutdown inbox
-            const shutdownAckPath = w.worktree_path
-                ? `$OMC_TEAM_STATE_ROOT/workers/${w.name}/shutdown-ack.json`
-                : TeamPaths.shutdownAck(sanitized, w.name);
+            const shutdownRoot = workerInstructionStateRoot(cwd, sanitized);
+            const shutdownAckPath = `${shutdownRoot}/workers/${w.name}/shutdown-ack.json`;
             const shutdownInbox = `# Shutdown Request\n\nAll tasks are complete. Please wrap up and respond with a shutdown acknowledgement.\n\nWrite your ack to: ${shutdownAckPath}\nFormat: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n\nThen exit your session.\n`;
             await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);
         }

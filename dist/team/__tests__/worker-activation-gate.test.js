@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { runWorkerActivationGate } from '../worker-activation-gate.js';
 import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, prepareWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, runWorkerLaunchBootstrap, } from '../worker-launch-ack.js';
-import { isProcessAlive } from '../../platform/process-utils.js';
+import { isProcessAlive, isProcessGroupQuiescent } from '../../platform/process-utils.js';
 let cwd;
 beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'recovery-gate-')); });
 afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
@@ -150,7 +150,7 @@ describe('worker recovery activation gate', () => {
             await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
             await expect.poll(() => isProcessAlive(childPid), { timeout: 2_000, interval: 20 }).toBe(false);
             await expect.poll(() => isProcessAlive(launched.provider_pid), { timeout: 2_000, interval: 20 }).toBe(false);
-            expect(() => process.kill(-started.process_group_id, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+            expect(isProcessGroupQuiescent(started.process_group_id)).toBe(true);
         }
         finally {
             if (!rollbackComplete) {

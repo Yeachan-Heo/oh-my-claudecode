@@ -5,7 +5,7 @@ import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'nod
 import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
+import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessGroupQuiescent, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
@@ -1071,12 +1071,7 @@ export async function terminateWorkerLaunchProvider(
 
 function isProcessGroupAbsent(processGroupId: unknown): boolean {
   if (process.platform === 'win32' || !Number.isSafeInteger(processGroupId) || Number(processGroupId) <= 0) return false;
-  try {
-    process.kill(-Number(processGroupId), 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ESRCH';
-  }
+  return isProcessGroupQuiescent(Number(processGroupId));
 }
 
 async function waitForProcessGroupAbsence(processGroupId: unknown, deadlineAt: number): Promise<boolean> {

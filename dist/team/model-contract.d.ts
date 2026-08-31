@@ -1,4 +1,5 @@
 import type { WorkerLaunchDescriptor } from './types.js';
+import type { ExternalModelsDefaults } from '../shared/types.js';
 export type CliAgentType = 'claude' | 'codex' | 'gemini' | 'cursor' | 'grok' | 'antigravity';
 export interface CliAgentContract {
     agentType: CliAgentType;
@@ -91,6 +92,16 @@ export declare function isPromptModeAgent(agentType: CliAgentType): boolean;
  * handles bare aliases fine).
  */
 export declare function resolveClaudeWorkerModel(env?: NodeJS.ProcessEnv): string | undefined;
+/**
+ * Resolve the default model for any team worker provider from the process
+ * environment. Explicit routing/configured models are applied by callers
+ * before this fallback; this helper only owns provider-specific env precedence.
+ */
+export declare function resolveDefaultWorkerModel(agentType: CliAgentType, env?: NodeJS.ProcessEnv, defaults?: ExternalModelsDefaults): string | undefined;
+/** Keep persisted provider defaults to trimmed, non-sensitive model names. */
+export declare function normalizeExternalModelsDefaults(defaults?: ExternalModelsDefaults): ExternalModelsDefaults | undefined;
+/** Capture the effective provider defaults at team creation for env-removal parity. */
+export declare function resolveExternalModelsDefaults(defaults?: ExternalModelsDefaults, env?: NodeJS.ProcessEnv): ExternalModelsDefaults;
 /**
  * Get the extra CLI args needed to pass an instruction in prompt mode.
  * Returns empty array if the agent does not support prompt mode.

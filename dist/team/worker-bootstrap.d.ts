@@ -9,6 +9,8 @@ export interface WorkerBootstrapParams {
         description: string;
     }>;
     bootstrapInstructions?: string;
+    /** Whether the runtime assigned this worker a reviewer-style verdict role. */
+    reviewerRole?: boolean;
     cwd: string;
     /**
      * Worker-facing root used in instructions. The default is the leader cwd
@@ -32,6 +34,7 @@ export interface RecoveryContinuationInstruction {
 }
 /** Render owner-adopted continuation data only after the activation gate opens. */
 export declare function renderRecoveryContinuationInstruction(instruction: RecoveryContinuationInstruction): string;
+export declare function renderCursorWorkerGuidance(reviewerRole?: boolean): string;
 /**
  * Generate the worker overlay markdown.
  * This is injected as AGENTS.md content for the worker agent.

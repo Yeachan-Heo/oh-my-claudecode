@@ -479,6 +479,7 @@ interface CliInput {
   teamName: string;
   workerCount?: number;
   agentTypes: string[];
+  workerProviderExplicit?: boolean[];
   tasks: Array<{ subject: string; description: string }>;
   cwd: string;
   newWindow?: boolean;
@@ -844,6 +845,7 @@ async function main(): Promise<void> {
   const {
     teamName,
     agentTypes,
+    workerProviderExplicit,
     tasks,
     cwd,
     newWindow = false,
@@ -962,6 +964,7 @@ async function main(): Promise<void> {
         teamName,
         workerCount,
         agentTypes,
+        workerProviderExplicit,
         tasks,
         cwd,
         newWindow,
