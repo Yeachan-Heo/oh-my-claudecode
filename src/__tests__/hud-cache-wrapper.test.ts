@@ -80,7 +80,7 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
     makeOld(liveLock);
     try {
       makeOld(join(liveLock, 'pid'));
-    } catch {}
+    } catch { void 0; }
 
     const cached = join(cacheDir, 'statusline.live-session.txt');
     writeFileSync(cached, 'EXISTING\n');
@@ -94,13 +94,13 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
 
     try {
       rmSync(liveLock, { recursive: true, force: true });
-    } catch {}
+    } catch { void 0; }
     mkdirSync(liveLock, { recursive: true });
     writeFileSync(join(liveLock, 'pid'), `${process.pid}\n`);
     makeOld(liveLock);
     try {
       makeOld(join(liveLock, 'pid'));
-    } catch {}
+    } catch { void 0; }
 
     const result = spawnSync('sh', [wrapperPath, hudScript], {
       input: JSON.stringify({ session_id: 'live-session', cwd: tempRoot }),
@@ -133,7 +133,7 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
     makeOld(deadLock);
     try {
       makeOld(join(deadLock, 'pid'));
-    } catch {}
+    } catch { void 0; }
 
     const hudScript = join(tempRoot, 'fake-hud.mjs');
     writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('recovered'));\n");
