@@ -12,6 +12,11 @@ function makeOld(path: string): void {
   utimesSync(path, old, old);
 }
 
+function makeVeryOld(path: string): void {
+  const veryOld = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+  utimesSync(path, veryOld, veryOld);
+}
+
 function makeFresh(path: string): void {
   const now = new Date();
   utimesSync(path, now, now);
@@ -317,6 +322,138 @@ describe('HUD cache wrapper err reclamation (issue #3933 defect 2)', () => {
     });
     expect(result.stdout).toBe('CACHED\n');
     expect(readFileSync(activeErr, 'utf8')).toContain('concurrent');
+
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
+describe('HUD cache wrapper orphan reclamation (issue #3938)', () => {
+  it('reclaims stale non-empty stdin/statusline tmps while preserving fresh in-flight tmps', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-3938-orphan-'));
+    const cacheDir = join(tempRoot, 'cache');
+    mkdirSync(cacheDir, { recursive: true });
+
+    const staleNonEmptyStdin = join(cacheDir, 'stdin.orphan.99999.tmp');
+    const staleNonEmptyStatusline = join(cacheDir, 'statusline.orphan.99999.tmp');
+    const staleEmptyStdin = join(cacheDir, 'stdin.88888.tmp');
+    writeFileSync(staleNonEmptyStdin, '{"session_id":"orphan"}\n');
+    writeFileSync(staleNonEmptyStatusline, 'render output\n');
+    writeFileSync(staleEmptyStdin, '');
+    makeOld(staleNonEmptyStdin);
+    makeOld(staleNonEmptyStatusline);
+    makeOld(staleEmptyStdin);
+
+    const freshNonEmptyStdin = join(cacheDir, 'stdin.11111.tmp');
+    const freshNonEmptyStatusline = join(cacheDir, 'statusline.fresh.11111.tmp');
+    writeFileSync(freshNonEmptyStdin, '{"fresh":true}\n');
+    writeFileSync(freshNonEmptyStatusline, 'fresh render\n');
+
+    const hudScript = join(tempRoot, 'fake-hud.mjs');
+    writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('ok'));\n");
+
+    const output = execFileSync('sh', [wrapperPath, hudScript], {
+      input: JSON.stringify({ session_id: 'repro-3938', cwd: tempRoot }),
+      encoding: 'utf8',
+      env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+      timeout: 2000,
+    });
+    expect(output).toBe('ok\n');
+    expect(existsSync(staleNonEmptyStdin)).toBe(false);
+    expect(existsSync(staleNonEmptyStatusline)).toBe(false);
+    expect(existsSync(staleEmptyStdin)).toBe(false);
+    expect(readFileSync(freshNonEmptyStdin, 'utf8')).toContain('fresh');
+    expect(readFileSync(freshNonEmptyStatusline, 'utf8')).toContain('fresh render');
+
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('does not delete the current invocation stdin pid tmp via stale window', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-3938-live-tmp-'));
+    const cacheDir = join(tempRoot, 'cache');
+    mkdirSync(cacheDir, { recursive: true });
+
+    const hudScript = join(tempRoot, 'fake-hud.mjs');
+    writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('live-ok'));\n");
+
+    const output = execFileSync('sh', [wrapperPath, hudScript], {
+      input: JSON.stringify({ session_id: 'live-tmp-check', cwd: tempRoot }),
+      encoding: 'utf8',
+      env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+      timeout: 2000,
+    });
+    expect(output).toBe('live-ok\n');
+    expect(readFileSync(join(cacheDir, 'stdin.live-tmp-check.json'), 'utf8')).toContain('live-tmp-check');
+
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+});
+
+describe('HUD cache wrapper per-session cache TTL (issue #3938)', () => {
+  it('reclaims stale per-session json/txt on bounded TTL without touching fresh session caches', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-3938-ttl-'));
+    const cacheDir = join(tempRoot, 'cache');
+    mkdirSync(cacheDir, { recursive: true });
+
+    const staleJson = join(cacheDir, 'stdin.old-session.json');
+    const staleTxt = join(cacheDir, 'statusline.old-session.txt');
+    writeFileSync(staleJson, '{"session_id":"old-session"}\n');
+    writeFileSync(staleTxt, 'old render\n');
+    makeVeryOld(staleJson);
+    makeVeryOld(staleTxt);
+
+    const freshJson = join(cacheDir, 'stdin.fresh-session.json');
+    const freshTxt = join(cacheDir, 'statusline.fresh-session.txt');
+    writeFileSync(freshJson, '{"session_id":"fresh-session"}\n');
+    writeFileSync(freshTxt, 'fresh render\n');
+
+    const hudScript = join(tempRoot, 'fake-hud.mjs');
+    writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('ttl-ok'));\n");
+
+    const output = execFileSync('sh', [wrapperPath, hudScript], {
+      input: JSON.stringify({ session_id: 'ttl-probe', cwd: tempRoot }),
+      encoding: 'utf8',
+      env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+      timeout: 2000,
+    });
+    expect(output).toBe('ttl-ok\n');
+    expect(existsSync(staleJson)).toBe(false);
+    expect(existsSync(staleTxt)).toBe(false);
+    expect(readFileSync(freshJson, 'utf8')).toContain('fresh-session');
+    expect(readFileSync(freshTxt, 'utf8')).toContain('fresh render');
+
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('active session json/txt survives because its mtime is refreshed on each render', () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-3938-active-ttl-'));
+    const cacheDir = join(tempRoot, 'cache');
+    mkdirSync(cacheDir, { recursive: true });
+
+    const hudScript = join(tempRoot, 'fake-hud.mjs');
+    writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('active-ok'));\n");
+
+    const sessionId = 'active-ttl-session';
+    let output = execFileSync('sh', [wrapperPath, hudScript], {
+      input: JSON.stringify({ session_id: sessionId, cwd: tempRoot }),
+      encoding: 'utf8',
+      env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+      timeout: 2000,
+    });
+    expect(output).toBe('active-ok\n');
+    const activeJson = join(cacheDir, `stdin.${sessionId}.json`);
+    const activeTxt = join(cacheDir, `statusline.${sessionId}.txt`);
+    expect(existsSync(activeJson)).toBe(true);
+    expect(existsSync(activeTxt)).toBe(true);
+
+    output = execFileSync('sh', [wrapperPath, hudScript], {
+      input: JSON.stringify({ session_id: sessionId, cwd: tempRoot }),
+      encoding: 'utf8',
+      env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+      timeout: 2000,
+    });
+    expect(output).toBe('active-ok\n');
+    expect(existsSync(activeJson)).toBe(true);
+    expect(existsSync(activeTxt)).toBe(true);
 
     rmSync(tempRoot, { recursive: true, force: true });
   });
