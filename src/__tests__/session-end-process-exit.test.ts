@@ -15,12 +15,12 @@ const IS_CI = process.env.CI === 'true' || process.env.CI === '1';
 // Keep the strict local regression ceiling while allowing bounded GitHub-hosted
 // process startup contention during the full parallel suite.
 const COMMAND_CEILING_MS = IS_CI ? 1_500 : 500;
-const SEQUENTIAL_CEILING_MS = COMMAND_CEILING_MS * 2;
+const SEQUENTIAL_CEILING_MS = IS_CI ? 3_000 : 1_000;
 const HAS_GENERATED_DIST = existsSync(join(REPO_ROOT, 'dist', 'hooks', 'session-end', 'worker.js'));
 const TEST_PRODUCER_GRACE_MS = '25';
 // The worker's required actions have a 9s budget; allow that bounded contract
 // plus process-startup/runner contention under the full suite.
-const DETACHED_WORKER_CEILING_MS = IS_CI ? 25_000 : 15_000;
+const DETACHED_WORKER_CEILING_MS = IS_CI ? 25_000 : 5_000;
 
 interface ExitResult {
   elapsedMs: number;

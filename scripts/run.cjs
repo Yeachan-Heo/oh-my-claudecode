@@ -909,14 +909,15 @@ if (require.main === module) {
       } else {
         const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
         if (sessionEndManifestHook) {
-          const isCi = process.env.CI === 'true' || process.env.CI === '1';
-          const defaultSessionEndTimeout = isCi ? 1_000 : 300;
+          // The shipped foreground budget stays 300ms unconditionally; only the
+          // test harness may widen it, and only under NODE_ENV=test.
           const requestedTestTimeout = process.env.NODE_ENV === 'test'
             ? Number(process.env.OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS)
             : NaN;
-          const timeoutMs = Number.isFinite(requestedTestTimeout) && requestedTestTimeout > 0
-            ? Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), requestedTestTimeout)
-            : Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), defaultSessionEndTimeout);
+          const budgetMs = Number.isFinite(requestedTestTimeout) && requestedTestTimeout > 0
+            ? requestedTestTimeout
+            : 300;
+          const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), budgetMs);
           runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
             process.exitCode = status;
           });
