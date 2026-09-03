@@ -61,7 +61,9 @@ describe('readLastToolError', () => {
 
     expect(result).toBeNull();
     expect(existsSync).toHaveBeenCalledWith(errorPath);
-    expect(readFileSync).not.toHaveBeenCalled();
+    // getOmcRoot legacy-branch discovery best-effort reads settings.json (up to 3 calls) —
+    // the semantic is that the error file itself was not read.
+    expect(readFileSync).not.toHaveBeenCalledWith(errorPath, 'utf-8');
   });
 
   it('returns null when error is stale (>60 seconds old)', () => {
