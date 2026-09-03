@@ -1099,6 +1099,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      timeout: 5000,
     }).trim();
   } catch {
     // No git remote (local-only repo or not a git repo) — use the normalized
@@ -1811,6 +1812,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      timeout: 5000,
     }).trim();
 
     const absoluteCommonDir = resolve(effectiveCwd, gitCommonDir);
@@ -1829,6 +1831,7 @@ export function resolveTranscriptPath(transcriptPath: string | undefined, cwd?: 
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
+      timeout: 5000,
     }).trim();
 
     if (mainRepoRoot !== worktreeTop) {

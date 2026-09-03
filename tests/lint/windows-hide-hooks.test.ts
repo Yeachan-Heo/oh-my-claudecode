@@ -426,6 +426,18 @@ describe('Windows Git child-process hardening', () => {
     expect(genericHookManifest().flatMap(({ path, content }) => scanGitTimeouts(path, content))).toEqual([]);
   });
 
+  it('requires every Git child-process call on the HUD render path to have a positive timeout (#3946)', () => {
+    const hudRenderPath = [
+      join(REPO_ROOT, 'src', 'lib', 'worktree-paths.ts'),
+      ...walkFiles(join(REPO_ROOT, 'src', 'hud'), (path) => path.endsWith('.ts') && !/\.(?:test|spec)\.ts$/.test(path)),
+    ]
+      .sort()
+      .map((path) => ({ path: toForwardSlash(relative(REPO_ROOT, path)), content: readFileSync(path, 'utf8') }));
+
+    expect(hudRenderPath.map(({ path }) => path)).toContain('src/lib/worktree-paths.ts');
+    expect(hudRenderPath.flatMap(({ path, content }) => scanGitTimeouts(path, content))).toEqual([]);
+  });
+
   it('requires the owned #3493 nested-git sites to use the shared BOUNDED_GIT_TIMEOUT_MS constant', () => {
     const manifest = productionManifest();
     const owned = manifest.filter(({ path }) => OWNED_NESTED_GIT_FILES.includes(path));
