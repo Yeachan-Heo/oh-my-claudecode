@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "bc540e523f23b2fc30970a94e767b9178ca4bef5",
-    "sourceSha256": "edf1bab0688240cf38e4ae50963c9dda41c8b40a6595a2b9b53a52a173d27881",
+    "head": "e30d899944b3f97df30304a966910a9f2c92df65",
+    "sourceSha256": "16ec9a6d5be8713f13ee2b72927275ce1806ad7fcb5bc67615ebabef78fb8da6",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "bc540e523f23b2fc30970a94e767b9178ca4bef5",
-  "sourceSha256": "edf1bab0688240cf38e4ae50963c9dda41c8b40a6595a2b9b53a52a173d27881",
+  "head": "e30d899944b3f97df30304a966910a9f2c92df65",
+  "sourceSha256": "16ec9a6d5be8713f13ee2b72927275ce1806ad7fcb5bc67615ebabef78fb8da6",
   "counts": {
     "public": {
       "skills": 35,
@@ -26,10 +26,10 @@
       "hookFiles": 295,
       "featureFiles": 69,
       "toolFiles": 61,
-      "libFiles": 39,
+      "libFiles": 40,
       "templateHooks": 21,
-      "srcFiles": 1325,
-      "total": 1346
+      "srcFiles": 1326,
+      "total": 1347
     },
     "generated": {
       "distFiles": 4955,
@@ -585,6 +585,7 @@
       "src/lib/__tests__/worktree-cleanup-safety.test.ts",
       "src/lib/__tests__/worktree-paths-foreign-root.test.ts",
       "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
+      "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
       "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
       "src/lib/__tests__/worktree-paths-split-warning.test.ts",
       "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
@@ -38156,6 +38157,11 @@
         "path": "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts"
       },
       {
+        "id": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-git-timeout.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts"
@@ -64643,6 +64649,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -77029,12 +77065,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6856,
-      "edgeCount": 7292,
-      "importEdgeCount": 5998,
+      "nodeCount": 6857,
+      "edgeCount": 7298,
+      "importEdgeCount": 6004,
       "registerEdgeCount": 56
     }
   },
-  "inventorySha256": "8487e17b5bbdcb30389d7276d19a1d6fc52826c645bd3f46a994b4ef14df6e32",
-  "manifestSha256": "6a8c44a723b62dbfe58f5840a957edeff49746fe33ceb2cc286947c640487e3e"
+  "inventorySha256": "59ad647e8e80a683726c3483953a07d3d29eb4e85818137f15e518ce8d2985d0",
+  "manifestSha256": "869341d864c7c7a5bff6446a61eddd0e0b2d82c3c9341a3f012c9c9349c96aa4"
 }
