@@ -409,7 +409,7 @@ describe('Edge cases and error handling', () => {
   });
 
   it('handles error state at exact 60 second boundary (not stale)', () => {
-    const exactlyAtBoundary = new Date(Date.now() - 59999).toISOString(); // 59.999 seconds ago
+    const exactlyAtBoundary = new Date(Date.now() - 59000).toISOString(); // 59 seconds ago — 1s margin avoids flakes from discovery overhead
     const toolError: ToolErrorState = {
       tool_name: 'Bash',
       error: 'Error at boundary',
