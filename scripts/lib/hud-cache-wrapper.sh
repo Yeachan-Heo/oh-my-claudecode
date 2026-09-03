@@ -18,6 +18,7 @@ CACHE_DIR=${OMC_HUD_CACHE_DIR:-"$CONFIG_DIR/hud/cache"}
 HUD_SCRIPT=${1:-"$SCRIPT_DIR/omc-hud.mjs"}
 INPUT_TMP="$CACHE_DIR/stdin.$$.tmp"
 LOCK_STALE_SECONDS=${OMC_HUD_LOCK_STALE_SECONDS:-10}
+CACHE_TTL_SECONDS=${OMC_HUD_CACHE_TTL_SECONDS:-604800}
 
 mkdir -p "$CACHE_DIR" 2>/dev/null || {
   printf '[OMC] Starting...\n'
@@ -40,6 +41,15 @@ is_stale_path() {
   [ -n "$path_mtime" ] || return 1
   [ "$now" -gt 0 ] || return 1
   [ $((now - path_mtime)) -gt "$LOCK_STALE_SECONDS" ] || return 1
+}
+
+is_cache_stale_path() {
+  path=$1
+  now=$(date +%s 2>/dev/null || printf '0')
+  path_mtime=$(file_mtime "$path")
+  [ -n "$path_mtime" ] || return 1
+  [ "$now" -gt 0 ] || return 1
+  [ $((now - path_mtime)) -gt "$CACHE_TTL_SECONDS" ] || return 1
 }
 
 is_numeric_pid() {
@@ -130,10 +140,9 @@ release_lock_if_owned() {
   fi
 }
 
-cleanup_empty_temp_files() {
+cleanup_stale_temp_files() {
   for temp_path in "$CACHE_DIR"/stdin.*.tmp "$CACHE_DIR"/statusline.*.tmp; do
     [ -f "$temp_path" ] || continue
-    [ -s "$temp_path" ] && continue
     is_stale_path "$temp_path" || continue
     rm -f "$temp_path" 2>/dev/null || :
   done
@@ -151,14 +160,22 @@ cleanup_stale_render_locks() {
   for stale_lock_dir in "$CACHE_DIR"/render.*.lock; do
     [ -d "$stale_lock_dir" ] || continue
     is_lock_stale "$stale_lock_dir" || continue
-    is_lock_stale "$stale_lock_dir" || continue
     rm -rf "$stale_lock_dir" 2>/dev/null || :
   done
 }
 
-cleanup_empty_temp_files
+cleanup_stale_session_caches() {
+  for cache_path in "$CACHE_DIR"/stdin.*.json "$CACHE_DIR"/statusline.*.txt; do
+    [ -f "$cache_path" ] || continue
+    is_cache_stale_path "$cache_path" || continue
+    rm -f "$cache_path" 2>/dev/null || :
+  done
+}
+
+cleanup_stale_temp_files
 cleanup_stale_err_files
 cleanup_stale_render_locks
+cleanup_stale_session_caches
 
 # Capture Claude's current statusLine stdin first so rendered output can be
 # scoped per session/worktree instead of leaking across concurrent sessions.
