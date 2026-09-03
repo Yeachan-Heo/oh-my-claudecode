@@ -11,6 +11,7 @@ import { executeTeamApiOperation } from '../team/api-interop.js';
 const ROOT = join(__dirname, '..', '..');
 const LAUNCH = readFileSync(join(ROOT, 'skills', 'launch', 'SKILL.md'), 'utf-8');
 const DRYDOCK = readFileSync(join(ROOT, 'skills', 'drydock', 'SKILL.md'), 'utf-8');
+const SHIPYARD_DOC = readFileSync(join(ROOT, 'docs', 'shipyard.md'), 'utf-8');
 const PLUGIN = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf-8'));
 
 function frontmatter(src: string): Record<string, string> {
@@ -233,6 +234,36 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('yard drift');
     expect(LAUNCH).toContain('re-run the drydock `--check` audit');
     expect(LAUNCH).not.toContain('shipyard gap list');
+  });
+
+  it('launch C5 carries the sediment pass: source checklist, mandatory answer, slot table', () => {
+    // regression: the sediment half-loop referenced a nonexistent retro; it now lives in C5
+    expect(LAUNCH).toContain('what did this ship teach the yard');
+    expect(LAUNCH).toContain('Sweep the source checklist first');
+    expect(LAUNCH).toContain('three-strike failure root causes');
+    expect(LAUNCH).toContain('"no new lessons"');
+    expect(LAUNCH).toContain('blocks non-answers, never empty answers');
+    expect(LAUNCH).toContain('`lesson → slot → intended change`');
+    expect(LAUNCH).toContain('`design-system/`');
+    expect(LAUNCH).toContain('skillify gate');
+    expect(LAUNCH).toContain('`.mcp.json`');
+    expect(LAUNCH).toContain('individually vetoable');
+    expect(LAUNCH).toContain('written to their slots only after acceptance');
+  });
+
+  it('launch keeps the thin entry a bounded cache (hot-entry budget with demotion)', () => {
+    expect(LAUNCH).toContain('at most five hot entries');
+    expect(LAUNCH).toContain('demote the coldest hot entry');
+    expect(LAUNCH).toContain('nothing is deleted, only re-tiered');
+    expect(LAUNCH).toContain('not a `--check` finding');
+  });
+
+  it('drydock governance loop names the real sediment carrier (no ghost retro)', () => {
+    // regression: the sediment loop referenced a nonexistent retro skill
+    expect(DRYDOCK).not.toMatch(/retro/i);
+    expect(DRYDOCK).toContain('launch C5 sediment');
+    expect(SHIPYARD_DOC).not.toMatch(/retros?/i);
+    expect(SHIPYARD_DOC).toContain('C5 sediment');
   });
 
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {

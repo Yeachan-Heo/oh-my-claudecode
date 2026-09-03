@@ -7,7 +7,7 @@ level: 3
 
 # Drydock
 
-Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill scaffolds the environment that turns "everyone ships" into "everyone ships on the same design language" — it creates the 5 surfaces, seeds them minimally, wires them to the flows that fill them (launch writes CONTEXT/ADR; retro and reviews sediment standards), and reports what exists, what was created, and what stays empty on purpose.
+Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill scaffolds the environment that turns "everyone ships" into "everyone ships on the same design language" — it creates the 5 surfaces, seeds them minimally, wires them to the flows that fill them (launch writes CONTEXT/ADR; the launch C5 sediment pass and reviews sediment standards), and reports what exists, what was created, and what stays empty on purpose.
 
 The four pillars and where they physically live:
 
@@ -319,7 +319,7 @@ write "this project's specific decision discipline", not generic tutorials.
 Tell the user, and rely on these flows to fill the skeleton:
 
 - **launch** writes CONTEXT.md vocabulary, ADRs, and docs/business/ as decisions settle (paper trail)
-- **retro / code-review** sediment recurring corrections into docs/standards/ and CLAUDE.md principles
+- **launch C5 sediment / code-review** sediment recurring corrections into docs/standards/ and CLAUDE.md principles
 - **anyone** can add a project skill to .omc/skills/ — the barrier is the skillify quality gate, not permission
 - **wiki** (OMC) compounds session knowledge; promote anything referenced twice into docs/business/
 

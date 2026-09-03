@@ -22,7 +22,7 @@ A repo that humans and agents both build on carries four pillars across five con
 | Conceptual surface | Concrete paths | Carries / filled by |
 | --- | --- | --- |
 | Shared context | `CONTEXT.md` + `docs/business/` + `docs/adr/` + OMC wiki | Glossary, business knowledge, and decision records; launch writes the file-backed paper trail and wiki compounds session knowledge |
-| Rules | `CLAUDE.md` + `docs/standards/` | Thin conventions/principles/index plus architecture, data, and process standards; drydock seeds them and retros/reviews sediment recurring corrections |
+| Rules | `CLAUDE.md` + `docs/standards/` | Thin conventions/principles/index plus architecture, data, and process standards; drydock seeds them and the launch C5 sediment pass/reviews sediment recurring corrections |
 | Project skills | `.omc/skills/` | Reusable project capabilities and practices; contributors add them through the skillify quality gate |
 | Design system | `design-system/` | Tokens, components, and patterns; drydock seeds it for UI repos and may create a stub or skip it for non-UI repos |
 | MCP / CLI tools | `.mcp.json` + `scripts/` | MCP servers and repository automation; drydock seeds empty tool surfaces and integrations are added only when needed |
@@ -48,7 +48,7 @@ They share one rule of thumb: **starting needs no permission; landing goes into 
 
 ## The feedback loop
 
-Shipyard corrects itself through its file-backed paper trail: launch closeout reconciles the spec, `CONTEXT.md`, and ADRs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through retros and reviews. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
+Shipyard corrects itself through its file-backed paper trail: launch closeout reconciles the spec, `CONTEXT.md`, and ADRs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through the launch C5 sediment pass and reviews. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
 
 ## When to reach for what
 

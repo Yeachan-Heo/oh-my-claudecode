@@ -27,7 +27,7 @@ Launch assumes the shipyard exists — and refuses to run if it does not. The ya
 | C2 approve acceptance criteria + test seam list | interview preparation: frontier questions batched with recommended answers |
 | C3 approve ticket decomposition (granularity, blocking edges) | spec and ticket drafting, mechanical validation (independence, demonstrability, fits-one-context) |
 | C4 answer irreversible decisions that emerge mid-run (batched, async) | tdd implementation at agreed seams, builds, tests, regressions |
-| C5 accept the completion report; veto via Open Assumptions | code-review, verify across the change, team frontier scheduling, the whole paper trail |
+| C5 accept the completion report; veto via Open Assumptions and the per-line sediment list | code-review, verify across the change, team frontier scheduling, the whole paper trail |
 
 Between checkpoints the pipeline never idles: agents keep working every frontier ticket that does not depend on a pending human answer.
 
@@ -36,7 +36,7 @@ Between checkpoints the pipeline never idles: agents keep working every frontier
 Launch is a **stateless composition over OMC's existing lifecycle** — it owns no runtime state machine:
 
 - Team owns task statuses, transitions, cancellation, and runtime cleanup; Launch never mutates them outside Team's contract.
-- The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `.omc/specs/<feature-slug>/`, `CONTEXT.md`, `docs/adr/`, and `docs/business/`.
+- The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `.omc/specs/<feature-slug>/`, `CONTEXT.md`, `docs/adr/`, and `docs/business/` — plus, only after C5 approval, the sediment slots named in the Phase 5 table.
 - Launch has no automatic resume. After interruption, re-read the artifacts and current Team status, but continue only through a new explicit Launch invocation after the owning Team lifecycle has reached a supported terminal/cleanup boundary. Never infer a human approval or replay an `in_progress` task.
 - Launch adds no approval receipt, revision counter, replay log, cancellation path, rollback mechanism, or cleanup lifecycle of its own.
 
@@ -115,7 +115,22 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 - all tickets terminal with evidence → run verify across the whole change
 - reconcile the paper trail: CONTEXT.md accurate, ADRs complete, spec updated where implementation taught it something
 - yard re-check: re-run the drydock `--check` audit; any new findings since entry are reported as **yard drift**, with a pointer to `/oh-my-claudecode:drydock`
-- emit the **completion report**: shipped scope, verification evidence, paper-trail locations, yard-drift findings (if any), and Open Assumptions ranked by how much a human would likely want to veto them
+- **sediment pass — answer: what did this ship teach the yard?** Sweep the source checklist first (three-strike failure root causes, C4 answers, review rejections, verify findings), then answer. Propose every lesson as `lesson → slot → intended change` against the slot table below, or decline it explicitly with a reason; a ship with nothing to teach must say so verbatim as "no new lessons". This requirement blocks non-answers, never empty answers — inventing lessons to have one is the same violation as skipping the question. The lesson list rides in the completion report next to the Open Assumptions, each line individually vetoable; approved lessons are written to their slots only after acceptance, and the report records each landing's file location.
+
+  | Lesson kind | Slot |
+  |---|---|
+  | terms and boundaries settled mid-run | `CONTEXT.md` glossary |
+  | checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |
+  | most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |
+  | hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |
+  | business rules / background | `docs/business/` |
+  | UI patterns / component contracts | `design-system/` |
+  | reusable craft | `.omc/skills/` (through the skillify gate) |
+  | repeatedly needed automation / integrations | `scripts/` or `.mcp.json` |
+  | no slot fits | decline explicitly with the reason |
+
+- **thin-entry budget:** the `CLAUDE.md` body carries at most five hot entries. A promotion proposal that would exceed the budget must demote the coldest hot entry in the same proposal, moving its full text back to `docs/standards/` — nothing is deleted, only re-tiered. Bloat is rebalanced ship by ship and is deliberately not a `--check` finding.
+- emit the **completion report**: shipped scope, verification evidence, paper-trail locations, yard-drift findings (if any), the sediment list (each line vetoable), and Open Assumptions ranked by how much a human would likely want to veto them
 
 ## Context hygiene
 
