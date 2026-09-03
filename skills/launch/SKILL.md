@@ -129,7 +129,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
   | repeatedly needed automation / integrations | `scripts/` or `.mcp.json` |
   | no slot fits | decline explicitly with the reason |
 
-- **thin-entry budget:** the `CLAUDE.md` body carries at most five hot entries. A promotion proposal that would exceed the budget must demote the coldest hot entry in the same proposal, moving its full text back to `docs/standards/` — nothing is deleted, only re-tiered. Bloat is rebalanced ship by ship and is deliberately not a `--check` finding.
+- **thin-entry budget:** the `CLAUDE.md` body carries at most five hot entries. A lesson is thin-entry grade only when the source checklist evidences the same violation at least twice in this run, or the captain marks it load-bearing. Entries are listed most-recently-promoted first; the coldest entry is deterministically the last one listed, and a promotion over budget must demote exactly that entry in the same proposal, moving its full text back to `docs/standards/` — nothing is deleted, only re-tiered. Bloat is rebalanced ship by ship and is deliberately not a `--check` finding.
 - emit the **completion report**: shipped scope, verification evidence, paper-trail locations, yard-drift findings (if any), the sediment list (each line vetoable), and Open Assumptions ranked by how much a human would likely want to veto them
 
 ## Context hygiene

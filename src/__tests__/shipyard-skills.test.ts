@@ -251,9 +251,10 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('written to their slots only after acceptance');
   });
 
-  it('launch keeps the thin entry a bounded cache (hot-entry budget with demotion)', () => {
+  it('launch keeps the thin entry a bounded cache (hot-entry budget with deterministic demotion)', () => {
     expect(LAUNCH).toContain('at most five hot entries');
-    expect(LAUNCH).toContain('demote the coldest hot entry');
+    expect(LAUNCH).toContain('same violation at least twice in this run');
+    expect(LAUNCH).toContain('the coldest entry is deterministically the last one listed');
     expect(LAUNCH).toContain('nothing is deleted, only re-tiered');
     expect(LAUNCH).toContain('not a `--check` finding');
   });
