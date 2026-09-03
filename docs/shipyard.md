@@ -4,7 +4,7 @@ Shipyard is the delivery methodology behind three opt-in skills: `drydock`, `lau
 
 > **Everyone ships, and nobody ships randomly** — agents continuously run everything repeatable and acceptable-by-evidence; humans decide what cannot be judged by the system or what fails expensively.
 
-This page is the map of the methodology: the boundary principle, the four pillars, the surface layout, the working metaphor, and how the three skills compose. The skills themselves (`/oh-my-claudecode:drydock`, `/oh-my-claudecode:launch`, `/oh-my-claudecode:minimal-code-discipline`) are the executable form.
+This page is the map of the methodology: the boundary principle, the four pillars, the surface layout, the working metaphor, and how the three skills compose. The skills themselves (`/oh-my-claudecode:drydock`, `/oh-my-claudecode:launch`, `/oh-my-claudecode:minimal-code-discipline`) are the executable form. For the visual quick-start with emoji and mermaid diagrams, see [shipyard-guide.md](./shipyard-guide.md).
 
 ## The verifiability boundary
 
@@ -41,7 +41,7 @@ A repo that humans and agents both build on carries four pillars across five con
 ## The three skills compose
 
 - **`drydock`** lays the keel once per repo (surfaces + seeds + `--check` drift audit).
-- **`launch`** runs delivery per feature (C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout), with the human at exactly the checkpoints that fail expensively.
+- **`launch`** runs delivery per feature (yard gate → C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout with a `--check` re-audit), with the human at exactly the checkpoints that fail expensively. The yard gate refuses to start unless the full drydock `--check` audit is clean — a yard that fails inspection ships nothing.
 - **`minimal-code-discipline`** is an opt-in discipline for code written inside tickets (YAGNI ladder, smallest correct diff).
 
 They share one rule of thumb: **starting needs no permission; landing goes into a shipyard slot.** A change that cannot say which slot it lands in (or explicitly none) is the smell.

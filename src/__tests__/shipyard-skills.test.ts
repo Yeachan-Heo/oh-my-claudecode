@@ -216,6 +216,25 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toMatch(/opt-in|explicit/i);
   });
 
+  it('launch enforces a hard yard gate at entry (drydock --check, never advisory)', () => {
+    // regression: entry checks were advisory ("suggestions, never a gate"); the yard gate now blocks
+    expect(LAUNCH).toContain('The yard gate is the first action of every invocation');
+    expect(LAUNCH).toContain('Run the full drydock `--check` audit');
+    expect(LAUNCH).toContain('Any finding hard-blocks the run');
+    expect(LAUNCH).toContain('no artifacts were produced');
+    expect(LAUNCH).toContain('No override flag, no confirm-to-continue path');
+    expect(LAUNCH).toContain('The rules entry is `CLAUDE.md` — the shipyard map recognizes no substitute');
+    expect(LAUNCH).not.toContain('never a gate');
+    expect(LAUNCH).not.toContain('Facility surface checkup');
+    expect(LAUNCH).not.toContain('never listed as missing');
+  });
+
+  it('launch closeout re-runs the yard audit as yard drift instead of the retired gap list', () => {
+    expect(LAUNCH).toContain('yard drift');
+    expect(LAUNCH).toContain('re-run the drydock `--check` audit');
+    expect(LAUNCH).not.toContain('shipyard gap list');
+  });
+
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {
     const example = DRYDOCK.match(/```markdown\n(---\nid: project-release-check\nname: project-release-check[\s\S]*?)\n```/)?.[1];
     expect(example).toBeDefined();
