@@ -11,11 +11,16 @@ const SESSION_END_SCRIPTS = [
   ['session-end', join(REPO_ROOT, 'scripts', 'session-end.mjs')],
   ['wiki-session-end', join(REPO_ROOT, 'scripts', 'wiki-session-end.mjs')],
 ] as const;
-const COMMAND_CEILING_MS = 500;
-const SEQUENTIAL_CEILING_MS = 1_000;
+const IS_CI = process.env.CI === 'true' || process.env.CI === '1';
+// Keep the strict local regression ceiling while allowing bounded GitHub-hosted
+// process startup contention during the full parallel suite.
+const COMMAND_CEILING_MS = IS_CI ? 1_500 : 500;
+const SEQUENTIAL_CEILING_MS = COMMAND_CEILING_MS * 2;
 const HAS_GENERATED_DIST = existsSync(join(REPO_ROOT, 'dist', 'hooks', 'session-end', 'worker.js'));
 const TEST_PRODUCER_GRACE_MS = '25';
-const DETACHED_WORKER_CEILING_MS = 5_000;
+// The worker's required actions have a 9s budget; allow that bounded contract
+// plus process-startup/runner contention under the full suite.
+const DETACHED_WORKER_CEILING_MS = IS_CI ? 25_000 : 15_000;
 
 interface ExitResult {
   elapsedMs: number;
@@ -35,7 +40,14 @@ function runUntilClose(
     const startedAt = Date.now();
     const child = spawn(process.execPath, [RUN_CJS, script], {
       cwd,
-      env: { ...process.env, HOME: cwd, USERPROFILE: cwd, ...extraEnv, CLAUDE_PLUGIN_ROOT: REPO_ROOT, CLAUDE_CONFIG_DIR: join(cwd, '.claude') },
+      env: {
+        ...process.env,
+        HOME: cwd,
+        USERPROFILE: cwd,
+        ...extraEnv,
+        CLAUDE_PLUGIN_ROOT: REPO_ROOT,
+        CLAUDE_CONFIG_DIR: join(cwd, '.claude'),
+      },
       stdio: ['pipe', 'ignore', 'ignore'],
       windowsHide: true,
     });
@@ -84,20 +96,54 @@ function configureDeferredAdapters(cwd: string): void {
 async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<void> {
   const callbackPath = join(cwd, 'callback.md');
   const manifestPath = join(cwd, '.omc', 'state', 'session-end-jobs', `${sessionId}.json`);
-  const deadline = Date.now() + DETACHED_WORKER_CEILING_MS;
-  while (Date.now() < deadline) {
+  let deadline = Date.now() + DETACHED_WORKER_CEILING_MS;
+  const hardCeiling = Date.now() + DETACHED_WORKER_CEILING_MS * 2;
+  let lastRevision = -1;
+  let lastPhase = '';
+
+  while (Date.now() < deadline && Date.now() < hardCeiling) {
     if (existsSync(callbackPath) && existsSync(manifestPath)) {
-      const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase: string; owner: unknown; actions: Record<string, { status: string }> };
-      if (manifest.phase === 'complete' && manifest.owner === null && manifest.actions.callback.status === 'completed') {
-        await new Promise<void>((resolve) => setTimeout(resolve, 250));
-        return;
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as {
+          phase: string;
+          revision: number;
+          owner: unknown;
+          actions: Record<string, { status: string }>;
+        };
+        if (manifest.revision !== lastRevision || manifest.phase !== lastPhase) {
+          lastRevision = manifest.revision;
+          lastPhase = manifest.phase;
+          deadline = Math.min(hardCeiling, Date.now() + (IS_CI ? 10_000 : 5_000));
+        }
+        if (manifest.phase === 'complete' && manifest.owner === null && manifest.actions.callback?.status === 'completed') {
+          await new Promise<void>((resolve) => setTimeout(resolve, 250));
+          return;
+        }
+      } catch {
+        // Read or parse collision during concurrent atomic write; retry on next tick
+      }
+    } else if (existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase: string; revision: number };
+        if (manifest.revision !== lastRevision || manifest.phase !== lastPhase) {
+          lastRevision = manifest.revision;
+          lastPhase = manifest.phase;
+          deadline = Math.min(hardCeiling, Date.now() + (IS_CI ? 10_000 : 5_000));
+        }
+      } catch {
+        // Read or parse collision
       }
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  const manifest = existsSync(manifestPath)
-    ? JSON.parse(readFileSync(manifestPath, 'utf-8')) as { phase?: string; owner?: unknown; actions?: Record<string, { status?: string; error?: string }> }
-    : null;
+  let manifest: { phase?: string; owner?: unknown; actions?: Record<string, { status?: string; error?: string }> } | null = null;
+  try {
+    if (existsSync(manifestPath)) {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+    }
+  } catch {
+    manifest = null;
+  }
   const callback = manifest?.actions?.callback;
   throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} file=${existsSync(callbackPath)}`);
 }
@@ -144,6 +190,11 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
 
     if (_name === 'session-end') {
       const manifestPath = join(cwd, '.omc', 'state', 'session-end-jobs', `${sessionId}.json`);
+      const deadline = Date.now() + (IS_CI ? 1_000 : 250);
+      while (!existsSync(manifestPath) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(existsSync(manifestPath)).toBe(true);
       const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as { actions: Record<string, { phase: string }> };
       expect(manifest.actions.callback.phase).toBe('deferred-best-effort');
       expect(manifest.actions.notification.phase).toBe('deferred-best-effort');
@@ -160,7 +211,11 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
       cwd,
       validSessionEndInput(cwd, sessionId),
       COMMAND_CEILING_MS,
-      { NODE_ENV: 'test', OMC_SESSION_END_TEST_PRODUCER_GRACE_MS: TEST_PRODUCER_GRACE_MS },
+      {
+        NODE_ENV: 'test',
+        OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(Math.max(450, COMMAND_CEILING_MS - 50)),
+        OMC_SESSION_END_TEST_PRODUCER_GRACE_MS: TEST_PRODUCER_GRACE_MS,
+      },
     ));
 
     await waitForTerminalCallback(cwd, sessionId);

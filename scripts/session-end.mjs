@@ -24,4 +24,8 @@ export async function runSessionEndHook() {
   }
 }
 
-if (!isMainThread || (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))) void runSessionEndHook();
+if (!isMainThread || (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))) {
+  void runSessionEndHook().finally(() => {
+    if (!isMainThread) process.exit(0);
+  });
+}

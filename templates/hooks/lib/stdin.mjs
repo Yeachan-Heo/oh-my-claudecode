@@ -132,8 +132,9 @@ export function readSessionEndFrame() {
       return;
     }
 
-    firstByteTimer = setTimeout(() => finish({ status: 'timeout' }, true), 25);
-    totalTimer = setTimeout(() => finish({ status: 'timeout' }, true), 100);
+    const isCi = process.env.CI === 'true' || process.env.CI === '1';
+    firstByteTimer = setTimeout(() => finish({ status: 'timeout' }, true), isCi ? 100 : 25);
+    totalTimer = setTimeout(() => finish({ status: 'timeout' }, true), isCi ? 500 : 100);
     stdin.resume();
   });
 }

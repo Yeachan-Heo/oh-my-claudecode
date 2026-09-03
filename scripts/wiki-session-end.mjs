@@ -24,4 +24,8 @@ export async function runWikiSessionEndHook() {
   }
 }
 
-if (!isMainThread || (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))) void runWikiSessionEndHook();
+if (!isMainThread || (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))) {
+  void runWikiSessionEndHook().finally(() => {
+    if (!isMainThread) process.exit(0);
+  });
+}
