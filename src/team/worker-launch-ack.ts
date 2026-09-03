@@ -556,19 +556,39 @@ function windowsWrapperRelativePath(cwd: string, wrapperPath: string): string {
   return relativePath;
 }
 
-function buildWorkerLaunchWrapper(attempt: WorkerLaunchAttempt): string {
-  const runtimeCli = quoteWindowsCmdArgument(attempt.runtimeCliPath);
-  const nodeExecutable = quoteWindowsCmdArgument(process.execPath);
+export function buildWorkerLaunchWrapper(attempt: WorkerLaunchAttempt, platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'win32') {
+    const runtimeCli = quoteWindowsCmdArgument(attempt.runtimeCliPath);
+    const nodeExecutable = quoteWindowsCmdArgument(process.execPath);
+    return [
+      '@echo off',
+      'setlocal DisableDelayedExpansion',
+      'set "OMC_WORKER_LAUNCH_SPEC_FILE=%~dp0bootstrap.json"',
+      `${nodeExecutable} ${runtimeCli} --worker-launch`,
+      'set "_OMC_WORKER_LAUNCH_EXIT=%ERRORLEVEL%"',
+      'del /f /q "%~f0" >nul 2>&1',
+      'endlocal & exit /b %_OMC_WORKER_LAUNCH_EXIT%',
+      '',
+    ].join('\r\n');
+  }
+  const runtimeCli = quotePosixShellArgument(attempt.runtimeCliPath);
+  const nodeExecutable = quotePosixShellArgument(process.execPath);
   return [
-    '@echo off',
-    'setlocal DisableDelayedExpansion',
-    'set "OMC_WORKER_LAUNCH_SPEC_FILE=%~dp0bootstrap.json"',
+    '#!/bin/sh',
+    'set -u',
+    'omc_wrapper_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+    'export OMC_WORKER_LAUNCH_SPEC_FILE="$omc_wrapper_dir/bootstrap.json"',
     `${nodeExecutable} ${runtimeCli} --worker-launch`,
-    'set "_OMC_WORKER_LAUNCH_EXIT=%ERRORLEVEL%"',
-    'del /f /q "%~f0" >nul 2>&1',
-    'endlocal & exit /b %_OMC_WORKER_LAUNCH_EXIT%',
+    '_omc_exit=$?',
+    'rm -f -- "$0"',
+    'exit $_omc_exit',
     '',
-  ].join('\\r\\n');
+  ].join('\n');
+}
+
+export function quotePosixShellArgument(value: string): string {
+  if (/[\r\n\0]/.test(value)) throw new Error('worker_launch_provider_argv_invalid');
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
 }
 
 export async function materializeWorkerLaunchTransport(input: {
@@ -597,7 +617,7 @@ export async function materializeWorkerLaunchTransport(input: {
   const wrapperRelativePath = windowsDelivery
     ? windowsWrapperRelativePath(input.cwd, attempt.wrapperPath)
     : '';
-  const wrapper = buildWorkerLaunchWrapper(attempt);
+  const wrapper = buildWorkerLaunchWrapper(attempt, windowsDelivery ? 'win32' : process.platform);
   let ownerCreated = false;
   let descriptorCreated = false;
   let wrapperCreated = false;

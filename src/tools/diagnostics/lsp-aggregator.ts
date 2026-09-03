@@ -26,6 +26,28 @@ export interface LspAggregationResult {
   installHints: string[]; // deduplicated, insertion order preserved
 }
 
+export const LSP_DIAGNOSTICS_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await mapper(items[index]);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 /**
  * Recursively find files with given extensions
  */
@@ -35,7 +57,7 @@ function findFiles(directory: string, extensions: string[], ignoreDirs: string[]
 
   function walk(dir: string) {
     try {
-      const entries = readdirSync(dir);
+      const entries = readdirSync(dir).sort();
 
       for (const entry of entries) {
         const fullPath = join(dir, entry);
@@ -83,51 +105,63 @@ export async function runLspAggregatedDiagnostics(
   const files = findFiles(directory, extensions, ['node_modules', 'dist', 'build', '.git']);
 
   const allDiagnostics: LspDiagnosticWithFile[] = [];
-  let filesChecked = 0;
   const skippedFiles: Array<{ file: string; reason: string }> = [];
   const installHintSet = new Set<string>();
 
-  for (const file of files) {
+  const fileResults = await mapWithConcurrency(files, LSP_DIAGNOSTICS_CONCURRENCY, async (file) => {
     // Guards future callers passing custom extensions with no registered LSP; redundant under default extension list.
     if (!getServerForFile(file)) {
-      skippedFiles.push({ file, reason: 'no language server registered for extension' });
-      continue;
+      return {
+        file,
+        skippedReason: 'no language server registered for extension',
+      };
     }
 
     try {
-      await lspClientManager.runWithClientLease(file, async (client) => {
-        // Open document to trigger diagnostics
-        await client.openDocument(file);
+      const diagnostics = await lspClientManager.runWithClientLease(file, async (client) => {
+        return client.withOpenDocument(file, async () => {
+          if (client.supportsPullDiagnostics) {
+            return client.pullDiagnostics(file);
+          }
 
-        // Wait for the server to publish diagnostics via textDocument/publishDiagnostics
-        // notification instead of using a fixed delay. Falls back to LSP_DIAGNOSTICS_WAIT_MS
-        // as a timeout so we don't hang forever on servers that omit the notification.
-        await client.waitForDiagnostics(file, LSP_DIAGNOSTICS_WAIT_MS);
-
-        // Get diagnostics for this file
-        const diagnostics = client.getDiagnostics(file);
-
-        // Add to aggregated results
-        for (const diagnostic of diagnostics) {
-          allDiagnostics.push({
-            file,
-            diagnostic
-          });
-        }
-
-        // Must remain the last statement in the lease callback to preserve filesChecked + skippedFiles.length === files.length.
-        filesChecked++;
+          // Wait for the server to publish diagnostics via textDocument/publishDiagnostics.
+          // The timeout prevents a server that omits the notification from blocking a worker.
+          await client.waitForDiagnostics(file, LSP_DIAGNOSTICS_WAIT_MS);
+          return client.getDiagnostics(file);
+        });
       });
+
+      return { file, diagnostics };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      // Regex pinned to throw at src/tools/lsp/client.ts:186 — keep header literal in formatLspResult in sync.
-      const match = message.match(/^Language server '([^']+)' not found\.\nInstall with: (.+)$/s);
-      if (match) {
-        installHintSet.add(match[2].trim());
-        skippedFiles.push({ file, reason: `missing language server: ${match[1]}` });
-      } else {
-        skippedFiles.push({ file, reason: message });
+      return { file, skippedReason: message };
+    }
+  });
+
+  let filesChecked = 0;
+  for (const result of fileResults) {
+    if (result.diagnostics) {
+      filesChecked++;
+      for (const diagnostic of result.diagnostics) {
+        allDiagnostics.push({
+          file: result.file,
+          diagnostic
+        });
       }
+      continue;
+    }
+
+    const message = result.skippedReason ?? 'unknown LSP diagnostics failure';
+    // Keep the missing-server header literal in formatLspResult in sync.
+    const match = message.match(/^Language server '([^']+)' not found\.\nInstall with: (.+)$/s);
+    if (match) {
+      installHintSet.add(match[2].trim());
+      skippedFiles.push({
+        file: result.file,
+        reason: `missing language server: ${match[1]}`
+      });
+    } else {
+      skippedFiles.push({ file: result.file, reason: message });
     }
   }
 
@@ -138,7 +172,7 @@ export async function runLspAggregatedDiagnostics(
   const allFilesSkipped = filesChecked === 0 && files.length > 0;
 
   return {
-    success: errorCount === 0 && !allFilesSkipped,
+    success: errorCount === 0 && skippedFiles.length === 0 && !allFilesSkipped,
     diagnostics: allDiagnostics,
     errorCount,
     warningCount,

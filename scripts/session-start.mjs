@@ -6,7 +6,7 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, symlinkSync, lstatSync, readlinkSync, unlinkSync, renameSync, statSync } from 'fs';
 import { spawn } from 'child_process';
 import { join, dirname, basename, resolve, relative, isAbsolute } from 'path';
 import { homedir } from 'os';
@@ -14,6 +14,10 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir, getUpdateCheckCachePath } from './lib/config-dir.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from './lib/cache-occupancy.mjs';
+
+// Detached update-cache refresh: argv flag and the child's overall deadline.
+const REFRESH_UPDATE_CACHE_FLAG = '--refresh-update-cache';
+const REFRESH_UPDATE_CACHE_DEADLINE_MS = 3000;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -628,18 +632,68 @@ function getMarketplaceCloneVersion() {
   } catch { return null; }
 }
 
-function writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, source) {
+function readUpdateCheckCache() {
   try {
-    const dir = join(configDir, '.omc');
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    writeFileSync(getUpdateCheckCachePath(), JSON.stringify({
-      timestamp: Date.now(),
-      latestVersion,
-      currentVersion,
-      updateAvailable,
-      source,
-    }));
-  } catch {}
+    const cached = JSON.parse(readFileSync(getUpdateCheckCachePath(), 'utf-8'));
+    return cached && typeof cached === 'object' && !Array.isArray(cached) ? cached : {};
+  } catch { return {}; }
+}
+
+// Merge into the existing cache so unrelated fields (e.g. the Claude Code
+// version tracked below) survive an OMC-only refresh.
+function mergeUpdateCheckCache(fields) {
+  const cachePath = getUpdateCheckCachePath();
+  const cacheDir = dirname(cachePath);
+  const lockPath = `${cachePath}.lock`;
+  const deadline = Date.now() + 1000;
+  let locked = false;
+
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+    while (!locked && Date.now() < deadline) {
+      try {
+        mkdirSync(lockPath);
+        locked = true;
+      } catch {
+        // mkdir is exclusive across processes. The critical section is only
+        // synchronous filesystem work, so a short bounded wait is sufficient.
+        try {
+          if (Date.now() - statSync(lockPath).mtimeMs > 10_000) {
+            rmSync(lockPath, { recursive: true, force: true });
+          }
+        } catch {}
+        try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10); } catch {}
+      }
+    }
+    if (!locked) return;
+
+    const temporaryPath = `${cachePath}.${process.pid}.${Date.now()}.tmp`;
+    writeFileSync(temporaryPath, JSON.stringify({ ...readUpdateCheckCache(), ...fields }));
+    try {
+      renameSync(temporaryPath, cachePath);
+    } catch {
+      // Windows cannot replace an existing file with rename. The lock keeps
+      // other writers out; readers already tolerate a missing cache briefly.
+      try { unlinkSync(cachePath); } catch {}
+      renameSync(temporaryPath, cachePath);
+    }
+  } catch {
+    // Cache refresh is best-effort and must never affect session startup.
+  } finally {
+    if (locked) {
+      try { rmSync(lockPath, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
+function writeUpdateCheckCache(latestVersion, currentVersion, updateAvailable, source) {
+  mergeUpdateCheckCache({
+    timestamp: Date.now(),
+    latestVersion,
+    currentVersion,
+    updateAvailable,
+    source,
+  });
 }
 
 function getPluginUpdateChannelVersion() {
@@ -754,6 +808,14 @@ function shouldNotifyDrift(driftInfo) {
 // Plugin marketplace installs update from the marketplace clone (usually origin/main),
 // not from the npm package. Keep those channels separate so HUD/session notices do
 // not advertise npm-only releases that `/plugin marketplace update` cannot install.
+// Registry base override. Only honoured when set; tests point it at a closed
+// port to exercise the offline/timeout paths without touching the network.
+function registryLatestUrl(packageName) {
+  const base = process.env.OMC_UPDATE_REGISTRY_BASE;
+  const root = base ? base.replace(/\/+$/, '') : 'https://registry.npmjs.org';
+  return `${root}/${packageName}/latest`;
+}
+
 async function checkNpmUpdate(currentVersion) {
   const marketplaceChannel = getPluginUpdateChannelVersion();
   if (marketplaceChannel.managed) {
@@ -787,7 +849,7 @@ async function checkNpmUpdate(currentVersion) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 2000);
   try {
-    const response = await fetch('https://registry.npmjs.org/oh-my-claude-sisyphus/latest', {
+    const response = await fetch(registryLatestUrl('oh-my-claude-sisyphus'), {
       signal: controller.signal
     });
     if (!response.ok) return null;
@@ -800,6 +862,79 @@ async function checkNpmUpdate(currentVersion) {
 
     return updateAvailable ? { currentVersion, latestVersion, source: 'npm' } : null;
   } catch { return null; } finally { clearTimeout(timeoutId); }
+}
+
+// Refresh the cached latest Claude Code version (same 24h window and 2s timeout
+// as the OMC check). Stored alongside the OMC fields so the HUD reads one file;
+// the field is simply absent on caches written before this check existed.
+async function checkClaudeCodeUpdate() {
+  const CACHE_DURATION = 24 * 60 * 60 * 1000;
+  const cached = readUpdateCheckCache();
+  if (cached.claudeCodeCheckedAt && (Date.now() - cached.claudeCodeCheckedAt) < CACHE_DURATION) return;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2000);
+  try {
+    const response = await fetch(registryLatestUrl('@anthropic-ai/claude-code'), {
+      signal: controller.signal
+    });
+    if (!response.ok) return;
+
+    const data = await response.json();
+    if (!data?.version) return;
+    mergeUpdateCheckCache({ claudeCodeLatestVersion: data.version, claudeCodeCheckedAt: Date.now() });
+  } catch {} finally { clearTimeout(timeoutId); }
+}
+
+// Refresh update caches and return a user-facing OMC update notice, if any.
+// Independent of the workspace, so it also runs for non-workspace cwds (#3942).
+async function runUpdateChecks() {
+  // Concurrent: each fetch aborts after 2s, and SessionStart hooks have a 5s
+  // budget, so running them in sequence would risk a cold-cache timeout.
+  const [notice] = await Promise.all([
+    (async () => {
+      try {
+        const pluginVersion = getPluginVersion();
+        if (!pluginVersion) return null;
+        const updateInfo = await checkNpmUpdate(pluginVersion);
+        if (!updateInfo) return null;
+        const omcConfig = readJsonFile(join(configDir, '.omc-config.json')) || {};
+        return formatUpdateNoticeForUser(updateInfo, { autoUpgradePrompt: omcConfig.autoUpgradePrompt !== false });
+      } catch { return null; }
+    })(),
+    checkClaudeCodeUpdate().catch(() => {}),
+  ]);
+  return notice;
+}
+
+// Refresh the update caches in a detached child so a slow or unreachable
+// registry cannot delay the SessionStart response (the hook budget is 5s).
+function refreshUpdateCacheInBackground() {
+  if (process.env.OMC_HOOK_BACKGROUND_CHILD === '1') return;
+  try {
+    const child = spawn(process.execPath, [__filename, REFRESH_UPDATE_CACHE_FLAG], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+      env: { ...process.env, OMC_HOOK_BACKGROUND_CHILD: '1' },
+    });
+    // spawn reports most failures (EMFILE, EPERM, ENOMEM) via an async 'error'
+    // event, not a throw; swallow it so the hook never exits non-zero after answering.
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Cache refresh is best-effort and must never affect hook output.
+  }
+}
+
+// Detached child entrypoint: refresh the caches, then exit. The deadline keeps
+// the child from lingering if a fetch never settles.
+async function refreshUpdateCacheAndExit() {
+  const deadline = setTimeout(() => process.exit(0), REFRESH_UPDATE_CACHE_DEADLINE_MS);
+  deadline.unref();
+  try { await runUpdateChecks(); } catch {}
+  clearTimeout(deadline);
+  process.exit(0);
 }
 
 // Check if HUD is properly installed (with retry for race conditions)
@@ -896,6 +1031,11 @@ async function main() {
     const rawDirectory = data.cwd || data.directory || process.cwd();
     const directory = validateCwd(rawDirectory);
     if (directory === null) {
+      // No workspace here, but the registry update checks do not need one, so
+      // the HUD update cache still refreshes for users who launch Claude Code
+      // outside a repo. It runs detached: this path must answer immediately and
+      // must not touch any workspace or session state.
+      refreshUpdateCacheInBackground();
       console.log(JSON.stringify({ continue: true }));
       return;
     }
@@ -964,17 +1104,9 @@ async function main() {
       messages.push(`<session-restore>\n\n${driftMsg}\n\n</session-restore>\n\n---\n`);
     }
 
-    // Check npm registry for available update (with 24h cache)
-    try {
-      const pluginVersion = getPluginVersion();
-      if (pluginVersion) {
-        const updateInfo = await checkNpmUpdate(pluginVersion);
-        if (updateInfo) {
-          const omcConfig = readJsonFile(join(configDir, '.omc-config.json')) || {};
-          userMessages.push(formatUpdateNoticeForUser(updateInfo, { autoUpgradePrompt: omcConfig.autoUpgradePrompt !== false }));
-        }
-      }
-    } catch {}
+    // Check npm registry for available updates (with 24h cache)
+    const updateNotice = await runUpdateChecks();
+    if (updateNotice) userMessages.push(updateNotice);
 
     // Warn if silentAutoUpdate is enabled but running in plugin mode (#1773)
     if (process.env.CLAUDE_PLUGIN_ROOT) {
@@ -1317,4 +1449,8 @@ ${cleanContent}
   }
 }
 
-main();
+if (process.argv.includes(REFRESH_UPDATE_CACHE_FLAG)) {
+  refreshUpdateCacheAndExit();
+} else {
+  main();
+}

@@ -192,7 +192,7 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
     expect(resolve).toHaveBeenCalledWith('recovered');
   });
 
-  it('replies to registration requests with the exact error and preserves string, zero, and empty IDs', () => {
+  it('replies to registration requests with the exact error and preserves string, zero, and empty IDs', async () => {
     const client = new LspClient('/tmp/ws', SERVER_CONFIG);
     const writes = setupWritableClient(client);
 
@@ -203,6 +203,8 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
         method: 'client/registerCapability',
       })));
     }
+
+    await vi.waitFor(() => expect(writes).toHaveLength(3));
 
     expect(writes.map(decodeLspMessage)).toEqual([
       {
@@ -223,7 +225,7 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
     ]);
   });
 
-  it('replies to unknown server requests with Method not found', () => {
+  it('replies to unknown server requests with Method not found', async () => {
     const client = new LspClient('/tmp/ws', SERVER_CONFIG);
     const writes = setupWritableClient(client);
 
@@ -233,6 +235,7 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
       method: 'window/showMessageRequest',
     })));
 
+    await vi.waitFor(() => expect(writes).toHaveLength(1));
     expect(writes).toHaveLength(1);
     expect(decodeLspMessage(writes[0])).toEqual({
       jsonrpc: '2.0',
@@ -363,6 +366,7 @@ describe('LspClient handleData byte-length fix (#1026)', () => {
     let resolved = false;
     request.then(() => { resolved = true; });
 
+    await vi.waitFor(() => expect(writes).toHaveLength(4));
     expect(writes).toHaveLength(4);
     expect(decodeLspMessage(writes[2])).toEqual({
       jsonrpc: '2.0',

@@ -217,17 +217,41 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toMatch(/opt-in|explicit/i);
   });
 
-  it('launch enforces a hard yard gate at entry (drydock --check, never advisory)', () => {
-    // regression: entry checks were advisory ("suggestions, never a gate"); the yard gate now blocks
+  it('launch enforces a hard yard gate at entry (drydock --check, fail-closed with narrow override)', () => {
+    // yard gate is fail-closed for high-confidence actionable findings; low-confidence / false-positive / throwaway may be overridden only with explicit per-invocation intent
     expect(LAUNCH).toContain('The yard gate is the first action of every invocation');
     expect(LAUNCH).toContain('Run the full drydock `--check` audit');
-    expect(LAUNCH).toContain('Any finding hard-blocks the run');
+    expect(LAUNCH).toContain('Actionable / high-confidence findings hard-block the run');
     expect(LAUNCH).toContain('no artifacts were produced');
-    expect(LAUNCH).toContain('No override flag, no confirm-to-continue path');
+    expect(LAUNCH).toContain('Narrow override (explicit intent only)');
+    expect(LAUNCH).toContain('low-confidence');
+    expect(LAUNCH).toContain('false positives');
+    expect(LAUNCH).toContain('scratch/throwaway');
+    expect(LAUNCH).toContain('never silently swallow a high-confidence actionable finding');
+    expect(LAUNCH).toContain('No general bypass');
+    expect(LAUNCH).toContain('Current audit limitation');
+    expect(LAUNCH).toContain('without a machine-readable finding/severity contract or executable');
     expect(LAUNCH).toContain('The rules entry is `CLAUDE.md` — the shipyard map recognizes no substitute');
+    expect(LAUNCH).not.toContain('No override flag, no confirm-to-continue path');
+    expect(LAUNCH).not.toContain('no exception for throwaway prototypes — laying the yard is one command away');
     expect(LAUNCH).not.toContain('never a gate');
     expect(LAUNCH).not.toContain('Facility surface checkup');
     expect(LAUNCH).not.toContain('never listed as missing');
+
+    // drydock --check must be honest about confidence and throwaway scope, and name the same override
+    expect(DRYDOCK).toContain('state the confidence (`high`');
+    expect(DRYDOCK).toContain('low` when heuristic');
+    expect(DRYDOCK).toContain('throwaway/scratch');
+    expect(DRYDOCK).toContain('high-confidence actionable findings as blocking');
+    expect(DRYDOCK).toContain('low-confidence or explicitly-classified false-positive');
+    expect(DRYDOCK).toContain('no executable or machine-readable exit contract');
+    expect(DRYDOCK).toContain('planned follow-up');
+
+    // docs/shipyard.md must reflect the same softened contract
+    expect(SHIPYARD_DOC).toContain('per-finding confidence');
+    expect(SHIPYARD_DOC).toContain('no executable or machine-readable severity contract (planned follow-up)');
+    expect(SHIPYARD_DOC).toContain('blocks on high-confidence actionable drydock findings');
+    expect(SHIPYARD_DOC).toContain('narrowly, explicitly overridden low-confidence / false-positive / scratch-scope finding — no general bypass');
   });
 
   it('launch closeout re-runs the yard audit as yard drift instead of the retired gap list', () => {

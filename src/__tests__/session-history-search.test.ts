@@ -3,11 +3,14 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { homedir, tmpdir } from 'os';
 import { basename, join } from 'path';
 import {
+  __testingCreateMatchRetainer,
   __testingIsWithinProject,
   encodeProjectPath,
   parseSinceSpec,
   searchSessionHistory,
 } from '../features/session-history-search/index.js';
+
+type SessionHistoryMatch = Awaited<ReturnType<typeof searchSessionHistory>>['results'][number];
 
 function writeTranscript(filePath: string, entries: Array<Record<string, unknown>>): void {
   mkdirSync(join(filePath, '..'), { recursive: true });
@@ -16,6 +19,26 @@ function writeTranscript(filePath: string, entries: Array<Record<string, unknown
 
 function normalizePathForAssert(path: string): string {
   return path.replace(/\\/g, '/');
+}
+
+function syntheticMatch(id: string, timestamp: string | undefined, sourcePath: string): SessionHistoryMatch {
+  return {
+    sessionId: id,
+    timestamp,
+    sourcePath,
+    sourceType: 'project-transcript',
+    line: 1,
+    excerpt: id,
+  };
+}
+
+function compareExpectedMatches(a: SessionHistoryMatch, b: SessionHistoryMatch): number {
+  const parsedATime = a.timestamp ? Date.parse(a.timestamp) : 0;
+  const parsedBTime = b.timestamp ? Date.parse(b.timestamp) : 0;
+  const aTime = Number.isFinite(parsedATime) ? parsedATime : 0;
+  const bTime = Number.isFinite(parsedBTime) ? parsedBTime : 0;
+  if (aTime !== bTime) return bTime - aTime;
+  return a.sourcePath.localeCompare(b.sourcePath);
 }
 
 describe('session history search', () => {
@@ -164,6 +187,86 @@ describe('session history search', () => {
     expect(report.totalMatches).toBe(3);
     expect(report.results).toHaveLength(1);
     expect(report.results[0].sessionId).toBe('session-current');
+  });
+
+  it('bounds retained matches while counting every match', () => {
+    const limit = 10;
+    const matchCount = 80_000;
+    const retainer = __testingCreateMatchRetainer(limit);
+    let maxRetained = 0;
+
+    for (let index = 0; index < matchCount; index += 1) {
+      retainer.add(syntheticMatch(
+        `session-${index}`,
+        new Date(Date.UTC(2026, 0, 1) + index * 1_000).toISOString(),
+        '/synthetic/session.jsonl',
+      ));
+      maxRetained = Math.max(maxRetained, retainer.retained.length);
+    }
+
+    expect(maxRetained).toBe(limit);
+    expect(retainer.retained).toHaveLength(limit);
+    expect(retainer.totalMatches).toBe(matchCount);
+  });
+
+  it('matches the legacy sorted prefix for ties and cross-file timestamps', () => {
+    const limit = 5;
+    const matches = [
+      syntheticMatch('encounter-0', '2026-03-01T00:00:00.000Z', '/synthetic/z.jsonl'),
+      syntheticMatch('encounter-1', '2026-03-03T00:00:00.000Z', '/synthetic/b.jsonl'),
+      syntheticMatch('encounter-2', '2026-03-03T00:00:00.000Z', '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-3', '2026-03-03T00:00:00.000Z', '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-4', undefined, '/synthetic/c.jsonl'),
+      syntheticMatch('encounter-5', '2026-03-02T00:00:00.000Z', '/synthetic/c.jsonl'),
+      syntheticMatch('encounter-6', '2026-03-01T00:00:00.000Z', '/synthetic/a.jsonl'),
+    ];
+    const expected = [...matches].sort(compareExpectedMatches).slice(0, limit);
+    const retainer = __testingCreateMatchRetainer(limit);
+
+    for (const match of matches) {
+      retainer.add(match);
+    }
+
+    expect(retainer.retained).toEqual(expected);
+    expect(retainer.totalMatches).toBe(matches.length);
+  });
+
+  it('orders invalid timestamps with the existing missing-timestamp fallback', () => {
+    const matches = [
+      syntheticMatch('encounter-0', undefined, '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-1', undefined, '/synthetic/b.jsonl'),
+      syntheticMatch('encounter-2', 'not-a-timestamp', '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-3', undefined, '/synthetic/b.jsonl'),
+      syntheticMatch('encounter-4', undefined, '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-5', undefined, '/synthetic/b.jsonl'),
+      syntheticMatch('encounter-6', undefined, '/synthetic/a.jsonl'),
+      syntheticMatch('encounter-7', undefined, '/synthetic/b.jsonl'),
+    ];
+    const expected = [...matches].sort(compareExpectedMatches).slice(0, 2);
+    const retainer = __testingCreateMatchRetainer(2);
+
+    for (const match of matches) {
+      retainer.add(match);
+    }
+
+    expect(retainer.retained).toEqual(expected);
+    expect(retainer.totalMatches).toBe(matches.length);
+  });
+
+  it('matches Array.slice limit coercion for direct fractional limits', () => {
+    const matches = [
+      syntheticMatch('newest', '2026-03-03T00:00:00.000Z', '/synthetic/a.jsonl'),
+      syntheticMatch('middle', '2026-03-02T00:00:00.000Z', '/synthetic/a.jsonl'),
+      syntheticMatch('oldest', '2026-03-01T00:00:00.000Z', '/synthetic/a.jsonl'),
+    ];
+    const retainer = __testingCreateMatchRetainer(2.9);
+
+    for (const match of matches) {
+      retainer.add(match);
+    }
+
+    expect(retainer.retained).toEqual([...matches].sort(compareExpectedMatches).slice(0, 2.9));
+    expect(retainer.totalMatches).toBe(matches.length);
   });
 
   it('uses a ~-prefixed CLAUDE_CONFIG_DIR for transcript discovery', async () => {

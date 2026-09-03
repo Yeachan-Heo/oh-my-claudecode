@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0280d62c295c34742b82a5eba94d38f6b0990f9a",
-    "sourceSha256": "ac5909bc581b20268bfb89e07b391b2e435466276b49733c1d7ca1f64f40ad04",
+    "head": "bec03daf0f67782260023d56e17e6c9fde87008b",
+    "sourceSha256": "ae4e4afdc2d79c00ade0986b337e13831b2c9751355ff33f2309111955914969",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0280d62c295c34742b82a5eba94d38f6b0990f9a",
-  "sourceSha256": "ac5909bc581b20268bfb89e07b391b2e435466276b49733c1d7ca1f64f40ad04",
+  "head": "bec03daf0f67782260023d56e17e6c9fde87008b",
+  "sourceSha256": "ae4e4afdc2d79c00ade0986b337e13831b2c9751355ff33f2309111955914969",
   "counts": {
     "public": {
       "skills": 35,
@@ -25,11 +25,11 @@
     "internal": {
       "hookFiles": 295,
       "featureFiles": 69,
-      "toolFiles": 60,
-      "libFiles": 37,
+      "toolFiles": 61,
+      "libFiles": 39,
       "templateHooks": 21,
-      "srcFiles": 1316,
-      "total": 1337
+      "srcFiles": 1325,
+      "total": 1346
     },
     "generated": {
       "distFiles": 4955,
@@ -532,6 +532,7 @@
       "src/tools/lsp-tools.ts",
       "src/tools/lsp/AGENTS.md",
       "src/tools/lsp/__tests__/client-devcontainer.test.ts",
+      "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
       "src/tools/lsp/__tests__/client-eviction.test.ts",
       "src/tools/lsp/__tests__/client-handle-data.test.ts",
       "src/tools/lsp/__tests__/client-python-boundary.test.ts",
@@ -585,7 +586,9 @@
       "src/lib/__tests__/worktree-paths-foreign-root.test.ts",
       "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
       "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
+      "src/lib/__tests__/worktree-paths-split-warning.test.ts",
       "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
+      "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
       "src/lib/__tests__/worktree-paths.test.ts",
       "src/lib/atomic-write.ts",
       "src/lib/env-vars.ts",
@@ -6239,6 +6242,7 @@
       "src/tools/lsp-tools.ts",
       "src/tools/lsp/AGENTS.md",
       "src/tools/lsp/__tests__/client-devcontainer.test.ts",
+      "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
       "src/tools/lsp/__tests__/client-eviction.test.ts",
       "src/tools/lsp/__tests__/client-handle-data.test.ts",
       "src/tools/lsp/__tests__/client-python-boundary.test.ts",
@@ -32362,6 +32366,11 @@
         "path": "node:module"
       },
       {
+        "id": "external:node:net",
+        "kind": "external",
+        "path": "node:net"
+      },
+      {
         "id": "external:node:os",
         "kind": "external",
         "path": "node:os"
@@ -34152,6 +34161,11 @@
         "path": "src/__tests__/hud/transcript-agent-lifecycle.test.ts"
       },
       {
+        "id": "src/__tests__/hud/update-hint.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/hud/update-hint.test.ts"
+      },
+      {
         "id": "src/__tests__/hud/usage-api-lock.test.ts",
         "kind": "src",
         "path": "src/__tests__/hud/usage-api-lock.test.ts"
@@ -34507,6 +34521,11 @@
         "path": "src/__tests__/project-memory-merge.test.ts"
       },
       {
+        "id": "src/__tests__/project-memory-posttool.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/project-memory-posttool.test.ts"
+      },
+      {
         "id": "src/__tests__/project-session-manager-review-worktree.test.ts",
         "kind": "src",
         "path": "src/__tests__/project-session-manager-review-worktree.test.ts"
@@ -34760,6 +34779,16 @@
         "id": "src/__tests__/session-start-timeout-cleanup.test.ts",
         "kind": "src",
         "path": "src/__tests__/session-start-timeout-cleanup.test.ts"
+      },
+      {
+        "id": "src/__tests__/session-start-update-check.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-start-update-check.test.ts"
+      },
+      {
+        "id": "src/__tests__/session-start-update-refresh.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-start-update-refresh.test.ts"
       },
       {
         "id": "src/__tests__/session-summary-pid-tracking.test.ts",
@@ -37802,6 +37831,11 @@
         "path": "src/hud/elements/token-usage.ts"
       },
       {
+        "id": "src/hud/elements/update-hint.ts",
+        "kind": "src",
+        "path": "src/hud/elements/update-hint.ts"
+      },
+      {
         "id": "src/hud/index.ts",
         "kind": "src",
         "path": "src/hud/index.ts"
@@ -38127,9 +38161,19 @@
         "path": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts"
       },
       {
+        "id": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-split-warning.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/worktree-paths-superproject-cache.test.ts"
+      },
+      {
+        "id": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts"
       },
       {
         "id": "src/lib/__tests__/worktree-paths.test.ts",
@@ -39347,6 +39391,11 @@
         "path": "src/team/__tests__/worker-launch-posix-transport.test.ts"
       },
       {
+        "id": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/worker-launch-wrapper-posix.test.ts"
+      },
+      {
         "id": "src/team/__tests__/worker-restart.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/worker-restart.test.ts"
@@ -39840,6 +39889,11 @@
         "id": "src/tools/lsp/__tests__/client-devcontainer.test.ts",
         "kind": "tool",
         "path": "src/tools/lsp/__tests__/client-devcontainer.test.ts"
+      },
+      {
+        "id": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "kind": "tool",
+        "path": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts"
       },
       {
         "id": "src/tools/lsp/__tests__/client-eviction.test.ts",
@@ -45159,6 +45213,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/hud/update-hint.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/update-hint.test.ts",
+        "to": "src/hud/elements/update-hint.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/update-hint.test.ts",
+        "to": "src/hud/render.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/update-hint.test.ts",
+        "to": "src/hud/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/update-hint.test.ts",
+        "to": "src/hud/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/__tests__/hud/usage-api-lock.test.ts",
         "to": "external:events",
         "kind": "imports"
@@ -46759,6 +46838,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/project-memory-posttool.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/project-memory-posttool.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/project-memory-posttool.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/project-memory-posttool.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/project-memory-posttool.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/project-session-manager-review-worktree.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -48040,6 +48144,76 @@
       },
       {
         "from": "src/__tests__/session-start-timeout-cleanup.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-check.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-check.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-check.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-check.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-check.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:net",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:net",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-update-refresh.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -62569,6 +62743,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hud/elements/update-hint.ts",
+        "to": "src/hud/colors.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hud/index.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -62881,6 +63060,11 @@
       {
         "from": "src/hud/render.ts",
         "to": "src/hud/elements/token-usage.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/render.ts",
+        "to": "src/hud/elements/update-hint.ts",
         "kind": "imports"
       },
       {
@@ -64484,6 +64668,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-split-warning.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -64505,6 +64719,41 @@
       },
       {
         "from": "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-toplevel-cache.test.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -70604,6 +70853,41 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/team/__tests__/worker-restart.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -74214,6 +74498,36 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "external:node:events",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/lsp/__tests__/client-document-lifecycle.test.ts",
+        "to": "src/tools/lsp/client.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/tools/lsp/__tests__/client-eviction.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -76120,6 +76434,11 @@
       },
       {
         "from": "templates/hooks/session-start.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/session-start.mjs",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -76710,12 +77029,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6846,
-      "edgeCount": 7239,
-      "importEdgeCount": 5949,
+      "nodeCount": 6856,
+      "edgeCount": 7292,
+      "importEdgeCount": 5998,
       "registerEdgeCount": 56
     }
   },
-  "inventorySha256": "8918d7975f1f220b0423a1191a32350db3a1f8565c3edf57c9d16bcbf438faca",
-  "manifestSha256": "e1b8e46dfb3ebf1b411bf4577027a4c384739ea51e09c4bd6f1397b08f673323"
+  "inventorySha256": "8487e17b5bbdcb30389d7276d19a1d6fc52826c645bd3f46a994b4ef14df6e32",
+  "manifestSha256": "b60a62c89c471b9db5f415d00bc3871e9c2501a9285efd619c39013ce0dc3bea"
 }

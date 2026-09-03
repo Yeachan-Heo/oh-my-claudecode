@@ -433,6 +433,15 @@ export interface HudRenderContext {
   /** Latest available version from npm registry (null if up to date or unknown) */
   updateAvailable: string | null;
 
+  /** Update channel the cached OMC update belongs to (null if unknown) */
+  omcUpdateSource?: 'npm' | 'marketplace' | null;
+
+  /** Installed Claude Code version reported by the statusline stdin payload */
+  claudeCodeVersion?: string | null;
+
+  /** Latest available Claude Code version (null if up to date or unknown) */
+  claudeCodeUpdateAvailable?: string | null;
+
   /** Total tool_use blocks seen in transcript */
   toolCallCount: number;
 
@@ -698,12 +707,12 @@ export interface LayoutConfig {
 export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
   line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'profile'],
   main: [
-    'omcLabel', 'model', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
+    'omcLabel', 'model', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
     'skills', 'lastSkill', 'contextBar', 'agents', 'background',
     'callCounts', 'lastTool', 'sessionSummary',
   ],
-  detail: ['missionBoard', 'agents', 'contextWarning', 'payloadWarning', 'todos'],
+  detail: ['missionBoard', 'agents', 'contextWarning', 'payloadWarning', 'updateHint', 'todos'],
 };
 
 export interface HudConfig {

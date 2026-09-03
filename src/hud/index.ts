@@ -377,6 +377,9 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
     // Read OMC version and update check cache
     let omcVersion: string | null = null;
     let updateAvailable: string | null = null;
+    let omcUpdateSource: "npm" | "marketplace" | null = null;
+    const claudeCodeVersion = stdin.version ?? null;
+    let claudeCodeUpdateAvailable: string | null = null;
     try {
       omcVersion = getRuntimePackageVersion();
       if (omcVersion === "unknown") omcVersion = null;
@@ -401,6 +404,18 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
         compareVersions(omcVersion, cached.latestVersion) < 0
       ) {
         updateAvailable = cached.latestVersion;
+      }
+      if (cached?.source === "npm" || cached?.source === "marketplace") {
+        omcUpdateSource = cached.source;
+      }
+      // claudeCodeLatestVersion is absent on caches written before the
+      // Claude Code check existed; treat that as "no update known".
+      if (
+        cached?.claudeCodeLatestVersion &&
+        claudeCodeVersion &&
+        compareVersions(claudeCodeVersion, cached.claudeCodeLatestVersion) < 0
+      ) {
+        claudeCodeUpdateAvailable = cached.claudeCodeLatestVersion;
       }
     } catch (error) {
       // Ignore update cache read errors - expected if file doesn't exist yet
@@ -478,6 +493,9 @@ async function main(watchMode = false, skipInit = false): Promise<void> {
       sessionTotalTokens: transcriptData.sessionTotalTokens ?? null,
       omcVersion,
       updateAvailable,
+      omcUpdateSource,
+      claudeCodeVersion,
+      claudeCodeUpdateAvailable,
       toolCallCount: transcriptData.toolCallCount,
       agentCallCount: transcriptData.agentCallCount,
       skillCallCount: transcriptData.skillCallCount,

@@ -179,7 +179,7 @@ describe('Windows-safe prompt hook runner paths', () => {
     const cacheBase = mkdtempSync(join(tmpdir(), 'omc generic tree reap-'));
     tempDirs.push(cacheBase);
     const root = join(cacheBase, '4.6.0');
-    const target = join(root, 'scripts', 'post-tool-verifier.mjs');
+    const target = join(root, 'scripts', 'post-tool-use-failure.mjs');
     const pidfile = join(cacheBase, 'generic-grandchild.pid');
     let grandchildPid: number | undefined;
     mkdirSync(join(root, 'scripts'), { recursive: true });
@@ -193,9 +193,9 @@ describe('Windows-safe prompt hook runner paths', () => {
     `);
     writeFileSync(join(root, 'hooks', 'hooks.json'), JSON.stringify({
       hooks: {
-        PostToolUse: [{ matcher: '', hooks: [{
+        PostToolUseFailure: [{ matcher: '', hooks: [{
           type: 'command',
-          command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-verifier.mjs',
+          command: 'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-use-failure.mjs',
           timeout: 2,
         }] }],
       },
@@ -207,7 +207,7 @@ describe('Windows-safe prompt hook runner paths', () => {
       const elapsed = Date.now() - startedAt;
       expect(result.status).toBe(0);
       const declaredMs = 2000;
-      const innerMs = runCjs.resolveGenericTimeoutMs({ timeoutMs: declaredMs, event: 'PostToolUse' });
+      const innerMs = runCjs.resolveGenericTimeoutMs({ timeoutMs: declaredMs, event: 'PostToolUseFailure' });
       expect(elapsed).toBeGreaterThanOrEqual(innerMs >= 400 ? 400 : 0);
       expect(elapsed).toBeLessThan(declaredMs);
       const pidDeadline = Date.now() + 1000;

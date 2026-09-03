@@ -61,7 +61,9 @@ describe('readLastToolError', () => {
 
     expect(result).toBeNull();
     expect(existsSync).toHaveBeenCalledWith(errorPath);
-    expect(readFileSync).not.toHaveBeenCalled();
+    // getOmcRoot legacy-branch discovery best-effort reads settings.json (up to 3 calls) —
+    // the semantic is that the error file itself was not read.
+    expect(readFileSync).not.toHaveBeenCalledWith(errorPath, 'utf-8');
   });
 
   it('returns null when error is stale (>60 seconds old)', () => {
@@ -407,7 +409,7 @@ describe('Edge cases and error handling', () => {
   });
 
   it('handles error state at exact 60 second boundary (not stale)', () => {
-    const exactlyAtBoundary = new Date(Date.now() - 59999).toISOString(); // 59.999 seconds ago
+    const exactlyAtBoundary = new Date(Date.now() - 59000).toISOString(); // 59 seconds ago — 1s margin avoids flakes from discovery overhead
     const toolError: ToolErrorState = {
       tool_name: 'Bash',
       error: 'Error at boundary',

@@ -19,6 +19,12 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 
+const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
+const HOOK_DISABLED =
+  process.env.DISABLE_OMC === '1' ||
+  process.env.DISABLE_OMC === 'true' ||
+  SKIP_HOOKS.includes('post-tool-use');
+
 const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
 const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
 const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
@@ -116,12 +122,14 @@ const distDir = join(__dirname, '..', 'dist', 'hooks', 'notepad');
 // Try to import notepad functions (may fail if not built)
 let setPriorityContext = null;
 let addWorkingMemoryEntry = null;
-try {
-  const notepadModule = await import(pathToFileURL(join(distDir, 'index.js')).href);
-  setPriorityContext = notepadModule.setPriorityContext;
-  addWorkingMemoryEntry = notepadModule.addWorkingMemoryEntry;
-} catch {
-  // Notepad module not available - remember tags will be silently ignored
+if (!HOOK_DISABLED) {
+  try {
+    const notepadModule = await import(pathToFileURL(join(distDir, 'index.js')).href);
+    setPriorityContext = notepadModule.setPriorityContext;
+    addWorkingMemoryEntry = notepadModule.addWorkingMemoryEntry;
+  } catch {
+    // Notepad module not available - remember tags will be silently ignored
+  }
 }
 
 // Debug logging helper - gated behind OMC_DEBUG env var
@@ -132,14 +140,17 @@ const debugLog = (...args) => {
 // State file for session tracking
 const cfgDir = getClaudeConfigDir();
 const STATE_FILE = join(cfgDir, '.session-stats.json');
+const MAX_SESSION_STATS = 100;
 
 // Ensure state directory exists
-try {
-  const stateDir = cfgDir;
-  if (!existsSync(stateDir)) {
-    mkdirSync(stateDir, { recursive: true });
-  }
-} catch {}
+if (!HOOK_DISABLED) {
+  try {
+    const stateDir = cfgDir;
+    if (!existsSync(stateDir)) {
+      mkdirSync(stateDir, { recursive: true });
+    }
+  } catch {}
+}
 
 // Load session statistics
 function loadStats() {
@@ -183,6 +194,17 @@ function updateStats(toolName, sessionId) {
   session.last_tool = toolName;
   session.total_calls = (session.total_calls || 0) + 1;
   session.updated_at = Math.floor(Date.now() / 1000);
+
+  const sessionEntries = Object.entries(stats.sessions);
+  if (sessionEntries.length > MAX_SESSION_STATS) {
+    sessionEntries
+      .filter(([id]) => id !== sessionId)
+      .sort(([, left], [, right]) =>
+        (right.updated_at || right.started_at || 0) - (left.updated_at || left.started_at || 0)
+      )
+      .slice(MAX_SESSION_STATS - 1)
+      .forEach(([id]) => delete stats.sessions[id]);
+  }
 
   saveStats(stats);
   return session.tool_counts[toolName];
@@ -1012,9 +1034,7 @@ function combineMessages(...messages) {
 }
 
 async function main() {
-  // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
-  const _skipHooks = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
-  if (process.env.DISABLE_OMC === '1' || _skipHooks.includes('post-tool-use')) {
+  if (HOOK_DISABLED) {
     console.log(JSON.stringify({ continue: true }));
     return;
   }

@@ -40,8 +40,8 @@ A repo that humans and agents both build on carries four pillars across five con
 
 ## The three skills compose
 
-- **`drydock`** lays the keel once per repo (surfaces + seeds + `--check` drift audit).
-- **`launch`** runs delivery per feature (yard gate → C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout with a `--check` re-audit), with the human at exactly the checkpoints that fail expensively. The yard gate refuses to start unless the full drydock `--check` audit is clean — a yard that fails inspection ships nothing.
+- **`drydock`** lays the keel once per repo (surfaces + seeds + `--check` drift audit). The `--check` report states per-finding confidence and whether the finding is actionable after excluding a user-declared scratch/throwaway scope; today it has no executable or machine-readable severity contract (planned follow-up).
+- **`launch`** runs delivery per feature (yard gate → C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout with a `--check` re-audit), with the human at exactly the checkpoints that fail expensively. The yard gate blocks on high-confidence actionable drydock findings (listing them verbatim and producing no artifacts) and admits only a clean audit or a narrowly, explicitly overridden low-confidence / false-positive / scratch-scope finding — no general bypass.
 - **`minimal-code-discipline`** is an opt-in discipline for code written inside tickets (YAGNI ladder, smallest correct diff).
 
 They share one rule of thumb: **starting needs no permission; landing goes into a shipyard slot.** A change that cannot say which slot it lands in (or explicitly none) is the smell.

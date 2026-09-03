@@ -11,7 +11,7 @@ import { z } from "zod";
 import { readFileSync, readdirSync, statSync, writeFileSync } from "fs";
 import { join, extname, resolve, normalize, relative, isAbsolute } from "path";
 import { createRequire } from "module";
-import { getGitTopLevel } from "../lib/worktree-paths.js";
+import { probeGitTopLevel } from "../lib/worktree-paths.js";
 import { isToolPathRestricted } from "../lib/security-config.js";
 
 // Dynamic import for @ast-grep/napi
@@ -72,7 +72,14 @@ export function validateToolPath(inputPath: string): string {
 
   // Use the literal git toplevel (not the superproject-climbing getWorktreeRoot)
   // so a tool inside a submodule stays confined to that submodule (#3349 / PR #3350).
-  const projectRoot = getGitTopLevel() || process.cwd();
+  const projectProbe = probeGitTopLevel(process.cwd());
+  if (projectProbe.status !== 'ok') {
+    throw new Error(
+      `Path restricted: unable to verify the project root because the Git probe failed. ` +
+        `Disable via security.restrictToolPaths in .claude/omc.jsonc or unset OMC_SECURITY.`,
+    );
+  }
+  const projectRoot = projectProbe.root;
   const normalizedRoot = normalize(projectRoot);
   const normalizedPath = normalize(resolved);
 

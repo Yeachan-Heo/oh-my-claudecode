@@ -162,15 +162,19 @@ function resolveInnerTimeoutMs(manifestHook, platform = process.platform) {
   return Math.max(1, manifestHook.timeoutMs - resolveTimeoutCushionMs(manifestHook.timeoutMs, manifestHook.event, platform));
 }
 
-// Call only after resolveWorkerTarget has verified an exact canonical trusted prompt target.
-function resolveTrustedPromptWorkerTimeoutMs(targetPath, manifestHook, trustedPluginRoot) {
+// Call only after resolveWorkerTarget has verified an exact canonical trusted target.
+const TRUSTED_WORKER_HOOKS = new Map([
+  ['keyword-detector.mjs', { event: 'UserPromptSubmit', timeoutCapMs: 8000 }],
+  ['skill-injector.mjs', { event: 'UserPromptSubmit', timeoutCapMs: 12000 }],
+  ['pre-tool-enforcer.mjs', { event: 'PreToolUse' }],
+  ['post-tool-verifier.mjs', { event: 'PostToolUse' }],
+  ['project-memory-posttool.mjs', { event: 'PostToolUse' }],
+  ['post-tool-rules-injector.mjs', { event: 'PostToolUse' }],
+]);
+
+function resolveTrustedWorkerTimeoutMs(targetPath, manifestHook) {
   const calculatedTimeoutMs = resolveInnerTimeoutMs(manifestHook);
-  const canonicalTarget = normalizedComparisonPath(targetPath);
-  const capsByCanonicalTarget = new Map([
-    [normalizedComparisonPath(join(trustedPluginRoot, 'scripts', 'keyword-detector.mjs')), 8000],
-    [normalizedComparisonPath(join(trustedPluginRoot, 'scripts', 'skill-injector.mjs')), 12000],
-  ]);
-  const capMs = capsByCanonicalTarget.get(canonicalTarget);
+  const capMs = TRUSTED_WORKER_HOOKS.get(basename(targetPath))?.timeoutCapMs;
   return capMs ? Math.min(calculatedTimeoutMs, capMs) : calculatedTimeoutMs;
 }
 
@@ -234,12 +238,14 @@ function resolveWorkerTarget(resolution, extraArgs) {
     const canonicalTarget = normalizedComparisonPath(resolution.targetPath);
     if (!isContainedBy(canonicalRoot, canonicalTarget)) return null;
 
-    const expectedTargets = ['keyword-detector.mjs', 'skill-injector.mjs']
-      .map(script => normalizedComparisonPath(join(trustedRoot, 'scripts', script)));
-    if (!expectedTargets.includes(canonicalTarget)) return null;
+    const scriptName = basename(resolution.targetPath);
+    const trustedHook = TRUSTED_WORKER_HOOKS.get(scriptName);
+    if (!trustedHook) return null;
+    const expectedTarget = normalizedComparisonPath(join(trustedRoot, 'scripts', scriptName));
+    if (canonicalTarget !== expectedTarget) return null;
 
     const manifestHook = resolveHookTimeoutMsFromRoot(trustedRoot, resolution.targetPath, []);
-    if (manifestHook?.event !== 'UserPromptSubmit') return null;
+    if (manifestHook?.event !== trustedHook.event) return null;
     return manifestHook;
   } catch {
     return null;
@@ -896,7 +902,7 @@ if (require.main === module) {
       const extraArgs = process.argv.slice(3);
       const workerManifestHook = resolveWorkerTarget(resolution, extraArgs);
       if (workerManifestHook) {
-        const workerTimeoutMs = resolveTrustedPromptWorkerTimeoutMs(resolution.targetPath, workerManifestHook, resolution.trustedPluginRoot);
+        const workerTimeoutMs = resolveTrustedWorkerTimeoutMs(resolution.targetPath, workerManifestHook);
         runWorker(resolution.targetPath, workerManifestHook, workerTimeoutMs).then(status => {
           process.exitCode = status;
         });
@@ -921,7 +927,7 @@ if (require.main === module) {
 
 module.exports = {
   resolveInnerTimeoutMs,
-  resolveTrustedPromptWorkerTimeoutMs,
+  resolveTrustedWorkerTimeoutMs,
   resolveWorkerTarget,
   resolveHookTimeoutMs,
   resolveGenericTimeoutMs,

@@ -15,7 +15,6 @@ import {
   ensureOmcDir,
   resolveStateWorkingDirectory,
   isSensitiveStateLocation,
-  getGitTopLevel,
   probeGitTopLevel,
   resolveSessionStatePath,
   ensureSessionStateDir,
@@ -214,7 +213,7 @@ function listSessionIdsUnderOmcRoot(omcRoot: string): string[] {
 function getConvergedOmcRoots(root: string): string[] {
   const canonicalRoot = getOmcRoot(root);
   if (process.env.OMC_STATE_DIR) return [canonicalRoot];
-  if (!getGitTopLevel(root)) return [canonicalRoot];
+  if (probeGitTopLevel(root).status !== 'ok') return [canonicalRoot];
 
   const roots = new Set<string>([canonicalRoot]);
   roots.add(join(root, OmcPaths.ROOT));
@@ -477,7 +476,7 @@ function getLegacyStateFileCandidates(mode: StateToolMode, root: string): string
     getStatePath(mode, root),
     join(getOmcRoot(root), `${normalizedName}.json`),
   ];
-  if (mode === 'autopilot' && getGitTopLevel(root)) candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
+  if (mode === 'autopilot' && probeGitTopLevel(root).status === 'ok') candidates.push(join(homedir(), '.omc', 'state', 'autopilot-state.json'));
 
   return [...new Set(candidates)];
 }
@@ -529,7 +528,7 @@ function shouldCheckWorkingDirectoryLocalState(root: string): boolean {
   // Non-git state uses a canonical user/central root. Do not probe or mutate
   // `{workingDirectory}/.omc` implicitly; legacy recovery requires an explicit
   // migration path so unrelated directories cannot be swept together.
-  if (!getGitTopLevel(root)) return false;
+  if (probeGitTopLevel(root).status !== 'ok') return false;
   return getWorkingDirectoryLocalOmcRoot(root) !== getOmcRoot(root);
 }
 

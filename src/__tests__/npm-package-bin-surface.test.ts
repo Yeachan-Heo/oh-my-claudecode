@@ -375,6 +375,7 @@ describe("npm package bin surface regression", () => {
     expect(source.match(/windowsHide/g)).toHaveLength(7);
     expect(packedDist).not.toContain("execSync(");
     expect(packedDist.match(/windowsHide: true/g)).toHaveLength(7);
+    expect(packedDist).toContain("gitTopLevelCacheMap");
   });
 
   it("packs the complete source-controlled plugin and hook payload", () => {

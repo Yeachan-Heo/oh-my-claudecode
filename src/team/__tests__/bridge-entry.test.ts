@@ -33,7 +33,7 @@ describe('bridge-entry security', () => {
   });
 
   it('verifies git worktree', () => {
-    expect(source).toContain('getWorktreeRoot');
+    expect(source).toContain('probeGitTopLevel');
   });
 
   it('validates working directory exists and is a directory', () => {
