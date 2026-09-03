@@ -133,9 +133,18 @@ By default, OMC stores state in `{worktree}/.omc/`. This is lost when worktrees 
 export OMC_STATE_DIR="$HOME/.claude/omc"
 ```
 
+> Shell rc files are not sourced by GUI-launched editors. For those sessions the
+> supported delivery channel is `settings.json` `env` (verified: keys defined only
+> there are present in spawned hook and statusline processes):
+>
+> ```json
+> { "env": { "OMC_STATE_DIR": "/home/you/.claude/omc" } }
+> ```
+> Set it in `~/.claude/settings.json` (or `$CLAUDE_CONFIG_DIR/settings.json`).
+
 This resolves to `~/.claude/omc/{project-identifier}/` where the project identifier uses a hash of the git remote URL (stable across worktrees/clones) with a fallback to the directory path hash for local-only repos.
 
-If both a legacy `{worktree}/.omc/` directory and a centralized directory exist, OMC logs a notice and uses the centralized directory. You can then migrate data from the legacy directory and remove it.
+If both a legacy `{worktree}/.omc/` directory and a centralized directory exist, OMC logs a notice. Processes that inherit `OMC_STATE_DIR` use the centralized directory; misconfigured processes that do not inherit it use the legacy directory and now also warn (legacy branch mirrors the centralized-branch check by discovering `OMC_STATE_DIR` from `settings.json` `env` when present). You can then migrate data from the legacy directory and remove it.
 
 #### OMC state, gitignore, worktree, and workspace contract
 

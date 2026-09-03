@@ -918,6 +918,38 @@ export function validatePath(inputPath: string): void {
 /** Track which dual-dir warnings have been logged to avoid repeated warnings */
 const dualDirWarnings = new Set<string>();
 
+/**
+ * Best-effort discovery of a centralized state location from Claude Code
+ * settings.json `env` blocks. This is used only for the symmetric legacy-branch
+ * warning — it never influences which root is chosen. Shell rc files are not
+ * sourced by GUI-launched editors, but settings.json `env` does reach hook and
+ * statusline subprocesses (verified). If discovery fails the legacy branch
+ * simply stays silent for this pair, the same as before.
+ */
+function discoverCentralizedDirFromSettings(): string | null {
+  const candidates: string[] = [];
+  try {
+    candidates.push(join(getClaudeConfigDir(), 'settings.json'));
+  } catch { /* ignore */ }
+  // Project-local settings override the user one — check both.
+  // Best-effort: try cwd-adjacent .claude/settings.json even if worktreeRoot varies.
+  try {
+    const cw = process.cwd();
+    candidates.push(join(cw, '.claude', 'settings.json'));
+    candidates.push(join(cw, '.claude', 'settings.local.json'));
+  } catch { /* ignore */ }
+  for (const p of candidates) {
+    try {
+      const raw = readFileSync(p, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const env = parsed?.env as Record<string, unknown> | undefined;
+      const val = env?.OMC_STATE_DIR;
+      if (typeof val === 'string' && val.trim()) return val.trim();
+    } catch { /* malformed or missing — ignore */ }
+  }
+  return null;
+}
+
 /** Track which workspace anchors have already had sibling-scan warnings emitted (once per process) */
 const siblingRetrofitWarned = new Set<string>();
 
@@ -1154,6 +1186,32 @@ export function getOmcRoot(worktreeRoot?: string): string {
   // share the same .omc/ at the marker location.
   const workspaceAnchor = findWorkspaceRoot(worktreeRoot);
   if (workspaceAnchor && !isSensitiveStateLocation(workspaceAnchor)) {
+    // Symmetric diagnostic: the legacy branch was previously silent.
+    // If a centralized sibling already exists (best-effort discovery via
+    // settings.json `env`), warn so the misconfigured half is visible.
+    try {
+      const legacyPathW = join(workspaceAnchor, OmcPaths.ROOT);
+      const discoveredCentral = discoverCentralizedDirFromSettings();
+      if (discoveredCentral) {
+        const wsCfg = readWorkspaceMarkerConfig(workspaceAnchor);
+        let projectIdW: string;
+        if (wsCfg.id && typeof wsCfg.id === 'string' && wsCfg.id.trim()) {
+          const safeId = wsCfg.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+          projectIdW = `${safeId}-${createHash('sha256').update(safeId).digest('hex').slice(0, 16)}`;
+        } else {
+          projectIdW = `${basename(workspaceAnchor).replace(/[^a-zA-Z0-9_-]/g, '_')}-${createHash('sha256').update(workspaceAnchor).digest('hex').slice(0, 16)}`;
+        }
+        const centralizedPathW = join(discoveredCentral, projectIdW);
+        const warningKeyW = `${legacyPathW}:${centralizedPathW}`;
+        if (!dualDirWarnings.has(warningKeyW) && existsSync(legacyPathW) && existsSync(centralizedPathW)) {
+          dualDirWarnings.add(warningKeyW);
+          console.warn(
+            `[omc] Both legacy state dir (${legacyPathW}) and centralized state dir (${centralizedPathW}) exist. ` +
+              `Using legacy dir (OMC_STATE_DIR not set in this process). Set OMC_STATE_DIR via settings.json env to use centralized dir consistently.`
+          );
+        }
+      }
+    } catch { /* best-effort diagnostic only — never break resolution */ }
     return join(workspaceAnchor, OmcPaths.ROOT);
   }
 
@@ -1161,6 +1219,25 @@ export function getOmcRoot(worktreeRoot?: string): string {
   if (!getGitTopLevel(root)) {
     return join(resolveNonGitStateAnchor(root), OmcPaths.ROOT);
   }
+  // Symmetric diagnostic for git-anchored projects: the legacy branch was
+  // previously silent. If a centralized sibling already exists (discoverable
+  // via settings.json `env`), warn so the misconfigured half is visible.
+  try {
+    const legacyPath = join(root, OmcPaths.ROOT);
+    const discoveredCentral = discoverCentralizedDirFromSettings();
+    if (discoveredCentral) {
+      const projectId = getProjectIdentifier(root);
+      const centralizedPath = join(discoveredCentral, projectId);
+      const warningKey = `${legacyPath}:${centralizedPath}`;
+      if (!dualDirWarnings.has(warningKey) && existsSync(legacyPath) && existsSync(centralizedPath)) {
+        dualDirWarnings.add(warningKey);
+        console.warn(
+          `[omc] Both legacy state dir (${legacyPath}) and centralized state dir (${centralizedPath}) exist. ` +
+            `Using legacy dir (OMC_STATE_DIR not set in this process). Set OMC_STATE_DIR via settings.json env to use centralized dir consistently.`
+        );
+      }
+    }
+  } catch { /* best-effort diagnostic only */ }
   return join(root, OmcPaths.ROOT);
 }
 
