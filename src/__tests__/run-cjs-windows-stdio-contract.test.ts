@@ -442,20 +442,37 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
 
   it('fail-opens when the protocol stdout consumer closes early', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-stdio-closed-out-'));
+    let runner: ReturnType<typeof spawn> | undefined;
     try {
+      const readyFile = join(directory, 'hook-ready');
+      const goFile = join(directory, 'hook-go');
       const fixture = join(directory, 'write-hook.cjs');
-      writeFileSync(fixture, 'process.stdout.write("OUT-BYTES"); process.stderr.write("ERR-BYTES");');
-      const runner = spawn(process.execPath, [RUN_CJS_PATH, fixture], {
+      writeFileSync(fixture, `
+const { existsSync, writeFileSync } = require('node:fs');
+writeFileSync(process.env.OMC_READY_FILE, 'ready');
+const writeOutput = () => {
+  if (!existsSync(process.env.OMC_GO_FILE)) return setTimeout(writeOutput, 1);
+  process.stdout.write('OUT-BYTES');
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(pause, 0, 0, 25);
+  process.stderr.write('ERR-BYTES');
+};
+writeOutput();
+`);
+      const child = runner = spawn(process.execPath, [RUN_CJS_PATH, fixture], {
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, OMC_READY_FILE: readyFile, OMC_GO_FILE: goFile },
         windowsHide: true,
       });
       let stderr = '';
-      runner.stderr.setEncoding('utf8');
-      runner.stderr.on('data', chunk => { stderr += chunk; });
-      runner.stdout.destroy();
+      child.stderr!.setEncoding('utf8');
+      child.stderr!.on('data', chunk => { stderr += chunk; });
+      await waitForFile(readyFile);
+      child.stdout!.destroy();
+      writeFileSync(goFile, 'go');
       const code = await new Promise<number | null>((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('runner hung after stdout consumer close')), 5000);
-        runner.once('exit', status => {
+        child.once('exit', status => {
           clearTimeout(timer);
           resolve(status);
         });
@@ -464,6 +481,7 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
       expect(stderr).toContain('ERR-BYTES');
       expect(stderr).not.toMatch(/EPIPE/);
     } finally {
+      try { runner?.kill('SIGKILL'); } catch { /* already gone */ }
       rmSync(directory, { recursive: true, force: true });
     }
   });
@@ -495,6 +513,50 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it('bounds cleanup when a hook survives the closed stdout channel', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-stdio-closed-out-survivor-'));
+    let runner: ReturnType<typeof spawn> | undefined;
+    try {
+      const readyFile = join(directory, 'hook-ready');
+      const goFile = join(directory, 'hook-go');
+      const pluginRoot = join(directory, 'plugin');
+      const target = writePluginHook(pluginRoot, 'surviving-hook.cjs', `
+const { existsSync, writeFileSync } = require('node:fs');
+process.stdout.on('error', () => {});
+writeFileSync(process.env.OMC_READY_FILE, 'ready');
+const start = () => {
+  if (!existsSync(process.env.OMC_GO_FILE)) return setTimeout(start, 1);
+  process.stdout.write('OUT-BYTES');
+  setInterval(() => {}, 1e9);
+};
+start();
+`, 5);
+      const startedAt = Date.now();
+      const child = runner = spawn(process.execPath, [RUN_CJS_PATH, target], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot, OMC_READY_FILE: readyFile, OMC_GO_FILE: goFile },
+        windowsHide: true,
+      });
+      child.stderr!.resume();
+      await waitForFile(readyFile);
+      child.stdout!.destroy();
+      writeFileSync(goFile, 'go');
+      const code = await new Promise<number | null>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('runner waited for the inner timeout after stdout close')), 1500);
+        child.once('exit', status => {
+          clearTimeout(timer);
+          resolve(status);
+        });
+      });
+      expect(code).toBe(0);
+      expect(Date.now() - startedAt).toBeLessThan(1500);
+    } finally {
+      try { runner?.kill('SIGKILL'); } catch { /* already gone */ }
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it('fail-opens a drain-aware noisy stdout hook when the consumer closes early', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-stdio-drain-out-'));
     try {

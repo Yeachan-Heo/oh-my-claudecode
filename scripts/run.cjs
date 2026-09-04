@@ -411,6 +411,7 @@ function createProtocolSink(hooks = {}) {
   const discarded = { stdout: false, stderr: false };
   const closedDest = { stdout: false, stderr: false };
   const bindings = { stdout: [], stderr: [] };
+  const discardedSources = { stdout: [], stderr: [] };
   let installed = false;
   let pendingWrites = 0;
   let uninstallRequested = false;
@@ -433,10 +434,38 @@ function createProtocolSink(hooks = {}) {
     }
   }
 
+  function discardChannel(name) {
+    discarded[name] = true;
+    const snapshot = bindings[name];
+    bindings[name] = [];
+    for (const binding of snapshot) {
+      try { binding.source.unpipe(binding.tap); } catch { /* already unpiped */ }
+      try { binding.tap.unpipe(binding.writer); } catch { /* already unpiped */ }
+      try { binding.tap.destroy(); } catch { /* already destroyed */ }
+      try { binding.writer.destroy(); } catch { /* already destroyed */ }
+      discardedSources[name].push(binding.source);
+      try { binding.source.resume(); } catch { /* already flowing or destroyed */ }
+    }
+  }
+
+  function destroyDiscardedSources() {
+    for (const name of ['stdout', 'stderr']) {
+      const sources = discardedSources[name];
+      discardedSources[name] = [];
+      for (const source of sources) {
+        try { source.destroy(); } catch { /* already destroyed */ }
+      }
+    }
+  }
+
   function handleDestError(name, dest, error) {
     if (discarded[name]) return;
     if (isClosedDestinationError(error)) closedDest[name] = true;
-    teardownChannel(name);
+    // Close only the failed protocol channel first. Keep its child pipe
+    // draining while the sibling channel remains available; reaping here can
+    // race sibling bytes that the hook has not written yet.
+    discardChannel(name);
+    if (typeof hooks.onDestinationClose === 'function') hooks.onDestinationClose(name);
     if (!isClosedDestinationError(error) && name === 'stdout') {
       void write(process.stderr, Buffer.from(`[run.cjs] protocol stream error: ${error.code || error.message}\n`));
     }
@@ -467,6 +496,7 @@ function createProtocolSink(hooks = {}) {
   function abandonOutputs() {
     teardownChannel('stdout');
     teardownChannel('stderr');
+    destroyDiscardedSources();
   }
 
   function closeDestinations() {
@@ -572,7 +602,7 @@ function createProtocolSink(hooks = {}) {
     bind(child.stderr, process.stderr, 'stderr');
   }
 
-  function settleOutputs(timeoutMs, idleMs = PROTOCOL_SOURCE_IDLE_MS) {
+  function settleOutputs(timeoutMs, idleMs = PROTOCOL_SOURCE_IDLE_MS, reapIdleSources = true) {
     const active = [...bindings.stdout, ...bindings.stderr];
     if (active.length === 0) return Promise.resolve(true);
     const deadline = Date.now() + Math.max(1, timeoutMs);
@@ -594,6 +624,7 @@ function createProtocolSink(hooks = {}) {
           finish(true);
           return;
         }
+        if (!reapIdleSources) return;
         const now = Date.now();
         for (const binding of active) {
           if (binding.completed || binding.writer.destroyed) continue;
@@ -694,8 +725,14 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
     reaped = true;
     reapTree(child, childIdentity);
   };
+  let destinationClosed = false;
+  let startClosedDestinationCleanup = () => {};
   const sink = createProtocolSink({
     beforeSourceDestroy: reapOnce,
+    onDestinationClose: () => {
+      destinationClosed = true;
+      startClosedDestinationCleanup();
+    },
   });
   sink.install();
   return new Promise(resolve => {
@@ -703,9 +740,46 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
     let terminal = false;
     let settling = false;
     let timer;
+    let closeCleanupStarted = false;
+    let closeCleanupTimer;
+    const closeGraceMs = Math.min(timeoutMs, WINDOWS_GENERIC_STARTUP_MS + PROTOCOL_STDIO_SETTLE_MS);
+    let detachHandlers = () => {};
     const finish = (status) => {
+      if (closeCleanupTimer) {
+        clearTimeout(closeCleanupTimer);
+        closeCleanupTimer = undefined;
+      }
       sink.uninstall();
       resolve(status);
+    };
+    const finishClosedDestination = () => {
+      if (terminal) return;
+      terminal = true;
+      settling = false;
+      if (closeCleanupTimer) {
+        clearTimeout(closeCleanupTimer);
+        closeCleanupTimer = undefined;
+      }
+      detachHandlers();
+      reapOnce();
+      sink.abandonOutputs();
+      detachProtocolStdio(child);
+      releaseGenericChild(child);
+      finish(0);
+    };
+    startClosedDestinationCleanup = () => {
+      if (closeCleanupStarted || terminal) return;
+      closeCleanupStarted = true;
+      closeCleanupTimer = setTimeout(finishClosedDestination, closeGraceMs);
+      if (settling) return;
+      settling = true;
+      // Do not apply the leaked-descendant idle heuristic while the leader may
+      // still be cold-starting. The close timer provides the bounded fallback;
+      // normal post-exit settling retains the 80ms orphan detection.
+      void sink.settleOutputs(closeGraceMs, PROTOCOL_SOURCE_IDLE_MS, false).then(() => {
+        settling = false;
+        finishClosedDestination();
+      });
     };
     child = spawn(process.execPath, resolveGenericChildCommand(targetPath, extraArgs), {
       stdio: resolveGenericChildStdio(),
@@ -723,7 +797,7 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
     // runner is terminated or cancelled BEFORE the inner timer fires (outer
     // hooks.json timeout, Ctrl-C, parent kill), reap the tree so the detached
     // hook cannot be orphaned — the exact failure class #3493 must not leave open.
-    const detachHandlers = () => {
+    detachHandlers = () => {
       clearTimeout(timer);
       for (const signal of RUNNER_TERMINATION_SIGNALS) process.off(signal, onRunnerSignal);
       process.off('exit', onRunnerExit);
@@ -766,7 +840,7 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
 
     child.once('exit', (code) => {
       if (terminal) return;
-      terminal = true;
+      if (destinationClosed) return;
       settling = true;
       clearTimeout(timer);
       // Drain then close even on a clean hook exit. A detached descendant that
@@ -776,7 +850,13 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
       const remainingProtocolMs = Math.max(1, protocolDeadline - Date.now());
       void sink.settleOutputs(remainingProtocolMs).then((complete) => {
         settling = false;
+        if (terminal) return;
+        if (destinationClosed) {
+          finishClosedDestination();
+          return;
+        }
         detachHandlers();
+        reapOnce();
         if (!complete && require.main === module) {
           sink.closeDestinations();
           releaseGenericChild(child);
