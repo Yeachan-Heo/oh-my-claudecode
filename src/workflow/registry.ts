@@ -191,6 +191,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'launch', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in governed delivery pipeline (spec -> tickets -> frontier); never a default gate.' }),
   entry({ name: 'ask-navigator', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in navigator: charts foggy efforts into decision-ticket maps; never a default gate, never builds.' }),
   entry({ name: 'loft', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in shape-before-steel discipline: throwaway artifacts answer design questions; never a default gate, never lands.' }),
+  entry({ name: 'harbor', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in intake gate for external issues and PRs: verifies claims, drafts dispositions; never a default gate, never merges.' }),
   entry({ name: 'drydock', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in harness scaffold (shipyard keel); never a default gate.' }),
   entry({ name: 'visual-verdict', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in for visual surfaces.' }),
   entry({ name: 'external-context', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in external evidence tool.' }),

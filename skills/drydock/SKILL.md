@@ -83,7 +83,7 @@ Ask the remaining questions only after language is resolved:
 
 - package/tech stack (for standards and design-system seeds)
 - does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
-- issue tracker location (GitHub / GitLab / local `.scratch/`) — consumed by tracker-backed flows (the navigator's map home)
+- issue tracker location (GitHub / GitLab / local `.scratch/`) — consumed by tracker-backed flows (the navigator's map home and the harbor's intake queue)
 
 ### 3. Scaffold (create missing surfaces — seeds render in the document language)
 

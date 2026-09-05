@@ -207,6 +207,7 @@ Workflow Skills:
 - `launch`: Shipyard governed delivery pipeline — spec synthesis, vertical-slice tickets with blocking edges, frontier execution with human checkpoints; opt-in
 - `ask-navigator`: Shipyard navigator — charts foggy efforts into decision-ticket maps on the issue tracker, one ticket per session, then hands a mission brief to launch; opt-in
 - `loft`: Shipyard shape-before-steel discipline — answers a design question prose cannot settle with a throwaway artifact (pure logic module or structurally different UI variants); model-invoked; opt-in
+- `harbor`: Shipyard intake gate — sweeps external issues and PRs, verifies every claim, hands the maintainer a signature docket; agent handles facts, human signs dispositions; opt-in
 - `drydock`: Shipyard harness scaffold — 4-pillar shared environment (Context/Rules/Tools/Standards) across 5 surfaces, with --check drift audit; opt-in
 
 Agent Shortcuts:

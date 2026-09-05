@@ -14,7 +14,7 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (29 Total)](#agents-29-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (37 Total)](#skills-37-total)
+- [Skills (38 Total)](#skills-38-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -881,7 +881,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (37 Total)
+## Skills (38 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -905,6 +905,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `drydock`                 | Shipyard harness scaffold: 4-pillar shared environment, --check drift audit    | `/oh-my-claudecode:drydock`                 |
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
+| `harbor`                  | Shipyard intake gate: verify external issues and PRs, hand a signature docket  | `/oh-my-claudecode:harbor`                  |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
@@ -953,6 +954,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Inte
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
 | `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
+| `/oh-my-claudecode:harbor [sweep\|look at #N\|what's ready?]` | Sweep external issues and PRs, verify claims, hand a signature docket                    |
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
 | `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (5 surfaces); --check audits drift                     |
 | `/oh-my-claudecode:launch <brief\|spec-path> [--serial]` | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |

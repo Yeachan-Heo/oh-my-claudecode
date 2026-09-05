@@ -118,6 +118,7 @@ The map is done when no open tickets remain and **Not yet specified** is empty. 
 ## Scope and non-goals
 
 - No daemon, no mode, no always-on behavior, no runtime state machine: the map is ordinary tracker issues or repo files.
+- Incoming requests that arrive as fog are the harbor's to route: a fuzzy issue handed over by `/oh-my-claudecode:harbor` charts like any loose idea, with the original thread as material.
 - Never mutates Team lifecycle, task statuses, or runtime state; never publishes delivery tickets — vertical-slice build tickets belong to launch's C3, and the navigator must not pre-slice fog into them.
 - Never executes a decision beyond recording it. The one exception is a `task` ticket, which does only what unblocks a decision.
 - The map's Decisions-so-far is an index; a decision lives in exactly one place, its ticket.
