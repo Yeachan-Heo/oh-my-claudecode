@@ -44,14 +44,14 @@ function identities(pids) {
   if (validPids.length === 0) return new Map();
   try {
     const filter = validPids.join(',');
-    const command = `$items=Get-Process -Id ${filter} -ErrorAction SilentlyContinue | Select-Object Id,@{Name='StartTicks';Expression={$_.StartTime.ToUniversalTime().Ticks}}; $items | ConvertTo-Json -Compress`;
+    const command = `$items=Get-Process -Id ${filter} -ErrorAction SilentlyContinue | Select-Object Id,@{Name='StartTicks';Expression={[string]$_.StartTime.ToUniversalTime().Ticks}}; $items | ConvertTo-Json -Compress`;
     const result = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', timeout: 3000, windowsHide: true });
     if (result.status !== 0) return new Map();
     const parsed = JSON.parse(result.stdout?.trim() || 'null');
     const items = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
     return new Map(items
-      .map(item => [Number(item?.Id), String(item?.StartTicks || '')])
-      .filter(([pid, ticks]) => validPids.includes(pid) && /^\d+$/.test(ticks))
+      .map(item => [Number(item?.Id), item?.StartTicks])
+      .filter(([pid, ticks]) => validPids.includes(pid) && typeof ticks === 'string' && /^\d+$/.test(ticks))
       .map(([pid, ticks]) => [pid, `ticks:${ticks}`]));
   } catch { return new Map(); }
 }

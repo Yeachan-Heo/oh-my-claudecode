@@ -744,6 +744,16 @@ OMC Ultrawork = "특수부대 작전 반"
 });
 
 describe('pre-tool-use packaged artifacts', () => {
+  it('keeps Windows cache-occupancy tick parsing string-based in runtime and template helpers', () => {
+    for (const helperPath of [
+      join(packageRoot, 'scripts', 'lib', 'cache-occupancy.mjs'),
+      join(packageRoot, 'templates', 'hooks', 'lib', 'cache-occupancy.mjs'),
+      join(packageRoot, 'src', 'utils', 'cache-occupancy.ts'),
+    ]) {
+      expect(readFileSync(helperPath, 'utf8')).toContain('[string]$_.StartTime.ToUniversalTime().Ticks');
+    }
+  });
+
   it('keeps cache occupancy path identity aligned across template and runtime helpers', async () => {
     const helperPaths = [
       join(packageRoot, 'templates', 'hooks', 'lib', 'cache-occupancy.mjs'),

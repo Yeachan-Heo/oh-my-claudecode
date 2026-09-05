@@ -43,14 +43,15 @@ export function processStartIdentities(pids: number[], exec: typeof execFileSync
   const validPids = [...new Set(pids.filter((pid) => Number.isSafeInteger(pid) && pid > 0))];
   if (validPids.length === 0) return new Map();
   try {
-    const command = `$items=Get-Process -Id ${validPids.join(',')} -ErrorAction SilentlyContinue | Select-Object Id,@{Name='StartTicks';Expression={$_.StartTime.ToUniversalTime().Ticks}}; $items | ConvertTo-Json -Compress`;
+    const command = `$items=Get-Process -Id ${validPids.join(',')} -ErrorAction SilentlyContinue | Select-Object Id,@{Name='StartTicks';Expression={[string]$_.StartTime.ToUniversalTime().Ticks}}; $items | ConvertTo-Json -Compress`;
     const output = exec('powershell', ['-NoProfile', '-NonInteractive', '-Command', command], { encoding: 'utf8', windowsHide: true });
     const parsed: unknown = JSON.parse(output.trim() || 'null');
     const items = Array.isArray(parsed) ? parsed : parsed ? [parsed] : [];
     return new Map(items
-      .map((item) => [Number((item as { Id?: unknown })?.Id), String((item as { StartTicks?: unknown })?.StartTicks || '')] as const)
-      .filter(([pid, ticks]) => validPids.includes(pid) && /^\d+$/.test(ticks))
-      .map(([pid, ticks]) => [pid, `ticks:${ticks}`] as const));
+      .map((item) => [Number((item as { Id?: unknown })?.Id), (item as { StartTicks?: unknown })?.StartTicks] as const)
+      .flatMap(([pid, ticks]) => validPids.includes(pid) && typeof ticks === 'string' && /^\d+$/.test(ticks)
+        ? [[pid, `ticks:${ticks}`] as const]
+        : []));
   } catch {
     return new Map();
   }
