@@ -123,6 +123,7 @@ If both configurations exist, **project-scoped takes precedence** over global:
 | `OMC_DISABLE_MULTIREPO`    | _(unset)_            | Set to `1` to disable workspace-marker resolution and fall back to git-root + cwd resolution order. `OMC_STATE_DIR` is still honoured. See [Rollback / disable multi-repo](#rollback--disable-multi-repo-omc_disable_multirepo) below.                                       |
 | `DISABLE_OMC`              | _(unset)_            | Set to `1` or `true` to disable all OMC hooks |
 | `OMC_SKIP_HOOKS`           | _(unset)_            | Comma-separated list of hook names to skip                                                                                                                                                                                                                                  |
+| `OMC_SESSION_START_CONTEXT_BUDGET` | `6000`       | Character budget shared by everything the SessionStart hook injects (mode restores, notepad Priority Context, root `AGENTS.md`, pending tasks). Raise it when a large `AGENTS.md` arrives truncated; lower it to spend less context. Positive integer; other values fall back to the default |
 
 #### Centralized State with `OMC_STATE_DIR`
 
