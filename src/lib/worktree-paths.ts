@@ -234,6 +234,10 @@ function resolveSuperprojectRoot(cwd: string): string | null {
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
         timeout: 5000,
+        // Force English error text so isDefinitiveNonGitError's stderr match is
+        // locale-independent (localized git output otherwise fails to match
+        // and mis-classifies a plain "not a repository" as a generic failure).
+        env: { ...process.env, LC_ALL: 'C' },
       }).trim();
     } catch (error) {
       completed = depth === 0 && isDefinitiveNonGitError(error);
@@ -622,6 +626,11 @@ function runGitShowToplevel(cwd: string): string {
     stdio: ['pipe', 'pipe', 'pipe'],
     windowsHide: true,
     timeout: 5000,
+    // Force English error text so isNotAGitRepositoryError's stderr match is
+    // locale-independent (localized git output otherwise fails to match and
+    // mis-classifies a plain "not a repository" as probe_failed, which then
+    // fails closed and breaks callers such as the HUD statusline).
+    env: { ...process.env, LC_ALL: 'C' },
   });
 }
 
