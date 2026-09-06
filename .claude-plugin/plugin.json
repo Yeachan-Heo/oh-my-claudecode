@@ -30,6 +30,7 @@
     "./skills/execute/",
     "./skills/external-context/",
     "./skills/graph/",
+    "./skills/harbor/",
     "./skills/hud/",
     "./skills/launch/",
     "./skills/loft/",
