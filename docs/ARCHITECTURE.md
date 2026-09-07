@@ -17,16 +17,16 @@ oh-my-claudecode enables Claude Code to orchestrate specialized agents through a
        │                                │                              │
        ▼                                ▼                              ▼
 ┌─────────────┐              ┌──────────────────┐           ┌─────────────────┐
-│  "ultrawork │              │   CLAUDE.md      │           │ SKILL ACTIVATED │
+│  "execute   │              │   CLAUDE.md      │           │ SKILL ACTIVATED │
 │   refactor  │─────────────▶│   Auto-Routing   │──────────▶│                 │
-│   the API"  │              │                  │           │ ultrawork +     │
+│   the API"  │              │                  │           │ execute +       │
 └─────────────┘              │ Task Type:       │           │ default +       │
                              │  - Implementation│           │ git-master      │
                              │  - Multi-file    │           │                 │
                              │  - Parallel OK   │           │ ┌─────────────┐ │
                              │                  │           │ │ Parallel    │ │
                              │ Skills:          │           │ │ agents      │ │
-                             │  - ultrawork ✓   │           │ │ launched    │ │
+                             │  - execute ✓     │           │ │ launched    │ │
                              │  - default ✓     │           │ └─────────────┘ │
                              │  - git-master ✓  │           │                 │
                              └──────────────────┘           │ ┌─────────────┐ │
@@ -175,7 +175,7 @@ explore --> analyst --> planner --> critic --> executor --> verifier
 
 ### Overview
 
-Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 31 skills total (28 user-invocable + 3 internal/pipeline).
+Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 37 shipped skills.
 
 ### Skill Layers
 
@@ -190,13 +190,13 @@ Skills compose in three layers:
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  ENHANCEMENT LAYER (0-N skills)                              │
-│  ultrawork (parallel) | git-master (commits) | frontend-ui-ux│
+│  team (parallel) | git-master (commits) | frontend-ui-ux│
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  EXECUTION LAYER (primary skill)                             │
-│  default (build) | orchestrate (coordinate) | planner (plan) │
+│  execute (build) | team (coordinate) | omc-plan (plan)      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,16 +204,18 @@ Skills compose in three layers:
 
 Example:
 ```
-Task: "ultrawork: refactor API with proper commits"
-Active skills: ultrawork + default + git-master
+Task: "execute: refactor API with proper commits"
+Active skills: execute + default + git-master
 ```
 
 ### How to Invoke Skills
 
 **Slash commands:**
 ```bash
-/oh-my-claudecode:autopilot build me a todo app
-/oh-my-claudecode:ralph refactor the auth module
+/oh-my-claudecode:omc-plan "plan a todo app"
+/oh-my-claudecode:execute build me a todo app
+/oh-my-claudecode:omc-review [path]
+/oh-my-claudecode:verify [target]
 /oh-my-claudecode:team 3:executor "implement fullstack app"
 ```
 
@@ -221,7 +223,7 @@ Active skills: ultrawork + default + git-master
 ```bash
 autopilot build me a todo app      # activates autopilot
 ralph: refactor the auth module    # activates ralph
-ultrawork implement OAuth          # activates ultrawork
+/oh-my-claudecode:execute implement OAuth  # explicit invocation, not a keyword trigger
 ```
 
 ### Core Workflow Skills
@@ -240,12 +242,12 @@ Repeating loop that does not stop until work is verified complete. The `verifier
 ralph: refactor the authentication module
 ```
 
-#### ultrawork
-Maximum parallelism — launches multiple agents simultaneously.
-- Trigger: `ultrawork`, `ulw`
+#### execute
+Carries an approved task through to working, verified code. Use an explicit invocation; the retired `ultrawork`/`ulw` names are not aliases.
 ```bash
-ultrawork implement user authentication with OAuth
+/oh-my-claudecode:execute implement user authentication with OAuth
 ```
+For coordinated parallel workers, use `/oh-my-claudecode:team` instead.
 
 #### team
 Coordinates N Claude agents with a 5-stage pipeline: `plan → prd → exec → verify → fix`
@@ -253,11 +255,12 @@ Coordinates N Claude agents with a 5-stage pipeline: `plan → prd → exec → 
 /oh-my-claudecode:team 3:executor "implement fullstack todo app"
 ```
 
-#### ccg (Claude-Codex-Gemini)
-Fans out to Codex and Antigravity simultaneously; Claude synthesizes the results. Gemini remains available as an enterprise/API-key fallback when using the legacy Gemini CLI.
-- Trigger: `ccg`, `claude-codex-gemini`
+#### Multi-provider advice with ask + team
+The retired `ccg` workflow is replaced by `/oh-my-claudecode:ask` plus `/oh-my-claudecode:team`: ask the selected providers for independent advice, then use a team to synthesize the results.
 ```bash
-ccg: review this authentication implementation
+/oh-my-claudecode:ask codex "review this authentication implementation"
+/oh-my-claudecode:ask antigravity "review this authentication implementation"
+/oh-my-claudecode:team 2:executor "synthesize the advisor findings"
 ```
 
 #### ralplan
@@ -275,25 +278,23 @@ ralplan this feature
 | `hud` | Status bar configuration | `/oh-my-claudecode:hud` |
 | `omc-setup` | Initial setup wizard | `/oh-my-claudecode:omc-setup` |
 | `omc-doctor` | Diagnose installation | `/oh-my-claudecode:omc-doctor` |
-| `skillify` | Extract reusable skills from session | `/oh-my-claudecode:skillify` (`learner` deprecated alias) |
+| `skillify` | Extract reusable skills from session | `/oh-my-claudecode:skillify` |
 | `skill` | Manage local skills (list/add/remove) | `/oh-my-claudecode:skill` |
 | `trace` | Evidence-driven causal tracing | `/oh-my-claudecode:trace` |
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `deepinit` | Generate hierarchical AGENTS.md | `/oh-my-claudecode:deepinit` |
-| `deep-interview` | Socratic deep interview | `/deep-interview` |
-| `sciomc` | Parallel scientist agent orchestration | `/oh-my-claudecode:sciomc` |
+| `deep-interview` | Socratic deep interview | `/oh-my-claudecode:deep-interview` |
+| `research` | Parallel or focused research | `/oh-my-claudecode:research` |
 | `external-context` | Parallel document-specialist research | `/oh-my-claudecode:external-context` |
 | `ai-slop-cleaner` | Clean AI expression patterns | `/oh-my-claudecode:ai-slop-cleaner` |
-| `writer-memory` | Memory system for writing projects | `/oh-my-claudecode:writer-memory` |
+| `remember` | Save durable session memory | `/oh-my-claudecode:remember` |
 
 ### Magic Keyword Reference
 
 | Keyword | Effect |
 |---------|--------|
-| `ultrawork`, `ulw`, `uw` | Parallel agent orchestration |
 | `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `e2e this` | Autonomous execution pipeline |
 | `ralph`, `don't stop`, `must complete`, `until done` | Loop until verified complete |
-| `ccg`, `claude-codex-gemini` | 3-model orchestration (use `antigravity` workers when using the Antigravity CLI) |
 | `ralplan` | Consensus-based planning |
 | `deep interview`, `ouroboros` | Socratic deep interview |
 | `code review`, `review code` | Comprehensive code review mode |
@@ -305,16 +306,18 @@ ralplan this feature
 | `deslop`, `anti-slop` | AI expression cleanup |
 | `cancelomc`, `stopomc` | Cancel active execution mode |
 
+Canonical execution, planning, review, verification, and team workflows use explicit `/oh-my-claudecode:<registered-name>` invocations. The `team` detector never auto-matches, and `plan this`/`plan the` do not activate a workflow.
+
 ### Keyword Detection Sources
 
 Keywords are processed in two places:
 
 | Source | Role | Customizable |
 |--------|------|--------------|
-| `config.jsonc` `magicKeywords` | 4 categories (ultrawork, search, analyze, ultrathink) | Yes |
-| `keyword-detector` hook | 11+ triggers (autopilot, ralph, ccg, etc.) | No |
+| `config.jsonc` `magicKeywords` | 3 categories (`search`, `analyze`, `ultrathink`) | Yes |
+| `keyword-detector` hook | Built-in workflow and mode triggers | No |
 
-The `autopilot`, `ralph`, and `ccg` triggers are hardcoded in the hook and cannot be changed through config.
+Workflow keywords such as `autopilot`, `ralph`, `ralplan`, and `deep interview` are handled by the keyword-detector hook and cannot be changed through config. Team orchestration and the `omc-plan`/`omc-review` workflows require explicit slash invocations.
 
 ---
 
@@ -359,13 +362,14 @@ Injected pattern meanings:
 | `hook success: Success` | Hook ran normally, continue as planned |
 | `hook additional context: ...` | Additional context information, take note |
 | `[MAGIC KEYWORD: ...]` | Magic keyword detected, execute indicated skill |
-| `The boulder never stops` | ralph/ultrawork mode is active |
+| `The boulder never stops` | ralph/autopilot mode is active |
+
 
 ### Key Hooks
 
 **keyword-detector** — fires on `UserPromptSubmit`. Detects magic keywords in user input and activates the corresponding skill.
 
-**persistent-mode** — fires on `Stop`. When a persistent mode (ralph, ultrawork) is active, prevents Claude from stopping until work is verified complete.
+**persistent-mode** — fires on `Stop`. When a persistent mode (ralph, autopilot, team, or ultragoal) is active, prevents Claude from stopping until work is verified complete.
 
 **pre-compact** — fires on `PreCompact`. Saves critical information (active modes, TODOs, background jobs, and durable plan anchors: PRD/boulder references) to a checkpoint before the context window is compressed. The `SessionStart` hook restores the newest matching checkpoint when `source === "compact"`, so plan detail survives auto-compaction (issue #3730).
 

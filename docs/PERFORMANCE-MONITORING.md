@@ -140,7 +140,7 @@ Replay data is stored at: `.omc/state/agent-replay-{sessionId}.jsonl`
 
 Each line is a JSON event:
 ```json
-{"t":0.0,"agent":"a1b2c3d","agent_type":"executor","event":"agent_start","task":"Implement feature","parent_mode":"ultrawork"}
+{"t":0.0,"agent":"a1b2c3d","agent_type":"executor","event":"agent_start","task":"Implement feature","parent_mode":"team"}
 {"t":5.2,"agent":"a1b2c3d","event":"tool_start","tool":"Read"}
 {"t":5.4,"agent":"a1b2c3d","event":"tool_end","tool":"Read","duration_ms":200,"success":true}
 ```

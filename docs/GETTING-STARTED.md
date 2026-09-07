@@ -27,7 +27,7 @@ OMC ships two surfaces and they are designed to coexist:
 
 | Surface | What you get | Recommended install |
 |---|---|---|
-| **Claude Code plugin** (`oh-my-claudecode@omc`) | In-session skills, agents, hooks, statusline, MCP servers — the `/autopilot`, `/ralph`, `/execute`, `/team` slash commands | Marketplace plugin install (Step 1–2 below) |
+| **Claude Code plugin** (`oh-my-claudecode@omc`) | In-session skills, agents, hooks, statusline, MCP servers — the `/oh-my-claudecode:autopilot`, `/oh-my-claudecode:ralph`, `/oh-my-claudecode:execute`, and `/oh-my-claudecode:team` slash commands | Marketplace plugin install (Step 1–2 below) |
 | **Terminal CLI** (`omc` binary, package `oh-my-claude-sisyphus`) | Shell commands: `omc setup`, `omc update`, `omc team`, `omc ask`, and a hard-deprecated `omc autoresearch` shim | `npm i -g oh-my-claude-sisyphus@latest` |
 
 Most users want **both**: the plugin for the in-session experience, and the npm CLI for shell-side automation and updates. Running them in parallel is fully supported — `omc update` and `omc setup` are idempotent and detect the plugin install to avoid duplicating in-session skills (#2252).
@@ -69,13 +69,9 @@ Both can be installed at the same time. The CLI auto-detects the plugin install 
 
 ### Step 3: Run initial setup
 
-After installation, enter one of the following in Claude Code:
+After installation, run this in Claude Code:
 
 ```bash
-# Option 1: natural language
-setup omc
-
-# Option 2: skill command
 /oh-my-claudecode:omc-setup
 ```
 
@@ -230,10 +226,11 @@ analyze why this test is failing
 deepsearch for files that handle authentication
 
 # Simple implementation
-ultrawork add a health check endpoint
+/oh-my-claudecode:execute add a health check endpoint
+
 ```
 
-These keywords invoke a single appropriate agent directly, without running the full pipeline.
+The analysis and search examples use keyword shortcuts; use the explicit execute invocation for implementation.
 
 ### Next steps
 
@@ -283,7 +280,6 @@ Defaults → User config (~/.config/claude-omc/config.jsonc)
 
   // Magic keyword customization
   "magicKeywords": {
-    "ultrawork": ["ultrawork", "ulw", "uw"],
     "search": ["search", "find", "locate"],
     "analyze": ["analyze", "investigate", "examine"],
     "ultrathink": ["ultrathink", "think", "reason"]
@@ -361,14 +357,11 @@ You can change the AI model used by each agent:
 
 ### Customizing magic keywords
 
-You can change keywords in four categories via the `magicKeywords` section of `config.jsonc`:
+You can change keywords in three categories via the `magicKeywords` section of `config.jsonc`:
 
 ```jsonc
 {
   "magicKeywords": {
-    // Triggers parallel execution mode
-    "ultrawork": ["ultrawork", "ulw", "parallel"],
-
     // Triggers codebase search mode
     "search": ["search", "find", "locate", "grep"],
 
@@ -381,7 +374,7 @@ You can change keywords in four categories via the `magicKeywords` section of `c
 }
 ```
 
-> ℹ️ **Note:** The `magicKeywords` section in `config.jsonc` only allows customizing four categories: `ultrawork`, `search`, `analyze`, and `ultrathink`. Keywords such as `autopilot`, `ralph`, and `ccg` are hardcoded in the keyword-detector hook and cannot be changed via config files.
+> ℹ️ **Note:** The `magicKeywords` section in `config.jsonc` only allows customizing three categories: `search`, `analyze`, and `ultrathink`. Workflow keywords such as `autopilot`, `ralph`, `ralplan`, and `deep interview` are handled by the keyword-detector hook and cannot be changed through this config section.
 
 ### Model routing configuration
 
