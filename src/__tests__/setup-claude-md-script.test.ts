@@ -1436,6 +1436,73 @@ describe('setup-claude-md.sh stale CLAUDE_PLUGIN_ROOT resolution', () => {
     expect(installed).toContain('<!-- OMC:VERSION:4.9.0 -->');
     expect(installed).not.toContain('<!-- OMC:VERSION:4.8.2 -->');
   });
+  it('succeeds when the launcher path is a repair-plugin-cache compat symlink to the latest version (issue #3980)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-3980-symlink-launcher-'));
+    tempRoots.push(root);
+
+    const cacheBase = join(root, '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+    const oldVersion = join(cacheBase, '4.8.2');
+    const newVersion = join(cacheBase, '4.9.0');
+    const projectRoot = join(root, 'project');
+    const homeRoot = join(root, 'home');
+
+    // Real latest version dir with the full setup surface.
+    mkdirSync(join(newVersion, 'docs'), { recursive: true });
+    writeFileSync(
+      join(newVersion, 'docs', 'CLAUDE.md'),
+      `<!-- OMC:START -->\n<!-- OMC:VERSION:4.9.0 -->\n\n# New\n<!-- OMC:END -->\n`,
+    );
+    installSetupSurface(newVersion);
+    buildCoordinatorFixture(newVersion, readFileSync(join(newVersion, 'docs', 'CLAUDE.md'), 'utf-8'), '4.9.0');
+
+    // Post-repair state: repair-plugin-cache.mjs replaces the stale version
+    // dir with a symlink fallback to the latest version.
+    symlinkSync('4.9.0', oldVersion, 'dir');
+
+    // Registry still records the compat path, as left by the repair.
+    mkdirSync(join(homeRoot, '.claude', 'plugins'), { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({
+        'oh-my-claudecode@omc': [
+          {
+            installPath: oldVersion,
+            version: '4.8.2',
+          },
+        ],
+      }),
+    );
+
+    mkdirSync(projectRoot, { recursive: true });
+    mkdirSync(join(homeRoot, '.claude'), { recursive: true });
+    writeFileSync(
+      join(homeRoot, '.claude', 'settings.json'),
+      JSON.stringify({ plugins: ['oh-my-claudecode'] }),
+    );
+
+    // Launch through the symlinked compat path, like a session whose plugin
+    // root is the stale version dir after cache repair.
+    const result = spawnSync(
+      'bash',
+      [join(oldVersion, 'scripts', 'setup-claude-md.sh'), 'local'],
+      {
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          HOME: homeRoot,
+          CLAUDE_CONFIG_DIR: join(homeRoot, '.claude'),
+        },
+        encoding: 'utf-8',
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain('must not be a symbolic link');
+
+    const installed = readFileSync(join(projectRoot, '.claude', 'CLAUDE.md'), 'utf-8');
+    expect(installed).toContain('<!-- OMC:VERSION:4.9.0 -->');
+    expect(installed).not.toContain('<!-- OMC:VERSION:4.8.2 -->');
+  });
 describe('setup-claude-md.sh Volta shim + re-exec loop regression (issue #3743)', () => {
   // Reporter topology: the script runs from a non-cache checkout whose cache
   // base holds no valid semver sibling, installed_plugins.json records an
