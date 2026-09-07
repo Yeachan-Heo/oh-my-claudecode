@@ -212,6 +212,27 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     return { teamRoot, outputFile, taskPath };
   }
 
+  it('keeps a configured role provider authoritative instead of changing to its fallback', async () => {
+    const { resolveTaskAssignment } = await import('../runtime-v2.js');
+    const assignment = resolveTaskAssignment(
+      { subject: 'Review PR', description: 'Inspect the implementation', role: 'executor' },
+      {
+        executor: {
+          primary: { provider: 'gemini', model: 'gemini-2.5-pro', agent: 'executor' },
+          fallback: { provider: 'claude', model: 'sonnet', agent: 'executor' },
+        },
+      } as any,
+      { executor: { provider: 'gemini' } } as any,
+      'claude',
+    );
+
+    expect(assignment).toMatchObject({
+      agentType: 'gemini',
+      model: 'gemini-2.5-pro',
+      role: 'executor',
+    });
+  });
+
   it('approve verdict transitions task to completed and renames verdict file', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-approve-');
     const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });

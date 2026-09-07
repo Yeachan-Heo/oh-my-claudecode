@@ -2,15 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { resolveTaskAssignment } from '../runtime-v2.js';
 import { buildResolvedRoutingSnapshot } from '../stage-router.js';
-import type { CliAgentType } from '../model-contract.js';
 
 const resolvedRouting = buildResolvedRoutingSnapshot({});
-const binaries: Partial<Record<CliAgentType, string>> = {
-  claude: '/usr/bin/claude',
-  gemini: '/usr/bin/gemini',
-  codex: '/usr/bin/codex',
-  antigravity: '/usr/bin/agy',
-};
 
 describe('runtime-v2 explicit provider + role preservation', () => {
   // Regression: `1:antigravity:executor` must launch antigravity, not silently fall
@@ -20,7 +13,6 @@ describe('runtime-v2 explicit provider + role preservation', () => {
       { subject: 'Executor task', description: 'apply the implementation', role: 'executor' },
       resolvedRouting,
       undefined,
-      binaries,
       'antigravity',
     );
     expect(assignment).toEqual({ agentType: 'antigravity', model: '', role: 'executor' });
@@ -31,7 +23,6 @@ describe('runtime-v2 explicit provider + role preservation', () => {
       { subject: 'Review', description: 'review the change', role: 'reviewer' },
       resolvedRouting,
       undefined,
-      binaries,
       'gemini',
     );
     expect(assignment.agentType).toBe('gemini');
@@ -44,7 +35,6 @@ describe('runtime-v2 explicit provider + role preservation', () => {
       { subject: 'Executor task', description: 'apply the implementation', role: 'executor' },
       resolvedRouting,
       undefined,
-      binaries,
       'claude',
     );
     expect(assignment.agentType).toBe('claude');

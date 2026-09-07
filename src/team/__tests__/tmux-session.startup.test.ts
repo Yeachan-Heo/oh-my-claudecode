@@ -543,6 +543,19 @@ describe('worker pane startup safety', () => {
   });
 
   it.each(['codex', 'cursor'] as const)(
+    'does not grant busy grace to a %s trust prompt with interrupt text',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = [
+        'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\nesc to interrupt\nctrl+c to stop\n',
+      ];
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('idle');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
     'classifies an unreadable %s pane as unknown without sending a key',
     async provider => {
       const context = await acceptedContext(provider);

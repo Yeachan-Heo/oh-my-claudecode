@@ -1492,6 +1492,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       let providerGateClosePromise: Promise<boolean> | null = null;
       let providerGateOperationPromise: Promise<boolean> | null = null;
       let providerGateOperationResolve: ((value: boolean) => void) | null = null;
+      let childExitObserved = false;
       let terminateProviderOnGateError: (() => void) | null = null;
       let supervisorTimer: NodeJS.Timeout | undefined;
       let terminationResult: Promise<Awaited<ReturnType<typeof terminateOwnedProcessGroup>>> | null = null;
@@ -1506,13 +1507,24 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         // this listener until the supervisor is reaped is part of the
         // launch-ownership protocol.
         providerGate.on('error', error => {
-          providerGateError ??= error instanceof Error ? error : new Error(String(error));
+          const gateError = error instanceof Error ? error : new Error(String(error));
+          // Once the release callback has succeeded, the provider has taken
+          // ownership of the descriptor. Any later stream error is only a
+          // diagnostic from that handoff; keep owning the event without
+          // converting it into a startup failure or cleanup signal.
+          if (providerGateReleased) return;
+          providerGateError ??= gateError;
           // A failed stream cannot safely be treated as an EOF/no-execution
           // close. Wake a pending end operation so the caller can switch to
           // creation-bound process-group cleanup.
           providerGateOperationResolve?.(false);
           providerGateOperationResolve = null;
-          terminateProviderOnGateError?.();
+          // Node records exitCode/signalCode before emitting `exit`; include
+          // those fields so a listener-order race cannot signal a reaped PID
+          // before this bootstrap's own exit callback runs.
+          if (!childExitObserved && child.exitCode === null && child.signalCode === null) {
+            terminateProviderOnGateError?.();
+          }
         });
       }
       if (process.platform === 'win32' && child.stdout) {
@@ -1564,7 +1576,11 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         resolveCompletion = resolve;
         child.once('exit', async (exitCode, signal) => {
           if (settled) return;
+          childExitObserved = true;
           settled = true;
+          // The child has been reaped. No later gate error may start a
+          // process-group signal; cleanup proof below is observation only.
+          terminateProviderOnGateError = null;
           if (supervisorTimer) clearInterval(supervisorTimer);
           if (process.platform === 'win32') {
             resolveWindowsReady(false);
@@ -1588,15 +1604,6 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           const gateTransportFailed = invocation.providerGateFd !== undefined
             && providerGateError !== null;
           const gateCleanupRequired = gateAborted || gateReleaseFailed || gateTransportFailed;
-          if ((gateReleaseFailed || gateTransportFailed) && launchGroup !== null && terminationResult === null) {
-            terminationResult = terminateOwnedProcessGroup({
-              pid: launchGroup.pid,
-              expectedStartIdentity: launchGroup.processStartIdentity,
-              processGroupId: launchGroup.processGroupId,
-              deadlineAt: new Date(Date.now() + 2_000).toISOString(),
-              force: true,
-            });
-          }
           const groupAbsent = launchGroup !== null
             && await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000);
           // Windows cleanup remains bound to the supervisor/Job completion
@@ -1606,12 +1613,14 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           const cleanupVerified = process.platform === 'win32'
             ? await awaitExternalTerminationCompletion(spec) || await readWorkerLaunchCleanupProof(spec)
             : (launchGroup !== null && groupAbsent) || (gateAborted && launchGroup === null);
+          const terminalExitCode = gateAborted ? null : effectiveExitCode;
+          const terminalSignal = gateAborted ? null : effectiveSignal;
           await atomicWriteJson(`${spec.started_path}.terminal`, {
             ...identityOf(spec), kind: 'worker_launch_provider_terminal',
             outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
             pid: providerPid ?? child.pid ?? null, process_start_identity: providerStartIdentity,
             ...(process.platform !== 'win32' && launchGroup ? { process_group_id: launchGroup.processGroupId } : {}),
-            exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
+            exit_code: terminalExitCode, signal: terminalSignal, written_at: new Date().toISOString(),
           }).catch(() => undefined);
           await invocation.cleanup().catch(() => undefined);
           resolve(gateCleanupRequired
@@ -1672,7 +1681,10 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         }
         return false;
       };
-      terminateProviderOnGateError = () => { void terminateProvider(); };
+      terminateProviderOnGateError = () => {
+        if (childExitObserved) return;
+        void terminateProvider();
+      };
       const closeProviderGate = async (): Promise<boolean> => {
         if (providerGateClosePromise) return providerGateClosePromise;
         if (invocation.providerGateFd === undefined || providerGateReleased) return false;
@@ -1725,7 +1737,12 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
               providerGateError ??= error ?? null;
               providerGateOperationResolve = null;
               const released = providerGateError === null;
-              if (released) providerGateReleased = true;
+              if (released) {
+                providerGateReleased = true;
+                // Do not let a late peer-close event terminate a provider
+                // whose release has already completed successfully.
+                terminateProviderOnGateError = null;
+              }
               resolve(released);
             });
           } catch {

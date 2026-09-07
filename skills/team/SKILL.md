@@ -613,6 +613,12 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 - They run as one-shot autonomous jobs, not persistent teammates
 - The lead manages their lifecycle (spawn, monitor, collect results)
 
+### Cursor/Codex startup evidence timeout
+
+The v2 runtime waits up to 30 seconds for current-attempt task/status evidence. If that is absent, a read-only pane activity probe can grant a busy Cursor/Codex worker one additional 30-second evidence window. An idle, dead, or unverified pane gets only the normal 1-second final recheck. The trigger is never resent, and pane activity alone never counts as successful startup.
+
+The default busy-worker evidence budget is therefore 60 seconds, plus probe and evidence-read overhead (roughly a minute, not a hard 61-second wall-clock limit). Pane creation, readiness, and cleanup add separate time. Startup is serial, so these waits can accumulate per worker. `OMC_TEAM_ENGAGED_PANE_RECHECK_MS` overrides the additional window in milliseconds; positive values are capped at 120000, while invalid or non-positive values retain the default.
+
 ### When to Route Where
 
 | Task Type                        | Best Route                     | Why                                                 |
@@ -954,9 +960,9 @@ OMC_TEAM_ROLE_OVERRIDES='{"critic":{"provider":"codex"},"code-reviewer":{"provid
 
 Precedence: `OMC_TEAM_ROLE_OVERRIDES` > `.claude/omc.jsonc` (project) > `~/.config/claude-omc/config.jsonc` (user) > built-in defaults. Invalid JSON logs a warning and is ignored — env overrides are best-effort and never abort the run.
 
-### Fallback when a CLI is missing
+### Missing CLI preflight
 
-If the CLI for a configured provider is absent from `PATH` at spawn time, `buildLaunchArgs()` throws, the team lead emits a visible team/conversation warning, and the runtime falls back to a deterministic Claude assignment pre-computed by `buildResolvedRoutingSnapshot` (same tier + same agent, `provider: "claude"`) only when the Claude CLI is resolvable. If the Claude CLI is unavailable, no runnable fallback exists: orchestration/startup is unavailable and the warning stays loud rather than claiming a fallback. Probe provider availability with `omc doctor --team-routing`.
+Team startup strictly preflights only providers that are effective for its initial workers, including idle-worker assignments and explicit role routes. A missing, relative, or untrusted binary for a selected provider fails before team state or multiplexer side effects are created. Providers that are merely present in the routing snapshot or declared agent list but are not selected are not probed. Routing is authoritative: the runtime never silently changes a selected role to Claude when its provider is unavailable. Scale-up and worker recovery independently preflight the provider they are about to launch and fail closed if it is unavailable. Probe provider availability with `omc doctor --team-routing`.
 
 ### Stickiness — resolved once, reused everywhere
 

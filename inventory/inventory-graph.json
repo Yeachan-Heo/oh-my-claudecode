@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "9a0a33ac852c111750af80cc8dd4783b9c61452c",
-    "sourceSha256": "f0f63327b4173e60ffa8121f30a19f22a86fa4e3bae370a4f23b62c155d6339e",
+    "head": "b26c25055cdc56165a12920549211afc0cb6542c",
+    "sourceSha256": "2358964b8316010d2d013345c71b4253f368301119f2cb8e9761599cfb749dc8",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "9a0a33ac852c111750af80cc8dd4783b9c61452c",
-  "sourceSha256": "f0f63327b4173e60ffa8121f30a19f22a86fa4e3bae370a4f23b62c155d6339e",
+  "head": "b26c25055cdc56165a12920549211afc0cb6542c",
+  "sourceSha256": "2358964b8316010d2d013345c71b4253f368301119f2cb8e9761599cfb749dc8",
   "counts": {
     "public": {
       "skills": 38,
@@ -70025,11 +70025,6 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.cursor-routing.test.ts",
-        "to": "src/team/model-contract.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.cursor-routing.test.ts",
         "to": "src/team/runtime-v2.ts",
         "kind": "imports"
       },
@@ -70100,11 +70095,6 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.explicit-provider-routing.test.ts",
-        "to": "src/team/model-contract.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.explicit-provider-routing.test.ts",
         "to": "src/team/runtime-v2.ts",
         "kind": "imports"
       },
@@ -70151,6 +70141,11 @@
       {
         "from": "src/team/__tests__/runtime-v2.gemini-preflight.test.ts",
         "to": "src/team/runtime-v2.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.gemini-preflight.test.ts",
+        "to": "src/team/types.ts",
         "kind": "imports"
       },
       {
@@ -73472,6 +73467,11 @@
         "from": "src/team/runtime-v2.ts",
         "to": "src/team/tmux-session.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/runtime-v2.ts",
+        "to": "src/team/types.ts",
+        "kind": "imports"
       },
       {
         "from": "src/team/runtime-v2.ts",
@@ -77692,10 +77692,10 @@
     "stats": {
       "nodeCount": 6903,
       "edgeCount": 7369,
-      "importEdgeCount": 6066,
+      "importEdgeCount": 6068,
       "registerEdgeCount": 59
     }
   },
   "inventorySha256": "96b61cb5df14663620165d68dbccea8b03c6757c289db671e8a2be1356240e0e",
-  "manifestSha256": "b36c49788f4360d6d930547c914ee4e072bb44cf4a13b1891cae2ff96e553dc7"
+  "manifestSha256": "d482f08eb37c9bee0e351071e5984c5c798f7cda50346ee93760d57da3eb1ed9"
 }

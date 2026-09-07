@@ -639,11 +639,15 @@ describe('worker launch acknowledgement', () => {
           outcome: string;
           cleanup_verified: boolean;
           pid: number;
+          exit_code: number | null;
+          signal: string | null;
         };
         expect(terminal).toMatchObject({
           kind: 'worker_launch_provider_terminal',
           outcome: 'exit',
           cleanup_verified: true,
+          exit_code: null,
+          signal: null,
         });
         expect(Number.isSafeInteger(terminal.pid)).toBe(true);
         expect(() => process.kill(-terminal.pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
@@ -719,6 +723,254 @@ describe('worker launch acknowledgement', () => {
         .toThrow(expect.objectContaining({ code: 'ESRCH' }));
     } finally {
       await bootstrap?.catch(() => undefined);
+      vi.doUnmock('node:child_process');
+      vi.resetModules();
+    }
+  });
+
+  it.runIf(process.platform !== 'win32')('ignores a late EPIPE emitted after release before start publication', async () => {
+    vi.resetModules();
+    const actualChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    type GateSocket = {
+      end: (chunk?: unknown, callback?: (error?: Error | null) => void) => unknown;
+      emit: (event: string, error: unknown) => boolean;
+    };
+    const lateError = Object.assign(new Error('provider gate peer closed'), { code: 'EPIPE' });
+    const spawnMock = vi.fn((
+      command: string,
+      args: string[],
+      options: Parameters<typeof spawn>[2],
+    ) => {
+      const child = actualChildProcess.spawn(command, args, options);
+      child.once('spawn', () => {
+        const gate = child.stdio[3] as unknown as GateSocket | null;
+        if (!gate) return;
+        const nativeEnd = gate.end.bind(gate);
+        gate.end = ((chunk?: unknown, callback?: (error?: Error | null) => void) => {
+          if (chunk !== 'release\n') return nativeEnd(chunk, callback);
+          return nativeEnd(chunk, (error?: Error | null) => {
+            callback?.(error);
+            // The release callback has succeeded, but this peer-close event
+            // arrives before the bootstrap publishes provider-started.
+            gate.emit('error', lateError);
+          });
+        }) as GateSocket['end'];
+      });
+      return child;
+    });
+    vi.doMock('node:child_process', () => ({ ...actualChildProcess, spawn: spawnMock }));
+    let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    const launchAttempt = await attempt();
+    const providerMarker = join(cwd, 'late-release-before-start-provider-ran');
+    const providerStop = join(cwd, 'late-release-before-start-provider-stop');
+    try {
+      const workerLaunch = await import('../worker-launch-ack.js');
+      bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', [
+          "const fs=require('node:fs')",
+          `fs.writeFileSync(${JSON.stringify(providerMarker)},'ran')`,
+          `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStop)})){clearInterval(timer);process.exit(0)}},5)`,
+        ].join(';')],
+        cwd,
+      ));
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toBe(true);
+      await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
+      await writeFile(providerStop, 'stop', 'utf8');
+      await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+    } finally {
+      await writeFile(providerStop, 'stop', 'utf8').catch(() => undefined);
+      await terminateWorkerLaunchProvider(launchAttempt, 2_000).catch(() => false);
+      await bootstrap?.catch(() => undefined);
+      vi.doUnmock('node:child_process');
+      vi.resetModules();
+    }
+  });
+
+  it.runIf(process.platform !== 'win32').each(['EPIPE', 'ECONNRESET', 'ERR_PROVIDER_GATE_LATE'] as const)(
+    'ignores a post-release %s after provider-start publication',
+    async errorCode => {
+      vi.resetModules();
+      const actualChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      type GateSocket = {
+        end: (chunk?: unknown, callback?: (error?: Error | null) => void) => unknown;
+        emit: (event: string, error: unknown) => boolean;
+      };
+      const lateError = Object.assign(new Error(`provider gate ${errorCode}`), { code: errorCode });
+      let emitLateGateError: (() => void) | undefined;
+      const spawnMock = vi.fn((
+        command: string,
+        args: string[],
+        options: Parameters<typeof spawn>[2],
+      ) => {
+        const child = actualChildProcess.spawn(command, args, options);
+        child.once('spawn', () => {
+          const gate = child.stdio[3] as unknown as GateSocket | null;
+          if (!gate) return;
+          const nativeEnd = gate.end.bind(gate);
+          gate.end = ((chunk?: unknown, callback?: (error?: Error | null) => void) => {
+            if (chunk !== 'release\n') return nativeEnd(chunk, callback);
+            return nativeEnd(chunk, (error?: Error | null) => {
+              callback?.(error);
+              emitLateGateError = () => { gate.emit('error', lateError); };
+            });
+          }) as GateSocket['end'];
+        });
+        return child;
+      });
+      vi.doMock('node:child_process', () => ({ ...actualChildProcess, spawn: spawnMock }));
+      let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+      const launchAttempt = await attempt();
+      const providerStop = join(cwd, `late-release-${errorCode}-provider-stop`);
+      try {
+        const workerLaunch = await import('../worker-launch-ack.js');
+        bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+          launchAttempt,
+          [process.execPath, '-e', [
+            "const fs=require('node:fs')",
+            `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStop)})){clearInterval(timer);process.exit(0)}},5)`,
+          ].join(';')],
+          cwd,
+          { releaseAfterSpawn: true },
+        ));
+        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+          timeoutMs: 2_000,
+          pollIntervalMs: 5,
+        })).resolves.toEqual({ ok: true });
+        await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+          timeoutMs: 2_000,
+          pollIntervalMs: 5,
+        })).resolves.toBe(true);
+        expect(emitLateGateError).toBeDefined();
+        emitLateGateError!();
+        await new Promise<void>(resolve => setImmediate(resolve));
+        const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8')) as { pid: number };
+        expect(isProcessAlive(started.pid)).toBe(true);
+        await writeFile(providerStop, 'stop', 'utf8');
+        await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+      } finally {
+        await writeFile(providerStop, 'stop', 'utf8').catch(() => undefined);
+        await terminateWorkerLaunchProvider(launchAttempt, 2_000).catch(() => false);
+        await bootstrap?.catch(() => undefined);
+        vi.doUnmock('node:child_process');
+        vi.resetModules();
+      }
+    },
+  );
+
+  it.runIf(process.platform !== 'win32')('does not signal a still-present group after supervisor exit', async () => {
+    vi.resetModules();
+    const actualChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    const dynamicProcessUtils = await import('../../platform/process-utils.js');
+    type GateSocket = {
+      end: (chunk?: unknown, callback?: (error?: Error | null) => void) => unknown;
+      emit: (event: string, error: unknown) => boolean;
+    };
+    const lateError = Object.assign(new Error('provider gate peer closed'), { code: 'EPIPE' });
+    let killSupervisor: (() => void) | undefined;
+    let supervisorExited = false;
+    let exitMetadataObserved = false;
+    let postReapTerminateCalls = 0;
+    const nativeTerminate = dynamicProcessUtils.terminateOwnedProcessGroup;
+    const terminateSpy = vi.spyOn(dynamicProcessUtils, 'terminateOwnedProcessGroup').mockImplementation(async options => {
+      if (supervisorExited) {
+        postReapTerminateCalls++;
+        return 'already-dead';
+      }
+      return nativeTerminate(options);
+    });
+    const spawnMock = vi.fn((
+      command: string,
+      args: string[],
+      options: Parameters<typeof spawn>[2],
+    ) => {
+      const child = actualChildProcess.spawn(command, args, options);
+      let gate: GateSocket | null = null;
+      // Attach before returning so this observer runs before the bootstrap's
+      // exit listener. Node has populated signalCode by this point.
+      child.once('exit', () => {
+        supervisorExited = true;
+        exitMetadataObserved = child.exitCode === null && child.signalCode === 'SIGKILL';
+        gate?.emit('error', lateError);
+      });
+      child.once('spawn', () => {
+        gate = child.stdio[3] as unknown as GateSocket | null;
+        if (!gate) return;
+        const nativeEnd = gate.end.bind(gate);
+        gate.end = ((chunk?: unknown, callback?: (error?: Error | null) => void) => {
+          if (chunk !== 'release\n') return nativeEnd(chunk, callback);
+          // Let the provider execute, but withhold the release callback. This
+          // is a real failed release with a live descendant when the supervisor
+          // is killed below.
+          const result = nativeEnd(chunk);
+          killSupervisor = () => { child.kill('SIGKILL'); };
+          return result;
+        }) as GateSocket['end'];
+      });
+      return child;
+    });
+    vi.doMock('node:child_process', () => ({ ...actualChildProcess, spawn: spawnMock }));
+    let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    const launchAttempt = await attempt();
+    let providerPid: number | undefined;
+    let providerGroupId: number | undefined;
+    try {
+      const workerLaunch = await import('../worker-launch-ack.js');
+      bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', [
+          "const fs=require('node:fs')",
+          `fs.writeFileSync(${JSON.stringify(join(cwd, 'failed-release-provider.json'))},JSON.stringify({pid:process.pid}))`,
+          'setInterval(()=>{},1000)',
+        ].join(';')],
+        cwd,
+        { releaseAfterSpawn: true },
+      ));
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      const providerMarker = join(cwd, 'failed-release-provider.json');
+      await vi.waitFor(async () => {
+        const record = JSON.parse(await readFile(providerMarker, 'utf8')) as { pid: number };
+        expect(record.pid).toBeGreaterThan(0);
+        providerPid = record.pid;
+      }, { timeout: 2_000, interval: 5 });
+      const ownedGroup = dynamicProcessUtils.captureOwnedProcessGroup(providerPid!);
+      expect(ownedGroup).not.toBeNull();
+      providerGroupId = ownedGroup!.processGroupId;
+      expect(killSupervisor).toBeDefined();
+      killSupervisor!();
+      await expect(bootstrap).resolves.toEqual({ outcome: 'provider_cleanup_unverified' });
+      expect(exitMetadataObserved).toBe(true);
+      expect(postReapTerminateCalls).toBe(0);
+      expect(() => process.kill(-providerGroupId!, 0)).not.toThrow();
+      await vi.waitFor(async () => {
+        const terminal = JSON.parse(await readFile(`${launchAttempt.startedPath}.terminal`, 'utf8'));
+        expect(terminal).toMatchObject({
+          outcome: 'cleanup_unverified',
+          cleanup_verified: false,
+          signal: 'SIGKILL',
+        });
+      }, { timeout: 2_000, interval: 5 });
+      expect(postReapTerminateCalls).toBe(0);
+    } finally {
+      killSupervisor?.();
+      if (!providerGroupId && providerPid) {
+        providerGroupId = dynamicProcessUtils.captureOwnedProcessGroup(providerPid)?.processGroupId;
+      }
+      if (providerGroupId) {
+        try { process.kill(-providerGroupId, 'SIGKILL'); } catch { /* group already absent */ }
+      }
+      await bootstrap?.catch(() => undefined);
+      terminateSpy.mockRestore();
       vi.doUnmock('node:child_process');
       vi.resetModules();
     }
