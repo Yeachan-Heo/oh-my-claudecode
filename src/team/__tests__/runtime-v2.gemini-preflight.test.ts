@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { ABSOLUTE_MAX_WORKERS } from '../types.js';
@@ -180,6 +180,25 @@ describe('runtime-v2 Gemini preflight routing', () => {
       .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('rejects an empty provider list before provider preflight or state creation', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'invalid-agent-types-'));
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'invalid-agent-types-team',
+      workerCount: 1,
+      agentTypes: [],
+      tasks: [],
+      cwd,
+      pluginConfig: {},
+    })).rejects.toThrow('Invalid agent types. Expected at least one provider.');
+
+    expect(modelContractMocks.resolveValidatedBinaryPath).not.toHaveBeenCalled();
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    await expect(import('node:fs/promises').then(fs => fs.access(join(cwd, '.omc', 'state', 'team', 'invalid-agent-types-team'))))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it.each([false, true])('starts a gemini-only team without unused claude (has task: %s)', async (hasTask) => {
     cwd = await mkdtemp(join(tmpdir(), 'unused-default-claude-'));
     modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
@@ -292,6 +311,84 @@ describe('runtime-v2 Gemini preflight routing', () => {
     })).resolves.toBeDefined();
     expect(modelContractMocks.resolveValidatedBinaryPath).toHaveBeenCalledExactlyOnceWith('codex');
     expect(mocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2]).toMatchObject({ provider: 'codex' });
+  });
+
+  it('uses the prepared Cursor reviewer launch for the real worker overlay', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'cursor-reviewer-overlay-'));
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+      if (agentType === 'claude') throw new Error('CLI binary not found: claude');
+      return `/usr/bin/${agentType ?? 'claude'}`;
+    });
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'cursor-reviewer-overlay-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Review code', description: 'Review code without editing files', role: 'code-reviewer' }],
+      cwd,
+      pluginConfig: {
+        team: { roleRouting: { 'code-reviewer': { provider: 'cursor' } } },
+      } as any,
+    });
+
+    expect(modelContractMocks.resolveValidatedBinaryPath).toHaveBeenCalledExactlyOnceWith('cursor');
+    expect(modelContractMocks.resolveValidatedBinaryPath).not.toHaveBeenCalledWith('claude');
+    expect(mocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2]).toMatchObject({ provider: 'cursor' });
+    expect(runtime.config).toMatchObject({
+      max_workers: ABSOLUTE_MAX_WORKERS,
+      workers: [{ worker_cli: 'cursor', role: 'code-reviewer', launch_descriptor: { provider: 'cursor' } }],
+    });
+
+    const overlay = await readFile(join(
+      runtime.config.team_state_root!,
+      'workers',
+      'worker-1',
+      'AGENTS.md',
+    ), 'utf8');
+    expect(overlay).toContain('### Agent-Type Guidance (cursor)');
+    expect(overlay).toMatch(/do NOT run .*transition-task-status.*reviewer assignment/);
+    expect(overlay).toContain('## BEFORE YOU YIELD THE REVIEW TURN');
+    expect(overlay).not.toMatch(/## BEFORE YOU EXIT[\s\S]*transition-task-status/);
+  });
+
+  it('uses the prepared Claude launch when routing replaces a declared Cursor provider', async () => {
+    cwd = await mkdtemp(join(tmpdir(), 'claude-reviewer-overlay-'));
+    modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType?: string) => {
+      if (agentType === 'cursor') throw new Error('CLI binary not found: cursor');
+      return `/usr/bin/${agentType ?? 'claude'}`;
+    });
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'claude-reviewer-overlay-team',
+      workerCount: 1,
+      agentTypes: ['cursor'],
+      tasks: [{ subject: 'Review code', description: 'Review code without editing files', role: 'code-reviewer' }],
+      cwd,
+      pluginConfig: {
+        team: { roleRouting: { 'code-reviewer': { provider: 'claude' } } },
+      } as any,
+    });
+
+    expect(modelContractMocks.resolveValidatedBinaryPath).toHaveBeenCalledExactlyOnceWith('claude');
+    expect(modelContractMocks.resolveValidatedBinaryPath).not.toHaveBeenCalledWith('cursor');
+    expect(mocks.spawnOwnedWorkerInPane.mock.calls[0]?.[2]).toMatchObject({ provider: 'claude' });
+    expect(runtime.config.workers[0]).toMatchObject({
+      worker_cli: 'claude',
+      role: 'code-reviewer',
+      launch_descriptor: { provider: 'claude' },
+    });
+
+    const overlay = await readFile(join(
+      runtime.config.team_state_root!,
+      'workers',
+      'worker-1',
+      'AGENTS.md',
+    ), 'utf8');
+    expect(overlay).toContain('### Agent-Type Guidance (claude)');
+    expect(overlay).not.toContain('### Agent-Type Guidance (cursor)');
+    expect(overlay).toMatch(/## BEFORE YOU EXIT[\s\S]*transition-task-status/);
   });
 
   it.each([

@@ -3214,6 +3214,9 @@ async function rollbackStartedNativeWorktreeStartup(args: {
  * NO watchdog polling — the leader drives monitoring via monitorTeamV2().
  */
 export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntimeV2> {
+  if (!Array.isArray(config.agentTypes) || config.agentTypes.length === 0) {
+    throw new Error('Invalid agent types. Expected at least one provider.');
+  }
   if (!Number.isInteger(config.workerCount) || config.workerCount < 1 || config.workerCount > ABSOLUTE_MAX_WORKERS) {
     throw new Error(`Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`);
   }
@@ -3416,19 +3419,19 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   try {
     for (let i = 0; i < workerNames.length; i++) {
       const wName = workerNames[i];
-      const agentType = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as CliAgentType;
+      const prepared = preparedLaunches.get(wName);
+      if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
       await ensureWorkerStateDir(sanitized, wName, leaderCwd);
       const overlayPath = await writeWorkerOverlay({
-        teamName: sanitized, workerName: wName, agentType,
+        teamName: sanitized, workerName: wName, agentType: prepared.agentType,
         tasks: config.tasks.map((t, idx) => ({
           id: String(idx + 1), subject: t.subject, description: t.description,
         })),
         cwd: leaderCwd,
         ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
         instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
-        ...(preparedLaunches.get(wName)?.role && shouldInjectContract(
-          preparedLaunches.get(wName)!.role!, preparedLaunches.get(wName)!.agentType,
-        ) ? { reviewerRole: true } : {}),
+        ...(prepared.role && shouldInjectContract(prepared.role, prepared.agentType)
+          ? { reviewerRole: true } : {}),
       });
       const worktree = workerWorktrees.get(wName);
       if (worktree) {
@@ -3490,7 +3493,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     policy: DEFAULT_TEAM_TRANSPORT_POLICY,
     governance: DEFAULT_TEAM_GOVERNANCE,
     worker_count: config.workerCount,
-    max_workers: 20,
+    max_workers: ABSOLUTE_MAX_WORKERS,
     workers: workersInfo,
     created_at: new Date().toISOString(),
     tmux_session: sessionName,

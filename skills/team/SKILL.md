@@ -962,11 +962,11 @@ Precedence: `OMC_TEAM_ROLE_OVERRIDES` > `.claude/omc.jsonc` (project) > `~/.conf
 
 ### Missing CLI preflight
 
-Team startup strictly preflights only providers that are effective for its initial workers, including idle-worker assignments and explicit role routes. A missing, relative, or untrusted binary for a selected provider fails before team state or multiplexer side effects are created. Providers that are merely present in the routing snapshot or declared agent list but are not selected are not probed. Routing is authoritative: the runtime never silently changes a selected role to Claude when its provider is unavailable. Scale-up and worker recovery independently preflight the provider they are about to launch and fail closed if it is unavailable. Probe provider availability with `omc doctor --team-routing`.
+Team startup strictly preflights only providers that are effective for its initial workers, including idle-worker assignments and explicit role routes. Role routing selects each worker's initial startup provider; later tasks delivered to an existing pane keep that worker's provider and are not re-routed by task role. A missing, relative, or untrusted binary for a selected provider fails before team state or multiplexer side effects are created. Providers that are merely present in the routing snapshot or declared agent list, including providers for roles never selected for a launch, are not probed. Routing is authoritative: the runtime never silently changes a selected role to Claude when its provider is unavailable. Scale-up and worker recovery independently preflight the provider they are about to launch and fail closed if it is unavailable. Probe provider availability with `omc doctor --team-routing`.
 
 ### Stickiness — resolved once, reused everywhere
 
-Resolved routing is immutable per team. Editing config mid-team-lifetime does not affect running teams; a new `/team` invocation picks up the new mapping. This guarantees that spawn, scale-up, and worker-restart all see identical routing, including across worktree detaches (the snapshot travels with `TeamConfig`).
+Resolved routing is immutable per team. It selects each worker's initial startup assignment; later tasks in an existing pane stay on that worker's provider instead of triggering task-role provider re-routing. Editing config mid-team-lifetime does not affect running teams; a new `/team` invocation picks up the new mapping. Spawn, scale-up, and worker-restart use the same snapshot for the workers they launch, including across worktree detaches (the snapshot travels with `TeamConfig`).
 
 ### Zero-config behavior
 
