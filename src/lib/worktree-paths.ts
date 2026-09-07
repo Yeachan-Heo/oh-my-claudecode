@@ -483,7 +483,39 @@ function isNotAGitRepositoryError(error: unknown): boolean {
     return false;
   }
   const stderr = gitErrorStderr(error);
-  return err.status === 128 && /not a git repository/i.test(stderr);
+  // A bare repository (the `git worktree` container layout: a bare `.git` at the
+  // container root with sibling linked worktrees) answers `rev-parse
+  // --show-toplevel` with exit 128 and "this operation must be run in a work
+  // tree" rather than "not a git repository". That is a benign absence of a work
+  // tree, not an unreadable git, so it must classify as not_a_repository instead
+  // of probe_failed — otherwise every fail-closed caller (HUD statusline, state
+  // resolution) throws from a legitimate container root (#3990).
+  return err.status === 128 && /(?:not a git repository|must be run in a work tree)/i.test(stderr);
+}
+
+/**
+ * True when `cwd` is inside a bare repository.
+ *
+ * A bare container legitimately carries a `.git` file (`gitdir: ./.bare`), so
+ * the `.git`-present guards below cannot treat its presence as evidence of a
+ * broken or foreign repository. Any failure to answer is reported as not bare,
+ * which keeps those guards fail-closed by default.
+ */
+function isBareRepository(cwd: string): boolean {
+  try {
+    return (
+      execFileSync('git', ['rev-parse', '--is-bare-repository'], {
+        cwd,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+        timeout: 5000,
+        env: { ...process.env, LC_ALL: 'C' },
+      }).trim() === 'true'
+    );
+  } catch {
+    return false;
+  }
 }
 
 function formatGitProbeDetail(error: unknown): string {
@@ -2239,7 +2271,7 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory?: strin
     } catch {
       cwdReal = process.cwd();
     }
-    if (existsSync(join(cwdReal, '.git'))) {
+    if (existsSync(join(cwdReal, '.git')) && !isBareRepository(cwdReal)) {
       throw new Error(formatGitProbeFailedMessage(callerLabel));
     }
     trustedRoot = process.cwd();
@@ -2294,7 +2326,11 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory?: strin
     throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
   }
 
-  if (providedProbe.status === 'not_a_repository' && existsSync(join(resolvedReal, '.git'))) {
+  if (
+    providedProbe.status === 'not_a_repository' &&
+    existsSync(join(resolvedReal, '.git')) &&
+    !isBareRepository(resolvedReal)
+  ) {
     throw new Error(formatGitProbeFailedMessage(workingDirectory));
   }
 
