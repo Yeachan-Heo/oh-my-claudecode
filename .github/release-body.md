@@ -1,34 +1,39 @@
-# oh-my-claudecode v5.3.0: Remote Approvals, Shipyard Navigation, and Windows Reliability
+# oh-my-claudecode v5.4.0: add harbor —, make the SessionStart
 
 ## Release Notes
 
-Release with **5 new features**, **3 bug fixes** across **8 merged PRs**.
+Release with **2 new features**, **6 bug fixes**, **1 other change** across **9 merged PRs**.
 
 ### Highlights
 
-- **perf: batch Windows cache occupancy identity checks** (#3973)
-- **feat(skills): add loft — shipyard shape-before-steel discipline (opt-in, model-invoked)** (#3970)
-- **feat(skills): add ask-navigator — shipyard navigator for foggy efforts (opt-in)** (#3969)
-- **perf(hud): scope git path memoization per render** (#3961)
-- **feat(graph): remote approval gates + workspace checkpoints/rollback** (#3960)
+- **feat(skills): add harbor — shipyard intake gate for external issues and PRs (opt-in)** (#3982)
+- **feat(hooks): make the SessionStart context budget configurable via OMC_SESSION_START_CONTEXT_BUDGET** (#3981)
 
 ### New Features
 
-- **perf: batch Windows cache occupancy identity checks** (#3973)
-- **feat(skills): add loft — shipyard shape-before-steel discipline (opt-in, model-invoked)** (#3970)
-- **feat(skills): add ask-navigator — shipyard navigator for foggy efforts (opt-in)** (#3969)
-- **perf(hud): scope git path memoization per render** (#3961)
-- **feat(graph): remote approval gates + workspace checkpoints/rollback** (#3960)
+- **feat(skills): add harbor — shipyard intake gate for external issues and PRs (opt-in)** (#3982)
+- **feat(hooks): make the SessionStart context budget configurable via OMC_SESSION_START_CONTEXT_BUDGET** (#3981)
 
 ### Bug Fixes
 
-- **fix: preserve Windows occupancy tick precision** (#3974)
-- **fix(hooks): preserve stderr after early protocol stdout close** (#3964)
-- **fix(hooks): omit unsupported PostToolUse suppressOutput** (#3958)
+- **fix(worktree-paths): treat a bare repository as a work-tree-less repo, not a failed probe** (#3991)
+- **fix(release): cover version-coupled surfaces in the release runbook** (#3989)
+- **fix(inventory): re-anchor inventory-graph provenance to the current dev head** (#3987)
+- **fix(setup): continue with canonical plugin root when launcher path is a compat symlink** (#3986)
+- **fix(worktree-paths): force LC_ALL=C on git probe spawns** (#3979)
+- **fix(team): bound active Cursor/Codex startup grace and verify provider cleanup**
+
+### Documentation
+
+- **docs: replace retired mode guidance with the shipped 5.3.0 surface** (#3985)
+
+### Other Changes
+
+- **chore(inventory): refresh graph for startup grace changes**
 
 ### Stats
 
-- **8 PRs merged** | **5 new features** | **3 bug fixes** | **0 security/hardening improvements** | **0 other changes**
+- **9 PRs merged** | **2 new features** | **6 bug fixes** | **0 security/hardening improvements** | **1 other change**
 
 ### Install / Update
 
@@ -37,7 +42,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.3.0
+npm install -g oh-my-claude-sisyphus@5.4.0
 ```
 
 **Claude Code plugin:**
@@ -46,12 +51,4 @@ npm install -g oh-my-claude-sisyphus@5.3.0
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.2.0...v5.3.0
-
-**Release tracking and owner authorization:** #3975
-
-## Contributors
-
-Thank you to all contributors who made this release possible!
-
-@cuijieshan3-collab @pangpang778 @Yeachan-Heo
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.3.0...v5.4.0
