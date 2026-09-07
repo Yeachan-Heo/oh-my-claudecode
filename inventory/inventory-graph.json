@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0c3d113b0f27c11f2b9d9af6d606f3987d75c3fb",
-    "sourceSha256": "1abdcff843a775bb147ee1ae29dd0d2de853e1d1a464ffcbc280813c7d56d7e8",
+    "head": "6576a16d8dfdee3f18a1aed009e1c91e27e69615",
+    "sourceSha256": "d982824c5daabdc66d00264deca0e74ddceb44993f0f2a010e942254ba668f4a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0c3d113b0f27c11f2b9d9af6d606f3987d75c3fb",
-  "sourceSha256": "1abdcff843a775bb147ee1ae29dd0d2de853e1d1a464ffcbc280813c7d56d7e8",
+  "head": "6576a16d8dfdee3f18a1aed009e1c91e27e69615",
+  "sourceSha256": "d982824c5daabdc66d00264deca0e74ddceb44993f0f2a010e942254ba668f4a",
   "counts": {
     "public": {
-      "skills": 37,
+      "skills": 38,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 86
+      "total": 87
     },
     "internal": {
       "hookFiles": 295,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 37,
+    "skills": 38,
     "commands": 21,
     "hookFiles": 295,
     "workflows": 8,
@@ -62,6 +62,7 @@
       "execute",
       "external-context",
       "graph",
+      "harbor",
       "hud",
       "launch",
       "loft",
@@ -33550,6 +33551,11 @@
         "path": "skills/graph/SKILL.md"
       },
       {
+        "id": "skills/harbor/SKILL.md",
+        "kind": "skill",
+        "path": "skills/harbor/SKILL.md"
+      },
+      {
         "id": "skills/hud/SKILL.md",
         "kind": "skill",
         "path": "skills/hud/SKILL.md"
@@ -40660,6 +40666,11 @@
         "path": "tests/benchmark-diagnostics.test.ts"
       },
       {
+        "id": "tests/fixtures/harbor/scenarios.json",
+        "kind": "other",
+        "path": "tests/fixtures/harbor/scenarios.json"
+      },
+      {
         "id": "tests/fixtures/multirepo/drift-fixture.mjs",
         "kind": "other",
         "path": "tests/fixtures/multirepo/drift-fixture.mjs"
@@ -40698,6 +40709,11 @@
         "id": "tests/fixtures/typescript-pnpm/tsconfig.json",
         "kind": "other",
         "path": "tests/fixtures/typescript-pnpm/tsconfig.json"
+      },
+      {
+        "id": "tests/harbor-scenarios.test.ts",
+        "kind": "other",
+        "path": "tests/harbor-scenarios.test.ts"
       },
       {
         "id": "tests/integration/concurrent-project-memory.test.ts",
@@ -43103,6 +43119,11 @@
       },
       {
         "from": "skills/graph/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/harbor/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -77162,6 +77183,16 @@
         "kind": "imports"
       },
       {
+        "from": "tests/harbor-scenarios.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/harbor-scenarios.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/concurrent-project-memory.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -77623,12 +77654,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6899,
-      "edgeCount": 7360,
-      "importEdgeCount": 6058,
-      "registerEdgeCount": 58
+      "nodeCount": 6902,
+      "edgeCount": 7363,
+      "importEdgeCount": 6060,
+      "registerEdgeCount": 59
     }
   },
-  "inventorySha256": "122797c89fe2040473c5962be4ff080f6ff5e58a3557b70241ac5674f39f9fec",
-  "manifestSha256": "6e320c6fe3c141e07333baf058a7c92dd024097e73fd94b06c3bcf8cacc06cee"
+  "inventorySha256": "4c67bc33ca843df1016f67d372b4b76fb320f462d959b442c8b2efffc091eea6",
+  "manifestSha256": "edf61e4e5d711c7a379c491f935437f269baf7880d076eefc9ff72ac685c1fe1"
 }
