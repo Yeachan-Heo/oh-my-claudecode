@@ -372,9 +372,9 @@ describe("npm package bin surface regression", () => {
     expect(
       packedPackageFixture.files.has("dist/lib/worktree-paths.js"),
     ).toBe(true);
-    expect(source.match(/windowsHide/g)).toHaveLength(7);
+    expect(source.match(/windowsHide/g)).toHaveLength(8);
     expect(packedDist).not.toContain("execSync(");
-    expect(packedDist.match(/windowsHide: true/g)).toHaveLength(7);
+    expect(packedDist.match(/windowsHide: true/g)).toHaveLength(8);
     expect(packedDist).toContain("gitTopLevelCacheMap");
   });
 
