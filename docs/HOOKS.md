@@ -47,7 +47,7 @@ Handle orchestration, keyword detection, and mode persistence.
 | Hook | Description |
 |------|-------------|
 | keyword-detector | Detects magic keywords and activates corresponding skills |
-| persistent-mode | Enforces continuation when an execution mode (ralph, autopilot, ultrawork, etc.) is active — injects reinforcement messages on Stop to prevent premature halting |
+| persistent-mode | Enforces continuation when an active execution mode (ralph, autopilot, ultragoal, or team) is active — injects reinforcement messages on Stop to prevent premature halting |
 
 ### Context Management Hooks
 
@@ -101,7 +101,7 @@ Fires when the user submits a prompt.
 | `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 30s outer host fuse; 8s trusted Worker limit |
 | `skill-injector.mjs` | Injects skill prompts | 30s outer host fuse; 12s trusted Worker limit |
 
-Runs on all user input (`matcher: "*"`). When the keyword detector finds keywords like "ultrawork", "ralph", or "autopilot", it injects the corresponding skill invocation instruction via `additionalContext`.
+Runs on all user input (`matcher: "*"`). When the keyword detector finds supported keywords such as "ralph", "autopilot", "ralplan", or "deep interview", it injects the corresponding skill invocation instruction via `additionalContext`.
 
 The 30s timeout is a per-command outer host fuse that includes launcher startup before `run.cjs`. Once the runner reaches its exact trusted Worker branch, `keyword-detector.mjs` is limited to 8s and `skill-injector.mjs` to 12s; lower manifest limits are never extended. A command that never reaches `run.cjs` can consume its full 30s outer fuse. The host schedules the two commands externally, so this does not claim an aggregate prompt latency.
 
@@ -201,7 +201,7 @@ Fires when Claude finishes a response.
 |--------|------|---------|
 | `context-guard-stop.mjs` | Monitors context usage | 5s |
 | `workflow-drift-guard.mjs` | Blocks narrow structured-question and fake-completion drift | 3s |
-| `persistent-mode.mjs` | Maintains active mode state (ralph, ultrawork, etc.) | 10s |
+| `persistent-mode.mjs` | Maintains active mode state (ralph, autopilot, ultragoal, team, etc.) | 10s |
 | `code-simplifier.mjs` | Auto-simplifies modified files (opt-in) | 5s |
 
 `persistent-mode` injects a reinforcement message like "The boulder never stops" when an active execution mode is running, prompting continued work. A fresh unconfirmed ultragoal is exempt while Claude `/goal` confirmation is pending; confirmed runs remain fail-closed.
@@ -228,11 +228,11 @@ Detects magic keywords in user prompts and invokes the corresponding skill.
 
 - **Event**: UserPromptSubmit
 - **Behavior**: Sanitizes the prompt (removes code blocks, URLs, file paths) then matches keyword patterns
-- **Conflict resolution**: cancel has highest priority, then ralph > autopilot > ultrawork
+- **Conflict resolution**: cancel has highest priority, then ralph > autopilot > ralplan
+
 - **Safety**: Disabled inside team workers to prevent infinite spawning
 
 See the [Magic Keywords](#magic-keywords) section for the full keyword list.
-
 
 #### workflow-drift-guard
 
@@ -263,16 +263,17 @@ Ambiguous-regex and malformed-ternary uncertainty is bounded to the current phys
 
 #### persistent-mode
 
-Enforces continuation when an execution mode is active. This is the hook that keeps skills like autopilot, ralph, and ultrawork running.
+Enforces continuation when an execution mode is active. This is the hook that keeps skills like autopilot and ralph running.
 
 - **Event**: Stop
-- **Behavior**: Checks `.omc/state/` for active mode state files. If any mode (ralph, ultragoal, autopilot, ultrawork, team, pipeline) is active, injects a reinforcement message to prevent Claude from stopping.
+- **Behavior**: Checks `.omc/state/` for active mode state files. If any mode (ralph, ultragoal, autopilot, or team) is active, injects a reinforcement message to prevent Claude from stopping.
+
 - **Reinforcement message**: "The boulder never stops" — prompts Claude to continue working
 - **Staleness check**: States older than 2 hours are treated as inactive to prevent stale state from blocking new sessions
 - **Notification**: Sends Discord/Telegram/Slack notification on first stop (if configured)
 - **Cancel**: Use `/oh-my-claudecode:cancel` to deactivate modes
 
-> **Note**: autopilot, ralph, and ultrawork are **skills** (invoked via keyword-detector), not hooks. The persistent-mode hook is what enforces their continuation by blocking the Stop event.
+> **Note**: autopilot and ralph are **skills** (invoked via keyword-detector), while team and ultragoal are explicit workflow invocations. The persistent-mode hook is what enforces their continuation by blocking the Stop event.
 
 ### Mode State Management
 
@@ -282,7 +283,7 @@ Execution mode hooks manage state files in the `.omc/state/` directory.
 {
   "active": true,
   "started_at": "2025-01-15T10:30:00Z",
-  "prompt": "ultrawork implement auth",
+  "prompt": "ralph implement auth",
   "session_id": "abc123",
   "project_path": "/path/to/project",
   "iteration": 0,
@@ -292,8 +293,9 @@ Execution mode hooks manage state files in the `.omc/state/` directory.
 }
 ```
 
-When a session ID is present, state is stored in session scope under `.omc/state/sessions/{sessionId}/`.
+The `linked_ultrawork` field is a legacy state field retained for compatibility with retired state files; it is not an invocable mode.
 
+When a session ID is present, state is stored in session scope under `.omc/state/sessions/{sessionId}/`.
 
 #### ultragoal-state.json lifecycle
 
@@ -318,7 +320,8 @@ or
 /oh-my-claudecode:cancel
 ```
 
-`cancel` removes state files for all active modes: ralph, autopilot, ultrawork, and any others.
+`cancel` removes state files for all active modes, including ralph, autopilot, ultragoal, and team, and clears legacy retired-mode artifacts when present.
+
 
 ---
 
@@ -416,8 +419,6 @@ These keywords invoke a skill and create a state file.
 | `cancelomc`, `stopomc` | cancel | Cancels all active modes |
 | `ralph`, `don't stop`, `must complete`, `until done` | ralph | Persistent execution until verification completes |
 | `autopilot`, `build me`, `I want a`, `handle it all`, `end to end`, `auto-pilot`, `full auto`, `fullsend`, `e2e this` | autopilot | Fully autonomous execution |
-| `ultrawork`, `ulw`, `uw` | ultrawork | Maximum parallel execution |
-| `ccg`, `claude-codex-gemini` | ccg | Claude-Codex-Gemini tri-model orchestration (use `antigravity` workers when using the Antigravity CLI) |
 | `ralplan` | ralplan | Consensus-based iterative planning |
 | `deep interview`, `ouroboros` | deep-interview | Socratic deep interview |
 
@@ -471,17 +472,15 @@ When multiple keywords are detected simultaneously, they resolve by the followin
 cancel  (highest priority, exclusive)
   → ralph
     → autopilot
-      → ultrawork
-        → ccg
-          → ralplan
-            → deep-interview
-              → ai-slop-cleaner
-                → tdd
-                  → code-review
-                    → security-review
-                      → ultrathink
-                        → deepsearch
-                          → analyze
+      → ralplan
+        → deep-interview
+          → ai-slop-cleaner
+            → tdd
+              → code-review
+                → security-review
+                  → ultrathink
+                    → deepsearch
+                      → analyze
 ```
 
 `cancel` is exclusive — it ignores all other matches and only runs the cancel action. All other keywords can be matched together and are processed in priority order.
@@ -495,7 +494,7 @@ cancel  (highest priority, exclusive)
 autopilot: implement user authentication with OAuth
 
 # Parallel execution
-ultrawork write all tests for this module
+/oh-my-claudecode:team 3:executor "write all tests for this module"
 
 # Persistent execution
 ralph refactor this authentication module
@@ -512,7 +511,7 @@ stopomc
 
 ### Note on the `team` Keyword
 
-`team` is not auto-detected. It must be invoked explicitly via the `/team` slash command to prevent infinite spawning.
+`team` is not auto-detected. It must be invoked explicitly via the `/oh-my-claudecode:team` slash command to prevent infinite spawning.
 
 ```
 /oh-my-claudecode:team 3:executor "build a fullstack todo app"

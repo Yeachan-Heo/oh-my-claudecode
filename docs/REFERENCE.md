@@ -2,6 +2,8 @@
 
 Complete reference for oh-my-claudecode. For quick start, see the main [README.md](../README.md).
 
+For v5.3.0, the plugin ships 19 agents, 37 skills, 21 command files, and one configured MCP server exposing exactly 55 tools.
+
 ---
 
 ## Table of Contents
@@ -12,9 +14,9 @@ Complete reference for oh-my-claudecode. For quick start, see the main [README.m
 - [Plugin directory flags](#plugin-directory-flags)
 - [CLI Commands: ask/team/session](#cli-commands-askteamsession)
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
-- [Agents (29 Total)](#agents-29-total)
+- [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (37 Total)](#skills-37-total)
+- [Skills (38 Total)](#skills-38-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -50,7 +52,7 @@ npm i -g oh-my-claude-sisyphus@latest
 omc setup
 ```
 
-The npm package exposes both `oh-my-claudecode` and `omc`; examples prefer `omc` unless troubleshooting needs the long alias. The CLI does not make in-session slash skills available by itself; install the plugin for `/autopilot`, `/ralph`, `/execute`, `/team`, and other interactive skills.
+The npm package exposes both `oh-my-claudecode` and `omc`; examples prefer `omc` unless troubleshooting needs the long alias. The CLI does not make in-session slash skills available by itself; install the plugin for `/oh-my-claudecode:autopilot`, `/oh-my-claudecode:ralph`, `/oh-my-claudecode:execute`, `/oh-my-claudecode:team`, and other interactive skills.
 
 ### Requirements
 
@@ -210,7 +212,7 @@ Resolution order inside `getOmcRoot()`:
 3. `git rev-parse --show-toplevel` (monorepo / single repo).
 4. `process.cwd()` (last resort).
 
-Once a workspace is anchored, multiple Claude Code sessions in different sub-repos can run `/ultragoal`, `/ralph`, `/execute`, `/autopilot` in parallel without bleeding state. For `/ultragoal` specifically, pass `--plan-id <id>` or `--auto-plan-id` on `create-goals` so each session writes to `.omc/ultragoal/plans/{planId}/` instead of the shared `goals.json` — see "ultragoal multi-plan" below. The PARALLEL SESSION WARNING in `session-start.mjs` performs a PID-aware liveness check and no longer suppresses restore when the owner session is dead.
+Once a workspace is anchored, multiple Claude Code sessions in different sub-repos can run `/oh-my-claudecode:ultragoal`, `/oh-my-claudecode:ralph`, `/oh-my-claudecode:execute`, and `/oh-my-claudecode:autopilot` in parallel without bleeding state. For `/oh-my-claudecode:ultragoal` specifically, pass `--plan-id <id>` or `--auto-plan-id` on `create-goals` so each session writes to `.omc/ultragoal/plans/{planId}/` instead of the shared `goals.json` — see "ultragoal multi-plan" below. The PARALLEL SESSION WARNING in `session-start.mjs` performs a PID-aware liveness check and no longer suppresses restore when the owner session is dead.
 
 #### `.omc/handoffs/` shared contract
 
@@ -648,7 +650,7 @@ Use OMC's terminal and library surfaces in non-interactive environments:
 - Run CLI commands that have deterministic exit codes, for example `omc setup`, `omc ask ...`, `omc session search ... --json`, or repo-owned verification scripts such as `npm run sync-metadata:verify`.
 - Provide authentication through runner environment variables (`ANTHROPIC_API_KEY`) or pre-authenticated provider CLIs for `codex`, `gemini`, `antigravity`, `grok`, or `cursor` when using `omc ask` / `omc team`.
 - Keep state explicit for ephemeral runners by setting `OMC_STATE_DIR` when state must survive worktree deletion or checkout replacement.
-- Avoid interactive slash skills (`/autopilot`, `/ralph`, `/execute`, `/deep-interview`, `/team`) in CI jobs; they require an active Claude Code session and user-visible conversation loop.
+- Avoid interactive slash skills (`/oh-my-claudecode:autopilot`, `/oh-my-claudecode:ralph`, `/oh-my-claudecode:execute`, `/oh-my-claudecode:deep-interview`, `/oh-my-claudecode:team`) in CI jobs; they require an active Claude Code session and user-visible conversation loop.
 - OMC does not currently provide a VS Code extension or VS Code-specific automation contract. The documented IDE path is to use Claude Code's own integrations, then install OMC through the Claude Code plugin surface.
 - Programmatic Agent SDK usage is supported through the exported TypeScript helpers and the in-process MCP server helpers in this package; it is a Node.js library surface, not an interactive plugin installer.
 
@@ -723,7 +725,9 @@ Bounded handoff policy:
 2. For larger payloads, pass a short summary plus the descriptor.
 3. Keep durable content in artifact paths such as `.omc/plans/`, `.omc/prompts/`, and related artifact stores rather than embedding full bodies into queue or status records.
 
-## Agents (29 Total)
+## Agents (19 Total)
+
+Model-tier aliases are shown in the table below; the shipped agent catalog contains 19 base agents.
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
@@ -845,7 +849,7 @@ Fail-closed invariants: a malformed ledger entry, an amended original that is st
 
 ## Named autopilot stage profiles (v1)
 
-A named profile is selected only by `/autopilot --workflow <name> <task>`; it is not a dynamic slash command, prompt alias, mode, plugin, filename, or independent state identity. Existing `/autopilot <task>` behavior remains the legacy no-profile path.
+A named profile is selected only by `/oh-my-claudecode:autopilot --workflow <name> <task>`; it is not a dynamic slash command, prompt alias, mode, plugin, filename, or independent state identity. Existing `/oh-my-claudecode:autopilot <task>` behavior remains the legacy no-profile path.
 
 Named profiles require Linux with the `flock` utility in v1. Their authenticated transcript boundary depends on Linux no-follow file-descriptor traversal and their recoverable mutation lock depends on kernel advisory locking; unsupported environments reject explicit `--workflow` activation before state mutation while legacy autopilot remains supported.
 
@@ -881,7 +885,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (37 Total)
+## Skills (38 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -900,11 +904,12 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `cancel-ralph`            | Deprecated compatibility alias for `cancel`                                   | `/oh-my-claudecode:cancel-ralph`            |
 | `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
-| `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/deep-interview`                           |
+| `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/oh-my-claudecode:deep-interview`                |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
 | `drydock`                 | Shipyard harness scaffold: 4-pillar shared environment, --check drift audit    | `/oh-my-claudecode:drydock`                 |
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
+| `harbor`                  | Shipyard intake gate: verify external issues and PRs, hand a signature docket  | `/oh-my-claudecode:harbor`                  |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
@@ -935,7 +940,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 ## Slash Commands
 
-Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Interview is intentionally documented with the short `/deep-interview` path because that path receives OMC's rendered runtime threshold guidance before the interview starts. The skills table above is the full runtime-backed list, including frontmatter aliases; the commands below list shipped command files and direct skill entrypoints. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
+Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The plugin ships 21 command files alongside the 37 skill entrypoints listed above; the commands below list both surfaces. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -949,10 +954,11 @@ Most installed skills are exposed as `/oh-my-claudecode:<skill-name>`. Deep Inte
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
 | `/oh-my-claudecode:compact [note]`                       | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |
-| `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
+| `/oh-my-claudecode:deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
 | `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
+| `/oh-my-claudecode:harbor [sweep\|look at #N\|what's ready?]` | Sweep external issues and PRs, verify claims, hand a signature docket                    |
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
 | `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (5 surfaces); --check audits drift                     |
 | `/oh-my-claudecode:launch <brief\|spec-path> [--serial]` | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |
@@ -992,6 +998,8 @@ handoff: .omc/specs/deep-interview-{slug}.md
 ```
 
 When present, OMC appends a standardized **Skill Pipeline** section to the rendered skill prompt so the current stage, handoff artifact, and explicit next `Skill("oh-my-claudecode:...")` invocation are carried forward consistently.
+
+Pipeline metadata may use on-disk directory keys such as `plan`; invoke the registered workflow as `/oh-my-claudecode:omc-plan` (and use `/oh-my-claudecode:omc-review` for the review workflow).
 
 ### Skills 2.0 Compatibility (MVP)
 
@@ -1381,11 +1389,12 @@ Use Claude Code's plugin management:
 /plugin uninstall oh-my-claudecode@oh-my-claudecode
 ```
 
-Or manually remove the installed files:
+Or remove only files left by an older standalone OMC install:
 
 ```bash
+# Leave Claude Code native commands untouched; OMC uses `omc-plan`/`omc-review`.
 rm ~/.claude/agents/{architect,document-specialist,explore,designer,writer,vision,critic,analyst,executor,qa-tester}.md
-rm ~/.claude/commands/{analyze,autopilot,deepsearch,plan,review,ultrawork}.md
+rm ~/.claude/commands/{analyze,autopilot,deepsearch}.md
 ```
 
 ---

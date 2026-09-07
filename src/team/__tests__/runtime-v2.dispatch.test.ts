@@ -4,8 +4,11 @@ import { join } from 'path';
 import { promisify } from 'util';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
+import { createHash } from 'node:crypto';
 
-import { listDispatchRequests } from '../dispatch-queue.js';
+import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
+import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
+import { absPath, TeamPaths } from '../state-paths.js';
 import {
   getWorkerStartupEvidencePolicy,
   settleStartupEvidence,
@@ -18,15 +21,16 @@ const mocks = vi.hoisted(() => ({
   spawnWorkerInPane: vi.fn(),
   spawnOwnedWorkerInPane: vi.fn(),
   deliverStartupInbox: vi.fn(),
+  probeStartupPaneActivity: vi.fn(),
   retryStartupInboxSubmit: vi.fn(),
   sendToWorker: vi.fn(),
   waitForPaneReady: vi.fn(),
   applyMainVerticalLayout: vi.fn(),
   killWorkerPanes: vi.fn(async () => undefined),
-  killOwnedWorkerPane: vi.fn(async () => {}),
+  killOwnedWorkerPane: vi.fn<(ownership: { paneId: string }) => Promise<void>>(async () => {}),
   killTeamSession: vi.fn(async () => {}),
   resolveSplitPaneWorkerPaneIds: vi.fn(async (_session: string | undefined, paneIds: string[]) => paneIds),
-  getWorkerLiveness: vi.fn(async () => 'dead'),
+  getWorkerLiveness: vi.fn<(paneId: string) => Promise<string>>(async () => 'dead'),
   execFile: vi.fn(),
   spawnSync: vi.fn(() => ({ status: 0 })),
   tmuxExecAsync: vi.fn(),
@@ -43,7 +47,9 @@ const launchMocks = vi.hoisted(() => ({
   terminateWorkerLaunchProvider: vi.fn(async () => true),
   retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
   loadWorkerLaunchAttempt: vi.fn(async () => ({})),
+  loadCurrentWorkerLaunchAttempt: vi.fn(async () => null),
   isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
+  isWorkerLaunchAttemptCurrent: vi.fn(async () => true),
 }));
 
 const mergeMocks = vi.hoisted(() => ({
@@ -132,7 +138,9 @@ vi.mock('../worker-launch-ack.js', async (importOriginal) => {
     terminateWorkerLaunchProvider: launchMocks.terminateWorkerLaunchProvider,
     retireAndCleanupCurrentWorkerLaunchAttempt: launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt,
     loadWorkerLaunchAttempt: launchMocks.loadWorkerLaunchAttempt,
+    loadCurrentWorkerLaunchAttempt: launchMocks.loadCurrentWorkerLaunchAttempt,
     isWorkerLaunchAttemptAccepted: launchMocks.isWorkerLaunchAttemptAccepted,
+    isWorkerLaunchAttemptCurrent: launchMocks.isWorkerLaunchAttemptCurrent,
   };
 });
 
@@ -144,6 +152,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     spawnWorkerInPane: mocks.spawnWorkerInPane,
     spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
     deliverStartupInbox: mocks.deliverStartupInbox,
+    probeStartupPaneActivity: mocks.probeStartupPaneActivity,
     retryStartupInboxSubmit: mocks.retryStartupInboxSubmit,
     sendToWorker: mocks.sendToWorker,
     waitForPaneReady: mocks.waitForPaneReady,
@@ -184,10 +193,33 @@ vi.mock('../worker-commit-cadence.js', () => ({
   uninstallCommitCadence: cadenceMocks.uninstallCommitCadence,
 }));
 
+vi.mock('../../platform/process-utils.js', async importOriginal => ({
+  ...await importOriginal<typeof import('../../platform/process-utils.js')>(),
+  isProcessIdentityLive: async (pid: number, identity: string) =>
+    pid === process.pid && identity === 'fixture-provider-start' ? 'live' : 'unknown',
+}));
+
 describe('runtime v2 startup inbox dispatch', () => {
+  type Deferred<T> = {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: unknown) => void;
+  };
+
   let cwd: string;
   let restoreFixtureEnv: (() => void) | undefined;
+  let startupDeliveryGate: Deferred<void> | undefined;
   const originalCwd = process.cwd();
+
+  function deferred<T>(): Deferred<T> {
+    let resolve!: Deferred<T>['resolve'];
+    let reject!: Deferred<T>['reject'];
+    const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    return { promise, resolve, reject };
+  }
 
   async function mkdtempFixture(prefix: string): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), prefix));
@@ -208,6 +240,163 @@ describe('runtime v2 startup inbox dispatch', () => {
     return root;
   }
 
+  async function flushRealIo(): Promise<void> {
+    await new Promise<void>(resolve => setImmediate(resolve));
+  }
+
+  type RecoveryProvider = 'codex' | 'cursor';
+
+  async function seedOwnerRecoveryFixture(
+    provider: RecoveryProvider,
+    label: string,
+  ): Promise<{ teamName: string; requestId: string; recoveryId: string; correlationKey: string }> {
+    const teamName = 'dispatch-team';
+    const requestId = `owner-${provider}-${label}-request`;
+    const recoveryId = `owner-${provider}-${label}-recovery`;
+    const createdAt = new Date().toISOString();
+    const launchDescriptor = {
+      schema_version: 1,
+      provider,
+      model: null,
+      binary: `/usr/bin/${provider}`,
+      args: [],
+    };
+    const worker = {
+      name: 'worker-1',
+      index: 1,
+      worker_cli: provider,
+      launch_descriptor: launchDescriptor,
+      assigned_tasks: [],
+      pane_id: '%91',
+      working_dir: cwd,
+    };
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    await mkdir(join(configPath, '..'), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      name: teamName,
+      task: 'owner recovery startup settlement',
+      agent_type: provider,
+      worker_launch_mode: 'interactive',
+      worker_count: 1,
+      max_workers: 20,
+      workers: [worker],
+      created_at: createdAt,
+      tmux_session: 'dispatch-session',
+      state_revision: 0,
+      lifecycle_state: 'active',
+      leader_pane_id: '%1',
+      next_task_id: 1,
+      workspace_mode: 'single',
+      worktree_mode: 'disabled',
+      service_descriptor: {
+        schema_version: 1,
+        service_generation: 1,
+        service_attempt_id: 'service-attempt',
+        auto_merge_enabled: false,
+        workspace_root: cwd,
+        cadence_policy: 'disabled',
+      },
+    }), 'utf8');
+    await writeFile(absPath(cwd, TeamPaths.manifest(teamName)), JSON.stringify({
+      schema_version: 2,
+      state_revision: 0,
+      name: teamName,
+      task: 'owner recovery startup settlement',
+      leader: { session_id: 'dispatch-session', worker_id: 'leader-fixed', role: 'leader' },
+      tmux_session: 'dispatch-session',
+      worker_count: 1,
+      workers: [worker],
+      next_task_id: 1,
+      created_at: createdAt,
+    }), 'utf8');
+    reserveRecoveryRequest(cwd, requestId, {
+      operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName,
+      workerName: 'worker-1',
+    }, recoveryId);
+    return {
+      teamName,
+      requestId,
+      recoveryId,
+      correlationKey: `recovery:${recoveryId}:attempt-worker-1`,
+    };
+  }
+
+  function configureOwnerPaneLifecycle(): Set<string> {
+    const deadPanes = new Set(['%91']);
+    launchMocks.loadCurrentWorkerLaunchAttempt.mockResolvedValue(null);
+    launchMocks.isWorkerLaunchAttemptCurrent.mockResolvedValue(true);
+    mocks.getWorkerLiveness.mockImplementation(async (paneId: string) => (
+      deadPanes.has(paneId) ? 'dead' : 'alive'
+    ));
+    mocks.killOwnedWorkerPane.mockImplementation(async (ownership: { paneId: string }) => {
+      deadPanes.add(ownership.paneId);
+    });
+    return deadPanes;
+  }
+
+  type OwnerEvidenceMode = 'current' | 'stale' | 'none' | 'probe-throw';
+
+  function configureOwnerEvidenceProbe(
+    mode: OwnerEvidenceMode,
+    probeGate: Deferred<void>,
+    evidenceGate: Deferred<void>,
+  ): void {
+    mocks.probeStartupPaneActivity.mockImplementation(async (context: {
+      attempt: { attempt_id: string; team_name: string; worker_name: string };
+    }) => {
+      probeGate.resolve();
+      if (mode === 'probe-throw') throw new Error('activity probe failed');
+      if (mode === 'none') return 'busy';
+      setTimeout(() => {
+        void (async () => {
+          const workerDir = absPath(cwd, TeamPaths.workerDir(
+            context.attempt.team_name,
+            context.attempt.worker_name,
+          ));
+          await mkdir(workerDir, { recursive: true });
+          await writeFile(absPath(cwd, TeamPaths.workerStatus(
+            context.attempt.team_name,
+            context.attempt.worker_name,
+          )), JSON.stringify({
+            state: 'working',
+            current_task_id: '1',
+            updated_at: new Date().toISOString(),
+            launch_attempt_id: mode === 'current' ? context.attempt.attempt_id : 'stale-attempt',
+          }), 'utf8');
+        })().then(evidenceGate.resolve, evidenceGate.reject);
+      }, 1_500);
+      return 'busy';
+    });
+  }
+
+  async function seedRecoveryDispatchCheckpoint(
+    fixture: { teamName: string; recoveryId: string; correlationKey: string },
+    status: 'pending' | 'notified' | 'failed',
+  ): Promise<void> {
+    const queued = await enqueueDispatchRequest(fixture.teamName, {
+      kind: 'inbox',
+      to_worker: 'worker-1',
+      worker_index: 1,
+      pane_id: '%2',
+      trigger_message: 'restart checkpoint dispatch',
+      transport_preference: 'transport_direct',
+      fallback_allowed: true,
+      inbox_correlation_key: fixture.correlationKey,
+    }, cwd);
+    if (status !== 'pending') {
+      await transitionDispatchRequest(
+        fixture.teamName,
+        queued.request.request_id,
+        'pending',
+        status,
+        { last_reason: `checkpoint_${status}` },
+        cwd,
+      );
+    }
+  }
+
   it('does not require progress evidence for an idle prompt-mode recovery', () => {
     expect(promptModeRecoveryRequiresProgressEvidence(true, 0)).toBe(false);
     expect(promptModeRecoveryRequiresProgressEvidence(true, 1)).toBe(true);
@@ -215,10 +404,12 @@ describe('runtime v2 startup inbox dispatch', () => {
   });
   beforeEach(() => {
     vi.resetModules();
+    startupDeliveryGate = undefined;
     mocks.createTeamSession.mockReset();
     mocks.spawnWorkerInPane.mockReset();
     mocks.spawnOwnedWorkerInPane.mockReset();
     mocks.deliverStartupInbox.mockReset();
+    mocks.probeStartupPaneActivity.mockReset();
     mocks.retryStartupInboxSubmit.mockReset();
     mocks.sendToWorker.mockReset();
     mocks.waitForPaneReady.mockReset();
@@ -262,8 +453,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup());
     launchMocks.loadWorkerLaunchAttempt.mockReset();
     launchMocks.loadWorkerLaunchAttempt.mockResolvedValue({});
+    launchMocks.loadCurrentWorkerLaunchAttempt.mockReset();
+    launchMocks.loadCurrentWorkerLaunchAttempt.mockResolvedValue(null);
     launchMocks.isWorkerLaunchAttemptAccepted.mockReset();
     launchMocks.isWorkerLaunchAttemptAccepted.mockResolvedValue(true);
+    launchMocks.isWorkerLaunchAttemptCurrent.mockReset();
+    launchMocks.isWorkerLaunchAttemptCurrent.mockResolvedValue(true);
 
     mocks.createTeamSession.mockResolvedValue({
       sessionName: 'dispatch-session',
@@ -307,6 +502,50 @@ describe('runtime v2 startup inbox dispatch', () => {
           OMC_WORKER_LAUNCH_ATTEMPT_ID: attempt.attempt_id,
         },
       });
+      const recoveryGateSpec = config.envVars?.OMC_RECOVERY_GATE_SPEC;
+      if (recoveryGateSpec) {
+        const gate = JSON.parse(recoveryGateSpec) as {
+          recoveryId: string;
+          workerName: string;
+          replacementGeneration: number;
+          paneAttemptId: string;
+          readyPath: string;
+          runPath: string;
+        };
+        const launchAttempt = {
+          recovery_id: gate.recoveryId,
+          worker_name: gate.workerName,
+          replacement_generation: gate.replacementGeneration,
+          pane_attempt_id: gate.paneAttemptId,
+          launch_attempt_id: attempt.attempt_id,
+          launch_nonce: attempt.nonce,
+          written_at: new Date().toISOString(),
+        };
+        await mkdir(join(gate.readyPath, '..'), { recursive: true });
+        await writeFile(gate.readyPath, JSON.stringify(launchAttempt), 'utf8');
+        await writeFile(`${gate.readyPath}.adoption-ready`, JSON.stringify(launchAttempt), 'utf8');
+        await writeFile(`${gate.runPath}.launched`, JSON.stringify({
+          ...launchAttempt,
+          provider_pid: process.pid,
+          provider_start_identity: 'fixture-provider-start',
+        }), 'utf8');
+
+        const manifestPath = absPath(cwd, TeamPaths.manifest(config.teamName));
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as {
+          workers?: Array<Record<string, unknown>>;
+        };
+        manifest.workers = (manifest.workers ?? []).map(worker => worker.name === gate.workerName
+          ? {
+            ...worker,
+            pane_id: ownership.paneId,
+            pane_attempt_id: gate.paneAttemptId,
+            recovery_id: gate.recoveryId,
+            replacement_generation: gate.replacementGeneration,
+            worker_cli: config.provider,
+          }
+          : worker);
+        await writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+      }
       return {
         ownership,
         provider: config.provider,
@@ -315,7 +554,10 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     mocks.deliverStartupInbox.mockImplementation(async (context: { attempt: { attempt_id: string; team_name: string; worker_name: string }; ownership: { paneId: string } }, message: string) => {
       const sent = await mocks.sendToWorker('', context.ownership.paneId, message);
-      if (!sent) return { ok: false, reason: 'startup_send_failed' };
+      if (!sent) {
+        startupDeliveryGate?.resolve();
+        return { ok: false, reason: 'startup_send_failed' };
+      }
       if (mocks.autoStartupEvidence) {
         const taskId = String(mocks.nextStartupTaskId++);
         const workerDir = join(cwd, '.omc', 'state', 'team', context.attempt.team_name, 'workers', context.attempt.worker_name);
@@ -327,8 +569,10 @@ describe('runtime v2 startup inbox dispatch', () => {
           launch_attempt_id: context.attempt.attempt_id,
         }), 'utf8');
       }
+      startupDeliveryGate?.resolve();
       return { ok: true, kind: 'attempted_unconfirmed' };
     });
+    mocks.probeStartupPaneActivity.mockResolvedValue('unknown');
     mocks.retryStartupInboxSubmit.mockResolvedValue('unavailable');
     mocks.waitForPaneReady.mockResolvedValue(true);
     mocks.sendToWorker.mockResolvedValue(true);
@@ -380,6 +624,7 @@ describe('runtime v2 startup inbox dispatch', () => {
   afterEach(async () => {
     vi.useRealTimers();
     delete process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS;
+    startupDeliveryGate = undefined;
     restoreFixtureEnv?.();
     restoreFixtureEnv = undefined;
     process.chdir(originalCwd);
@@ -1451,6 +1696,97 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(policy.engagedPaneRecheckBudgetMs).toBe(30_000);
   });
 
+  it('gives a busy Cursor pane one read-only engaged recheck without resubmitting', async () => {
+    vi.useFakeTimers();
+    const policy = getWorkerStartupEvidencePolicy('cursor');
+    const startedAt = Date.now();
+    let hasEvidence = false;
+    let probeCalls = 0;
+    let retryCalls = 0;
+    setTimeout(() => { hasEvidence = true; }, 31_500);
+    const evidencePromise = settleStartupEvidence(
+      policy,
+      budgetMs => waitForStartupEvidenceBudget(async () => hasEvidence, budgetMs),
+      async () => {
+        retryCalls++;
+        return 'resubmitted';
+      },
+      async () => {
+        probeCalls++;
+        return 'busy';
+      },
+    );
+    let settled = false;
+    void evidencePromise.finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(31_499);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(evidencePromise).resolves.toBe(true);
+    expect(Date.now() - startedAt).toBe(31_500);
+    expect(probeCalls).toBe(1);
+    expect(retryCalls).toBe(0);
+    expect(policy).toMatchObject({
+      initialBudgetMs: 30_000,
+      engagedPaneRecheckBudgetMs: 30_000,
+      resubmitAttempts: 0,
+    });
+  });
+
+  it('bounds a busy Cursor pane to the initial plus one engaged evidence window', async () => {
+    vi.useFakeTimers();
+    const policy = getWorkerStartupEvidencePolicy('cursor');
+    const startedAt = Date.now();
+    let probeCalls = 0;
+    let retryCalls = 0;
+    const evidencePromise = settleStartupEvidence(
+      policy,
+      budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs),
+      async () => {
+        retryCalls++;
+        return 'resubmitted';
+      },
+      async () => {
+        probeCalls++;
+        return 'busy';
+      },
+    );
+    let settled = false;
+    void evidencePromise.finally(() => { settled = true; });
+
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(settled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(evidencePromise).resolves.toBe(false);
+    expect(Date.now() - startedAt).toBe(60_000);
+    expect(probeCalls).toBe(1);
+    expect(retryCalls).toBe(0);
+  });
+
+  it.each(['idle', 'unknown', 'dead'] as const)(
+    'does not grant Cursor engaged grace for a %s pane or treat it as evidence',
+    async activity => {
+      vi.useFakeTimers();
+      const policy = getWorkerStartupEvidencePolicy('cursor');
+      const evidencePromise = settleStartupEvidence(
+        policy,
+        budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs),
+        undefined,
+        async () => activity,
+      );
+      let settled = false;
+      void evidencePromise.finally(() => { settled = true; });
+
+      await vi.advanceTimersByTimeAsync(30_999);
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(evidencePromise).resolves.toBe(false);
+    },
+  );
+
   it('times out engaged Claude evidence at exactly 31.25s (initial budget plus engaged recheck)', async () => {
     vi.useFakeTimers();
     const policy = getWorkerStartupEvidencePolicy('claude');
@@ -1550,15 +1886,14 @@ describe('runtime v2 startup inbox dispatch', () => {
     await vi.advanceTimersByTimeAsync(0);
   });
 
-  it('keeps the Codex settle path at 31s with no engaged extension', async () => {
+  it('keeps Codex at 31s when no activity callback is supplied', async () => {
     vi.useFakeTimers();
     const policy = getWorkerStartupEvidencePolicy('codex');
     const startedAt = Date.now();
-    expect(policy.engagedPaneRecheckBudgetMs).toBe(0);
+    expect(policy.engagedPaneRecheckBudgetMs).toBe(30_000);
     const evidencePromise = settleStartupEvidence(
       policy,
       budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs),
-      async () => 'pane_busy',
     );
     let settled = false;
     void evidencePromise.finally(() => { settled = true; });
@@ -1570,6 +1905,407 @@ describe('runtime v2 startup inbox dispatch', () => {
     await expect(evidencePromise).resolves.toBe(false);
     expect(Date.now() - startedAt).toBe(31_000);
   });
+
+  it.each(['codex', 'cursor'] as const)(
+    'keeps a busy %s worker alive for current attempt evidence at 31.5s without retry or teardown',
+    async provider => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      cwd = await mkdtempFixture(`omc-runtime-v2-${provider}-engaged-late-`);
+      mocks.autoStartupEvidence = false;
+      const deliveryGate = deferred<void>();
+      const activityProbeGate = deferred<void>();
+      const evidenceWriteGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      const startedAt = Date.now();
+      let activityProbeCalls = 0;
+      mocks.probeStartupPaneActivity.mockImplementation(async (context: {
+        attempt: { attempt_id: string; team_name: string; worker_name: string };
+      }) => {
+        activityProbeCalls++;
+        setTimeout(() => {
+          void (async () => {
+            const workerDir = join(
+              cwd,
+              '.omc',
+              'state',
+              'team',
+              context.attempt.team_name,
+              'workers',
+              context.attempt.worker_name,
+            );
+            await mkdir(workerDir, { recursive: true });
+            await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+              state: 'working',
+              current_task_id: '1',
+              updated_at: new Date().toISOString(),
+              launch_attempt_id: context.attempt.attempt_id,
+            }), 'utf8');
+          })().then(evidenceWriteGate.resolve, evidenceWriteGate.reject);
+        }, 1_500);
+        activityProbeGate.resolve();
+        return 'busy';
+      });
+
+      const { startTeamV2 } = await import('../runtime-v2.js');
+      let startPromise: ReturnType<typeof startTeamV2> | undefined;
+      try {
+        startPromise = startTeamV2({
+          teamName: 'dispatch-team',
+          workerCount: 1,
+          agentTypes: [provider],
+          tasks: [{ subject: 'Dispatch test', description: `Verify delayed ${provider} startup evidence` }],
+          cwd,
+        });
+
+        await deliveryGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(30_000);
+        await flushRealIo();
+        await activityProbeGate.promise;
+        await vi.advanceTimersByTimeAsync(1_500);
+        await evidenceWriteGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(250);
+
+        const runtime = await startPromise;
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(31_500);
+        expect(activityProbeCalls).toBe(1);
+        expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+        expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+        expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+        expect(requests[0]).toMatchObject({ status: 'notified', last_reason: 'worker_startup_confirmed' });
+      } finally {
+        if (startPromise) await startPromise;
+      }
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'rejects stale %s evidence during busy grace and fails closed within the bounded override',
+    async provider => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS = '2000';
+      cwd = await mkdtempFixture(`omc-runtime-v2-${provider}-stale-engaged-`);
+      mocks.autoStartupEvidence = false;
+      const deliveryGate = deferred<void>();
+      const activityProbeGate = deferred<void>();
+      const evidenceWriteGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      mocks.probeStartupPaneActivity.mockImplementation(async (context: {
+        attempt: { team_name: string; worker_name: string };
+      }) => {
+        setTimeout(() => {
+          void (async () => {
+            const workerDir = join(
+              cwd,
+              '.omc',
+              'state',
+              'team',
+              context.attempt.team_name,
+              context.attempt.worker_name,
+            );
+            await mkdir(workerDir, { recursive: true });
+            await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+              state: 'working',
+              current_task_id: '1',
+              updated_at: new Date().toISOString(),
+              launch_attempt_id: 'stale-attempt',
+            }), 'utf8');
+          })().then(evidenceWriteGate.resolve, evidenceWriteGate.reject);
+        }, 1_500);
+        activityProbeGate.resolve();
+        return 'busy';
+      });
+
+      const { startTeamV2 } = await import('../runtime-v2.js');
+      let startPromise: ReturnType<typeof startTeamV2> | undefined;
+      try {
+        startPromise = startTeamV2({
+          teamName: 'dispatch-team',
+          workerCount: 1,
+          agentTypes: [provider],
+          tasks: [{ subject: 'Dispatch test', description: `Reject stale ${provider} startup evidence` }],
+          cwd,
+        });
+
+        await deliveryGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(30_000);
+        await flushRealIo();
+        await activityProbeGate.promise;
+        await vi.advanceTimersByTimeAsync(1_500);
+        await evidenceWriteGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(2_000);
+
+        const runtime = await startPromise;
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+        expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+        expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+      } finally {
+        if (startPromise) await startPromise;
+      }
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'executes the actual %s recovery owner at the restart before-first-dispatch checkpoint',
+    async provider => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-before-dispatch-`);
+      mocks.autoStartupEvidence = false;
+      const fixture = await seedOwnerRecoveryFixture(provider, 'before-dispatch');
+      configureOwnerPaneLifecycle();
+      const deliveryGate = deferred<void>();
+      const probeGate = deferred<void>();
+      const evidenceGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      configureOwnerEvidenceProbe('current', probeGate, evidenceGate);
+
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+      const startedAt = Date.now();
+      const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+      });
+
+      await Promise.race([
+        deliveryGate.promise,
+        recoveryPromise.then(result => { throw new Error(`Recovery ended before delivery: ${JSON.stringify(result)}`); }),
+      ]);
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushRealIo();
+      await probeGate.promise;
+      await vi.advanceTimersByTimeAsync(1_500);
+      await evidenceGate.promise;
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(250);
+
+      const result = await recoveryPromise;
+      expect(result).toMatchObject({
+        outcome: 'recovered',
+        committed: true,
+        oldPaneId: '%91',
+        newPaneId: '%2',
+      });
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(31_500);
+      expect(mocks.deliverStartupInbox).toHaveBeenCalledTimes(1);
+      expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+      expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
+      expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+      expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalled();
+      const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        status: 'notified',
+        last_reason: 'worker_startup_confirmed',
+        inbox_correlation_key: fixture.correlationKey,
+      });
+      expect(readRecoveryOutcome(cwd, fixture.requestId)).toMatchObject({
+        kind: 'final',
+        outcome: 'succeeded',
+      });
+    },
+  );
+
+  it.each([
+    ['codex', 'stale'],
+    ['cursor', 'stale'],
+    ['codex', 'none'],
+    ['cursor', 'none'],
+    ['codex', 'probe-throw'],
+    ['cursor', 'probe-throw'],
+  ] as const)(
+    'keeps a committed %s recovery replacement on postcommit %s startup failure',
+    async (provider, mode) => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS = '2000';
+      cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-${mode}-`);
+      mocks.autoStartupEvidence = false;
+      const fixture = await seedOwnerRecoveryFixture(provider, mode);
+      configureOwnerPaneLifecycle();
+      const deliveryGate = deferred<void>();
+      const probeGate = deferred<void>();
+      const evidenceGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      configureOwnerEvidenceProbe(mode, probeGate, evidenceGate);
+
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+      const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+      });
+
+      await deliveryGate.promise;
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushRealIo();
+      await probeGate.promise;
+      if (mode === 'stale') {
+        await vi.advanceTimersByTimeAsync(1_500);
+        await evidenceGate.promise;
+        await flushRealIo();
+      }
+      await vi.advanceTimersByTimeAsync(2_000);
+
+      const result = await recoveryPromise;
+      expect(result).toMatchObject({
+        outcome: 'failed',
+        committed: false,
+        error: 'runtime_owner_unavailable',
+      });
+      expect(mocks.deliverStartupInbox).toHaveBeenCalledTimes(1);
+      expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+      expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
+      expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+      expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalled();
+      const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        status: 'failed',
+        last_reason: 'worker_startup_evidence_missing',
+      });
+      const persistedConfig = JSON.parse(await readFile(
+        absPath(cwd, TeamPaths.config(fixture.teamName)),
+        'utf8',
+      )) as {
+        active_recovery?: { recovery_id?: string };
+        workers?: Array<{ pane_id?: string; recovery_id?: string }>;
+      };
+      expect(persistedConfig.active_recovery?.recovery_id).toBe(fixture.recoveryId);
+      expect(persistedConfig.workers?.[0]).toMatchObject({
+        pane_id: '%2',
+        recovery_id: fixture.recoveryId,
+      });
+      expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
+        kind: 'final',
+        outcome: 'succeeded',
+      });
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed at the restart pending-dispatch checkpoint for %s before notify or evidence polling',
+    async provider => {
+      cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-pending-dispatch-`);
+      mocks.autoStartupEvidence = false;
+      const fixture = await seedOwnerRecoveryFixture(provider, 'pending-dispatch');
+      await seedRecoveryDispatchCheckpoint(fixture, 'pending');
+      configureOwnerPaneLifecycle();
+
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+      const result = await executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+      });
+
+      expect(result).toMatchObject({
+        outcome: 'failed',
+        committed: false,
+        error: 'runtime_owner_unavailable',
+      });
+      expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+      expect(mocks.sendToWorker).not.toHaveBeenCalled();
+      expect(mocks.probeStartupPaneActivity).not.toHaveBeenCalled();
+      expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+      expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]).toMatchObject({
+        status: 'pending',
+        inbox_correlation_key: fixture.correlationKey,
+      });
+      expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
+        kind: 'final',
+        outcome: 'succeeded',
+      });
+    },
+  );
+
+  it.each([
+    ['codex', 'notified', 'current'],
+    ['cursor', 'notified', 'current'],
+    ['codex', 'failed', 'none'],
+    ['cursor', 'failed', 'none'],
+  ] as const)(
+    'characterizes the restart %s %s checkpoint with %s evidence without assuming universal deduplication',
+    async (provider, checkpoint, mode) => {
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS = '2000';
+      cwd = await mkdtempFixture(`omc-runtime-v2-owner-${provider}-terminal-${checkpoint}-`);
+      mocks.autoStartupEvidence = false;
+      const fixture = await seedOwnerRecoveryFixture(provider, `terminal-${checkpoint}`);
+      await seedRecoveryDispatchCheckpoint(fixture, checkpoint);
+      configureOwnerPaneLifecycle();
+      const deliveryGate = deferred<void>();
+      const probeGate = deferred<void>();
+      const evidenceGate = deferred<void>();
+      startupDeliveryGate = deliveryGate;
+      configureOwnerEvidenceProbe(mode, probeGate, evidenceGate);
+
+      const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+      const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+        teamName: fixture.teamName,
+        cwd,
+        workerName: 'worker-1',
+        requestId: fixture.requestId,
+      });
+
+      await deliveryGate.promise;
+      await flushRealIo();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await flushRealIo();
+      await probeGate.promise;
+      if (mode === 'current') {
+        await vi.advanceTimersByTimeAsync(1_500);
+        await evidenceGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(250);
+      } else {
+        await vi.advanceTimersByTimeAsync(2_000);
+      }
+
+      const result = await recoveryPromise;
+      const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
+      expect(requests).toHaveLength(2);
+      expect(requests[0]?.status).toBe(checkpoint);
+      expect(mocks.deliverStartupInbox).toHaveBeenCalledTimes(1);
+      expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
+      expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
+      expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
+      expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+      if (mode === 'current') {
+        expect(result).toMatchObject({ outcome: 'recovered', committed: true, newPaneId: '%2' });
+        expect(requests[1]).toMatchObject({ status: 'notified', last_reason: 'worker_startup_confirmed' });
+      } else {
+        expect(result).toMatchObject({
+          outcome: 'failed',
+          committed: false,
+          error: 'runtime_owner_unavailable',
+        });
+        expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
+          kind: 'final',
+          outcome: 'succeeded',
+        });
+      }
+    },
+  );
 
   it('rejects a stale worker status that predates the current startup trigger', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-stale-status-');

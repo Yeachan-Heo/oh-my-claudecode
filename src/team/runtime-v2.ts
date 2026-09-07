@@ -74,6 +74,7 @@ import {
   createTeamSession,
   spawnOwnedWorkerInPane,
   deliverStartupInbox,
+  probeStartupPaneActivity,
   retryStartupInboxSubmit,
   proveWorkerPaneOwnership,
   adoptWorkerPaneOwnership,
@@ -89,6 +90,7 @@ import {
   splitTeamWorkerPaneWithEvidence,
   workerPaneBelongsToProviderTarget,
   type StartupPaneContext,
+  type StartupPaneActivity,
   type StartupInboxResubmitOutcome,
   type WorkerPaneConfig,
   type WorkerPaneLiveness,
@@ -923,9 +925,12 @@ const WORKER_STARTUP_EVIDENCE_POLICIES: Readonly<Record<CliAgentType, WorkerStar
   // External providers can be visibly ready before they publish task/status
   // evidence. Give that distinct evidence gate enough time for a cold start,
   // then perform one bounded read-only recheck without duplicating the inbox.
-  codex: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
   gemini: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
-  cursor: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
+  // Interactive external panes can consume the trigger while their first file
+  // read is still in flight. A read-only activity probe earns one bounded
+  // engaged recheck; it never resends the trigger or proves startup itself.
+  codex: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
+  cursor: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
   grok: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
   antigravity: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
 };
@@ -1002,13 +1007,15 @@ async function waitForWorkerStatusTransition(
  * actively working, so resubmitting would duplicate the inbox and stopping the
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
- * the caller's fail-closed teardown. Panes that are idle, wrong, or dead never
- * earn that recheck and keep the existing fast failure path.
+ * the caller's fail-closed teardown. Interactive providers may also supply a
+ * read-only activity probe when resubmission is disabled. Panes that are idle,
+ * wrong, or dead never earn that recheck and keep the existing fast failure path.
  */
 export async function settleStartupEvidence(
   policy: WorkerStartupEvidencePolicy,
   waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>,
   resubmit?: () => Promise<StartupInboxResubmitOutcome>,
+  probeActivity?: () => Promise<StartupPaneActivity>,
 ): Promise<boolean> {
   let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
   let engagedPane = false;
@@ -1020,6 +1027,14 @@ export async function settleStartupEvidence(
     }
     if (outcome !== 'resubmitted') break;
     settled = await waitForCurrentEvidence(policy.resubmitBudgetMs);
+  }
+  if (!settled && !engagedPane && probeActivity) {
+    try {
+      engagedPane = (await probeActivity()) === 'busy';
+    } catch {
+      // A failed activity observation must not turn an unverified pane into
+      // startup evidence or extend the fail-closed path.
+    }
   }
   if (!settled) {
     settled = await waitForCurrentEvidence(engagedPane
@@ -1185,8 +1200,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     startupContext.attempt.attempt_id,
     budgetMs,
   );
+  const probeActivity = opts.agentType === 'cursor' || opts.agentType === 'codex'
+    ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
+    : undefined;
   const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
-    settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+    settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
   const fencedDispatch = await (async () => {
     try {
       return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -1218,8 +1236,11 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       if (!attempted.ok) {
         return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
       }
-      const settled = await waitForBoundedStartupEvidence(() =>
-        retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
+      const settled = await waitForBoundedStartupEvidence(
+        opts.agentType === 'cursor' || opts.agentType === 'codex'
+          ? undefined
+          : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
+      );
       return settled
         ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
         : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
@@ -2857,8 +2878,11 @@ export async function executeRecoverDeadWorkerV2Owner(
               startupAttemptId,
               budgetMs,
             );
+        const probeActivity = pending.agentType === 'cursor' || pending.agentType === 'codex'
+          ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
+          : undefined;
         const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
-          settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+          settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
         const instruction = continuations.length > 0
           ? continuations.map(continuation => {
             const continuationInstruction = renderRecoveryContinuationInstruction({
@@ -2974,7 +2998,9 @@ export async function executeRecoverDeadWorkerV2Owner(
                 return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
               }
               const settled = await waitForBoundedStartupEvidence(
-                () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
+                pending.agentType === 'cursor' || pending.agentType === 'codex'
+                  ? undefined
+                  : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
               );
               return settled
                 ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }

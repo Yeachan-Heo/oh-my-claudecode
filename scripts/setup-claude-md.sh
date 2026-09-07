@@ -179,9 +179,11 @@ fi
 ACTIVE_PLUGIN_ROOT_NORMALIZED="$(normalize_plugin_root "$ACTIVE_PLUGIN_ROOT")"
 SCRIPT_PLUGIN_ROOT_NORMALIZED="$(normalize_plugin_root "$SCRIPT_PLUGIN_ROOT")"
 if [ "$ACTIVE_PLUGIN_ROOT_NORMALIZED" = "$SCRIPT_PLUGIN_ROOT_NORMALIZED" ]; then
-  # Same physical plugin root: keep executing this script. Re-exec'ing here is
-  # what turned a Windows-style installPath into an infinite process chain.
-  ACTIVE_PLUGIN_ROOT="$SCRIPT_PLUGIN_ROOT"
+  # Same physical plugin root: continue with the canonical path. The logical
+  # SCRIPT_PLUGIN_ROOT preserves a symlinked invocation path (e.g. a
+  # repair-plugin-cache.mjs compat symlink), which the coordinator rejects;
+  # the normalized form is the same directory without the link (issue #3980).
+  ACTIVE_PLUGIN_ROOT="$ACTIVE_PLUGIN_ROOT_NORMALIZED"
 else
   # Bounded re-exec (issue #3743): a defect that makes the guard compare
   # unequal roots forever must terminate loudly, not hang the user's shell.

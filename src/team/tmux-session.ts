@@ -1853,6 +1853,43 @@ export async function deliverStartupInbox(
  */
 export type StartupInboxResubmitOutcome = 'resubmitted' | 'pane_busy' | 'unavailable';
 
+/**
+ * Read-only observation of the pane after the startup trigger was delivered.
+ * `busy` is the only state that can extend the evidence wait; all other
+ * outcomes fail closed to the normal final recheck. This probe intentionally
+ * never inspects or mutates the input buffer, so it cannot resubmit Enter.
+ */
+export type StartupPaneActivity = 'busy' | 'idle' | 'dead' | 'unknown';
+
+export async function probeStartupPaneActivity(
+  context: StartupPaneContext,
+  options: { attemptAlreadyFenced?: boolean } = {},
+): Promise<StartupPaneActivity> {
+  if (!await startupContextIsActive(context, options.attemptAlreadyFenced)) return 'unknown';
+
+  const membership = await verifyTeamTargetOwnership({
+    provider: context.ownership.provider,
+    providerTarget: context.ownership.providerTarget,
+    recipient: 'worker',
+    recipientRole: 'worker',
+    paneId: context.ownership.paneId,
+  });
+  if (membership.kind !== 'owned') return 'unknown';
+
+  const liveness = await getWorkerLiveness(context.ownership.paneId);
+  if (liveness !== 'alive') return liveness;
+
+  const copyMode = await paneCopyModeObservation(context.ownership.paneId);
+  if (copyMode !== false) return 'unknown';
+
+  const observation = await capturePaneObservation(context.ownership.paneId, {
+    operation: 'startup-activity-probe',
+  });
+  if (!observation.ok) return 'unknown';
+  if (detectPaneTrustPromptKind(observation.captured, context.provider)) return 'idle';
+  return paneHasActiveTask(observation.captured, context.provider) ? 'busy' : 'idle';
+}
+
 export async function retryStartupInboxSubmit(
   context: StartupPaneContext,
   message: string,

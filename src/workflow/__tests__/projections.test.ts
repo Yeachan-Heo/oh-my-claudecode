@@ -43,8 +43,8 @@ describe('registry projections — canonical JSON and digest', () => {
 describe('registry projections — drift check against installed surfaces', () => {
   it('matches the repository skills/ and commands/ surface exactly', () => {
     const installed = enumerateInstalledSurfaces(process.cwd());
-    // 41 + execute/review/research + graph + minimal-code-discipline + launch/drydock + ask-navigator + loft, which ship as real skill directories.
-    expect(installed.skills.length).toBe(37);
+    // 41 + execute/review/research + graph + minimal-code-discipline + launch/drydock + ask-navigator + loft + harbor, which ship as real skill directories.
+    expect(installed.skills.length).toBe(38);
     expect(installed.commands.length).toBe(21);
     const drift = checkProjectionDrift(installed);
     expect(drift.unregistered).toEqual([]);

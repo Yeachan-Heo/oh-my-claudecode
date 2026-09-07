@@ -17,6 +17,10 @@ const tmuxState = vi.hoisted(() => ({
   args: [] as string[][],
   captures: [] as Array<string | Error>,
   paneStatus: '0 cmd\n',
+  paneMode: '0\n',
+  ownedPaneIds: '%2\n',
+  livenessError: null as Error | null,
+  captureError: null as Error | null,
   activeAttempt: null as WorkerLaunchAttempt | null,
 }));
 
@@ -27,8 +31,9 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
     tmuxExecAsync: vi.fn(async (args: string[]) => {
       tmuxState.args.push(args);
       if (args[0] === 'kill-pane') tmuxState.paneStatus = '1 cmd\n';
-      if (args[0] === 'list-panes') return { stdout: '%2\n', stderr: '' };
+      if (args[0] === 'list-panes') return { stdout: tmuxState.ownedPaneIds, stderr: '' };
       if (args[0] === 'capture-pane') {
+        if (tmuxState.captureError) throw tmuxState.captureError;
         const next = tmuxState.captures.length > 1 ? tmuxState.captures.shift() : tmuxState.captures[0];
         if (next instanceof Error) throw next;
         return { stdout: next ?? '', stderr: '' };
@@ -124,10 +129,15 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
     }),
     tmuxCmdAsync: vi.fn(async (args: string[]) => {
       tmuxState.args.push(args);
+      if (args.includes('#{pane_dead}')) {
+        if (tmuxState.livenessError) throw tmuxState.livenessError;
+        return { stdout: tmuxState.paneStatus.startsWith('1') ? '1\n' : '0\n', stderr: '' };
+      }
       if (args.includes('#{pane_dead} #{pane_current_command}')) {
+        if (tmuxState.livenessError) throw tmuxState.livenessError;
         return { stdout: tmuxState.paneStatus, stderr: '' };
       }
-      if (args.includes('#{pane_in_mode}')) return { stdout: '0\n', stderr: '' };
+      if (args.includes('#{pane_in_mode}')) return { stdout: tmuxState.paneMode, stderr: '' };
       return { stdout: '', stderr: '' };
     }),
   };
@@ -137,6 +147,7 @@ import {
   deliverStartupInbox,
   adoptWorkerPaneOwnership,
   proveWorkerPaneOwnership,
+  probeStartupPaneActivity,
   spawnWorkerInPane,
   spawnOwnedWorkerInPane,
   retryStartupInboxSubmit,
@@ -193,6 +204,10 @@ beforeEach(() => {
   tmuxState.args = [];
   tmuxState.captures = [];
   tmuxState.paneStatus = '0 cmd\n';
+  tmuxState.paneMode = '0\n';
+  tmuxState.ownedPaneIds = '%2\n';
+  tmuxState.livenessError = null;
+  tmuxState.captureError = null;
   tmuxState.activeAttempt = null;
   originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
   processMocks.isProcessIdentityLive.mockResolvedValue('live');
@@ -501,6 +516,110 @@ describe('worker pane startup safety', () => {
     await expect(retryStartupInboxSubmit(context, message)).resolves.toBe('pane_busy');
     expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(false);
   });
+
+  it.each([
+    ['codex', '› Read inbox.md\nesc to interrupt\n'],
+    ['cursor', '→ Read inbox.md\nctrl+c to stop\n'],
+  ] as const)('probes a busy %s pane read-only without sending a key', async (provider, capture) => {
+    const context = await acceptedContext(provider);
+    tmuxState.captures = [capture];
+
+    await expect(probeStartupPaneActivity(context)).resolves.toBe('busy');
+    expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+  });
+
+  it.each([
+    ['codex', 'idle', '› ready\n'],
+    ['cursor', 'idle', '→ ready\n'],
+    ['codex', 'dead', '› ready\n'],
+    ['cursor', 'dead', '→ ready\n'],
+  ] as const)('does not classify a %s %s pane as engaged', async (provider, activity, capture) => {
+    const context = await acceptedContext(provider);
+    tmuxState.captures = [capture];
+    if (activity === 'dead') tmuxState.paneStatus = '1 cmd\n';
+
+    await expect(probeStartupPaneActivity(context)).resolves.toBe(activity);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+  });
+
+  it.each(['codex', 'cursor'] as const)(
+    'classifies an unreadable %s pane as unknown without sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captureError = new Error('capture unavailable');
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed for a stale %s launch attempt before probing pane activity',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.activeAttempt = null;
+      await expect(probeStartupPaneActivity({
+        ...context,
+        attempt: { ...context.attempt, attempt_id: '00000000-0000-4000-8000-000000000000' },
+      })).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed for %s copy mode without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['› Read inbox.md\nesc to interrupt\n'];
+      tmuxState.paneMode = '1\n';
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed for %s ownership mismatch without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+
+      await expect(probeStartupPaneActivity({
+        ...context,
+        ownership: { ...context.ownership, paneId: '%9' },
+      })).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed for a foreign %s pane without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.ownedPaneIds = '%9\n';
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
+
+  it.each(['codex', 'cursor'] as const)(
+    'fails closed for %s unknown liveness without probing or sending a key',
+    async provider => {
+      const context = await acceptedContext(provider);
+      tmuxState.captures = ['→ Read inbox.md\nctrl+c to stop\n'];
+      tmuxState.livenessError = new Error('liveness unavailable');
+
+      await expect(probeStartupPaneActivity(context)).resolves.toBe('unknown');
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'send-keys')).toBe(false);
+    },
+  );
 
   it('does not retry Enter for unrelated pane text', async () => {
     const context = await acceptedContext('claude');

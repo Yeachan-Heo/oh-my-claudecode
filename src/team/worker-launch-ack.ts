@@ -4,6 +4,7 @@ import { constants, existsSync } from 'node:fs';
 import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { Writable } from 'node:stream';
 
 import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
 import type { CliAgentType } from './model-contract.js';
@@ -182,6 +183,8 @@ export interface MaterializedProviderSpawnInvocation {
   cleanup: () => Promise<void>;
   completionPath?: string;
   stdinPayload?: string;
+  /** Extra POSIX descriptor used to hold provider execution until ownership is proven. */
+  providerGateFd?: number;
 }
 
 export interface MaterializedWorkerLaunchTransport {
@@ -1350,35 +1353,12 @@ async function awaitExternalTerminationCompletion(
   }
   return false;
 }
-async function isCorrelatedTerminationDead(spec: WorkerLaunchBootstrapSpec): Promise<boolean> {
-  const [request, started] = await Promise.all([
-    readJson(`${spec.started_path}.termination-request`),
-    readJson(spec.started_path),
-  ]);
-  if (request.kind !== 'value' || started.kind !== 'value'
-    || !identityMatches(request.value as Partial<WorkerLaunchIdentity>, spec)
-    || !identityMatches(started.value as Partial<WorkerLaunchIdentity>, spec)) return false;
-  const requestRecord = request.value as Record<string, unknown>;
-  const startedRecord = started.value as Partial<WorkerLaunchProviderStarted>;
-  if (requestRecord.kind !== 'worker_launch_termination_request'
-    || requestRecord.pid !== startedRecord.pid
-    || requestRecord.process_start_identity !== startedRecord.process_start_identity
-    || !Number.isSafeInteger(startedRecord.pid)
-    || !isValidProcessStartIdentity(startedRecord.process_start_identity)) return false;
-  const liveness = await isProcessIdentityLive(
-    startedRecord.pid!,
-    startedRecord.process_start_identity!,
-    Date.now() + 500,
-  );
-  return liveness === 'dead' || liveness === 'mismatch';
-}
-
-
 export async function materializeProviderSpawnInvocation(
   invocation: ProviderSpawnInvocation,
-  options: { superviseWindowsTree?: boolean; superviseProcessTree?: boolean } = {},
+  options: { superviseWindowsTree?: boolean; superviseProcessTree?: boolean; gateProviderExecution?: boolean } = {},
 ): Promise<MaterializedProviderSpawnInvocation> {
   const superviseProcessTree = options.superviseProcessTree ?? options.superviseWindowsTree ?? false;
+  const gateProviderExecution = options.gateProviderExecution === true && !invocation.batchScript;
   if (!invocation.batchScript && !superviseProcessTree) {
     return { command: invocation.command, args: invocation.args, cleanup: async () => {} };
   }
@@ -1400,8 +1380,17 @@ export async function materializeProviderSpawnInvocation(
     }
     const wrapperPath = join(wrapperDir, 'launch.sh');
     const quotedCompletion = `'${completionPath!.replace(/'/g, `'"'"'`)}'`;
-    await writeFile(wrapperPath, `#!/bin/sh\n"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
-    return { command: '/bin/sh', args: [wrapperPath, invocation.command, ...invocation.args], completionPath, cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); } };
+    const providerGate = gateProviderExecution
+      ? 'if ! IFS= read -r _omc_provider_release <&3; then exit 125; fi\nexec 3<&-\n'
+      : '';
+    await writeFile(wrapperPath, `#!/bin/sh\n${providerGate}"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
+    return {
+      command: '/bin/sh',
+      args: [wrapperPath, invocation.command, ...invocation.args],
+      completionPath,
+      ...(gateProviderExecution ? { providerGateFd: 3 } : {}),
+      cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
+    };
   } catch (error) {
     await rm(wrapperDir, { recursive: true, force: true }).catch(() => undefined);
     throw error;
@@ -1469,11 +1458,20 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       }
       const invocation = process.platform === 'win32'
         ? buildWindowsSupervisorInvocation(spec)
-        : await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv, process.platform, providerEnv), { superviseProcessTree: true });
+        : await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv, process.platform, providerEnv), {
+          superviseProcessTree: true,
+          // Keep the detached shell alive without running the provider until
+          // this bootstrap has captured and revalidated its native ownership.
+          gateProviderExecution: true,
+        });
       const child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd,
         env: providerEnv,
-        stdio: process.platform === 'win32' ? ['pipe', 'pipe', 'pipe'] : 'inherit',
+        stdio: process.platform === 'win32'
+          ? ['pipe', 'pipe', 'pipe']
+          : invocation.providerGateFd === undefined
+            ? 'inherit'
+            : ['inherit', 'inherit', 'inherit', 'pipe'],
         detached: process.platform !== 'win32',
       });
       if (process.platform === 'win32' && invocation.stdinPayload && child.stdin?.writable) {
@@ -1484,6 +1482,17 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       let providerStartIdentity: string | null = null;
       let supervisedExitCode: number | null = null;
       let launchGroup: ReturnType<typeof captureOwnedProcessGroup> = null;
+      const providerGate: Writable | null = invocation.providerGateFd === undefined
+        ? null
+        : (child.stdio[invocation.providerGateFd] as Writable | null | undefined) ?? null;
+      let providerGateReleased = invocation.providerGateFd === undefined;
+      let providerGateClosed = false;
+      let providerGateReleaseAttempted = false;
+      let providerGateError: Error | null = null;
+      let providerGateClosePromise: Promise<boolean> | null = null;
+      let providerGateOperationPromise: Promise<boolean> | null = null;
+      let providerGateOperationResolve: ((value: boolean) => void) | null = null;
+      let terminateProviderOnGateError: (() => void) | null = null;
       let supervisorTimer: NodeJS.Timeout | undefined;
       let terminationResult: Promise<Awaited<ReturnType<typeof terminateOwnedProcessGroup>>> | null = null;
       let resolveCompletion!: (result: WorkerLaunchBootstrapResult) => void;
@@ -1491,6 +1500,21 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
       let resolveWindowsTerminal!: (verified: boolean) => void;
       const windowsReady = new Promise<boolean>(resolve => { resolveWindowsReady = resolve; });
       const windowsTerminal = new Promise<boolean>(resolve => { resolveWindowsTerminal = resolve; });
+      if (providerGate) {
+        // Own the extra stream's error for its entire lifetime. ChildProcess
+        // does not forward errors from additional stdio sockets, so leaving
+        // this listener until the supervisor is reaped is part of the
+        // launch-ownership protocol.
+        providerGate.on('error', error => {
+          providerGateError ??= error instanceof Error ? error : new Error(String(error));
+          // A failed stream cannot safely be treated as an EOF/no-execution
+          // close. Wake a pending end operation so the caller can switch to
+          // creation-bound process-group cleanup.
+          providerGateOperationResolve?.(false);
+          providerGateOperationResolve = null;
+          terminateProviderOnGateError?.();
+        });
+      }
       if (process.platform === 'win32' && child.stdout) {
         let buffered = '';
         child.stdout.setEncoding('utf8');
@@ -1548,15 +1572,40 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           }
           const effectiveExitCode = supervisedExitCode ?? exitCode;
           const effectiveSignal = supervisedExitCode === null ? signal : null;
-          const terminationVerified = process.platform === 'win32'
+          const gateOperationResult = providerGateOperationPromise
+            ? await Promise.race([
+              providerGateOperationPromise,
+              sleep(2_000).then(() => false),
+            ])
+            : true;
+          const gateAborted = invocation.providerGateFd !== undefined
+            && providerGateClosed
+            && !providerGateReleased
+            && !providerGateReleaseAttempted;
+          const gateReleaseFailed = invocation.providerGateFd !== undefined
+            && providerGateReleaseAttempted
+            && (!providerGateReleased || providerGateError !== null || !gateOperationResult);
+          const gateTransportFailed = invocation.providerGateFd !== undefined
+            && providerGateError !== null;
+          const gateCleanupRequired = gateAborted || gateReleaseFailed || gateTransportFailed;
+          if ((gateReleaseFailed || gateTransportFailed) && launchGroup !== null && terminationResult === null) {
+            terminationResult = terminateOwnedProcessGroup({
+              pid: launchGroup.pid,
+              expectedStartIdentity: launchGroup.processStartIdentity,
+              processGroupId: launchGroup.processGroupId,
+              deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+              force: true,
+            });
+          }
+          const groupAbsent = launchGroup !== null
+            && await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000);
+          // Windows cleanup remains bound to the supervisor/Job completion
+          // proof. POSIX cleanup is proven by this reaped child and its
+          // creation-bound process group being absent; an aborted gate with
+          // no captured group is safe only when no release was attempted.
+          const cleanupVerified = process.platform === 'win32'
             ? await awaitExternalTerminationCompletion(spec) || await readWorkerLaunchCleanupProof(spec)
-            : terminationResult
-              ? ['terminated', 'already-dead', 'identity-mismatch'].includes(await terminationResult)
-              : await awaitExternalTerminationCompletion(spec) || await readWorkerLaunchCleanupProof(spec)
-                || await isCorrelatedTerminationDead(spec);
-          const cleanupVerified = terminationVerified && (process.platform === 'win32'
-            || (launchGroup !== null
-              && await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000)));
+            : (launchGroup !== null && groupAbsent) || (gateAborted && launchGroup === null);
           await atomicWriteJson(`${spec.started_path}.terminal`, {
             ...identityOf(spec), kind: 'worker_launch_provider_terminal',
             outcome: cleanupVerified ? 'exit' : 'cleanup_unverified', cleanup_verified: cleanupVerified,
@@ -1565,7 +1614,11 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
             exit_code: effectiveExitCode, signal: effectiveSignal, written_at: new Date().toISOString(),
           }).catch(() => undefined);
           await invocation.cleanup().catch(() => undefined);
-          resolve(cleanupVerified
+          resolve(gateCleanupRequired
+            ? cleanupVerified
+              ? { outcome: 'provider_spawn_failed' }
+              : { outcome: 'provider_cleanup_unverified' }
+            : cleanupVerified
             ? { outcome: 'ran', exitCode: effectiveExitCode, signal: effectiveSignal }
             : { outcome: 'provider_cleanup_unverified' });
         });
@@ -1584,7 +1637,11 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
         });
       });
       const terminateProvider = async (): Promise<boolean> => {
-        if (settled) return process.platform !== 'win32';
+        if (settled) {
+          return process.platform !== 'win32'
+            && launchGroup !== null
+            && await waitForProcessGroupAbsence(launchGroup.processGroupId, Date.now() + 2_000);
+        }
         if (process.platform === 'win32') {
           if (!providerPid || !providerStartIdentity || !child.stdin?.writable) return false;
           const frame = JSON.stringify({
@@ -1603,7 +1660,7 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
             processGroupId: launchGroup.processGroupId,
             deadlineAt: new Date(Date.now() + 2_000).toISOString(), force: true,
           });
-          const terminated = ['terminated', 'already-dead', 'identity-mismatch'].includes(await terminationResult);
+          await terminationResult;
           const completed = await new Promise<boolean>(resolve => {
             const timer = setTimeout(() => resolve(false), 2_000);
             void completion.then(result => {
@@ -1611,12 +1668,96 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
               resolve(result.outcome !== 'provider_cleanup_unverified');
             });
           });
-          return terminated && completed;
+          return completed;
         }
         return false;
       };
+      terminateProviderOnGateError = () => { void terminateProvider(); };
+      const closeProviderGate = async (): Promise<boolean> => {
+        if (providerGateClosePromise) return providerGateClosePromise;
+        if (invocation.providerGateFd === undefined || providerGateReleased) return false;
+        providerGateClosed = true;
+        const closePromise = (async () => {
+          if (!providerGate || providerGate.destroyed) return false;
+          let callbackCalled = false;
+          let callbackError = false;
+          const closeResultPromise = new Promise<boolean>(resolve => {
+            providerGateOperationResolve = resolve;
+            const finish = (error?: Error | null) => {
+              providerGateError ??= error ?? null;
+              providerGateOperationResolve = null;
+              callbackCalled = true;
+              callbackError = providerGateError !== null;
+              resolve(!callbackError);
+            };
+            try {
+              providerGate.end(finish);
+            } catch {
+              providerGateOperationResolve = null;
+              resolve(false);
+            }
+          });
+          providerGateOperationPromise = closeResultPromise;
+          const closeResult = await Promise.race([
+            closeResultPromise,
+            sleep(2_000).then(() => false),
+          ]);
+          if (!callbackCalled && providerGateError !== null) return false;
+          if (!closeResult || providerGateError !== null) return false;
+          const completed = await Promise.race([
+            completion,
+            sleep(2_000).then(() => null),
+          ]);
+          return completed !== null && completed.outcome === 'provider_spawn_failed';
+        })();
+        providerGateClosePromise = closePromise;
+        return closePromise;
+      };
+      const releaseProviderGate = async (): Promise<boolean> => {
+        if (invocation.providerGateFd === undefined) return true;
+        if (providerGateReleased) return providerGateError === null;
+        if (providerGateReleaseAttempted || providerGateClosed || !providerGate || providerGate.destroyed) return false;
+        providerGateReleaseAttempted = true;
+        const releasePromise = new Promise<boolean>(resolve => {
+          providerGateOperationResolve = resolve;
+          try {
+            providerGate.end('release\n', (error?: Error | null) => {
+              providerGateError ??= error ?? null;
+              providerGateOperationResolve = null;
+              const released = providerGateError === null;
+              if (released) providerGateReleased = true;
+              resolve(released);
+            });
+          } catch {
+            providerGateOperationResolve = null;
+            resolve(false);
+          }
+        });
+        providerGateOperationPromise = releasePromise;
+        return await Promise.race([
+          releasePromise,
+          sleep(2_000).then(() => false),
+        ]);
+      };
+      const cleanupProvider = async (
+        outcome: 'provider_spawn_failed' | 'superseded',
+      ): Promise<{ outcome: 'provider_spawn_failed' | 'provider_cleanup_unverified' | 'superseded' }> => {
+        if (invocation.providerGateFd !== undefined && !providerGateReleaseAttempted) {
+          if (await closeProviderGate()) return { outcome };
+          return await terminateProvider()
+            ? { outcome }
+            : { outcome: 'provider_cleanup_unverified' };
+        }
+        return await terminateProvider()
+          ? { outcome }
+          : { outcome: 'provider_cleanup_unverified' };
+      };
       const cleanupSignals: NodeJS.Signals[] = ['SIGHUP', 'SIGINT', 'SIGTERM'];
-      const onBootstrapSignal = () => { void terminateProvider(); };
+      const onBootstrapSignal = () => {
+        void (invocation.providerGateFd !== undefined && !providerGateReleaseAttempted
+          ? closeProviderGate()
+          : terminateProvider());
+      };
       const ownsSignalLifecycle = Boolean(
         process.env.OMC_WORKER_LAUNCH_SPEC
         || process.env.OMC_WORKER_LAUNCH_SPEC_B64
@@ -1642,61 +1783,78 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           new Promise<false>(resolve => setTimeout(() => resolve(false), 10_000)),
         ]);
         if (!ready || !providerPid || !providerStartIdentity || settled) {
-          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-          return { outcome: 'provider_spawn_failed' as const };
+          return cleanupProvider('provider_spawn_failed');
         }
       } else {
         // Bind identity immediately after spawn, before an async handoff can race PID reuse.
         providerPid = child.pid ?? null;
-        providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+        try {
+          providerStartIdentity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
+        } catch {
+          providerStartIdentity = null;
+        }
         if (!child.pid || !providerStartIdentity || settled || !isProcessAlive(child.pid)) {
-          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-          return { outcome: 'provider_spawn_failed' as const };
+          return cleanupProvider('provider_spawn_failed');
         }
-        launchGroup = captureOwnedProcessGroup(child.pid);
-        if (!launchGroup) {
-          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-          return { outcome: 'provider_spawn_failed' as const };
+        try {
+          launchGroup = captureOwnedProcessGroup(child.pid);
+        } catch {
+          launchGroup = null;
         }
+        if (!launchGroup || launchGroup.processStartIdentity !== providerStartIdentity) {
+          return cleanupProvider('provider_spawn_failed');
+        }
+        let reboundIdentity: string | null = null;
+        try {
+          reboundIdentity = getProcessStartIdentitySync(child.pid);
+        } catch {
+          reboundIdentity = null;
+        }
+        if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
+          return cleanupProvider('provider_spawn_failed');
+        }
+        if (!await releaseProviderGate() || providerGateError !== null) {
+          return cleanupProvider('provider_spawn_failed');
+        }
+        // Preserve the original settling window, but only after ownership
+        // proof has released the provider. This lets quick provider exits be
+        // observed before durable start publication/currentness checks.
         if (!spec.release_after_spawn) await new Promise(resolve => setTimeout(resolve, 75));
         if (settled) return { completion };
-        const reboundIdentity = getProcessStartIdentitySync(child.pid);
-        if (!reboundIdentity || reboundIdentity !== providerStartIdentity || !isProcessAlive(child.pid)) {
-          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-          return { outcome: 'provider_spawn_failed' as const };
-        }
       }
       if (invocation.completionPath && existsSync(invocation.completionPath)) {
         const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
         if (Number.isSafeInteger(exitCode)) supervisedExitCode = exitCode;
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-        return { outcome: 'provider_spawn_failed' as const };
+        return cleanupProvider('provider_spawn_failed');
+      }
+      if (providerGateError !== null) {
+        return cleanupProvider('provider_spawn_failed');
       }
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)
         || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-        return { outcome: 'superseded' as const };
+        return cleanupProvider('superseded');
       }
       try {
+        if (providerGateError !== null) return cleanupProvider('provider_spawn_failed');
         if (!await publishProviderStarted(spec, providerPid ?? child.pid, providerStartIdentity, invocation.completionPath,
           launchGroup?.processGroupId)) {
-          if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-          return { outcome: 'provider_spawn_failed' as const };
+          return cleanupProvider('provider_spawn_failed');
         }
       } catch {
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
-        return { outcome: 'provider_spawn_failed' as const };
+        return cleanupProvider('provider_spawn_failed');
       }
       if (invocation.completionPath && existsSync(invocation.completionPath)) {
         const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
         if (Number.isSafeInteger(exitCode)) supervisedExitCode = exitCode;
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+        const cleaned = await terminateProvider();
+        if (!cleaned) return { outcome: 'provider_cleanup_unverified' as const };
         await unlink(spec.started_path).catch(() => {});
         return { outcome: 'provider_spawn_failed' as const };
       }
       if (!await isCurrentLaunchIdentity(spec.current_path, spec)
         || (await readJson(`${spec.decision_path}.retired`)).kind !== 'absent') {
-        if (!await terminateProvider()) return { outcome: 'provider_cleanup_unverified' as const };
+        const cleaned = await terminateProvider();
+        if (!cleaned) return { outcome: 'provider_cleanup_unverified' as const };
         await unlink(spec.started_path).catch(() => {});
         return { outcome: 'superseded' as const };
       }

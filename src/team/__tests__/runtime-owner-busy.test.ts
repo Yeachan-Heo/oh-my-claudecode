@@ -14,7 +14,7 @@ import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request
 import { executeRecoverDeadWorkerV2Owner } from '../runtime-v2.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { readRevisionedTeamConfig } from '../monitor.js';
-import { publishOwnerEpoch, readLatestOwnerEpoch } from '../team-owner-epoch.js';
+import { currentProcessStartIdentity, isProcessIdentityDead, isValidProcessStartIdentity, publishOwnerEpoch, readLatestOwnerEpoch } from '../team-owner-epoch.js';
 
 const launchMetadata = { worker_cli: 'claude' as const,
   launch_descriptor: { schema_version: 1 as const, provider: 'claude' as const, model: null,
@@ -37,6 +37,32 @@ function mkdtempFixture(prefix: string): string {
   process.env.USERPROFILE = root;
   delete process.env.OMC_STATE_DIR;
   return root;
+}
+
+function hostValidDeadProcessStartIdentity(pid: number): string {
+  const current = currentProcessStartIdentity();
+  expect(current).not.toBeNull();
+  expect(isValidProcessStartIdentity(current)).toBe(true);
+
+  const darwin = /^darwin:([1-9]\d*):(\d+)$/.exec(current!);
+  const numeric = /^(linux|win32):([1-9]\d*)$/.exec(current!);
+  let dead: string;
+  if (darwin) {
+    const micros = Number(darwin[2]);
+    dead = micros === 0
+      ? `darwin:${Number(darwin[1]) + 1}:0`
+      : `darwin:${darwin[1]}:${micros === 999_999 ? micros - 1 : micros + 1}`;
+  } else if (numeric) {
+    dead = `${numeric[1]}:${Number(numeric[2]) + 1}`;
+  } else {
+    const separator = current!.indexOf(':');
+    dead = `${current!.slice(0, separator)}:${current!.slice(separator + 1)}-different`;
+  }
+
+  expect(dead).not.toBe(current);
+  expect(isValidProcessStartIdentity(dead)).toBe(true);
+  expect(isProcessIdentityDead({ pid, process_started_at: dead })).toBe(true);
+  return dead;
 }
 
 afterEach(() => {
@@ -143,14 +169,15 @@ describe('runtime owner team mutation contention', () => {
         owner_epoch: 1, owner_nonce: 'reused-pid-owner', phase: 'active', state_revision: 3,
         created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     }));
-    publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: 'linux:1', nonce: 'reused-pid-owner' });
+    const processStartedAt = hostValidDeadProcessStartIdentity(process.pid);
+    publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt, nonce: 'reused-pid-owner' });
     reserveRecoveryRequest(cwd, 'waiting-pid-request', { operation: 'recover-worker',
       workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, 'waiting-pid-recovery');
 
     await expect(executeRecoverDeadWorkerV2Owner({ teamName, cwd, workerName: 'worker-1', requestId: 'waiting-pid-request' }))
       .resolves.toMatchObject({ outcome: 'failed', error: 'runtime_owner_fence_lost' });
     const owner = readLatestOwnerEpoch(cwd, teamName);
-    expect(owner).toMatchObject({ epoch: 1, pid: process.pid, process_started_at: 'linux:1' });
+    expect(owner).toMatchObject({ epoch: 1, pid: process.pid, process_started_at: processStartedAt });
     await expect(readRevisionedTeamConfig(teamName, cwd)).resolves.toMatchObject({
       config: { active_recovery: { recovery_id: 'other-recovery', owner_epoch: 1 } },
     });

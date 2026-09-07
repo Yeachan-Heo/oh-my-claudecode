@@ -71,6 +71,8 @@ Non-convergence here is normal work, not a failure: if the frontier will not emp
 
 **Loft detour.** A residual question that is precise but cannot settle in prose — it needs to be seen or clicked, not described (how the UI should look, whether a state model feels right) — is answered with an artifact, not more questions: call the Skill tool with "loft", let the captain react, and fold that reaction back into the interview. The lofted artifact is C2's input; the captain signs what they saw, not what they were told.
 
+**Harbor briefs.** A mission brief handed over by `/oh-my-claudecode:harbor` carries signed decisions with links and applicable conditions: consume them as already-made — do not re-ask unchanged business goals. If the code has moved since the evidence was gathered (new head, changed base), re-verify the affected technical evidence; new implementation scope beyond the signed brief still gets its own approval.
+
 ## Phase 2 — Spec synthesis (agent drafts → C2 approves)
 
 Synthesize `.omc/specs/<feature-slug>/spec.md`:

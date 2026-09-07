@@ -187,8 +187,24 @@ const MODE_CONFIRMATION_SKILL_MAP: Record<string, string[]> = {
   ralplan: ["ralplan"],
 };
 
-const SESSION_START_CONTEXT_BUDGET = 6000;
-const SESSION_START_OMISSION_NOTICE = '[Additional SessionStart context omitted to preserve the 6000-character aggregate budget.]';
+const DEFAULT_SESSION_START_CONTEXT_BUDGET = 6000;
+
+/**
+ * Aggregate character budget shared by everything SessionStart injects.
+ * Override with OMC_SESSION_START_CONTEXT_BUDGET (positive integer). Any other
+ * value falls back to the default so a bad setting can never blank the context.
+ */
+function resolveSessionStartContextBudget(): number {
+  const raw = process.env.OMC_SESSION_START_CONTEXT_BUDGET?.trim();
+  if (!raw) return DEFAULT_SESSION_START_CONTEXT_BUDGET;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_START_CONTEXT_BUDGET;
+}
+
+function sessionStartOmissionNotice(budget: number): string {
+  return `[Additional SessionStart context omitted to preserve the ${budget}-character aggregate budget.]`;
+}
+
 const SESSION_STARTED_MARKER_FILE = "session-started.json";
 const LINUX_BOOT_ID_PATH = "/proc/sys/kernel/random/boot_id";
 
@@ -227,17 +243,18 @@ function buildSessionStartAdditionalContext(messages: string[]): string {
     .sort((a, b) => a.priority - b.priority || a.index - b.index)
     .map((entry) => entry.message);
 
+  const budget = resolveSessionStartContextBudget();
   let used = 0;
   const selected: string[] = [];
   for (const message of ordered) {
     const separatorLength = selected.length > 0 ? 1 : 0;
-    if (used + separatorLength + message.length > SESSION_START_CONTEXT_BUDGET) {
-      const remainingBudget = SESSION_START_CONTEXT_BUDGET - used - separatorLength;
+    if (used + separatorLength + message.length > budget) {
+      const remainingBudget = budget - used - separatorLength;
       if (remainingBudget > 0) {
         selected.push(
           remainingBudget > 120
             ? compactBudgetedText(message, remainingBudget)
-            : compactBudgetedText(SESSION_START_OMISSION_NOTICE, remainingBudget),
+            : compactBudgetedText(sessionStartOmissionNotice(budget), remainingBudget),
         );
       }
       break;

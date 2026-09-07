@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
+import * as processUtils from '../../platform/process-utils.js';
 import {
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
@@ -23,12 +24,19 @@ import {
   retireAndCleanupCurrentWorkerLaunchAttempt,
   terminateWorkerLaunchProvider,
   revokeWorkerLaunchAttempt,
+  withWorkerLaunchAttemptFence,
   buildProviderEnvironment,
   buildProviderSpawnInvocation,
   materializeProviderSpawnInvocation,
   quoteWindowsCreateProcessArgument,
 } from '../worker-launch-ack.js';
-import { getProcessStartIdentity, isProcessAlive, terminateOwnedProcessTree } from '../../platform/process-utils.js';
+import {
+  captureOwnedProcessGroup,
+  getProcessStartIdentity,
+  isProcessAlive,
+  terminateOwnedProcessGroup,
+  terminateOwnedProcessTree,
+} from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 let cwd = '';
@@ -183,52 +191,197 @@ describe('worker launch acknowledgement', () => {
 
   it('rejects a provider that exits after publishing start evidence but before handoff', async () => {
     const launchAttempt = await attempt();
+    const stopPath = join(cwd, 'exit-after-start');
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
       launchAttempt,
-      [process.execPath, '-e', 'setTimeout(() => process.exit(0), 500)'],
+      [process.execPath, '-e', `const fs=require('node:fs');setInterval(()=>{if(fs.existsSync(${JSON.stringify(stopPath)}))process.exit(0)},10)`],
       cwd,
     ));
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
-      pollIntervalMs: 5,
-    })).resolves.toEqual({ ok: true });
-    await vi.waitFor(async () => {
-      await expect(isWorkerLaunchProviderStarted(launchAttempt)).resolves.toBe(true);
-    }, { timeout: 2_000, interval: 5 });
-    await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
-    await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-      timeoutMs: 50,
-      pollIntervalMs: 5,
-    })).resolves.toBe(false);
+    try {
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      await vi.waitFor(async () => {
+        await expect(isWorkerLaunchProviderStarted(launchAttempt)).resolves.toBe(true);
+      }, { timeout: 2_000, interval: 5 });
+      await writeFile(stopPath, 'exit', 'utf8');
+      await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+      await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+        timeoutMs: 50,
+        pollIntervalMs: 5,
+      })).resolves.toBe(false);
+    } finally {
+      await writeFile(stopPath, 'exit', 'utf8');
+      await terminateWorkerLaunchProvider(launchAttempt, 2_000);
+      await bootstrap;
+    }
   });
 
-  it('kills provider descendants when the provider exits around start publication', async () => {
+  it('kills provider descendants when the provider exits after start publication', async () => {
     const launchAttempt = await attempt();
     const childPidPath = join(cwd, 'early-exit-child-pid');
+    const providerReadyPath = join(cwd, 'early-exit-provider-ready');
+    const providerStopPath = join(cwd, 'early-exit-provider-stop');
     const providerScript = [
       "const fs=require('node:fs')",
       "const cp=require('node:child_process')",
       "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});child.unref()",
-      `fs.writeFileSync(${JSON.stringify(childPidPath)},String(child.pid))`,
+      `child.once('spawn',()=>fs.writeFileSync(${JSON.stringify(childPidPath)},JSON.stringify({parent:process.pid,child:child.pid})))`,
+      `child.once('spawn',()=>fs.writeFileSync(${JSON.stringify(providerReadyPath)},'ready'))`,
+      `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStopPath)})){clearInterval(timer);process.exit(0)}},5)`,
     ].join(';');
-    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
-      launchAttempt,
-      [process.execPath, '-e', providerScript],
-      cwd,
-    ));
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
-      pollIntervalMs: 5,
-    })).resolves.toEqual({ ok: true });
-    const result = await bootstrap;
-    expect(['provider_spawn_failed', 'ran']).toContain(result.outcome);
-    const childPid = Number(await readFile(childPidPath, 'utf8'));
-    await vi.waitFor(() => expect(isProcessAlive(childPid)).toBe(false), { timeout: 2_000, interval: 20 });
-    await expect(readFile(`${launchAttempt.startedPath}.terminal`, 'utf8').then(JSON.parse))
-      .resolves.toMatchObject({ cleanup_verified: true });
-    expect(isProcessAlive(process.pid)).toBe(true);
-    await expect(readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')).resolves.toContain('worker_launch_provider_terminal');
+    let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    try {
+      bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', providerScript],
+        cwd,
+        { releaseAfterSpawn: true },
+      ));
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toBe(true);
+      await vi.waitFor(async () => {
+        await expect(readFile(providerReadyPath, 'utf8')).resolves.toBe('ready');
+      }, { timeout: 2_000, interval: 5 });
+      const pids = JSON.parse(await readFile(childPidPath, 'utf8')) as { parent: number; child: number };
+      expect(pids.parent).toBeGreaterThan(0);
+      expect(pids.child).toBeGreaterThan(0);
+      await writeFile(providerStopPath, 'stop', 'utf8');
+
+      await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+      await vi.waitFor(() => {
+        expect(isProcessAlive(pids.parent)).toBe(false);
+        expect(isProcessAlive(pids.child)).toBe(false);
+      }, { timeout: 2_000, interval: 20 });
+      const terminal = JSON.parse(await readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')) as {
+        kind: string;
+        outcome: string;
+        cleanup_verified: boolean;
+        process_group_id: number;
+      };
+      expect(terminal).toMatchObject({
+        kind: 'worker_launch_provider_terminal',
+        outcome: 'exit',
+        cleanup_verified: true,
+      });
+      expect(Number.isSafeInteger(terminal.process_group_id)).toBe(true);
+      expect(() => process.kill(-terminal.process_group_id, 0))
+        .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      expect(isProcessAlive(process.pid)).toBe(true);
+    } finally {
+      await writeFile(providerStopPath, 'stop', 'utf8').catch(() => undefined);
+      await terminateWorkerLaunchProvider(launchAttempt, 2_000).catch(() => false);
+      await bootstrap?.catch(() => undefined);
+    }
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'proves native group absence without durable termination records',
+    async () => {
+      const launchAttempt = await attempt();
+      const providerReadyPath = join(cwd, 'native-direct-termination-ready');
+      const providerScript = [
+        `require('node:fs').writeFileSync(${JSON.stringify(providerReadyPath)},'ready')`,
+        'setInterval(()=>{},1000)',
+      ].join(';');
+      let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+      let ownedGroup: ReturnType<typeof captureOwnedProcessGroup> = null;
+      try {
+        bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+          launchAttempt,
+          [process.execPath, '-e', providerScript],
+          cwd,
+          { releaseAfterSpawn: true },
+        ));
+        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+          timeoutMs: 2_000,
+          pollIntervalMs: 5,
+        })).resolves.toEqual({ ok: true });
+        await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+          timeoutMs: 2_000,
+          pollIntervalMs: 5,
+        })).resolves.toBe(true);
+        await vi.waitFor(async () => {
+          await expect(readFile(providerReadyPath, 'utf8')).resolves.toBe('ready');
+        }, { timeout: 2_000, interval: 5 });
+
+        const fenced = await withWorkerLaunchAttemptFence(launchAttempt, async () => {
+          const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8')) as {
+            pid: number;
+            process_start_identity: string;
+            process_group_id: number;
+          };
+          expect(isProcessAlive(started.pid)).toBe(true);
+          ownedGroup = captureOwnedProcessGroup(started.pid);
+          expect(ownedGroup).toMatchObject({
+            pid: started.pid,
+            processStartIdentity: started.process_start_identity,
+            processGroupId: started.process_group_id,
+          });
+          if (!ownedGroup) throw new Error('worker_launch_owned_group_capture_failed');
+          return await terminateOwnedProcessGroup({
+            pid: ownedGroup.pid,
+            expectedStartIdentity: ownedGroup.processStartIdentity,
+            processGroupId: ownedGroup.processGroupId,
+            deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+            force: true,
+          });
+        });
+        expect(fenced).toMatchObject({ ok: true, value: 'terminated' });
+        await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: null, signal: 'SIGKILL' });
+        await expect(readFile(`${launchAttempt.startedPath}.termination-request`, 'utf8'))
+          .rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(readFile(`${launchAttempt.startedPath}.termination-complete`, 'utf8'))
+          .rejects.toMatchObject({ code: 'ENOENT' });
+
+        const terminal = JSON.parse(await readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')) as {
+          kind: string;
+          outcome: string;
+          cleanup_verified: boolean;
+          process_group_id: number;
+          signal: string | null;
+        };
+        expect(terminal).toMatchObject({
+          kind: 'worker_launch_provider_terminal',
+          outcome: 'exit',
+          cleanup_verified: true,
+          process_group_id: ownedGroup!.processGroupId,
+          signal: 'SIGKILL',
+        });
+        expect(() => process.kill(-ownedGroup!.processGroupId, 0))
+          .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      } finally {
+        // The fence callback assigns this handle; retain its declared type
+        // rather than TypeScript's pre-callback null narrowing.
+        const cleanupGroup = ownedGroup as ReturnType<typeof captureOwnedProcessGroup>;
+        if (cleanupGroup) {
+          await terminateOwnedProcessGroup({
+            pid: cleanupGroup.pid,
+            expectedStartIdentity: cleanupGroup.processStartIdentity,
+            processGroupId: cleanupGroup.processGroupId,
+            deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+            force: true,
+          }).catch(() => 'unknown');
+        } else {
+          await terminateWorkerLaunchProvider(launchAttempt, 2_000).catch(() => false);
+        }
+        await bootstrap?.catch(() => undefined);
+        if (ownedGroup) {
+          await vi.waitFor(() => {
+            expect(() => process.kill(-ownedGroup!.processGroupId, 0))
+              .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+          }, { timeout: 2_000, interval: 20 });
+        }
+      }
+    },
+  );
 
   it('revokes a timed-out attempt and treats a later acknowledgement as losing evidence', async () => {
     const launchAttempt = await attempt();
@@ -459,6 +612,118 @@ describe('worker launch acknowledgement', () => {
     }, { timeout: 2_000, interval: 20 });
   });
 
+  it.runIf(process.platform !== 'win32').each(['identity', 'group'] as const)(
+    'gates provider execution when %s ownership capture is unavailable',
+    async missingCapture => {
+      const launchAttempt = await attempt();
+      const providerMarker = join(cwd, `provider-ran-${missingCapture}`);
+      const spec = buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran');process.exit(0)`],
+        cwd,
+      );
+      const captureSpy = missingCapture === 'identity'
+        ? vi.spyOn(processUtils, 'getProcessStartIdentitySync').mockReturnValue(null)
+        : vi.spyOn(processUtils, 'captureOwnedProcessGroup').mockReturnValue(null);
+      try {
+        const bootstrap = runWorkerLaunchBootstrap(spec);
+        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+          timeoutMs: 2_000,
+          pollIntervalMs: 5,
+        })).resolves.toEqual({ ok: true });
+        await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
+        await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+
+        const terminal = JSON.parse(await readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')) as {
+          kind: string;
+          outcome: string;
+          cleanup_verified: boolean;
+          pid: number;
+        };
+        expect(terminal).toMatchObject({
+          kind: 'worker_launch_provider_terminal',
+          outcome: 'exit',
+          cleanup_verified: true,
+        });
+        expect(Number.isSafeInteger(terminal.pid)).toBe(true);
+        expect(() => process.kill(-terminal.pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }));
+      } finally {
+        captureSpy.mockRestore();
+      }
+    },
+  );
+
+  it.runIf(process.platform !== 'win32').each(['event-first', 'callback-first'] as const)('fails closed on asynchronous EPIPE after peer exit (%s)', async (errorOrder) => {
+    vi.resetModules();
+    const actualChildProcess = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    type GateSocket = {
+      end: (chunk?: unknown, callback?: (error?: Error) => void) => unknown;
+      emit: (event: string, error: unknown) => boolean;
+    };
+    const spawnMock = vi.fn((
+      command: string,
+      args: string[],
+      options: Parameters<typeof spawn>[2],
+    ) => {
+      const child = actualChildProcess.spawn(command, args, options);
+      child.once('spawn', () => {
+        const gate = child.stdio[3] as unknown as GateSocket | null;
+        if (!gate) return;
+        gate.end = ((_: unknown, callback?: (error?: Error) => void) => {
+          setImmediate(() => {
+            child.kill('SIGKILL');
+            const error = Object.assign(new Error('provider gate peer exited'), { code: 'EPIPE' });
+            if (errorOrder === 'callback-first') callback?.(error);
+            gate.emit('error', error);
+            if (errorOrder === 'event-first') callback?.(error);
+          });
+          return gate;
+        }) as GateSocket['end'];
+      });
+      return child;
+    });
+    vi.doMock('node:child_process', () => ({ ...actualChildProcess, spawn: spawnMock }));
+    let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    try {
+      const workerLaunch = await import('../worker-launch-ack.js');
+      const launchAttempt = await attempt();
+      const providerMarker = join(cwd, 'async-release-provider-ran');
+      bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran');setInterval(()=>{},1000)`],
+        cwd,
+      ));
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      const result = await bootstrap;
+      expect(result.outcome).toBe('provider_spawn_failed');
+      expect(result.outcome).not.toBe('ran');
+      await expect(readFile(providerMarker, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(workerLaunch.isWorkerLaunchProviderStarted(launchAttempt)).resolves.toBe(false);
+
+      const terminal = JSON.parse(await readFile(`${launchAttempt.startedPath}.terminal`, 'utf8')) as {
+        kind: string;
+        outcome: string;
+        cleanup_verified: boolean;
+        process_group_id: number;
+      };
+      expect(terminal).toMatchObject({
+        kind: 'worker_launch_provider_terminal',
+        outcome: 'exit',
+        cleanup_verified: true,
+      });
+      expect(Number.isSafeInteger(terminal.process_group_id)).toBe(true);
+      expect(() => process.kill(-terminal.process_group_id, 0))
+        .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+    } finally {
+      await bootstrap?.catch(() => undefined);
+      vi.doUnmock('node:child_process');
+      vi.resetModules();
+    }
+  });
+
   it('terminates the exact started provider process group before failed-startup pane cleanup', async () => {
     const launchAttempt = await attempt();
     const pidMarker = join(cwd, 'started-provider-tree-pids.json');
@@ -592,21 +857,44 @@ describe('worker launch acknowledgement', () => {
   it('keeps an accepted decision terminal when revocation arrives later', async () => {
     const launchAttempt = await attempt();
     const providerMarker = join(cwd, 'accepted-provider-ran');
-    const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
-      launchAttempt,
-      [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran')`],
-      cwd,
-    ));
-
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
-      pollIntervalMs: 5,
-    })).resolves.toEqual({ ok: true });
-    await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
-    await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
-    await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
-    const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
-    expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
+    const providerReadyPath = join(cwd, 'accepted-provider-ready');
+    const providerStopPath = join(cwd, 'accepted-provider-stop');
+    const providerScript = [
+      "const fs=require('node:fs')",
+      `fs.writeFileSync(${JSON.stringify(providerReadyPath)},JSON.stringify({pid:process.pid}))`,
+      `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStopPath)})){clearInterval(timer);fs.writeFileSync(${JSON.stringify(providerMarker)},'ran');process.exit(0)}},5)`,
+    ].join(';');
+    let bootstrap: ReturnType<typeof runWorkerLaunchBootstrap> | undefined;
+    try {
+      bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
+        launchAttempt,
+        [process.execPath, '-e', providerScript],
+        cwd,
+        { releaseAfterSpawn: true },
+      ));
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toEqual({ ok: true });
+      await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
+      const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
+      expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
+      await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
+        timeoutMs: 2_000,
+        pollIntervalMs: 5,
+      })).resolves.toBe(true);
+      await vi.waitFor(async () => {
+        const ready = JSON.parse(await readFile(providerReadyPath, 'utf8')) as { pid: number };
+        expect(ready.pid).toBeGreaterThan(0);
+      }, { timeout: 2_000, interval: 5 });
+      await writeFile(providerStopPath, 'stop', 'utf8');
+      await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+      await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
+    } finally {
+      await writeFile(providerStopPath, 'stop', 'utf8').catch(() => undefined);
+      await terminateWorkerLaunchProvider(launchAttempt, 2_000).catch(() => false);
+      await bootstrap?.catch(() => undefined);
+    }
   });
 
   it('prevents an older acknowledged attempt from releasing a provider after supersession', async () => {
@@ -1018,6 +1306,97 @@ describe('worker launch acknowledgement', () => {
     expect(invocation.completionPath).toBeTruthy();
     await expect(readFile(invocation.args[0]!, 'utf8')).resolves.toContain('"$@"');
     await invocation.cleanup();
+
+    const gated = await materializeProviderSpawnInvocation(
+      buildProviderSpawnInvocation(['/usr/bin/codex', '--prompt', 'literal & value'], 'linux'),
+      { superviseProcessTree: true, gateProviderExecution: true },
+    );
+    expect(gated.providerGateFd).toBe(3);
+    await expect(readFile(gated.args[0]!, 'utf8')).resolves.toContain('<&3');
+    await gated.cleanup();
+  });
+
+  it.runIf(process.platform !== 'win32')('proves gated providers retain stdio and see fd3 closed', async () => {
+    cwd = await createFixture('worker-launch-posix-fd-contract-');
+    const providerScript = [
+      'IFS= read -r message',
+      'printf "stdin:%s\\n" "$message"',
+      'printf "stdout:preserved\\n"',
+      'printf "stderr:preserved\\n" >&2',
+      'if ( : >&3 ) 2>/dev/null; then printf "fd3:open\\n" >&2; else printf "fd3:closed\\n" >&2; fi',
+      'exit 0',
+    ].join(';');
+    const invocation = await materializeProviderSpawnInvocation(
+      buildProviderSpawnInvocation(['/bin/sh', '-c', providerScript], 'linux'),
+      { superviseProcessTree: true, gateProviderExecution: true },
+    );
+    let child: ReturnType<typeof spawn> | undefined;
+    let ownedGroup: ReturnType<typeof captureOwnedProcessGroup> = null;
+    let childExit: Promise<void> | undefined;
+    let stdout = '';
+    let stderr = '';
+    try {
+      child = spawn(invocation.command, invocation.args, {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+        detached: true,
+      });
+      child.stdout?.setEncoding('utf8');
+      child.stdout?.on('data', chunk => { stdout += String(chunk); });
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', chunk => { stderr += String(chunk); });
+      childExit = new Promise<void>((resolve, reject) => {
+        child!.once('exit', () => resolve());
+        child!.once('error', reject);
+      });
+      await new Promise<void>((resolve, reject) => {
+        child!.once('spawn', () => resolve());
+        child!.once('error', reject);
+      });
+      ownedGroup = captureOwnedProcessGroup(child.pid!);
+      expect(ownedGroup).not.toBeNull();
+      expect(invocation.providerGateFd).toBe(3);
+      const gate = child.stdio[invocation.providerGateFd!] as unknown as {
+        end: (chunk?: unknown, callback?: () => void) => unknown;
+        on: (event: string, listener: (error: unknown) => void) => unknown;
+      };
+      const gateErrors: unknown[] = [];
+      gate.on('error', error => { gateErrors.push(error); });
+      child.stdin?.write('descriptor-message\n');
+      await new Promise<void>((resolve, reject) => {
+        gate.end('release\n', () => resolve());
+        if (gateErrors.length > 0) reject(gateErrors[0]);
+      });
+      expect(gateErrors).toHaveLength(0);
+      await vi.waitFor(() => {
+        expect(stdout).toContain('stdin:descriptor-message\n');
+        expect(stdout).toContain('stdout:preserved\n');
+        expect(stderr).toContain('stderr:preserved\n');
+        expect(stderr).toContain('fd3:closed\n');
+        expect(stderr).not.toContain('fd3:open\n');
+      }, { timeout: 2_000, interval: 5 });
+      await vi.waitFor(async () => {
+        await expect(readFile(invocation.completionPath!, 'utf8')).resolves.toMatch(/^0\s*$/);
+      }, { timeout: 2_000, interval: 5 });
+    } finally {
+      if (ownedGroup) {
+        await terminateOwnedProcessGroup({
+          pid: ownedGroup.pid,
+          expectedStartIdentity: ownedGroup.processStartIdentity,
+          processGroupId: ownedGroup.processGroupId,
+          deadlineAt: new Date(Date.now() + 2_000).toISOString(),
+          force: true,
+        }).catch(() => 'unknown');
+      }
+      await childExit?.catch(() => undefined);
+      if (ownedGroup) {
+        await vi.waitFor(() => {
+          expect(() => process.kill(-ownedGroup!.processGroupId, 0))
+            .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+        }, { timeout: 2_000, interval: 20 });
+      }
+      await invocation.cleanup();
+    }
   });
 
   it.runIf(process.platform === 'win32')('distinguishes provider starts created within the same wall-clock second', async () => {

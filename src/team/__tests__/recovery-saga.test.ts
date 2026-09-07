@@ -121,6 +121,21 @@ describe('recovery saga ordering and rollback contract', () => {
     expect(order).not.toContain('kill');
   });
 
+  it('surfaces provider startup rejection after commit without repeating persistence or killing the replacement', async () => {
+    const order: string[] = [];
+    await expect(runRecoverySaga(input, dependencies(order, {
+      spawnGatedPane: async () => {
+        order.push('spawn');
+        return { ok: true, paneId: '%9', paneAttemptId: 'attempt-a', committed: true, stateRevision: 8, manifestSync: 'synced' };
+      },
+      persistActive: async () => { order.push('persist'); throw new Error('must not persist committed pane'); },
+      writeRun: async () => { order.push('run'); throw new Error('startup_evidence_missing'); },
+    }))).rejects.toThrow('startup_evidence_missing');
+    expect(order).toEqual(['liveness', 'list', 'validate', 'requeue', 'spawn', 'activate', 'adopt', 'repair', 'run']);
+    expect(order).not.toContain('persist');
+    expect(order).not.toContain('kill');
+  });
+
   it('does not kill a committed replacement or start its provider when adoption is incomplete', async () => {
     const order: string[] = [];
     const result = await runRecoverySaga(input, dependencies(order, {

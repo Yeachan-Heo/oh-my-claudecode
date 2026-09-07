@@ -300,13 +300,21 @@ function releaseNextSteps(version: string): string {
   return `
   git switch -c release/v${version}
   npm run build
+  # The build rewrites CLAUDE.md and .github/CLAUDE.md from docs/CLAUDE.md with the
+  # new version marker. The golden fixture carries the same marker, and the inventory
+  # baseline must be regenerated while HEAD is still the base-branch commit so that
+  # provenance.head stays an ancestor after the release squash merge.
+  cp CLAUDE.md tests/fixtures/prompt-projection/claude-managed-block.golden
+  node scripts/generate-inventory-graph.mjs --write
   npm run plugin:shipping:verify
   npm run plugin:shipping:stage
-  git add -- package.json package-lock.json .claude-plugin/plugin.json .claude-plugin/marketplace.json docs/CLAUDE.md CHANGELOG.md README.md docs/REFERENCE.md .github/CLAUDE.md docs/ARCHITECTURE.md .github/release-body.md
+  git add -- package.json package-lock.json .claude-plugin/plugin.json .claude-plugin/marketplace.json CLAUDE.md docs/CLAUDE.md CHANGELOG.md README.md docs/REFERENCE.md .github/CLAUDE.md docs/ARCHITECTURE.md .github/release-body.md tests/fixtures/prompt-projection/claude-managed-block.golden inventory/inventory-graph.json
   git commit -S -m "chore(release): bump version to v${version}"
   git push origin HEAD:release/v${version}
   # Open a release PR from release/v${version} to dev. The signed commit is required; do not push or merge a protected branch directly.
   # The maintainer shipping transaction stages only the verified generated closure.
+  # bridge/claude-md-coordinator.cjs embeds the engine version, so it ships inside the
+  # signed generated closure and needs a matching base-owned authorization entry.
 `;
 }
 

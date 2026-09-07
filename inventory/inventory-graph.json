@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "729ede5f45bb80be688977870d11d9f0867f0df4",
-    "sourceSha256": "dc1624dad8c7c0dcfe5149c6cdddb9d5c8ea5cc7dbc324cd95873242321bd405",
+    "head": "b26c25055cdc56165a12920549211afc0cb6542c",
+    "sourceSha256": "b8b9e2a8294f7dccfbed38a6b107a4fd3c80a85d7aae8484684748eb0a28e2d3",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "729ede5f45bb80be688977870d11d9f0867f0df4",
-  "sourceSha256": "dc1624dad8c7c0dcfe5149c6cdddb9d5c8ea5cc7dbc324cd95873242321bd405",
+  "head": "b26c25055cdc56165a12920549211afc0cb6542c",
+  "sourceSha256": "b8b9e2a8294f7dccfbed38a6b107a4fd3c80a85d7aae8484684748eb0a28e2d3",
   "counts": {
     "public": {
-      "skills": 37,
+      "skills": 38,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 86
+      "total": 87
     },
     "internal": {
       "hookFiles": 295,
       "featureFiles": 71,
       "toolFiles": 61,
-      "libFiles": 40,
+      "libFiles": 42,
       "templateHooks": 21,
-      "srcFiles": 1332,
-      "total": 1353
+      "srcFiles": 1335,
+      "total": 1356
     },
     "generated": {
       "distFiles": 4986,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 37,
+    "skills": 38,
     "commands": 21,
     "hookFiles": 295,
     "workflows": 8,
@@ -62,6 +62,7 @@
       "execute",
       "external-context",
       "graph",
+      "harbor",
       "hud",
       "launch",
       "loft",
@@ -587,8 +588,10 @@
       "src/lib/__tests__/sync-publication-short-write.test.ts",
       "src/lib/__tests__/truncate-prompt.test.ts",
       "src/lib/__tests__/worktree-cleanup-safety.test.ts",
+      "src/lib/__tests__/worktree-paths-bare-container.test.ts",
       "src/lib/__tests__/worktree-paths-foreign-root.test.ts",
       "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
+      "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
       "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
       "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
       "src/lib/__tests__/worktree-paths-split-warning.test.ts",
@@ -33549,6 +33552,11 @@
         "path": "skills/graph/SKILL.md"
       },
       {
+        "id": "skills/harbor/SKILL.md",
+        "kind": "skill",
+        "path": "skills/harbor/SKILL.md"
+      },
+      {
         "id": "skills/hud/SKILL.md",
         "kind": "skill",
         "path": "skills/hud/SKILL.md"
@@ -34972,6 +34980,11 @@
         "id": "src/__tests__/session-start-cache-cleanup.test.ts",
         "kind": "src",
         "path": "src/__tests__/session-start-cache-cleanup.test.ts"
+      },
+      {
+        "id": "src/__tests__/session-start-context-budget.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-start-context-budget.test.ts"
       },
       {
         "id": "src/__tests__/session-start-precompact-restore.test.ts",
@@ -38379,6 +38392,11 @@
         "path": "src/lib/__tests__/worktree-cleanup-safety.test.ts"
       },
       {
+        "id": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-bare-container.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/worktree-paths-foreign-root.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/worktree-paths-foreign-root.test.ts"
@@ -38387,6 +38405,11 @@
         "id": "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts"
+      },
+      {
+        "id": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts"
       },
       {
         "id": "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
@@ -40649,6 +40672,11 @@
         "path": "tests/benchmark-diagnostics.test.ts"
       },
       {
+        "id": "tests/fixtures/harbor/scenarios.json",
+        "kind": "other",
+        "path": "tests/fixtures/harbor/scenarios.json"
+      },
+      {
         "id": "tests/fixtures/multirepo/drift-fixture.mjs",
         "kind": "other",
         "path": "tests/fixtures/multirepo/drift-fixture.mjs"
@@ -40687,6 +40715,11 @@
         "id": "tests/fixtures/typescript-pnpm/tsconfig.json",
         "kind": "other",
         "path": "tests/fixtures/typescript-pnpm/tsconfig.json"
+      },
+      {
+        "id": "tests/harbor-scenarios.test.ts",
+        "kind": "other",
+        "path": "tests/harbor-scenarios.test.ts"
       },
       {
         "id": "tests/integration/concurrent-project-memory.test.ts",
@@ -43092,6 +43125,11 @@
       },
       {
         "from": "skills/graph/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/harbor/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -48338,6 +48376,36 @@
       {
         "from": "src/__tests__/session-start-cache-cleanup.test.ts",
         "to": "src/utils/paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-context-budget.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -65001,6 +65069,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-bare-container.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/worktree-paths-foreign-root.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -65072,6 +65170,31 @@
       },
       {
         "from": "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -69927,6 +70050,11 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.dispatch.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.dispatch.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -69952,7 +70080,17 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.dispatch.test.ts",
+        "to": "src/team/recovery-request-store.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.dispatch.test.ts",
         "to": "src/team/runtime-v2.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.dispatch.test.ts",
+        "to": "src/team/state-paths.ts",
         "kind": "imports"
       },
       {
@@ -70109,6 +70247,11 @@
         "from": "src/team/__tests__/runtime-v2.shutdown-pane-cleanup.test.ts",
         "to": "src/team/worker-launch-ack.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.shutdown-pane-cleanup.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
@@ -71328,6 +71471,11 @@
       {
         "from": "src/team/__tests__/worker-launch-posix-transport.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-posix-transport.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -74362,6 +74510,11 @@
       },
       {
         "from": "src/team/worker-launch-ack.ts",
+        "to": "external:node:stream",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/team/worker-launch-ack.ts",
         "to": "src/lib/atomic-write.ts",
         "kind": "imports"
       },
@@ -77066,6 +77219,16 @@
         "kind": "imports"
       },
       {
+        "from": "tests/harbor-scenarios.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/harbor-scenarios.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/concurrent-project-memory.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -77527,12 +77690,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6897,
-      "edgeCount": 7343,
-      "importEdgeCount": 6043,
-      "registerEdgeCount": 58
+      "nodeCount": 6903,
+      "edgeCount": 7369,
+      "importEdgeCount": 6066,
+      "registerEdgeCount": 59
     }
   },
-  "inventorySha256": "d4529469934f2cbf2fa4897aea788da0e912fad10235f00a88b9afff515417b5",
-  "manifestSha256": "2c711b3b46916d3cbe0090151f940c5fa5b65348cd8cffdfb51db04aca799b93"
+  "inventorySha256": "96b61cb5df14663620165d68dbccea8b03c6757c289db671e8a2be1356240e0e",
+  "manifestSha256": "0d9199b58b1c425bf0b48492094ff8b7fd893453ee57f5a49797b766a677155c"
 }

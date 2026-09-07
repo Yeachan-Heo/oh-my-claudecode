@@ -639,6 +639,53 @@ ${'- preserve this startup guidance\n'.repeat(400)}
     expect((result.message || '').length).toBeLessThanOrEqual(6000);
   });
 
+  it('honors OMC_SESSION_START_CONTEXT_BUDGET so a large root AGENTS.md can arrive whole', async () => {
+    const sentinel = 'END-OF-AGENTS-MD-SENTINEL';
+    writeFileSync(
+      join(testDir, 'AGENTS.md'),
+      `# Project orientation\n\n${'- a plain orientation line that is not OMC guidance\n'.repeat(160)}\n${sentinel}\n`,
+    );
+    const previous = process.env.OMC_SESSION_START_CONTEXT_BUDGET;
+    try {
+      delete process.env.OMC_SESSION_START_CONTEXT_BUDGET;
+      const truncated = await processHook('session-start', { sessionId, directory: testDir });
+      expect(truncated.continue).toBe(true);
+      expect((truncated.message || '').length).toBeLessThanOrEqual(6000);
+      expect(truncated.message || '').toContain('[truncated to preserve SessionStart context budget]');
+      expect(truncated.message || '').not.toContain(sentinel);
+
+      process.env.OMC_SESSION_START_CONTEXT_BUDGET = '20000';
+      const full = await processHook('session-start', { sessionId, directory: testDir });
+      expect(full.continue).toBe(true);
+      expect(full.message || '').toContain('[ROOT AGENTS.md LOADED]');
+      expect(full.message || '').toContain(sentinel);
+      expect(full.message || '').not.toContain('[truncated to preserve SessionStart context budget]');
+    } finally {
+      if (previous === undefined) delete process.env.OMC_SESSION_START_CONTEXT_BUDGET;
+      else process.env.OMC_SESSION_START_CONTEXT_BUDGET = previous;
+    }
+  });
+
+  it('falls back to the default budget when OMC_SESSION_START_CONTEXT_BUDGET is not a positive integer', async () => {
+    writeFileSync(
+      join(testDir, 'AGENTS.md'),
+      `# Project orientation\n\n${'- a plain orientation line that is not OMC guidance\n'.repeat(160)}\n`,
+    );
+    const previous = process.env.OMC_SESSION_START_CONTEXT_BUDGET;
+    try {
+      for (const invalid of ['abc', '0', '-500', '12.5', '']) {
+        process.env.OMC_SESSION_START_CONTEXT_BUDGET = invalid;
+        const result = await processHook('session-start', { sessionId, directory: testDir });
+        expect(result.continue).toBe(true);
+        expect((result.message || '').length).toBeLessThanOrEqual(6000);
+        expect(result.message || '').toContain('[truncated to preserve SessionStart context budget]');
+      }
+    } finally {
+      if (previous === undefined) delete process.env.OMC_SESSION_START_CONTEXT_BUDGET;
+      else process.env.OMC_SESSION_START_CONTEXT_BUDGET = previous;
+    }
+  });
+
   it('keeps combined session-start restore context under aggregate budget', async () => {
     writeFileSync(
       join(testDir, '.omc', 'state', 'sessions', sessionId, 'team-state.json'),
