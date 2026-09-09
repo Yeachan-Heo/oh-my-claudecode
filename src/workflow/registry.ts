@@ -188,6 +188,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'project-session-manager', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Utility only; workflow-gate behavior removed per plan.' }),
   entry({ name: 'ai-slop-cleaner', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review tool; never a default gate.' }),
   entry({ name: 'minimal-code-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline; never a default gate.' }),
+  entry({ name: 'agent-doc-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline for agent-facing documents; mandatory at drydock seed generation and launch C5 sediment; never a default gate.' }),
   entry({ name: 'launch', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in governed delivery pipeline (spec -> tickets -> frontier); never a default gate.' }),
   entry({ name: 'ask-navigator', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in navigator: charts foggy efforts into decision-ticket maps; never a default gate, never builds.' }),
   entry({ name: 'loft', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in shape-before-steel discipline: throwaway artifacts answer design questions; never a default gate, never lands.' }),

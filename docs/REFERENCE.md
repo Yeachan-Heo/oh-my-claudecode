@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 37 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (38 Total)](#skills-38-total)
+- [Skills (39 Total)](#skills-39-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -901,7 +901,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (38 Total)
+## Skills (39 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -912,6 +912,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | Skill                     | Description                                                                    | Manual Command                              |
 | ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------- |
 | `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass        | `/oh-my-claudecode:ai-slop-cleaner`         |
+| `agent-doc-discipline`    | Writing-time discipline for agent-facing documents: checkable rules with a why, steps first, one meaning one home | `/oh-my-claudecode:agent-doc-discipline` |
 | `ask`                     | Ask Claude, Codex, Gemini, Antigravity, Grok, or Cursor via local CLI          | `/oh-my-claudecode:ask`                     |
 | `ask-navigator`           | Shipyard navigator: chart foggy efforts into decision-ticket maps, hand off to launch | `/oh-my-claudecode:ask-navigator`    |
 | `autopilot`               | Full autonomous execution from idea to working code                            | `/oh-my-claudecode:autopilot`               |
@@ -961,6 +962,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `/oh-my-claudecode:ai-slop-cleaner <target>`             | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                        |
+| `/oh-my-claudecode:agent-doc-discipline`                 | Apply the writing-time discipline for agent-facing documents                                   |
 | `/oh-my-claudecode:ask <claude\|codex\|gemini\|antigravity\|grok\|cursor> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact                   |
 | `/oh-my-claudecode:ask-navigator <idea\|map>`            | Chart a foggy effort into a map of decision tickets (or work the open map), then hand off to launch |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |

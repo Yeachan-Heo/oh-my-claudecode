@@ -105,6 +105,8 @@ scripts/README.md
 
 Seed exemplars are reference companions, never a combined payload. Select exactly one companion after resolving `documentLanguage`; do not emit duplicate headings or labels from another companion. Use the longest matching language/script prefix: `en-*` uses English, `zh-Hans-*` uses Simplified Chinese, and `zh-Hant-*` uses Traditional Chinese, while Seed B writes the full resolved tag into `documentLanguage`. For any other valid tag, translate the English canonical companion once while preserving every stable token above.
 
+Seed prose follows `/oh-my-claudecode:agent-doc-discipline` — the shipyard's mandatory writing-time discipline for agent-facing documents: every rule checkable and carrying a why, every surface self-describing without chat history, and sources named rather than assumed — a teammate or agent should be able to act on the seed's content by reading alone.
+
 Seed A — CLAUDE.md, en (thin entry; extend in place if the file exists):
 
 <!-- shipyard-seed-a:en:start -->

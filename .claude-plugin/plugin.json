@@ -17,6 +17,7 @@
   ],
   "skills": [
     "./skills/ai-slop-cleaner/",
+    "./skills/agent-doc-discipline/",
     "./skills/ask/",
     "./skills/ask-navigator/",
     "./skills/autopilot/",
