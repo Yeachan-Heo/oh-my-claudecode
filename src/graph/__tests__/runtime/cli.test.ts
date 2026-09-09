@@ -180,10 +180,10 @@ describe('graphCommand run subcommand', () => {
     expect(mocks.runGraph).not.toHaveBeenCalled();
   });
 
-  it('fails closed on unsupported POSIX before creating run state', async () => {
+  it('accepts Darwin as a supported confined runtime platform', async () => {
     const runsRoot = join(workDir, '.omc', 'graph-runs');
     const fixturePath = join(workDir, 'descriptor.json');
-    writeFileSync(fixturePath, JSON.stringify(descriptorInput('run-darwin', 'unsupported')));
+    writeFileSync(fixturePath, JSON.stringify(descriptorInput('run-darwin', 'darwin support')));
     const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
 
     try {
@@ -192,11 +192,8 @@ describe('graphCommand run subcommand', () => {
       platform.mockRestore();
     }
 
-    expect(process.exitCode).toBe(1);
-    expect(mocks.runGraph).not.toHaveBeenCalled();
-    expect(existsSync(runsRoot)).toBe(false);
-    expect(errorSpy.mock.calls.map((args) => args.join(' ')).join('\n')).toContain(
-      'graph runtime is unavailable on darwin',
-    );
+    expect(process.exitCode).toBe(EXIT_CODES.OK);
+    expect(mocks.runGraph).toHaveBeenCalledOnce();
+    expect(existsSync(runsRoot)).toBe(true);
   });
 });

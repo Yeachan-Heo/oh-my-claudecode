@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "54795969be2217e4d21f4edc506159b05d20b777",
-    "sourceSha256": "b6222d4b1191834d299b7cf435c36fb2ceebe5f5d2cd3ddc265477771bc86da4",
+    "head": "d10eb01f82d27e9911c1d492899a18d8844c592f",
+    "sourceSha256": "5bab9e0011b0de4e70f54d28db0019426e965479ed6c49026a430db16badfa20",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "54795969be2217e4d21f4edc506159b05d20b777",
-  "sourceSha256": "b6222d4b1191834d299b7cf435c36fb2ceebe5f5d2cd3ddc265477771bc86da4",
+  "head": "d10eb01f82d27e9911c1d492899a18d8844c592f",
+  "sourceSha256": "5bab9e0011b0de4e70f54d28db0019426e965479ed6c49026a430db16badfa20",
   "counts": {
     "public": {
       "skills": 38,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 42,
       "templateHooks": 21,
-      "srcFiles": 1346,
-      "total": 1367
+      "srcFiles": 1347,
+      "total": 1368
     },
     "generated": {
       "distFiles": 4986,
@@ -36410,6 +36410,11 @@
         "path": "src/graph/runtime/approval.ts"
       },
       {
+        "id": "src/graph/runtime/contained-fd.ts",
+        "kind": "src",
+        "path": "src/graph/runtime/contained-fd.ts"
+      },
+      {
         "id": "src/graph/runtime/executors/agent.ts",
         "kind": "src",
         "path": "src/graph/runtime/executors/agent.ts"
@@ -54827,6 +54832,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/graph/runtime/contained-fd.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/runtime/executors/agent.ts",
         "to": "external:@anthropic-ai/claude-agent-sdk",
         "kind": "imports"
@@ -55032,6 +55042,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/graph/runtime/run-dir.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/runtime/runner.ts",
         "to": "external:path",
         "kind": "imports"
@@ -55104,6 +55119,11 @@
       {
         "from": "src/graph/runtime/safe-fs.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
         "kind": "imports"
       },
       {
@@ -78038,12 +78058,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6915,
-      "edgeCount": 7423,
-      "importEdgeCount": 6111,
+      "nodeCount": 6916,
+      "edgeCount": 7426,
+      "importEdgeCount": 6114,
       "registerEdgeCount": 59
     }
   },
-  "inventorySha256": "f43dbc64d3d2f1711aeb2b8dd548884f816919af76218064a6b6d8b0a1f5a8fe",
-  "manifestSha256": "cd87daa55408aea8bcb7ebea3dea4efb0672a0c44edec17df16efbcec9cdf880"
+  "inventorySha256": "dbd043a823e64ee7655a3be94e186db2a2ba70faf20e556099264fa62fb74296",
+  "manifestSha256": "f5762a65098d95e9a0da9ea63b4e4a14ccc3729643579d17065530e22f25afed"
 }
