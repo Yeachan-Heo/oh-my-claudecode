@@ -6,6 +6,7 @@ import {
   readFileSync,
 } from "fs";
 import { isAbsolute, join, normalize, win32 } from "path";
+import { containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
 import type { RunDirHandle } from "./run-dir.js";
 
 const NO_FOLLOW = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
@@ -17,7 +18,7 @@ const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|clock\$|com[1-9¹²³]|lpt[1-9�
 export function assertContainedFsSupported(
   platform: NodeJS.Platform = process.platform,
 ): void {
-  if (platform !== "linux") {
+  if (!containedFsPlatformSupported(platform)) {
     throw new Error(
       `contained directory-FD traversal is unavailable on ${platform}; refusing pathname fallback`,
     );
@@ -111,11 +112,8 @@ export function containedPathForPlatform(
   platform: NodeJS.Platform = process.platform,
 ): string {
   assertSafeContainedFileName(fileName, platform);
-  if (platform === "linux") {
-    return join(`/proc/self/fd/${directoryFd}`, fileName);
-  }
   assertContainedFsSupported(platform);
-  throw new Error("unreachable");
+  return join(containedFdPath(directoryFd, platform), fileName);
 }
 
 /**
@@ -153,7 +151,7 @@ export function withContainedDirectory<T>(
     if (stats.dev !== runDir.device || stats.ino !== runDir.inode) {
       throw new Error("run directory identity changed");
     }
-    return operation(`/proc/self/fd/${directoryFd}`);
+    return operation(containedFdPath(directoryFd, platform));
   } finally {
     closeSync(directoryFd);
   }
