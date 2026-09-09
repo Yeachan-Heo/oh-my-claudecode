@@ -164,9 +164,10 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(fm.name).toBe('agent-doc-discipline');
     expect(DISCIPLINE).toContain('Mandatory when: drydock generates surface seeds, the launch C5 sediment pass');
     expect(DISCIPLINE).toContain('**Every rule checkable and carrying a why.**');
+    expect(DISCIPLINE).toContain('stale or redundant material found during the edit is gone');
     expect(PLUGIN.skills as string[]).toContain('./skills/agent-doc-discipline/');
-    expect(LAUNCH).toContain('follows `/oh-my-claudecode:agent-doc-discipline` — mandatory at this pass');
-    expect(DRYDOCK).toContain('follows `/oh-my-claudecode:agent-doc-discipline`');
+    expect(LAUNCH).toContain('call the Skill tool with `agent-doc-discipline`');
+    expect(DRYDOCK).toContain('call the Skill tool with `agent-doc-discipline`');
   });
 
   it('harbor speaks plain language on the tracker (no methodology metaphors leak)', () => {

@@ -30,7 +30,7 @@ Documents written for humans only: `docs/business/` narrative, ADR decision stor
 
 **Prompt the positive.** State the target behavior; a prohibition is reserved for hard guardrails and is always paired with the positive target. _Test:_ every prohibition in the document names the thing to do instead.
 
-**Scrape barnacles on write.** A sentence the model already obeys by default pays load for nothing — delete the whole sentence. Stale lines accrete like barnacles; every touch of the document scrapes some off. _Test:_ every line re-read earns its place against "does this change behavior versus the default?".
+**Scrape barnacles on write.** When the document contains stale or redundant material, remove it in the same edit; when it does not, add only the required material and do not invent deletions. A sentence the model already obeys by default pays load for nothing — delete the whole sentence. _Test:_ every line re-read earns its place against "does this change behavior versus the default?", and any stale or redundant material found during the edit is gone.
 
 ## Verification
 
@@ -39,4 +39,4 @@ Before reporting a document change done, confirm:
 - a fresh session could act on it without asking a human anything
 - every rule is checkable and states its why; no rule restates a lookup
 - meanings live in one place; pointers name their trigger branches
-- the edit removed at least as much as it added, unless the document is new
+- stale or redundant material found during the edit was removed, while valid unrelated content was preserved
