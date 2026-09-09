@@ -409,6 +409,7 @@ describe('getUsage routing', () => {
     // Reset env
     delete process.env.ANTHROPIC_BASE_URL;
     delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     // Get the mocked https module for assertions
     httpsModule = await import('https') as unknown as typeof httpsModule;
   });
@@ -423,6 +424,44 @@ describe('getUsage routing', () => {
     expect(result.error).toBe('no_credentials');
     // No network call should be made without credentials
     expect(httpsModule.default.request).not.toHaveBeenCalled();
+  });
+
+  it('prefers CLAUDE_CODE_OAUTH_TOKEN over Keychain and uses it as the Bearer token', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-oauth-token';
+
+    let capturedAuth: string | undefined;
+    httpsModule.default.request.mockImplementationOnce((options, callback) => {
+      capturedAuth = (options as { headers?: Record<string, string> })?.headers?.Authorization;
+      const req = new EventEmitter() as EventEmitter & { end: () => void; destroy: () => void; on: typeof EventEmitter.prototype.on };
+      req.destroy = vi.fn();
+      req.end = () => {
+        const res = new EventEmitter() as EventEmitter & { statusCode?: number };
+        res.statusCode = 200;
+        callback(res);
+        res.emit('data', JSON.stringify({
+          five_hour: { utilization: 20 },
+          seven_day: { utilization: 40 },
+        }));
+        res.emit('end');
+      };
+      return req;
+    });
+
+    const result = await getUsage();
+
+    // Usage is fetched successfully using the env token...
+    expect(result).toEqual({
+      rateLimits: {
+        fiveHourPercent: 20,
+        weeklyPercent: 40,
+        fiveHourResetsAt: null,
+        weeklyResetsAt: null,
+      },
+    });
+    // ...sent as the Bearer credential...
+    expect(capturedAuth).toBe('Bearer env-oauth-token');
+    // ...and the Keychain is never consulted (the env override short-circuits it).
+    expect(vi.mocked(childProcess.execFileSync)).not.toHaveBeenCalled();
   });
 
   it('uses the raw ~-prefixed CLAUDE_CONFIG_DIR value for Keychain service lookup', async () => {

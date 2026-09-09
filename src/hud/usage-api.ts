@@ -89,7 +89,7 @@ interface OAuthCredentials {
   expiresAt?: number;
   refreshToken?: string;
   /** Where the credentials were read from, needed for write-back */
-  source?: 'keychain' | 'file';
+  source?: 'keychain' | 'file' | 'env';
   /** Keychain account name used when reading (null = service-only lookup) */
   keychainAccount?: string | null;
   /** Subscription type from OAuth credentials (e.g. 'enterprise') */
@@ -758,6 +758,17 @@ function readFileCredentials(): OAuthCredentials | null {
  * Get OAuth credentials (Keychain first, then file fallback)
  */
 function getCredentials(): OAuthCredentials | null {
+  // Respect an explicit CLAUDE_CODE_OAUTH_TOKEN override, matching how Claude Code itself
+  // authenticates. Multi-account setups launch each session with a per-account token via this
+  // env var; without honoring it here the HUD always reads the default Keychain login and shows
+  // the wrong account's usage. Setup-tokens are long-lived and carry no refresh token, so leave
+  // expiresAt/refreshToken unset — isCredentialExpired() then treats them as non-expiring and no
+  // token refresh or Keychain write-back is attempted.
+  const envToken = process.env.CLAUDE_CODE_OAUTH_TOKEN?.trim();
+  if (envToken) {
+    return { accessToken: envToken, source: 'env' };
+  }
+
   // Try Keychain first (macOS)
   const keychainCreds = readKeychainCredentials();
   if (keychainCreds) return keychainCreds;
