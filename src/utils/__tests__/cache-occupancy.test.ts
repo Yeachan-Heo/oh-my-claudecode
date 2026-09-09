@@ -65,4 +65,29 @@ describe('cache occupancy registry', () => {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     }
   });
+
+  it('publish skips its per-process probe when handed a precomputed identity (#3995)', async () => {
+    const root = join(dir, 'plugins', '2.0.0');
+    mkdirSync(root, { recursive: true });
+    const originalPlatform = process.platform;
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      // A deliberately corrupt precomputed identity would only be accepted
+      // verbatim if publish skipped its own probe; the record must carry it
+      // untouched (verification happens on read via the identity map).
+      expect(await publishCacheOccupancy(root, dir, 'ticks:638933184000000001')).toBe(true);
+      // The map-backed read verifies the record without any further probe.
+      const result = readOccupiedPluginRoots(dir, { identities: new Map([[process.pid, 'ticks:638933184000000001']]) });
+      expect(result.unavailable).toBe(false);
+      expect(result.roots).toEqual(new Set([root.toLowerCase()]));
+      // A mismatched identity in the map invalidates the record; omitting the
+      // map falls back to a fresh batched probe. Both verification paths agree
+      // the record is only kept on proven-fresh or unknown identity.
+      const mismatched = readOccupiedPluginRoots(dir, { identities: new Map([[process.pid, 'ticks:638933184000000002']]) });
+      expect(mismatched.roots.size).toBe(0);
+      expect(mismatched.identities.get(process.pid)).toBe('ticks:638933184000000002');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
+  });
 });

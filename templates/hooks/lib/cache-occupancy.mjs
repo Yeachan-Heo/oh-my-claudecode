@@ -37,17 +37,31 @@ function alive(pid) {
 
 function registryDir(configDir) { return join(configDir, '.omc', 'cache-occupancy'); }
 function fileName(root, pid, start) { return `${createHash('sha256').update(`${root}\0${pid}\0${start}`).digest('hex')}.json`; }
-export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid) {
-  const root = pathIdentity(pluginRoot || ''); const start = identity(pid); if (!root || !start) return false;
+
+// Issue #3995: on win32 every identity probe is a PowerShell host (~1.6-2.0s),
+// so SessionStart must not need two. publishCacheOccupancy() accepts an
+// explicit precomputed identity for `pid` (resolved by the caller in the ONE
+// batched readOccupiedPluginRoots() host) and skips its own probe entirely;
+// readOccupiedPluginRoots() accepts a previously returned identities map to
+// verify records without spawning a second host (pids absent from the map are
+// kept conservatively — the record survives unless proven stale otherwise).
+export function publishCacheOccupancy(pluginRoot, configDir, pid = process.ppid, precomputedIdentity) {
+  const root = pathIdentity(pluginRoot || ''); const start = typeof precomputedIdentity === 'string' && precomputedIdentity.length > 0 ? precomputedIdentity : identity(pid); if (!root || !start) return false;
   const dir = registryDir(configDir); const target = join(dir, fileName(root, pid, start)); const temp = `${target}.${process.pid}.${randomUUID()}.tmp`;
   try { mkdirSync(dir, { recursive: true, mode: 0o700 }); writeFileSync(temp, JSON.stringify({ version: 1, pid, processStartIdentity: start, pluginRoot: root, updatedAt: new Date().toISOString() }), { mode: 0o600 }); renameSync(temp, target); return true; } catch { try { unlinkSync(temp); } catch {} return false; }
 }
-export function readOccupiedPluginRoots(configDir) {
+export function readOccupiedPluginRoots(configDir, options = {}) {
   const dir = registryDir(configDir); let names;
-  try { names = readdirSync(dir).filter(name => typeof name === 'string' && NAME.test(name)); } catch (error) { return { roots: new Set(), unavailable: error?.code !== 'ENOENT' }; }
+  try { names = readdirSync(dir).filter(name => typeof name === 'string' && NAME.test(name)); } catch (error) { return { roots: new Set(), unavailable: error?.code !== 'ENOENT', identities: new Map() }; }
   const roots = new Set(); const records = [];
   for (const name of names) { const path = join(dir, name); let record; try { record = JSON.parse(readFileSync(path, 'utf8')); } catch { try { unlinkSync(path); } catch {} continue; } const age = Date.now() - Date.parse(record?.updatedAt); if (record?.version !== 1 || !Number.isSafeInteger(record?.pid) || !record?.processStartIdentity || !record?.pluginRoot || !Number.isFinite(Date.parse(record?.updatedAt)) || age < -300000 || !alive(record.pid)) { try { unlinkSync(path); } catch {} continue; } records.push({ path, record }); }
-  const currentIdentities = identities(records.map(({ record }) => record.pid));
+  // A precomputed map (same-process reuse, issue #3995) verifies records
+  // without a second PowerShell host; the fresh batched probe runs otherwise.
+  const currentIdentities = Array.isArray(options.identities)
+    ? new Map(options.identities)
+    : (options.identities instanceof Map
+      ? options.identities
+      : identities([...records.map(({ record }) => record.pid), ...(Array.isArray(options.includePids) ? options.includePids : [])]));
   for (const { path, record } of records) { const current = process.platform === 'win32' ? currentIdentities.get(record.pid) : identity(record.pid); if (current && current !== record.processStartIdentity) { try { unlinkSync(path); } catch {} continue; } roots.add(pathIdentity(record.pluginRoot)); }
-  return { roots, unavailable: false };
+  return { roots, unavailable: false, identities: currentIdentities };
 }

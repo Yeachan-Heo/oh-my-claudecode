@@ -14,7 +14,7 @@ const __dirname = dirname(__filename);
 const { getClaudeConfigDir, getUpdateCheckCachePath } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const configDir = getClaudeConfigDir();
 const { resolveSessionStatePathsForHook, resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
-const { publishCacheOccupancy } = await import(pathToFileURL(join(__dirname, 'lib', 'cache-occupancy.mjs')).href);
+const { publishCacheOccupancy, readOccupiedPluginRoots } = await import(pathToFileURL(join(__dirname, 'lib', 'cache-occupancy.mjs')).href);
 
 // Detached update-cache refresh: argv flag and the child's overall deadline.
 const REFRESH_UPDATE_CACHE_FLAG = '--refresh-update-cache';
@@ -605,7 +605,13 @@ async function main() {
     }
     const sessionId = data.sessionId || data.session_id || data.sessionid || '';
     if (process.env.CLAUDE_PLUGIN_ROOT) {
-      publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir);
+      // Issue #3995: resolve plugin-cache occupancy ONCE per session start.
+      // The win32 batched identity host (the only PowerShell spawn on this
+      // path) runs a single time; its identities map feeds the owner publish
+      // below. The template has no stale-cache GC consumer, so no occupancy
+      // state is carried past this point.
+      const occupancy = readOccupiedPluginRoots(configDir);
+      publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir, process.ppid, occupancy.identities.get(process.ppid));
     }
     let messages = [];
     const userMessages = [];

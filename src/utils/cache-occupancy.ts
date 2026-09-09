@@ -8,6 +8,11 @@ import { getClaudeConfigDir } from './config-dir.js';
 const REGISTRY_VERSION = 1;
 const RECORD_PATTERN = /^[a-f0-9]{64}\.json$/;
 
+// Issue #3995: on win32 every identity probe is a PowerShell host
+// (~1.6-2.0s), so same-process startup paths must not need two. Both
+// operations accept a precomputed identity / identity map so callers can reuse
+// the ONE batched host instead of spawning an extra per-process probe.
+
 /** Resolve paths for identity comparisons; only Windows has case-insensitive paths. */
 export function pathIdentity(path: string): string {
   const normalized = resolve(path);
@@ -82,9 +87,13 @@ function recordPath(pluginRoot: string, pid: number, identity: string, configDir
   return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity));
 }
 
-export async function publishCacheOccupancy(pluginRoot: string, configDir?: string): Promise<boolean> {
+export async function publishCacheOccupancy(pluginRoot: string, configDir?: string, precomputedIdentity?: string): Promise<boolean> {
   const normalizedRoot = pathIdentity(pluginRoot);
-  const identity = processStartIdentity(process.pid);
+  // Precomputed identity handoff (issue #3995): a caller that already resolved
+  // an identity with the same algorithm (the batched readOccupiedPluginRoots()
+  // host on win32) passes it here so publish skips the extra per-process
+  // PowerShell spawn instead of paying for two hosts on one startup path.
+  const identity = precomputedIdentity ?? processStartIdentity(process.pid);
   if (!identity) return false;
   const record: CacheOccupancyRecord = {
     version: REGISTRY_VERSION,
@@ -115,13 +124,21 @@ function validRecord(value: unknown): value is CacheOccupancyRecord {
     && typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt));
 }
 
-export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()): { roots: Set<string>; unavailable: boolean } {
+export interface ReadOccupiedPluginRootsOptions {
+  /** Precomputed pid→identity map (same-process reuse, issue #3995). Records
+   *  whose pid is absent from the map are kept conservatively. */
+  identities?: Map<number, string>;
+  /** Extra pids to resolve in the fresh batched identity probe. */
+  includePids?: number[];
+}
+
+export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), options: ReadOccupiedPluginRootsOptions = {}): { roots: Set<string>; unavailable: boolean; identities: Map<number, string> } {
   const directory = getCacheOccupancyDir(configDir);
   let names: string[];
   try {
     names = readdirSync(directory).filter(name => RECORD_PATTERN.test(name));
   } catch (error) {
-    return { roots: new Set(), unavailable: (error as NodeJS.ErrnoException).code !== 'ENOENT' };
+    return { roots: new Set(), unavailable: (error as NodeJS.ErrnoException).code !== 'ENOENT', identities: new Map() };
   }
 
   const roots = new Set<string>();
@@ -137,7 +154,11 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()): { roo
     if (!processAlive(record.pid)) { try { unlinkSync(path); } catch { /* best effort */ } continue; }
     records.push({ path, record });
   }
-  const currentIdentities = processStartIdentities(records.map(({ record }) => record.pid));
+  // A precomputed map (same-process reuse, issue #3995) verifies records
+  // without a second PowerShell host; the fresh batched probe runs otherwise.
+  const currentIdentities = options.identities instanceof Map
+    ? options.identities
+    : processStartIdentities([...records.map(({ record }) => record.pid), ...(options.includePids ?? [])]);
   for (const { path, record } of records) {
     const currentIdentity = process.platform === 'win32'
       ? currentIdentities.get(record.pid)
@@ -147,5 +168,5 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()): { roo
     // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
     roots.add(pathIdentity(record.pluginRoot));
   }
-  return { roots, unavailable: false };
+  return { roots, unavailable: false, identities: currentIdentities };
 }

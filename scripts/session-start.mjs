@@ -1093,14 +1093,20 @@ async function main() {
     } catch { /* non-fatal — dist unavailable or no workspace anchor */ }
     const projectMemoryModules = await loadProjectMemoryModules();
 
+    // Issue #3995: single occupancy resolution per session start; assigned in
+    // the plugin-root branch below, consumed by the stale-cache GC scan below.
+    let occupancyResolution = null;
     writeSessionStartedMarker(omcRoot, directory, sessionId);
     if (process.env.CLAUDE_PLUGIN_ROOT) {
+      // Issue #3995: resolve plugin-cache occupancy ONCE per session start.
+      // The win32 batched identity host (the only PowerShell spawn on this
+      // path) runs a single time; its identities map feeds the owner publish
+      // below and the stale-cache GC scan further down. `includePids` covers
+      // the configured owner even before its own record exists.
       const configuredOwnerPid = Number(process.env.OMC_SESSION_OWNER_PID);
-      publishCacheOccupancy(
-        process.env.CLAUDE_PLUGIN_ROOT,
-        configDir,
-        Number.isSafeInteger(configuredOwnerPid) && configuredOwnerPid > 1 ? configuredOwnerPid : process.ppid,
-      );
+      const ownerPid = Number.isSafeInteger(configuredOwnerPid) && configuredOwnerPid > 1 ? configuredOwnerPid : process.ppid;
+      occupancyResolution = readOccupiedPluginRoots(configDir, { includePids: [ownerPid] });
+      publishCacheOccupancy(process.env.CLAUDE_PLUGIN_ROOT, configDir, ownerPid, occupancyResolution.identities.get(ownerPid));
     }
     reconcileAbandonedSessionStarts(omcRoot, sessionId);
     reconcileSessionEndJobsInBackground(getRuntimeBaseDir(), directory);
@@ -1263,7 +1269,12 @@ ${cleanContent}
     // plugin update whose CLAUDE_PLUGIN_ROOT still points to the old version.
     try {
       const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
-      const occupancy = readOccupiedPluginRoots(configDir);
+      // Issue #3995: reuse the occupancy resolution hoisted above the owner
+      // publish (same-process identities map, no second win32 host). The GC
+      // still re-scans the registry files for records published after that
+      // resolution, and conservatively keeps records whose pid has no
+      // precomputed identity.
+      const occupancy = readOccupiedPluginRoots(configDir, { identities: occupancyResolution?.identities ?? [] });
       let versions = [];
       if (existsSync(cacheBase)) {
         versions = readdirSync(cacheBase)

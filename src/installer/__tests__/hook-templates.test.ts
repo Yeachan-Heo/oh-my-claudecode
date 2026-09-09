@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { readdirSync } from 'fs';
 import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -739,6 +740,63 @@ OMC Ultrawork = "특수부대 작전 반"
     } finally {
       rmSync(fakeHome, { recursive: true, force: true });
       rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
+  it('keeps SessionStart occupancy single-host: publish takes a precomputed identity and read reuses an identity map', async () => {
+    const helperPaths = [
+      join(packageRoot, 'templates', 'hooks', 'lib', 'cache-occupancy.mjs'),
+      join(packageRoot, 'scripts', 'lib', 'cache-occupancy.mjs'),
+    ];
+    const helpers = await Promise.all(helperPaths.map(async (helperPath) => import(pathToFileURL(helperPath).href)));
+    const originalPlatform = process.platform;
+    const tempDir = mkdtempSync(join(tmpdir(), 'cache-occupancy-single-host-'));
+
+    try {
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      for (const [index, helper] of helpers.entries()) {
+        const configDir = join(tempDir, `config-${index}`);
+        const pluginRoot = join(tempDir, `MiXeD-Plugin-${index}`, 'Version-1');
+
+        // Simulate the identity resolved by the ONE batched host and hand it
+        // to publish: the record must carry it verbatim (no second probe).
+        const precomputed = 'ticks:638933184000000001';
+        expect(helper.publishCacheOccupancy(pluginRoot, configDir, process.pid, precomputed)).toBe(true);
+        const registryDir = join(configDir, '.omc', 'cache-occupancy');
+        const records = readdirSync(registryDir);
+        expect(records).toHaveLength(1);
+        const record = JSON.parse(readFileSync(join(registryDir, records[0]!), 'utf8')) as { processStartIdentity: string };
+        expect(record.processStartIdentity).toBe(precomputed);
+
+        // The map-backed read must verify that record without spawning a
+        // fresh batched host (pids absent from the map stay conservatively).
+        const identityMap = new Map([[process.pid, precomputed]]);
+        const occupancy = helper.readOccupiedPluginRoots(configDir, { identities: identityMap });
+        expect(occupancy.unavailable).toBe(false);
+        expect(occupancy.roots).toEqual(new Set([pluginRoot.toLowerCase()]));
+        expect(occupancy.identities).toBe(identityMap);
+      }
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('session-start hooks resolve plugin-cache occupancy once and pass the owner identity to publish', () => {
+    for (const hookPath of [
+      join(packageRoot, 'scripts', 'session-start.mjs'),
+      join(packageRoot, 'templates', 'hooks', 'session-start.mjs'),
+    ]) {
+      const source = readFileSync(hookPath, 'utf8');
+      // Exactly one batched readOccupiedPluginRoots CALL per execution path:
+      // the runtime hook calls it twice (hoisted owner resolution + GC scan
+      // that reuses the hoisted identities map); the template calls it once
+      // and has no GC consumer. The publish call must carry the identity
+      // resolved from that single host, and no hook may spawn its own
+      // PowerShell probe.
+      const expectedReadCalls = hookPath.endsWith(join('scripts', 'session-start.mjs')) ? 2 : 1;
+      expect(source.match(/readOccupiedPluginRoots\(/g)!.length).toBe(expectedReadCalls);
+      expect(source).toMatch(/publishCacheOccupancy\([^)]*identit(?:ies\.get|y)/s);
+      expect(source).not.toMatch(/spawnSync\(\s*'powershell'/);
     }
   });
 });
