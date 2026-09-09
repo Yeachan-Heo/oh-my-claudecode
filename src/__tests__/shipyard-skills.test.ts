@@ -168,6 +168,13 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(PLUGIN.skills as string[]).toContain('./skills/agent-doc-discipline/');
     expect(LAUNCH).toContain('call the Skill tool with `agent-doc-discipline`');
     expect(DRYDOCK).toContain('call the Skill tool with `agent-doc-discipline`');
+    expect(LAUNCH).toContain('**Two-axis review gate.**');
+    expect(LAUNCH).toContain('**Standards axis**');
+    expect(LAUNCH).toContain('**Spec axis**');
+    expect(LAUNCH).toContain('*this ticket\'s* acceptance criteria');
+    expect(LAUNCH).toContain('reported separately');
+    expect(LAUNCH).toContain('never merged or cross-ranked');
+    expect(LAUNCH).toContain('reviewer fails the ticket when either axis fails');
   });
 
   it('harbor speaks plain language on the tracker (no methodology metaphors leak)', () => {

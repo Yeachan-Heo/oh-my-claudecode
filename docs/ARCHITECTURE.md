@@ -175,7 +175,7 @@ explore --> analyst --> planner --> critic --> executor --> verifier
 
 ### Overview
 
-Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 38 shipped skills.
+Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 39 shipped skills.
 
 ### Skill Layers
 
@@ -288,6 +288,22 @@ ralplan this feature
 | `external-context` | Parallel document-specialist research | `/oh-my-claudecode:external-context` |
 | `ai-slop-cleaner` | Clean AI expression patterns | `/oh-my-claudecode:ai-slop-cleaner` |
 | `remember` | Save durable session memory | `/oh-my-claudecode:remember` |
+
+### Shipyard document discipline
+
+The opt-in Shipyard workflows compose `drydock`, `ask-navigator`, `launch`, and
+the writing-time companions `agent-doc-discipline` and
+`minimal-code-discipline`. `agent-doc-discipline` is advisory everywhere else,
+but the `drydock` seed-generation step and the `launch` C5 sediment pass must
+call the Skill tool for it before writing agent-facing prose. This keeps the
+five shared surfaces self-describing without turning a writing aid into a
+default workflow gate.
+
+At Launch closeout, the review is two independent axes: the **standards axis**
+compares the diff with the applicable `docs/standards/` guidance, while the
+**spec axis** compares it with the current ticket's acceptance criteria. The
+axes run in parallel, are reported separately, and are never merged or
+cross-ranked; the ticket fails when either axis fails.
 
 ### Magic Keyword Reference
 
