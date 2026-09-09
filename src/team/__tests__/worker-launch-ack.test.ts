@@ -77,11 +77,25 @@ function restoreFixtureEnv(): void {
   originalUserProfile = undefined;
   originalStateDir = undefined;
 }
+async function removeFixtureDir(dir: string): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOTEMPTY' && code !== 'EBUSY' && code !== 'EPERM') throw error;
+      await new Promise(resolve => setTimeout(resolve, 25 * (attempt + 1)));
+    }
+  }
+  await rm(dir, { recursive: true, force: true });
+}
+
 
 afterEach(async () => {
   for (const child of [...disposableProviders]) await stopDisposableProvider(child).catch(() => undefined);
   restoreFixtureEnv();
-  if (cwd) await rm(cwd, { recursive: true, force: true });
+  if (cwd) await removeFixtureDir(cwd);
   cwd = '';
 });
 
