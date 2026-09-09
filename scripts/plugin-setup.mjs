@@ -6,7 +6,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, chmodSync, copyFileSync } from 'node:fs';
-import { execFileSync, execSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -31,19 +31,6 @@ const isPublishedPluginCache = !existsSync(join(__dirname, '..', '.git'));
 
 console.log('[OMC] Running post-install setup...');
 
-function checkRalphRubyDependency() {
-  try {
-    execFileSync('ruby', ['--version'], { stdio: 'ignore', timeout: 5000 });
-    console.log('[OMC] Ruby detected for Ralph workflows');
-  } catch {
-    console.log('[OMC] Warning: Ruby was not found on PATH. Ralph workflows require Ruby and may fail until it is installed.');
-    console.log('[OMC] Ubuntu/Debian: sudo apt update && sudo apt install ruby-full');
-    console.log('[OMC] macOS: brew install ruby');
-    console.log('[OMC] After installing Ruby, restart Claude Code and rerun /oh-my-claudecode:omc-setup if needed.');
-  }
-}
-
-checkRalphRubyDependency();
 
 // 1. Create HUD directory
 if (!existsSync(HUD_DIR)) {

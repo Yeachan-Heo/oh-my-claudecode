@@ -22,19 +22,15 @@ else
 fi
 ```
 
-## Step 2.0: Check Ralph Ruby Dependency
+## Step 2.0: Check Ralph Runtime Prerequisites
 
-Ralph workflows require Ruby. On fresh Ubuntu installations, missing Ruby can cause Ralph to fail later with an opaque Claude Code abort. Check for Ruby during setup and show a product-facing remediation hint without blocking the rest of setup:
+Ralph is an agent-driven persistence loop with no external language dependency. Its only hard prerequisites are the Node runtime that already runs OMC's hooks and a writable config directory for `.omc/state/` state files. Verify both without blocking the rest of setup:
 
 ```bash
-if command -v ruby >/dev/null 2>&1; then
-  echo "Ruby detected for Ralph workflows: $(ruby --version 2>/dev/null | head -1)"
-else
-  echo "WARNING: Ruby was not found on PATH. Ralph workflows require Ruby."
-  echo "Install it, then restart Claude Code before using Ralph."
-  echo "Ubuntu/Debian: sudo apt update && sudo apt install ruby-full"
-  echo "macOS: brew install ruby"
-fi
+node --version || echo "ERROR: Node is required for OMC hooks and Ralph state persistence."
+mkdir -p "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" 2>/dev/null
+touch "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-write-probe" 2>/dev/null && rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-write-probe" \
+  || echo "WARNING: Config dir is not writable; Ralph state persistence will fail until it is."
 ```
 
 ## Step 2.1: Setup HUD Statusline

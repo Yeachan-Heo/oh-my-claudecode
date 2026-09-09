@@ -740,7 +740,7 @@ The recommended refinement path chains clarity and feasibility gates, then stops
   → Socratic Q&A until ambiguity ≤ <resolvedThresholdPercent>
   → Spec written to .omc/specs/deep-interview-{slug}.md
   → User explicitly selects "Refine with omc-plan consensus"
-  → /omc-plan --consensus --direct (spec as input, skip interview)
+  → Skill("oh-my-claudecode:plan") with --consensus --direct (spec as input, skip interview)
     → Planner creates implementation plan from spec
     → Architect reviews for architectural soundness
     → Critic validates quality and testability

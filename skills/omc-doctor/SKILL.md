@@ -74,23 +74,20 @@ grep -o "CLAUDE-[^ )]*\.md" "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md" 2>/d
 - If `OMC:VERSION` marker is missing from deterministic CLAUDE source scan (base + referenced companion): WARN - cannot verify CLAUDE.md freshness
 - If `CLAUDE.md OMC version` != `Latest cached plugin version`: WARN - version drift detected (run `omc update` or `omc setup`)
 
-### Step 5: Check Ralph Ruby Dependency
+### Step 5: Check Ralph Runtime Prerequisites
 
-Ralph workflows require Ruby. Check for Ruby explicitly so fresh installations get actionable guidance instead of a later opaque Ralph failure.
+Ralph is an agent-driven persistence loop, not a compiled program: its only hard runtime prerequisites are the Node runtime that executes OMC's hook scripts (`persistent-mode.mjs`, `keyword-detector.mjs`) and a writable config directory for `.omc/state/` state files such as `ralph-state.json`.
 
 ```bash
-if command -v ruby >/dev/null 2>&1; then
-  echo "Ruby for Ralph: $(ruby --version 2>/dev/null | head -1)"
-else
-  echo "Ruby for Ralph: MISSING"
-  echo "Install Ruby before using Ralph. Ubuntu/Debian: sudo apt update && sudo apt install ruby-full"
-  echo "macOS: brew install ruby"
-fi
+node --version || echo "Node for Ralph: MISSING"
+mkdir -p "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" 2>/dev/null
+touch "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-write-probe" 2>/dev/null && rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.omc-write-probe" && echo "Config dir writable" || echo "Config dir NOT writable"
 ```
 
 **Diagnosis**:
-- If Ruby is found: OK - Ralph dependency present
-- If Ruby is missing: WARN - Ralph workflows may fail until Ruby is installed
+- If Node runs and prints a version: OK - Ralph runtime prerequisite present
+- If `node` is missing or fails: CRITICAL - OMC hooks and Ralph cannot run without Node (see https://nodejs.org for installers; nvm/fnm users need Node on the PATH of non-interactive shells)
+- If the config dir is not writable: WARN - Ralph state persistence will fail until it is writable
 
 ### Step 6: Check for Stale Plugin Cache
 
@@ -153,7 +150,7 @@ After running all checks, output a report:
 | Legacy Hooks (settings.json) | OK/CRITICAL | ... |
 | Legacy Scripts (~/.claude/hooks/) | OK/WARN | ... |
 | CLAUDE.md | OK/WARN/CRITICAL | ... |
-| Ralph Ruby Dependency | OK/WARN | ... |
+| Ralph Runtime Prerequisites (Node, config dir) | OK/CRITICAL | ... |
 | Plugin Cache | OK/WARN | ... |
 | Legacy Agents (~/.claude/agents/) | OK/WARN | ... |
 | Legacy Commands (~/.claude/commands/) | OK/WARN | ... |
