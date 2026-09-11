@@ -16,6 +16,7 @@ const LOFT = readFileSync(join(ROOT, 'skills', 'loft', 'SKILL.md'), 'utf-8');
 const HARBOR = readFileSync(join(ROOT, 'skills', 'harbor', 'SKILL.md'), 'utf-8');
 const SHIPYARD_DOC = readFileSync(join(ROOT, 'docs', 'shipyard.md'), 'utf-8');
 const DISCIPLINE = readFileSync(join(ROOT, 'skills', 'agent-doc-discipline', 'SKILL.md'), 'utf-8');
+const SURVEY = readFileSync(join(ROOT, 'skills', 'architecture-survey', 'SKILL.md'), 'utf-8');
 const PLUGIN = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf-8'));
 
 function frontmatter(src: string): Record<string, string> {
@@ -541,11 +542,28 @@ describe('shipyard skills — behavior & packaging contract', () => {
   });
 
   it('plugin.json ships both skills and every path exists on disk', () => {
-    for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor']) {
+    for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor', 'architecture-survey']) {
       const entry = `./skills/${name}/`;
       expect(PLUGIN.skills as string[]).toContain(entry);
       expect(existsSync(join(ROOT, entry, 'SKILL.md'))).toBe(true);
     }
+  });
+
+  it('architecture-survey ships as a loadable skill with survey-not-rescue non-goals', () => {
+    const fm = frontmatter(SURVEY);
+    expect(fm.name).toBe('architecture-survey');
+    expect(fm.description.length).toBeGreaterThan(0);
+    expect(fm.level).toBeDefined();
+    expect(fm['argument-hint']).toBeDefined();
+    expect(PLUGIN.skills as string[]).toContain('./skills/architecture-survey/');
+    expect(SURVEY).toContain('Shallow modules');
+    expect(SURVEY).toContain('Hypothetical seams');
+    expect(SURVEY).toContain('Logic behind the wrong seam');
+    expect(SURVEY).toContain('Survey proposes; the captain disposes');
+    expect(SURVEY).toContain('No code edits.');
+    expect(SURVEY).toContain('Not a gate.');
+    expect(SURVEY).toContain('Not merged into the drydock drift audit.');
+    expect(SHIPYARD_DOC).toContain('`architecture-survey`');
   });
 
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
@@ -559,7 +577,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(ref).toContain('/oh-my-claudecode:launch <brief\\|spec-path> [--serial]');
     expect(ref).toContain('/oh-my-claudecode:ask-navigator <idea\\|map>');
     expect(ref).toContain('/oh-my-claudecode:harbor [sweep\\|look at #N\\|what\'s ready?]');
-    for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor']) {
+    for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor', 'architecture-survey']) {
       expect(ref).toContain(`\`${name}\``);
     }
   });

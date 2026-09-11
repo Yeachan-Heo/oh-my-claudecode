@@ -1,10 +1,10 @@
 # Shipyard — Governed Delivery & Shared Harness
 
-Shipyard is the delivery methodology behind four opt-in skills: `drydock`, `ask-navigator`, `launch`, and `minimal-code-discipline`. Its premise in one line:
+Shipyard is the delivery methodology behind seven opt-in skills: `drydock`, `ask-navigator`, `loft`, `harbor`, `launch`, `architecture-survey`, and `minimal-code-discipline`. Its premise in one line:
 
 > **Everyone ships, and nobody ships randomly** — agents continuously run everything repeatable and acceptable-by-evidence; humans decide what cannot be judged by the system or what fails expensively.
 
-This page is the map of the methodology: the boundary principle, the roles, the four pillars, the surface layout, the working metaphor, and how the five skills compose. The skills themselves (`/oh-my-claudecode:drydock`, `/oh-my-claudecode:ask-navigator`, `/oh-my-claudecode:loft`, `/oh-my-claudecode:launch`, `/oh-my-claudecode:minimal-code-discipline`) are the executable form.
+This page is the map of the methodology: the boundary principle, the roles, the four pillars, the surface layout, the working metaphor, and how the seven skills compose. The skills themselves (`/oh-my-claudecode:drydock`, `/oh-my-claudecode:ask-navigator`, `/oh-my-claudecode:loft`, `/oh-my-claudecode:harbor`, `/oh-my-claudecode:launch`, `/oh-my-claudecode:architecture-survey`, `/oh-my-claudecode:minimal-code-discipline`) are the executable form.
 
 ## The verifiability boundary
 
@@ -59,7 +59,7 @@ A repo that humans and agents both build on carries four pillars across five con
 | The launch | `/oh-my-claudecode:launch` | Everyone may launch — and not one class check may be skipped |
 | The lookout | `omc lookout` | The mast watch: before an unattended run, scan the briefing and the workspace for danger — the lookout reports, the captain decides |
 
-## The six skills compose
+## The seven skills compose
 
 - **`drydock`** lays the keel once per repo (surfaces + seeds + `--check` drift audit). The `--check` report states per-finding confidence and whether the finding is actionable after excluding a user-declared scratch/throwaway scope; today it has no executable or machine-readable severity contract (planned follow-up).
 - **`ask-navigator`** charts foggy efforts (destination unclear → a map of decision tickets on the tracker, worked one ticket per session) and hands the collapsed decisions to launch as a mission brief. Resolutions sediment into the same paper-trail slots launch's Phase 1 uses. It produces decisions, never deliverables.
@@ -67,6 +67,7 @@ A repo that humans and agents both build on carries four pillars across five con
 - **`harbor`** is the intake gate for external work: sweeps incoming issues and PRs, verifies every claim (reproduce, check out, run), routes fog to the navigator, and hands the maintainer a short docket whose only remaining work is signing. Facts are harbor's to gather autonomously; dispositions and merges are the captain's to sign. The recurring-request clusters in its sweep summary are the feedback loop's outer ear — demand signals from the world, sedimenting into `docs/business/` or promoting into ideas.
 - **`launch`** runs delivery per feature (fog gate → yard gate → C1 brief → C2 spec+seams → C3 tickets → frontier execution with C4 decision stops → C5 closeout with a `--check` re-audit), with the human at exactly the checkpoints that fail expensively. The fog gate routes an effort whose destination cannot be stated to the navigator before the run starts. The yard gate blocks on high-confidence actionable drydock findings (listing them verbatim and producing no artifacts) and admits only a clean audit or a narrowly, explicitly overridden low-confidence / false-positive / scratch-scope finding — no general bypass.
 - **`minimal-code-discipline`** is an opt-in discipline for code written inside tickets (YAGNI ladder, smallest correct diff).
+- **`architecture-survey`** periodically walks the module graph and reports ranked deepening candidates — shallow modules, hypothetical seams, logic behind the wrong seam — each with file:line evidence, a deepening move, and a risk note. Survey, not rescue: the report is the captain's decision input (mission-brief or grilling material), never auto-work. It never edits code, is not a gate, and is not merged into the drydock drift audit.
 
 The gates form one chain with the same anatomy — run checks, list findings verbatim, sign only what fails expensively: **harbor gate** (take this external request?) → **fog gate** (can the destination be stated?) → **yard gate** (are the surfaces laid and clean?) → C1–C5 (quality signatures).
 
@@ -86,5 +87,6 @@ Shipyard corrects itself through its file-backed paper trail: navigator resoluti
 - external requests piling up (issues, bug reports, PRs) → `harbor` sweeps the intake and hands over a signature queue
 - new repo, or a repo where knowledge lives in heads → `drydock` first
 - writing-time code discipline inside any of the above → `minimal-code-discipline`
+- repo getting harder to change, or a periodic maintenance survey → `architecture-survey` reports ranked deepening candidates (no code edits)
 
 Shipyard adds no daemon, no mode, no always-on behavior: the surfaces are ordinary repository files, the skills are plain instructions, and the canonical `plan → execute → review → verify` spine remains the default path. Shipyard is opt-in at every door.

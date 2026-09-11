@@ -18,6 +18,7 @@
   "skills": [
     "./skills/ai-slop-cleaner/",
     "./skills/agent-doc-discipline/",
+    "./skills/architecture-survey/",
     "./skills/ask/",
     "./skills/ask-navigator/",
     "./skills/autopilot/",
