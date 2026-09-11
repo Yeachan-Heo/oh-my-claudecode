@@ -11,7 +11,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { appendFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { appendFile, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { TeamPaths, absPath } from './state-paths.js';
@@ -22,6 +22,8 @@ import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import {
   isTerminalTeamTaskStatus,
   canTransitionTeamTaskStatus,
+  TASK_ID_SAFE_PATTERN,
+  TEAM_TASK_STATUSES,
 } from './contracts.js';
 import type { TeamTaskStatus } from './contracts.js';
 import type {
@@ -64,6 +66,8 @@ import {
   transitionTaskStatus as transitionTaskStatusImpl,
   releaseTaskClaim as releaseTaskClaimImpl,
   listTasks as listTasksImpl,
+  createTaskRecord,
+  validateTaskDependencies,
 } from './state/tasks.js';
 import {
   publishTaskRecoveryCheckpoint as publishTaskRecoveryCheckpointImpl,
@@ -132,7 +136,9 @@ function teamDir(teamName: string, cwd: string): string {
 
 function normalizeTaskId(taskId: string): string {
   const raw = String(taskId).trim();
-  return raw.startsWith('task-') ? raw.slice('task-'.length) : raw;
+  const normalized = raw.startsWith('task-') ? raw.slice('task-'.length) : raw;
+  if (!TASK_ID_SAFE_PATTERN.test(normalized)) throw new Error(`invalid_task_id:${taskId}`);
+  return normalized;
 }
 
 function canonicalTaskFilePath(teamName: string, taskId: string, cwd: string): string {
@@ -152,11 +158,15 @@ function taskFileCandidates(teamName: string, taskId: string, cwd: string): stri
 }
 
 async function writeAtomic(path: string, data: string): Promise<void> {
-  const tmp = `${path}.${process.pid}.tmp`;
+  const tmp = `${path}.${process.pid}.${randomUUID()}.tmp`;
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(tmp, data, 'utf8');
-  const { rename } = await import('node:fs/promises');
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, data, 'utf8');
+    const { rename } = await import('node:fs/promises');
+    await rename(tmp, path);
+  } finally {
+    await rm(tmp, { force: true }).catch(() => undefined);
+  }
 }
 
 async function readJsonSafe<T>(path: string): Promise<T | null> {
@@ -169,20 +179,144 @@ async function readJsonSafe<T>(path: string): Promise<T | null> {
   }
 }
 
+type PersistedJsonRead<T> =
+  | { kind: 'missing' }
+  | { kind: 'value'; value: T }
+  | { kind: 'invalid'; cause: 'json' | 'unreadable'; error?: unknown };
+
+async function readPersistedJson<T>(path: string): Promise<PersistedJsonRead<T>> {
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { kind: 'missing' }
+      : { kind: 'invalid', cause: 'unreadable', error };
+  }
+  try {
+    return { kind: 'value', value: JSON.parse(raw) as T };
+  } catch (error) {
+    return { kind: 'invalid', cause: 'json', error };
+  }
+}
+
+async function readTaskPersistedJson(path: string): Promise<PersistedJsonRead<unknown>> {
+  let fileStat: Awaited<ReturnType<typeof lstat>>;
+  try {
+    fileStat = await lstat(path);
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { kind: 'missing' }
+      : { kind: 'invalid', cause: 'unreadable', error };
+  }
+  if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+    return { kind: 'invalid', cause: 'unreadable' };
+  }
+  return readPersistedJson<unknown>(path);
+}
+
+function persistedStateError(path: string, cause: 'json' | 'schema' | 'unreadable'): Error {
+  return new Error(`invalid_persisted_state:${cause}:${path}`);
+}
+
 function normalizeTask(task: TeamTask): TeamTaskV2 {
-  return { ...task, version: task.version ?? 1 };
+  const normalized: TeamTaskV2 = { ...task, version: task.version ?? 1 };
+  if (normalized.owner === null) delete normalized.owner;
+  if (normalized.result === null) delete normalized.result;
+  if (normalized.error === null) delete normalized.error;
+  return normalized;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.getPrototypeOf(value) === Object.prototype;
+}
+
+function isNonEmptyText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
+}
+
+function isTaskRecoveryReservation(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  return isNonEmptyText(value.recovery_id)
+    && isNonEmptyText(value.request_id)
+    && isPositiveSafeInteger(value.continuation_sequence)
+    && isNonEmptyText(value.checkpoint_path)
+    && isNonEmptyText(value.checkpoint_hash)
+    && isNonEmptyText(value.replacement_worker)
+    && isPositiveSafeInteger(value.replacement_generation)
+    && isNonEmptyText(value.adoption_token_hash)
+    && typeof value.reserved_at === 'string'
+    && Number.isFinite(Date.parse(value.reserved_at));
+}
+
+function isTaskRecoveryAdoption(value: unknown): boolean {
+  if (!isPlainRecord(value)) return false;
+  return isNonEmptyText(value.recovery_id)
+    && isNonEmptyText(value.request_id)
+    && isPositiveSafeInteger(value.continuation_sequence)
+    && isNonEmptyText(value.checkpoint_path)
+    && isNonEmptyText(value.checkpoint_hash)
+    && isNonEmptyText(value.replacement_worker)
+    && isPositiveSafeInteger(value.replacement_generation)
+    && typeof value.adopted_at === 'string'
+    && Number.isFinite(Date.parse(value.adopted_at));
 }
 
 function isTeamTask(value: unknown): value is TeamTask {
-  if (!value || typeof value !== 'object') return false;
+  if (!isPlainRecord(value)) return false;
   const v = value as Record<string, unknown>;
-  return typeof v.id === 'string' && typeof v.subject === 'string' && typeof v.status === 'string';
+  if (typeof v.id !== 'string' || !TASK_ID_SAFE_PATTERN.test(v.id)
+    || typeof v.subject !== 'string' || typeof v.description !== 'string'
+    || typeof v.created_at !== 'string' || !Number.isFinite(Date.parse(v.created_at))
+    || typeof v.status !== 'string' || !TEAM_TASK_STATUSES.includes(v.status as TeamTaskStatus)) {
+    return false;
+  }
+  if (v.version !== undefined && (!Number.isSafeInteger(v.version) || (v.version as number) < 1)) return false;
+  if (v.owner !== undefined && v.owner !== null && (typeof v.owner !== 'string' || v.owner.trim() === '')) return false;
+  try {
+    validateTaskDependencies(v, 'invalid_task_dependencies');
+  } catch {
+    return false;
+  }
+  if (v.completed_at !== undefined && (typeof v.completed_at !== 'string' || !Number.isFinite(Date.parse(v.completed_at)))) return false;
+  if (v.result !== undefined && v.result !== null && typeof v.result !== 'string') return false;
+  if (v.error !== undefined && v.error !== null && typeof v.error !== 'string') return false;
+  if (v.metadata !== undefined && !isPlainRecord(v.metadata)) return false;
+  if (v.recovery_reservation !== undefined && !isTaskRecoveryReservation(v.recovery_reservation)) return false;
+  if (v.recovery_adoption !== undefined && !isTaskRecoveryAdoption(v.recovery_adoption)) return false;
+  const claim = v.claim;
+  if (claim !== undefined) {
+    if (!isPlainRecord(claim)
+      || typeof claim.owner !== 'string' || claim.owner.trim() === ''
+      || typeof claim.token !== 'string' || claim.token.trim() === ''
+      || typeof claim.leased_until !== 'string' || !Number.isFinite(Date.parse(claim.leased_until))
+      || (claim.launch_attempt_id !== undefined && typeof claim.launch_attempt_id !== 'string')) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Validate and canonicalize a task record at a persistence boundary.
+ *
+ * The runtime and public task APIs must share this guard so malformed task
+ * fields cannot be published while nullable wire fields are normalized.
+ */
+export function normalizeTaskRecord(value: unknown): TeamTaskV2 {
+  if (!isTeamTask(value)) throw new Error('invalid_task_schema');
+  return normalizeTask(value);
 }
 
 // Process-identity lock: live holders are never stolen by elapsed time alone.
 async function withLock<T>(lockPath: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
   try {
-    const value = await withProcessIdentityFileLock(lockPath, fn, 1);
+    const value = await withProcessIdentityFileLock(lockPath, fn, 100);
     return { ok: true, value };
   } catch (error) {
     if (error instanceof Error && error.message === 'process_identity_lock_timeout') return { ok: false };
@@ -191,7 +325,7 @@ async function withLock<T>(lockPath: string, fn: () => Promise<T>): Promise<{ ok
 }
 
 export async function withTaskClaimLock<T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false }> {
-  const lockDir = join(teamDir(teamName, cwd), 'tasks', `.lock-${taskId}`);
+  const lockDir = join(teamDir(teamName, cwd), 'tasks', `.lock-${normalizeTaskId(taskId)}`);
   return withLock(lockDir, fn);
 }
 
@@ -366,6 +500,20 @@ export async function teamCreateTask(
   task: Omit<TeamTask, 'id' | 'created_at'>,
   cwd: string,
 ): Promise<TeamTaskV2> {
+  // Reject malformed dependency fields before entering the config/task
+  // transaction. The assigned task id is checked again below for self-links.
+  const requestedDependencies = {
+    depends_on: task.depends_on,
+    blocked_by: task.blocked_by,
+  };
+  validateTaskDependencies(requestedDependencies, 'invalid_task_dependencies');
+  const preflightConfig = await teamReadConfig(teamName, cwd);
+  if (preflightConfig?.next_task_id !== undefined) {
+    validateTaskDependencies({
+      ...requestedDependencies,
+      id: String(preflightConfig.next_task_id),
+    }, 'invalid_task_dependencies');
+  }
   const lockDir = join(teamDir(teamName, cwd), '.lock-create-task');
   const timeoutMs = 5_000;
   const deadline = Date.now() + timeoutMs;
@@ -380,16 +528,14 @@ export async function teamCreateTask(
       }
 
       const nextId = String(revisioned.config.next_task_id ?? 1);
-      const created: TeamTaskV2 = {
-        ...task,
+      validateTaskDependencies({
         id: nextId,
-        status: task.status ?? 'pending',
-        depends_on: task.depends_on ?? task.blocked_by ?? [],
-        version: 1,
-        created_at: new Date().toISOString(),
-      };
-      const serializedTask = JSON.stringify(created, null, 2);
-      const createdTaskPath = join(absPath(cwd, TeamPaths.tasks(teamName)), `task-${nextId}.json`);
+        ...requestedDependencies,
+      }, 'invalid_task_dependencies');
+      const created = createTaskRecord(nextId, task);
+      const normalized = normalizeTaskRecord(created);
+      const serializedTask = JSON.stringify(normalized, null, 2);
+      const createdTaskPath = canonicalTaskFilePath(teamName, nextId, cwd);
       const taskLock = await withTaskClaimLock(teamName, nextId, cwd, async () => {
         await mkdir(dirname(createdTaskPath), { recursive: true });
         await writeAtomic(createdTaskPath, serializedTask);
@@ -414,7 +560,7 @@ export async function teamCreateTask(
           }
           throw error;
         }
-        return created;
+        return normalized;
       });
       if (!taskLock.ok) throw new Error(`Failed to acquire task claim lock for task ${nextId}`);
       return taskLock.value;
@@ -428,10 +574,15 @@ export async function teamCreateTask(
 }
 
 export async function teamReadTask(teamName: string, taskId: string, cwd: string): Promise<TeamTask | null> {
-  for (const candidate of taskFileCandidates(teamName, taskId, cwd)) {
-    const task = await readJsonSafe<TeamTask>(candidate);
-    if (!task || !isTeamTask(task)) continue;
-    return normalizeTask(task);
+  const normalizedId = normalizeTaskId(taskId);
+  for (const candidate of taskFileCandidates(teamName, normalizedId, cwd)) {
+    const state = await readTaskPersistedJson(candidate);
+    if (state.kind === 'missing') continue;
+    if (state.kind === 'invalid') throw persistedStateError(candidate, state.cause);
+    if (!isTeamTask(state.value) || state.value.id !== normalizedId) {
+      throw persistedStateError(candidate, 'schema');
+    }
+    return normalizeTask(state.value);
   }
   return null;
 }
@@ -441,6 +592,7 @@ export async function teamListTasks(teamName: string, cwd: string): Promise<Team
     teamDir: (tn: string, c: string) => teamDir(tn, c),
     isTeamTask,
     normalizeTask,
+    stateError: persistedStateError,
   });
 }
 
@@ -459,17 +611,40 @@ export async function teamUpdateTask(
       const existing = await teamReadTask(teamName, taskId, cwd);
       if (!existing) return null;
 
+      const hasDependsOn = Object.prototype.hasOwnProperty.call(updates, 'depends_on');
+      const hasBlockedBy = Object.prototype.hasOwnProperty.call(updates, 'blocked_by');
+      if ((hasDependsOn && updates.depends_on === undefined)
+        || (hasBlockedBy && updates.blocked_by === undefined)) {
+        throw new Error('invalid_task_dependencies');
+      }
+
+      let dependencyUpdates: { depends_on?: string[]; blocked_by?: string[] } = {};
+      if (hasDependsOn || hasBlockedBy) {
+        const dependencyIds = validateTaskDependencies({
+          id: existing.id,
+          ...(hasDependsOn ? { depends_on: updates.depends_on } : {}),
+          ...(hasBlockedBy ? { blocked_by: updates.blocked_by } : {}),
+        }, 'invalid_task_dependencies');
+        dependencyUpdates = {
+          depends_on: [...dependencyIds],
+          blocked_by: [...dependencyIds],
+        };
+      }
+
       const merged: TeamTaskV2 = {
         ...normalizeTask(existing),
         ...updates as Partial<TeamTask>,
+        ...dependencyUpdates,
         id: existing.id,
         created_at: existing.created_at,
         version: Math.max(1, existing.version ?? 1) + 1,
       };
+      validateTaskDependencies(merged, 'invalid_task_dependencies');
+      const normalized = normalizeTaskRecord(merged);
 
       const p = canonicalTaskFilePath(teamName, taskId, cwd);
-      await writeAtomic(p, JSON.stringify(merged, null, 2));
-      return merged;
+      await writeAtomic(p, JSON.stringify(normalized, null, 2));
+      return normalized;
     });
     if (result.ok) return result.value;
     await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -549,8 +724,7 @@ export async function teamTransitionTaskStatus(
     taskFilePath: (tn: string, tid: string, c: string) => canonicalTaskFilePath(tn, tid, c),
     writeAtomic,
     appendTeamEvent: teamAppendEvent,
-    readMonitorSnapshot: teamReadMonitorSnapshot,
-    writeMonitorSnapshot: teamWriteMonitorSnapshot,
+    markTaskCompleted: teamMarkTaskCompleted,
   });
 }
 
@@ -1030,12 +1204,70 @@ export async function teamReadShutdownAck(
 // Monitor snapshot
 // ---------------------------------------------------------------------------
 
+function isMonitorSnapshotState(value: unknown): value is TeamMonitorSnapshotState {
+  if (!isPlainRecord(value)) return false;
+  const recordValuesAre = (field: string, predicate: (entry: unknown) => boolean): boolean => {
+    const map = value[field];
+    return map === undefined
+      || (isPlainRecord(map) && Object.values(map).every(predicate));
+  };
+  const mapFields = [
+    'taskStatusById',
+    'workerAliveByName',
+    'workerStateByName',
+    'workerTurnCountByName',
+    'workerTaskIdByName',
+    'mailboxNotifiedByMessageId',
+    'completedEventTaskIds',
+  ] as const;
+  if (!isPlainRecord(value.completedEventTaskIds)) return false;
+  if (!mapFields.every((field) => value[field] === undefined || isPlainRecord(value[field]))) return false;
+  if (value.workerLivenessByName !== undefined && !isPlainRecord(value.workerLivenessByName)) return false;
+  if (!recordValuesAre('taskStatusById', (entry) => typeof entry === 'string')
+    || !recordValuesAre('workerAliveByName', (entry) => typeof entry === 'boolean')
+    || !recordValuesAre('workerLivenessByName', (entry) => entry === 'alive' || entry === 'dead' || entry === 'unknown')
+    || !recordValuesAre('workerStateByName', (entry) => typeof entry === 'string')
+    || !recordValuesAre('workerTurnCountByName', (entry) => typeof entry === 'number' && Number.isFinite(entry))
+    || !recordValuesAre('workerTaskIdByName', (entry) => typeof entry === 'string')
+    || !recordValuesAre('mailboxNotifiedByMessageId', (entry) => typeof entry === 'string')
+    || !recordValuesAre('completedEventTaskIds', (entry) => typeof entry === 'boolean')) {
+    return false;
+  }
+  if (value.monitorTimings !== undefined) {
+    if (!isPlainRecord(value.monitorTimings)
+      || typeof value.monitorTimings.list_tasks_ms !== 'number'
+      || typeof value.monitorTimings.worker_scan_ms !== 'number'
+      || typeof value.monitorTimings.mailbox_delivery_ms !== 'number'
+      || typeof value.monitorTimings.total_ms !== 'number'
+      || typeof value.monitorTimings.updated_at !== 'string') {
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function teamReadMonitorSnapshot(
   teamName: string,
   cwd: string,
 ): Promise<TeamMonitorSnapshotState | null> {
   const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
-  return readJsonSafe<TeamMonitorSnapshotState>(p);
+  const state = await readPersistedJson<unknown>(p);
+  if (state.kind === 'missing') return null;
+  // The monitor snapshot is a rebuildable cache. Task files remain
+  // authoritative, so malformed or unreadable cache state is treated as
+  // absent and can be replaced by the next successful writer.
+  if (state.kind === 'invalid' || !isMonitorSnapshotState(state.value)) return null;
+  return {
+    taskStatusById: state.value.taskStatusById ?? {},
+    workerAliveByName: state.value.workerAliveByName ?? {},
+    workerLivenessByName: state.value.workerLivenessByName ?? {},
+    workerStateByName: state.value.workerStateByName ?? {},
+    workerTurnCountByName: state.value.workerTurnCountByName ?? {},
+    workerTaskIdByName: state.value.workerTaskIdByName ?? {},
+    mailboxNotifiedByMessageId: state.value.mailboxNotifiedByMessageId ?? {},
+    completedEventTaskIds: state.value.completedEventTaskIds,
+    ...(state.value.monitorTimings ? { monitorTimings: state.value.monitorTimings } : {}),
+  };
 }
 
 export async function teamWriteMonitorSnapshot(
@@ -1044,7 +1276,62 @@ export async function teamWriteMonitorSnapshot(
   cwd: string,
 ): Promise<void> {
   const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
-  await writeAtomic(p, JSON.stringify(snapshot, null, 2));
+  if (!isMonitorSnapshotState(snapshot)) throw persistedStateError(p, 'schema');
+  const lockPath = join(teamDir(teamName, cwd), '.monitor-snapshot.lock');
+  await withProcessIdentityFileLock(lockPath, async () => {
+    const currentState = await readPersistedJson<unknown>(p);
+    // A stale/corrupt cache must not make task state unusable. Replace it
+    // with the caller's current projection while preserving any valid
+    // completion markers that survived from the previous cache.
+    const current: TeamMonitorSnapshotState | null = currentState.kind === 'value' && isMonitorSnapshotState(currentState.value)
+      ? currentState.value
+      : null;
+    const completedEventTaskIds = { ...snapshot.completedEventTaskIds };
+    for (const [taskId, completed] of Object.entries(current?.completedEventTaskIds ?? {})) {
+      if (completed) completedEventTaskIds[taskId] = true;
+    }
+    await writeAtomic(p, JSON.stringify({ ...snapshot, completedEventTaskIds }, null, 2));
+  }, 5_000);
+}
+
+/**
+ * Persist only the completion marker for a task. The latest monitor snapshot
+ * is read while holding the snapshot lock, so an older completion operation
+ * cannot overwrite fresh monitor-owned fields.
+ */
+export async function teamMarkTaskCompleted(
+  teamName: string,
+  taskId: string,
+  cwd: string,
+): Promise<void> {
+  const normalizedTaskId = normalizeTaskId(taskId);
+  const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
+  const lockPath = join(teamDir(teamName, cwd), '.monitor-snapshot.lock');
+  await withProcessIdentityFileLock(lockPath, async () => {
+    const state = await readPersistedJson<unknown>(p);
+    const current = state.kind === 'value' && isMonitorSnapshotState(state.value)
+      ? state.value
+      : null;
+    const next: TeamMonitorSnapshotState = current
+      ? {
+          ...current,
+          completedEventTaskIds: {
+            ...current.completedEventTaskIds,
+            [normalizedTaskId]: true,
+          },
+        }
+      : {
+          taskStatusById: {},
+          workerAliveByName: {},
+          workerLivenessByName: {},
+          workerStateByName: {},
+          workerTurnCountByName: {},
+          workerTaskIdByName: {},
+          mailboxNotifiedByMessageId: {},
+          completedEventTaskIds: { [normalizedTaskId]: true },
+        };
+    await writeAtomic(p, JSON.stringify(next, null, 2));
+  }, 5_000);
 }
 
 // Atomic write re-export for other modules

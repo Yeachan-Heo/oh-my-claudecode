@@ -551,4 +551,68 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     expect(persisted.state_revision).toBe(4);
     expect(persisted.active_recovery).toBeUndefined();
   });
+
+  it('commits the stopped fence when the post-cleanup Ralph summary cannot read tasks', async () => {
+    const teamName = 'shutdown-ralph-summary-failure';
+    const teamRoot = join(repoDir, '.omc', 'state', 'team', teamName);
+    const tasksRoot = join(teamRoot, 'tasks');
+    const worktree = createWorkerWorktree(teamName, 'worker-1', repoDir);
+    writeFileSync(join(worktree.path, 'dirty.txt'), 'preserve for fence inspection\n', 'utf8');
+    mkdirSync(tasksRoot, { recursive: true });
+    const configPath = join(teamRoot, 'config.json');
+    const taskPath = join(tasksRoot, 'task-1.json');
+    writeFileSync(configPath, JSON.stringify({
+      name: teamName,
+      task: 'demo',
+      agent_type: 'claude',
+      worker_launch_mode: 'interactive',
+      worker_count: 1,
+      max_workers: 20,
+      workers: [{
+        name: 'worker-1',
+        index: 1,
+        role: 'executor',
+        assigned_tasks: ['1'],
+        pane_id: '%42',
+        worker_cli: 'claude',
+        working_dir: worktree.path,
+        worktree_path: worktree.path,
+        worktree_created: true,
+      }],
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      leader_pane_id: '%1',
+      lifecycle_state: 'active',
+      state_revision: 4,
+      next_task_id: 2,
+    }));
+    writeFileSync(taskPath, JSON.stringify({
+      id: '1',
+      subject: 'complete',
+      description: 'completed before shutdown',
+      status: 'completed',
+      version: 1,
+      created_at: new Date().toISOString(),
+    }));
+    tmuxMocks.getWorkerLiveness
+      .mockResolvedValueOnce('alive')
+      .mockResolvedValueOnce('alive')
+      .mockResolvedValueOnce('dead');
+    tmuxMocks.killOwnedWorkerPane.mockImplementationOnce(async () => {
+      writeFileSync(taskPath, '{corrupt task after pane cleanup', 'utf8');
+    });
+
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
+    await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, ralph: true }))
+      .resolves.toEqual({ outcome: 'preserved', reason: 'worktrees_preserved', workers: [] });
+
+    const stoppedConfig = JSON.parse(readFileSync(configPath, 'utf8')) as {
+      lifecycle_state?: string;
+      shutdown_attempt?: unknown;
+    };
+    expect(stoppedConfig.lifecycle_state).toBe('stopped');
+    expect(stoppedConfig.shutdown_attempt).toBeUndefined();
+    expect(readFileSync(join(teamRoot, 'events.jsonl'), 'utf8'))
+      .toContain('ralph_cleanup_summary_unavailable');
+  });
 });

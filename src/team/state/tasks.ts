@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import { join } from 'path';
-import { existsSync } from 'fs';
-import { readFile, readdir } from 'fs/promises';
+import { lstat, readFile, readdir } from 'fs/promises';
+import { TASK_ID_SAFE_PATTERN } from '../contracts.js';
+import { createSwallowedErrorLogger } from '../../lib/swallowed-error.js';
+import type { Dirent } from 'fs';
 import type { TeamTaskStatus } from '../contracts.js';
 import type {
   TeamTask,
@@ -11,7 +13,6 @@ import type {
   ClaimTaskResult,
   TransitionTaskResult,
   ReleaseTaskClaimResult,
-  TeamMonitorSnapshotState,
   TaskRecoveryAdoptionProof,
   TaskRecoveryAdoptionResult,
   TaskRecoveryCheckpoint,
@@ -24,6 +25,114 @@ interface TaskReadDeps {
   readTask: (teamName: string, taskId: string, cwd: string) => Promise<TeamTask | null>;
 }
 
+const logEventAppendFailure = createSwallowedErrorLogger(
+  'team.state.tasks transitionTaskStatus appendTeamEvent failed',
+);
+const logCompletionMarkerFailure = createSwallowedErrorLogger(
+  'team.state.tasks transitionTaskStatus completion marker failed',
+);
+
+export interface TaskDependencyFields {
+  id?: unknown;
+  depends_on?: unknown;
+  blocked_by?: unknown;
+}
+
+/**
+ * `depends_on` is the canonical dependency field, while `blocked_by` is kept
+ * for compatibility with older task producers. Once both fields are present
+ * they must describe the same ordered set; otherwise a reader could claim a
+ * task using one field while a monitor or writer reasons about the other.
+ */
+export function validateTaskDependencies(
+  fields: TaskDependencyFields,
+  errorMessage = 'invalid_task_dependencies',
+): string[] {
+  const taskId = fields.id;
+  if (taskId !== undefined
+    && (typeof taskId !== 'string'
+      || !TASK_ID_SAFE_PATTERN.test(taskId)
+      || String(Number(taskId)) !== taskId)) {
+    throw new Error(errorMessage);
+  }
+
+  const dependsOn = fields.depends_on;
+  const blockedBy = fields.blocked_by;
+  if (dependsOn !== undefined && !Array.isArray(dependsOn)) {
+    throw new Error(errorMessage);
+  }
+  if (blockedBy !== undefined && !Array.isArray(blockedBy)) {
+    throw new Error(errorMessage);
+  }
+  if (dependsOn !== undefined && blockedBy !== undefined
+    && (dependsOn.length !== blockedBy.length
+      || dependsOn.some((dependencyId, index) => dependencyId !== blockedBy[index]))) {
+    throw new Error(errorMessage);
+  }
+
+  const dependencies = (dependsOn ?? blockedBy ?? []) as unknown[];
+  const seen = new Set<string>();
+  for (const dependencyId of dependencies) {
+    const numericId = typeof dependencyId === 'string' ? Number(dependencyId) : Number.NaN;
+    if (typeof dependencyId !== 'string'
+      || !TASK_ID_SAFE_PATTERN.test(dependencyId)
+      || !Number.isSafeInteger(numericId)
+      || numericId < 1
+      || String(numericId) !== dependencyId
+      || dependencyId === taskId
+      || seen.has(dependencyId)) {
+      throw new Error(errorMessage);
+    }
+    seen.add(dependencyId);
+  }
+  return dependencies as string[];
+}
+
+function taskDependencyIds(task: TeamTask): string[] {
+  return validateTaskDependencies(task, 'invalid_persisted_state');
+}
+
+/**
+ * Build the canonical persisted representation for a newly-created task.
+ *
+ * Task files are the source of truth, so every producer must use the same
+ * dependency normalization and must not persist null/undefined optional
+ * fields that readers treat as absent.
+ */
+export function createTaskRecord(
+  id: string,
+  task: Omit<TeamTask, 'id' | 'created_at'>,
+): TeamTaskV2 {
+  const dependencyIds = validateTaskDependencies({
+    id,
+    depends_on: task.depends_on,
+    blocked_by: task.blocked_by,
+  }, 'invalid_task_dependencies');
+
+  const record: TeamTaskV2 = {
+    ...task,
+    id,
+    status: task.status ?? 'pending',
+    depends_on: [...dependencyIds],
+    version: 1,
+    created_at: new Date().toISOString(),
+  };
+
+  if (task.blocked_by !== undefined) record.blocked_by = [...dependencyIds];
+  else delete record.blocked_by;
+
+  // Optional wire fields historically used null as an empty value. Keep the
+  // task shape canonical without mutating the caller's object.
+  for (const key of ['owner', 'result', 'error'] as const) {
+    if (record[key] === undefined || record[key] === null) delete record[key];
+  }
+  for (const [key, value] of Object.entries(record)) {
+    if (value === undefined) Reflect.deleteProperty(record, key);
+  }
+
+  return record;
+}
+
 export async function computeTaskReadiness(
   teamName: string,
   taskId: string,
@@ -33,10 +142,13 @@ export async function computeTaskReadiness(
   const task = await deps.readTask(teamName, taskId, cwd);
   if (!task) return { ready: false, reason: 'blocked_dependency', dependencies: [] };
 
-  const depIds = task.depends_on ?? task.blocked_by ?? [];
+  const depIds = taskDependencyIds(task);
   if (depIds.length === 0) return { ready: true };
 
   const depTasks = await Promise.all(depIds.map((depId) => deps.readTask(teamName, depId, cwd)));
+  for (const depTask of depTasks) {
+    if (depTask) taskDependencyIds(depTask);
+  }
   const incomplete = depIds.filter((_, idx) => depTasks[idx]?.status !== 'completed');
   if (incomplete.length > 0) return { ready: false, reason: 'blocked_dependency', dependencies: incomplete };
 
@@ -160,8 +272,16 @@ interface TransitionDeps extends ClaimTaskDeps {
     },
     cwd: string,
   ) => Promise<unknown>;
-  readMonitorSnapshot: (teamName: string, cwd: string) => Promise<TeamMonitorSnapshotState | null>;
-  writeMonitorSnapshot: (teamName: string, snapshot: TeamMonitorSnapshotState, cwd: string) => Promise<void>;
+  markTaskCompleted: (teamName: string, taskId: string, cwd: string) => Promise<void>;
+}
+
+function hasValidLease(claim: TeamTaskV2['claim']): claim is NonNullable<TeamTaskV2['claim']> {
+  if (!claim || typeof claim.owner !== 'string' || claim.owner.trim() === ''
+    || typeof claim.token !== 'string' || claim.token.trim() === ''
+    || typeof claim.leased_until !== 'string' || claim.leased_until.trim() === '') {
+    return false;
+  }
+  return Number.isFinite(Date.parse(claim.leased_until));
 }
 
 export async function transitionTaskStatus(
@@ -183,10 +303,10 @@ export async function transitionTaskStatus(
     if (!deps.canTransitionTaskStatus(v.status, to)) return { ok: false as const, error: 'invalid_transition' as const };
     if (v.status !== from) return { ok: false as const, error: 'invalid_transition' as const };
 
-    if (!v.owner || !v.claim || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
+    if (!v.owner || !hasValidLease(v.claim) || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
       return { ok: false as const, error: 'claim_conflict' as const };
     }
-    if (new Date(v.claim.leased_until) <= new Date()) return { ok: false as const, error: 'lease_expired' as const };
+    if (Date.parse(v.claim.leased_until) <= Date.now()) return { ok: false as const, error: 'lease_expired' as const };
 
     const normalizedResult = typeof terminalData?.result === 'string' ? terminalData.result : undefined;
     const normalizedError = typeof terminalData?.error === 'string' ? terminalData.error : undefined;
@@ -212,43 +332,41 @@ export async function transitionTaskStatus(
     };
     await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
 
-    if (to === 'completed') {
-      await deps.appendTeamEvent(
-        deps.teamName,
-        { type: 'task_completed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: undefined },
-        deps.cwd,
-      );
-    } else if (to === 'failed') {
-      await deps.appendTeamEvent(
-        deps.teamName,
-        { type: 'task_failed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: updated.error || 'task_failed' },
-        deps.cwd,
-      );
+    let eventAppended = true;
+    try {
+      if (to === 'completed') {
+        await deps.appendTeamEvent(
+          deps.teamName,
+          { type: 'task_completed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: undefined },
+          deps.cwd,
+        );
+      } else if (to === 'failed') {
+        await deps.appendTeamEvent(
+          deps.teamName,
+          { type: 'task_failed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: updated.error || 'task_failed' },
+          deps.cwd,
+        );
+      }
+    } catch (error) {
+      eventAppended = false;
+      logEventAppendFailure(error);
     }
 
-    return { ok: true as const, task: updated };
+    return { ok: true as const, task: updated, eventAppended };
   });
 
   if (!lock.ok) return { ok: false, error: 'claim_conflict' };
+  if (!lock.value.ok) return lock.value;
 
-  if (to === 'completed') {
-    const existing = await deps.readMonitorSnapshot(deps.teamName, deps.cwd);
-    const updated: TeamMonitorSnapshotState = existing
-      ? { ...existing, completedEventTaskIds: { ...(existing.completedEventTaskIds ?? {}), [taskId]: true } }
-      : {
-          taskStatusById: {},
-          workerAliveByName: {},
-          workerLivenessByName: {},
-          workerStateByName: {},
-          workerTurnCountByName: {},
-          workerTaskIdByName: {},
-          mailboxNotifiedByMessageId: {},
-          completedEventTaskIds: { [taskId]: true },
-        };
-    await deps.writeMonitorSnapshot(deps.teamName, updated, deps.cwd);
+  if (to === 'completed' && lock.value.eventAppended) {
+    try {
+      await deps.markTaskCompleted(deps.teamName, lock.value.task.id, deps.cwd);
+    } catch (error) {
+      logCompletionMarkerFailure(error);
+    }
   }
 
-  return lock.value;
+  return { ok: true, task: lock.value.task };
 }
 
 type ReleaseDeps = ClaimTaskDeps;
@@ -267,10 +385,10 @@ export async function releaseTaskClaim(
     if (v.status === 'pending' && !v.claim && !v.owner) return { ok: true as const, task: v };
     if (v.status === 'completed' || v.status === 'failed') return { ok: false as const, error: 'already_terminal' as const };
 
-    if (!v.owner || !v.claim || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
+    if (!v.owner || !hasValidLease(v.claim) || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
       return { ok: false as const, error: 'claim_conflict' as const };
     }
-    if (new Date(v.claim.leased_until) <= new Date()) return { ok: false as const, error: 'lease_expired' as const };
+    if (Date.parse(v.claim.leased_until) <= Date.now()) return { ok: false as const, error: 'lease_expired' as const };
 
     const updated: TeamTaskV2 = {
       ...v,
@@ -294,37 +412,105 @@ export async function listTasks(
     teamDir: (teamName: string, cwd: string) => string;
     isTeamTask: (value: unknown) => value is TeamTask;
     normalizeTask: (task: TeamTask) => TeamTaskV2;
+    stateError?: (path: string, cause: 'json' | 'schema' | 'unreadable') => Error;
   },
 ): Promise<TeamTask[]> {
   const tasksRoot = join(deps.teamDir(teamName, cwd), 'tasks');
-  if (!existsSync(tasksRoot)) return [];
+  const invalidState = (path: string, cause: 'json' | 'schema' | 'unreadable'): Error =>
+    deps.stateError?.(path, cause) ?? new Error('invalid_persisted_state');
+  let entries: Dirent[];
+  try {
+    entries = await readdir(tasksRoot, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw invalidState(tasksRoot, 'unreadable');
+  }
 
-  const entries = await readdir(tasksRoot, { withFileTypes: true });
-  const matched = entries.flatMap((entry) => {
-    if (!entry.isFile()) return [];
-    const match = /^(?:task-)?(\d+)\.json$/.exec(entry.name);
-    if (!match) return [];
-    return [{ id: match[1], fileName: entry.name }];
-  });
-
-  const loaded = await Promise.all(
-    matched.map(async ({ id, fileName }) => {
-      try {
-        const raw = await readFile(join(tasksRoot, fileName), 'utf8');
-        const parsed = JSON.parse(raw) as unknown;
-        if (!deps.isTeamTask(parsed)) return null;
-        const normalized = deps.normalizeTask(parsed);
-        if (normalized.id !== id) return null;
-        return normalized;
-      } catch {
-        return null;
-      }
-    }),
-  );
+  const candidates = new Map<string, { canonical?: string; legacy?: string }>();
+  for (const entry of entries) {
+    const canonical = /^task-(\d{1,20})\.json$/.exec(entry.name);
+    const legacy = /^(\d{1,20})\.json$/.exec(entry.name);
+    const match = canonical ?? legacy;
+    if (!match) continue;
+    const id = match[1]!;
+    const current = candidates.get(id) ?? {};
+    if (canonical) current.canonical = entry.name;
+    else current.legacy = entry.name;
+    candidates.set(id, current);
+  }
 
   const tasks: TeamTaskV2[] = [];
-  for (const task of loaded) {
-    if (task) tasks.push(task);
+  for (const [id, paths] of candidates) {
+    let fileName = paths.canonical ?? paths.legacy;
+    if (!fileName) continue;
+    let path = join(tasksRoot, fileName);
+    let fileStat: Awaited<ReturnType<typeof lstat>>;
+    try {
+      fileStat = await lstat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (fileName === paths.canonical && paths.legacy) {
+          fileName = paths.legacy;
+          path = join(tasksRoot, fileName);
+          try {
+            fileStat = await lstat(path);
+          } catch (legacyError) {
+            if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+            throw invalidState(path, 'unreadable');
+          }
+        } else {
+          continue;
+        }
+      } else {
+        throw invalidState(path, 'unreadable');
+      }
+    }
+    if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+      throw invalidState(path, 'unreadable');
+    }
+    let raw: string;
+    try {
+      raw = await readFile(path, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        if (fileName === paths.canonical && paths.legacy) {
+          fileName = paths.legacy;
+          path = join(tasksRoot, fileName);
+          try {
+            const legacyStat = await lstat(path);
+            if (legacyStat.isSymbolicLink() || !legacyStat.isFile()) {
+              throw invalidState(path, 'unreadable');
+            }
+            raw = await readFile(path, 'utf8');
+          } catch (legacyError) {
+            if ((legacyError as NodeJS.ErrnoException).code === 'ENOENT') continue;
+            if (legacyError instanceof Error && legacyError.message.startsWith('invalid_persisted_state')) {
+              throw legacyError;
+            }
+            throw invalidState(path, 'unreadable');
+          }
+        } else {
+          continue;
+        }
+      } else {
+        throw invalidState(path, 'unreadable');
+      }
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw) as unknown;
+    } catch {
+      throw invalidState(join(tasksRoot, fileName), 'json');
+    }
+    if (!deps.isTeamTask(parsed)) throw invalidState(path, 'schema');
+    const task = deps.normalizeTask(parsed);
+    if (task.id !== id) throw invalidState(path, 'schema');
+    try {
+      taskDependencyIds(task);
+    } catch {
+      throw invalidState(path, 'schema');
+    }
+    tasks.push(task);
   }
   tasks.sort((a, b) => Number(a.id) - Number(b.id));
   return tasks;

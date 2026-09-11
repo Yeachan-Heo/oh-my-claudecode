@@ -27,7 +27,8 @@ let previousOmcStateDir: string | undefined;
 function task(): TeamTaskV2 {
   return {
     id: taskId, subject: 'Recover', description: 'Recover safely', status: 'in_progress',
-    owner: workerName, version: 3, claim: { owner: workerName, token: claimToken, leased_until: '2099-01-01T00:00:00.000Z' },
+    owner: workerName, version: 3, created_at: '2026-01-01T00:00:00.000Z',
+    claim: { owner: workerName, token: claimToken, leased_until: '2099-01-01T00:00:00.000Z' },
   } as TeamTaskV2;
 }
 
