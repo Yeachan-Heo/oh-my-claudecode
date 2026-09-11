@@ -19,7 +19,7 @@
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { link, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
+import { link, lstat, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
@@ -29,12 +29,9 @@ import {
   readTeamConfig,
   readWorkerStatus,
   readWorkerHeartbeat,
-  readMonitorSnapshot,
-  writeMonitorSnapshot,
   writeShutdownRequest,
   readShutdownAck,
   writeWorkerInbox,
-  listTasksFromFiles,
   saveTeamConfig,
   readRevisionedTeamConfig,
   saveTeamConfigAtRevision,
@@ -156,7 +153,20 @@ import { parseRecoveryIntent, resolveRuntimeCliPath, type RecoverDeadWorkerOwner
 import { scaleUpFenceBlocks } from './scaling.js';
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
-import { teamAdoptRecoveryReservations, teamRequeueRecoveredTask, teamTransitionTaskStatus } from './team-ops.js';
+import {
+  teamAdoptRecoveryReservations,
+  teamListTasks,
+  teamMarkTaskCompleted,
+  teamReadMonitorSnapshot,
+  teamReadTask,
+  teamRequeueRecoveredTask,
+  teamTransitionTaskStatus,
+  teamWriteMonitorSnapshot,
+  normalizeTaskRecord,
+  withTaskClaimLock,
+  writeAtomic,
+} from './team-ops.js';
+import { createTaskRecord, validateTaskDependencies } from './state/tasks.js';
 
 function workerInstructionStateRoot(cwd: string, teamName: string): string {
   return process.platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
@@ -682,6 +692,47 @@ function getMissingDependencyIds(
   return getTaskDependencyIds(task).filter((dependencyId) => !taskById.has(dependencyId));
 }
 
+type StartTeamTaskInput = StartTeamV2Config['tasks'][number];
+
+function taskInputDependencyIds(task: StartTeamTaskInput, taskIndex: number): string[] {
+  return [...validateTaskDependencies({ ...task, id: String(taskIndex + 1) })];
+}
+
+/**
+ * Validate the complete initial task graph before creating team state,
+ * worktrees, panes, or provider launch attempts.
+ */
+function validateStartTaskDependencies(tasks: readonly StartTeamTaskInput[]): Map<number, string[]> {
+  const dependencyByIndex = new Map<number, string[]>();
+  const taskCount = tasks.length;
+  for (let index = 0; index < taskCount; index++) {
+    const task = tasks[index];
+    if (!task || typeof task !== 'object') throw new Error('invalid_task_dependencies');
+    const dependencies = taskInputDependencyIds(task, index);
+    for (const dependencyId of dependencies) {
+      const dependencyIndex = Number(dependencyId) - 1;
+      if (!Number.isSafeInteger(dependencyIndex) || dependencyIndex < 0 || dependencyIndex >= taskCount
+      ) {
+        throw new Error(`invalid_task_dependency:task-${index + 1}:${dependencyId}`);
+      }
+    }
+    dependencyByIndex.set(index, dependencies);
+  }
+
+  const visiting = new Set<number>();
+  const visited = new Set<number>();
+  const visit = (index: number): void => {
+    if (visiting.has(index)) throw new Error(`cyclic_task_dependency:task-${index + 1}`);
+    if (visited.has(index)) return;
+    visiting.add(index);
+    for (const dependencyId of dependencyByIndex.get(index) ?? []) visit(Number(dependencyId) - 1);
+    visiting.delete(index);
+    visited.add(index);
+  };
+  for (let index = 0; index < taskCount; index++) visit(index);
+  return dependencyByIndex;
+}
+
 // ---------------------------------------------------------------------------
 // StartTeam V2 — create state, spawn workers, write initial dispatch requests
 // ---------------------------------------------------------------------------
@@ -690,7 +741,15 @@ export interface StartTeamV2Config {
   teamName: string;
   workerCount: number;
   agentTypes: string[];
-  tasks: Array<{ subject: string; description: string; owner?: string; blocked_by?: string[]; role?: string; delegation?: TeamTaskDelegationPlan }>;
+  tasks: Array<{
+    subject: string;
+    description: string;
+    owner?: string;
+    blocked_by?: string[];
+    depends_on?: string[];
+    role?: string;
+    delegation?: TeamTaskDelegationPlan;
+  }>;
   cwd: string;
   newWindow?: boolean;
   workerRoles?: string[];
@@ -2015,7 +2074,7 @@ async function hasBootstrapActiveRecoveryEvidence(
     return false;
   }
   let tasks: TeamTask[];
-  try { tasks = await listTasksFromFiles(teamName, cwd); } catch { return false; }
+  try { tasks = await teamListTasks(teamName, cwd); } catch { return false; }
   const continuations = tasks.filter(task => task.recovery_reservation?.recovery_id === active.recovery_id
     || task.recovery_adoption?.recovery_id === active.recovery_id);
   const untouchedClaims = tasks.filter(task => task.status === 'in_progress' && task.owner === input.workerName
@@ -2381,7 +2440,7 @@ export async function executeRecoverDeadWorkerV2Owner(
         return committedReplacementLiveness === 'unknown' ? 'unknown' : 'dead';
       },
       listOwnedInProgressTasks: async () => selectRecoveryReplayTasks(
-        await listTasksFromFiles(input.teamName, input.cwd), input.workerName, recoveryId, committedReplacementLiveness,
+        await teamListTasks(input.teamName, input.cwd), input.workerName, recoveryId, committedReplacementLiveness,
       ),
       validateCheckpoint: async (teamName, task) => {
         const persisted = task.recovery_reservation ?? task.recovery_adoption;
@@ -2406,7 +2465,7 @@ export async function executeRecoverDeadWorkerV2Owner(
       },
       requeue: async (sagaInput, taskId, adoptionTokenHash) => {
         await ensureFence();
-        const currentTask = (await listTasksFromFiles(input.teamName, input.cwd)).find(task => task.id === taskId);
+        const currentTask = await teamReadTask(input.teamName, taskId, input.cwd);
         if (currentTask?.recovery_adoption?.recovery_id === sagaInput.recoveryId) {
           return { ok: true, sequence: currentTask.recovery_adoption.continuation_sequence };
         }
@@ -3223,6 +3282,18 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   const sanitized = sanitizeTeamName(config.teamName);
   const leaderCwd = resolve(config.cwd);
   validateTeamName(sanitized);
+  if (!Array.isArray(config.tasks)) throw new Error('invalid_task_dependencies');
+  const dependencyByIndex = validateStartTaskDependencies(config.tasks);
+  const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
+  const workerNameSet = new Set(workerNames);
+  for (let index = 0; index < config.tasks.length; index++) {
+    const task = config.tasks[index]!;
+    const owner = task.owner;
+    if (owner === undefined) continue;
+    if (typeof owner !== 'string' || owner.trim() === '' || !workerNameSet.has(owner)) {
+      throw new Error(`invalid_task_owner:task-${index + 1}`);
+    }
+  }
 
   // Resolve routing snapshot ONCE at team creation. The snapshot is immutable
   // for the team's lifetime (stickiness per plan AC-10): spawn/scaleUp/restart
@@ -3255,8 +3326,6 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   const workspaceMode = worktreeMode === 'disabled' ? 'single' as const : 'worktree' as const;
 
   const agentTypes = config.agentTypes as CliAgentType[];
-  const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
-  const workerNameSet = new Set(workerNames);
   const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
   const resolveDefaultModel = (agentType: CliAgentType): string | undefined => {
     return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
@@ -3268,6 +3337,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   const startupAllocations: Array<{ workerName: string; taskIndex: number }> = [];
   const unownedTaskIndices: number[] = [];
   for (let i = 0; i < config.tasks.length; i++) {
+    const dependencies = dependencyByIndex.get(i) ?? [];
+    if (dependencies.length > 0) continue;
     const owner = config.tasks[i]?.owner;
     if (typeof owner === 'string' && workerNameSet.has(owner)) {
       startupAllocations.push({ workerName: owner, taskIndex: i });
@@ -3352,19 +3423,21 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // Write task files
   for (let i = 0; i < config.tasks.length; i++) {
     const taskId = String(i + 1);
+    const task = config.tasks[i]!;
     const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    await mkdir(join(taskFilePath, '..'), { recursive: true });
-    await writeFile(taskFilePath, JSON.stringify({
-      id: taskId,
-      subject: config.tasks[i].subject,
-      description: config.tasks[i].description,
+    const taskRecord = normalizeTaskRecord(createTaskRecord(taskId, {
+      subject: task.subject,
+      description: task.description,
       status: 'pending',
-      owner: null,
-      result: null,
-      ...(config.tasks[i].role ? { role: config.tasks[i].role } : {}),
-      ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
-      created_at: new Date().toISOString(),
-    }, null, 2), 'utf-8');
+      ...(task.owner !== undefined ? { owner: task.owner } : {}),
+      ...(task.role !== undefined ? { role: task.role } : {}),
+      ...(task.blocked_by !== undefined ? { blocked_by: [...task.blocked_by] } : {}),
+      ...(dependencyByIndex.get(i)?.length
+        ? { depends_on: [...dependencyByIndex.get(i)!] }
+        : {}),
+      ...(task.delegation !== undefined ? { delegation: task.delegation } : {}),
+    }));
+    await writeAtomic(taskFilePath, JSON.stringify(taskRecord, null, 2));
   }
 
   const workerWorktrees = new Map<string, NonNullable<ReturnType<typeof ensureWorkerWorktree>>>();
@@ -3863,16 +3936,130 @@ export interface CliWorkerVerdictResult {
   reason?: string;
 }
 
+interface NonCursorVerdictBinding {
+  schema_version: 1;
+  artifact_fingerprint: string;
+  worker_name: string;
+  task_id: string;
+  task_version: number;
+}
+
+type NonCursorVerdictBindingRead =
+  | { kind: 'missing' }
+  | { kind: 'valid'; binding: NonCursorVerdictBinding }
+  | { kind: 'invalid' };
+
+function nonCursorVerdictBindingPath(outputFile: string): string {
+  return `${outputFile}.binding`;
+}
+
+function nonCursorVerdictStalePath(outputFile: string, artifactFingerprint: string): string {
+  return `${outputFile}.stale.${artifactFingerprint}`;
+}
+
+function nonCursorVerdictStaleMarkerPath(outputFile: string, artifactFingerprint: string): string {
+  return `${nonCursorVerdictStalePath(outputFile, artifactFingerprint)}.marker`;
+}
+
+function nonCursorVerdictFileIdentity(stats: {
+  dev: number | bigint;
+  ino: number | bigint;
+  size: number | bigint;
+  mtimeMs: number;
+}): string {
+  // ctime is deliberately excluded: permission/metadata changes must not
+  // make an unchanged retained verdict look like a new publication.
+  return [
+    String(stats.dev),
+    String(stats.ino),
+    String(stats.size),
+    String(stats.mtimeMs),
+  ].join('-');
+}
+
+function fingerprintCliWorkerVerdictArtifact(
+  raw: string,
+  stats: {
+    dev: number | bigint;
+    ino: number | bigint;
+    size: number | bigint;
+    mtimeMs: number;
+  },
+): string {
+  const contentSha256 = createHash('sha256').update(raw, 'utf8').digest('hex');
+  return `${contentSha256}-${nonCursorVerdictFileIdentity(stats)}`;
+}
+
+async function readNonCursorVerdictArtifact(
+  outputFile: string,
+): Promise<{ raw: string; artifactFingerprint: string }> {
+  const before = await lstat(outputFile);
+  const raw = await readFile(outputFile, 'utf8');
+  const after = await lstat(outputFile);
+  if (nonCursorVerdictFileIdentity(before) !== nonCursorVerdictFileIdentity(after)) {
+    throw new Error('verdict_artifact_changed');
+  }
+  return {
+    raw,
+    artifactFingerprint: fingerprintCliWorkerVerdictArtifact(raw, after),
+  };
+}
+
+function isNonCursorVerdictBinding(value: unknown): value is NonCursorVerdictBinding {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const fingerprintParts = typeof candidate.artifact_fingerprint === 'string'
+    ? candidate.artifact_fingerprint.split('-')
+    : [];
+  return candidate.schema_version === 1
+    && typeof candidate.artifact_fingerprint === 'string'
+    && fingerprintParts.length === 5
+    && /^[a-f0-9]{64}$/.test(fingerprintParts[0] ?? '')
+    && fingerprintParts.slice(1).every(part => part.length > 0 && Number.isFinite(Number(part)))
+    && typeof candidate.worker_name === 'string'
+    && candidate.worker_name.length > 0
+    && typeof candidate.task_id === 'string'
+    && TASK_ID_SAFE_PATTERN.test(candidate.task_id)
+    && Number.isSafeInteger(candidate.task_version)
+    && (candidate.task_version as number) >= 1;
+}
+
+async function readNonCursorVerdictBinding(path: string): Promise<NonCursorVerdictBindingRead> {
+  let raw: string;
+  try {
+    raw = await readFile(path, 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? { kind: 'missing' }
+      : { kind: 'invalid' };
+  }
+  try {
+    const value: unknown = JSON.parse(raw);
+    return isNonCursorVerdictBinding(value)
+      ? { kind: 'valid', binding: value }
+      : { kind: 'invalid' };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
+
 /**
  * Completion handler for CLI workers that emitted a structured verdict
  * (AC-7). Scans workers whose panes have exited, plus live Cursor panes whose
  * persistent reviewer session has published a verdict, and whose WorkerInfo
  * carries `output_file`. For each:
  *   - Reads + validates the JSON payload via `parseCliWorkerVerdict`.
- *   - Locates the worker's in_progress task and writes a terminal status
- *     (completed for `approve`, failed for `revise`/`reject`) plus verdict
- *     metadata through the canonical `transitionTaskStatus` path so lease,
+ *   - Cursor reviewers use the claim-token transition path so lease,
  *     delegation, event, and monitor-snapshot invariants remain authoritative.
+ *   - Other providers retain the post-exit no-token contract: under the
+ *     consumer-owned artifact lock, a durable binding records the exact
+ *     verdict bytes and filesystem publication fingerprint plus original task
+ *     id/version before publication. Retries reuse that binding; under the
+ *     canonical task claim lock they re-read and version-check the task,
+ *     validate an incremented terminal candidate, and publish it atomically.
+ *     Their best-effort events run only after that publication succeeds.
+ *     Proven identity conflicts quarantine the artifact (or persist a stale
+ *     marker if the rename fails) instead of rebinding it.
  *   - Renames the assignment-scoped verdict artifact to `.processed` so a
  *     subsequent monitor cycle does not reprocess it.
  *   - Quarantines stale `.processing` artifacts when replacement output exists.
@@ -3891,10 +4078,50 @@ export async function processCliWorkerVerdicts(
   const logEventFailure = createSwallowedErrorLogger(
     'team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed',
   );
+  const logCompletionMarkerFailure = createSwallowedErrorLogger(
+    'team.runtime-v2.processCliWorkerVerdicts teamMarkTaskCompleted failed',
+  );
 
   const { rename } = await import('fs/promises');
-  const { renameSync, readFileSync, writeFileSync, existsSync: fsExistsSync } = await import('fs');
+  const { renameSync, readFileSync, existsSync: fsExistsSync } = await import('fs');
   const { withFileLockSync } = await import('../lib/file-lock.js');
+
+  const quarantineNonCursorVerdict = async (
+    outputFile: string,
+    artifactFingerprint: string,
+    workerName: string,
+    taskId: string,
+    taskVersion: number,
+    reason: string,
+  ): Promise<boolean> => {
+    const stalePath = nonCursorVerdictStalePath(outputFile, artifactFingerprint);
+    let moved = false;
+    try {
+      await rename(outputFile, stalePath);
+      moved = true;
+    } catch {
+      // Keep the original artifact in place when the evidence rename fails.
+    }
+    try {
+      await writeFile(
+        nonCursorVerdictStaleMarkerPath(outputFile, artifactFingerprint),
+        JSON.stringify({
+          schema_version: 1,
+          artifact_fingerprint: artifactFingerprint,
+          worker_name: workerName,
+          task_id: taskId,
+          task_version: taskVersion,
+          reason,
+          quarantined_at: new Date().toISOString(),
+        }),
+        'utf8',
+      );
+      return true;
+    } catch {
+      // A successful rename still makes the original artifact non-selectable.
+      return moved;
+    }
+  };
 
 
   for (const worker of config.workers) {
@@ -3946,6 +4173,8 @@ export async function processCliWorkerVerdicts(
       verdictFile = processingOutputFile;
     }
     let payload: CliWorkerOutputPayload;
+    let nonCursorArtifactFingerprint: string | undefined;
+    let nonCursorBinding: NonCursorVerdictBinding | null = null;
     try {
       if (cursorReviewer && verdictFile === outputFile) {
         // Claim a complete verdict before mutating task state. The per-output
@@ -3971,10 +4200,92 @@ export async function processCliWorkerVerdicts(
           verdictFile = processingOutputFile;
         });
       }
-      const raw = await readFile(verdictFile, 'utf-8');
-      payload = parseCliWorkerVerdict(raw);
+      if (cursorReviewer) {
+        const raw = await readFile(verdictFile, 'utf-8');
+        payload = parseCliWorkerVerdict(raw);
+      } else {
+        const artifactState = await withProcessIdentityFileLock(
+          `${outputFile}.lock`,
+          async () => {
+            const artifact = await readNonCursorVerdictArtifact(outputFile);
+            if (fsExistsSync(nonCursorVerdictStaleMarkerPath(outputFile, artifact.artifactFingerprint))) {
+              return { kind: 'quarantined' as const, artifactFingerprint: artifact.artifactFingerprint };
+            }
+            const parsed = parseCliWorkerVerdict(artifact.raw);
+            const bindingPath = nonCursorVerdictBindingPath(outputFile);
+            const bindingRead = await readNonCursorVerdictBinding(bindingPath);
+            if (bindingRead.kind === 'invalid') {
+              const quarantined = await quarantineNonCursorVerdict(
+                outputFile,
+                artifact.artifactFingerprint,
+                worker.name,
+                parsed.task_id,
+                1,
+                'verdict_binding_malformed',
+              );
+              return {
+                kind: quarantined ? 'quarantined' as const : 'quarantine_failed' as const,
+                artifactFingerprint: artifact.artifactFingerprint,
+              };
+            }
+            let binding = bindingRead.kind === 'valid' ? bindingRead.binding : null;
+            if (binding && binding.artifact_fingerprint !== artifact.artifactFingerprint) {
+              await rm(bindingPath, { force: true });
+              binding = null;
+            }
+            if (binding && binding.worker_name !== worker.name) {
+              const quarantined = await quarantineNonCursorVerdict(
+                outputFile,
+                artifact.artifactFingerprint,
+                worker.name,
+                binding.task_id,
+                binding.task_version,
+                'verdict_binding_worker_mismatch',
+              );
+              return {
+                kind: quarantined ? 'quarantined' as const : 'quarantine_failed' as const,
+                artifactFingerprint: artifact.artifactFingerprint,
+              };
+            }
+            return { kind: 'ready' as const, payload: parsed, artifactFingerprint: artifact.artifactFingerprint, binding };
+          },
+          100,
+        );
+        if (artifactState.kind !== 'ready') {
+          results.push({
+            workerName: worker.name,
+            taskId: null,
+            status: 'skipped',
+            reason: artifactState.kind === 'quarantined'
+              ? 'stale_verdict_quarantined'
+              : 'verdict_quarantine_failed',
+          });
+          continue;
+        }
+        payload = artifactState.payload;
+        nonCursorArtifactFingerprint = artifactState.artifactFingerprint;
+        nonCursorBinding = artifactState.binding;
+      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
+      if (!cursorReviewer && reason === 'process_identity_lock_timeout') {
+        results.push({
+          workerName: worker.name,
+          taskId: null,
+          status: 'skipped',
+          reason: 'verdict_artifact_lock_contention',
+        });
+        continue;
+      }
+      if (!cursorReviewer && reason === 'verdict_artifact_changed') {
+        results.push({
+          workerName: worker.name,
+          taskId: null,
+          status: 'skipped',
+          reason,
+        });
+        continue;
+      }
       await appendTeamEvent(sanitized, {
         type: 'team_leader_nudge',
         worker: 'leader-fixed',
@@ -4004,20 +4315,37 @@ export async function processCliWorkerVerdicts(
     }
 
     const candidateTaskIds = new Set<string>();
-    if (payload.task_id) candidateTaskIds.add(payload.task_id);
-    if (!cursorReviewer) {
+    if (!cursorReviewer && nonCursorBinding) {
+      candidateTaskIds.add(nonCursorBinding.task_id);
+    } else {
+      if (payload.task_id) candidateTaskIds.add(payload.task_id);
+    }
+    if (!cursorReviewer && !nonCursorBinding) {
       for (const id of worker.assigned_tasks ?? []) candidateTaskIds.add(id);
     }
 
     let targetTaskId: string | null = null;
     let targetTaskPath: string | null = null;
+    let targetTaskVersion: number | null = null;
+    if (!cursorReviewer && nonCursorBinding) {
+      targetTaskId = nonCursorBinding.task_id;
+      targetTaskPath = absPath(cwd, TeamPaths.taskFile(sanitized, nonCursorBinding.task_id));
+      targetTaskVersion = nonCursorBinding.task_version;
+    }
     for (const taskId of candidateTaskIds) {
+      if (targetTaskId) break;
       if (!TASK_ID_SAFE_PATTERN.test(taskId)) continue;
       const taskPath = absPath(cwd, TeamPaths.taskFile(sanitized, taskId));
-      if (!fsExistsSync(taskPath)) continue;
+      let taskData: TeamTask | null;
       try {
-        const taskRaw = readFileSync(taskPath, 'utf-8');
-        const taskData = JSON.parse(taskRaw) as TeamTask;
+        taskData = await teamReadTask(sanitized, taskId, cwd);
+      } catch {
+        // A selected task must pass the canonical persisted schema before it
+        // can be considered for a verdict publication.
+        continue;
+      }
+      if (!taskData) continue;
+      try {
         const taskRole = typeof taskData.role === 'string'
           ? normalizeDelegationRole(taskData.role)
           : null;
@@ -4037,14 +4365,15 @@ export async function processCliWorkerVerdicts(
           && claimMatchesCursorWorker) {
           targetTaskId = taskId;
           targetTaskPath = taskPath;
+          targetTaskVersion = taskData.version ?? 1;
           break;
         }
       } catch {
-        // skip malformed task file
+        // skip a task that cannot be compared to this verdict
       }
     }
 
-    if (!targetTaskId || !targetTaskPath) {
+    if (!targetTaskId || !targetTaskPath || targetTaskVersion === null) {
       if (cursorReviewer && verdictFile === processingOutputFile) {
         const processedTaskPath = absPath(cwd, TeamPaths.taskFile(sanitized, payload.task_id));
         try {
@@ -4112,7 +4441,10 @@ export async function processCliWorkerVerdicts(
     }
 
     const terminalStatus = payload.verdict === 'approve' ? 'completed' : 'failed';
+    const canonicalTaskPath = targetTaskPath;
+    const observedTaskVersion = targetTaskVersion;
     let transitionOk = false;
+    let publishFailureReason: string | undefined;
     try {
       if (cursorReviewer) {
         const transition = await teamTransitionTaskStatus(
@@ -4156,61 +4488,243 @@ export async function processCliWorkerVerdicts(
         );
         transitionOk = transition.ok;
       } else {
-        // Preserve the existing post-exit path for non-Cursor providers.
-        withFileLockSync(targetTaskPath + '.lock', () => {
-          const raw = readFileSync(targetTaskPath!, 'utf-8');
-          const taskData = JSON.parse(raw) as Record<string, unknown>;
-          if (taskData.status !== 'in_progress' || taskData.owner !== worker.name) {
-            return;
-          }
-          const prevMetadata = (taskData.metadata && typeof taskData.metadata === 'object')
-            ? taskData.metadata as Record<string, unknown>
-            : {};
-          taskData.status = terminalStatus;
-          taskData.completed_at = new Date().toISOString();
-          taskData.claim = undefined;
-          taskData.metadata = {
-            ...prevMetadata,
-            verdict: payload.verdict,
-            verdict_summary: payload.summary,
-            verdict_findings: payload.findings,
-            verdict_role: payload.role,
-            verdict_source: 'cli_worker_output_contract',
-          };
-          if (terminalStatus === 'failed') {
-            taskData.error = `cli_worker_verdict:${payload.verdict}:${payload.summary}`;
-          }
-          writeFileSync(targetTaskPath!, JSON.stringify(taskData, null, 2), 'utf-8');
+        const artifactResult = await withProcessIdentityFileLock(
+          `${outputFile}.lock`,
+          async () => {
+            let artifact: { raw: string; artifactFingerprint: string };
+            try {
+              artifact = await readNonCursorVerdictArtifact(outputFile);
+            } catch (error) {
+              return {
+                ok: false as const,
+                reason: error instanceof Error && error.message === 'verdict_artifact_changed'
+                  ? 'verdict_artifact_changed' as const
+                  : 'verdict_artifact_missing' as const,
+              };
+            }
+            const artifactFingerprint = artifact.artifactFingerprint;
+            if (artifactFingerprint !== nonCursorArtifactFingerprint) {
+              return { ok: false as const, reason: 'verdict_artifact_changed' as const };
+            }
+            if (fsExistsSync(nonCursorVerdictStaleMarkerPath(outputFile, artifactFingerprint))) {
+              return { ok: false as const, reason: 'stale_verdict_quarantined' as const };
+            }
+
+            const bindingPath = nonCursorVerdictBindingPath(outputFile);
+            const bindingRead = await readNonCursorVerdictBinding(bindingPath);
+            if (bindingRead.kind === 'invalid') {
+              const quarantined = await quarantineNonCursorVerdict(
+                outputFile,
+                artifactFingerprint,
+                worker.name,
+                targetTaskId,
+                observedTaskVersion,
+                'verdict_binding_malformed',
+              );
+              return {
+                ok: false as const,
+                reason: quarantined
+                  ? 'stale_verdict_quarantined' as const
+                  : 'verdict_quarantine_failed' as const,
+              };
+            }
+
+            let binding = bindingRead.kind === 'valid' ? bindingRead.binding : null;
+            if (binding && (
+              binding.artifact_fingerprint !== artifactFingerprint
+              || binding.worker_name !== worker.name
+              || binding.task_id !== targetTaskId
+              || binding.task_version !== observedTaskVersion
+            )) {
+              const quarantined = await quarantineNonCursorVerdict(
+                outputFile,
+                artifactFingerprint,
+                worker.name,
+                binding.task_id,
+                binding.task_version,
+                'verdict_binding_identity_conflict',
+              );
+              return {
+                ok: false as const,
+                reason: quarantined
+                  ? 'stale_verdict_quarantined' as const
+                  : 'verdict_quarantine_failed' as const,
+              };
+            }
+
+            if (!binding) {
+              binding = {
+                schema_version: 1,
+                artifact_fingerprint: artifactFingerprint,
+                worker_name: worker.name,
+                task_id: targetTaskId,
+                task_version: observedTaskVersion,
+              };
+              try {
+                await writeAtomic(bindingPath, JSON.stringify(binding, null, 2));
+              } catch {
+                const quarantined = await quarantineNonCursorVerdict(
+                  outputFile,
+                  artifactFingerprint,
+                  worker.name,
+                  targetTaskId,
+                  observedTaskVersion,
+                  'verdict_binding_persist_failed',
+                );
+                return {
+                  ok: false as const,
+                  reason: quarantined
+                    ? 'verdict_binding_persist_failed' as const
+                    : 'verdict_quarantine_failed' as const,
+                };
+              }
+            }
+
+            const lock = await withTaskClaimLock(sanitized, targetTaskId, cwd, async () => {
+              let current: TeamTask | null;
+              try {
+                current = await teamReadTask(sanitized, targetTaskId, cwd);
+              } catch {
+                return { ok: false as const, reason: 'task_schema_conflict' as const };
+              }
+              if (!current) return { ok: false as const, reason: 'task_missing' as const };
+              const currentVersion = current.version ?? 1;
+              if (currentVersion !== observedTaskVersion) {
+                return { ok: false as const, reason: 'task_version_conflict' as const };
+              }
+              if (current.status !== 'in_progress' || current.owner !== worker.name) {
+                return { ok: false as const, reason: 'task_claim_conflict' as const };
+              }
+
+              let terminalCandidate: ReturnType<typeof normalizeTaskRecord>;
+              try {
+                terminalCandidate = normalizeTaskRecord({
+                  ...current,
+                  status: terminalStatus,
+                  completed_at: new Date().toISOString(),
+                  claim: undefined,
+                  version: currentVersion + 1,
+                  metadata: {
+                    ...(current.metadata ?? {}),
+                    verdict: payload.verdict,
+                    verdict_summary: payload.summary,
+                    verdict_findings: payload.findings,
+                    verdict_role: payload.role,
+                    verdict_source: 'cli_worker_output_contract',
+                  },
+                  ...(terminalStatus === 'failed'
+                    ? { error: `cli_worker_verdict:${payload.verdict}:${payload.summary}` }
+                    : {}),
+                });
+              } catch {
+                return { ok: false as const, reason: 'task_schema_conflict' as const };
+              }
+              try {
+                await writeAtomic(canonicalTaskPath, JSON.stringify(terminalCandidate, null, 2));
+              } catch {
+                return { ok: false as const, reason: 'task_publish_failed' as const };
+              }
+              return { ok: true as const };
+            });
+            if (!lock.ok) {
+              return { ok: false as const, reason: 'task_claim_lock_contention' as const };
+            }
+            if (!lock.value.ok) {
+              if (lock.value.reason === 'task_publish_failed') {
+                return lock.value;
+              }
+              const quarantined = await quarantineNonCursorVerdict(
+                outputFile,
+                artifactFingerprint,
+                worker.name,
+                targetTaskId,
+                observedTaskVersion,
+                lock.value.reason,
+              );
+              return {
+                ok: false as const,
+                reason: quarantined
+                  ? `stale_${lock.value.reason}_quarantined` as const
+                  : 'verdict_quarantine_failed' as const,
+              };
+            }
+            return { ok: true as const };
+          },
+          100,
+        );
+        if (!artifactResult.ok) {
+          publishFailureReason = artifactResult.reason;
+        } else {
           transitionOk = true;
-        });
+        }
       }
-    } catch {
-      // lock or filesystem failure — leave task in_progress, do not rename verdict file
+    } catch (error) {
+      // Leave the verdict artifact retryable when the canonical publication
+      // cannot be completed.
+      publishFailureReason = !cursorReviewer
+        && error instanceof Error
+        && error.message === 'process_identity_lock_timeout'
+        ? 'verdict_artifact_lock_contention'
+        : 'task_publish_failed';
     }
 
     if (!transitionOk) {
       results.push({
         workerName: worker.name,
         taskId: targetTaskId,
-        status: 'already_terminal',
+        status: cursorReviewer ? 'already_terminal' : 'skipped',
         verdict: payload.verdict,
+        ...(cursorReviewer
+          ? {}
+          : { reason: publishFailureReason ?? 'task_transition_rejected' }),
       });
       continue;
     }
 
     if (!cursorReviewer) {
-      await appendTeamEvent(sanitized, {
-        type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
-        worker: worker.name,
-        task_id: targetTaskId,
-        reason: `cli_worker_verdict:${payload.verdict}`,
-      }, cwd).catch(logEventFailure);
+      let eventAppended = false;
+      try {
+        await appendTeamEvent(sanitized, {
+          type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
+          worker: worker.name,
+          task_id: targetTaskId,
+          reason: `cli_worker_verdict:${payload.verdict}`,
+        }, cwd);
+        eventAppended = true;
+      } catch (error) {
+        logEventFailure(error);
+      }
+      if (terminalStatus === 'completed' && eventAppended) {
+        await teamMarkTaskCompleted(sanitized, targetTaskId, cwd).catch(logCompletionMarkerFailure);
+      }
     }
 
-    try {
-      await rename(verdictFile, processedOutputFile);
-    } catch {
-      // best-effort; reprocess is idempotent (already_terminal on rerun)
+    if (!cursorReviewer) {
+      try {
+        await withProcessIdentityFileLock(`${outputFile}.lock`, async () => {
+          const artifact = await readNonCursorVerdictArtifact(verdictFile);
+          if (artifact.artifactFingerprint !== nonCursorArtifactFingerprint) return;
+          const bindingPath = nonCursorVerdictBindingPath(outputFile);
+          const binding = await readNonCursorVerdictBinding(bindingPath);
+          if (binding.kind !== 'valid'
+            || binding.binding.artifact_fingerprint !== nonCursorArtifactFingerprint
+            || binding.binding.worker_name !== worker.name
+            || binding.binding.task_id !== targetTaskId
+            || binding.binding.task_version !== observedTaskVersion) return;
+          // Only consume this invocation's artifact. A failed rename leaves
+          // its binding intact so retries cannot adopt a replacement claim.
+          await rename(verdictFile, processedOutputFile);
+          await rm(bindingPath, { force: true });
+        }, 100);
+      } catch {
+        // Task publication already committed. Cleanup remains best-effort.
+      }
+    } else {
+      try {
+        await rename(verdictFile, processedOutputFile);
+      } catch {
+        // best-effort; reprocess is idempotent (already_terminal on rerun)
+      }
     }
 
     results.push({
@@ -4251,11 +4765,11 @@ export async function monitorTeamV2(
     );
   }
 
-  const previousSnapshot = await readMonitorSnapshot(sanitized, cwd);
+  const previousSnapshot = await teamReadMonitorSnapshot(sanitized, cwd);
 
   // Load all tasks
   const listTasksStartMs = performance.now();
-  const allTasks = await listTasksFromFiles(sanitized, cwd);
+  const allTasks = await teamListTasks(sanitized, cwd);
   const listTasksMs = performance.now() - listTasksStartMs;
 
   const taskById = new Map(allTasks.map((task) => [task.id, task] as const));
@@ -4407,7 +4921,7 @@ export async function monitorTeamV2(
   // Persist snapshot for next cycle
   const updatedAt = new Date().toISOString();
   const totalMs = performance.now() - monitorStartMs;
-  await writeMonitorSnapshot(sanitized, {
+  await teamWriteMonitorSnapshot(sanitized, {
     taskStatusById: Object.fromEntries(allTasks.map((t) => [t.id, t.status])),
     workerAliveByName: Object.fromEntries(workers.map((w) => [w.name, w.alive])),
     workerLivenessByName: Object.fromEntries(workers.map((w) => [w.name, w.liveness])),
@@ -4474,7 +4988,7 @@ export async function shutdownTeamV2(
   const lifecycleLock = absPath(cwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
   const assertShutdownGate = async (currentConfig: TeamConfig): Promise<void> => {
     if (force) return;
-    const allTasks = await listTasksFromFiles(sanitized, cwd);
+    const allTasks = await teamListTasks(sanitized, cwd);
     const governance = getConfigGovernance(currentConfig);
     const gate: ShutdownGateCounts = {
       total: allTasks.length,
@@ -4906,15 +5420,26 @@ export async function shutdownTeamV2(
 
   // 5. Ralph completion logging
   if (ralph) {
-    const finalTasks = await listTasksFromFiles(sanitized, cwd).catch(() => [] as TeamTask[]);
-    const completed = finalTasks.filter((t) => t.status === 'completed').length;
-    const failed = finalTasks.filter((t) => t.status === 'failed').length;
-    const pending = finalTasks.filter((t) => t.status === 'pending').length;
-    await appendTeamEvent(sanitized, {
-      type: 'team_leader_nudge',
-      worker: 'leader-fixed',
-      reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
-    }, cwd).catch(logEventFailure);
+    try {
+      const finalTasks = await teamListTasks(sanitized, cwd);
+      const completed = finalTasks.filter((t) => t.status === 'completed').length;
+      const failed = finalTasks.filter((t) => t.status === 'failed').length;
+      const pending = finalTasks.filter((t) => t.status === 'pending').length;
+      await appendTeamEvent(sanitized, {
+        type: 'team_leader_nudge',
+        worker: 'leader-fixed',
+        reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
+      }, cwd).catch(logEventFailure);
+    } catch (error) {
+      const detail = redactBoundedDiagnostic(error instanceof Error ? error.message : String(error), 500);
+      const reason = `ralph_cleanup_summary_unavailable:${detail}`;
+      process.stderr.write(`[team/runtime-v2] ${reason}\n`);
+      await appendTeamEvent(sanitized, {
+        type: 'team_leader_nudge',
+        worker: 'leader-fixed',
+        reason,
+      }, cwd).catch(logEventFailure);
+    }
   }
 
   // 6a. Drain the merge orchestrator (if attached). Final merge sweep before

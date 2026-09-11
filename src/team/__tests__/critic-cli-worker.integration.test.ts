@@ -128,6 +128,7 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
 
       const finalTask = JSON.parse(readFileSync(taskPath, 'utf-8'));
       expect(finalTask.status).toBe('completed');
+      expect(finalTask.version).toBe(2);
       expect(finalTask.metadata?.verdict).toBe('approve');
       expect(finalTask.metadata?.verdict_role).toBe('critic');
       expect(existsSync(outputFile + '.processed')).toBe(true);

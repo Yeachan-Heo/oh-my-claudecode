@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, rm, writeFile, readFile, access } from 'fs/promises';
+import { mkdtemp, mkdir, rm, writeFile, readFile, access, readdir } from 'fs/promises';
+import * as fsPromises from 'fs/promises';
+import { createHash } from 'crypto';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -12,13 +14,49 @@ const mocks = vi.hoisted(() => ({
   getWorkerLiveness: vi.fn(async () => 'dead'),
   execFile: vi.fn(),
   tmuxExecAsync: vi.fn(),
+  afterEventAppend: undefined as (() => Promise<void>) | undefined,
 }));
+
+const renameFault = vi.hoisted(() => ({
+  destination: undefined as string | undefined,
+  calls: [] as string[],
+}));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    rename: async (...args: Parameters<typeof actual.rename>) => {
+      renameFault.calls.push(String(args[1]));
+      if (String(args[1]) === renameFault.destination) {
+        throw new Error('injected_rename_failure');
+      }
+      return actual.rename(...args);
+    },
+  };
+});
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
   return {
     ...actual,
     execFile: mocks.execFile,
+  };
+});
+
+vi.mock('../events.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../events.js')>();
+  return {
+    ...actual,
+    appendTeamEvent: async (...args: Parameters<typeof actual.appendTeamEvent>) => {
+      const event = await actual.appendTeamEvent(...args);
+      if (args[1].type === 'task_completed' && mocks.afterEventAppend) {
+        const hook = mocks.afterEventAppend;
+        mocks.afterEventAppend = undefined;
+        await hook();
+      }
+      return event;
+    },
   };
 });
 
@@ -51,6 +89,9 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     previousUserProfile = process.env.USERPROFILE;
     previousOmcStateDir = process.env.OMC_STATE_DIR;
     vi.resetModules();
+    renameFault.destination = undefined;
+    renameFault.calls = [];
+    mocks.afterEventAppend = undefined;
     mocks.isWorkerAlive.mockReset();
     mocks.isWorkerPaneAlive.mockReset();
     mocks.getWorkerLiveness.mockReset();
@@ -212,6 +253,17 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     return { teamRoot, outputFile, taskPath };
   }
 
+  async function waitForContendedTaskLockAttempt(teamRoot: string): Promise<void> {
+    const taskRoot = join(teamRoot, 'tasks');
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const lockTemps = (await readdir(taskRoot)).filter(name =>
+        name.startsWith('.lock-1.') && name.endsWith('.tmp'));
+      if (lockTemps.length >= 2) return;
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    throw new Error('timed out waiting for verdict task lock attempt');
+  }
+
   it('keeps a configured role provider authoritative instead of changing to its fallback', async () => {
     const { resolveTaskAssignment } = await import('../runtime-v2.js');
     const assignment = resolveTaskAssignment(
@@ -247,6 +299,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     const taskRaw = await readFile(taskPath, 'utf-8');
     const task = JSON.parse(taskRaw);
     expect(task.status).toBe('completed');
+    expect(task.version).toBe(2);
     expect(task.metadata?.verdict).toBe('approve');
     expect(task.metadata?.verdict_source).toBe('cli_worker_output_contract');
     expect(task.metadata?.verdict_role).toBe('code-reviewer');
@@ -255,6 +308,12 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
     // Verdict file renamed to .processed
     await expect(access(outputFile + '.processed')).resolves.toBeUndefined();
+
+    const snapshot = JSON.parse(await readFile(
+      absPath(cwd, TeamPaths.monitorSnapshot('role-routing-team')),
+      'utf-8',
+    ));
+    expect(snapshot.completedEventTaskIds['1']).toBe(true);
   });
 
   it('revise verdict transitions task to failed with verdict metadata', async () => {
@@ -273,6 +332,443 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     expect(task.error).toContain('cli_worker_verdict:revise');
     expect(Array.isArray(task.metadata?.verdict_findings)).toBe(true);
     expect(task.metadata?.verdict_findings).toHaveLength(1);
+  });
+
+  it('keeps a non-Cursor verdict retryable when the canonical task lock is contended', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-lock-contention-');
+    const { teamRoot, outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const originalTask = await readFile(taskPath, 'utf-8');
+    const { withProcessIdentityFileLock } = await import('../process-identity-lock.js');
+    const lockPath = join(teamRoot, 'tasks', '.lock-1');
+    let enteredResolve!: () => void;
+    let releaseResolve!: () => void;
+    const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+    const released = new Promise<void>(resolve => { releaseResolve = resolve; });
+    const holder = withProcessIdentityFileLock(lockPath, async () => {
+      enteredResolve();
+      await released;
+    });
+    await entered;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const processing = processCliWorkerVerdicts('role-routing-team', cwd);
+      await waitForContendedTaskLockAttempt(teamRoot);
+      const results = await processing;
+
+      expect(results[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'task_claim_lock_contention',
+      });
+      expect(await readFile(taskPath, 'utf-8')).toBe(originalTask);
+      await expect(access(outputFile + '.processed')).rejects.toThrow();
+      await expect(access(outputFile)).resolves.toBeUndefined();
+    } finally {
+      releaseResolve();
+      await holder;
+    }
+  });
+
+  it('does not clobber a same-owner task version changed while waiting for the canonical lock', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-version-race-');
+    const { teamRoot, outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const originalOutput = await readFile(outputFile, 'utf-8');
+    const { withProcessIdentityFileLock } = await import('../process-identity-lock.js');
+    const lockPath = join(teamRoot, 'tasks', '.lock-1');
+    let enteredResolve!: () => void;
+    let releaseResolve!: () => void;
+    const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+    const released = new Promise<void>(resolve => { releaseResolve = resolve; });
+    const holder = withProcessIdentityFileLock(lockPath, async () => {
+      enteredResolve();
+      await released;
+    });
+    await entered;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const processing = processCliWorkerVerdicts('role-routing-team', cwd);
+      await waitForContendedTaskLockAttempt(teamRoot);
+      const changedTask = JSON.parse(await readFile(taskPath, 'utf-8'));
+      changedTask.version = 2;
+      changedTask.claim.token = 'tk-requeued';
+      await writeFile(taskPath, JSON.stringify(changedTask, null, 2), 'utf-8');
+      releaseResolve();
+      await holder;
+
+      const results = await processing;
+      expect(results[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'stale_task_version_conflict_quarantined',
+      });
+      const replacementBytes = await readFile(taskPath, 'utf-8');
+      expect(JSON.parse(replacementBytes)).toMatchObject({
+        status: 'in_progress',
+        owner: 'worker-1',
+        version: 2,
+        claim: { token: 'tk-requeued' },
+      });
+      await expect(access(outputFile + '.processed')).rejects.toThrow();
+      await expect(access(outputFile)).rejects.toThrow();
+
+      // A second monitor cycle (including a consumer restart) cannot rebind
+      // the old verdict to the replacement claim.
+      vi.resetModules();
+      const { processCliWorkerVerdicts: restartedProcess } = await import('../runtime-v2.js');
+      const second = await restartedProcess('role-routing-team', cwd);
+      expect(second[0]).toMatchObject({ status: 'file_missing' });
+      expect(await readFile(taskPath, 'utf-8')).toBe(replacementBytes);
+
+      const replacementOutput = `${outputFile}.replacement`;
+      await writeFile(replacementOutput, originalOutput, 'utf-8');
+      await fsPromises.rename(replacementOutput, outputFile);
+      const third = await restartedProcess('role-routing-team', cwd);
+      expect(third[0]).toMatchObject({ status: 'completed', verdict: 'approve' });
+      expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({
+        status: 'completed',
+        version: 3,
+      });
+    } finally {
+      releaseResolve();
+      await holder;
+    }
+  });
+
+  it('does not clobber a canonical requeue that wins before verdict publication', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-requeue-race-');
+    const { teamRoot, outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const { withProcessIdentityFileLock } = await import('../process-identity-lock.js');
+    const lockPath = join(teamRoot, 'tasks', '.lock-1');
+    let enteredResolve!: () => void;
+    let releaseResolve!: () => void;
+    const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+    const released = new Promise<void>(resolve => { releaseResolve = resolve; });
+    const holder = withProcessIdentityFileLock(lockPath, async () => {
+      enteredResolve();
+      await released;
+    });
+    await entered;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const processing = processCliWorkerVerdicts('role-routing-team', cwd);
+      await waitForContendedTaskLockAttempt(teamRoot);
+      const changedTask = JSON.parse(await readFile(taskPath, 'utf-8'));
+      delete changedTask.owner;
+      delete changedTask.claim;
+      changedTask.status = 'pending';
+      changedTask.version = 2;
+      await writeFile(taskPath, JSON.stringify(changedTask, null, 2), 'utf-8');
+      releaseResolve();
+      await holder;
+
+      const results = await processing;
+      expect(results[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'stale_task_version_conflict_quarantined',
+      });
+      const replacementBytes = await readFile(taskPath, 'utf-8');
+      expect(JSON.parse(replacementBytes)).toMatchObject({
+        status: 'pending',
+        version: 2,
+      });
+      await expect(access(outputFile + '.processed')).rejects.toThrow();
+      await expect(access(outputFile)).rejects.toThrow();
+
+      vi.resetModules();
+      const { processCliWorkerVerdicts: restartedProcess } = await import('../runtime-v2.js');
+      const second = await restartedProcess('role-routing-team', cwd);
+      expect(second[0]).toMatchObject({ status: 'file_missing' });
+      expect(await readFile(taskPath, 'utf-8')).toBe(replacementBytes);
+    } finally {
+      releaseResolve();
+      await holder;
+    }
+  });
+
+  it('fails closed when stale-artifact quarantine rename fails, then accepts a new artifact identity', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-quarantine-failure-');
+    const { teamRoot, outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const originalOutput = await readFile(outputFile, 'utf-8');
+    const outputStat = await fsPromises.lstat(outputFile);
+    const artifactSha256 = createHash('sha256').update(originalOutput, 'utf8').digest('hex');
+    const artifactFingerprint = [
+      artifactSha256,
+      String(outputStat.dev),
+      String(outputStat.ino),
+      String(outputStat.size),
+      String(outputStat.mtimeMs),
+    ].join('-');
+    const { withProcessIdentityFileLock } = await import('../process-identity-lock.js');
+    const lockPath = join(teamRoot, 'tasks', '.lock-1');
+    let enteredResolve!: () => void;
+    let releaseResolve!: () => void;
+    const entered = new Promise<void>(resolve => { enteredResolve = resolve; });
+    const released = new Promise<void>(resolve => { releaseResolve = resolve; });
+    const holder = withProcessIdentityFileLock(lockPath, async () => {
+      enteredResolve();
+      await released;
+    });
+    await entered;
+    renameFault.destination = `${outputFile}.stale.${artifactFingerprint}`;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const processing = processCliWorkerVerdicts('role-routing-team', cwd);
+      await waitForContendedTaskLockAttempt(teamRoot);
+      const changedTask = JSON.parse(await readFile(taskPath, 'utf-8'));
+      changedTask.version = 2;
+      changedTask.claim.token = 'tk-requeued';
+      await writeFile(taskPath, JSON.stringify(changedTask, null, 2), 'utf-8');
+      releaseResolve();
+      await holder;
+
+      const first = await processing;
+      expect(first[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'stale_task_version_conflict_quarantined',
+      });
+      expect(await readFile(taskPath, 'utf-8')).toEqual(JSON.stringify(changedTask, null, 2));
+      await expect(access(outputFile)).resolves.toBeUndefined();
+      await expect(access(`${outputFile}.stale.${artifactFingerprint}.marker`)).resolves.toBeUndefined();
+
+      vi.resetModules();
+      const { processCliWorkerVerdicts: restartedProcess } = await import('../runtime-v2.js');
+      const second = await restartedProcess('role-routing-team', cwd);
+      expect(second[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'stale_verdict_quarantined',
+      });
+      expect(await readFile(taskPath, 'utf-8')).toEqual(JSON.stringify(changedTask, null, 2));
+
+      // Metadata-only changes (ctime/mode) do not make the retained verdict
+      // a new publication identity.
+      await fsPromises.chmod(outputFile, 0o600);
+      vi.resetModules();
+      const attributeRetry = await import('../runtime-v2.js');
+      const thirdAfterAttributeChange = await attributeRetry.processCliWorkerVerdicts('role-routing-team', cwd);
+      expect(thirdAfterAttributeChange[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'stale_verdict_quarantined',
+      });
+
+      renameFault.destination = undefined;
+      const replacementPath = `${outputFile}.replacement`;
+      await writeFile(replacementPath, originalOutput, 'utf-8');
+      await fsPromises.rename(replacementPath, outputFile);
+      const third = await attributeRetry.processCliWorkerVerdicts('role-routing-team', cwd);
+      expect(third[0]).toMatchObject({ status: 'completed', verdict: 'approve' });
+      expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({
+        status: 'completed',
+        version: 3,
+        metadata: { verdict_summary: 'approve summary' },
+      });
+    } finally {
+      renameFault.destination = undefined;
+      releaseResolve();
+      await holder;
+    }
+  });
+
+  it('leaves canonical bytes and the verdict artifact retryable when atomic publication fails', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-publish-failure-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const originalTask = await readFile(taskPath, 'utf-8');
+    renameFault.destination = taskPath;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+
+      expect(renameFault.calls).toContain(taskPath);
+      expect(results[0]).toMatchObject({
+        status: 'skipped',
+        reason: 'task_publish_failed',
+      });
+      expect(await readFile(taskPath, 'utf-8')).toBe(originalTask);
+      await expect(access(outputFile + '.processed')).rejects.toThrow();
+      await expect(access(outputFile)).resolves.toBeUndefined();
+      await expect(access(outputFile + '.binding')).resolves.toBeUndefined();
+
+      renameFault.destination = undefined;
+      vi.resetModules();
+      const { processCliWorkerVerdicts: retryProcess } = await import('../runtime-v2.js');
+      const retry = await retryProcess('role-routing-team', cwd);
+      expect(retry[0]).toMatchObject({ status: 'completed', verdict: 'approve' });
+      expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({
+        status: 'completed',
+        version: 2,
+      });
+    } finally {
+      renameFault.destination = undefined;
+    }
+  });
+
+  it('refuses a malformed selected task without consuming its verdict', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-malformed-task-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const malformed = '{malformed canonical task';
+    await writeFile(taskPath, malformed, 'utf-8');
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+
+    expect(results[0]).toMatchObject({
+      status: 'no_in_progress_task',
+      taskId: '1',
+    });
+    expect(await readFile(taskPath, 'utf-8')).toBe(malformed);
+    await expect(access(outputFile + '.processed')).rejects.toThrow();
+    await expect(access(outputFile)).resolves.toBeUndefined();
+  });
+
+  it('fails closed on a malformed existing verdict binding instead of rebinding', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-malformed-binding-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const originalTask = await readFile(taskPath, 'utf-8');
+    await writeFile(outputFile + '.binding', '{not valid binding', 'utf-8');
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const first = await processCliWorkerVerdicts('role-routing-team', cwd);
+
+    expect(first[0]).toMatchObject({
+      status: 'skipped',
+      reason: 'stale_verdict_quarantined',
+    });
+    expect(await readFile(taskPath, 'utf-8')).toBe(originalTask);
+    await expect(access(outputFile)).rejects.toThrow();
+    await expect(access(outputFile + '.processed')).rejects.toThrow();
+  });
+
+  it('keeps the original binding across restart and same-worker release/reclaim', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-reclaim-restart-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    renameFault.destination = taskPath;
+
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      const first = await processCliWorkerVerdicts('role-routing-team', cwd);
+      expect(first[0]).toMatchObject({ status: 'skipped', reason: 'task_publish_failed' });
+      await expect(access(outputFile + '.binding')).resolves.toBeUndefined();
+    } finally {
+      renameFault.destination = undefined;
+    }
+
+    const teamOps = await import('../team-ops.js');
+    const released = await teamOps.teamReleaseTaskClaim(
+      'role-routing-team',
+      '1',
+      'tk-1',
+      'worker-1',
+      cwd,
+    );
+    expect(released).toMatchObject({ ok: true, task: { status: 'pending', version: 2 } });
+    const reclaimed = await teamOps.teamClaimTask('role-routing-team', '1', 'worker-1', 2, cwd);
+    expect(reclaimed).toMatchObject({ ok: true, task: { status: 'in_progress', version: 3 } });
+    const replacementBytes = await readFile(taskPath, 'utf-8');
+
+    vi.resetModules();
+    const { processCliWorkerVerdicts: restartedProcess } = await import('../runtime-v2.js');
+    const second = await restartedProcess('role-routing-team', cwd);
+    expect(second[0]).toMatchObject({
+      status: 'skipped',
+      reason: 'stale_task_version_conflict_quarantined',
+    });
+    expect(await readFile(taskPath, 'utf-8')).toBe(replacementBytes);
+    await expect(access(outputFile)).rejects.toThrow();
+
+    vi.resetModules();
+    const { processCliWorkerVerdicts: secondRestart } = await import('../runtime-v2.js');
+    expect(await secondRestart('role-routing-team', cwd)).toEqual([
+      expect.objectContaining({ status: 'file_missing' }),
+    ]);
+    expect(await readFile(taskPath, 'utf-8')).toBe(replacementBytes);
+  });
+
+  it('retains the binding after processed rename failure across task reopen and restart', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-processed-failure-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    renameFault.destination = `${outputFile}.processed`;
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    const first = await processCliWorkerVerdicts('role-routing-team', cwd);
+    expect(first[0]).toMatchObject({ status: 'completed' });
+    expect(renameFault.calls).toContain(`${outputFile}.processed`);
+    await expect(access(outputFile)).resolves.toBeUndefined();
+    const bindingBytes = await readFile(`${outputFile}.binding`, 'utf8');
+    expect(JSON.parse(bindingBytes)).toMatchObject({ task_id: '1', task_version: 1 });
+    renameFault.destination = undefined;
+
+    const teamOps = await import('../team-ops.js');
+    await teamOps.teamUpdateTask('role-routing-team', '1', {
+      status: 'pending', owner: undefined, claim: undefined,
+    }, cwd);
+    const reclaimed = await teamOps.teamClaimTask('role-routing-team', '1', 'worker-1', 3, cwd);
+    expect(reclaimed).toMatchObject({ ok: true, task: { status: 'in_progress', version: 4 } });
+    const replacementBytes = await readFile(taskPath, 'utf8');
+
+    vi.resetModules();
+    const restarted = await import('../runtime-v2.js');
+    const second = await restarted.processCliWorkerVerdicts('role-routing-team', cwd);
+    expect(second[0]).toMatchObject({
+      status: 'skipped', reason: 'stale_task_version_conflict_quarantined',
+    });
+    expect(await readFile(taskPath, 'utf8')).toBe(replacementBytes);
+    await expect(access(outputFile)).rejects.toThrow();
+  });
+
+  it('preserves a fresh artifact and binding arriving before post-publication cleanup', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-fresh-cleanup-');
+    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const teamOps = await import('../team-ops.js');
+    const { withProcessIdentityFileLock } = await import('../process-identity-lock.js');
+    let freshOutput = '';
+    let freshBinding = '';
+    let replacementBytes = '';
+    mocks.afterEventAppend = async () => {
+      await teamOps.teamUpdateTask('role-routing-team', '1', {
+        status: 'pending', owner: undefined, claim: undefined,
+      }, cwd);
+      const reclaimed = await teamOps.teamClaimTask('role-routing-team', '1', 'worker-1', 3, cwd);
+      expect(reclaimed).toMatchObject({ ok: true, task: { status: 'in_progress', version: 4 } });
+      replacementBytes = await readFile(taskPath, 'utf8');
+      await withProcessIdentityFileLock(`${outputFile}.lock`, async () => {
+        const originalBinding = JSON.parse(await readFile(`${outputFile}.binding`, 'utf8'));
+        freshOutput = JSON.stringify({
+          ...JSON.parse(await readFile(outputFile, 'utf8')),
+          summary: 'fresh replacement verdict',
+        });
+        await writeFile(`${outputFile}.replacement`, freshOutput, 'utf8');
+        await fsPromises.rename(`${outputFile}.replacement`, outputFile);
+        const stats = await fsPromises.lstat(outputFile);
+        freshBinding = JSON.stringify({
+          ...originalBinding,
+          task_version: 4,
+          artifact_fingerprint: [
+            createHash('sha256').update(freshOutput, 'utf8').digest('hex'),
+            stats.dev, stats.ino, stats.size, stats.mtimeMs,
+          ].join('-'),
+        });
+        await teamOps.writeAtomic(`${outputFile}.binding`, freshBinding);
+      }, 100);
+    };
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    expect((await processCliWorkerVerdicts('role-routing-team', cwd))[0])
+      .toMatchObject({ status: 'completed' });
+    expect(mocks.afterEventAppend).toBeUndefined();
+    expect(await readFile(outputFile, 'utf8')).toBe(freshOutput);
+    expect(await readFile(`${outputFile}.binding`, 'utf8')).toBe(freshBinding);
+    expect(await readFile(taskPath, 'utf8')).toBe(replacementBytes);
+    await expect(access(`${outputFile}.processed`)).rejects.toThrow();
+
+    vi.resetModules();
+    const restarted = await import('../runtime-v2.js');
+    expect((await restarted.processCliWorkerVerdicts('role-routing-team', cwd))[0])
+      .toMatchObject({ status: 'completed' });
+    expect(JSON.parse(await readFile(taskPath, 'utf8'))).toMatchObject({
+      status: 'completed', version: 5,
+      metadata: { verdict_summary: 'fresh replacement verdict' },
+    });
   });
 
   it('reject verdict transitions task to failed', async () => {

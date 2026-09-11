@@ -6,8 +6,48 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { createHash } from 'node:crypto';
 
+const atomicWriteControl = vi.hoisted(() => ({
+  failCanonicalPath: undefined as string | undefined,
+  triggerReadPath: undefined as string | undefined,
+  corruptSiblingPath: undefined as string | undefined,
+  readTriggered: false,
+}));
+
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    writeFile: async (
+      path: string | URL,
+      data: string | Uint8Array,
+      options?: Parameters<typeof actual.writeFile>[2],
+    ) => {
+      const target = atomicWriteControl.failCanonicalPath;
+      if (target && String(path).startsWith(`${target}.`)) {
+        throw new Error('injected_task_publication_interruption');
+      }
+      return actual.writeFile(path, data, options);
+    },
+    readFile: async (
+      path: string | URL,
+      options?: Parameters<typeof actual.readFile>[1],
+    ) => {
+      if (atomicWriteControl.triggerReadPath
+        && String(path) === atomicWriteControl.triggerReadPath
+        && !atomicWriteControl.readTriggered) {
+        atomicWriteControl.readTriggered = true;
+        if (atomicWriteControl.corruptSiblingPath) {
+          await actual.writeFile(atomicWriteControl.corruptSiblingPath, '{corrupt sibling', 'utf8');
+        }
+      }
+      return actual.readFile(path, options);
+    },
+  };
+});
+
 import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
 import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
+import { hashTaskRecoveryCheckpointPayload, taskRecoveryClaimTokenHash } from '../task-recovery-checkpoint.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import {
   getWorkerStartupEvidencePolicy,
@@ -404,6 +444,10 @@ describe('runtime v2 startup inbox dispatch', () => {
   });
   beforeEach(() => {
     vi.resetModules();
+    atomicWriteControl.failCanonicalPath = undefined;
+    atomicWriteControl.triggerReadPath = undefined;
+    atomicWriteControl.corruptSiblingPath = undefined;
+    atomicWriteControl.readTriggered = false;
     startupDeliveryGate = undefined;
     mocks.createTeamSession.mockReset();
     mocks.spawnWorkerInPane.mockReset();
@@ -691,6 +735,119 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
     expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
     expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
+  });
+
+  it('does not publish a corrupt canonical task when startup publication is interrupted', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-atomic-task-publication-');
+    const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', '1'));
+    atomicWriteControl.failCanonicalPath = taskPath;
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Interrupted task', description: 'Must not leave a torn task file.' }],
+      cwd,
+    })).rejects.toThrow('injected_task_publication_interruption');
+
+    await expect(readFile(taskPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+  });
+
+  it('persists dependencies and leaves dependent tasks out of startup dispatch', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-dependencies-');
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 2,
+      agentTypes: ['claude', 'claude'],
+      tasks: [
+        { subject: 'Root task', description: 'Run first.' },
+        { subject: 'Dependent task', description: 'Run second.', depends_on: ['1'] },
+      ],
+      cwd,
+    });
+
+    const dependent = JSON.parse(await readFile(
+      join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-2.json'),
+      'utf8',
+    )) as { depends_on?: string[]; status?: string; version?: number; result?: unknown };
+    expect(dependent).toMatchObject({ depends_on: ['1'], status: 'pending', version: 1 });
+    expect(dependent).not.toHaveProperty('result');
+    expect(runtime.config.workers[1]?.pane_id).toBeUndefined();
+    expect(runtime.config.workers[1]?.assigned_tasks).toEqual([]);
+    expect(mocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+    const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+    expect(requests.map(request => request.to_worker)).toEqual(['worker-1']);
+  });
+
+  it.each([
+    ['out-of-range', [{ subject: 'Only task', description: 'invalid', depends_on: ['2'] }]],
+    ['self-reference', [{ subject: 'Self task', description: 'invalid', depends_on: ['1'] }]],
+    ['duplicate', [
+      { subject: 'First task', description: 'valid' },
+      { subject: 'Second task', description: 'valid' },
+      { subject: 'Duplicate dependency', description: 'invalid', depends_on: ['1', '1'] },
+    ]],
+    ['mismatched-fields', [{
+      subject: 'Mismatched fields',
+      description: 'invalid',
+      depends_on: ['1'],
+      blocked_by: ['2'],
+    }]],
+    ['non-string-id', [{
+      subject: 'Non-string dependency',
+      description: 'invalid',
+      depends_on: [1] as unknown as string[],
+    }]],
+    ['cycle', [
+      { subject: 'First task', description: 'invalid', depends_on: ['2'] },
+      { subject: 'Second task', description: 'invalid', depends_on: ['1'] },
+    ]],
+  ])('rejects %s task dependencies before startup side effects', async (_label, tasks) => {
+    cwd = await mkdtempFixture('omc-runtime-v2-invalid-dependencies-');
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks,
+      cwd,
+    })).rejects.toThrow(/(?:invalid_task_dependenc(?:y|ies)|cyclic_task_dependency)/);
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each([
+    ['unknown', [{ subject: 'Unknown owner', description: 'invalid', owner: 'worker-9' }]],
+    ['blank', [{ subject: 'Blank owner', description: 'invalid', owner: '   ' }]],
+    ['null', [{ subject: 'Null owner', description: 'invalid', owner: null as unknown as string }]],
+    ['non-string', [{ subject: 'Numeric owner', description: 'invalid', owner: 7 as unknown as string }]],
+    ['blocked unknown', [
+      { subject: 'Root task', description: 'valid' },
+      { subject: 'Blocked task', description: 'invalid', depends_on: ['1'], owner: 'worker-9' },
+    ]],
+  ])('rejects %s explicit task owner before state or pane side effects', async (_label, tasks) => {
+    cwd = await mkdtempFixture('omc-runtime-v2-invalid-owner-');
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    await expect(startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks,
+      cwd,
+    })).rejects.toThrow('invalid_task_owner');
+
+    expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('delivers trusted Cursor reviewer guidance in the default non-worktree inbox', async () => {
@@ -2117,6 +2274,105 @@ describe('runtime v2 startup inbox dispatch', () => {
       });
     },
   );
+
+  it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    cwd = await mkdtempFixture('omc-runtime-v2-requeue-target-read-');
+    mocks.autoStartupEvidence = false;
+    const fixture = await seedOwnerRecoveryFixture('codex', 'target-read');
+    const taskRoot = absPath(cwd, TeamPaths.tasks(fixture.teamName));
+    const targetPath = absPath(cwd, TeamPaths.taskFile(fixture.teamName, '1'));
+    const siblingPath = absPath(cwd, TeamPaths.taskFile(fixture.teamName, '2'));
+    const claimToken = 'target-claim-token';
+    const createdAt = new Date().toISOString();
+    await mkdir(taskRoot, { recursive: true });
+    await writeFile(targetPath, JSON.stringify({
+      id: '1',
+      subject: 'Recover target',
+      description: 'Only this task should be requeued.',
+      status: 'in_progress',
+      owner: 'worker-1',
+      version: 1,
+      claim: { owner: 'worker-1', token: claimToken, leased_until: '2099-01-01T00:00:00.000Z' },
+      created_at: createdAt,
+    }));
+    await writeFile(siblingPath, JSON.stringify({
+      id: '2',
+      subject: 'Unrelated sibling',
+      description: 'This file is corrupted after inventory.',
+      status: 'completed',
+      version: 1,
+      created_at: createdAt,
+    }));
+    const resumePayload = { resume: 'continue target' };
+    const checkpointPath = absPath(cwd, TeamPaths.checkpoint(
+      fixture.teamName,
+      '1',
+      taskRecoveryClaimTokenHash(claimToken),
+      1,
+    ));
+    await mkdir(join(checkpointPath, '..'), { recursive: true });
+    await writeFile(checkpointPath, JSON.stringify({
+      schema_version: 1,
+      team_name: fixture.teamName,
+      task_id: '1',
+      worker_name: 'worker-1',
+      sequence: 1,
+      task_version: 1,
+      claim_token: claimToken,
+      resume_payload_hash: hashTaskRecoveryCheckpointPayload(resumePayload),
+      resume_payload: resumePayload,
+      updated_at: createdAt,
+    }));
+    atomicWriteControl.triggerReadPath = checkpointPath;
+    atomicWriteControl.corruptSiblingPath = siblingPath;
+
+    configureOwnerPaneLifecycle();
+    const deliveryGate = deferred<void>();
+    const probeGate = deferred<void>();
+    const evidenceGate = deferred<void>();
+    startupDeliveryGate = deliveryGate;
+    configureOwnerEvidenceProbe('current', probeGate, evidenceGate);
+
+    const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+    const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+      teamName: fixture.teamName,
+      cwd,
+      workerName: 'worker-1',
+      requestId: fixture.requestId,
+    });
+
+    await deliveryGate.promise;
+    await flushRealIo();
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushRealIo();
+    await probeGate.promise;
+    await vi.advanceTimersByTimeAsync(1_500);
+    await evidenceGate.promise;
+    await flushRealIo();
+    await vi.advanceTimersByTimeAsync(250);
+
+    await expect(recoveryPromise).resolves.toMatchObject({
+      outcome: 'recovered',
+      committed: true,
+      requeuedTaskIds: ['1'],
+    });
+    expect(atomicWriteControl.readTriggered).toBe(true);
+    await expect(readFile(siblingPath, 'utf8')).resolves.toBe('{corrupt sibling');
+    const target = JSON.parse(await readFile(targetPath, 'utf8')) as {
+      status?: string;
+      recovery_adoption?: { recovery_id?: string };
+    };
+    expect(target).toMatchObject({
+      status: 'in_progress',
+      owner: 'worker-1',
+      version: 3,
+      claim: { owner: 'worker-1', token: expect.any(String) },
+      recovery_adoption: { recovery_id: fixture.recoveryId, request_id: fixture.requestId },
+    });
+    expect(target).not.toHaveProperty('recovery_reservation');
+    expect(target).not.toMatchObject({ claim: { token: claimToken } });
+  });
 
   it.each([
     ['codex', 'stale'],
