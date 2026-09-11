@@ -270,7 +270,7 @@ Rule-shaped, checkable writing; every rule carries a "why". Empty sections are l
 
 - A seam is a real boundary two modules already cross in both directions. One adapter is a hypothetical seam; two adapters make it real. (Checkable: count the callers. Why: speculative abstraction is a tax paid before the need exists.)
 - A deep module puts much behavior behind a small interface; deepen before widening. (Why: the interface is the permanent tax.)
-- Logic lives behind the seam that owns its data; stable dependencies point inward.
+- Logic lives behind the seam that owns its data; stable dependencies point inward. (Why: logic that reaches across a boundary it does not own couples every caller to the wrong neighbor.)
 ```
 
 Seed D — docs/business/README.md:

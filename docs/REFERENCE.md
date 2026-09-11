@@ -2,7 +2,7 @@
 
 Complete reference for oh-my-claudecode. For quick start, see the main [README.md](../README.md).
 
-For v5.3.0, the plugin ships 19 agents, 39 skills, 21 command files, and one configured MCP server exposing exactly 55 tools.
+For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one configured MCP server exposing exactly 55 tools.
 
 ---
 
@@ -965,6 +965,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ai-slop-cleaner <target>`             | Run the anti-slop cleanup workflow (`--review` for reviewer-only pass)                        |
 | `/oh-my-claudecode:agent-doc-discipline`                 | Apply the writing-time discipline for agent-facing documents                                   |
 | `/oh-my-claudecode:ask <claude\|codex\|gemini\|antigravity\|grok\|cursor> <prompt>` | Route a prompt through the selected advisor CLI and capture an ask artifact                   |
+| `/oh-my-claudecode:architecture-survey [area]`           | Survey the repo for architecture-deepening candidates with evidence; reports only, never edits  |
 | `/oh-my-claudecode:ask-navigator <idea\|map>`            | Chart a foggy effort into a map of decision tickets (or work the open map), then hand off to launch |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:autoresearch <task>`                  | Run a bounded evaluator-driven improvement mission                                             |

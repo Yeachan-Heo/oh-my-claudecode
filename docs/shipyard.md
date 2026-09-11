@@ -77,12 +77,12 @@ They share one rule of thumb: **starting needs no permission; landing goes into 
 
 ## The invocation contract
 
-Every shipyard skill sits on one of two axes:
+Every shipyard skill — the seven compose skills plus the `agent-doc-discipline` companion — sits on one of two axes:
 
 - **User-invoked** — reachable only by the human typing the skill (`/oh-my-claudecode:launch`). Other skills may point the human at them, but never invoke them through the Skill tool. `launch`, `harbor`, `ask-navigator`, and `architecture-survey` are user-invoked entry points, marked `disable-model-invocation: true` in frontmatter where the harness honors it.
 - **Model-invoked** — reachable by the model when the task fits, and callable by other skills ("call the Skill tool with ..."). `drydock`, `loft`, `minimal-code-discipline`, and `agent-doc-discipline` stay model-invoked.
 
-The iron rule: a user-invoked skill never invokes another user-invoked skill. The one deliberate exception is `drydock` — it is a human keel-laying entry point *and* the gate chain's callable audit: launch's yard gate and the navigator's charting mechanically call `drydock --check`, so it must remain model-invoked. The shipyard contract test suite pins the assignment in both directions and rejects any skill text that invokes a user-invoked skill through the Skill tool.
+The iron rule: a user-invoked skill never invokes another user-invoked skill. The one deliberate exception is `drydock` — it is a human keel-laying entry point *and* the gate chain's callable audit: launch's yard gate and the navigator's charting mechanically call `drydock --check`, so it must remain model-invoked. The shipyard contract test suite pins the assignment in both directions and rejects skill text that invokes a user-invoked skill by name through the Skill tool.
 
 ## The feedback loop
 

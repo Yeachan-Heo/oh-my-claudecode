@@ -17,7 +17,7 @@ Optional argument narrows the survey to a directory or area; with no argument, s
 
 ## The survey
 
-1. Read the repo's architecture principles (CLAUDE.md, ADRs) and the seeded seam vocabulary in `docs/standards/architecture.md` — the definitions of seam, deep module, and placement.
+1. Read the repo's architecture principles (CLAUDE.md, ADRs) and the seeded seam vocabulary in `docs/standards/architecture.md` — the definitions of seam and deep module.
 2. Walk the module graph of the target area.
 3. Look for three finding classes:
    - **Shallow modules** — wide interface, thin behavior; callers know more than the module hides.
