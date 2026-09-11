@@ -55,7 +55,7 @@ Invoked with a map (link or number) or with no argument (pick up the open map). 
 4. **Record the resolution**: post the answer as a resolution comment/section, close the ticket (as completed; a ticket ruled beyond the destination closes as not planned), and append one line to the map's **Decisions so far** — `[<ticket title>](link): <one-line gist>`.
 5. **Advance the frontier**: graduate any fog the answer has made specifiable (remove it from **Not yet specified**, create the new tickets, wire edges); if the answer reveals a ticket sits beyond the destination, **close it** and leave one line in **Out of scope** carrying the concept and the reason (so a later session or a later map can match it); update or delete tickets the decision invalidated.
 6. **Sediment** (see Sediment).
-7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier.
+7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier. The map issue is the primary source, session memory secondary — every session re-orients from the map, never from the previous session's memory.
 
 ## Ticket types
 

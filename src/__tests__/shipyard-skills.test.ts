@@ -606,6 +606,12 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(HARBOR).toContain('Match rejections by concept, not by title');
   });
 
+  it('launch and navigator state the primary-source-on-disk boundary cost model', () => {
+    expect(LAUNCH).toContain('Disk is the primary source; conversation memory is secondary');
+    expect(LAUNCH).toContain('The four-way boundary choice');
+    expect(NAVIGATOR).toContain('every session re-orients from the map, never from the previous session');
+  });
+
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
     const ref = readFileSync(join(ROOT, 'docs', 'REFERENCE.md'), 'utf-8');
     const dirCount = existsSync(join(ROOT, 'skills'))

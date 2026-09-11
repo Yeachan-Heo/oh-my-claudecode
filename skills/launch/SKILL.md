@@ -153,6 +153,8 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 ## Context hygiene
 
 - Phases 1–3 in one unbroken context window; compact at phase boundaries only (HUD high water is the signal).
+- **Disk is the primary source; conversation memory is secondary.** Every boundary action except continuing converts the primary source into a secondary one — so after any boundary, re-read the artifacts from disk and never continue from remembered state.
+- **The four-way boundary choice:** continue (context still fits and is unpolluted) → re-enter from disk (a phase just completed) → hand off (pointer, never content) → compact (approaching the limit, at the phase edge). Take the first that fits.
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
 - Handoffs pass pointers, never content.
