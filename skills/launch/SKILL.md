@@ -3,6 +3,7 @@ name: launch
 description: Shipyard's governed delivery pipeline — converge the mission, synthesize a durable spec, decompose vertical-slice tickets with blocking edges, run the frontier in parallel via team, close with verification, and report with a full decision log. Two entry gates — the yard gate (drydock audit) and the fog gate (an effort whose destination is unclear is routed to /ask-navigator before this pipeline starts). Humans own the checkpoints where there is no unique answer or the error cost is severe; agents continuously run everything repeatable and acceptable-by-evidence.
 argument-hint: "<mission brief | path to existing spec> [--serial]"
 level: 3
+disable-model-invocation: true
 pipeline: [deep-interview, launch]
 ---
 

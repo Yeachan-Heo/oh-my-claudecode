@@ -566,6 +566,37 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(SHIPYARD_DOC).toContain('`architecture-survey`');
   });
 
+  it('the invocation contract is stated on the map and pinned in both directions', () => {
+    const USER_INVOKED = ['launch', 'harbor', 'ask-navigator', 'architecture-survey'];
+    const MODEL_INVOKED = ['drydock', 'loft', 'minimal-code-discipline', 'agent-doc-discipline'];
+    const sources: Record<string, string> = {
+      launch: LAUNCH,
+      drydock: DRYDOCK,
+      'ask-navigator': NAVIGATOR,
+      loft: LOFT,
+      harbor: HARBOR,
+      'minimal-code-discipline': readFileSync(join(ROOT, 'skills', 'minimal-code-discipline', 'SKILL.md'), 'utf-8'),
+      'agent-doc-discipline': DISCIPLINE,
+      'architecture-survey': SURVEY,
+    };
+    for (const name of USER_INVOKED) {
+      expect(frontmatter(sources[name])['disable-model-invocation']).toBe('true');
+    }
+    for (const name of MODEL_INVOKED) {
+      expect(frontmatter(sources[name])['disable-model-invocation']).toBeUndefined();
+    }
+    // iron rule: no shipyard skill may instruct the Skill tool to invoke a user-invoked skill
+    for (const src of Object.values(sources)) {
+      const lower = src.toLowerCase();
+      for (const name of USER_INVOKED) {
+        expect(lower).not.toContain(`skill tool with "${name}"`);
+        expect(lower).not.toContain(`skill tool with \`${name}\``);
+      }
+    }
+    expect(SHIPYARD_DOC.toLowerCase()).toContain('the invocation contract');
+    expect(SHIPYARD_DOC).toContain('a user-invoked skill never invokes another user-invoked skill');
+  });
+
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
     const ref = readFileSync(join(ROOT, 'docs', 'REFERENCE.md'), 'utf-8');
     const dirCount = existsSync(join(ROOT, 'skills'))

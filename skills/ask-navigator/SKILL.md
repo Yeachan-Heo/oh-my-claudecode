@@ -3,6 +3,7 @@ name: ask-navigator
 description: Shipyard's navigator — chart a foggy effort (destination unclear, questions not yet stateable) into a map of decision tickets on the repo's issue tracker, then work the frontier one ticket per session until the way is clear, and hand the collapsed decisions to /launch as a mission brief. Wayfinding, not building: it produces decisions, never deliverables.
 argument-hint: "<loose idea | residual questions | map link or number | nothing to continue the open map>"
 level: 3
+disable-model-invocation: true
 pipeline: [deep-interview, ask-navigator]
 ---
 

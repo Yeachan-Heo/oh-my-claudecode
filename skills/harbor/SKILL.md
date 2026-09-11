@@ -3,6 +3,7 @@ name: harbor
 description: Harbor intake for external work — the captain only handles unresolved decisions. Sweeps incoming issues and PRs, verifies every claim before disposition, reuses every decision already made, and hands the maintainer a docket whose pending items each carry one question with options, recommendation, impact and evidence. Agent-autonomous for facts and for actions covered by standing authorization; signed for every new judgment. Never merges.
 argument-hint: "[sweep | look at #N | sign ... | what's ready?]"
 level: 3
+disable-model-invocation: true
 ---
 
 # Harbor
