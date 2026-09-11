@@ -628,7 +628,13 @@ function sameRecoveryClaim(left, right) {
 }
 function releaseRecoveryClaim(path, owner) {
     const guardPath = `${path}.recovery.guard`;
-    const lock = localLocks.get(resolve(realpathSync(dirname(guardPath)), basename(guardPath)));
+    const key = (() => { try {
+        return resolve(realpathSync(dirname(guardPath)), basename(guardPath));
+    }
+    catch {
+        return resolve(guardPath);
+    } })();
+    const lock = localLocks.get(key);
     if (!lock)
         return;
     try {

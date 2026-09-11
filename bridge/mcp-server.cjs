@@ -25327,7 +25327,14 @@ function sameRecoveryClaim(left, right) {
 }
 function releaseRecoveryClaim(path13, owner) {
   const guardPath = `${path13}.recovery.guard`;
-  const lock = localLocks.get((0, import_path14.resolve)((0, import_fs14.realpathSync)((0, import_path14.dirname)(guardPath)), (0, import_path14.basename)(guardPath)));
+  const key = (() => {
+    try {
+      return (0, import_path14.resolve)((0, import_fs14.realpathSync)((0, import_path14.dirname)(guardPath)), (0, import_path14.basename)(guardPath));
+    } catch {
+      return (0, import_path14.resolve)(guardPath);
+    }
+  })();
+  const lock = localLocks.get(key);
   if (!lock) return;
   try {
     const current = readRecoveryClaim(path13);

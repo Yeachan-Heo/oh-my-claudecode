@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "023d56ca533b20b75d9b5fcbfe023ffb8f5cffd9",
-    "sourceSha256": "b19a36db694d9047b62b76cca362e0d09f5b4c449d5e02cac218b2576e446b37",
+    "sourceSha256": "64f0e5c8473598c529a7d2c0e10633c5d9ba445900aac605e66c3222173b1b08",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "023d56ca533b20b75d9b5fcbfe023ffb8f5cffd9",
-  "sourceSha256": "b19a36db694d9047b62b76cca362e0d09f5b4c449d5e02cac218b2576e446b37",
+  "sourceSha256": "64f0e5c8473598c529a7d2c0e10633c5d9ba445900aac605e66c3222173b1b08",
   "counts": {
     "public": {
       "skills": 39,
@@ -78511,5 +78511,5 @@
     }
   },
   "inventorySha256": "5ad3903bbd001ae2d1ce8d943bbbf338edc7231078189389641f989809a1d297",
-  "manifestSha256": "6dbfbdea819c9885cef142386c0d922e5f1d343e087f1d55a18ffa9085a67efc"
+  "manifestSha256": "9e8daa69a25dbfdc024fcc035161de49d1760942f98e7e930f7c12fd2bab10e2"
 }
