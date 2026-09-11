@@ -597,6 +597,15 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(SHIPYARD_DOC).toContain('a user-invoked skill never invokes another user-invoked skill');
   });
 
+  it('rejected directions persist as concept-level memory across launch, navigator, and harbor', () => {
+    expect(LAUNCH).toContain('a concept-similar re-proposal must state what changed');
+    expect(LAUNCH).toContain('a new name for a rejected idea is not a new idea');
+    expect(LAUNCH).toContain('ruled-out directions (concept + why rejected)');
+    expect(NAVIGATOR).toContain('carrying the concept and the reason');
+    expect(NAVIGATOR).toContain('ruled-out work never re-enters as a fresh ticket');
+    expect(HARBOR).toContain('Match rejections by concept, not by title');
+  });
+
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
     const ref = readFileSync(join(ROOT, 'docs', 'REFERENCE.md'), 'utf-8');
     const dirCount = existsSync(join(ROOT, 'skills'))

@@ -68,6 +68,8 @@ Paper trail, written the moment each item settles:
 - decisions passing the ADR test (hard to reverse, surprising without context, real tradeoff) → `docs/adr/NNNN-<slug>.md`
 - business rules and background discovered during convergence → `docs/business/` (one article per business question, opening paragraph states why it matters)
 
+Before surfacing a proposal, check the paper trail (ADRs, `docs/business/`) for a prior rejection of the same concept: a concept-similar re-proposal must state what changed, or it is declined — a new name for a rejected idea is not a new idea.
+
 Non-convergence here is normal work, not a failure: if the frontier will not empty, present the residual questions ranked — this is C2's input, not an error. If the residual questions themselves cannot be stated precisely (fog test Q2 fails), the destination itself is unsettled and that is beyond C2's authority: stop, note what already settled (vocabulary in `CONTEXT.md`, answered questions), recommend `/oh-my-claudecode:ask-navigator`, and exit — the pipeline never invents a destination.
 
 **Loft detour.** A residual question that is precise but cannot settle in prose — it needs to be seen or clicked, not described (how the UI should look, whether a state model feels right) — is answered with an artifact, not more questions: call the Skill tool with "loft", let the captain react, and fold that reaction back into the interview. The lofted artifact is C2's input; the captain signs what they saw, not what they were told.
@@ -138,6 +140,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
   | checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |
   | most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |
   | hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |
+  | ruled-out directions (concept + why rejected) | `docs/adr/` (a rejection is a decision too; the why is the load-bearing part) |
   | business rules / background | `docs/business/` |
   | UI patterns / component contracts | `design-system/` |
   | reusable craft | `.omc/skills/` (through the skillify gate) |
