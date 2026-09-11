@@ -56,10 +56,39 @@ function ownerLive(owner) { const current = processStartIdentity(owner.pid); ret
 function sameOwner(left, right) { return left && left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce; }
 function publishOwner(path, owner) { const tempPath = `${path}.${owner.pid}.${owner.nonce}.tmp`; let fd; try { mkdirSync(dirname(path), { recursive: true }); fd = openSync(tempPath, 'wx', 0o600); writeAllSync(fd, JSON.stringify(owner), 'lock owner publication'); fsyncSync(fd); closeSync(fd); fd = undefined; linkSync(tempPath, path); unlinkSync(tempPath); return true; } catch { try { if (fd !== undefined) closeSync(fd); } catch {} try { unlinkSync(tempPath); } catch {} return false; } }
 
-export function isStateFileLockingSupported() { return Boolean(Database); }
-export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false) {
-  void requireExclusive;
-  const lockPath = `${filePath}.mutation.lock`; mkdirSync(dirname(lockPath), { recursive: true });
+// OMC_TEST_FLOCK_AVAILABLE='0' is a test-only simulation switch predating the
+// SQLite-based rewrite (originally: is the external flock binary available).
+// Locking is no longer flock-based, but tests still rely on this switch to
+// simulate a "locking unsupported" fallback path; honor it here so that
+// contract is preserved across the storage-backend change.
+function stateFileLockingTestOverride() {
+  return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? false : null;
+}
+export function isStateFileLockingSupported() {
+  const override = stateFileLockingTestOverride();
+  return override !== null ? override : Boolean(Database);
+}
+export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false, bypassTestOverride = false) {
+  const lockPath = `${filePath}.mutation.lock`;
+  // OMC_TEST_FLOCK_AVAILABLE='0' simulates the external flock binary being
+  // absent. Historically flock-gated callers (an exclusive-required
+  // `acquireLockAt` caller such as the cancel-signal-validation lock) failed
+  // closed in that state; non-exclusive callers proceeded best-effort.
+  // acquireRecoveryClaim's guard lock never went through that flock check at
+  // all in the pre-SQLite implementation (it used a separate subprocess-
+  // guarded mechanism unconditionally), so it opts out of the simulation via
+  // bypassTestOverride and always uses the real SQLite-backed lock.
+  if (!bypassTestOverride && stateFileLockingTestOverride() === false) {
+    if (requireExclusive) return null;
+    const artifact = readOwner(lockPath);
+    if (artifact !== 'absent') {
+      if (!artifact) return null;
+      if (ownerLive(artifact) !== false) return null;
+      try { unlinkSync(lockPath); } catch { return null; }
+    }
+    return { unlocked: true };
+  }
+  mkdirSync(dirname(lockPath), { recursive: true });
   const key = canonicalKey(lockPath); const held = localLocks.get(key); if (held) { held.depth += 1; return held; }
   const processStart = ownProcessStartIdentity(); if (!processStart || processStart === 'absent') return null;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -79,7 +108,7 @@ export function releaseStateFileLockSync(lock) { if (!lock || lock.unlocked) ret
 export function withStateFileLockSync(filePath, callback, requireExclusive = false) { const lock = acquireStateFileLockSync(filePath, 50, requireExclusive); if (!lock) return { acquired: false, value: undefined }; try { return { acquired: true, value: callback() }; } finally { releaseStateFileLockSync(lock); } }
 
 export function acquireRecoveryClaim(path, attempts = 50) {
-  const lock = acquireStateFileLockSync(path, attempts, true);
+  const lock = acquireStateFileLockSync(path, attempts, true, true);
   if (!lock) return null;
   const existing = readOwner(path);
   if (existing !== 'absent') {
