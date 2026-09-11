@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2b6ee1042837cb66f25c7482faaa5dd4e6ae2082",
-    "sourceSha256": "92e32dccfdfe4f70fa0647720c8b554bc15237ad412bd62041f8c9dde6903583",
+    "head": "7af19f265a11688b3ebd9ca577e0bc662f9246f2",
+    "sourceSha256": "de32db4f98d0fb5868d3290959653183da6a4ac38afa980bb695334c57037d4a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2b6ee1042837cb66f25c7482faaa5dd4e6ae2082",
-  "sourceSha256": "92e32dccfdfe4f70fa0647720c8b554bc15237ad412bd62041f8c9dde6903583",
+  "head": "7af19f265a11688b3ebd9ca577e0bc662f9246f2",
+  "sourceSha256": "de32db4f98d0fb5868d3290959653183da6a4ac38afa980bb695334c57037d4a",
   "counts": {
     "public": {
-      "skills": 39,
+      "skills": 40,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 88
+      "total": 89
     },
     "internal": {
       "hookFiles": 296,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 39,
+    "skills": 40,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -50,6 +50,7 @@
     "skills": [
       "agent-doc-discipline",
       "ai-slop-cleaner",
+      "architecture-survey",
       "ask",
       "ask-navigator",
       "autopilot",
@@ -33796,6 +33797,11 @@
         "path": "skills/ai-slop-cleaner/SKILL.md"
       },
       {
+        "id": "skills/architecture-survey/SKILL.md",
+        "kind": "skill",
+        "path": "skills/architecture-survey/SKILL.md"
+      },
+      {
         "id": "skills/ask-navigator/SKILL.md",
         "kind": "skill",
         "path": "skills/ask-navigator/SKILL.md"
@@ -43479,6 +43485,11 @@
       },
       {
         "from": "skills/ai-slop-cleaner/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/architecture-survey/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -78504,12 +78515,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6966,
-      "edgeCount": 7455,
+      "nodeCount": 6967,
+      "edgeCount": 7456,
       "importEdgeCount": 6140,
-      "registerEdgeCount": 60
+      "registerEdgeCount": 61
     }
   },
-  "inventorySha256": "5ad3903bbd001ae2d1ce8d943bbbf338edc7231078189389641f989809a1d297",
-  "manifestSha256": "de86bda2bd86d5d293597f0889035f72675356627d545b83db1f195e131911f9"
+  "inventorySha256": "f6debfe0d6e2eca6df8b4c16a69e1bef98d1f76d5e642f56df70bdbd5c735492",
+  "manifestSha256": "aedc224a8618fa0fb737cd81e606f83a7d54720971a9a7fd6efd86d24f3908c5"
 }
