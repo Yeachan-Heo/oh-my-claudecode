@@ -612,6 +612,12 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(NAVIGATOR).toContain('every session re-orients from the map, never from the previous session');
   });
 
+  it('the seam and deep-module vocabulary is seeded once in the architecture standards', () => {
+    expect(DRYDOCK).toContain('## Seams and depth');
+    expect(DRYDOCK).toContain('One adapter is a hypothetical seam; two adapters make it real.');
+    expect(LAUNCH).toContain('the vocabulary is seeded in `docs/standards/architecture.md`');
+  });
+
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
     const ref = readFileSync(join(ROOT, 'docs', 'REFERENCE.md'), 'utf-8');
     const dirCount = existsSync(join(ROOT, 'skills'))
