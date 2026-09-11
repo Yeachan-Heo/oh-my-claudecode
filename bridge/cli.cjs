@@ -34242,9 +34242,15 @@ function openMutationDb(lockPath2) {
     for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
       try {
         const stat2 = (0, import_fs20.statSync)(sidecar);
-        if (!stat2.isFile() || stat2.nlink !== 1) return null;
+        if (!stat2.isFile() || stat2.nlink !== 1) {
+          if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb sidecar-reject ${sidecar} isFile=${stat2.isFile()} nlink=${stat2.nlink}`);
+          return null;
+        }
       } catch (error2) {
-        if (error2.code !== "ENOENT") return null;
+        if (error2.code !== "ENOENT") {
+          if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb sidecar-stat-error ${sidecar} ${error2.code}`);
+          return null;
+        }
       }
     }
     db = new Database3(dbPath);
@@ -34252,7 +34258,8 @@ function openMutationDb(lockPath2) {
     db.pragma("busy_timeout = 2000");
     db.exec("CREATE TABLE IF NOT EXISTS state_mutation_locks (lock_key TEXT PRIMARY KEY, version INTEGER NOT NULL, pid INTEGER NOT NULL, process_start TEXT NOT NULL, created_at TEXT NOT NULL, nonce TEXT NOT NULL)");
     return db;
-  } catch {
+  } catch (error2) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb open/exec failed for ${lockPath2}: ${error2?.message}`);
     try {
       db?.close();
     } catch {
@@ -34286,7 +34293,10 @@ function acquireLockAt(path27, attempts = 50) {
       db.close();
     } catch {
     }
-    return null;
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt processStart-null ${path27}`);
+    if (attempts <= 1) return null;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    return acquireLockAt(path27, attempts - 1);
   }
   const owner = { version: 1, pid: process.pid, processStart, createdAt: (/* @__PURE__ */ new Date()).toISOString(), nonce: (0, import_crypto8.randomUUID)() };
   try {
@@ -34297,12 +34307,14 @@ function acquireLockAt(path27, attempts = 50) {
       if (!row) {
         db.exec("ROLLBACK");
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-invalid ${path27}`);
         return null;
       }
       const live = ownerLive(row);
       if (live === null || live) {
         db.exec("ROLLBACK");
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-live=${live} ${path27}`);
         if (live === null || attempts <= 1) return null;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path27, attempts - 1);
@@ -34321,15 +34333,17 @@ function acquireLockAt(path27, attempts = 50) {
       if (live === null || live) {
         db.exec("ROLLBACK");
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-live=${live} ${path27}`);
         if (live === null || attempts <= 1) return null;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path27, attempts - 1);
       }
       try {
         (0, import_fs20.unlinkSync)(path27);
-      } catch {
+      } catch (error2) {
         db.exec("ROLLBACK");
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-unlink-failed ${path27} ${error2.code}`);
         return null;
       }
     }
@@ -34337,6 +34351,7 @@ function acquireLockAt(path27, attempts = 50) {
     if (!publishLockOwner(path27, owner)) {
       db.exec("ROLLBACK");
       db.close();
+      if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt publish-failed ${path27}`);
       if (attempts <= 1) return null;
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       return acquireLockAt(path27, attempts - 1);
@@ -34355,6 +34370,7 @@ function acquireLockAt(path27, attempts = 50) {
     } catch {
     }
     const code = error2?.code;
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt caught-error ${path27} code=${code} msg=${error2?.message}`);
     if ((code === "SQLITE_BUSY" || code === "SQLITE_LOCKED") && attempts > 1) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       return acquireLockAt(path27, attempts - 1);
@@ -34518,9 +34534,15 @@ function writeStateFileLockedIf(filePath, predicate, transform2) {
   }
 }
 function writeStateFileLockedCreateIf(filePath, predicate, transform2) {
-  if (!recoverEmergencyStateFile(filePath)) return "failed";
+  if (!recoverEmergencyStateFile(filePath)) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf recoverEmergency failed ${filePath}`);
+    return "failed";
+  }
   const lock = acquireMutationLock(filePath);
-  if (!lock) return "failed";
+  if (!lock) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf acquireMutationLock failed ${filePath}`);
+    return "failed";
+  }
   try {
     if (process.env.NODE_ENV === "test" && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
       try {
@@ -34535,14 +34557,16 @@ function writeStateFileLockedCreateIf(filePath, predicate, transform2) {
     if ((0, import_fs20.existsSync)(filePath)) {
       try {
         current = JSON.parse((0, import_fs20.readFileSync)(filePath, "utf8"));
-      } catch {
+      } catch (error2) {
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf JSON-parse-failed ${filePath} ${error2?.message}`);
         return "failed";
       }
     }
     if (!predicate(current)) return "skipped";
     atomicWriteJsonSync(filePath, transform2(current));
     return "written";
-  } catch {
+  } catch (error2) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf caught-error ${filePath} ${error2?.message}`);
     return "failed";
   } finally {
     releaseMutationLock(lock);

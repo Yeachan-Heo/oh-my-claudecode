@@ -98,6 +98,8 @@ jobs:
       # run.cjs supervisor/stdio contract tests (#3920) must run here: leaked
       # protocol handles and process-tree reap are Windows-hosted failures.
       - name: Run Windows path-handling tests
+        env:
+          OMC_LOCK_DEBUG: "1"
         run: >-
           npx vitest run --fileParallelism=false
           src/utils/__tests__/encode-project-path.test.ts

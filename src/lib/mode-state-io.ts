@@ -123,9 +123,15 @@ function openMutationDb(lockPath: string): BetterSqlite3 | null {
     for (const sidecar of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`, `${dbPath}-journal`]) {
       try {
         const stat = statSync(sidecar);
-        if (!stat.isFile() || stat.nlink !== 1) return null;
+        if (!stat.isFile() || stat.nlink !== 1) {
+          if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb sidecar-reject ${sidecar} isFile=${stat.isFile()} nlink=${stat.nlink}`);
+          return null;
+        }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return null;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb sidecar-stat-error ${sidecar} ${(error as NodeJS.ErrnoException).code}`);
+          return null;
+        }
       }
     }
     db = new Database(dbPath);
@@ -133,7 +139,8 @@ function openMutationDb(lockPath: string): BetterSqlite3 | null {
     db.pragma('busy_timeout = 2000');
     db.exec('CREATE TABLE IF NOT EXISTS state_mutation_locks (lock_key TEXT PRIMARY KEY, version INTEGER NOT NULL, pid INTEGER NOT NULL, process_start TEXT NOT NULL, created_at TEXT NOT NULL, nonce TEXT NOT NULL)');
     return db;
-  } catch {
+  } catch (error) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb open/exec failed for ${lockPath}: ${(error as Error)?.message}`);
     try { db?.close(); } catch { /* best effort */ }
     return null;
   }
@@ -154,18 +161,28 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
     return acquireLockAt(path, attempts - 1);
   }
   const processStart = ownProcessStartIdentity();
-  if (!processStart) { try { db.close(); } catch { /* best effort */ } return null; }
+  if (!processStart) {
+    try { db.close(); } catch { /* best effort */ }
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt processStart-null ${path}`);
+    // Transient: the identity probe (spawnSync ps/powershell) can time out
+    // under CI/system load without the process itself being unavailable.
+    // Retry within budget instead of failing closed on the first probe miss.
+    if (attempts <= 1) return null;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    return acquireLockAt(path, attempts - 1);
+  }
   const owner: MutationLockOwner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
   try {
     db.exec('BEGIN IMMEDIATE');
     const rawRow = db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(key) as Record<string, unknown> | undefined;
     if (rawRow) {
       const row = ownerFromRow(rawRow);
-      if (!row) { db.exec('ROLLBACK'); db.close(); return null; }
+      if (!row) { db.exec('ROLLBACK'); db.close(); if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-invalid ${path}`); return null; }
       const live = ownerLive(row);
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-live=${live} ${path}`);
         if (live === null || attempts <= 1) return null;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path, attempts - 1);
@@ -179,16 +196,18 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-live=${live} ${path}`);
         if (live === null || attempts <= 1) return null;
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path, attempts - 1);
       }
-      try { unlinkSync(path); } catch { db.exec('ROLLBACK'); db.close(); return null; }
+      try { unlinkSync(path); } catch (error) { db.exec('ROLLBACK'); db.close(); if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-unlink-failed ${path} ${(error as NodeJS.ErrnoException).code}`); return null; }
     }
     db.prepare('INSERT INTO state_mutation_locks (lock_key, version, pid, process_start, created_at, nonce) VALUES (?, 1, ?, ?, ?, ?)').run(key, owner.pid, owner.processStart, owner.createdAt, owner.nonce);
     if (!publishLockOwner(path, owner)) {
       db.exec('ROLLBACK');
       db.close();
+      if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt publish-failed ${path}`);
       // The lock artifact may have been (re)written by a concurrent owner
       // between our absent/dead check and this publish (e.g. linkSync sees
       // EEXIST). This is contention, not corruption; retry within budget
@@ -209,6 +228,7 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
     // the same way row/artifact contention does. Any other error still
     // fails closed immediately.
     const code = (error as { code?: string } | null)?.code;
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt caught-error ${path} code=${code} msg=${(error as Error)?.message}`);
     if ((code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED') && attempts > 1) {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       return acquireLockAt(path, attempts - 1);
@@ -396,9 +416,9 @@ export function writeStateFileLockedCreateIf(
   predicate: (current: Record<string, unknown> | null) => boolean,
   transform: (current: Record<string, unknown> | null) => Record<string, unknown>,
 ): ConditionalWriteResult {
-  if (!recoverEmergencyStateFile(filePath)) return 'failed';
+  if (!recoverEmergencyStateFile(filePath)) { if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf recoverEmergency failed ${filePath}`); return 'failed'; }
   const lock = acquireMutationLock(filePath);
-  if (!lock) return 'failed';
+  if (!lock) { if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf acquireMutationLock failed ${filePath}`); return 'failed'; }
   try {
     if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_PATH === filePath && process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64) {
       try {
@@ -412,12 +432,13 @@ export function writeStateFileLockedCreateIf(
     let current: Record<string, unknown> | null = null;
     if (existsSync(filePath)) {
       try { current = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>; }
-      catch { return 'failed'; }
+      catch (error) { if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf JSON-parse-failed ${filePath} ${(error as Error)?.message}`); return 'failed'; }
     }
     if (!predicate(current)) return 'skipped';
     atomicWriteJsonSync(filePath, transform(current));
     return 'written';
-  } catch {
+  } catch (error) {
+    if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf caught-error ${filePath} ${(error as Error)?.message}`);
     return 'failed';
   } finally {
     releaseMutationLock(lock);
