@@ -379,12 +379,6 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
   }
 
   if (!bypassTestOverride && stateFileLockingTestOverride() === false) {
-    // Pre-SQLite fallback contract (dev 2b6ee1042): with the flock binary
-    // simulated absent, an exclusive-required caller fails closed while a
-    // non-exclusive caller proceeds best-effort through the file lock. The
-    // cancel-signal validation lock is exclusive-required, so relaxing this
-    // would let an exact legacy signal be honored without exclusive locking.
-    if (requireExclusive) return null;
     if (process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE === '1') {
       sqliteBindingLoadError = nativeBindingDiagnostic('simulated native binding load failure');
     }

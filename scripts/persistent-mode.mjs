@@ -825,7 +825,13 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
   const isActiveSignal = (signalPath) => {
     if (!existsSync(signalPath)) return false;
     if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
-    const stateLock = acquireStateFileLockSync(currentAutopilotPath, 50, true);
+    // The flock-absent contract lives here rather than inside the lock
+    // primitive: with no exclusive backend to fail closed against, this path
+    // must not authenticate state through the best-effort fallback lock, while
+    // emergency recovery still gets its SQLite-backed exclusive claim.
+    const stateLock = isExclusiveStateLockingAvailable()
+      ? acquireStateFileLockSync(currentAutopilotPath, 50, true)
+      : null;
     if (!stateLock) {
       // A real contender holds the lock only when exclusive acquisition is
       // actually available; without it, fall through to the enforceability check.
