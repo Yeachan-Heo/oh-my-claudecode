@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (40 Total)](#skills-40-total)
+- [Skills (41 Total)](#skills-41-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -901,7 +901,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (40 Total)
+## Skills (41 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -924,6 +924,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/oh-my-claudecode:deep-interview`                |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
+| `diagram`                 | Model-invoked visual explanations — smallest view (pseudocode, tree, Mermaid, diff) that carries the point | `/oh-my-claudecode:diagram`                |
 | `drydock`                 | Shipyard harness scaffold: 4-pillar shared environment, --check drift audit    | `/oh-my-claudecode:drydock`                 |
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
@@ -958,7 +959,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 ## Slash Commands
 
-Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The plugin ships 21 command files alongside the 40 skill entrypoints listed above; the commands below list both surfaces. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
+Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The plugin ships 21 command files alongside the 41 skill entrypoints listed above; the commands below list both surfaces. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -976,6 +977,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
+| `/oh-my-claudecode:diagram`                              | Explain the current topic with the smallest visual that carries it                            |
 | `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
 | `/oh-my-claudecode:harbor [sweep\|look at #N\|what's ready?]` | Sweep external issues and PRs, verify claims, hand a signature docket                    |
