@@ -2844,7 +2844,9 @@ describe('state-tools', () => {
       // centralized session file present the local candidate is captured but
       // never cleared. No individual cleanup reports a failure, so only the
       // captured-survivor backstop can catch it — and a half-cancelled mode
-      // must never be reported as a successful clear.
+      // must never be reported as a successful clear. The survivor here is
+      // still owned by the requesting session, which is what separates it from
+      // a path a foreign replacement run has taken over.
       const previous = process.env.OMC_STATE_DIR;
       const sessionId = 'captured-survivor-autopilot-session';
       const gitRoot = mkdtempSync(join(homedir(), 'state-clear-captured-'));
