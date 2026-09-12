@@ -34,6 +34,8 @@ Rank candidates by leverage against risk. Each candidate carries:
 - **The deepening move** — what to deepen, merge, or move, in one sentence.
 - **The risk note** — what the move touches and what could break.
 
+Every candidate states the yard's shared findings vocabulary — **severity** (how much friction the shallowness causes), **confidence** (a survey finding is heuristic-class and therefore low by construction; the mechanically checkable end of the scale belongs to the drydock `--check` audit), and **actionable** (whether the deepening move is specific enough to start from the report alone). End the report with the **top recommendation**: the one candidate to deepen first, and why — the captain reads one card, not the whole reef.
+
 ## Handoff
 
 The report is decision input, not work. Candidates feed the mission brief (launch Phase 1) or grilling material for the next effort. Survey proposes; the captain disposes.
