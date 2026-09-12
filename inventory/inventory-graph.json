@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "00d3c027acc512b32f067a59af095568fc678fe8",
-    "sourceSha256": "f695fda04d355a6ff985aba48b95c102d4f8e2264e2a2ed2755632c85a13441e",
+    "head": "589d7fa5872fd73e91b786af234758c5d94fec4f",
+    "sourceSha256": "a6b6bce35e0107ba2366eabd0d20cff9c481de2147fcc8ee4ca4d2518ea8f2ae",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "00d3c027acc512b32f067a59af095568fc678fe8",
-  "sourceSha256": "f695fda04d355a6ff985aba48b95c102d4f8e2264e2a2ed2755632c85a13441e",
+  "head": "589d7fa5872fd73e91b786af234758c5d94fec4f",
+  "sourceSha256": "a6b6bce35e0107ba2366eabd0d20cff9c481de2147fcc8ee4ca4d2518ea8f2ae",
   "counts": {
     "public": {
-      "skills": 40,
+      "skills": 41,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 89
+      "total": 90
     },
     "internal": {
       "hookFiles": 296,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 40,
+    "skills": 41,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -60,6 +60,7 @@
       "debug",
       "deep-interview",
       "deepinit",
+      "diagram",
       "drydock",
       "execute",
       "external-context",
@@ -33847,6 +33848,11 @@
         "path": "skills/deepinit/SKILL.md"
       },
       {
+        "id": "skills/diagram/SKILL.md",
+        "kind": "skill",
+        "path": "skills/diagram/SKILL.md"
+      },
+      {
         "id": "skills/drydock/SKILL.md",
         "kind": "skill",
         "path": "skills/drydock/SKILL.md"
@@ -43539,6 +43545,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/diagram/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/drydock/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49401,6 +49412,26 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -78515,12 +78546,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6967,
-      "edgeCount": 7456,
-      "importEdgeCount": 6140,
-      "registerEdgeCount": 61
+      "nodeCount": 6968,
+      "edgeCount": 7461,
+      "importEdgeCount": 6144,
+      "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "f6debfe0d6e2eca6df8b4c16a69e1bef98d1f76d5e642f56df70bdbd5c735492",
-  "manifestSha256": "f1ddd8f96a3b6a645964534873291e6024ad4226582a3a8805714656a5b1dd10"
+  "inventorySha256": "b54c934dddcbb51bf4a10243b5eb1015488bc7e7a0f9160a61eff3f2730e9384",
+  "manifestSha256": "33cefeed198527b61695cd2516fa414165949b3a5029dbecb0e4aa8dc8ff993f"
 }

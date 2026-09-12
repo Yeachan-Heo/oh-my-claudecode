@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 40 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 41 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -196,6 +196,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'drydock', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in harness scaffold (shipyard keel); never a default gate.' }),
   entry({ name: 'architecture-survey', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in periodic architecture survey; reports ranked deepening candidates with evidence, never refactors on its own.' }),
   entry({ name: 'visual-verdict', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in for visual surfaces.' }),
+  entry({ name: 'diagram', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Model-invoked explanation aid: picks the smallest visual (pseudocode, tree, Mermaid, diff, focused HTML) that carries the point; never gates, never edits code on its own.' }),
   entry({ name: 'external-context', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in external evidence tool.' }),
   entry({ name: 'graph', kind: 'skill', decision: 'keep', riskClass: 'security-boundary', owner: REGISTRY_OWNER, notes: 'Declarative graph runtime with command execution and bounded read-only Agent SDK execution; CLI + skill entrypoints.' }),
   entry({ name: 'debug', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER }),

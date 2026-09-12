@@ -1,6 +1,6 @@
 ---
 name: architecture-survey
-description: Periodic architecture survey — walks the module graph and reports ranked deepening candidates (shallow modules, hypothetical seams, logic behind the wrong seam). Survey, not rescue: it finds candidates and hands them to the captain; it never refactors on its own.
+description: "Periodic architecture survey — walks the module graph and reports ranked deepening candidates (shallow modules, hypothetical seams, logic behind the wrong seam). Survey, not rescue: it finds candidates and hands them to the captain; it never refactors on its own."
 argument-hint: "[optional directory or area to survey]"
 level: 3
 disable-model-invocation: true
