@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "1246b7e4b15edfc5b65f31190f0f2cbefd17b7d2",
-    "sourceSha256": "5c3e3dd39b1340020a23e38bcf7490e24c7fe82bdc732f6251f749a8ff9c1e9c",
+    "head": "5f5d53e2cd64615fd5499d8b595c50853c24f5f4",
+    "sourceSha256": "b1d116f5afe10eb8132bc96e6327f77b514b44eb30b645234529bb698ae947ec",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "1246b7e4b15edfc5b65f31190f0f2cbefd17b7d2",
-  "sourceSha256": "5c3e3dd39b1340020a23e38bcf7490e24c7fe82bdc732f6251f749a8ff9c1e9c",
+  "head": "5f5d53e2cd64615fd5499d8b595c50853c24f5f4",
+  "sourceSha256": "b1d116f5afe10eb8132bc96e6327f77b514b44eb30b645234529bb698ae947ec",
   "counts": {
     "public": {
-      "skills": 41,
+      "skills": 39,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 90
+      "total": 88
     },
     "internal": {
       "hookFiles": 296,
       "featureFiles": 80,
       "toolFiles": 61,
-      "libFiles": 43,
+      "libFiles": 42,
       "templateHooks": 22,
-      "srcFiles": 1349,
-      "total": 1371
+      "srcFiles": 1350,
+      "total": 1372
     },
     "generated": {
       "distFiles": 5032,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 41,
+    "skills": 39,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -50,7 +50,6 @@
     "skills": [
       "agent-doc-discipline",
       "ai-slop-cleaner",
-      "architecture-survey",
       "ask",
       "ask-navigator",
       "autopilot",
@@ -60,7 +59,6 @@
       "debug",
       "deep-interview",
       "deepinit",
-      "diagram",
       "drydock",
       "execute",
       "external-context",
@@ -593,7 +591,6 @@
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
-      "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
       "src/lib/__tests__/plugin-dir.test.ts",
       "src/lib/__tests__/session-id.test.ts",
@@ -728,6 +725,7 @@
       "scripts/build-bridge-entry.mjs",
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
+      "scripts/build-contained-fs.mjs",
       "scripts/build-mcp-server.mjs",
       "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
@@ -824,6 +822,7 @@
       "scripts/verify-deliverables.mjs",
       "scripts/verify-epic-3698-closure.mjs",
       "scripts/verify-generated-artifact-authorization.mjs",
+      "scripts/verify-graph-contained-fs.mjs",
       "scripts/wiki-pre-compact.mjs",
       "scripts/wiki-session-end.mjs",
       "scripts/wiki-session-start.mjs",
@@ -32639,6 +32638,11 @@
         "path": "docs/geobench.md"
       },
       {
+        "id": "docs/graph-contained-filesystem.md",
+        "kind": "other",
+        "path": "docs/graph-contained-filesystem.md"
+      },
+      {
         "id": "docs/issues/issue-3668-ralph-namespace.md",
         "kind": "other",
         "path": "docs/issues/issue-3668-ralph-namespace.md"
@@ -32827,6 +32831,11 @@
         "id": "external:net",
         "kind": "external",
         "path": "net"
+      },
+      {
+        "id": "external:node:assert/strict",
+        "kind": "external",
+        "path": "node:assert/strict"
       },
       {
         "id": "external:node:async_hooks",
@@ -33079,6 +33088,11 @@
         "path": "missions/prove-reliability-by-finding-and-fixing-flaky-te/sandbox.md"
       },
       {
+        "id": "native/contained-fs.c",
+        "kind": "other",
+        "path": "native/contained-fs.c"
+      },
+      {
         "id": "package-lock.json",
         "kind": "other",
         "path": "package-lock.json"
@@ -33192,6 +33206,11 @@
         "id": "scripts/build-cli.mjs",
         "kind": "script",
         "path": "scripts/build-cli.mjs"
+      },
+      {
+        "id": "scripts/build-contained-fs.mjs",
+        "kind": "script",
+        "path": "scripts/build-contained-fs.mjs"
       },
       {
         "id": "scripts/build-mcp-server.mjs",
@@ -33674,6 +33693,11 @@
         "path": "scripts/verify-generated-artifact-authorization.mjs"
       },
       {
+        "id": "scripts/verify-graph-contained-fs.mjs",
+        "kind": "script",
+        "path": "scripts/verify-graph-contained-fs.mjs"
+      },
+      {
         "id": "scripts/wiki-pre-compact.mjs",
         "kind": "script",
         "path": "scripts/wiki-pre-compact.mjs"
@@ -33799,11 +33823,6 @@
         "path": "skills/ai-slop-cleaner/SKILL.md"
       },
       {
-        "id": "skills/architecture-survey/SKILL.md",
-        "kind": "skill",
-        "path": "skills/architecture-survey/SKILL.md"
-      },
-      {
         "id": "skills/ask-navigator/SKILL.md",
         "kind": "skill",
         "path": "skills/ask-navigator/SKILL.md"
@@ -33847,11 +33866,6 @@
         "id": "skills/deepinit/SKILL.md",
         "kind": "skill",
         "path": "skills/deepinit/SKILL.md"
-      },
-      {
-        "id": "skills/diagram/SKILL.md",
-        "kind": "skill",
-        "path": "skills/diagram/SKILL.md"
       },
       {
         "id": "skills/drydock/SKILL.md",
@@ -36659,6 +36673,11 @@
         "path": "src/graph/__tests__/runtime/journal.test.ts"
       },
       {
+        "id": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "kind": "src",
+        "path": "src/graph/__tests__/runtime/native-contained-fs.test.ts"
+      },
+      {
         "id": "src/graph/__tests__/runtime/progress.test.ts",
         "kind": "src",
         "path": "src/graph/__tests__/runtime/progress.test.ts"
@@ -36742,6 +36761,11 @@
         "id": "src/graph/runtime/journal.ts",
         "kind": "src",
         "path": "src/graph/runtime/journal.ts"
+      },
+      {
+        "id": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "src",
+        "path": "src/graph/runtime/native-contained-fs.ts"
       },
       {
         "id": "src/graph/runtime/progress.ts",
@@ -38737,11 +38761,6 @@
         "id": "src/lib/__tests__/mode-state-io.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/mode-state-io.test.ts"
-      },
-      {
-        "id": "src/lib/__tests__/mode-state-lock.test.ts",
-        "kind": "lib",
-        "path": "src/lib/__tests__/mode-state-lock.test.ts"
       },
       {
         "id": "src/lib/__tests__/payload-limits.test.ts",
@@ -41204,11 +41223,6 @@
         "path": "tests/lint/subagent-lock-test-contract.test.ts"
       },
       {
-        "id": "tests/lint/team-resume-contract.test.ts",
-        "kind": "other",
-        "path": "tests/lint/team-resume-contract.test.ts"
-      },
-      {
         "id": "tests/lint/windows-hide-hooks.test.ts",
         "kind": "other",
         "path": "tests/lint/windows-hide-hooks.test.ts"
@@ -41748,6 +41762,31 @@
       {
         "from": "scripts/build-cli.mjs",
         "to": "external:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -42588,11 +42627,6 @@
       {
         "from": "scripts/persistent-mode.mjs",
         "to": "external:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/plugin-setup.mjs",
-        "to": "external:better-sqlite3",
         "kind": "imports"
       },
       {
@@ -43441,6 +43475,36 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:assert/strict",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/wiki-pre-compact.mjs",
         "to": "dist/hooks/wiki/session-hooks.js",
         "kind": "imports"
@@ -43511,11 +43575,6 @@
         "kind": "registers"
       },
       {
-        "from": "skills/architecture-survey/SKILL.md",
-        "to": "src/features/builtin-skills/skills.ts",
-        "kind": "registers"
-      },
-      {
         "from": "skills/ask-navigator/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -43557,11 +43616,6 @@
       },
       {
         "from": "skills/deepinit/SKILL.md",
-        "to": "src/features/builtin-skills/skills.ts",
-        "kind": "registers"
-      },
-      {
-        "from": "skills/diagram/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -46527,11 +46581,6 @@
       },
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
       },
@@ -46558,11 +46607,6 @@
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "src/installer/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/keyword-detector-script.test.ts",
-        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -49438,26 +49482,6 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "src/installer/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
-        "to": "external:node:module",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
-        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -54886,6 +54910,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/__tests__/runtime/progress.test.ts",
         "to": "external:stream",
         "kind": "imports"
@@ -55137,12 +55186,22 @@
       },
       {
         "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
         "to": "src/graph/runtime/run-dir.ts",
         "kind": "imports"
       },
       {
         "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
         "to": "src/graph/runtime/safe-fs.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
+        "to": "src/lib/atomic-write.ts",
         "kind": "imports"
       },
       {
@@ -55271,6 +55330,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/graph/runtime/contained-fd.ts",
+        "to": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/runtime/executors/agent.ts",
         "to": "external:@anthropic-ai/claude-agent-sdk",
         "kind": "imports"
@@ -55337,13 +55401,8 @@
       },
       {
         "from": "src/graph/runtime/fence.ts",
-        "to": "external:fs",
+        "to": "src/graph/runtime/contained-fd.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/fence.ts",
-        "to": "external:path",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/fence.ts",
@@ -55424,6 +55483,26 @@
         "from": "src/graph/runtime/journal.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:url",
+        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/progress.ts",
@@ -55559,6 +55638,11 @@
         "from": "src/graph/runtime/safe-fs.ts",
         "to": "src/graph/runtime/contained-fd.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
@@ -59163,11 +59247,6 @@
       {
         "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
         "to": "src/hooks/persistent-mode/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
-        "to": "src/hooks/todo-continuation/index.ts",
         "kind": "imports"
       },
       {
@@ -65771,41 +65850,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "src/lib/mode-state-io.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/mode-state-lock.test.ts",
-        "to": "src/platform/process-utils.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/lib/__tests__/payload-limits.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -66348,11 +66392,6 @@
       {
         "from": "src/lib/mode-state-io.ts",
         "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/mode-state-io.ts",
-        "to": "external:module",
         "kind": "imports"
       },
       {
@@ -75567,16 +75606,6 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -75603,11 +75632,6 @@
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/platform/process-utils.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -76907,11 +76931,6 @@
       },
       {
         "from": "src/tools/state-tools.ts",
-        "to": "src/lib/atomic-write.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/state-tools.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -76933,11 +76952,6 @@
       {
         "from": "src/tools/state-tools.ts",
         "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/state-tools.ts",
-        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -78571,21 +78585,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
         "from": "tests/lint/windows-hide-hooks.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -78657,12 +78656,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6970,
-      "edgeCount": 7481,
-      "importEdgeCount": 6164,
-      "registerEdgeCount": 62
+      "nodeCount": 6973,
+      "edgeCount": 7478,
+      "importEdgeCount": 6161,
+      "registerEdgeCount": 60
     }
   },
-  "inventorySha256": "6757c236df49e65dfb77ff8000590c31fb4caa7d014d0c2eb995dee72a7cd5ec",
-  "manifestSha256": "69aec82199f73adf15c67870ae6c64748448c68be9c274924849d80ddaf71395"
+  "inventorySha256": "1710707e007026d10e711c840023fa032e07eea10bbb031861cd5945eccf6357",
+  "manifestSha256": "e1cc39a3b0ba61abbee1d089461e7c51e3583c4949e2834aece497f35a4df947"
 }
