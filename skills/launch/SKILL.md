@@ -163,7 +163,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 - **The four-way boundary choice:** continue (context still fits and is unpolluted) → re-enter from disk (a phase just completed) → hand off (pointer, never content) → compact (approaching the limit, at the phase edge). Take the first that fits.
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
-- Handoffs pass pointers, never content.
+- Handoffs pass pointers, never content. A handoff paper carries three things only: **pointers** (where the material and the decisions live — never copies), **the next watch** (what the next phase does, and which skills to call), and **the warning lines** (red lines already ruled out; credentials redacted). When a compact is unavoidable, pass an instruction with it, so the summary keeps what the next phase needs.
 - Session died mid-run: preserve the artifacts and stop. A later explicit invocation may continue only after the owning Team lifecycle reaches its supported terminal/cleanup boundary; Team remains authoritative for runtime state.
 
 ## Completion definition
