@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'crypto';
 import { getProcessStartIdentitySync } from '../../platform/process-utils.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync, writeFileSync, existsSync, lstatSync } from 'fs';
 import { homedir, tmpdir } from 'os';
@@ -2837,6 +2837,47 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain('No state found to clear for mode: autopilot in session: missing-autopilot-state-session');
       expect(result.content[0].text).toContain('Checked paths');
       expect(result.content[0].text).toContain(join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'));
+    });
+
+    it('reports a captured candidate that survives a non-team session clear as a failure', async () => {
+      // The workingDirectory-local cleanup only runs as a fallback, so with a
+      // centralized session file present the local candidate is captured but
+      // never cleared. No individual cleanup reports a failure, so only the
+      // captured-survivor backstop can catch it — and a half-cancelled mode
+      // must never be reported as a successful clear.
+      const previous = process.env.OMC_STATE_DIR;
+      const sessionId = 'captured-survivor-autopilot-session';
+      const gitRoot = mkdtempSync(join(homedir(), 'state-clear-captured-'));
+      execFileSync('git', ['init'], { cwd: gitRoot, stdio: 'pipe' });
+      process.env.OMC_STATE_DIR = join(gitRoot, 'central-state-root');
+      try {
+        const state = JSON.stringify({ active: true, session_id: sessionId, current_phase: 'execution' });
+        const centralPath = join(getOmcRoot(gitRoot), 'state', 'sessions', sessionId, 'autopilot-state.json');
+        const localPath = join(gitRoot, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json');
+        for (const path of [centralPath, localPath]) {
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, state);
+        }
+
+        const result = await stateClearTool.handler({
+          mode: 'autopilot',
+          session_id: sessionId,
+          workingDirectory: gitRoot,
+        });
+
+        expect(existsSync(centralPath)).toBe(false);
+        expect(existsSync(localPath)).toBe(true);
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('Warning: Some files could not be removed');
+        expect(result.content[0].text).not.toContain('Successfully cleared state');
+      } finally {
+        if (previous === undefined) {
+          delete process.env.OMC_STATE_DIR;
+        } else {
+          process.env.OMC_STATE_DIR = previous;
+        }
+        rmSync(gitRoot, { recursive: true, force: true });
+      }
     });
 
     it('clears autopilot state from the centralized OMC_STATE_DIR root used by stop hooks', async () => {

@@ -1890,8 +1890,11 @@ export const stateClearTool: ToolDefinition<{
           ownerSessionCleanup.cleared +
           ownerLegacyCleanup.cleared +
           runtimeCleanup.cleared;
-        const capturedCleanupIncomplete = mode === 'team' &&
-          operationCandidates.some((candidate) => existsSync(candidate.path));
+        // Every mode needs this backstop: a captured candidate can be skipped
+        // without any cleanup reporting a failure (its owning cleanup never
+        // runs, or its snapshot predicate no longer matches) and still be left
+        // on disk. Reporting success there hides a half-cancelled mode.
+        const capturedCleanupIncomplete = operationCandidates.some((candidate) => existsSync(candidate.path));
         const hadFailure = !primarySuccess || capturedCleanupIncomplete ||
           legacyCleanup.hadFailure || sessionCleanup.hadFailure ||
           workingDirectoryLocalCleanup.hadFailure || convergedCleanup.hadFailure ||
