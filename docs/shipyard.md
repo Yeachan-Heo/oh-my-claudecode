@@ -86,9 +86,46 @@ Every shipyard skill — the seven compose skills plus the `agent-doc-discipline
 
 The iron rule: a user-invoked skill never invokes another user-invoked skill. The one deliberate exception is `drydock` — it is a human keel-laying entry point *and* the gate chain's callable audit: launch's yard gate and the navigator's charting mechanically call `drydock --check`, so it must remain model-invoked. The shipyard contract test suite pins the assignment in both directions and rejects skill text that invokes a user-invoked skill by name through the Skill tool.
 
-## The feedback loop
+## The loop — the methodology's spine
 
-Shipyard corrects itself through its file-backed paper trail: navigator resolutions sediment into `CONTEXT.md`, `docs/adr/`, and `docs/business/` as decisions settle; launch closeout reconciles the spec, `CONTEXT.md`, and ADRs, while recurring corrections can sediment into `CLAUDE.md` and `docs/standards/` through the launch C5 sediment pass and reviews; and harbor's sweep summary surfaces recurring request clusters from outside — the loop's outer ear, turning what the world keeps asking for into `docs/business/` knowledge or fresh ideas. `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
+The gates are not a chain that ends at delivery; they form one **closed circuit**. Every stage hands its output to a named gate, and the circuit closes: sediment that becomes a recurring demand signal re-enters as business knowledge, not as a new intake class.
+
+```
+        ┌──────────────────────────────────────────────────────┐
+        │                                                      │
+        ▼                                                      │
+   [intake gate]          drydock lays the keel once           │
+   harbor sweeps ──► fog gate ──► yard gate ──► C1–C5 (launch)│
+   external noise    can the      are the       quality       │
+   → triage, verify  destination  surfaces laid  signatures   │
+   → docket, sign    be stated?   and clean?        │         │
+        │                │                           ▼         │
+        │                ▼                     delivery shipped │
+        │           wayfinding                      │           │
+        │        ask-navigator charts ──► loft shapes the     │
+        │        a map of decisions     question (any stage)  │
+        │                │                           │         │
+        │                ▼                           ▼         │
+        │           sediment ◄──── review/verify ◄───┘         │
+        │   decisions land in CONTEXT.md, ADRs,                │
+        │   docs/business/, docs/standards/, .omc/skills/      │
+        │                │                                     │
+        └────────────────┘                                     │
+   recurring demand signals re-enter as business knowledge ────┘
+```
+
+The joins, each named as a gate:
+
+- **harbor gate** — take this external request? Intake classifies before verifying; unanswerable decisions exit as decision questionnaires; every disposition passes the restatement gate before it ships.
+- **fog gate** — can the destination be stated? No → the navigator charts a map; large efforts get a long-lived map with vessels and a census line, worked one ticket per session until the way is clear.
+- **yard gate** — are the surfaces laid and clean? High-confidence actionable drydock findings block; narrow, explicit overrides only.
+- **C1–C5** — the captain's quality signatures; C3 tickets declare load-bearing blocking edges, C5 closeout consumes a structured retro and sediments lessons into their slots.
+- **wayfinding join** — the navigator's collapsed decisions re-enter as a mission brief; its resolutions sediment into the same paper-trail slots launch's Phase 1 uses.
+- **closure join** — the loop's exit and entrance are the same door: harbor's sweep summary surfaces recurring request clusters (the loop's outer ear), and sediment that keeps being demanded re-enters as `docs/business/` knowledge or fresh ideas.
+
+The cross-cutting express surfaces — **diagram** and **show-me** — are callable from any stage of the circuit; they are express lanes, not stages.
+
+Shipyard corrects itself through its file-backed paper trail; `/oh-my-claudecode:drydock --check` audits harness drift. These skills do not add a separate findings store, shipped/wontfixed state machine, hidden ledger, or `sy check`/`context-lint` commands.
 
 ## When to reach for what
 

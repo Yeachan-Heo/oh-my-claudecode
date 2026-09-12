@@ -471,8 +471,11 @@ describe('shipyard skills — behavior & packaging contract', () => {
   it('launch C5 carries the sediment pass: source checklist, mandatory answer, slot table', () => {
     // regression: the sediment half-loop referenced a nonexistent retro; it now lives in C5
     expect(LAUNCH).toContain('what did this ship teach the yard');
-    expect(LAUNCH).toContain('Sweep the source checklist first');
-    expect(LAUNCH).toContain('three-strike failure root causes');
+    expect(LAUNCH).toContain('Consume a **structured retro** first');
+    expect(LAUNCH).toContain('what was built');
+    expect(LAUNCH).toContain('what broke');
+    expect(LAUNCH).toContain('what taught');
+    expect(LAUNCH).toContain('three-strike');
     expect(LAUNCH).toContain('"no new lessons"');
     expect(LAUNCH).toContain('blocks non-answers, never empty answers');
     expect(LAUNCH).toContain('`lesson → slot → intended change`');
@@ -492,11 +495,12 @@ describe('shipyard skills — behavior & packaging contract', () => {
   });
 
   it('drydock governance loop names the real sediment carrier (no ghost retro)', () => {
-    // regression: the sediment loop referenced a nonexistent retro skill
+    // regression: the sediment loop referenced a nonexistent retro skill; the
+    // structured retro now genuinely lives in launch's C5, so only drydock's
+    // governance loop must still name "launch C5 sediment" rather than a retro skill
     expect(DRYDOCK).not.toMatch(/retro/i);
     expect(DRYDOCK).toContain('launch C5 sediment');
-    expect(SHIPYARD_DOC).not.toMatch(/retros?/i);
-    expect(SHIPYARD_DOC).toContain('C5 sediment');
+    expect(SHIPYARD_DOC).toContain('C5 closeout consumes a structured retro');
   });
 
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {
