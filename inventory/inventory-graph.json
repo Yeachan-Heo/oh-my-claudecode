@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "73677f232de85e608f92a34da314d39ff38a0cbc",
-    "sourceSha256": "1b1bee4568dcb13b731b6aebd366038490427b67b2554f6b3590dcaadaf1d036",
+    "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
+    "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "73677f232de85e608f92a34da314d39ff38a0cbc",
-  "sourceSha256": "1b1bee4568dcb13b731b6aebd366038490427b67b2554f6b3590dcaadaf1d036",
+  "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
+  "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
   "counts": {
     "public": {
-      "skills": 40,
+      "skills": 41,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 89
+      "total": 90
     },
     "internal": {
       "hookFiles": 296,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 40,
+    "skills": 41,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -60,6 +60,7 @@
       "debug",
       "deep-interview",
       "deepinit",
+      "diagram",
       "drydock",
       "execute",
       "external-context",
@@ -33847,6 +33848,11 @@
         "path": "skills/deepinit/SKILL.md"
       },
       {
+        "id": "skills/diagram/SKILL.md",
+        "kind": "skill",
+        "path": "skills/diagram/SKILL.md"
+      },
+      {
         "id": "skills/drydock/SKILL.md",
         "kind": "skill",
         "path": "skills/drydock/SKILL.md"
@@ -41192,6 +41198,11 @@
         "path": "tests/lint/subagent-lock-test-contract.test.ts"
       },
       {
+        "id": "tests/lint/team-resume-contract.test.ts",
+        "kind": "other",
+        "path": "tests/lint/team-resume-contract.test.ts"
+      },
+      {
         "id": "tests/lint/windows-hide-hooks.test.ts",
         "kind": "other",
         "path": "tests/lint/windows-hide-hooks.test.ts"
@@ -43535,6 +43546,11 @@
       },
       {
         "from": "skills/deepinit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/diagram/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -49401,6 +49417,26 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -59109,6 +59145,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
+        "to": "src/hooks/todo-continuation/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/persistent-mode/__tests__/deleted-state-writeback.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -66251,11 +66292,6 @@
       {
         "from": "src/lib/mode-state-io.ts",
         "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/mode-state-io.ts",
-        "to": "external:module",
         "kind": "imports"
       },
       {
@@ -75470,6 +75506,16 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -75496,6 +75542,11 @@
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -76795,6 +76846,11 @@
       },
       {
         "from": "src/tools/state-tools.ts",
+        "to": "src/lib/atomic-write.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -76816,6 +76872,11 @@
       {
         "from": "src/tools/state-tools.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -78449,6 +78510,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/windows-hide-hooks.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -78520,12 +78596,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6967,
-      "edgeCount": 7457,
-      "importEdgeCount": 6141,
-      "registerEdgeCount": 61
+      "nodeCount": 6969,
+      "edgeCount": 7470,
+      "importEdgeCount": 6153,
+      "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "f6debfe0d6e2eca6df8b4c16a69e1bef98d1f76d5e642f56df70bdbd5c735492",
-  "manifestSha256": "b5739383fe0531c64c1338987fed4f61539a030cac82d9caadae41b9195fae9a"
+  "inventorySha256": "c6ce36cc1dfb2b18c7f15643dbca83e26493128825334ceaac60eb56b1213c43",
+  "manifestSha256": "104caea5f1eb0c00e02db25fc49a8c5f06fc8ea640fd90c2f21007dbc5a87202"
 }

@@ -1,6 +1,6 @@
 ---
 name: loft
-description: Loft the shape before cutting steel — answer a design question that prose cannot settle by building a throwaway artifact: a pure logic module in a clickable shell, or structurally different UI variants behind one route. The captain reacts to the artifact; the answer folds into the decision; the artifact never docks. Use when a design question stalls in words, when a navigator map carries a loft ticket, or when a spec discussion reaches "we would have to see it".
+description: 'Loft the shape before cutting steel — answer a design question that prose cannot settle by building a throwaway artifact: a pure logic module in a clickable shell, or structurally different UI variants behind one route. The captain reacts to the artifact; the answer folds into the decision; the artifact never docks. Use when a design question stalls in words, when a navigator map carries a loft ticket, or when a spec discussion reaches "we would have to see it".'
 level: 3
 ---
 

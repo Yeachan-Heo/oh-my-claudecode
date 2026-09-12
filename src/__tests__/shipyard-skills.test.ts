@@ -620,6 +620,19 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('the vocabulary is seeded in `docs/standards/architecture.md`');
   });
 
+  it('the testing discipline is seeded as its own process volume that launch can point at', () => {
+    expect(DRYDOCK).toContain('Seed C2 — docs/standards/process.md, Testing volume');
+    expect(DRYDOCK).toContain('## Testing');
+    expect(DRYDOCK).toContain('Tests enter through the interface only');
+    expect(DRYDOCK).toContain('Expected values come from an independent source of truth');
+    expect(DRYDOCK).toContain('Refactoring happens at the review axis, not inside the red-green loop');
+    expect(DRYDOCK).toContain('Tests open only at seams the reviewing captain approved');
+    // launch already points callers at the process volume; the seed must exist,
+    // or that reference dangles.
+    expect(LAUNCH).toContain('The testing rules themselves are seeded in `docs/standards/process.md`');
+    expect(DRYDOCK).not.toContain('data.md / process.md same shape');
+  });
+
   it('docs/REFERENCE.md skills count matches the filesystem', () => {
     const ref = readFileSync(join(ROOT, 'docs', 'REFERENCE.md'), 'utf-8');
     const dirCount = existsSync(join(ROOT, 'skills'))

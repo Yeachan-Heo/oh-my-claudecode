@@ -82,11 +82,13 @@ describe('alias-retirement registry', () => {
     // skill directory; this is an addition, not an alias retirement.
     // Raised 39 -> 40 canonical when architecture-survey shipped as a real
     // skill directory; this is an addition, not an alias retirement.
+    // Raised 40 -> 41 canonical when diagram shipped as a real skill directory;
+    // this is an addition, not an alias retirement.
     const all = createBuiltinSkills();
-    expect(all).toHaveLength(42);
+    expect(all).toHaveLength(43);
     const canonical = all.filter((s) => !s.aliasOf);
     const aliases = all.filter((s) => !!s.aliasOf);
-    expect(canonical).toHaveLength(40);
+    expect(canonical).toHaveLength(41);
     expect(aliases).toHaveLength(2);
     expect(aliases.map((s) => s.name).sort()).toEqual(['cancel-ralph', 'psm'].sort());
   });

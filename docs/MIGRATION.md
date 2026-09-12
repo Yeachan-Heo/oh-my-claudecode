@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Cancellation Scope](#unreleased-cancellation-scope)
 - [v4.x → v5.0: Workflow Retirement](#v4x--v50-workflow-retirement)
 - [Unreleased: Team MCP Runtime Deprecation (CLI-Only)](#unreleased-team-mcp-runtime-deprecation-cli-only)
 - [Unreleased: Native Team Worktree Mode (Opt-In)](#unreleased-native-team-worktree-mode-opt-in)
@@ -17,6 +18,17 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
 
 ---
+
+## Unreleased: Cancellation Scope
+
+`/oh-my-claudecode:cancel --force` now targets only the current session; it no longer
+means clearing every session. It skips graceful waits, not state locks or ownership checks.
+If the current session cannot be identified, cancellation fails closed.
+
+Use `--all` explicitly for all-session cancellation. It follows normal cancellation
+within each session; use `--force --all` when forced cancellation across sessions is intended.
+Update prompts or automation that previously used `--force` for a workspace-wide reset.
+The deprecated `cancel-ralph` alias follows the same contract.
 
 ## Unreleased: Git-less State Root Recovery
 
