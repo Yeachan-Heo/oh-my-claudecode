@@ -928,6 +928,16 @@ export function runClaude(cwd: string, args: string[], sessionId: string): void 
  * Launches Claude in current pane
  */
 function runClaudeInsideTmux(cwd: string, args: string[]): void {
+  // Resolve and authenticate the invoking pane before any tmux option writes.
+  // A stale-but-live TMUX_PANE must never be allowed to steer -k at another
+  // pane, and an invalid invocation must not mutate tmux's implicit target.
+  const currentPaneId = resolveInvokingTmuxPaneId();
+  if (!currentPaneId) {
+    console.error('[omc] Error: unable to identify the invoking tmux pane; refusing to respawn Claude.');
+    process.exit(1);
+    return;
+  }
+
   // Enable OSC 52 clipboard forwarding and mouse scrolling in the current tmux session (non-fatal if unsupported).
   try {
     configureTmuxClipboardForCurrentSession({ stdio: 'ignore' });
@@ -939,16 +949,9 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
 
   // Replace the pane's current process instead of keeping this node process as
   // the pane foreground while Claude runs as its child.  respawn-pane kills the
-  // launcher process and starts the quoted shell command in the same pane.
+  // the launcher process and starts the quoted shell command in the same pane.
   // Never let tmux choose its active pane implicitly: -k would otherwise kill
   // an unrelated pane when TMUX_PANE is missing or stale.
-  const currentPaneId = resolveInvokingTmuxPaneId();
-  if (!currentPaneId) {
-    console.error('[omc] Error: unable to identify the invoking tmux pane; refusing to respawn Claude.');
-    process.exit(1);
-    return;
-  }
-
   const nativeWindows = isNativeWindowsShell();
   const respawnArgs = ['respawn-pane', '-k', '-t', currentPaneId, '-c', cwd];
   if (nativeWindows) {
@@ -975,8 +978,12 @@ function resolveInvokingTmuxPaneId(): string | null {
   if (!paneId || !/^%\d+$/.test(paneId)) return null;
 
   try {
+    // Do not pass the untrusted pane id back to tmux as the query target.
+    // With -t, display-message merely echoes a live target and cannot prove
+    // that it is the pane belonging to this invoking client. Without -t,
+    // tmux resolves the pane from the client's own tty/context instead.
     const resolvedPaneId = tmuxExec(
-      ['display-message', '-p', '-t', paneId, '#{pane_id}'],
+      ['display-message', '-p', '#{pane_id}'],
       { stdio: 'pipe' },
     ).trim();
     return resolvedPaneId === paneId ? paneId : null;
@@ -1030,7 +1037,6 @@ export const TMUX_ENV_FORWARD = [
   'HOME',
   'USERPROFILE',
   'SHELL',
-  'TERM',
   'LANG',
   'LC_ALL',
   'LC_CTYPE',
@@ -1055,11 +1061,28 @@ export function isSensitiveTmuxEnvironmentVariable(name: string): boolean {
     || /^(?:AWS_SECRET_ACCESS_KEY|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)$/i.test(name);
 }
 
+function normalizeTmuxEnvironmentName(name: string): string {
+  return process.platform === 'win32' ? name.toUpperCase() : name;
+}
+
+function getProcessEnvironmentValue(name: string): string | undefined {
+  if (process.platform !== 'win32') return process.env[name];
+
+  // Windows environment names are case-insensitive even though Object.keys
+  // can expose the live PATH entry as `Path`. Prefer the enumerated matching
+  // entry so a casing-only difference cannot drop the launcher's PATH.
+  const normalizedName = name.toUpperCase();
+  const matchingEntries = Object.entries(process.env)
+    .filter(([entryName, value]) => value !== undefined && entryName.toUpperCase() === normalizedName);
+  if (matchingEntries.length > 0) return matchingEntries.at(-1)?.[1];
+  return process.env[name];
+}
+
 export function buildEnvExportPrefix(vars: string[]): string {
   const parts: string[] = [];
   for (const name of vars) {
     if (isSensitiveTmuxEnvironmentVariable(name)) continue;
-    const value = process.env[name];
+    const value = getProcessEnvironmentValue(name);
     if (value !== undefined) {
       parts.push(`export ${name}=${quoteShellArg(value)}`);
     }
@@ -1076,14 +1099,14 @@ export function buildEnvExportPrefix(vars: string[]): string {
  */
 export function buildSensitiveEnvFilePrefix(vars: string[]): string {
   const sensitive = vars.filter(
-    (name) => isSensitiveTmuxEnvironmentVariable(name) && process.env[name] !== undefined,
+    (name) => isSensitiveTmuxEnvironmentVariable(name) && getProcessEnvironmentValue(name) !== undefined,
   );
   if (sensitive.length === 0) return '';
   try {
     const dir = mkdtempSync(join(tmpdir(), 'omc-launch-env-'));
     const file = join(dir, 'env.sh');
     const body = sensitive
-      .map((name) => `export ${name}=${quoteShellArg(process.env[name] as string)}`)
+      .map((name) => `export ${name}=${quoteShellArg(getProcessEnvironmentValue(name) as string)}`)
       .join('\n');
     writeFileSync(file, `${body}\n`, { mode: 0o600 });
     return `. ${quoteShellArg(file)}; rm -f ${quoteShellArg(file)}; rmdir ${quoteShellArg(dir)} 2>/dev/null; `;
@@ -1094,25 +1117,33 @@ export function buildSensitiveEnvFilePrefix(vars: string[]): string {
 
 const TMUX_SESSION_ENV_VARS = new Set(['TMUX', 'TMUX_PANE', 'PSMUX_SESSION', 'CLAUDECODE']);
 const TMUX_SHELL_JUNK_ENV_VARS = new Set(['_', 'OLDPWD', 'SHLVL']);
-const TMUX_EXPLICIT_ENV_VARS = new Set(TMUX_ENV_FORWARD);
 
-function isSupportedTmuxEnvironmentVariable(name: string): boolean {
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return false;
-  if (TMUX_SESSION_ENV_VARS.has(name) || TMUX_SHELL_JUNK_ENV_VARS.has(name)) return false;
-  if (TMUX_EXPLICIT_ENV_VARS.has(name)) return true;
+function canonicalTmuxEnvironmentName(name: string): string | null {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+  const normalizedName = normalizeTmuxEnvironmentName(name);
+  if (TMUX_SESSION_ENV_VARS.has(normalizedName) || TMUX_SHELL_JUNK_ENV_VARS.has(normalizedName)) return null;
+
+  // Explicit names retain their canonical spelling (notably PATH) while
+  // Windows matching remains case-insensitive.
+  const explicitName = TMUX_ENV_FORWARD.find(
+    (candidate) => normalizeTmuxEnvironmentName(candidate) === normalizedName,
+  );
+  if (explicitName) return explicitName;
 
   // Keep newly introduced supported provider/configuration variables from
   // regressing at this boundary. Values still come from this launcher's
   // process.env; the prefixes only classify the supported surface.
-  if (name.startsWith('ANTHROPIC_') || name.startsWith('CLAUDE_') || name.startsWith('OMC_')) return true;
-  if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/i.test(name)) return true;
+  if (normalizedName.startsWith('ANTHROPIC_') || normalizedName.startsWith('CLAUDE_') || normalizedName.startsWith('OMC_')) {
+    return normalizedName;
+  }
+  if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName)) return normalizedName;
   if (
-    name === 'NODE_EXTRA_CA_CERTS'
-    || name === 'NODE_TLS_REJECT_UNAUTHORIZED'
-    || name.startsWith('SSL_CERT_')
-    || name.endsWith('_CA_BUNDLE')
-  ) return true;
-  return false;
+    normalizedName === 'NODE_EXTRA_CA_CERTS'
+    || normalizedName === 'NODE_TLS_REJECT_UNAUTHORIZED'
+    || normalizedName.startsWith('SSL_CERT_')
+    || normalizedName.endsWith('_CA_BUNDLE')
+  ) return normalizedName;
+  return null;
 }
 
 /**
@@ -1123,11 +1154,13 @@ function isSupportedTmuxEnvironmentVariable(name: string): boolean {
  * direct-launch contract across respawn-pane.
  */
 function getEffectiveTmuxEnvironment(): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(process.env)
-      .filter(([name, value]) => value !== undefined && isSupportedTmuxEnvironmentVariable(name))
-      .map(([name, value]) => [name, value as string]),
-  );
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const canonicalName = canonicalTmuxEnvironmentName(name);
+    if (canonicalName) forwarded[canonicalName] = value;
+  }
+  return forwarded;
 }
 
 /**

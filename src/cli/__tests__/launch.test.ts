@@ -288,6 +288,7 @@ describe('runClaude — exit code propagation', () => {
         '[omc] Error: unable to identify the invoking tmux pane; refusing to respawn Claude.',
       );
       expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'respawn-pane')).toBe(false);
+      expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'set-option')).toBe(false);
     });
 
     it('fails safely when TMUX_PANE is stale', () => {
@@ -303,6 +304,25 @@ describe('runClaude — exit code propagation', () => {
       expect(stderrSpy).toHaveBeenCalledWith(
         '[omc] Error: unable to identify the invoking tmux pane; refusing to respawn Claude.',
       );
+      expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'respawn-pane')).toBe(false);
+      expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'set-option')).toBe(false);
+    });
+
+    it('authenticates TMUX_PANE against the invoking client instead of targeting it', () => {
+      process.env.TMUX_PANE = '%1';
+      vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
+        if (args[0] === 'display-message' && args.includes('#{pane_id}')) return '%0';
+        return '';
+      });
+
+      runClaude('/tmp', [], 'sid');
+
+      const paneQuery = vi.mocked(tmuxExec).mock.calls.find(
+        ([args]) => args[0] === 'display-message' && args.includes('#{pane_id}'),
+      )?.[0] ?? [];
+      expect(paneQuery).not.toContain('-t');
+      expect(processExitSpy).toHaveBeenCalledWith(1);
+      expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'set-option')).toBe(false);
       expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'respawn-pane')).toBe(false);
     });
 
@@ -2140,8 +2160,8 @@ describe('runClaude outside-tmux — env forwarding', () => {
   });
 
   it('does not inject exports when no forwarded vars are set', () => {
-    const saved = Object.fromEntries(TMUX_ENV_FORWARD.map((name) => [name, process.env[name]]));
-    for (const name of TMUX_ENV_FORWARD) delete process.env[name];
+    const saved = { ...process.env };
+    for (const name of Object.keys(process.env)) delete process.env[name];
     vi.mocked(isNativeWindowsShell).mockReturnValue(false);
 
     try {
@@ -2150,10 +2170,49 @@ describe('runClaude outside-tmux — env forwarding', () => {
       const cmdString = vi.mocked(wrapWithLoginShell).mock.calls[0][0];
       expect(cmdString).not.toContain('export ');
     } finally {
-      for (const [name, value] of Object.entries(saved)) {
-        if (value === undefined) delete process.env[name];
-        else process.env[name] = value;
-      }
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.assign(process.env, saved);
+    }
+  });
+
+  it('does not forward TERM because tmux owns the pane terminal type', () => {
+    const savedTerm = process.env.TERM;
+    process.env.TERM = 'outer-term-should-not-leak';
+    vi.mocked(isNativeWindowsShell).mockReturnValue(false);
+
+    try {
+      runClaude('/tmp', [], 'sid');
+
+      const command = vi.mocked(wrapWithLoginShell).mock.calls[0][0];
+      expect(command).not.toContain('TERM=');
+      expect(command).not.toContain('export TERM');
+    } finally {
+      if (savedTerm === undefined) delete process.env.TERM;
+      else process.env.TERM = savedTerm;
+    }
+  });
+
+  it('canonicalizes a Windows Path entry to PATH when forwarding the live environment', () => {
+    const originalPlatform = process.platform;
+    const savedPath = process.env.PATH;
+    const savedPathCasing = process.env.Path;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    delete process.env.PATH;
+    process.env.Path = 'C:\\live\\claude-bin';
+    vi.mocked(isNativeWindowsShell).mockReturnValue(false);
+
+    try {
+      runClaude('/tmp', [], 'sid');
+
+      const command = vi.mocked(wrapWithLoginShell).mock.calls[0][0];
+      expect(command).toContain("export PATH='C:\\live\\claude-bin';");
+      expect(command).not.toContain('export Path=');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (savedPath === undefined) delete process.env.PATH;
+      else process.env.PATH = savedPath;
+      if (savedPathCasing === undefined) delete process.env.Path;
+      else process.env.Path = savedPathCasing;
     }
   });
 
@@ -2177,6 +2236,44 @@ describe('runClaude outside-tmux — env forwarding', () => {
     expect(rawCommand).not.toContain('tcflush');
 
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+  });
+
+  it('preserves literal percent signs in forwarded values on native psmux', () => {
+    const originalPlatform = process.platform;
+    const savedApiKey = process.env.ANTHROPIC_API_KEY;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.ANTHROPIC_API_KEY = 'literal%PATH%';
+    vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+
+    try {
+      runClaude('/tmp', [], 'sid');
+
+      const rawCommand = String(vi.mocked(tmuxExec).mock.calls.find(([args]) => args[0] === 'new-session')?.[0].at(-1));
+      expect(rawCommand).toContain('literal%%%%PATH%%%%');
+      expect(rawCommand).not.toContain('literal%PATH%');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (savedApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = savedApiKey;
+    }
+  });
+
+  it('rejects newline values before composing a native psmux command', () => {
+    const originalPlatform = process.platform;
+    const savedApiKey = process.env.ANTHROPIC_API_KEY;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.ANTHROPIC_API_KEY = 'line\nbreak';
+    vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+
+    try {
+      expect(() => runClaude('/tmp', [], 'sid')).toThrow(
+        'Native Windows tmux command values cannot contain NUL, CR, or LF characters',
+      );
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (savedApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = savedApiKey;
+    }
   });
 
   it('keeps POSIX preflight commands on MSYS2 Windows shells', () => {
