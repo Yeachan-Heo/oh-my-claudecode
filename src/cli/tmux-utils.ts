@@ -55,14 +55,14 @@ export function isNativeWindowsShell(): boolean {
   return process.platform === 'win32' && !isUnixLikeOnWindows();
 }
 
-function quoteForCmd(arg: string): string {
+export function quoteForCmd(arg: string): string {
   assertSafeCmdValue(arg);
   if (arg.length === 0) return '""';
   if (!/[\s"%^&|<>()]/.test(arg)) return arg;
   return `"${arg.replace(/(["%])/g, '$1$1')}"`;
 }
 
-function escapeForCmdSet(value: string): string {
+export function escapeForCmdSet(value: string): string {
   assertSafeCmdValue(value);
   // The set command is embedded in a command string which is then wrapped in
   // a second cmd /c invocation. Percent signs therefore need one escaping
