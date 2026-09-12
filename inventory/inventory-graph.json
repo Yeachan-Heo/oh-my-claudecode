@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "66132b42d7fa678fcf877005199d94ad8deeb735",
-    "sourceSha256": "bb86008575b8dfc2bc837884ce5b9879d202187fab21fbdc0766eeb6ae25667f",
+    "head": "8ca178dcadf88e5f5c8eb8ec3ffa02face91a43f",
+    "sourceSha256": "ad56d26bfd7f4b07241462328b9094ecfeac775c51cf46b6d770721e81fe2b32",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "66132b42d7fa678fcf877005199d94ad8deeb735",
-  "sourceSha256": "bb86008575b8dfc2bc837884ce5b9879d202187fab21fbdc0766eeb6ae25667f",
+  "head": "8ca178dcadf88e5f5c8eb8ec3ffa02face91a43f",
+  "sourceSha256": "ad56d26bfd7f4b07241462328b9094ecfeac775c51cf46b6d770721e81fe2b32",
   "counts": {
     "public": {
       "skills": 41,
@@ -55568,6 +55568,11 @@
       },
       {
         "from": "src/graph/runtime/remote-approval.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/remote-approval.ts",
         "to": "src/graph/runtime/run-dir.ts",
         "kind": "imports"
       },
@@ -55585,11 +55590,6 @@
         "from": "src/graph/runtime/remote-approval.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/remote-approval.ts",
-        "to": "src/lib/atomic-write.ts",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/run-dir.ts",
@@ -55673,6 +55673,11 @@
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -55690,6 +55695,11 @@
         "from": "src/graph/runtime/safe-fs.ts",
         "to": "src/graph/runtime/contained-fd.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/run-dir.ts",
+        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
@@ -78749,11 +78759,11 @@
     ],
     "stats": {
       "nodeCount": 6976,
-      "edgeCount": 7493,
-      "importEdgeCount": 6174,
+      "edgeCount": 7495,
+      "importEdgeCount": 6175,
       "registerEdgeCount": 62
     }
   },
   "inventorySha256": "b91d5da737a59edbb4f5c44ba08b482c12bb6d9f87afe4e4f77ac085189a0694",
-  "manifestSha256": "3b446a281bb1cf2bd15851e78dc95164b3877cc494ea1133e71c3a7f06a45eb3"
+  "manifestSha256": "1e522e81f6094d8863b39ef4bf6abd4b332debb749ccdc6ffd0f7b290810d716"
 }
