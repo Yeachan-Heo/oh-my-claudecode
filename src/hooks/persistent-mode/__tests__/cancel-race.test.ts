@@ -4,6 +4,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { checkPersistentModes } from '../index.js';
+import { isExplicitCancelCommand } from '../../todo-continuation/index.js';
 
 function makeRalphSession(tempDir: string, sessionId: string): string {
   const stateDir = join(tempDir, '.omc', 'state', 'sessions', sessionId);
@@ -31,9 +32,28 @@ function makeRalphSession(tempDir: string, sessionId: string): string {
 }
 
 describe('persistent-mode cancel race guard (issue #921)', () => {
+  it('keeps Ralph cancellation retries scoped unless the user explicitly requests all sessions', async () => {
+    const sessionId = 'ralph-scoped-retry';
+    const tempDir = mkdtempSync(join(tmpdir(), 'persistent-cancel-retry-'));
+    try {
+      execFileSync('git', ['init'], { cwd: tempDir, stdio: 'pipe' });
+      makeRalphSession(tempDir, sessionId);
+      const result = await checkPersistentModes(sessionId, tempDir, { stop_reason: 'end_turn' });
+      expect(result.mode).toBe('ralph');
+      expect(result.message).toContain('retry within the same session scope');
+      expect(result.message).toContain('only when the user explicitly requests `--all`');
+      expect(result.message).not.toContain('/oh-my-claudecode:cancel --force');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     '/oh-my-claudecode:cancel',
-    '/oh-my-claudecode:cancel --force'
+    '/oh-my-claudecode:cancel --force',
+    '/oh-my-claudecode:cancel --all',
+    '/oh-my-claudecode:cancel --force --all',
+    '/oh-my-claudecode:cancel --all --force',
   ])('should not re-enforce while explicit cancel prompt is "%s"', async (cancelPrompt: string) => {
     const sessionId = `session-921-${cancelPrompt.includes('force') ? 'force' : 'normal'}`;
     const tempDir = mkdtempSync(join(tmpdir(), 'persistent-cancel-race-'));
@@ -58,6 +78,15 @@ describe('persistent-mode cancel race guard (issue #921)', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    '/oh-my-claudecode:cancel --alligator',
+    '/oh-my-claudecode:cancel --force --unknown',
+    '/oh-my-claudecode:cancel please',
+    'please /oh-my-claudecode:cancel --all',
+  ])('should not treat malformed cancel prompt "%s" as explicit cancellation', (cancelPrompt: string) => {
+    expect(isExplicitCancelCommand({ prompt: cancelPrompt })).toBe(false);
   });
 
   it('should not trigger ralph max-iteration extension or ultrawork self-heal when cancel signal exists', async () => {

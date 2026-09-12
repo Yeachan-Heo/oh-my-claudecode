@@ -2,7 +2,7 @@
 name: cancel
 aliases: [cancel-ralph]
 description: Cancel any active OMC mode (autopilot, ralph, ultragoal, swarm, ultrapilot, pipeline, team) and clean up retired legacy state
-argument-hint: "[--force|--all]"
+argument-hint: "[--force] [--all]"
 level: 2
 ---
 
@@ -11,376 +11,359 @@ level: 2
 Intelligent cancellation that detects and cancels the active OMC mode.
 
 **The cancel skill is the standard way to complete and exit any OMC mode.**
-When the stop hook detects work is complete, it instructs the LLM to invoke
-this skill for proper state cleanup. If cancel fails or is interrupted,
-retry with `--force` flag, or wait for the 2-hour staleness timeout as
-a last resort.
+When the stop hook detects completion, it instructs the LLM to invoke this
+skill for state cleanup. Retry a failed operation in the same scope and report
+what remains; `--force` changes shutdown urgency, never scope, lock handling,
+or ownership checks. `--all` is the only cross-session authorization.
+
+## Cancellation Contract
+
+The flags control independent scope and shutdown dimensions:
+
+| Invocation | Scope | Shutdown behavior |
+|---|---|---|
+| no flags | Current session only | Graceful cancellation, including teammate shutdown waits |
+| `--force` | Current session only | Forced cancellation: skip graceful waits, but still use protected state tools and honor locks/ownership |
+| `--all` | Every known session, by explicit session id | Normal safe cancellation independently for each session, then explicit legacy/global cleanup |
+| `--force --all` | Every known session, by explicit session id | Forced-all: skip graceful waits for each session, then perform the authorized legacy/global cleanup |
+
+Resolve the current identity from `OMC_SESSION_ID` in CLI contexts or the
+hook-provided `session_id`. A missing or ambiguous identity for no flags or
+`--force` fails closed: do not aggregate state, choose a discovered session,
+or issue an unscoped cleanup. This is a fail-closed error for the default
+command and for `--force`. `--all` may enumerate known sessions, but every
+concrete id is still read, cancelled, and cleared independently.
 
 ## What It Does
 
-Automatically detects which mode is active and cancels it:
-- **Autopilot**: Stops workflow, preserves progress for resume
-- **Ralph**: Stops the persistence loop
-- **Legacy Ultrawork state**: Cleanup-only removal for upgraded installations; it is not an active workflow
-- **UltraQA (retired)**: No live workflow remains; clears stale pre-5.0.0 `ultraqa-state.json` if present
-- **Ultragoal**: Clears the session-scoped ultragoal runtime guard (`.omc/state/.../ultragoal-state.json`) so PreToolUse `/goal` enforcement and Stop reinforcement release. Durable `.omc/ultragoal/` plan/ledger artifacts are preserved.
-- **Swarm**: Stops coordinated agent swarm, releases claimed tasks
-- **Ultrapilot**: Stops parallel autopilot workers
-- **Pipeline**: Stops sequential agent pipeline
-- **Team**: Requests shutdown from all teammates through the active team/conversation surface, waits for responses/timeouts, clears OMC team state, clears linked ralph if present. Claude Code 2.1.178+ has no TeamDelete.
-- **Team+Ralph (linked)**: Cancels team first (graceful shutdown), then clears ralph state. Cancelling ralph when linked also cancels team first.
+Automatically detects and cancels active modes:
+
+- **Autopilot**: Stops the workflow while preserving progress for resume.
+- **Ralph**: Stops the persistence loop.
+- **Legacy Ultrawork / UltraQA**: Removes stale upgraded-installation state only;
+  neither is a live workflow.
+- **Ultragoal**: Clears its session runtime guard while preserving durable
+  `.omc/ultragoal/` plan and ledger artifacts.
+- **Swarm**: Stops coordinated agents and releases claimed tasks only in its
+  authorized shared cleanup path.
+- **Ultrapilot / Pipeline**: Stops their worker or sequential execution.
+- **Team**: Uses the active team surface for graceful shutdown, then clears
+  session-scoped Team state; forced paths skip waits. Claude Code 2.1.178+ has
+  no `TeamDelete`.
+- **Team + Ralph**: Team is cancelled first, then linked Ralph is cleared in
+  the same session; a Team failure retains linked Ralph.
+- **OMC Teams, Plan Consensus, and Self-Improve**: Use their mode-specific
+  protected cleanup and preserve artifacts designated for resume.
 
 ## Usage
 
-```
+```text
 /oh-my-claudecode:cancel
+/oh-my-claudecode:cancel --force
+/oh-my-claudecode:cancel --all
+/oh-my-claudecode:cancel --force --all
 ```
 
-Or say: "cancelomc", "stopomc"
+Or say: `cancelomc`, `stopomc`.
 
 ## Critical: Deferred Tool Handling
 
-The state management tools (`state_clear`, `state_read`, `state_write`, `state_list_active`,
-`state_get_status`) may be registered as **deferred tools** by Claude Code. Before calling
-any state tool, you MUST first load all of them via `ToolSearch`:
+The state tools (`state_clear`, `state_read`, `state_write`,
+`state_list_active`, `state_get_status`) may be deferred by Claude Code. Before
+calling any of them, load all of them with `ToolSearch`:
 
-```
+```text
 ToolSearch(query="select:mcp__plugin_oh-my-claudecode_t__state_clear,mcp__plugin_oh-my-claudecode_t__state_read,mcp__plugin_oh-my-claudecode_t__state_write,mcp__plugin_oh-my-claudecode_t__state_list_active,mcp__plugin_oh-my-claudecode_t__state_get_status")
 ```
 
-If `state_clear` is unavailable or fails, use this **bash fallback** as an **emergency
-escape from the stop hook loop**. This is NOT a full replacement for the cancel flow —
-it only removes state files to unblock the session. Linked active modes (for example,
-autopilot→ralph) must be cleared separately by running the fallback once per mode.
+If `state_clear` is unavailable or fails, retry the same scoped operation and
+report the failure. The fallback below is only an emergency escape from a
+stop-hook loop for a non-force, non-Team cancellation. It removes files only
+for an explicitly identified current session. Do NOT use this fallback for
+`autopilot`, `team`, or `omc-teams`, or for `--force`/`--all`; never use it to
+bypass a lock, ownership check, corruption, or another state-tool failure.
+Linked modes need one protected operation per mode.
 
-Replace `MODE` with the specific mode (e.g. `ralplan`, `ralph`, `ultrawork`, `ultragoal`).
-
-**WARNING:** Do NOT use this fallback for `autopilot` or `omc-teams`. Autopilot requires
-`state_write(active=false)` to preserve resume data. omc-teams requires tmux session
-cleanup that cannot be done via file deletion alone.
+Replace `MODE` with the specific mode (for example `ralplan`, `ralph`,
+`ultrawork`, or `ultragoal`).
 
 ```bash
-# Fallback: direct file removal when state_clear MCP tool is unavailable
-SESSION_ID="${CLAUDE_SESSION_ID:-${CLAUDECODE_SESSION_ID:-}}"
+# Emergency fallback: direct file removal for one identified session only.
+SESSION_ID="${OMC_SESSION_ID:-${CLAUDE_SESSION_ID:-${CLAUDECODE_SESSION_ID:-}}}"
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { d="$PWD"; while [ "$d" != "/" ] && [ ! -d "$d/.omc" ]; do d="$(dirname "$d")"; done; echo "$d"; })"
-
-# Cross-platform SHA-256 (macOS: shasum, Linux: sha256sum)
 sha256portable() { printf '%s' "$1" | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-16; }
 
-# Resolve state directory (supports OMC_STATE_DIR centralized storage)
 if [ -n "${OMC_STATE_DIR:-}" ]; then
-  # Mirror getProjectIdentifier() from worktree-paths.ts
   SOURCE="$(git remote get-url origin 2>/dev/null || echo "$REPO_ROOT")"
   HASH="$(sha256portable "$SOURCE")"
   DIR_NAME="$(basename "$REPO_ROOT" | sed 's/[^a-zA-Z0-9_-]/_/g')"
   OMC_STATE="$OMC_STATE_DIR/${DIR_NAME}-${HASH}/state"
-  [ ! -d "$OMC_STATE" ] && { echo "ERROR: State dir not found at $OMC_STATE" >&2; exit 1; }
 elif [ "$REPO_ROOT" != "/" ] && [ -d "$REPO_ROOT/.omc" ]; then
   OMC_STATE="$REPO_ROOT/.omc/state"
 else
-  echo "ERROR: Could not locate .omc state directory" >&2
-  exit 1
+  echo "ERROR: Could not locate .omc state directory" >&2; exit 1
 fi
-MODE="ralplan"  # <-- replace with the target mode
+[ -d "$OMC_STATE" ] || { echo "ERROR: State dir not found at $OMC_STATE" >&2; exit 1; }
+MODE="ralplan" # replace with the target mode
+[ -n "$SESSION_ID" ] || { echo "ERROR: current session identity is required; refusing unscoped fallback" >&2; exit 1; }
 
-# Clear session-scoped state for the specific mode
-if [ -n "$SESSION_ID" ] && [ -d "$OMC_STATE/sessions/$SESSION_ID" ]; then
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-state.json"
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-stop-breaker.json"
-  rm -f "$OMC_STATE/sessions/$SESSION_ID/skill-active-state.json"
-  # Write cancel signal so stop hook detects cancellation in progress
+if [ -d "$OMC_STATE/sessions/$SESSION_ID" ]; then
+  rm -f "$OMC_STATE/sessions/$SESSION_ID/${MODE}-state.json" \
+    "$OMC_STATE/sessions/$SESSION_ID/${MODE}-stop-breaker.json" \
+    "$OMC_STATE/sessions/$SESSION_ID/skill-active-state.json"
   NOW_ISO="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  EXPIRES_ISO="$(date -u -d "+30 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || python3 - <<'PY'\nfrom datetime import datetime, timedelta, timezone\nprint((datetime.now(timezone.utc) + timedelta(seconds=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))\nPY\n)"
+  EXPIRES_ISO="$(date -u -d "+30 seconds" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || python3 - <<'PY'
+from datetime import datetime, timedelta, timezone
+print((datetime.now(timezone.utc) + timedelta(seconds=30)).strftime('%Y-%m-%dT%H:%M:%SZ'))
+PY
+)"
   printf '{"active":true,"requested_at":"%s","expires_at":"%s","mode":"%s","source":"bash_fallback"}' \
     "$NOW_ISO" "$EXPIRES_ISO" "$MODE" > "$OMC_STATE/sessions/$SESSION_ID/cancel-signal-state.json"
 fi
-
-# Clear legacy state only if no session ID (avoid clearing another session's state)
-if [ -z "$SESSION_ID" ]; then
-  rm -f "$OMC_STATE/${MODE}-state.json"
-fi
 ```
 
-## Auto-Detection
+## Cancellation Flow
 
-`/oh-my-claudecode:cancel` follows the session-aware state contract:
-- By default the command inspects the current session via `state_list_active` and `state_get_status`, navigating `.omc/state/sessions/{sessionId}/…` to discover which mode is active.
-- When a session id is provided or already known, that session-scoped path is authoritative. Legacy files in `.omc/state/*.json` are consulted only as a compatibility fallback if the session id is missing or empty.
-- Swarm is a shared SQLite/marker mode (`.omc/state/swarm.db` / `.omc/state/swarm-active.marker`) and is not session-scoped.
-- The default cleanup flow calls `state_clear` with the session id to remove only the matching session files; modes stay bound to their originating session.
-
-Active modes are still cancelled in dependency order:
-1. Autopilot (includes linked ralph and retired-state cleanup)
-2. Ralph
-3. Legacy Ultrawork/UltraQA state cleanup
-4. Ultragoal (standalone runtime guard — `state_clear(mode="ultragoal")`; preserves durable `.omc/ultragoal/` artifacts)
-5. Swarm (standalone)
-6. Ultrapilot (standalone)
-7. Pipeline (standalone)
-8. Team (Claude Code native)
-9. OMC Teams (tmux CLI workers)
-10. Plan Consensus (standalone)
-11. Self-Improve (standalone — clear state, clean orphaned worktrees, preserve iteration_state for resume, set status: "user_stopped" in the resolved `<self-improve-root>/state/agent-settings.json`; new runs use `.omc/self-improve/topics/<topic-slug>/`, with flat `.omc/self-improve/` retained only for legacy single-track resumes)
-
-## Force Clear All
-
-Use `--force` or `--all` when you need to erase every session plus legacy artifacts, e.g., to reset the workspace entirely.
-
-```
-/oh-my-claudecode:cancel --force
-```
-
-```
-/oh-my-claudecode:cancel --all
-```
-
-Steps under the hood:
-1. `state_list_active` enumerates `.omc/state/sessions/{sessionId}/…` to find every known session.
-2. `state_clear` runs once per session to drop that session’s files.
-3. A global `state_clear` without `session_id` removes legacy files under `.omc/state/*.json`, `.omc/state/swarm*.db`, and compatibility artifacts (see list).
-4. Team artifacts (`~/.claude/teams/*/`, `~/.claude/tasks/*/`, `.omc/state/team-state.json`) are best-effort cleared as part of the legacy fallback.
-   - Cancel for native team does NOT affect omc-teams state, and vice versa.
-
-Every `state_clear` command honors the `session_id` argument, so even force mode still uses the session-aware paths first before deleting legacy files.
-
-Legacy compatibility list (removed only under `--force`/`--all`):
-- `.omc/state/autopilot-state.json`
-- `.omc/state/ralph-state.json`
-- `.omc/state/ralph-plan-state.json`
-- `.omc/state/ralph-verification.json`
-- `.omc/state/ultrawork-state.json`
-- `.omc/state/ultraqa-state.json`
-- `.omc/state/swarm.db`
-- `.omc/state/swarm.db-wal`
-- `.omc/state/swarm.db-shm`
-- `.omc/state/swarm-active.marker`
-- `.omc/state/swarm-tasks.db`
-- `.omc/state/ultrapilot-state.json`
-- `.omc/state/ultrapilot-ownership.json`
-- `.omc/state/pipeline-state.json`
-- `.omc/state/omc-teams-state.json`
-- `.omc/state/plan-consensus.json`
-- `.omc/state/ralplan-state.json`
-- `.omc/state/boulder.json`
-- `.omc/state/hud-state.json`
-- `.omc/state/subagent-tracking.json`
-- `.omc/state/subagent-tracker.lock`
-- `.omc/state/rate-limit-daemon.pid`
-- `.omc/state/rate-limit-daemon.log`
-- `.omc/state/checkpoints/` (directory)
-- `.omc/state/sessions/` (empty directory cleanup after clearing sessions)
-
-## Implementation Steps
-
-When you invoke this skill:
+This is the authoritative procedure for every invocation.
 
 ### 1. Parse Arguments
 
+Parse exact flags independently; unknown or near-match arguments do nothing:
+
 ```bash
-# Check for --force or --all flags
 FORCE_MODE=false
-if [[ "$*" == *"--force"* ]] || [[ "$*" == *"--all"* ]]; then
-  FORCE_MODE=true
-fi
+ALL_MODE=false
+for arg in "$@"; do
+  case "$arg" in
+    --force) FORCE_MODE=true ;;
+    --all) ALL_MODE=true ;;
+  esac
+done
+SCOPE="current"
+if [[ "$ALL_MODE" == true ]]; then SCOPE="all"; fi
+GRACEFUL_MODE=true
+if [[ "$FORCE_MODE" == true ]]; then GRACEFUL_MODE=false; fi
 ```
+
+The parsed values select exactly one row in the contract above.
 
 ### 2. Detect Active Modes
 
-The skill now relies on the session-aware state contract rather than hard-coded file paths:
-1. Call `state_list_active` to enumerate `.omc/state/sessions/{sessionId}/…` and discover every active session.
-2. For each session id, call `state_get_status` to learn which active mode is running and whether dependent modes exist; treat any Ultrawork record as retired cleanup input only.
-3. If a `session_id` was supplied to `/oh-my-claudecode:cancel`, skip legacy fallback entirely and operate solely within that session path; otherwise, consult legacy files in `.omc/state/*.json` only if the state tools report no active session. Swarm remains a shared SQLite/marker mode outside session scoping.
-4. Any cancellation logic in this doc mirrors the dependency order discovered via state tools (autopilot → ralph → …).
+1. For no flags or `--force`, require one unambiguous current session id and
+   call `state_list_active(session_id="<current_session_id>")`. Its scoped
+   result is authoritative; never use an aggregate result to infer ownership.
+2. For `--all`, call `state_list_active(all=true)` once and retain every
+   concrete session id. Discovery enumerates targets; it is not a Team read.
+3. For each selected id, call
+   `state_get_status(mode="<mode>", session_id="<session_id>")` before mode
+   cleanup. Treat Ultrawork as retired cleanup input.
+4. Pass the selected id to every read, write, and clear. Protected state tools
+   enforce the shared mutation lock and ownership boundary; no flag bypasses
+   either one.
 
-### 3A. Force Mode (if --force or --all)
+Use this dependency order when several modes appear in one scoped status:
 
-Use force mode to clear every session plus legacy artifacts via `state_clear`. Direct file removal is reserved for legacy cleanup when the state tools report no active sessions.
+1. Autopilot (including its linked Ralph and retired-state cleanup)
+2. Standalone Ralph
+3. Retired Ultrawork and UltraQA
+4. Ultragoal runtime guard
+5. Shared Swarm state (global pass only)
+6. Ultrapilot and Pipeline
+7. Native Team
+8. Legacy OMC Teams
+9. Plan Consensus and Self-Improve
 
-### 3B. Smart Cancellation (default)
+Ralph linked to Team is excluded from the standalone step and is handled only
+after Team succeeds; this prevents the persistence loop from outliving workers.
 
-#### If Team Active (Claude Code implicit team)
+### 3. Cancel Each Selected Session
 
-Teams are detected through OMC team state, not removed Claude Code `~/.claude/teams` config directories:
+Process each selected session independently in this dependency order. A failed
+or unresolved scoped operation marks that session unsuccessful: retain affected
+state/runtime records, report the scope and reason, and do not claim linked
+cleanup. An `--all` run may continue other ids, but any such failure blocks the
+final global pass.
+
+**Autopilot (primary first)**
+
+1. Read the exact session state, including `workflowRunId` when present.
+2. Pause only that run with `state_write(mode="autopilot", session_id="<session_id>", active=false, state={workflowRunId: "<exact run id>"})`; do not replay the readback. The state tool revalidates workflow integrity under its mutation lock.
+3. If the primary write fails, stop this session's dependent cleanup. Otherwise,
+   clear only same-session named-workflow
+   `state_clear(mode="ralplan", session_id="<session_id>")`, then linked Ralph,
+   then retired UltraQA. Preserve the paused primary for resume when a
+   dependent clear fails. Force mode keeps this primary-first ordering.
+
+The primary pause preserves workflow, pipeline tracking, and task identity. A
+`target_state_sha256` may be supplied only when it is the exact hash of the
+current serialized state. Never clear nested `ralplan`, linked state, cancel
+signals, or runtime artifacts after a failed primary write; report the exact
+dependent failure and retry it in the same session.
+
+**Team (native Claude Code)**
+
+1. Read `state_read(mode="team", session_id="<session_id>")` and obtain the
+   captured team name and active worker labels. Never select a Team from an
+   aggregate read.
+2. On graceful paths, signal each named teammate through the active surface,
+   wait up to 15 seconds per member, then reconcile for 5 more seconds. Record
+   acknowledgements and timeouts. Forced paths skip both waits.
+3. After graceful confirmation/timeouts (or immediately when forced), clear
+   `state_clear(mode="team", session_id="<session_id>")`. If the protected
+   clear fails for lock, ownership, corruption, or another reason, retain Team
+   runtime records and linked Ralph; do not use an unscoped clear or fallback.
+4. Only after Team clear succeeds, inspect linked Ralph and clear it with the
+   same session id (`state_read(mode="ralph", session_id="<session_id>")` then
+   `state_clear(mode="ralph", session_id="<session_id>")`). For legacy
+   `omc team` / `/omc-teams` workers, run the
+   captured team-name orphan scan after state cleanup; native Team has no
+   `TeamDelete`.
+
+Report the team name, signaled members, responses, timeouts, whether Team and
+linked Ralph state cleared, and any manual cleanup needed. A graceful timeout
+is recorded separately; only an unresolved protected operation blocks the global
+pass. The legacy orphan scan is limited to the captured name and must not
+terminate an uncaptured native Team or delete a `~/.claude/teams` root.
+
+The legacy scan, when applicable, is:
 
 ```bash
-# Check for active OMC team state
-state_read(mode="team")
+node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" \
+  --team-name "<captured_team_name>"
 ```
 
-**Two-pass cancellation protocol:**
+Use `--dry-run` to inspect without terminating workers. This scan is not a
+substitute for the protected Team clear and is never inferred from a
+name-prefix match.
 
-**Pass 1: Graceful Shutdown**
-```
-For the active OMC team state:
-  1. Read team_name and worker labels from OMC state/handoffs/task bookkeeping
-  2. For each active teammate:
-     a. Ask or notify the named teammate through the active conversation/team messaging surface
-     b. Wait up to 15 seconds for shutdown_response
-     c. If response received: mark member acknowledged
-     d. If timeout: mark member as unresponsive, continue to next
-  3. Log: "Graceful pass: X/Y members responded"
-```
+**Linked Ralph context**
 
-**Pass 2: Reconciliation**
-```
-After graceful pass:
-  1. Wait 5 more seconds for unresponsive teammates that may still be processing
-  2. Record any remaining unresponsive teammates in the cancellation report
-  3. Do not call TeamDelete; Claude Code 2.1.178+ removed per-team native cleanup
-```
+If cancellation starts while Ralph is linked, apply the same Team-first
+ordering. Never clear Ralph before a linked Team has been successfully handled;
+if Team fails, Ralph remains protected. Both operations use the selected id.
 
-**OMC State Cleanup:**
-```
-  1. Clear team state: state_clear(mode="team")
-  2. Check for linked ralph: state_read(mode="ralph") — if linked_team is true:
-     a. Clear ralph state: state_clear(mode="ralph")
-  3. Run OMC tmux/CLI orphan scan only for legacy `omc team` / `/omc-teams` workers (see below)
-  4. Emit structured cancel report
-```
+**Other modes**
 
-**Orphan Detection (Post-Cleanup):**
+- Standalone Ralph: `state_clear(mode="ralph", session_id="<session_id>")`.
+- Retired Ultrawork: `state_clear(mode="ultrawork", session_id="<session_id>")`
+  only for the stale scoped record; never reactivate or route it.
+- Retired UltraQA: `state_clear(mode="ultraqa", session_id="<session_id>")`
+  only for stale pre-5.0.0 state.
+- Ultragoal: `state_clear(mode="ultragoal", session_id="<session_id>")` clears
+  only its runtime guard; preserve `.omc/ultragoal/` artifacts.
+- Ultrapilot, Pipeline, Plan Consensus, and Self-Improve: use their protected
+  session-scoped clear and mode-specific resume/artifact rules.
+- Swarm and other shared state are not guessed from a session; process them in
+  the authorized global pass only. OMC Teams use their own tmux/runtime cleanup.
 
-For legacy OMC tmux/CLI worker runs, verify no worker processes remain:
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" --team-name "{team_name}"
-```
+Self-Improve cleanup clears its resolved state and orphaned worktrees while
+preserving `iteration_state` and recording `status: "user_stopped"` in the
+resolved `agent-settings.json`. New topic roots are not replaced by a flat
+legacy root. OMC Teams are cleaned through their own captured tmux/runtime
+records, never as native Team state; clear `omc-teams` only through that
+mode's protected session operation.
 
-The orphan scanner:
-1. Checks `ps aux` (Unix) or `tasklist` (Windows) for OMC worker processes with `--team-name` matching the cleaned-up team
-2. Sends SIGTERM, waits 5s, sends SIGKILL if still alive
-3. Reports cleanup results as JSON
+Finally, clear `state_clear(mode="skill-active", session_id="<session_id>")` as
+the last scoped operation. A failure also makes that session unresolved.
 
-Use `--dry-run` to inspect without killing. The scanner is safe to run multiple times.
+### 4. Authorized Global Pass
 
-**Structured Cancel Report:**
-```
-Team "{team_name}" cancelled:
-  - Members signaled: N
-  - Responses received: M
-  - Unresponsive: K (list names if any)
-  - OMC state cleared: yes/no
-  - Manual cleanup needed: yes/no
-    Path: OMC team state / tmux worker processes, if any
+The global pass is allowed only for `--all`, after every concrete session id is
+attempted successfully and has completed its scoped flow, including the final
+`skill-active` clear. If any session operation failed or remains unresolved,
+report partial completion and omit this pass. Never replace a failed scoped
+operation with a global retry.
+If all-session enumeration itself fails, returns an ambiguous id, or cannot
+capture a Team owner, treat the affected scope as unresolved and stop before
+any unscoped operation. A legacy-only entry may be reported, but it does not
+authorize guessing a current session or deleting a native Team root.
+
+Use protected state tools for the explicit pass, for example:
+
+```text
+state_clear(mode="<legacy-mode>")  # no session_id: --all authorization only
 ```
 
-**Implementation note:** The cancel skill is executed by the LLM, not as a bash script. When you detect an active team:
-1. Read `state_read(mode="team")` to find the active OMC team
-2. Identify active named teammates from state, handoffs, or task bookkeeping
-3. For each teammate, ask or notify the named teammate through the active conversation/team messaging surface
-4. Wait briefly for shutdown responses (15s per member timeout)
-5. Record unresponsive teammates after a reconciliation wait
-6. Clear team state: `state_clear(mode="team", session_id)`
-7. Report structured summary to user
+An unscoped `state_clear` is not a legacy-only API: it can revisit session
+state as well as legacy/shared artifacts. Restrict it to the compatibility
+paths explicitly authorized for this pass, including legacy mode JSON, Swarm
+databases/markers, checkpoints, and shared OMC worker registries. Do not clear
+native Claude roots or any Team root whose owner was not successfully captured
+and cleared; uncaptured Team roots remain protected. Report global cleanup
+failures separately from scoped session failures.
 
-#### If Autopilot Active
+The explicit compatibility set is:
 
-Autopilot handles its own primary-first cleanup: named workflows additionally remove only their session-owned nested ralplan enforcement state before linked ralph and retired ultraqa cleanup.
+- `.omc/state/{autopilot,ralph,ralph-plan,ralph-verification}-state.json`
+- `.omc/state/{ultrawork,ultraqa,ultrapilot,pipeline,omc-teams}-state.json`
+- `.omc/state/{ultrapilot-ownership,plan-consensus,ralplan,boulder,hud}.json`
+- `.omc/state/subagent-tracking.json` and `.omc/state/subagent-tracker.lock`
+- `.omc/state/{swarm.db,swarm.db-wal,swarm.db-shm,swarm-active.marker,swarm-tasks.db}`
+- `.omc/state/{rate-limit-daemon.pid,rate-limit-daemon.log}`
+- `.omc/state/checkpoints/` and an empty `.omc/state/sessions/` directory
+- shared legacy Team bridge heartbeats and
+  `.omc/state/team-mcp-workers.json`, only after captured owners succeed
 
-1. Read autopilot state via `state_read(mode="autopilot", session_id)` to capture the exact current run, including `workflowRunId` when present.
-2. Pause that exact run with the narrow mutation `state_write(mode="autopilot", session_id, active=false, state={workflowRunId: "<exact run id>"})`. Do **not** replay or copy the state readback. On Linux with `flock`, the tool revalidates the held run and workflow integrity under its mutation lock before changing only `active` to `false`; it preserves workflow, pipeline tracking, and task identity. `target_state_sha256` may be included only when it is the exact SHA-256 of the current serialized state.
-   - If this write fails, stop immediately. Do not clear nested ralplan, linked state, cancel signals, or runtime artifacts.
-3. For a named workflow, clear only `ralplan` state owned by the same `session_id`; never clear another session's standalone ralplan state. Record a failure but keep the paused primary resumable.
-4. Only after the primary pause commits, check linked ralph via `state_read(mode="ralph", session_id)`:
-   - Clear ralph and require success.
-5. Check for retired ultraqa state via `state_read(mode="ultraqa", session_id)` and clear it if present.
-6. Report every dependent clear failure explicitly; the already-paused autopilot state remains resumable and cleanup may be retried.
+These names expand to the following legacy records (and no session-owned
+replacement): `autopilot-state.json`, `ralph-state.json`,
+`ralph-plan-state.json`, `ralph-verification.json`, `ultrawork-state.json`,
+`ultraqa-state.json`, `ultrapilot-state.json`, `ultrapilot-ownership.json`,
+`pipeline-state.json`, `omc-teams-state.json`, `plan-consensus.json`,
+`ralplan-state.json`, `boulder.json`, `hud-state.json`,
+`subagent-tracking.json`, and `subagent-tracker.lock`.
 
-Force cancellation follows the same primary-first rule for every autopilot group: clear the exact autopilot primary first, abort its dependent cleanup if the primary clear fails, and never continue as though that group succeeded.
+Shared database compatibility records are `swarm.db`, `swarm.db-wal`,
+`swarm.db-shm`, `swarm-active.marker`, and `swarm-tasks.db`; daemon records
+are `rate-limit-daemon.pid` and `rate-limit-daemon.log`. Checkpoints are
+removed only as part of this authorized global pass.
 
-#### If Ralph Active (but not Autopilot)
+Do not interpret this list as permission to remove arbitrary files under
+`.omc/state`, `~/.claude/teams`, or `~/.claude/tasks`. Unlisted or uncaptured
+Team/runtime records remain for inspection and future ownership resolution.
 
-1. Clear ralph: `state_clear(mode="ralph", session_id)`
+The global pass must retain the same lock and ownership checks as scoped
+operations. It may continue recording an error for one compatibility item
+after the per-session gate opens, but must report that global failure and never
+claim a complete reset. It must not delete durable Autopilot, Ultragoal,
+Self-Improve, or Team handoff artifacts merely because they share a directory.
 
-#### If Legacy Ultrawork State Exists
+If no active mode is found in the selected scope, report: “No active OMC modes
+detected.” For a current-session command, do not silently broaden that result;
+use `--all` to enumerate other sessions and perform the global pass.
 
-1. Read Ultrawork state only to identify a stale upgraded-installation record.
-2. Clear it with `state_clear(mode="ultrawork", session_id)`; never reactivate or route it.
+## Preserved State
 
-#### If UltraQA State Present (retired)
+| Mode | Cancellation result |
+|---|---|
+| Autopilot | `active=false` with progress, phase, plan, and verdicts preserved |
+| Ralph, Ultrawork, UltraQA, Swarm, Ultrapilot, Pipeline | State cleared when the protected scoped/global operation succeeds |
+| Ultragoal | Runtime guard cleared; durable plan/ledger preserved |
+| Team | Handoffs and uncaptured runtime roots preserved; selected state cleared only after its flow |
+| Plan Consensus / Self-Improve | Mode-specific resume/artifact records preserved as documented by the mode |
 
-UltraQA was retired in 5.0.0. No live workflow exists; if a stale
-`ultraqa-state.json` remains from a pre-5.0.0 run, clear it directly:
-`state_clear(mode="ultraqa", session_id)`
+Autopilot can resume with `/oh-my-claudecode:autopilot`; Ultragoal's durable
+plan and ledger can resume through `/ultragoal`. Ralph and retired state do not
+provide a resume path. Team handoffs remain available for a later scoped
+resume, while shared Swarm and legacy records require explicit authorization.
 
-#### If Ultragoal Active (standalone)
-
-Clear the runtime guard only: `state_clear(mode="ultragoal", session_id)`.
-Durable `.omc/ultragoal/{brief.md,goals.json,ledger.jsonl}` artifacts are preserved.
-
-#### No Active Modes
-
-Report: "No active OMC modes detected. Use --force to clear all state files anyway."
-
-## Implementation Notes
-
-The cancel skill runs as follows:
-1. Parse the `--force` / `--all` flags, tracking whether cleanup should span every session or stay scoped to the current session id.
-2. Use `state_list_active` to enumerate known session ids and `state_get_status` to learn each active mode; treat any Ultrawork record as cleanup-only legacy state.
-3. When operating in default mode, call `state_clear` with that session_id to remove only the session’s files, then run mode-specific cleanup (autopilot → ralph → …) based on the state tool signals.
-4. In force mode, iterate every active session, call `state_clear` per session, then run a global `state_clear` without `session_id` to drop legacy files (`.omc/state/*.json`, compatibility artifacts) and report success. Swarm remains a shared SQLite/marker mode outside session scoping.
-5. Team artifacts (`~/.claude/teams/*/`, `~/.claude/tasks/*/`, `.omc/state/team-state.json`) remain best-effort cleanup items invoked during the legacy/global pass.
-6. **Always** clear skill-active state as the final step, regardless of which mode was active or whether `--force` was used:
-   ```
-   state_clear(mode="skill-active", session_id)
-   ```
-   This ensures the stop hook does not keep firing skill-protection reinforcements after cancel due to a stale `skill-active-state.json`. See issue #2118.
-
-State tools always honor the `session_id` argument, so even force mode still clears the session-scoped paths before deleting compatibility-only legacy state.
-
-Mode-specific subsections below describe what extra cleanup each handler performs after the state-wide operations finish.
-## Messages Reference
-
-| Mode | Success Message |
-|------|-----------------|
-| Autopilot | "Autopilot cancelled at phase: {phase}. Progress preserved for resume." |
-| Ralph | "Ralph cancelled. Persistent mode deactivated." |
-| Legacy Ultrawork state | "Retired Ultrawork state removed." |
-| Legacy UltraQA state | "Retired UltraQA state cleared." |
-| Ultragoal | "Ultragoal cancelled. Runtime /goal guard released; durable plan/ledger preserved." |
-| Swarm | "Swarm cancelled. Coordinated agents stopped." |
-| Ultrapilot | "Ultrapilot cancelled. Parallel autopilot workers stopped." |
-| Pipeline | "Pipeline cancelled. Sequential agent chain stopped." |
-| Team | "Team cancelled. Teammates shut down and cleaned up." |
-| Plan Consensus | "Plan Consensus cancelled. Planning session ended." |
-| Force | "All OMC modes cleared. You are free to start fresh." |
-| None | "No active OMC modes detected." |
-
-## What Gets Preserved
-
-| Mode | State Preserved | Resume Command |
-|------|-----------------|----------------|
-| Autopilot | Yes (phase, files, spec, plan, verdicts) | `/oh-my-claudecode:autopilot` |
-| Ralph | No | N/A |
-| Ultrawork | No | N/A |
-| Ultragoal | Yes (durable plan/ledger under `.omc/ultragoal/`) | Resume via `/ultragoal` / `omc ultragoal complete-goals` |
-| Swarm | No | N/A |
-| Ultrapilot | No | N/A |
-| Pipeline | No | N/A |
-| Plan Consensus | Yes (plan file path preserved) | N/A |
-
-## Notes
-
-- **Dependency-aware**: Autopilot cancellation cleans up Ralph and any retired ultraqa state
-- **Local-only**: Clears state files in `.omc/state/` directory
-- **Resume-friendly**: Autopilot state is preserved for seamless resume
-- **Team-aware**: Detects native Claude Code teams and performs graceful shutdown
+Cancellation reports should identify the selected scope, modes observed,
+successful and failed operations, skipped waits, and any retained records.
+Do not turn a timeout, missing identity, lock conflict, ownership mismatch, or
+malformed state into a success message. A successful current-session report
+does not imply that another session or a shared legacy artifact was touched.
 
 ## MCP Worker Cleanup
 
-When cancelling modes that may have spawned MCP workers (team bridge daemons), the cancel skill should also:
+For selected-session cancellation, inspect only the captured team's
+`.omc/state/team-bridge/{team}/*.heartbeat.json` records and capture exact worker
+handles before state cleanup. Send shutdown signals and terminate only those
+exact tmux session identifiers, not sessions selected by name prefix. If ownership
+or identity cannot be established, retain the records and report manual cleanup.
+Remove their heartbeat/registry entries only after protected cleanup succeeds.
 
-1. **Check for active MCP workers**: Look for heartbeat files at `.omc/state/team-bridge/{team}/*.heartbeat.json`
-2. **Send shutdown signals**: Write shutdown signal files for each active worker
-3. **Kill tmux sessions**: Run `tmux kill-session -t omc-team-{team}-{worker}` for each worker
-4. **Clean up heartbeat files**: Remove all heartbeat files for the team
-5. **Clean up shadow registry**: Remove `.omc/state/team-mcp-workers.json`
-
-### Force Clear Addition
-
-When `--force` is used, also clean up:
-```bash
-rm -rf .omc/state/team-bridge/       # Heartbeat files
-rm -f .omc/state/team-mcp-workers.json  # Shadow registry
-# Kill all omc-team-* tmux sessions
-tmux list-sessions -F '#{session_name}' 2>/dev/null | grep '^omc-team-' | while read s; do tmux kill-session -t "$s" 2>/dev/null; done
-```
+After every concrete session succeeds, the authorized `--all` global runtime
+cleanup may remove shared legacy bridge state for captured Team names. Populate
+`CAPTURED_TEAM_NAMES` only from successful scoped Team reads; retain every
+uncaptured registry/root. Use the exact captured worker identities for shutdown;
+a team-name prefix is not ownership evidence. Remove only matching bridge
+records and registry entries after their cleanup succeeds.

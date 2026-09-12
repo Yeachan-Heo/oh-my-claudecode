@@ -88,8 +88,10 @@ Smart cancellation that auto-detects active mode.
 
 **Usage:** `/cancel` or just say "cancelomc", "stopomc"
 
-Auto-detects and cancels: autopilot, ralph, ultrawork, pipeline
-Use `--force` or `--all` to clear ALL states.
+Auto-detects and cancels: autopilot, ralph, ultrawork, pipeline, team
+Use `--force` to skip graceful waits in the current session without widening scope.
+Use `--all` to cancel across sessions; combine `--force --all` for forced cancellation across sessions.
+Neither flag bypasses state locks or ownership checks.
 
 ## Verification Module (v3.4)
 

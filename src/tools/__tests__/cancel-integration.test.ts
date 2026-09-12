@@ -165,8 +165,8 @@ describe('cancel-integration', () => {
     });
   });
 
-  describe('2. Force cancel (no session_id)', () => {
-    it('should clear ALL files across all sessions plus legacy', async () => {
+  describe('2. Explicit all-session cancel (no session_id)', () => {
+    it('should clear all known sessions plus legacy when session_id is omitted', async () => {
       const sessions = ['session-a', 'session-b', 'session-c'];
 
       // Create state files in 3 different session directories
@@ -197,7 +197,7 @@ describe('cancel-integration', () => {
         JSON.stringify({ active: true, _meta: { sessionId: 'cancel-integration-home' } })
       );
 
-      // Clear without session_id (force/broad clear)
+      // Clear without session_id for the explicit all-session scope.
       const result = await stateClearTool.handler({
         mode: 'ralph',
         workingDirectory: TEST_DIR,
@@ -438,7 +438,67 @@ describe('cancel-integration', () => {
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team-state.json'))).toBe(true);
     });
 
-    it('should remove all team runtime roots on broad team clear', async () => {
+    it('should clear only the selected Team session and runtime', async () => {
+      const sessionA = 'team-cancel-scoped-a';
+      const sessionB = 'team-cancel-scoped-b';
+      const teamA = 'scoped-team-a';
+      const teamB = 'scoped-team-b';
+      const sessionDirA = join(TEST_DIR, '.omc', 'state', 'sessions', sessionA);
+      const sessionDirB = join(TEST_DIR, '.omc', 'state', 'sessions', sessionB);
+      const runtimeRootA = join(TEST_DIR, '.omc', 'state', 'team', teamA);
+      const runtimeRootB = join(TEST_DIR, '.omc', 'state', 'team', teamB);
+      mkdirSync(sessionDirA, { recursive: true });
+      mkdirSync(sessionDirB, { recursive: true });
+      mkdirSync(join(runtimeRootA, 'tasks'), { recursive: true });
+      mkdirSync(join(runtimeRootB, 'tasks'), { recursive: true });
+
+      writeFileSync(
+        join(sessionDirA, 'team-state.json'),
+        JSON.stringify({ active: true, team_name: teamA, _meta: { sessionId: sessionA } })
+      );
+      writeFileSync(
+        join(sessionDirB, 'team-state.json'),
+        JSON.stringify({ active: true, team_name: teamB, _meta: { sessionId: sessionB } })
+      );
+      writeFileSync(join(runtimeRootA, 'tasks', 'task-a.json'), JSON.stringify({ status: 'running' }));
+      writeFileSync(join(runtimeRootB, 'tasks', 'task-b.json'), JSON.stringify({ status: 'running' }));
+      writeFileSync(
+        join(TEST_DIR, '.omc', 'state', 'mission-state.json'),
+        JSON.stringify({
+          updatedAt: new Date().toISOString(),
+          missions: [
+            { id: `team:${teamA}`, source: 'team', teamName: teamA, name: teamA },
+            { id: `team:${teamB}`, source: 'team', teamName: teamB, name: teamB },
+          ],
+        })
+      );
+
+      await stateClearTool.handler({
+        mode: 'team',
+        session_id: sessionA,
+        workingDirectory: TEST_DIR,
+      });
+
+      expect(existsSync(join(sessionDirA, 'team-state.json'))).toBe(false);
+      expect(existsSync(join(runtimeRootA, 'tasks', 'task-a.json'))).toBe(false);
+      expect(existsSync(join(sessionDirB, 'team-state.json'))).toBe(true);
+      expect(existsSync(join(runtimeRootB, 'tasks', 'task-b.json'))).toBe(true);
+
+      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
+      expect(missionState.missions).toEqual([
+        { id: `team:${teamB}`, source: 'team', teamName: teamB, name: teamB },
+      ]);
+    });
+
+    it('should remove runtime roots for all captured Team sessions', async () => {
+      for (const teamName of ['alpha-team', 'beta-team']) {
+        const sessionId = `${teamName}-session`;
+        const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
+        mkdirSync(sessionDir, { recursive: true });
+        writeFileSync(join(sessionDir, 'team-state.json'), JSON.stringify({
+          active: true, team_name: teamName, session_id: sessionId,
+        }));
+      }
       mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'alpha-team'), { recursive: true });
       mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'beta-team'), { recursive: true });
       writeFileSync(
@@ -458,15 +518,37 @@ describe('cancel-integration', () => {
         workingDirectory: TEST_DIR,
       });
 
-      expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team'))).toBe(false);
+      for (const teamName of ['alpha-team', 'beta-team']) {
+        expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team', teamName))).toBe(false);
+        expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', `${teamName}-session`, 'team-state.json'))).toBe(false);
+      }
 
       const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
       expect(missionState.missions).toEqual([
         { id: 'session:keep', source: 'session', name: 'keep-session' },
       ]);
 
-      expect(result.content[0].text).toContain('Team runtime roots removed: 1');
+      expect(result.isError).not.toBe(true);
+      expect(result.content[0].text).toContain('Team runtime roots removed: 2');
       expect(result.content[0].text).toContain('HUD mission entries pruned: 2');
+    });
+
+    it('preserves uncaptured Team runtime and HUD records during aggregate clear', async () => {
+      const runtimeRoot = join(TEST_DIR, '.omc', 'state', 'team', 'uncaptured-team');
+      const taskPath = join(runtimeRoot, 'task.json');
+      const missionPath = join(TEST_DIR, '.omc', 'state', 'mission-state.json');
+      mkdirSync(runtimeRoot, { recursive: true });
+      writeFileSync(taskPath, '{"status":"in_progress"}');
+      writeFileSync(missionPath, JSON.stringify({
+        missions: [{ source: 'team', teamName: 'uncaptured-team' }],
+      }));
+      const taskBytes = readFileSync(taskPath);
+      const missionBytes = readFileSync(missionPath);
+
+      await stateClearTool.handler({ mode: 'team', workingDirectory: TEST_DIR });
+
+      expect(readFileSync(taskPath)).toEqual(taskBytes);
+      expect(readFileSync(missionPath)).toEqual(missionBytes);
     });
   });
 });

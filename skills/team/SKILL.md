@@ -75,8 +75,8 @@ User: "/team 3:executor fix all TypeScript errors"
               +-- Completion
                       -> request shutdown from each teammate through the active team surface
                       <- shutdown acknowledgement from teammates
-                      -> clear OMC team state (no TeamDelete call)
-                      -> rm .omc/state/team-state.json
+                      -> state_clear(mode="team", session_id="<current_session_id>")
+                      -> preserve shared/legacy state for explicit --all cleanup
 ```
 
 **Native Claude Code team model (2.1.178+):**
@@ -192,7 +192,9 @@ The lead writes handoffs to `.omc/handoffs/<stage-name>.md`.
 ### Resume and Cancel Semantics
 
 - **Resume:** restart from the last non-terminal stage using staged state + live task status. Read `.omc/handoffs/` to recover stage transition context.
-- **Cancel:** `/oh-my-claudecode:cancel` requests teammate shutdown, waits for responses (best effort), marks phase `cancelled` with `active=false`, captures cancellation metadata, then deletes team resources and clears/preserves Team state per policy. Handoff files in `.omc/handoffs/` are preserved for potential resume.
+- **Cancel:** use the authoritative flow in
+  `skills/cancel/SKILL.md`; do not duplicate its flag, scope, or state-cleanup
+  rules here. Handoff files in `.omc/handoffs/` are preserved for resume.
 - Terminal states are `complete`, `failed`, and `cancelled`.
 
 ## Windows psmux tmux-compatible gate
@@ -207,6 +209,22 @@ Before blocking or falling back on Windows:
 4. Only when no tmux-compatible binary is available, tell the user to install psmux for native Windows support or use WSL2 as an alternative.
 
 ## Workflow
+
+### Resume Check (Before Initialization)
+
+Resolve the current session identity from the invocation context before touching Team state. In CLI contexts, `OMC_SESSION_ID` is authoritative; in hook contexts, the payload's `session_id` is authoritative. When an identity is available, pass it explicitly and consistently:
+
+```
+state_read(mode="team", session_id="<current_session_id>")
+```
+
+`state_read` without `session_id` reads legacy/aggregate state and may include other sessions. Never select or resume a Team from an unscoped aggregate response. If no identity is available, use only an explicitly identified legacy state; never infer ownership from session entries in an aggregate response.
+
+Read existing session state before deriving a slug, decomposing work, or writing/initializing state. If `active=true` and `current_phase` is non-terminal, resume the recorded stage using the existing handoffs and task-list state for that Team. Preserve `team_name`, `current_phase`, `fix_loop_count`, `max_fix_loops`, `stage_history`, and all other existing Team state fields, including worker/task/launch-attempt records. Use the same `session_id` on every subsequent `state_write` and `state_clear`, applying only partial updates under the existing state lock. Do not run the new-team initialization below, derive a replacement slug, create duplicate tasks, spawn duplicate workers, or repeat launch attempts.
+
+If state is malformed, unreadable, or otherwise corrupt, report the diagnostic and preserve the original bytes. Do not replace, clear, initialize, or treat it as a new run.
+
+The following initialization phases apply only to a new run with no active, scoped state.
 
 ### Phase 1: Parse Input
 
@@ -231,8 +249,10 @@ Derive a slug such as `fix-ts-errors` for OMC state, prompt labels, handoffs, an
 
 Write OMC state using the `state_write` MCP tool for proper session-scoped persistence:
 
+Use the same resolved `session_id` from the Resume Check for this and every later Team state call; if no identity is available, use only the explicitly identified legacy state described above.
+
 ```
-state_write(mode="team", active=true, current_phase="team-plan", state={
+state_write(mode="team", session_id="<current_session_id>", active=true, current_phase="team-plan", state={
   "team_name": "fix-ts-errors",
   "agent_count": 3,
   "agent_types": "executor",
@@ -264,18 +284,10 @@ state_write(mode="team", active=true, current_phase="team-plan", state={
 **Update state on every stage transition:**
 
 ```
-state_write(mode="team", current_phase="team-exec", state={
+state_write(mode="team", session_id="<current_session_id>", current_phase="team-exec", state={
   "stage_history": "team-plan:2026-02-07T12:00:00Z,team-prd:2026-02-07T12:01:00Z,team-exec:2026-02-07T12:02:00Z"
 })
 ```
-
-**Read state for resume detection:**
-
-```
-state_read(mode="team")
-```
-
-If `active=true` and `current_phase` is non-terminal, resume from the last incomplete stage instead of creating a new team.
 
 ### Phase 4: Create Tasks
 
@@ -388,22 +400,22 @@ On every stage transition, update OMC state:
 
 ```
 // Entering team-exec after planning
-state_write(mode="team", current_phase="team-exec", state={
+state_write(mode="team", session_id="<current_session_id>", current_phase="team-exec", state={
   "stage_history": "team-plan:T1,team-prd:T2,team-exec:T3"
 })
 
 // Entering team-verify after execution
-state_write(mode="team", current_phase="team-verify")
+state_write(mode="team", session_id="<current_session_id>", current_phase="team-verify")
 
 // Entering team-fix after verify failure
-state_write(mode="team", current_phase="team-fix", state={
+state_write(mode="team", session_id="<current_session_id>", current_phase="team-fix", state={
   "fix_loop_count": 1
 })
 ```
 
 This enables:
 
-- **Resume**: If the lead crashes, `state_read(mode="team")` reveals the last stage and team name for recovery
+- **Resume**: If the lead crashes, `state_read(mode="team", session_id="<current_session_id>")` reveals the last stage and team name for recovery
 - **Cancel**: The cancel skill reads `current_phase` to know what cleanup is needed
 - **Ralph integration**: Ralph can read team state to know if the pipeline completed or failed
 
@@ -421,9 +433,10 @@ When all real tasks (non-internal) are completed or failed:
    }
    ```
 3. **Await responses** -- Each teammate responds with `shutdown_response(approve: true)` and terminates
-4. **Clean up native team state** -- Claude Code 2.1.178+ has no `TeamDelete`; after teammates acknowledge shutdown, clear OMC state and any local task bookkeeping.
-5. **Clean OMC state** -- Remove `.omc/state/team-state.json`
-6. **Report summary** -- Present results to the user
+4. **Clean up** -- After the graceful shutdown pass, follow the Team flow in
+   `skills/cancel/SKILL.md` for the selected session and any linked Ralph;
+   native Claude Code 2.1.178+ has no `TeamDelete`.
+5. **Report summary** -- Present results to the user
 
 ## Agent Preamble
 
@@ -522,7 +535,11 @@ This addendum must preserve the core rule: **worker = executor only, never leade
 
 ### Shutdown Protocol (BLOCKING)
 
-**CRITICAL: Steps must execute in exact order. Never clear OMC team state before shutdown is confirmed or timed out.**
+**CRITICAL for graceful paths:** Execute these steps in order. Never clear OMC
+Team state before shutdown is confirmed or timed out. The `--force` and
+`--force --all` invocations are the explicit wait-skipping paths; they still
+use the canonical protected, session-scoped clear, honor locks/ownership, and
+report failures. `--force` alone never broadens scope.
 
 **Step 1: Verify completion**
 
@@ -544,9 +561,10 @@ Verify via TodoWrite or the active task-list surface — all real tasks (non-int
 
 **Step 3: Wait for responses (BLOCKING)**
 
-- Wait up to 30s per teammate for `shutdown_response`
+- Follow the canonical cancel flow: wait up to 15 seconds per teammate for
+  `shutdown_response`, then reconcile for 5 more seconds
 - Track which teammates confirmed vs timed out
-- If a teammate doesn't respond within 30s: log warning, mark as unresponsive
+- If a teammate doesn't respond after those waits: log warning, mark as unresponsive
 
 **Teammate receives and responds:**
 
@@ -560,9 +578,11 @@ Verify via TodoWrite or the active task-list surface — all real tasks (non-int
 
 After approval, the teammate terminates or stops accepting new work. Claude Code 2.1.178+ does not expose per-team config membership or TeamDelete cleanup; track acknowledgements in OMC state/reporting instead.
 
-**Step 4: Clear OMC team state — only after ALL teammates confirmed or timed out**
+**Step 4: Complete protected cleanup**
 
-Claude Code 2.1.178+ has no `TeamDelete`. Clear OMC team state and local task bookkeeping after the blocking shutdown pass completes.
+After the graceful pass, follow the Team cancellation flow in
+`skills/cancel/SKILL.md`; it clears the selected session and handles linked
+Ralph. Claude Code 2.1.178+ has no `TeamDelete`.
 
 **Step 5: Orphan scan for OMC tmux/CLI workers only**
 
@@ -574,12 +594,9 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/cleanup-orphans.mjs" --team-name fix-ts-erro
 
 This scans for OMC worker processes matching the team name and terminates stale orphans (SIGTERM → 5s wait → SIGKILL). Supports `--dry-run` for inspection.
 
-**Shutdown sequence is BLOCKING:** Do not clear OMC team state until all teammates have either:
-
-- Confirmed shutdown (`shutdown_response` with `approve: true`), OR
-- Timed out (30s with no response)
-
-**IMPORTANT:** The `request_id` is provided in the shutdown request message that the teammate receives. The teammate must extract it and pass it back. Do NOT fabricate request IDs.
+The graceful clear requires every teammate to confirm (`shutdown_response`
+with `approve: true`) or time out. The `request_id` comes from the request;
+teammates must return it, never fabricate one.
 
 ## CLI Workers (Codex and Gemini)
 
@@ -767,14 +784,14 @@ Both modes write their own state files with cross-references:
 
 ```
 // Team state (via state_write)
-state_write(mode="team", active=true, current_phase="team-plan", state={
+state_write(mode="team", session_id="<current_session_id>", active=true, current_phase="team-plan", state={
   "team_name": "build-rest-api",
   "linked_ralph": true,
   "task": "build a complete REST API"
 })
 
 // Ralph state (via state_write)
-state_write(mode="ralph", active=true, iteration=1, max_iterations=10, current_phase="execution", state={
+state_write(mode="ralph", session_id="<current_session_id>", active=true, iteration=1, max_iterations=10, current_phase="execution", state={
   "linked_team": true,
   "team_name": "build-rest-api"
 })
@@ -790,20 +807,11 @@ state_write(mode="ralph", active=true, iteration=1, max_iterations=10, current_p
 6. If fix loop exceeds `max_fix_loops`: Ralph increments iteration and retries the full pipeline
 7. If Ralph exceeds `max_iterations`: terminal `failed` state
 
-### Cancellation
-
-Cancel either mode cancels both:
-
-- **Cancel Ralph (linked):** Cancel Team first (graceful shutdown), then clear Ralph state
-- **Cancel Team (linked):** Clear Team, mark Ralph iteration cancelled, stop loop
-
-See Cancellation section below for details.
-
 ## Idempotent Recovery
 
 If the lead crashes mid-run, the team skill should detect existing OMC state and resume:
 
-1. Read `state_read(mode="team")` for the active OMC team slug, phase, and worker labels
+1. Read `state_read(mode="team", session_id="<current_session_id>")` for the active OMC team slug, phase, and worker labels
 2. Use OMC handoffs and task-list/TodoWrite state to determine current progress
 3. Resume monitor mode instead of spawning duplicate teammates
 4. Continue from the last recorded stage
@@ -832,27 +840,20 @@ This prevents duplicate worker spawns and allows graceful recovery from lead fai
 
 ## Cancellation
 
-The `/oh-my-claudecode:cancel` skill handles team cleanup:
-
-1. Read team state via `state_read(mode="team")` to get `team_name` and `linked_ralph`
-2. Request shutdown from all active named teammates through the active team surface
-3. Wait for `shutdown_response` from each (15s timeout per member)
-4. Clear state via `state_clear(mode="team")`
-5. If `linked_ralph` is true, also clear ralph: `state_clear(mode="ralph")`
+Team cancellation is defined only by the flow in
+`skills/cancel/SKILL.md`. It owns the flag matrix, identity/fail-closed rule,
+graceful and forced waits, session-scoped protected clears, Team-first linked
+Ralph handling, all-session authorization, and unresolved-session gate.
+Handoffs survive cancellation; uncaptured Team roots remain protected.
 
 ### Linked Mode Cancellation (Team + Ralph)
 
-When team is linked to ralph, cancellation follows dependency order:
-
-- **Cancel triggered from Ralph context:** Cancel Team first (graceful shutdown of all teammates), then clear Ralph state. This ensures workers are stopped before the persistence loop exits.
-- **Cancel triggered from Team context:** Clear Team state, then mark Ralph as cancelled. Ralph's stop hook will detect the missing team and stop iterating.
-- **Force cancel (`--force`):** Clears both `team` and `ralph` state unconditionally via `state_clear`.
-
-If teammates are unresponsive, record the timeout, avoid spawning more work, and clear OMC state only after the shutdown wait completes or the user force-cancels.
+The linked-Ralph dependency is covered by that same canonical flow; do not
+restate a second session-operation recipe here.
 
 ## Runtime V2 (Event-Driven)
 
-When `OMC_RUNTIME_V2=1` is set, the team runtime uses an event-driven architecture instead of the legacy done.json polling watchdog:
+By default, the team runtime uses an event-driven architecture instead of the legacy done.json polling watchdog:
 
 - **No done.json**: Task completion is detected via CLI API lifecycle transitions (claim-task, transition-task-status)
 - **Snapshot-based monitoring**: Each poll cycle takes a point-in-time snapshot of tasks and workers, computes deltas, and emits events
@@ -860,7 +861,7 @@ When `OMC_RUNTIME_V2=1` is set, the team runtime uses an event-driven architectu
 - **Worker status files**: Workers write status to `.omc/state/team/{teamName}/workers/{name}/status.json`
 - **Preserved**: Sentinel gate (blocks premature completion), circuit breaker (dead worker detection), failure sidecars
 
-The v2 runtime is feature-flagged and can be enabled per-session. The legacy v1 runtime remains the default.
+Set `OMC_RUNTIME_V2=0`, `false`, `no`, or `off` to opt out and use the legacy v1 runtime for that session.
 
 ## Dynamic Scaling
 
@@ -974,20 +975,11 @@ An empty `team.roleRouting` preserves pre-patch behavior: every worker is Claude
 
 ## State Cleanup
 
-On successful completion:
-
-1. Native Claude Code 2.1.178+ has no per-team `TeamDelete` cleanup. After shutdown is confirmed or timed out, clear OMC state via MCP tools:
-   ```
-   state_clear(mode="team")
-   ```
-   If linked to Ralph:
-   ```
-   state_clear(mode="ralph")
-   ```
-2. For legacy OMC tmux/CLI workers, run the documented `omc team shutdown` / cleanup path.
-3. Or run `/oh-my-claudecode:cancel` which handles OMC state cleanup automatically.
-
-**IMPORTANT:** Clear OMC team state only AFTER all teammates have been shut down or timed out.
+Use `/oh-my-claudecode:cancel` for Team and linked-Ralph cleanup; its
+authoritative flow handles session identity, locks/ownership, graceful versus
+forced waits, and legacy runtime cleanup. Native Claude Code 2.1.178+ has no
+`TeamDelete`. For normal completion, invoke it after the shutdown protocol;
+uncaptured Team roots and handoffs are preserved.
 
 ## Git Worktree Integration
 
