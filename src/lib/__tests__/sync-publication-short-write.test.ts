@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
+import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 
 const fsControl = vi.hoisted(() => ({
   maxBytes: 0,
   calls: 0,
+  failTempUnlink: false,
+  failLockUnlink: false,
 }));
 
 type WriteSync = (fd: number, buffer: string | Uint8Array, offset?: number | null, length?: number | string | null, position?: number | null) => number;
@@ -28,10 +30,24 @@ vi.mock('fs', async importOriginal => {
       }
       return writeSync(...args);
     },
+    unlinkSync: (path: Parameters<typeof actual.unlinkSync>[0]) => {
+      const value = String(path);
+      if (fsControl.failTempUnlink && value.includes('.mutation.lock.') && value.endsWith('.tmp')) {
+        fsControl.failTempUnlink = false;
+        const error = Object.assign(new Error('simulated temporary cleanup denial'), { code: 'EPERM' });
+        throw error;
+      }
+      if (fsControl.failLockUnlink && value.endsWith('.mutation.lock')) {
+        fsControl.failLockUnlink = false;
+        const error = Object.assign(new Error('simulated owner cleanup denial'), { code: 'EPERM' });
+        throw error;
+      }
+      return actual.unlinkSync(path);
+    },
   };
 });
 
-import { writeStateFileLocked } from '../mode-state-io.js';
+import { getStateMutationLockFailureMessage, withStateFileMutationLock, writeStateFileLocked } from '../mode-state-io.js';
 // @ts-expect-error Hook runtime source is intentionally JavaScript-only.
 import * as pluginAtomicWrite from '../../../scripts/lib/atomic-write.mjs';
 
@@ -47,6 +63,8 @@ function fixturePath(name: string): string {
 afterEach(() => {
   fsControl.maxBytes = 0;
   fsControl.calls = 0;
+  fsControl.failTempUnlink = false;
+  fsControl.failLockUnlink = false;
   for (const directory of directories.splice(0)) {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -79,5 +97,23 @@ describe('synchronous publication short writes', () => {
     expect(atomicWrite.withStateFileLockSync(statePath, () => 'held')).toEqual({ acquired: true, value: 'held' });
     expect(() => readFileSync(`${statePath}.mutation.lock`, 'utf8')).toThrow(/ENOENT/);
     expect(fsControl.calls).toBeGreaterThan(Buffer.byteLength(content, 'utf8') / 2);
+  });
+
+  it('keeps a lock acquired when Windows-style temporary cleanup is denied', () => {
+    const statePath = fixturePath('state.json');
+    fsControl.failTempUnlink = true;
+
+    expect(withStateFileMutationLock(statePath, () => 'held')).toEqual({ acquired: true, value: 'held' });
+    expect(existsSync(`${statePath}.mutation.lock`)).toBe(false);
+    expect(readdirSync(dirname(statePath)).some(name => name.includes('.mutation.lock.') && name.endsWith('.tmp'))).toBe(true);
+  });
+
+  it('surfaces a denied fallback owner release instead of reporting a successful mutation', () => {
+    const statePath = fixturePath('state.json');
+    fsControl.failLockUnlink = true;
+
+    expect(writeStateFileLocked(statePath, { active: true })).toBe(false);
+    expect(existsSync(`${statePath}.mutation.lock`)).toBe(true);
+    expect(getStateMutationLockFailureMessage()).toContain('release failed');
   });
 });

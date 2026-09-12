@@ -6,8 +6,8 @@
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, readdirSync, linkSync, statSync, fstatSync } from 'fs';
 import { dirname, basename, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
-import { processStartIdentity, acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported, acquireRecoveryClaim, readRecoveryClaim, releaseRecoveryClaim, sameRecoveryClaim, isEmergencyOwnerLive } from './state-lock.mjs';
-export { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported };
+import { processStartIdentity, acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported, isExclusiveStateLockingAvailable, getStateFileLockDiagnostic, getStateFileLockFailureMessage, acquireRecoveryClaim, readRecoveryClaim, releaseRecoveryClaim, sameRecoveryClaim, isEmergencyOwnerLive } from './state-lock.mjs';
+export { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported, isExclusiveStateLockingAvailable, getStateFileLockDiagnostic, getStateFileLockFailureMessage };
 function journalIsOwned(path, transactionId, owner) { const current = readEmergencyJournal(path); return current !== null && current.transactionId === transactionId && isSameEmergencyOwner(current.owner, owner); }
 function isSameEmergencyOwner(left, right) { return left && right && left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce; }
 function emergencyJournalPath(path) { return `${path}.emergency-journal.json`; }

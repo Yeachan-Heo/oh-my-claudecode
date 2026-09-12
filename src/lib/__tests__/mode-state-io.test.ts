@@ -5,7 +5,7 @@ import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, readdirSync, write
 import { basename, dirname, join } from 'path';
 import { tmpdir } from 'os';
 
-import { emergencyMutateStateFileIf, recoverEmergencyStateFile, captureModeStateCleanup, findSessionOwnedStateCandidates, writeModeState, readModeState, readModeStateWithMeta, clearModeStateFile, withStateFileMutationLock } from '../mode-state-io.js';
+import { emergencyMutateStateFileIf, recoverEmergencyStateFile, captureModeStateCleanup, findSessionOwnedStateCandidates, getStateMutationLockDiagnostic, writeModeState, readModeState, readModeStateWithMeta, clearModeStateFile, withStateFileMutationLock } from '../mode-state-io.js';
 import { atomicWriteJsonSync } from '../atomic-write.js';
 import { clearWorktreeCache, getOmcRoot, getProjectIdentifier } from '../worktree-paths.js';
 import { getProcessStartIdentitySync } from '../../platform/process-utils.js';
@@ -165,11 +165,15 @@ describe('mode-state-io', () => {
       expect(existsSync(`${statePath}.mutation.lock`)).toBe(false);
     });
 
-    it('uses one state-root SQLite lock database for nested session paths', () => {
+    it('uses one state-root SQLite lock database for nested session paths when available', () => {
       const statePath = join(tempDir, '.omc', 'state', 'sessions', 'session-a', 'autopilot-state.json');
       mkdirSync(dirname(statePath), { recursive: true });
       expect(withStateFileMutationLock(statePath, () => true)).toMatchObject({ acquired: true, value: true });
-      expect(existsSync(join(tempDir, '.omc', 'state', '.state-mutation-locks.db'))).toBe(true);
+      if (getStateMutationLockDiagnostic()) {
+        expect(existsSync(join(tempDir, '.omc', 'state', '.state-mutation-locks.db'))).toBe(false);
+      } else {
+        expect(existsSync(join(tempDir, '.omc', 'state', '.state-mutation-locks.db'))).toBe(true);
+      }
       expect(existsSync(join(dirname(statePath), '.state-mutation-locks.db'))).toBe(false);
     });
 
