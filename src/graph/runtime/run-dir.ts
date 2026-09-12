@@ -61,7 +61,7 @@ function openDirectory(path: string, label: string): number {
  * Both the mkdir and the subsequent open are anchored at the parent FD, so a
  * pathname replacement cannot redirect creation through a symlink.
  */
-function openOrCreateDirectoryAt(parentFd: number, name: string, label: string): number {
+export function openOrCreateDirectoryAt(parentFd: number, name: string, label: string): number {
   const operations = directoryOperations(parentFd);
   const open = (): number => {
     try {
@@ -83,6 +83,28 @@ function openOrCreateDirectoryAt(parentFd: number, name: string, label: string):
       if (!isErrno(mkdirError, "EEXIST")) throw mkdirError;
     }
     return open();
+  }
+}
+
+/**
+ * Open one existing directory component below an already-open directory
+ * without following a symlink at that component. Returns null when the
+ * component does not exist; a symlinked component fails closed.
+ */
+export function openExistingDirectoryAt(
+  parentFd: number,
+  name: string,
+  label: string,
+): number | null {
+  const operations = directoryOperations(parentFd);
+  try {
+    return operations.open(name, DIRECTORY_FLAGS);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return null;
+    if (isErrno(error, "ELOOP") || (isErrno(error, "ENOTDIR") && operations.lstat(name).isSymbolicLink())) {
+      throw new Error(`${label} must not be a symbolic link`);
+    }
+    throw error;
   }
 }
 
