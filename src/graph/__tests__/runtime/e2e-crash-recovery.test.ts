@@ -16,7 +16,7 @@ import { spawn, spawnSync } from "child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   readFileSync,
   rmSync,
   statSync,
@@ -220,7 +220,7 @@ describe("e2e crash recovery via spawned CLI (AC-2/AC-3)", () => {
   });
 
   it("resumes a killed run without re-executing journaled nodes and converges to the direct-run projection", async () => {
-    baseDir = mkdtempSync(join(tmpdir(), "omc-graph-e2e-crash-"));
+    baseDir = mkdtempSync(join(realpathSync(tmpdir()), "omc-graph-e2e-crash-"));
     const runsRoot = join(baseDir, "runs-resume");
     const markers = join(baseDir, "markers-resume");
     const directRunsRoot = join(baseDir, "runs-direct");

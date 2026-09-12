@@ -1,5 +1,11 @@
 # MCP/Plugin Compatibility Layer
 
+Graph commands use a packaged native directory-relative backend on macOS and
+FD-relative procfs operations on Linux. Missing Darwin backend assets cause an
+explicit refusal before persistence. See [Graph contained filesystem](graph-contained-filesystem.md)
+for source-build requirements and platform-specific verification scope.
+
+
 The Compatibility Layer enables oh-my-claudecode to discover, register, and use external plugins, MCP servers, and tools. It provides a unified interface for managing external tools while maintaining security through an integrated permission system.
 
 ## Table of Contents

@@ -6,7 +6,7 @@ import {
   readFileSync,
 } from "fs";
 import { isAbsolute, join, normalize, win32 } from "path";
-import { containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
+import { directoryOperations, type DirectoryOperations, containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
 import type { RunDirHandle } from "./run-dir.js";
 
 const NO_FOLLOW = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
@@ -135,7 +135,7 @@ export function withContainedPath<T>(
   );
 }
 
-/** Run several related operations beneath one identity-checked directory FD. */
+/** Legacy Linux-only path callback; use withContainedOperations for portable I/O. */
 export function withContainedDirectory<T>(
   runDir: RunDirHandle,
   operation: (directoryPath: string) => T,
@@ -187,5 +187,42 @@ export function readContainedFileNoFollow(
   runDir: RunDirHandle,
   fileName: string,
 ): string {
-  return withContainedPath(runDir, fileName, readFileNoFollow);
+  return withContainedOperations(runDir, (operations) => readOperationFileNoFollow(operations, fileName));
+}
+
+/**
+ * Bind synchronous operations to one identity-checked directory descriptor.
+ * The callback must not return a Promise. Retained operations fail closed after
+ * callback return, before the OS can reuse the closed descriptor number.
+ */
+export function withContainedOperations<T>(runDir: RunDirHandle, operation: (operations: DirectoryOperations) => T): T {
+  assertContainedFsSupported();
+  const fd = openNoFollow(runDir.path, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+  let active = true;
+  const checkActive = (): void => {
+    if (!active) throw new Error("contained operations used outside synchronous callback");
+  };
+  try {
+    const stats = fstatSync(fd);
+    if (stats.dev !== runDir.device || stats.ino !== runDir.inode) throw new Error("run directory identity changed");
+    const operations = directoryOperations(fd);
+    const check = (name: string): string => { checkActive(); assertSafeContainedFileName(name); return name; };
+    return operation({ ...operations,
+      open: (name, flags, mode) => operations.open(check(name), flags, mode),
+      mkdir: (name, mode) => operations.mkdir(check(name), mode),
+      lstat: (name) => operations.lstat(check(name)),
+      rename: (source, destination) => operations.rename(check(source), check(destination)),
+      unlink: (name) => operations.unlink(check(name)),
+      link: (source, destination) => operations.link(check(source), check(destination)),
+      readDir: () => { checkActive(); return operations.readDir(); },
+      realpath: () => { checkActive(); return operations.realpath(); },
+      sync: () => { checkActive(); operations.sync(); },
+    });
+  } finally { active = false; closeSync(fd); }
+}
+
+export function readOperationFileNoFollow(operations: DirectoryOperations, name: string): string {
+  const fd = operations.open(name, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+  try { assertPrivateRegularFile(fd, name); return readFileSync(fd, "utf8"); }
+  finally { closeSync(fd); }
 }
