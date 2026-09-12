@@ -936,20 +936,24 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
     tmuxExec(['set-option', 'mouse', 'on'], { stdio: 'ignore' });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
-  // Launch Claude in current pane
+  // Replace the pane's current process instead of keeping this node process as
+  // the pane foreground while Claude runs as its child.  respawn-pane kills the
+  // launcher process and starts the quoted shell command in the same pane.
+  const currentPaneId = process.env.TMUX_PANE;
+  const respawnArgs = ['respawn-pane', '-k'];
+  if (currentPaneId) {
+    respawnArgs.push('-t', currentPaneId);
+  }
+  respawnArgs.push('-c', cwd, buildTmuxClaudeCommand(args));
+
   try {
-    execFileSync('claude', args, {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
+    tmuxExec(respawnArgs, { stdio: 'inherit' });
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { status?: number | null };
     if (err.code === 'ENOENT') {
-      console.error('[omc] Error: claude CLI not found in PATH.');
+      console.error('[omc] Error: unable to respawn Claude in the current tmux pane.');
       process.exit(1);
     }
-    // Propagate Claude's exit code so omc does not swallow failures
     process.exit(typeof err.status === 'number' ? err.status : 1);
   }
 }
@@ -982,6 +986,34 @@ export function buildEnvExportPrefix(vars: string[]): string {
     }
   }
   return parts.length > 0 ? parts.join('; ') + '; ' : '';
+}
+
+/**
+ * Build the command that respawn-pane runs for an in-tmux Claude launch.
+ *
+ * On POSIX shells, the explicit final `exec` is required because this command
+ * replaces the launcher node process in the existing pane, leaving Claude as
+ * the pane's foreground process after any login-shell setup and env exports.
+ */
+export function buildTmuxClaudeCommand(args: string[]): string {
+  const forwardedEnv = Object.fromEntries(
+    TMUX_ENV_FORWARD
+      .map((name) => [name, process.env[name]] as const)
+      .filter(([, value]) => value !== undefined),
+  ) as Record<string, string>;
+  const nativeWindows = isNativeWindowsShell();
+  const rawClaudeCmd = nativeWindows
+    ? buildTmuxShellCommandWithEnv('claude', args, forwardedEnv)
+    : buildTmuxShellCommand('claude', args);
+  const envPrefix = !nativeWindows && Object.keys(forwardedEnv).length > 0
+    ? buildEnvExportPrefix(TMUX_ENV_FORWARD)
+    : '';
+
+  if (nativeWindows) {
+    return wrapWithLoginShell(rawClaudeCmd);
+  }
+
+  return wrapWithLoginShell(`${envPrefix}exec ${rawClaudeCmd}`);
 }
 
 /**

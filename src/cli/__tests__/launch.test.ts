@@ -36,7 +36,7 @@ vi.mock('../tmux-utils.js', () => ({
   tmuxExec: vi.fn(),
 }));
 
-import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs, isPrintMode, prepareOmcLaunchConfigDir, buildEnvExportPrefix, hasMadmaxFlag, TMUX_ENV_FORWARD } from '../launch.js';
+import { runClaude, launchCommand, extractNotifyFlag, extractOpenClawFlag, extractTelegramFlag, extractDiscordFlag, extractSlackFlag, extractWebhookFlag, normalizeClaudeLaunchArgs, isPrintMode, prepareOmcLaunchConfigDir, buildEnvExportPrefix, buildTmuxClaudeCommand, hasMadmaxFlag, TMUX_ENV_FORWARD } from '../launch.js';
 import {
   resolveLaunchPolicy,
   buildTmuxShellCommand,
@@ -225,7 +225,10 @@ describe('runClaude — exit code propagation', () => {
 
     it('propagates Claude non-zero exit code', () => {
       const err = Object.assign(new Error('Command failed'), { status: 3 });
-      (execFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => { throw err; });
+      vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
+        if (args[0] === 'respawn-pane') throw err;
+        return '';
+      });
 
       runClaude('/tmp', [], 'sid');
 
@@ -234,32 +237,37 @@ describe('runClaude — exit code propagation', () => {
 
     it('exits with code 1 when status is null', () => {
       const err = Object.assign(new Error('Command failed'), { status: null });
-      (execFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => { throw err; });
+      vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
+        if (args[0] === 'respawn-pane') throw err;
+        return '';
+      });
 
       runClaude('/tmp', [], 'sid');
 
       expect(processExitSpy).toHaveBeenCalledWith(1);
     });
 
-    it('uses shell:true on win32 so claude.cmd can launch inside tmux', () => {
+    it('respawns the current pane on win32 so claude.cmd replaces the launcher', () => {
       const originalPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+      vi.mocked(isNativeWindowsShell).mockReturnValue(true);
 
       runClaude('/tmp', ['--continue'], 'sid');
 
-      expect(vi.mocked(execFileSync)).toHaveBeenCalledWith('claude', ['--continue'], {
-        cwd: '/tmp',
-        stdio: 'inherit',
-        shell: true,
-      });
+      expect(vi.mocked(tmuxExec)).toHaveBeenCalledWith(
+        ['respawn-pane', '-k', '-t', '%0', '-c', '/tmp', expect.stringContaining('claude --continue')],
+        { stdio: 'inherit' },
+      );
 
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     });
 
     it('exits with code 1 on ENOENT', () => {
       const err = Object.assign(new Error('Not found'), { code: 'ENOENT' });
-      (execFileSync as ReturnType<typeof vi.fn>).mockImplementation(() => { throw err; });
+      vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
+        if (args[0] === 'respawn-pane') throw err;
+        return '';
+      });
 
       runClaude('/tmp', [], 'sid');
 
@@ -267,11 +275,12 @@ describe('runClaude — exit code propagation', () => {
     });
 
     it('does not call process.exit on success', () => {
-      (execFileSync as ReturnType<typeof vi.fn>).mockReturnValue(Buffer.from(''));
+      vi.mocked(tmuxExec).mockReturnValue('');
 
       runClaude('/tmp', [], 'sid');
 
       expect(processExitSpy).not.toHaveBeenCalled();
+      expect(vi.mocked(tmuxExec).mock.calls.some(([args]) => args[0] === 'respawn-pane')).toBe(true);
     });
   });
 });
@@ -445,23 +454,55 @@ describe('runClaude inside-tmux — mouse configuration (issue #890)', () => {
     const mouseCall = tmuxCalls.find(([args]) => args[0] === 'set-option' && args.includes('mouse'));
     expect(mouseCall?.[0]).toEqual(['set-option', 'mouse', 'on']);
 
-    // execFileSync should have been called for claude
-    const claudeCalls = vi.mocked(execFileSync).mock.calls;
-    expect(claudeCalls.find(([cmd]) => cmd === 'claude')).toBeDefined();
+    // respawn-pane should replace the launcher with Claude in the current pane
+    const respawnCall = vi.mocked(tmuxExec).mock.calls.find(([args]) => args[0] === 'respawn-pane');
+    expect(respawnCall).toBeDefined();
+    expect(String(respawnCall?.[0].at(-1))).toContain('claude');
   });
 
   it('still launches claude even if tmux mouse config fails', () => {
-    (execFileSync as ReturnType<typeof vi.fn>).mockImplementation((cmd: string) => {
-      if (cmd === 'tmux') throw new Error('tmux set-option failed');
-      return Buffer.from('');
+    vi.mocked(tmuxExec).mockImplementation((args: string[]) => {
+      if (args[0] === 'set-option') throw new Error('tmux set-option failed');
+      return '';
     });
 
     runClaude('/tmp', [], 'sid');
 
-    // tmux calls fail but claude should still be called
-    const calls = vi.mocked(execFileSync).mock.calls;
-    const claudeCall = calls.find(([cmd]) => cmd === 'claude');
-    expect(claudeCall).toBeDefined();
+    // tmux calls fail but the pane respawn should still be attempted
+    const calls = vi.mocked(tmuxExec).mock.calls;
+    const respawnCall = calls.find(([args]) => args[0] === 'respawn-pane');
+    expect(respawnCall).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildTmuxClaudeCommand — pane process identity (issue #4005)
+// ---------------------------------------------------------------------------
+describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () => {
+  it('exec-replaces into claude while delegating argument quoting', () => {
+    const args = ['--model', 'sonnet', 'prompt with spaces', "it's"];
+    const savedConfigDir = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = '/tmp/config with spaces';
+    vi.mocked(isNativeWindowsShell).mockReturnValue(false);
+    vi.mocked(wrapWithLoginShell).mockImplementation((command: string) => command);
+
+    try {
+      const command = buildTmuxClaudeCommand(args);
+
+      expect(command).toContain('export CLAUDE_CONFIG_DIR=/tmp/config with spaces; ');
+      expect(command).toContain("exec claude --model sonnet prompt with spaces it's");
+      expect(command).not.toContain('node');
+      expect(vi.mocked(buildTmuxShellCommand)).toHaveBeenCalledWith('claude', args);
+      const execIndex = command.lastIndexOf('exec claude');
+      expect(execIndex).toBeGreaterThanOrEqual(0);
+      expect(command.slice(execIndex)).not.toContain(';');
+    } finally {
+      if (savedConfigDir === undefined) {
+        delete process.env.CLAUDE_CONFIG_DIR;
+      } else {
+        process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
+      }
+    }
   });
 });
 
