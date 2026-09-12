@@ -970,8 +970,8 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ask-navigator <idea\|map>`            | Chart a foggy effort into a map of decision tickets (or work the open map), then hand off to launch |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:autoresearch <task>`                  | Run a bounded evaluator-driven improvement mission                                             |
-| `/oh-my-claudecode:cancel [--force\|--all]`              | Cancel active OMC modes                                                                       |
-| `/oh-my-claudecode:cancel-ralph [--force\|--all]`        | Deprecated alias for cancellation                                                             |
+| `/oh-my-claudecode:cancel [--force] [--all]`            | Cancel current-session modes; `--force` skips graceful waits, `--all` explicitly selects all sessions |
+| `/oh-my-claudecode:cancel-ralph [--force] [--all]`      | Deprecated alias with the same force/scope distinction                                         |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
 | `/oh-my-claudecode:compact [note]`                       | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |

@@ -390,6 +390,29 @@ describe('AutopilotCancel', () => {
       expect(ralphLoop.clearRalphState).toHaveBeenCalledWith(testDir);
     });
 
+    it('should request a same-session retry when linked cleanup fails', () => {
+      const sessionId = 'autopilot-linked-cleanup';
+      initAutopilot(testDir, 'test idea', sessionId);
+      vi.mocked(ralphLoop.readRalphState).mockReturnValueOnce({
+        active: true,
+        iteration: 1,
+        max_iterations: 10,
+        started_at: new Date().toISOString(),
+        prompt: 'test idea',
+        session_id: sessionId,
+      });
+      vi.mocked(ralphLoop.clearRalphState).mockReturnValueOnce(false);
+
+      const result = clearAutopilot(testDir, sessionId);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain('retry within the same session scope');
+      expect(result.message).toContain('only when the user explicitly requests `--all`');
+      expect(result.message).not.toContain('/cancel --force');
+      expect(ralphLoop.clearRalphState).toHaveBeenCalledWith(testDir, sessionId);
+      expect(ralphLoop.clearRalphState).not.toHaveBeenCalledWith(testDir);
+    });
+
     it('should ignore retired linkage metadata when clearing ralph state', () => {
       initAutopilot(testDir, 'test idea');
 
