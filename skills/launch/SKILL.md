@@ -3,6 +3,7 @@ name: launch
 description: Shipyard's governed delivery pipeline — converge the mission, synthesize a durable spec, decompose vertical-slice tickets with blocking edges, run the frontier in parallel via team, close with verification, and report with a full decision log. Two entry gates — the yard gate (drydock audit) and the fog gate (an effort whose destination is unclear is routed to /ask-navigator before this pipeline starts). Humans own the checkpoints where there is no unique answer or the error cost is severe; agents continuously run everything repeatable and acceptable-by-evidence.
 argument-hint: "<mission brief | path to existing spec> [--serial]"
 level: 3
+disable-model-invocation: true
 pipeline: [deep-interview, launch]
 ---
 
@@ -67,6 +68,10 @@ Paper trail, written the moment each item settles:
 - decisions passing the ADR test (hard to reverse, surprising without context, real tradeoff) → `docs/adr/NNNN-<slug>.md`
 - business rules and background discovered during convergence → `docs/business/` (one article per business question, opening paragraph states why it matters)
 
+Before surfacing a proposal, check the paper trail (ADRs, `docs/business/`) for a prior rejection of the same concept: a concept-similar re-proposal must state what changed, or it is declined — a new name for a rejected idea is not a new idea.
+
+The glossary is policed during the interview, not after it: a term that collides with `CONTEXT.md` is challenged on the spot; a fuzzy term is pressed until it holds one exclusive name; business relationships are stress-tested against a concrete scenario; claims about system behavior are checked against the code, and a contradiction goes on the table instead of passing. A term the interview needs but the glossary lacks is itself a finding — either the word is being invented for this ship (withdraw it) or the glossary has a real gap (write the entry now).
+
 Non-convergence here is normal work, not a failure: if the frontier will not empty, present the residual questions ranked — this is C2's input, not an error. If the residual questions themselves cannot be stated precisely (fog test Q2 fails), the destination itself is unsettled and that is beyond C2's authority: stop, note what already settled (vocabulary in `CONTEXT.md`, answered questions), recommend `/oh-my-claudecode:ask-navigator`, and exit — the pipeline never invents a destination.
 
 **Loft detour.** A residual question that is precise but cannot settle in prose — it needs to be seen or clicked, not described (how the UI should look, whether a state model feels right) — is answered with an artifact, not more questions: call the Skill tool with "loft", let the captain react, and fold that reaction back into the interview. The lofted artifact is C2's input; the captain signs what they saw, not what they were told.
@@ -87,9 +92,13 @@ Synthesize `.omc/specs/<feature-slug>/spec.md`:
 ## Out of Scope
 ```
 
-Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis); the human confirms or corrects the list — a seam the human has not approved gets no tests.
+Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests. Each seam entry declares its **boundary class** — in-process, locally substitutable, owned-remote (a port with a production and a test adapter), or true-external (an injected substitute) — because the class decides how the seam is tested.
+
+**Tender rule.** When the interface's shape is itself contested — two plausible designs, neither settleable by talk — C2 signs *between* alternatives, never on the only proposal on the table: draft the candidate shapes in parallel sub-agents, each under a different emphasis (smallest interface surface · widest future fit · smoothest default path for the most common caller · cleanest cross-boundary adapter), present them side by side compared on depth, locality, and seam placement, and let the captain pick one or fold a hybrid.
 
 Durability gate (agent-enforced, no approval needed): spec and tickets carry contracts, never coordinates — no file paths, no line numbers. Fragments encoding a decision better than prose (state machines, reducers, schemas) are the exception and state their origin (usually a loft).
+
+Testing decisions retire orphans: when a seam is deepened or replaced, the tests pinned to the old interface retire with it — new tests write to the new interface only. The testing rules themselves are seeded in `docs/standards/process.md`.
 
 ## Phase 3 — Ticket decomposition (agent drafts → C3 approves)
 
@@ -99,7 +108,7 @@ Split into vertical slices under `.omc/specs/<feature-slug>/tickets/`:
 - each ticket crosses every layer, is independently demonstrable, and fits one fresh context
 - wide refactors go expand-contract: add the new form, migrate in batches, remove the old — each batch a ticket
 
-Agent-side mechanical validation runs first (independence, demonstrability, context fit). Then **C3**: present granularity, blocking edges, and proposed merges/splits for human approval. Iterate until approved. Mark every ticket `ready-for-agent`.
+Agent-side mechanical validation runs first (independence, demonstrability, context fit). Then **C3**: present granularity, blocking edges, and proposed merges/splits for human approval. Iterate until approved. Mark every ticket `ready-for-agent`. The C3 bar: a fresh worker can start any ticket without a question back — a ticket that must ask sends the flaw up to the spec, not to the worker.
 
 Integration-wiring rule: every vertical slice includes its own wiring and a smoke assertion — a slice whose output nothing mounts, serves, or imports is not done. Cross-slice seams that no single slice owns (route mounting, static serving, entry-point wiring) get an explicit integration ticket as the last frontier item.
 
@@ -137,6 +146,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
   | checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |
   | most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |
   | hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |
+  | ruled-out directions (concept + why rejected) | `docs/adr/` (a rejection is a decision too; the why is the load-bearing part) |
   | business rules / background | `docs/business/` |
   | UI patterns / component contracts | `design-system/` |
   | reusable craft | `.omc/skills/` (through the skillify gate) |
@@ -149,9 +159,11 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 ## Context hygiene
 
 - Phases 1–3 in one unbroken context window; compact at phase boundaries only (HUD high water is the signal).
+- **Disk is the primary source; conversation memory is secondary.** Every boundary action except continuing converts the primary source into a secondary one — so after any boundary, re-read the artifacts from disk and never continue from remembered state.
+- **The four-way boundary choice:** continue (context still fits and is unpolluted) → re-enter from disk (a phase just completed) → hand off (pointer, never content) → compact (approaching the limit, at the phase edge). Take the first that fits.
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
-- Handoffs pass pointers, never content.
+- Handoffs pass pointers, never content. A handoff paper carries three things only: **pointers** (where the material and the decisions live — never copies), **the next watch** (what the next phase does, and which skills to call), and **the warning lines** (red lines already ruled out; credentials redacted). When a compact is unavoidable, pass an instruction with it, so the summary keeps what the next phase needs.
 - Session died mid-run: preserve the artifacts and stop. A later explicit invocation may continue only after the owning Team lifecycle reaches its supported terminal/cleanup boundary; Team remains authoritative for runtime state.
 
 ## Completion definition
