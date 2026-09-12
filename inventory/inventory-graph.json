@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5f5d53e2cd64615fd5499d8b595c50853c24f5f4",
-    "sourceSha256": "b1d116f5afe10eb8132bc96e6327f77b514b44eb30b645234529bb698ae947ec",
+    "head": "0c43711a88e08d999b7eee757af22b10e180a677",
+    "sourceSha256": "86baac6428defa91ecec0c25eb727c47c6204f8aff99528fac6c7f22f482ee86",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5f5d53e2cd64615fd5499d8b595c50853c24f5f4",
-  "sourceSha256": "b1d116f5afe10eb8132bc96e6327f77b514b44eb30b645234529bb698ae947ec",
+  "head": "0c43711a88e08d999b7eee757af22b10e180a677",
+  "sourceSha256": "86baac6428defa91ecec0c25eb727c47c6204f8aff99528fac6c7f22f482ee86",
   "counts": {
     "public": {
-      "skills": 39,
+      "skills": 41,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 88
+      "total": 90
     },
     "internal": {
       "hookFiles": 296,
       "featureFiles": 80,
       "toolFiles": 61,
-      "libFiles": 42,
+      "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1350,
-      "total": 1372
+      "srcFiles": 1351,
+      "total": 1373
     },
     "generated": {
       "distFiles": 5032,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 39,
+    "skills": 41,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -50,6 +50,7 @@
     "skills": [
       "agent-doc-discipline",
       "ai-slop-cleaner",
+      "architecture-survey",
       "ask",
       "ask-navigator",
       "autopilot",
@@ -59,6 +60,7 @@
       "debug",
       "deep-interview",
       "deepinit",
+      "diagram",
       "drydock",
       "execute",
       "external-context",
@@ -591,6 +593,7 @@
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
+      "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
       "src/lib/__tests__/plugin-dir.test.ts",
       "src/lib/__tests__/session-id.test.ts",
@@ -33823,6 +33826,11 @@
         "path": "skills/ai-slop-cleaner/SKILL.md"
       },
       {
+        "id": "skills/architecture-survey/SKILL.md",
+        "kind": "skill",
+        "path": "skills/architecture-survey/SKILL.md"
+      },
+      {
         "id": "skills/ask-navigator/SKILL.md",
         "kind": "skill",
         "path": "skills/ask-navigator/SKILL.md"
@@ -33866,6 +33874,11 @@
         "id": "skills/deepinit/SKILL.md",
         "kind": "skill",
         "path": "skills/deepinit/SKILL.md"
+      },
+      {
+        "id": "skills/diagram/SKILL.md",
+        "kind": "skill",
+        "path": "skills/diagram/SKILL.md"
       },
       {
         "id": "skills/drydock/SKILL.md",
@@ -38763,6 +38776,11 @@
         "path": "src/lib/__tests__/mode-state-io.test.ts"
       },
       {
+        "id": "src/lib/__tests__/mode-state-lock.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/mode-state-lock.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/payload-limits.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/payload-limits.test.ts"
@@ -41223,6 +41241,11 @@
         "path": "tests/lint/subagent-lock-test-contract.test.ts"
       },
       {
+        "id": "tests/lint/team-resume-contract.test.ts",
+        "kind": "other",
+        "path": "tests/lint/team-resume-contract.test.ts"
+      },
+      {
         "id": "tests/lint/windows-hide-hooks.test.ts",
         "kind": "other",
         "path": "tests/lint/windows-hide-hooks.test.ts"
@@ -42631,6 +42654,11 @@
       },
       {
         "from": "scripts/plugin-setup.mjs",
+        "to": "external:better-sqlite3",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/plugin-setup.mjs",
         "to": "external:node:child_process",
         "kind": "imports"
       },
@@ -43575,6 +43603,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/architecture-survey/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/ask-navigator/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -43616,6 +43649,11 @@
       },
       {
         "from": "skills/deepinit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/diagram/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -46581,6 +46619,11 @@
       },
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
       },
@@ -46607,6 +46650,11 @@
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -49482,6 +49530,26 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -55521,6 +55589,11 @@
       },
       {
         "from": "src/graph/runtime/remote-approval.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/remote-approval.ts",
         "to": "src/graph/runtime/run-dir.ts",
         "kind": "imports"
       },
@@ -55538,11 +55611,6 @@
         "from": "src/graph/runtime/remote-approval.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/remote-approval.ts",
-        "to": "src/lib/atomic-write.ts",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/run-dir.ts",
@@ -55626,6 +55694,11 @@
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -55643,6 +55716,11 @@
         "from": "src/graph/runtime/safe-fs.ts",
         "to": "src/graph/runtime/contained-fd.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/run-dir.ts",
+        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
@@ -59247,6 +59325,11 @@
       {
         "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
         "to": "src/hooks/persistent-mode/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
+        "to": "src/hooks/todo-continuation/index.ts",
         "kind": "imports"
       },
       {
@@ -65850,6 +65933,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "src/lib/mode-state-io.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/payload-limits.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -66392,6 +66510,11 @@
       {
         "from": "src/lib/mode-state-io.ts",
         "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/mode-state-io.ts",
+        "to": "external:module",
         "kind": "imports"
       },
       {
@@ -75606,6 +75729,16 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -75632,6 +75765,11 @@
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -76931,6 +77069,11 @@
       },
       {
         "from": "src/tools/state-tools.ts",
+        "to": "src/lib/atomic-write.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -76952,6 +77095,11 @@
       {
         "from": "src/tools/state-tools.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -78585,6 +78733,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/windows-hide-hooks.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -78656,12 +78819,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6973,
-      "edgeCount": 7478,
-      "importEdgeCount": 6161,
-      "registerEdgeCount": 60
+      "nodeCount": 6977,
+      "edgeCount": 7506,
+      "importEdgeCount": 6186,
+      "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "1710707e007026d10e711c840023fa032e07eea10bbb031861cd5945eccf6357",
-  "manifestSha256": "e1cc39a3b0ba61abbee1d089461e7c51e3583c4949e2834aece497f35a4df947"
+  "inventorySha256": "9ba57e900b66850d0257cd8ef48c1a7b5c7f1e0165cfce5448ae47e451624607",
+  "manifestSha256": "33910accd59679a7b045cf1b2bab40782ca99d3987153d18816b45d23c3bedf9"
 }
