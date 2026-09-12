@@ -209,11 +209,12 @@ documentLanguage: en
 
 # Glossary
 
-One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming.
+One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming. Ship-specific terms only: a concept any sea chart carries does not get an entry.
 
 ## <term>
 - Definition:
 - Boundary: (is X, not Y)
+- Avoid: (near-synonyms this ship does not use)
 - Resolved ambiguity:
 ```
 <!-- shipyard-seed-b:en:end -->
@@ -228,11 +229,12 @@ documentLanguage: zh-Hans
 
 # 术语表
 
-一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。
+一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。只收本船特有的词；海图上都有的通用词不立条目。
 
 ## <term>
 - 定义:
 - 边界: （是 X，不是 Y）
+- 禁用: （本船不用的近义词）
 - 已解决的歧义:
 ```
 <!-- shipyard-seed-b:zh-Hans:end -->
@@ -247,16 +249,17 @@ documentLanguage: zh-Hant
 
 # 詞彙表
 
-每個術語一個條目：定義、邊界、一個已解決的歧義。術語確定時立即寫入。這裡的詞彙是所有 spec、ticket 與程式碼命名的準則。
+每個術語一個條目：定義、邊界、一個已解決的歧義。術語確定時立即寫入。這裡的詞彙是所有 spec、ticket 與程式碼命名的準則。只收本船特有的詞；海圖上都有的通用詞不立條目。
 
 ## <term>
 - 定義:
 - 邊界: （是 X，不是 Y）
+- 禁用: （本船不用的近義詞）
 - 已解決的歧義:
 ```
 <!-- shipyard-seed-b:zh-Hant:end -->
 
-Seed C — docs/standards/architecture.md (data.md / process.md same shape; prose renders in the document language):
+Seed C — docs/standards/architecture.md (data.md same shape; process.md additionally seeds a Testing volume — see Seed C2; prose renders in the document language):
 
 ```markdown
 # Architecture Standards
@@ -266,6 +269,23 @@ Rule-shaped, checkable writing; every rule carries a "why". Empty sections are l
 ## Module boundaries
 ## Error handling
 ## Dependency direction
+## Seams and depth
+
+- A seam is a real boundary two modules already cross in both directions. One adapter is a hypothetical seam; two adapters make it real. (Checkable: count the callers. Why: speculative abstraction is a tax paid before the need exists.)
+- A deep module puts much behavior behind a small interface; deepen before widening. (Why: the interface is the permanent tax.)
+- Logic lives behind the seam that owns its data; stable dependencies point inward. (Why: logic that reaches across a boundary it does not own couples every caller to the wrong neighbor.)
+```
+
+Seed C2 — docs/standards/process.md, Testing volume (rendered when the repo tests code; prose renders in the document language):
+
+```markdown
+## Testing
+
+- Tests enter through the interface only: assert observable behavior at the seam. Reaching past the seam — querying the store directly, reading internal state — is false confidence. (Why: a test that survives refactors describes behavior, not plumbing.)
+- Expected values come from an independent source of truth: a known-good literal or a worked example from the spec. (Why: a test that recomputes its expectation the way the code does can never disagree with the code.)
+- One slice at a time: one failing test, one minimal implementation, repeat. Bulk-writing all tests first tests the imagination, not the behavior. (Why: the loop is a feedback engine; batching cuts the feedback.)
+- Refactoring happens at the review axis, not inside the red-green loop. (Why: the loop answers "is the behavior right"; mixing redesign in hides regressions.)
+- Tests open only at seams the reviewing captain approved. (Why: unapproved seams spend effort where the risk is not.)
 ```
 
 Seed D — docs/business/README.md:

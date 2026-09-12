@@ -319,14 +319,16 @@ export function isUserAbort(context?: StopContext): boolean {
  * Detect explicit /cancel command paths that should bypass stop-hook reinforcement.
  *
  * This is stricter than generic user-abort detection and is intended to prevent
- * re-enforcement races when the user explicitly invokes /cancel or /cancel --force.
+ * re-enforcement races when the user explicitly invokes /cancel with a known
+ * cancellation flag.
  */
 export function isExplicitCancelCommand(context?: StopContext): boolean {
   if (!context) return false;
 
   const prompt = (context.prompt ?? '').trim();
   if (prompt) {
-    const slashCancelPattern = /^\/(?:oh-my-claudecode:)?cancel(?:\s+--force)?\s*$/i;
+    const slashCancelPattern =
+      /^\/(?:oh-my-claudecode:)?cancel(?:\s+--force(?:\s+--all)?|\s+--all(?:\s+--force)?)?\s*$/i;
     const keywordCancelPattern = /^(?:cancelomc|stopomc)\s*$/i;
     if (slashCancelPattern.test(prompt) || keywordCancelPattern.test(prompt)) {
       return true;

@@ -179,7 +179,7 @@ explore --> analyst --> planner --> critic --> executor --> verifier
 
 ### Overview
 
-Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 39 shipped skills.
+Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 41 shipped skills.
 
 ### Skill Layers
 
