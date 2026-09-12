@@ -92,6 +92,8 @@ Synthesize `.omc/specs/<feature-slug>/spec.md`:
 
 Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests. Each seam entry declares its **boundary class** — in-process, locally substitutable, owned-remote (a port with a production and a test adapter), or true-external (an injected substitute) — because the class decides how the seam is tested.
 
+**Tender rule.** When the interface's shape is itself contested — two plausible designs, neither settleable by talk — C2 signs *between* alternatives, never on the only proposal on the table: draft the candidate shapes in parallel sub-agents, each under a different emphasis (smallest interface surface · widest future fit · smoothest default path for the most common caller · cleanest cross-boundary adapter), present them side by side compared on depth, locality, and seam placement, and let the captain pick one or fold a hybrid.
+
 Durability gate (agent-enforced, no approval needed): spec and tickets carry contracts, never coordinates — no file paths, no line numbers. Fragments encoding a decision better than prose (state machines, reducers, schemas) are the exception and state their origin (usually a loft).
 
 ## Phase 3 — Ticket decomposition (agent drafts → C3 approves)
