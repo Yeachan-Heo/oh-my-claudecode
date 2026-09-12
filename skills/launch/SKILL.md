@@ -96,6 +96,8 @@ Draft all of it, then stop at **C2**: present the acceptance criteria and the te
 
 Durability gate (agent-enforced, no approval needed): spec and tickets carry contracts, never coordinates — no file paths, no line numbers. Fragments encoding a decision better than prose (state machines, reducers, schemas) are the exception and state their origin (usually a loft).
 
+Testing decisions retire orphans: when a seam is deepened or replaced, the tests pinned to the old interface retire with it — new tests write to the new interface only. The testing rules themselves are seeded in `docs/standards/process.md`.
+
 ## Phase 3 — Ticket decomposition (agent drafts → C3 approves)
 
 Split into vertical slices under `.omc/specs/<feature-slug>/tickets/`:
@@ -104,7 +106,7 @@ Split into vertical slices under `.omc/specs/<feature-slug>/tickets/`:
 - each ticket crosses every layer, is independently demonstrable, and fits one fresh context
 - wide refactors go expand-contract: add the new form, migrate in batches, remove the old — each batch a ticket
 
-Agent-side mechanical validation runs first (independence, demonstrability, context fit). Then **C3**: present granularity, blocking edges, and proposed merges/splits for human approval. Iterate until approved. Mark every ticket `ready-for-agent`.
+Agent-side mechanical validation runs first (independence, demonstrability, context fit). Then **C3**: present granularity, blocking edges, and proposed merges/splits for human approval. Iterate until approved. Mark every ticket `ready-for-agent`. The C3 bar: a fresh worker can start any ticket without a question back — a ticket that must ask sends the flaw up to the spec, not to the worker.
 
 Integration-wiring rule: every vertical slice includes its own wiring and a smoke assertion — a slice whose output nothing mounts, serves, or imports is not done. Cross-slice seams that no single slice owns (route mounting, static serving, entry-point wiring) get an explicit integration ticket as the last frontier item.
 
