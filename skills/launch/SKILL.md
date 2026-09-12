@@ -90,7 +90,7 @@ Synthesize `.omc/specs/<feature-slug>/spec.md`:
 ## Out of Scope
 ```
 
-Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests.
+Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests. Each seam entry declares its **boundary class** — in-process, locally substitutable, owned-remote (a port with a production and a test adapter), or true-external (an injected substitute) — because the class decides how the seam is tested.
 
 Durability gate (agent-enforced, no approval needed): spec and tickets carry contracts, never coordinates — no file paths, no line numbers. Fragments encoding a decision better than prose (state machines, reducers, schemas) are the exception and state their origin (usually a loft).
 
