@@ -288,11 +288,8 @@ describe('state-tools', () => {
     delete process.env.OMC_TEST_CONDITIONAL_CREATE_REPLACEMENT_BASE64;
     delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_PATH;
     delete process.env.OMC_TEST_EMERGENCY_REPLACEMENT_BASE64;
-<<<<<<< HEAD
     delete process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE;
-=======
     artifactUnlinkFault.target = undefined;
->>>>>>> origin/dev
   });
 
   describe('state_read', () => {

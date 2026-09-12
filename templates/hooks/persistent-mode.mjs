@@ -98,7 +98,7 @@ const { readStdin } = await import(
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
 const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
-const { acquireStateFileLockSync, atomicWriteFileSync, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, getStateFileLockFailureMessage, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 function readJsonFile(path) {
   try {
@@ -107,6 +107,11 @@ function readJsonFile(path) {
   } catch {
     return null;
   }
+}
+
+function lockFailureReason(operation) {
+  const message = getStateFileLockFailureMessage();
+  return `[OMC] ${operation} failed: ${message} Retry the operation after the lock holder exits.`;
 }
 
 function writeJsonFile(path, data) {
@@ -125,34 +130,48 @@ function workflowStopResponse(state) {
 
 function commitWorkflowAdvance(path, advance) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path) };
+  if (!lock) return { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state transition') };
+  let result;
   try {
     const current = readJsonFile(path);
     const currentStage = current?.pipelineTracking?.stages?.[advance.expectedStageIndex];
-    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') return { committed: false, state: current };
-    if (!refreshWorkflowBoundaryForCommit(advance)) return { committed: false, state: current };
-    if (!writeJsonFile(path, advance.updated)) return { committed: false, state: readJsonFile(path) };
-    return { committed: true, state: advance.updated };
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') {
+      result = { committed: false, state: current };
+    } else if (!refreshWorkflowBoundaryForCommit(advance)) {
+      result = { committed: false, state: current };
+    } else if (!writeJsonFile(path, advance.updated)) {
+      result = { committed: false, state: readJsonFile(path) };
+    } else {
+      result = { committed: true, state: advance.updated };
+    }
   } finally {
-    releaseStateFileLockSync(lock);
+    if (!releaseStateFileLockSync(lock)) result = { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state transition release') };
   }
+  return result;
 }
 
 function refreshNamedWorkflowDispatch(path, expected) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path) };
+  if (!lock) return { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state refresh') };
+  let result;
   try {
     const current = readJsonFile(path);
     const currentStage = current?.pipelineTracking?.stages?.[expected.stageIndex];
-    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) return { committed: false, state: current, integrityFailed: true };
-    if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) return { committed: false, state: current };
-    const now = new Date().toISOString();
-    const refreshed = { ...current, last_checked_at: now, updated_at: now };
-    if (!writeJsonFile(path, refreshed)) return { committed: false, state: readJsonFile(path) };
-    return { committed: true, state: refreshed };
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) {
+      result = { committed: false, state: current, integrityFailed: true };
+    } else if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) {
+      result = { committed: false, state: current };
+    } else {
+      const now = new Date().toISOString();
+      const refreshed = { ...current, last_checked_at: now, updated_at: now };
+      result = writeJsonFile(path, refreshed)
+        ? { committed: true, state: refreshed }
+        : { committed: false, state: readJsonFile(path) };
+    }
   } finally {
-    releaseStateFileLockSync(lock);
+    if (!releaseStateFileLockSync(lock)) result = { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state refresh release') };
   }
+  return result;
 }
 
 function shouldWriteStateBack(path) {
@@ -1068,6 +1087,8 @@ async function main() {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
               ? workflowAdvance.nextStagePrompt
               : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
+          } else if (commit.lockFailure) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: commit.lockFailure }));
           } else if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
             console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
           } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
@@ -1098,6 +1119,8 @@ async function main() {
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
           if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
+          } else if (refresh.lockFailure) {
+            console.log(JSON.stringify({ continue: false, decision: "block", reason: refresh.lockFailure }));
           } else {
             console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
           }
@@ -1118,7 +1141,9 @@ async function main() {
               committed = writeJsonFile(autopilot.path, reinforced);
             });
             if (!locked.acquired || !committed) {
-              console.log(JSON.stringify(SAFE_CONTINUE));
+              console.log(JSON.stringify(locked.acquired
+                ? SAFE_CONTINUE
+                : { continue: false, decision: "block", reason: lockFailureReason('Autopilot state reinforcement') }));
               return;
             }
             autopilot.state = reinforced;

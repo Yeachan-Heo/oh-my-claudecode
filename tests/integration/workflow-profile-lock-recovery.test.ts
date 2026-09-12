@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { getProcessStartIdentitySync } from '../../src/platform/process-utils.js';
@@ -51,6 +51,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   while (created.length) rmSync(created.pop()!, { recursive: true, force: true });
   delete process.env.OMC_TEST_FLOCK_AVAILABLE;
+  delete process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE;
 });
 
 describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) => {
@@ -108,6 +109,8 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
 
   it('serializes concurrent reclaimers without removing a live replacement', async () => {
     const { statePath, lockPath } = fixture();
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE = '1';
     writeFileSync(lockPath, JSON.stringify(owner({ pid: 999999999, processStart: '1' })));
     const logPath = `${statePath}.critical.log`;
     const childScript = String.raw`
@@ -148,6 +151,25 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
     const second = lockApi.acquireStateFileLockSync(statePath, 2);
     expect(second).not.toBeNull();
     lockApi.releaseStateFileLockSync(second);
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it('uses the shipped owner-file fallback when better-sqlite3 cannot load', async () => {
+    const { statePath, lockPath } = fixture();
+    process.env.NODE_ENV = 'test';
+    process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE = '1';
+    const lockApi = await import(`${pathToFileURL(join(root, 'scripts', 'lib', 'state-lock.mjs')).href}?unavailable=${randomUUID()}`) as {
+      acquireStateFileLockSync(path: string, attempts?: number): unknown;
+      getStateFileLockDiagnostic(): string | null;
+      releaseStateFileLockSync(lock: unknown): boolean;
+    };
+
+    const lock = lockApi.acquireStateFileLockSync(statePath, 3);
+    expect(lock).not.toBeNull();
+    expect(lockApi.getStateFileLockDiagnostic()).toContain('better_sqlite3.node');
+    expect(existsSync(join(dirname(statePath), '.state-mutation-locks.db'))).toBe(false);
+    expect(existsSync(lockPath)).toBe(true);
+    expect(lockApi.releaseStateFileLockSync(lock)).toBe(true);
     expect(existsSync(lockPath)).toBe(false);
   });
 });

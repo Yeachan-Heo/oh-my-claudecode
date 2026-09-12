@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -67,6 +67,50 @@ describe('plugin-setup.mjs dependency installation', () => {
   it('wraps install in try/catch for graceful failure', () => {
     // The install should be wrapped in try/catch so setup continues on failure
     expect(scriptContent).toContain('Could not install dependencies');
+  });
+
+  it('reports a failed native rebuild while completing with the owner-file fallback', () => {
+    const packageRoot = mkdtempSync(join(tmpdir(), 'omc-plugin-setup-fallback-'));
+    const configDir = join(packageRoot, 'claude');
+    const fakeHome = join(packageRoot, 'home');
+    const fakeBin = join(packageRoot, 'bin');
+    mkdirSync(join(packageRoot, 'scripts', 'lib'), { recursive: true });
+    mkdirSync(join(packageRoot, 'hooks'), { recursive: true });
+    mkdirSync(join(packageRoot, 'node_modules', 'commander'), { recursive: true });
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(fakeHome, { recursive: true });
+    mkdirSync(fakeBin, { recursive: true });
+
+    cpSync(PLUGIN_SETUP_PATH, join(packageRoot, 'scripts', 'plugin-setup.mjs'));
+    for (const file of ['config-dir.mjs', 'config-dir.sh', 'hook-command-normalizer.mjs', 'hud-cache-wrapper.sh', 'hud-wrapper-template.mjs', 'hud-wrapper-template.txt']) {
+      cpSync(join(PACKAGE_ROOT, 'scripts', 'lib', file), join(packageRoot, 'scripts', 'lib', file));
+    }
+    cpSync(join(PACKAGE_ROOT, 'scripts', 'find-node.sh'), join(packageRoot, 'scripts', 'find-node.sh'));
+    cpSync(join(PACKAGE_ROOT, 'hooks', 'hooks.json'), join(packageRoot, 'hooks', 'hooks.json'));
+    cpSync(join(PACKAGE_ROOT, 'package.json'), join(packageRoot, 'package.json'));
+    const fakeNpm = join(fakeBin, 'npm');
+    writeFileSync(fakeNpm, '#!/bin/sh\necho simulated rebuild failure >&2\nexit 17\n');
+    chmodSync(fakeNpm, 0o755);
+
+    try {
+      const output = execFileSync(process.execPath, [join(packageRoot, 'scripts', 'plugin-setup.mjs')], {
+        cwd: packageRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CLAUDE_CONFIG_DIR: configDir,
+          HOME: fakeHome,
+          PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+        },
+      });
+
+      expect(output).toContain('Could not build better-sqlite3 native binding');
+      expect(output).toContain('State mutation will use the file-lock fallback');
+      expect(output).toContain('Setup complete with file-lock fallback');
+      expect(output).not.toContain('native binding built successfully');
+    } finally {
+      rmSync(packageRoot, { recursive: true, force: true });
+    }
   });
 });
 

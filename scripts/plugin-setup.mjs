@@ -17,6 +17,7 @@ import { hookPrefixForPlatform, normalizeHooksDataForPlatform } from './lib/hook
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const require = createRequire(import.meta.url);
 
 const CLAUDE_DIR = getClaudeConfigDir();
 const HUD_DIR = join(CLAUDE_DIR, 'hud');
@@ -145,6 +146,19 @@ const betterSqliteBindingCheck = join(
   'Release',
   'better_sqlite3.node',
 );
+
+function probeBetterSqliteBinding() {
+  try {
+    const loaded = require('better-sqlite3');
+    const Database = typeof loaded === 'function' ? loaded : loaded?.default;
+    if (typeof Database !== 'function') return false;
+    const db = new Database(':memory:');
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
 if (!existsSync(commanderCheck)) {
   console.log('[OMC] Installing runtime dependencies...');
   try {
@@ -164,7 +178,7 @@ if (!existsSync(commanderCheck)) {
 // better-sqlite3 has a native install script.  The dependency bootstrap above
 // intentionally ignores package lifecycle scripts so it cannot recurse into
 // this setup entry point; rebuild this one native package explicitly instead.
-if (!existsSync(betterSqliteBindingCheck)) {
+if (!existsSync(betterSqliteBindingCheck) && isPublishedPluginCache) {
   console.log('[OMC] Building better-sqlite3 native binding...');
   try {
     execSync('npm rebuild better-sqlite3', {
@@ -172,10 +186,26 @@ if (!existsSync(betterSqliteBindingCheck)) {
       stdio: 'pipe',
       timeout: 60000,
     });
-    console.log('[OMC] better-sqlite3 native binding built successfully');
+    if (existsSync(betterSqliteBindingCheck)) {
+      console.log('[OMC] better-sqlite3 native binding built successfully');
+    } else {
+      console.log('[OMC] Warning: npm rebuild completed without producing better_sqlite3.node; state mutation will use the file-lock fallback.');
+    }
   } catch (e) {
     console.log('[OMC] Warning: Could not build better-sqlite3 native binding:', e.message);
+    console.log('[OMC] State mutation will use the file-lock fallback until better-sqlite3 is rebuilt successfully.');
   }
+} else if (!existsSync(betterSqliteBindingCheck)) {
+  console.log('[OMC] better-sqlite3 native binding is absent in the repository checkout; runtime state mutation will use the file-lock fallback.');
 }
 
-console.log('[OMC] Setup complete! Restart Claude Code to activate HUD.');
+const betterSqliteBindingHealthy = probeBetterSqliteBinding();
+if (existsSync(betterSqliteBindingCheck) && !betterSqliteBindingHealthy) {
+  console.log('[OMC] Warning: better_sqlite3.node exists but could not be loaded; runtime state mutation will use the file-lock fallback until the native binding is rebuilt for this Node runtime.');
+}
+
+if (betterSqliteBindingHealthy) {
+  console.log('[OMC] Setup complete! Restart Claude Code to activate HUD.');
+} else {
+  console.log('[OMC] Setup complete with file-lock fallback (better-sqlite3 native binding unavailable). Restart Claude Code to activate HUD.');
+}
