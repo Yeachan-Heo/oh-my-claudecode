@@ -336,6 +336,8 @@ write "this project's specific decision discipline", not generic tutorials.
 
 `.mcp.json` seed: `{"mcpServers": {}}` — servers get added when a tool integration is actually needed, not speculatively.
 
+**Destructive-operation guardrail preset.** On request, drydock seeds a hook preset that blocks destructive git operations — push, force-push, hard reset, clean, and branch deletion — behind explicit approval. It is installed as ordinary, inspectable repo config (a hooks file the repo can read and audit), never a hidden enforcement layer: the file lives in the Tools pillar, its rules are listed in the report, and removing it is an explicit human act. The preset protects the laid harness, not the agent — no agent session can end the repo's history by accident.
+
 ### 4. Wire the governance loop (this is what makes it a shipyard, not a folder)
 
 Tell the user, and rely on these flows to fill the skeleton:
