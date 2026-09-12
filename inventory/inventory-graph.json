@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b2d1d93d7ed4c551e2a6e99598c5755226d37b53",
-    "sourceSha256": "1e22b0cc6f1aa2cf123a97bc6b7317259f6e50f2b27ad478c626e0f51fb2852c",
+    "head": "c7c713cc772f9940ad740430a6b9d8475b137697",
+    "sourceSha256": "9ad695f48f699afebb5695824c9095c097778eff62cf9e76771afa39d1027866",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b2d1d93d7ed4c551e2a6e99598c5755226d37b53",
-  "sourceSha256": "1e22b0cc6f1aa2cf123a97bc6b7317259f6e50f2b27ad478c626e0f51fb2852c",
+  "head": "c7c713cc772f9940ad740430a6b9d8475b137697",
+  "sourceSha256": "9ad695f48f699afebb5695824c9095c097778eff62cf9e76771afa39d1027866",
   "counts": {
     "public": {
       "skills": 41,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1352,
-      "total": 1374
+      "srcFiles": 1353,
+      "total": 1375
     },
     "generated": {
       "distFiles": 5032,
@@ -787,6 +787,7 @@
       "scripts/persistent-mode.mjs",
       "scripts/plugin-setup.mjs",
       "scripts/plugin-shipping-surface.mjs",
+      "scripts/post-tool-directory-context-injector.mjs",
       "scripts/post-tool-rules-injector.mjs",
       "scripts/post-tool-use-failure.mjs",
       "scripts/post-tool-verifier.mjs",
@@ -33506,6 +33507,11 @@
         "path": "scripts/plugin-shipping-surface.mjs"
       },
       {
+        "id": "scripts/post-tool-directory-context-injector.mjs",
+        "kind": "script",
+        "path": "scripts/post-tool-directory-context-injector.mjs"
+      },
+      {
         "id": "scripts/post-tool-rules-injector.mjs",
         "kind": "script",
         "path": "scripts/post-tool-rules-injector.mjs"
@@ -34389,6 +34395,11 @@
         "id": "src/__tests__/delegation-enforcer.test.ts",
         "kind": "src",
         "path": "src/__tests__/delegation-enforcer.test.ts"
+      },
+      {
+        "id": "src/__tests__/directory-context-injector-registration.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/directory-context-injector-registration.test.ts"
       },
       {
         "id": "src/__tests__/directory-context-injector.test.ts",
@@ -42743,6 +42754,21 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/post-tool-rules-injector.mjs",
         "to": "external:path",
         "kind": "imports"
@@ -44675,6 +44701,31 @@
       {
         "from": "src/__tests__/delegation-enforcer.test.ts",
         "to": "src/features/delegation-routing/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -78849,12 +78900,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6978,
-      "edgeCount": 7511,
-      "importEdgeCount": 6191,
+      "nodeCount": 6980,
+      "edgeCount": 7519,
+      "importEdgeCount": 6199,
       "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "1cf792d0a5f5622af60dddd9e745930b12ccc8cd31345a413e8334b39bdfc2dc",
-  "manifestSha256": "9c9f238f376afbf26f206e90b03a39d27221ce1742f1d3aa062e827b5eac581e"
+  "inventorySha256": "dae592c0ba83bfa6e1615d2e0052f56710d645af3f283d5a7dd4c12a8d39bd95",
+  "manifestSha256": "39dff4b54fba91ec9306c05b8f11958f1346c71a49458f7fc990a8e4fbc61f4c"
 }

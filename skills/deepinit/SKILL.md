@@ -18,28 +18,46 @@ AGENTS.md files serve as **AI-readable documentation** that helps agents underst
 
 ## Hierarchical Tagging System
 
-Every AGENTS.md (except root) includes a parent reference tag:
+Every AGENTS.md (except root) includes a parent reference line:
 
 ```markdown
-<!-- Parent: ../AGENTS.md -->
+**Parent context:** `../AGENTS.md`
 ```
+
+This MUST be visible prose, never an HTML comment. Claude Code strips HTML
+comments before a memory file reaches the model, so `<!-- Parent: ... -->`,
+`<!-- Generated: ... -->` and a commented MANUAL boundary are invisible to the
+agent that is supposed to act on them.
 
 This creates a navigable hierarchy:
 ```
-/AGENTS.md                          ← Root (no parent tag)
-├── src/AGENTS.md                   ← <!-- Parent: ../AGENTS.md -->
-│   ├── src/components/AGENTS.md    ← <!-- Parent: ../AGENTS.md -->
-│   └── src/utils/AGENTS.md         ← <!-- Parent: ../AGENTS.md -->
-└── docs/AGENTS.md                  ← <!-- Parent: ../AGENTS.md -->
+/AGENTS.md                          ← Root (no parent line)
+├── src/AGENTS.md                   ← **Parent context:** `../AGENTS.md`
+│   ├── src/components/AGENTS.md    ← **Parent context:** `../AGENTS.md`
+│   └── src/utils/AGENTS.md         ← **Parent context:** `../AGENTS.md`
+└── docs/AGENTS.md                  ← **Parent context:** `../AGENTS.md`
 ```
+
+## Loading Model
+
+Stock Claude Code discovers nested `CLAUDE.md` by basename and never loads a
+nested `AGENTS.md`; a root `@AGENTS.md` import does not reach subdirectories
+either. The nested files generated here are delivered by OMC's PostToolUse
+directory-context injector, which walks up from each accessed file and injects
+the nearest `AGENTS.md`/`README.md` once per session.
+
+That means the hierarchy requires OMC's hooks to be active. When OMC hooks are
+disabled (`DISABLE_OMC=1`, `OMC_SKIP_HOOKS=post-tool-use`) or the plugin is not
+registered, add a root-level `CLAUDE.md` symlink or `@AGENTS.md` import for the
+root file and expect nested files to stay unread.
 
 ## AGENTS.md Template
 
 ```markdown
-<!-- Parent: {relative_path_to_parent}/AGENTS.md -->
-<!-- Generated: {timestamp} | Updated: {timestamp} -->
-
 # {Directory Name}
+
+**Parent context:** `{relative_path_to_parent}/AGENTS.md`
+**Generated:** {timestamp} · **Updated:** {timestamp}
 
 ## Purpose
 {One-paragraph description of what this directory contains and its role}
@@ -77,7 +95,9 @@ This creates a navigable hierarchy:
 ### External
 {Key external packages/libraries used}
 
-<!-- MANUAL: Any manually added notes below this line are preserved on regeneration -->
+## Manual Notes
+
+Notes under this heading are written by humans and preserved on regeneration.
 ```
 
 ## Execution Workflow
@@ -117,7 +137,7 @@ When AGENTS.md already exists:
 1. **Read existing content**
 2. **Identify sections**:
    - Auto-generated sections (can be updated)
-   - Manual sections (`<!-- MANUAL -->` preserved)
+   - Manual sections (the `## Manual Notes` heading and everything under it are preserved)
 3. **Compare**:
    - New files added?
    - Files removed?
@@ -133,10 +153,10 @@ After generation, run validation checks:
 
 | Check | How to Verify | Corrective Action |
 |-------|--------------|-------------------|
-| Parent references resolve | Read each AGENTS.md, check `<!-- Parent: -->` path exists | Fix path or remove orphan |
+| Parent references resolve | Read each AGENTS.md, check the `**Parent context:**` path exists | Fix path or remove orphan |
 | No orphaned AGENTS.md | Compare AGENTS.md locations to directory structure | Delete orphaned files |
 | Completeness | List all directories, check for AGENTS.md | Generate missing files |
-| Timestamps current | Check `<!-- Generated: -->` dates | Regenerate outdated files |
+| Timestamps current | Check the `**Generated:**` / `**Updated:**` dates | Regenerate outdated files |
 
 Validation script pattern:
 ```bash
@@ -144,7 +164,7 @@ Validation script pattern:
 find . -name "AGENTS.md" -type f
 
 # Check parent references
-grep -r "<!-- Parent:" --include="AGENTS.md" .
+grep -r "\*\*Parent context:\*\*" --include="AGENTS.md" .
 ```
 
 ## Smart Delegation
@@ -169,8 +189,9 @@ When encountering empty or near-empty directories:
 
 Example minimal AGENTS.md for directory-only containers:
 ```markdown
-<!-- Parent: ../AGENTS.md -->
 # {Directory Name}
+
+**Parent context:** `../AGENTS.md`
 
 ## Purpose
 Container directory for organizing related modules.
@@ -206,9 +227,9 @@ Container directory for organizing related modules.
 
 ### Root AGENTS.md
 ```markdown
-<!-- Generated: 2024-01-15 | Updated: 2024-01-15 -->
-
 # my-project
+
+**Generated:** 2024-01-15 · **Updated:** 2024-01-15
 
 ## Purpose
 A web application for managing user tasks with real-time collaboration features.
@@ -249,15 +270,17 @@ A web application for managing user tasks with real-time collaboration features.
 - TypeScript 5.x - Type safety
 - Vite - Build tool
 
-<!-- MANUAL: Custom project notes can be added below -->
+## Manual Notes
+
+Custom project notes can be added under this heading.
 ```
 
 ### Nested AGENTS.md
 ```markdown
-<!-- Parent: ../AGENTS.md -->
-<!-- Generated: 2024-01-15 | Updated: 2024-01-15 -->
-
 # components
+
+**Parent context:** `../AGENTS.md`
+**Generated:** 2024-01-15 · **Updated:** 2024-01-15
 
 ## Purpose
 Reusable React components organized by feature and complexity.
@@ -300,7 +323,7 @@ Reusable React components organized by feature and complexity.
 - `clsx` - Conditional class names
 - `lucide-react` - Icons
 
-<!-- MANUAL: -->
+## Manual Notes
 ```
 
 ## Triggering Update Mode
