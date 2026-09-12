@@ -26,7 +26,7 @@ import { join, dirname, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
-import { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } from './lib/atomic-write.mjs';
+import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencyStateFile, withStateFileLockSync } from './lib/atomic-write.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
@@ -1054,7 +1054,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
   try {
     mkdirSync(dirname(writePath), { recursive: true });
     let workflowIntegrityFailure = false;
-    withStateFileLockSync(writePath, () => {
+    const locked = withStateFileLockSync(writePath, () => {
       if (!recoverEmergencyStateFile(writePath)) return;
       // A legacy autopilot activation must never replace named state. Own
       // markers are authoritative even when their values are falsy.
@@ -1072,13 +1072,14 @@ async function activateState(directory, prompt, stateName, sessionId) {
       }
       atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
     });
+    if (!locked.acquired) return getStateFileLockFailureMessage();
     return workflowIntegrityFailure ? 'workflow_descriptor_integrity_failed' : null;
   } catch { return null; }
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
   const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
-  withStateFileLockSync(signalPath, () => {
+  const locked = withStateFileLockSync(signalPath, () => {
     if (!existsSync(signalPath)) return;
     try {
       const signal = JSON.parse(readFileSync(signalPath, 'utf8'));
@@ -1087,6 +1088,8 @@ function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
       // Malformed signals fail closed in Stop and are left for explicit cleanup.
     }
   });
+  if (!locked.acquired) return getStateFileLockFailureMessage();
+  return null;
 }
 
 function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
@@ -1117,7 +1120,8 @@ function resumeWorkflowProfile(directory, sessionId, workflowName, omcRoot) {
     if (result.value?.error === 'workflow_transcript_record_too_large') throw new Error('workflow_transcript_record_too_large');
     if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
     if (!result.acquired || !result.value?.stagePrompt) return null;
-    retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
+    const cleanupFailure = retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
+    if (cleanupFailure) process.stderr.write(`[OMC] ${cleanupFailure}\n`);
     return result.value.stagePrompt;
   } catch (error) {
     if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
@@ -1173,7 +1177,8 @@ function activateWorkflowProfile(directory, sessionId, task, workflow, omcRoot, 
     if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
     if (result.acquired && result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;
-    retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
+    const cleanupFailure = retireStaleWorkflowCancelSignal(target, result.value.workflowRunId);
+    if (cleanupFailure) process.stderr.write(`[OMC] ${cleanupFailure}\n`);
     return result.value.stagePrompt;
   } catch (error) {
     if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
@@ -1196,20 +1201,25 @@ function activateRalplanStartupState(directory, prompt, sessionId, omcRoot) {
     last_checked_at: now
   };
 
+  const persist = statePath => {
+    try {
+      mkdirSync(dirname(statePath), { recursive: true });
+      const locked = withStateFileLockSync(statePath, () => {
+        atomicWriteFileSync(statePath, JSON.stringify(state, null, 2));
+      });
+      return locked.acquired ? null : getStateFileLockFailureMessage();
+    } catch {
+      return 'Could not persist ralplan state.';
+    }
+  };
+
   if (sessionId && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) {
     const sessionDir = join(_omcRoot, 'state', 'sessions', sessionId);
-    if (!existsSync(sessionDir)) {
-      try { mkdirSync(sessionDir, { recursive: true }); } catch {}
-    }
-    try { atomicWriteFileSync(join(sessionDir, 'ralplan-state.json'), JSON.stringify(state, null, 2)); } catch {}
-    return;
+    return persist(join(sessionDir, 'ralplan-state.json'));
   }
 
   const localDir = join(_omcRoot, 'state');
-  if (!existsSync(localDir)) {
-    try { mkdirSync(localDir, { recursive: true }); } catch {}
-  }
-  try { atomicWriteFileSync(join(localDir, 'ralplan-state.json'), JSON.stringify(state, null, 2)); } catch {}
+  return persist(join(localDir, 'ralplan-state.json'));
 }
 
 
@@ -1726,7 +1736,13 @@ async function main() {
     }
 
     if (isExplicitRalplanSlashInvocation(prompt)) {
-      activateRalplanStartupState(directory, prompt, sessionId, omcRoot);
+      const activationError = activateRalplanStartupState(directory, prompt, sessionId, omcRoot);
+      if (activationError) {
+        console.log(JSON.stringify(createHookOutput(
+          `[OMC STATE ERROR] ${activationError} No ralplan state was activated.`,
+        )));
+        return;
+      }
       console.log(JSON.stringify(createHookOutput(
         `[RALPLAN INIT]\n` +
         `Explicit /ralplan invoke detected during UserPromptSubmit.\n` +
@@ -1953,6 +1969,12 @@ async function main() {
       const activationError = await activateState(directory, prompt, mode.name, sessionId);
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
+        return;
+      }
+      if (activationError) {
+        console.log(JSON.stringify(createHookOutput(
+          `[OMC STATE ERROR] ${activationError} No ${mode.name} state was activated.`,
+        )));
         return;
       }
     }

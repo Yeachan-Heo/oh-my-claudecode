@@ -98,7 +98,7 @@ const { readStdin } = await import(
 );
 const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
 const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
-const { acquireStateFileLockSync, atomicWriteFileSync, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, getStateFileLockFailureMessage, isExclusiveStateLockingAvailable, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 function readJsonFile(path) {
   try {
@@ -106,6 +106,25 @@ function readJsonFile(path) {
     return JSON.parse(readFileSync(path, "utf-8"));
   } catch {
     return null;
+  }
+}
+
+function lockFailureReason(operation) {
+  const message = getStateFileLockFailureMessage();
+  return `[OMC] ${operation} failed: ${message} Retry the operation after the lock holder exits.`;
+}
+
+/**
+ * A contended or unverifiable state lock is diagnostic, never a turn blocker.
+ * The uncommitted transition is re-derived on the next invocation, so the
+ * stage/phase prompt must still reach the agent; surfacing the shortfall on
+ * stderr keeps #4016's actionable message without losing that contract.
+ */
+function reportLockFailure(operation) {
+  try {
+    console.error(lockFailureReason(operation));
+  } catch {
+    // Diagnostics never affect control flow.
   }
 }
 
@@ -125,34 +144,48 @@ function workflowStopResponse(state) {
 
 function commitWorkflowAdvance(path, advance) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path) };
+  if (!lock) { reportLockFailure('Autopilot workflow state transition'); return { committed: false, state: readJsonFile(path) }; }
+  let result;
   try {
     const current = readJsonFile(path);
     const currentStage = current?.pipelineTracking?.stages?.[advance.expectedStageIndex];
-    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') return { committed: false, state: current };
-    if (!refreshWorkflowBoundaryForCommit(advance)) return { committed: false, state: current };
-    if (!writeJsonFile(path, advance.updated)) return { committed: false, state: readJsonFile(path) };
-    return { committed: true, state: advance.updated };
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, advance.expectedSessionId) || current.workflowRunId !== advance.expectedWorkflowRunId || current?.pipelineTracking?.trackingRevision !== advance.expectedRevision || current.workflow.profileHash !== advance.expectedProfileHash || current?.session_id !== advance.expectedSessionId || current?.active !== true || current?.pipelineTracking?.currentStageIndex !== advance.expectedStageIndex || currentStage?.id !== advance.expectedStageId || currentStage?.status !== 'active') {
+      result = { committed: false, state: current };
+    } else if (!refreshWorkflowBoundaryForCommit(advance)) {
+      result = { committed: false, state: current };
+    } else if (!writeJsonFile(path, advance.updated)) {
+      result = { committed: false, state: readJsonFile(path) };
+    } else {
+      result = { committed: true, state: advance.updated };
+    }
   } finally {
-    releaseStateFileLockSync(lock);
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state transition release'); result = { committed: false, state: readJsonFile(path) }; }
   }
+  return result;
 }
 
 function refreshNamedWorkflowDispatch(path, expected) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path) };
+  if (!lock) { reportLockFailure('Autopilot workflow state refresh'); return { committed: false, state: readJsonFile(path) }; }
+  let result;
   try {
     const current = readJsonFile(path);
     const currentStage = current?.pipelineTracking?.stages?.[expected.stageIndex];
-    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) return { committed: false, state: current, integrityFailed: true };
-    if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) return { committed: false, state: current };
-    const now = new Date().toISOString();
-    const refreshed = { ...current, last_checked_at: now, updated_at: now };
-    if (!writeJsonFile(path, refreshed)) return { committed: false, state: readJsonFile(path) };
-    return { committed: true, state: refreshed };
+    if (!isValidWorkflowDescriptor(current?.workflow) || !isValidWorkflowTrackingState(current, expected.sessionId)) {
+      result = { committed: false, state: current, integrityFailed: true };
+    } else if (current?.workflowRunId !== expected.workflowRunId || current?.session_id !== expected.sessionId || current?.workflow?.profileHash !== expected.profileHash || current?.pipelineTracking?.trackingRevision !== expected.trackingRevision || current?.pipelineTracking?.currentStageIndex !== expected.stageIndex || currentStage?.id !== expected.stageId || currentStage?.status !== 'active' || current?.phase !== expected.phase || current?.active !== true) {
+      result = { committed: false, state: current };
+    } else {
+      const now = new Date().toISOString();
+      const refreshed = { ...current, last_checked_at: now, updated_at: now };
+      result = writeJsonFile(path, refreshed)
+        ? { committed: true, state: refreshed }
+        : { committed: false, state: readJsonFile(path) };
+    }
   } finally {
-    releaseStateFileLockSync(lock);
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state refresh release'); result = { committed: false, state: readJsonFile(path) }; }
   }
+  return result;
 }
 
 function shouldWriteStateBack(path) {
@@ -459,9 +492,17 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
   const isActiveSignal = (signalPath) => {
     if (!existsSync(signalPath)) return false;
     if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
-    const stateLock = acquireStateFileLockSync(currentAutopilotPath, 50, true);
+    // The flock-absent contract lives here rather than inside the lock
+    // primitive: with no exclusive backend to fail closed against, this path
+    // must not authenticate state through the best-effort fallback lock, while
+    // emergency recovery still gets its SQLite-backed exclusive claim.
+    const stateLock = isExclusiveStateLockingAvailable()
+      ? acquireStateFileLockSync(currentAutopilotPath, 50, true)
+      : null;
     if (!stateLock) {
-      if (isStateFileLockingSupported()) return false;
+      // A real contender holds the lock only when exclusive acquisition is
+      // actually available; without it, fall through to the enforceability check.
+      if (isExclusiveStateLockingAvailable()) return false;
       const currentAutopilot = readJsonFile(currentAutopilotPath);
       if (isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return false;
       return validateSignal(signalPath, null);
@@ -1118,6 +1159,7 @@ async function main() {
               committed = writeJsonFile(autopilot.path, reinforced);
             });
             if (!locked.acquired || !committed) {
+              if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
               console.log(JSON.stringify(SAFE_CONTINUE));
               return;
             }

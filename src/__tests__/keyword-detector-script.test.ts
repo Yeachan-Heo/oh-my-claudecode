@@ -3,7 +3,9 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, write
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 import { provisionStandaloneStateLockBridge } from '../installer/index.js';
+import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -74,7 +76,44 @@ function getRalplanStatePath(cwd: string, sessionId: string) {
   return join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralplan-state.json');
 }
 
+function currentProcessStart(): string {
+  const identity = getProcessStartIdentitySync(process.pid);
+  if (identity === null) throw new Error('current process identity unavailable');
+  return identity;
+}
+
 describe('keyword-detector.mjs mode-message dispatch', () => {
+  it('does not route a mode when the shipped lock fallback is contended', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-lock-contention-'));
+    const sessionId = 'session-lock-contention';
+    try {
+      execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'pipe' });
+      const statePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
+      const lockPath = `${statePath}.mutation.lock`;
+      mkdirSync(dirname(lockPath), { recursive: true });
+      writeFileSync(lockPath, JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        processStart: currentProcessStart(),
+        createdAt: new Date().toISOString(),
+        nonce: randomUUID(),
+      }));
+
+      const output = runKeywordDetector('ralph this task', cwd, sessionId, {
+        OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE: '1',
+      });
+      const context = output.hookSpecificOutput?.additionalContext ?? '';
+
+      expect(context).toContain('[OMC STATE ERROR]');
+      expect(context).toContain('better_sqlite3.node');
+      expect(context).toContain('No ralph state was activated.');
+      expect(existsSync(join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json'))).toBe(false);
+      expect(existsSync(lockPath)).toBe(true);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('injects search mode for deepsearch without emitting a magic skill invocation', () => {
     const output = runKeywordDetector('deepsearch the codebase for keyword dispatch');
     const context = output.hookSpecificOutput?.additionalContext ?? '';

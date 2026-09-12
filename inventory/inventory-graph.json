@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "64099fbdbe5cb3ef56cd4bacfde2b72fcef3330d",
-    "sourceSha256": "2f63d3350490cfd249af363c72b29372ba067c3c5f8ec63098cb68c30d70051e",
+    "head": "c30250814d764c6335c9e579d992be8439c51986",
+    "sourceSha256": "cfa0c9ff9344215b758fc8d731b8785b0c27d24f4a30f8858308293b20cf4c35",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "64099fbdbe5cb3ef56cd4bacfde2b72fcef3330d",
-  "sourceSha256": "2f63d3350490cfd249af363c72b29372ba067c3c5f8ec63098cb68c30d70051e",
+  "head": "c30250814d764c6335c9e579d992be8439c51986",
+  "sourceSha256": "cfa0c9ff9344215b758fc8d731b8785b0c27d24f4a30f8858308293b20cf4c35",
   "counts": {
     "public": {
       "skills": 41,
@@ -26,10 +26,10 @@
       "hookFiles": 296,
       "featureFiles": 80,
       "toolFiles": 61,
-      "libFiles": 42,
+      "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1348,
-      "total": 1370
+      "srcFiles": 1349,
+      "total": 1371
     },
     "generated": {
       "distFiles": 5032,
@@ -593,6 +593,7 @@
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
+      "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
       "src/lib/__tests__/plugin-dir.test.ts",
       "src/lib/__tests__/session-id.test.ts",
@@ -38738,6 +38739,11 @@
         "path": "src/lib/__tests__/mode-state-io.test.ts"
       },
       {
+        "id": "src/lib/__tests__/mode-state-lock.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/mode-state-lock.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/payload-limits.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/payload-limits.test.ts"
@@ -42582,6 +42588,11 @@
       {
         "from": "scripts/persistent-mode.mjs",
         "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/plugin-setup.mjs",
+        "to": "external:better-sqlite3",
         "kind": "imports"
       },
       {
@@ -46516,6 +46527,11 @@
       },
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
       },
@@ -46542,6 +46558,11 @@
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -65750,6 +65771,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "src/lib/mode-state-io.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-lock.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/payload-limits.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -66292,6 +66348,11 @@
       {
         "from": "src/lib/mode-state-io.ts",
         "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/mode-state-io.ts",
+        "to": "external:module",
         "kind": "imports"
       },
       {
@@ -78596,12 +78657,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6969,
-      "edgeCount": 7470,
-      "importEdgeCount": 6153,
+      "nodeCount": 6970,
+      "edgeCount": 7481,
+      "importEdgeCount": 6164,
       "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "c6ce36cc1dfb2b18c7f15643dbca83e26493128825334ceaac60eb56b1213c43",
-  "manifestSha256": "e84c97c9abc7a4cca6eea9add5a34a7c6dc39ddd7193c4abbbe1e26dfdc54b60"
+  "inventorySha256": "6757c236df49e65dfb77ff8000590c31fb4caa7d014d0c2eb995dee72a7cd5ec",
+  "manifestSha256": "548985a0ebd226fb2cd0ed3deb4a56e0d1ffabc3cab7e931862d139d26cc2ac4"
 }

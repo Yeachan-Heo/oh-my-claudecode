@@ -31,7 +31,7 @@ const __dirname = dirname(__filename);
 
 // Dynamic import for the shared stdin module (use pathToFileURL for Windows compatibility, #524)
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
-const { atomicWriteFileSync, recoverEmergencyStateFile, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
+const { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencyStateFile, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, 'lib', 'atomic-write.mjs')).href);
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, 'lib', 'config-dir.mjs')).href);
 const { resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 const { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, 'lib', 'workflow-profile-runtime.mjs')).href);
@@ -912,7 +912,7 @@ async function activateState(directory, prompt, stateName, sessionId) {
   const writeState = (writePath, authorizeState) => {
     try {
       mkdirSync(dirname(writePath), { recursive: true });
-      withStateFileLockSync(writePath, () => {
+      const locked = withStateFileLockSync(writePath, () => {
         if (!recoverEmergencyStateFile(writePath, authorizeState ? { authorizeState } : undefined)) return;
         // Shared home fallbacks are project-scoped. A foreign or unverifiable
         // primary/recovery generation must win over this activation.
@@ -941,27 +941,31 @@ async function activateState(directory, prompt, stateName, sessionId) {
         }
         atomicWriteFileSync(writePath, JSON.stringify(state, null, 2));
       });
+      if (!locked.acquired) return getStateFileLockFailureMessage();
     } catch {}
+    return null;
   };
 
 
   const safeSessionId = sessionId && SESSION_ID_ALLOWLIST.test(sessionId) ? sessionId : undefined;
   const { writePath } = await resolveSessionStatePathsForHook(directory, stateName, safeSessionId);
-  writeState(writePath);
+  const writeFailure = writeState(writePath);
+  if (writeFailure) return writeFailure;
 
   // The standalone compatibility fallback is shared by every project, so it
   // may only recover or replace generations owned by this canonical project.
   const globalStatePath = join(homedir(), '.omc', 'state', `${stateName}-state.json`);
   const authorizeGlobalState = (candidate) =>
     typeof candidate?.project_path === 'string' && resolve(candidate.project_path) === resolve(directory);
-  writeState(globalStatePath, authorizeGlobalState);
+  const globalWriteFailure = writeState(globalStatePath, authorizeGlobalState);
+  if (globalWriteFailure) return globalWriteFailure;
   return workflowIntegrityFailure ? 'workflow_descriptor_integrity_failed' : null;
 
 }
 
 function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
   const signalPath = join(dirname(statePath), 'cancel-signal-state.json');
-  withStateFileLockSync(signalPath, () => {
+  const locked = withStateFileLockSync(signalPath, () => {
     if (!existsSync(signalPath)) return;
     try {
       const signal = JSON.parse(readFileSync(signalPath, 'utf8'));
@@ -970,6 +974,8 @@ function retireStaleWorkflowCancelSignal(statePath, workflowRunId) {
       // Malformed signals fail closed in Stop and are left for explicit cleanup.
     }
   });
+  if (!locked.acquired) return getStateFileLockFailureMessage();
+  return null;
 }
 
 async function resumeWorkflowProfile(directory, sessionId, workflowName) {
@@ -998,7 +1004,8 @@ async function resumeWorkflowProfile(directory, sessionId, workflowName) {
     if (result.value?.error === 'workflow_transcript_record_too_large') throw new Error('workflow_transcript_record_too_large');
     if (result.value?.error) throw new Error('workflow_descriptor_integrity_failed');
     if (!result.acquired || !result.value?.stagePrompt) return null;
-    retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    const cleanupFailure = retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    if (cleanupFailure) process.stderr.write(`[OMC] ${cleanupFailure}\n`);
     return result.value.stagePrompt;
   } catch (error) {
     if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
@@ -1052,7 +1059,8 @@ async function activateWorkflowProfile(directory, sessionId, task, workflow, tra
     if (result.acquired && result.value?.error === 'workflow_integrity_failure') throw new Error('workflow_descriptor_integrity_failed');
     if (result.acquired && result.value?.error === 'workflow_recovery_failure') throw new Error('workflow_emergency_recovery_failed');
     if (!result.acquired || !result.value || typeof result.value.stagePrompt !== 'string') return null;
-    retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    const cleanupFailure = retireStaleWorkflowCancelSignal(writePath, result.value.workflowRunId);
+    if (cleanupFailure) process.stderr.write(`[OMC] ${cleanupFailure}\n`);
     return result.value.stagePrompt;
   } catch (error) {
     if (error?.message === 'workflow_emergency_recovery_failed' || error?.message === 'workflow_transcript_record_too_large') throw error;
@@ -1687,6 +1695,12 @@ async function main() {
       const activationError = await activateState(directory, prompt, mode.name, sessionId);
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
+        return;
+      }
+      if (activationError) {
+        console.log(JSON.stringify(createHookOutput(
+          `[OMC STATE ERROR] ${activationError} No ${mode.name} state was activated.`,
+        )));
         return;
       }
     }
