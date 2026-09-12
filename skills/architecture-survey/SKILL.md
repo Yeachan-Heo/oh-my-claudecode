@@ -24,6 +24,8 @@ Optional argument narrows the survey to a directory or area; with no argument, s
    - **Hypothetical seams** — a boundary crossed by exactly one adapter with no second caller; checkable by counting callers.
    - **Logic behind the wrong seam** — behavior living on the far side of a boundary that does not own its data.
 
+Apply the **demolition test** to every suspect: if the module were removed, would its complexity vanish (a pass-through wearing a uniform) or reappear across its callers (load-bearing)? Only load-bearing shallowness is a finding.
+
 ## The report
 
 Rank candidates by leverage against risk. Each candidate carries:
