@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "098d1fcaa6b29b8d24ed5202129edbfaab9ac5d4",
-    "sourceSha256": "e2171eeab937e9682b0b8718d2cb7cc942d47f57c637157a1a4206a27147719c",
+    "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
+    "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "098d1fcaa6b29b8d24ed5202129edbfaab9ac5d4",
-  "sourceSha256": "e2171eeab937e9682b0b8718d2cb7cc942d47f57c637157a1a4206a27147719c",
+  "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
+  "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
   "counts": {
     "public": {
       "skills": 41,
@@ -41198,6 +41198,11 @@
         "path": "tests/lint/subagent-lock-test-contract.test.ts"
       },
       {
+        "id": "tests/lint/team-resume-contract.test.ts",
+        "kind": "other",
+        "path": "tests/lint/team-resume-contract.test.ts"
+      },
+      {
         "id": "tests/lint/windows-hide-hooks.test.ts",
         "kind": "other",
         "path": "tests/lint/windows-hide-hooks.test.ts"
@@ -59140,6 +59145,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
+        "to": "src/hooks/todo-continuation/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/persistent-mode/__tests__/deleted-state-writeback.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -75496,6 +75506,16 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -75522,6 +75542,11 @@
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -76821,6 +76846,11 @@
       },
       {
         "from": "src/tools/state-tools.ts",
+        "to": "src/lib/atomic-write.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -76842,6 +76872,11 @@
       {
         "from": "src/tools/state-tools.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/state-tools.ts",
+        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -78475,6 +78510,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/team-resume-contract.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/windows-hide-hooks.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -78546,12 +78596,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6968,
-      "edgeCount": 7461,
-      "importEdgeCount": 6144,
+      "nodeCount": 6969,
+      "edgeCount": 7470,
+      "importEdgeCount": 6153,
       "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "b54c934dddcbb51bf4a10243b5eb1015488bc7e7a0f9160a61eff3f2730e9384",
-  "manifestSha256": "a8fbded21704a4ce9c400d3b4848f5ce588819253098591dc1107dc43c51d847"
+  "inventorySha256": "c6ce36cc1dfb2b18c7f15643dbca83e26493128825334ceaac60eb56b1213c43",
+  "manifestSha256": "104caea5f1eb0c00e02db25fc49a8c5f06fc8ea640fd90c2f21007dbc5a87202"
 }
