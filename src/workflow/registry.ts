@@ -194,6 +194,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'loft', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in shape-before-steel discipline: throwaway artifacts answer design questions; never a default gate, never lands.' }),
   entry({ name: 'harbor', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in intake gate for external issues and PRs: verifies claims, drafts dispositions; never a default gate, never merges.' }),
   entry({ name: 'drydock', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in harness scaffold (shipyard keel); never a default gate.' }),
+  entry({ name: 'architecture-survey', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in periodic architecture survey; reports ranked deepening candidates with evidence, never refactors on its own.' }),
   entry({ name: 'visual-verdict', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in for visual surfaces.' }),
   entry({ name: 'diagram', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Model-invoked explanation aid: picks the smallest visual (pseudocode, tree, Mermaid, diff, focused HTML) that carries the point; never gates, never edits code on its own.' }),
   entry({ name: 'external-context', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in external evidence tool.' }),

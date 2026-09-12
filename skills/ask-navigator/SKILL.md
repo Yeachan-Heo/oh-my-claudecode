@@ -3,6 +3,7 @@ name: ask-navigator
 description: "Shipyard's navigator — chart a foggy effort (destination unclear, questions not yet stateable) into a map of decision tickets on the repo's issue tracker, then work the frontier one ticket per session until the way is clear, and hand the collapsed decisions to /launch as a mission brief. Wayfinding, not building: it produces decisions, never deliverables."
 argument-hint: "<loose idea | residual questions | map link or number | nothing to continue the open map>"
 level: 3
+disable-model-invocation: true
 pipeline: [deep-interview, ask-navigator]
 ---
 
@@ -38,7 +39,7 @@ Invoked with a loose idea (or launch's residual questions). Charting is one sess
 
 1. **Run the audit, defer the findings.** Run the `/oh-my-claudecode:drydock` `--check` audit in report-only mode: findings never block charting (a map produces decisions, not slot landings), but they are recorded verbatim in the map's Notes — launch's yard gate will collect that debt when the effort finally enters delivery. If the yard is not laid at all (no `CONTEXT.md`, no `docs/adr/`), offer `/oh-my-claudecode:drydock` **once**; if the captain declines, proceed in tracker-only mode and defer all sediment (see Sediment).
 2. **W1 — name the destination.** Call the Skill tool with "deep-interview" and pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it is settled first. **W1 is a captain signature: present the destination statement and get explicit confirmation.** If the captain cannot state a destination even with the interview's help, that is not an error — present the best candidates ranked and let the captain pick one to chart toward or park the effort.
-3. **Map the frontier.** Grill again with "deep-interview", **breadth-first**: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. **If this surfaces no fog** — the way to the destination is already clear and the journey fits one session — no map is needed: stop and recommend `/oh-my-claudecode:launch`.
+3. **Map the frontier.** Grill again with "deep-interview", **breadth-first**: fan out across the whole space rather than deep on any one thread, surfacing the open decisions and the first steps takeable now. When charting against an existing map (residual questions or a redraw), read its **Out of scope** section before ticketing — ruled-out work never re-enters as a fresh ticket. **If this surfaces no fog** — the way to the destination is already clear and the journey fits one session — no map is needed: stop and recommend `/oh-my-claudecode:launch`.
 4. **W2 — sign the chart.** Present the proposed map: destination, initial tickets with types and blocking edges, and the fog sketch. **W2 is a captain signature**: granularity wrong here wastes every later session. Iterate until signed.
 5. **Create the map and tickets.** Label the map `navigator:map`; create child tickets; wire blocking edges in a second pass (issues need ids before they can reference each other). Everything not yet sharp enough to ticket stays in **Not yet specified**.
 6. **Fire the research subagents.** For each `research` ticket just created, spawn a background subagent to resolve it in parallel (see Ticket types), capturing findings where the ticket can link them.
@@ -52,9 +53,9 @@ Invoked with a map (link or number) or with no argument (pick up the open map). 
 2. **Claim before work**: assign the ticket to the captain (tracker) or set `Claimed-by` (local) **first**, so concurrent sessions skip it. An open, unclaimed ticket is unclaimed. If assignment isn't possible (permissions, no handle), record the claim in a ticket comment instead.
 3. **Resolve it** according to its type (see Ticket types). Zoom as needed; call the Skill tool with "deep-interview" whenever the resolution needs the captain's input.
 4. **Record the resolution**: post the answer as a resolution comment/section, close the ticket (as completed; a ticket ruled beyond the destination closes as not planned), and append one line to the map's **Decisions so far** — `[<ticket title>](link): <one-line gist>`.
-5. **Advance the frontier**: graduate any fog the answer has made specifiable (remove it from **Not yet specified**, create the new tickets, wire edges); if the answer reveals a ticket sits beyond the destination, **close it** and leave one line in **Out of scope**; update or delete tickets the decision invalidated.
+5. **Advance the frontier**: graduate any fog the answer has made specifiable (remove it from **Not yet specified**, create the new tickets, wire edges); if the answer reveals a ticket sits beyond the destination, **close it** and leave one line in **Out of scope** carrying the concept and the reason (so a later session or a later map can match it); update or delete tickets the decision invalidated.
 6. **Sediment** (see Sediment).
-7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier.
+7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier. The map issue is the primary source, session memory secondary — every session re-orients from the map, never from the previous session's memory.
 
 ## Ticket types
 
@@ -68,6 +69,8 @@ Every ticket is **HITL** (worked with the captain, who speaks for themselves) or
 | `task` | HITL or AFK | The navigator drives it alone where it can; otherwise hands the captain a precise checklist | Manual work that unblocks a decision (sign up for a service, provision access, move data so its shape can be seen) — it earns its place by unblocking a decision, not by delivering the destination |
 
 The answer is never part of the ticket body; it is recorded on resolution. Assets created while resolving are linked from the ticket, not pasted in.
+
+A `research` file speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
 
 ## Map body
 

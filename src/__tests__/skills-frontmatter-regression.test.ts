@@ -10,8 +10,9 @@ const yaml = requireFromHere('js-yaml') as { load: (source: string) => unknown }
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SKILLS_DIR = join(REPO_ROOT, 'skills');
 const SHIM_DESCRIPTION_BUDGET = 240;
-const NON_MODEL_INVOKED_SKILLS = new Set(['ask-navigator', 'drydock', 'harbor', 'launch']);
 const KNOWN_LONG_MODEL_INVOCATION_DESCRIPTIONS = new Set(['agent-doc-discipline', 'loft']);
+// drydock is a user-invoked entrypoint that predates `disable-model-invocation`.
+const MANUAL_ONLY_WITHOUT_FLAG = new Set(['drydock']);
 
 function shippedSkillNames(): string[] {
   return readdirSync(SKILLS_DIR, { withFileTypes: true })
@@ -48,10 +49,16 @@ describe('shipped skill frontmatter', () => {
       const description = metadata.description;
       expect(typeof description, `${skillName} description must be a string`).toBe('string');
 
-      // Manual-only entrypoints and these existing long model-facing descriptions
-      // intentionally retain their full prose; diagram and future model-invoked
-      // skills must fit the native shim budget so their triggers are not cut.
-      if (NON_MODEL_INVOKED_SKILLS.has(skillName) || KNOWN_LONG_MODEL_INVOCATION_DESCRIPTIONS.has(skillName)) {
+      // Manual-only entrypoints declare `disable-model-invocation`, so their
+      // description is never used as an autonomous trigger and may keep full
+      // prose. These two existing long model-facing descriptions are explicit
+      // legacy exceptions; every other model-invoked skill must fit the native
+      // shim budget so its trigger is not cut mid-sentence.
+      if (
+        metadata['disable-model-invocation'] === true
+        || MANUAL_ONLY_WITHOUT_FLAG.has(skillName)
+        || KNOWN_LONG_MODEL_INVOCATION_DESCRIPTIONS.has(skillName)
+      ) {
         continue;
       }
       expect((description as string).length, `${skillName} description length`).toBeLessThanOrEqual(SHIM_DESCRIPTION_BUDGET);
