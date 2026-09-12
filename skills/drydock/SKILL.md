@@ -209,11 +209,12 @@ documentLanguage: en
 
 # Glossary
 
-One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming.
+One entry per term: definition, boundaries, one resolved ambiguity. Agents write here the moment a term is settled. Vocabulary here is law for all specs, tickets, and code naming. Ship-specific terms only: a concept any sea chart carries does not get an entry.
 
 ## <term>
 - Definition:
 - Boundary: (is X, not Y)
+- Avoid: (near-synonyms this ship does not use)
 - Resolved ambiguity:
 ```
 <!-- shipyard-seed-b:en:end -->
@@ -228,11 +229,12 @@ documentLanguage: zh-Hans
 
 # 术语表
 
-一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。
+一条术语一个条目：定义、边界、一个已解决的歧义。术语敲定的当下写入。词汇对所有 spec、ticket、代码命名具有法律效力。只收本船特有的词；海图上都有的通用词不立条目。
 
 ## <term>
 - 定义:
 - 边界: （是 X，不是 Y）
+- 禁用: （本船不用的近义词）
 - 已解决的歧义:
 ```
 <!-- shipyard-seed-b:zh-Hans:end -->
@@ -247,11 +249,12 @@ documentLanguage: zh-Hant
 
 # 詞彙表
 
-每個術語一個條目：定義、邊界、一個已解決的歧義。術語確定時立即寫入。這裡的詞彙是所有 spec、ticket 與程式碼命名的準則。
+每個術語一個條目：定義、邊界、一個已解決的歧義。術語確定時立即寫入。這裡的詞彙是所有 spec、ticket 與程式碼命名的準則。只收本船特有的詞；海圖上都有的通用詞不立條目。
 
 ## <term>
 - 定義:
 - 邊界: （是 X，不是 Y）
+- 禁用: （本船不用的近義詞）
 - 已解決的歧義:
 ```
 <!-- shipyard-seed-b:zh-Hant:end -->
