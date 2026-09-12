@@ -212,8 +212,13 @@ function publishOwner(path, owner) {
   }
 }
 
-function openMutationDb(lockPath) {
-  if (stateFileLockingTestOverride() === false || !Database) return null;
+function openMutationDb(lockPath, bypassTestOverride = false) {
+  // The flock simulation describes a host without the external flock binary,
+  // not a host without SQLite. A caller that explicitly opts out of the
+  // simulation (the emergency recovery claim) must still get the SQLite
+  // backend, otherwise it retries into an 'unverifiable' failure and recovery
+  // reports false with a perfectly healthy binding.
+  if ((!bypassTestOverride && stateFileLockingTestOverride() === false) || !Database) return null;
   let db = null;
   try {
     const dbPath = mutationDbPath(lockPath);
@@ -385,7 +390,7 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
     return acquireFileLock(lockPath, attempts);
   }
 
-  const db = openMutationDb(lockPath);
+  const db = openMutationDb(lockPath, bypassTestOverride);
   if (!db) {
     if (sqliteBindingLoadError) return acquireFileLock(lockPath, attempts);
     if (attempts <= 1) {
