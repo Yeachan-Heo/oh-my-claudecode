@@ -591,6 +591,8 @@ describe('shipyard skills — behavior & packaging contract', () => {
       for (const name of USER_INVOKED) {
         expect(lower).not.toContain(`skill tool with "${name}"`);
         expect(lower).not.toContain(`skill tool with \`${name}\``);
+        expect(lower).not.toContain(`skill("oh-my-claudecode:${name}")`);
+        expect(lower).not.toContain(`skill(skill="oh-my-claudecode:${name}")`);
       }
     }
     expect(SHIPYARD_DOC.toLowerCase()).toContain('the invocation contract');
