@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ce43e772da081279e5554fbdf6be1ca26b7c440b",
-    "sourceSha256": "eb3a1d0411ebf9cfa9cec05def041dde2ebe8ca708b7cfd12a1ffe9a331ddcb7",
+    "head": "7bbc967fbafa755bd3881b17323e8293b1f2e343",
+    "sourceSha256": "d4eec2b1dbdf64ef26f2ad5c92be19873e2198d248b8f8efcaa60a2719426e82",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ce43e772da081279e5554fbdf6be1ca26b7c440b",
-  "sourceSha256": "eb3a1d0411ebf9cfa9cec05def041dde2ebe8ca708b7cfd12a1ffe9a331ddcb7",
+  "head": "7bbc967fbafa755bd3881b17323e8293b1f2e343",
+  "sourceSha256": "d4eec2b1dbdf64ef26f2ad5c92be19873e2198d248b8f8efcaa60a2719426e82",
   "counts": {
     "public": {
       "skills": 40,
@@ -49405,6 +49405,26 @@
       },
       {
         "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -78516,11 +78536,11 @@
     ],
     "stats": {
       "nodeCount": 6967,
-      "edgeCount": 7456,
-      "importEdgeCount": 6140,
+      "edgeCount": 7460,
+      "importEdgeCount": 6144,
       "registerEdgeCount": 61
     }
   },
   "inventorySha256": "3bfeb7076742fc8faa5c523d9456174b6321d060ed8232410f07feaf7db7c960",
-  "manifestSha256": "1e737999f98a49f735d689c42a7761089428147e6cc41d347444cc7a6e47ed4f"
+  "manifestSha256": "1a221be55532f2d478e1e4297a5bf0af67be2da0d65d737fa066b25f6dd0dffd"
 }

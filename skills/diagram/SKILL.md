@@ -1,6 +1,6 @@
 ---
 name: diagram
-description: When an explanation has to carry structure — control flow, call depth, module ownership, the shape of a change — reach for the smallest visual that holds it: a pseudocode sketch, a call tree, a component or file tree, a Mermaid diagram, or a diff. Skip it when prose already answers the question; a visual the reader must decode costs more than a sentence they only read.
+description: "Use the smallest visual when prose must carry structure—control flow, call depth, module ownership, or change shape: pseudocode, call tree, component/file tree, Mermaid diagram, or diff. Skip it when prose already answers the question."
 level: 2
 ---
 

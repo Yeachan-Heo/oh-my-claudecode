@@ -1,6 +1,6 @@
 ---
 name: agent-doc-discipline
-description: Writing-time discipline for documents agents consume (the five surfaces, specs, tickets, .omc/skills/) — every rule checkable and carrying a why, steps before reference, one meaning in one home, no restating what the environment already says. Mandatory at drydock seed generation and the launch C5 sediment pass; opt-in for any other agent-facing doc edit. The companion of minimal-code-discipline: that one disciplines code, this one disciplines papers.
+description: "Writing-time discipline for documents agents consume (the five surfaces, specs, tickets, .omc/skills/) — every rule checkable and carrying a why, steps before reference, one meaning in one home, no restating what the environment already says. Mandatory at drydock seed generation and the launch C5 sediment pass; opt-in for any other agent-facing doc edit. The companion of minimal-code-discipline: that one disciplines code, this one disciplines papers."
 level: 3
 ---
 
