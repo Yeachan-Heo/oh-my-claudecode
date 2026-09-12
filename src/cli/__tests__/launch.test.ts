@@ -2240,9 +2240,8 @@ describe('runClaude outside-tmux — env forwarding', () => {
 
   it('preserves literal percent signs in forwarded values on native psmux', () => {
     const originalPlatform = process.platform;
-    const savedApiKey = process.env.ANTHROPIC_API_KEY;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    process.env.ANTHROPIC_API_KEY = 'literal%PATH%';
+    process.env.CLAUDE_CONFIG_DIR = 'literal%PATH%';
     vi.mocked(isNativeWindowsShell).mockReturnValue(true);
 
     try {
@@ -2253,22 +2252,51 @@ describe('runClaude outside-tmux — env forwarding', () => {
       expect(rawCommand).not.toContain('literal%PATH%');
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
-      if (savedApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
-      else process.env.ANTHROPIC_API_KEY = savedApiKey;
     }
   });
 
   it('rejects newline values before composing a native psmux command', () => {
     const originalPlatform = process.platform;
-    const savedApiKey = process.env.ANTHROPIC_API_KEY;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    process.env.ANTHROPIC_API_KEY = 'line\nbreak';
+    process.env.CLAUDE_CONFIG_DIR = 'line\nbreak';
     vi.mocked(isNativeWindowsShell).mockReturnValue(true);
 
     try {
       expect(() => runClaude('/tmp', [], 'sid')).toThrow(
         'Native Windows tmux command values cannot contain NUL, CR, or LF characters',
       );
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    }
+  });
+
+  it('keeps credential values off the native psmux command line', () => {
+    const originalPlatform = process.platform;
+    const savedApiKey = process.env.ANTHROPIC_API_KEY;
+    const secret = 'sk-native-windows-secret-value';
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.ANTHROPIC_API_KEY = secret;
+    vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+
+    try {
+      runClaude('/tmp', [], 'sid');
+
+      const paneCommand = String(vi.mocked(tmuxExec).mock.calls.find(([args]) => args[0] === 'new-session')?.[0].at(-1));
+      // `set "ANTHROPIC_API_KEY=..."` inside the command string is readable
+      // through the process command line and #{pane_start_command}; the value
+      // must travel through the sourced fragment instead.
+      expect(paneCommand).not.toContain(secret);
+      const rawCommand = vi.mocked(wrapWithLoginShell).mock.calls.at(-1)?.[0] as string;
+      expect(rawCommand).not.toContain(secret);
+      expect(rawCommand).toMatch(/call "[^"]*omc-launch-env-[^"]*env\.cmd"/);
+
+      const envFile = rawCommand.match(/call "([^"]*omc-launch-env-[^"]*env\.cmd)"/)?.[1];
+      expect(envFile).toBeDefined();
+      const body = readFileSync(envFile as string, 'utf8');
+      expect(body).toContain(`set "ANTHROPIC_API_KEY=${secret}"`);
+      rmSync(dirname(envFile as string), { recursive: true, force: true });
+
+      expect(vi.mocked(buildTmuxShellCommandWithEnv).mock.calls.at(-1)?.[2]).not.toHaveProperty('ANTHROPIC_API_KEY');
     } finally {
       Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
       if (savedApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;

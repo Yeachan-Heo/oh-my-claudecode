@@ -1096,14 +1096,32 @@ export function buildEnvExportPrefix(vars: string[]): string {
  * command line. Returns an empty prefix when there is nothing sensitive to
  * forward, and on any write failure — a launch must not be blocked by an
  * unwritable temp directory, it just proceeds without those values.
+ *
+ * The native Windows variant emits a `.cmd` fragment invoked with `call`.
+ * cmd.exe has no `source`, and a `set "KEY=value"` prefix inside the command
+ * string would put the value straight back on the psmux/tmux command line —
+ * exactly what this indirection exists to prevent. File mode is best-effort
+ * there; the file lives in the per-user temp directory and is deleted by the
+ * launched shell before Claude starts.
  */
 export function buildSensitiveEnvFilePrefix(vars: string[]): string {
   const sensitive = vars.filter(
     (name) => isSensitiveTmuxEnvironmentVariable(name) && getProcessEnvironmentValue(name) !== undefined,
   );
   if (sensitive.length === 0) return '';
+  const nativeWindows = isNativeWindowsShell();
   try {
     const dir = mkdtempSync(join(tmpdir(), 'omc-launch-env-'));
+    if (nativeWindows) {
+      const file = join(dir, 'env.cmd');
+      const body = sensitive
+        .map((name) => `set "${name}=${getProcessEnvironmentValue(name) as string}"`)
+        .join('\r\n');
+      writeFileSync(file, `@echo off\r\n${body}\r\n`, { mode: 0o600 });
+      // `&` rather than `&&`: cleanup and the launch must still happen even if
+      // the fragment cannot be read, matching the POSIX fallback behaviour.
+      return `call "${file}" & del /q "${file}" >nul 2>nul & rmdir "${dir}" >nul 2>nul & `;
+    }
     const file = join(dir, 'env.sh');
     const body = sensitive
       .map((name) => `export ${name}=${quoteShellArg(getProcessEnvironmentValue(name) as string)}`)
@@ -1113,6 +1131,17 @@ export function buildSensitiveEnvFilePrefix(vars: string[]): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * The env map handed to `buildTmuxShellCommandWithEnv` ends up inside the
+ * command string, so credential-shaped values must be stripped from it and
+ * forwarded through `buildSensitiveEnvFilePrefix` instead.
+ */
+function withoutSensitiveEnv(env: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => !isSensitiveTmuxEnvironmentVariable(name)),
+  );
 }
 
 const TMUX_SESSION_ENV_VARS = new Set(['TMUX', 'TMUX_PANE', 'PSMUX_SESSION', 'CLAUDECODE']);
@@ -1175,17 +1204,19 @@ export function buildTmuxClaudeCommand(args: string[]): string {
   const forwardedEnvNames = Object.keys(forwardedEnv);
   const nativeWindows = isNativeWindowsShell();
   const rawClaudeCmd = nativeWindows
-    ? buildTmuxShellCommandWithEnv('claude', args, forwardedEnv)
+    ? buildTmuxShellCommandWithEnv('claude', args, withoutSensitiveEnv(forwardedEnv))
     : buildTmuxShellCommand('claude', args);
-  const envPrefix = !nativeWindows && forwardedEnvNames.length > 0
-    ? `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`
-    : '';
+  const envPrefix = forwardedEnvNames.length === 0
+    ? ''
+    : nativeWindows
+      ? buildSensitiveEnvFilePrefix(forwardedEnvNames)
+      : `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`;
   const missingBinaryGuard = nativeWindows
     ? 'where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1) && '
     : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
 
   if (nativeWindows) {
-    return wrapWithLoginShell(`${missingBinaryGuard}${rawClaudeCmd}`);
+    return wrapWithLoginShell(`${envPrefix}${missingBinaryGuard}${rawClaudeCmd}`);
   }
 
   return wrapWithLoginShell(`${envPrefix}${missingBinaryGuard}exec ${rawClaudeCmd}`);
@@ -1206,11 +1237,13 @@ function runClaudeOutsideTmux(
   const forwardedEnv = getEffectiveTmuxEnvironment();
   const forwardedEnvNames = Object.keys(forwardedEnv);
   const rawClaudeCmd = isNativeWindowsShell()
-    ? buildTmuxShellCommandWithEnv('claude', args, forwardedEnv)
+    ? buildTmuxShellCommandWithEnv('claude', args, withoutSensitiveEnv(forwardedEnv))
     : buildTmuxShellCommand('claude', args);
-  const envPrefix = !isNativeWindowsShell() && forwardedEnvNames.length > 0
-    ? buildEnvExportPrefix(forwardedEnvNames)
-    : '';
+  const envPrefix = forwardedEnvNames.length === 0
+    ? ''
+    : isNativeWindowsShell()
+      ? buildSensitiveEnvFilePrefix(forwardedEnvNames)
+      : `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`;
   // Drain any pending terminal Device Attributes (DA1) response from stdin.
   // When tmux attach-session sends a DA1 query, the terminal replies with
   // \e[?6c which lands in the pty buffer before Claude reads input.
