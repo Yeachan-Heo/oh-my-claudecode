@@ -11,6 +11,7 @@ import {
   lstatSync,
   linkSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readlinkSync,
   renameSync,
@@ -18,7 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'fs';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../lib/file-lock.js';
@@ -927,6 +928,16 @@ export function runClaude(cwd: string, args: string[], sessionId: string): void 
  * Launches Claude in current pane
  */
 function runClaudeInsideTmux(cwd: string, args: string[]): void {
+  // Resolve and authenticate the invoking pane before any tmux option writes.
+  // A stale-but-live TMUX_PANE must never be allowed to steer -k at another
+  // pane, and an invalid invocation must not mutate tmux's implicit target.
+  const currentPaneId = resolveInvokingTmuxPaneId();
+  if (!currentPaneId) {
+    console.error('[omc] Error: unable to identify the invoking tmux pane; refusing to respawn Claude.');
+    process.exit(1);
+    return;
+  }
+
   // Enable OSC 52 clipboard forwarding and mouse scrolling in the current tmux session (non-fatal if unsupported).
   try {
     configureTmuxClipboardForCurrentSession({ stdio: 'ignore' });
@@ -936,21 +947,48 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
     tmuxExec(['set-option', 'mouse', 'on'], { stdio: 'ignore' });
   } catch { /* non-fatal — user's tmux may not support these options */ }
 
-  // Launch Claude in current pane
+  // Replace the pane's current process instead of keeping this node process as
+  // the pane foreground while Claude runs as its child.  respawn-pane kills the
+  // the launcher process and starts the quoted shell command in the same pane.
+  // Never let tmux choose its active pane implicitly: -k would otherwise kill
+  // an unrelated pane when TMUX_PANE is missing or stale.
+  const nativeWindows = isNativeWindowsShell();
+  const respawnArgs = ['respawn-pane', '-k', '-t', currentPaneId, '-c', cwd];
+  if (nativeWindows) {
+    // psmux treats a command immediately following respawn-pane options as a
+    // target/session argument. Its command must follow the literal separator.
+    respawnArgs.push('--');
+  }
+  respawnArgs.push(buildTmuxClaudeCommand(args));
+
   try {
-    execFileSync('claude', args, {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
+    tmuxExec(respawnArgs, { stdio: 'inherit' });
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { status?: number | null };
     if (err.code === 'ENOENT') {
-      console.error('[omc] Error: claude CLI not found in PATH.');
+      console.error('[omc] Error: unable to respawn Claude in the current tmux pane.');
       process.exit(1);
     }
-    // Propagate Claude's exit code so omc does not swallow failures
     process.exit(typeof err.status === 'number' ? err.status : 1);
+  }
+}
+
+function resolveInvokingTmuxPaneId(): string | null {
+  const paneId = process.env.TMUX_PANE?.trim();
+  if (!paneId || !/^%\d+$/.test(paneId)) return null;
+
+  try {
+    // Do not pass the untrusted pane id back to tmux as the query target.
+    // With -t, display-message merely echoes a live target and cannot prove
+    // that it is the pane belonging to this invoking client. Without -t,
+    // tmux resolves the pane from the client's own tty/context instead.
+    const resolvedPaneId = tmuxExec(
+      ['display-message', '-p', '#{pane_id}'],
+      { stdio: 'pipe' },
+    ).trim();
+    return resolvedPaneId === paneId ? paneId : null;
+  } catch {
+    return null;
   }
 }
 
@@ -963,7 +1001,11 @@ function runClaudeInsideTmux(cwd: string, args: string[]): void {
  * so our values take precedence.
  */
 export const TMUX_ENV_FORWARD = [
+  // Explicit non-prefix names in the supported launch surface. Prefix-based
+  // provider/configuration matching below keeps new supported vars flowing.
   'CLAUDE_CONFIG_DIR',
+  'OMC_STATE_DIR',
+  'DISABLE_OMC',
   'OMC_NOTIFY',
   'OMC_OPENCLAW',
   'OMC_TELEGRAM',
@@ -971,17 +1013,213 @@ export const TMUX_ENV_FORWARD = [
   'OMC_SLACK',
   'OMC_WEBHOOK',
   OMC_PLUGIN_ROOT_ENV,
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_BASE_URL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_MODEL',
+  'ANTHROPIC_MODEL',
+  'KIMI_API_KEY',
+  'ZAI_API_KEY',
+  'MINIMAX_API_KEY',
+  'AWS_PROFILE',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_SDK_LOAD_CONFIG',
+  'AWS_CONFIG_FILE',
+  'AWS_SHARED_CREDENTIALS_FILE',
+  'AWS_CA_BUNDLE',
+  'PATH',
+  'HOME',
+  'USERPROFILE',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'NODE_ENV',
+  'NODE_EXTRA_CA_CERTS',
 ];
+
+/**
+ * Credential-shaped variables must never reach a command line.
+ * `buildEnvExportPrefix` output is handed to tmux as an argument, so anything
+ * it interpolates is readable through `/proc/<pid>/cmdline` (world-readable by
+ * default on Linux) and through `#{pane_start_command}`. Pattern-matched
+ * rather than enumerated so a newly supported provider key is contained by
+ * default instead of leaking until someone remembers to add it.
+ */
+export function isSensitiveTmuxEnvironmentVariable(name: string): boolean {
+  return /(?:_API_KEY|_AUTH_TOKEN|_SESSION_TOKEN|_ACCESS_KEY_ID|SECRET|PASSWORD|PASSWD|_CREDENTIALS?|_TOKEN)$/i.test(name)
+    || /^(?:AWS_SECRET_ACCESS_KEY|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)$/i.test(name);
+}
+
+function normalizeTmuxEnvironmentName(name: string): string {
+  return process.platform === 'win32' ? name.toUpperCase() : name;
+}
+
+function getProcessEnvironmentValue(name: string): string | undefined {
+  if (process.platform !== 'win32') return process.env[name];
+
+  // Windows environment names are case-insensitive even though Object.keys
+  // can expose the live PATH entry as `Path`. Prefer the enumerated matching
+  // entry so a casing-only difference cannot drop the launcher's PATH.
+  const normalizedName = name.toUpperCase();
+  const matchingEntries = Object.entries(process.env)
+    .filter(([entryName, value]) => value !== undefined && entryName.toUpperCase() === normalizedName);
+  if (matchingEntries.length > 0) return matchingEntries.at(-1)?.[1];
+  return process.env[name];
+}
 
 export function buildEnvExportPrefix(vars: string[]): string {
   const parts: string[] = [];
   for (const name of vars) {
-    const value = process.env[name];
+    if (isSensitiveTmuxEnvironmentVariable(name)) continue;
+    const value = getProcessEnvironmentValue(name);
     if (value !== undefined) {
       parts.push(`export ${name}=${quoteShellArg(value)}`);
     }
   }
   return parts.length > 0 ? parts.join('; ') + '; ' : '';
+}
+
+/**
+ * Forward credential-shaped variables through a 0600 file that the launched
+ * shell sources and immediately removes, so only the path appears in any
+ * command line. Returns an empty prefix when there is nothing sensitive to
+ * forward, and on any write failure — a launch must not be blocked by an
+ * unwritable temp directory, it just proceeds without those values.
+ *
+ * The native Windows variant emits a `.cmd` fragment invoked with `call`.
+ * cmd.exe has no `source`, and a `set "KEY=value"` prefix inside the command
+ * string would put the value straight back on the psmux/tmux command line —
+ * exactly what this indirection exists to prevent. File mode is best-effort
+ * there; the file lives in the per-user temp directory and is deleted by the
+ * launched shell before Claude starts.
+ */
+export function buildSensitiveEnvFilePrefix(vars: string[]): string {
+  const sensitive = vars.filter(
+    (name) => isSensitiveTmuxEnvironmentVariable(name) && getProcessEnvironmentValue(name) !== undefined,
+  );
+  if (sensitive.length === 0) return '';
+  const nativeWindows = isNativeWindowsShell();
+  try {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-launch-env-'));
+    if (nativeWindows) {
+      const file = join(dir, 'env.cmd');
+      const body = sensitive
+        .map((name) => `set "${name}=${getProcessEnvironmentValue(name) as string}"`)
+        .join('\r\n');
+      writeFileSync(file, `@echo off\r\n${body}\r\n`, { mode: 0o600 });
+      // `&` rather than `&&`: cleanup and the launch must still happen even if
+      // the fragment cannot be read, matching the POSIX fallback behaviour.
+      return `call "${file}" & del /q "${file}" >nul 2>nul & rmdir "${dir}" >nul 2>nul & `;
+    }
+    const file = join(dir, 'env.sh');
+    const body = sensitive
+      .map((name) => `export ${name}=${quoteShellArg(getProcessEnvironmentValue(name) as string)}`)
+      .join('\n');
+    writeFileSync(file, `${body}\n`, { mode: 0o600 });
+    return `. ${quoteShellArg(file)}; rm -f ${quoteShellArg(file)}; rmdir ${quoteShellArg(dir)} 2>/dev/null; `;
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * The env map handed to `buildTmuxShellCommandWithEnv` ends up inside the
+ * command string, so credential-shaped values must be stripped from it and
+ * forwarded through `buildSensitiveEnvFilePrefix` instead.
+ */
+function withoutSensitiveEnv(env: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => !isSensitiveTmuxEnvironmentVariable(name)),
+  );
+}
+
+const TMUX_SESSION_ENV_VARS = new Set(['TMUX', 'TMUX_PANE', 'PSMUX_SESSION', 'CLAUDECODE']);
+const TMUX_SHELL_JUNK_ENV_VARS = new Set(['_', 'OLDPWD', 'SHLVL']);
+
+function canonicalTmuxEnvironmentName(name: string): string | null {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return null;
+  const normalizedName = normalizeTmuxEnvironmentName(name);
+  if (TMUX_SESSION_ENV_VARS.has(normalizedName) || TMUX_SHELL_JUNK_ENV_VARS.has(normalizedName)) return null;
+
+  // Explicit names retain their canonical spelling (notably PATH) while
+  // Windows matching remains case-insensitive.
+  const explicitName = TMUX_ENV_FORWARD.find(
+    (candidate) => normalizeTmuxEnvironmentName(candidate) === normalizedName,
+  );
+  if (explicitName) return explicitName;
+
+  // Keep newly introduced supported provider/configuration variables from
+  // regressing at this boundary. Values still come from this launcher's
+  // process.env; the prefixes only classify the supported surface.
+  if (normalizedName.startsWith('ANTHROPIC_') || normalizedName.startsWith('CLAUDE_') || normalizedName.startsWith('OMC_')) {
+    return normalizedName;
+  }
+  if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName)) return normalizedName;
+  if (
+    normalizedName === 'NODE_EXTRA_CA_CERTS'
+    || normalizedName === 'NODE_TLS_REJECT_UNAUTHORIZED'
+    || normalizedName.startsWith('SSL_CERT_')
+    || normalizedName.endsWith('_CA_BUNDLE')
+  ) return normalizedName;
+  return null;
+}
+
+/**
+ * Capture the launcher's effective environment instead of relying on the
+ * tmux server snapshot. The launcher may receive provider credentials,
+ * routing/model overrides, state paths, proxy settings, and TLS configuration
+ * after the server was started; forwarding the current values preserves the
+ * direct-launch contract across respawn-pane.
+ */
+function getEffectiveTmuxEnvironment(): Record<string, string> {
+  const forwarded: Record<string, string> = {};
+  for (const [name, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    const canonicalName = canonicalTmuxEnvironmentName(name);
+    if (canonicalName) forwarded[canonicalName] = value;
+  }
+  return forwarded;
+}
+
+/**
+ * Build the command that respawn-pane runs for an in-tmux Claude launch.
+ *
+ * On POSIX shells, the explicit final `exec` is required because this command
+ * replaces the launcher node process in the existing pane, leaving Claude as
+ * the pane's foreground process after any login-shell setup and env exports.
+ */
+export function buildTmuxClaudeCommand(args: string[]): string {
+  const forwardedEnv = getEffectiveTmuxEnvironment();
+  const forwardedEnvNames = Object.keys(forwardedEnv);
+  const nativeWindows = isNativeWindowsShell();
+  const rawClaudeCmd = nativeWindows
+    ? buildTmuxShellCommandWithEnv('claude', args, withoutSensitiveEnv(forwardedEnv))
+    : buildTmuxShellCommand('claude', args);
+  const envPrefix = forwardedEnvNames.length === 0
+    ? ''
+    : nativeWindows
+      ? buildSensitiveEnvFilePrefix(forwardedEnvNames)
+      : `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`;
+  const missingBinaryGuard = nativeWindows
+    ? 'where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1) && '
+    : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
+
+  if (nativeWindows) {
+    return wrapWithLoginShell(`${envPrefix}${missingBinaryGuard}${rawClaudeCmd}`);
+  }
+
+  return wrapWithLoginShell(`${envPrefix}${missingBinaryGuard}exec ${rawClaudeCmd}`);
 }
 
 /**
@@ -996,17 +1234,16 @@ function runClaudeOutsideTmux(
   _sessionId: string,
   options: { requireTmux?: boolean } = {},
 ): void {
-  const forwardedEnv = Object.fromEntries(
-    TMUX_ENV_FORWARD
-      .map((name) => [name, process.env[name]] as const)
-      .filter(([, value]) => value !== undefined),
-  ) as Record<string, string>;
+  const forwardedEnv = getEffectiveTmuxEnvironment();
+  const forwardedEnvNames = Object.keys(forwardedEnv);
   const rawClaudeCmd = isNativeWindowsShell()
-    ? buildTmuxShellCommandWithEnv('claude', args, forwardedEnv)
+    ? buildTmuxShellCommandWithEnv('claude', args, withoutSensitiveEnv(forwardedEnv))
     : buildTmuxShellCommand('claude', args);
-  const envPrefix = !isNativeWindowsShell() && Object.keys(forwardedEnv).length > 0
-    ? buildEnvExportPrefix(TMUX_ENV_FORWARD)
-    : '';
+  const envPrefix = forwardedEnvNames.length === 0
+    ? ''
+    : isNativeWindowsShell()
+      ? buildSensitiveEnvFilePrefix(forwardedEnvNames)
+      : `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`;
   // Drain any pending terminal Device Attributes (DA1) response from stdin.
   // When tmux attach-session sends a DA1 query, the terminal replies with
   // \e[?6c which lands in the pty buffer before Claude reads input.
