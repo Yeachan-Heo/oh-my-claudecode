@@ -168,6 +168,20 @@ function lockFailureReason(operation) {
   return `[OMC] ${operation} failed: ${message} Retry the operation after the lock holder exits.`;
 }
 
+/**
+ * A contended or unverifiable state lock is diagnostic, never a turn blocker.
+ * The uncommitted transition is re-derived on the next invocation, so the
+ * stage/phase prompt must still reach the agent; surfacing the shortfall on
+ * stderr keeps #4016's actionable message without losing that contract.
+ */
+function reportLockFailure(operation) {
+  try {
+    process.stderr.write(`${lockFailureReason(operation)}\n`);
+  } catch {
+    // Diagnostics never affect control flow.
+  }
+}
+
 function workflowStopResponse(state) {
   const stage = state?.workflow?.stages?.[state?.pipelineTracking?.currentStageIndex];
   if (!stage) return { continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] All selected stages are complete." };
@@ -177,7 +191,7 @@ function workflowStopResponse(state) {
 
 function commitWorkflowAdvance(path, advance) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state transition') };
+  if (!lock) { reportLockFailure('Autopilot workflow state transition'); return { committed: false, state: readJsonFile(path) }; }
   let result;
   try {
     const current = readJsonFile(path);
@@ -192,14 +206,14 @@ function commitWorkflowAdvance(path, advance) {
       result = { committed: true, state: advance.updated };
     }
   } finally {
-    if (!releaseStateFileLockSync(lock)) result = { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state transition release') };
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state transition release'); result = { committed: false, state: readJsonFile(path) }; }
   }
   return result;
 }
 
 function refreshNamedWorkflowDispatch(path, expected) {
   const lock = acquireStateFileLockSync(path);
-  if (!lock) return { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state refresh') };
+  if (!lock) { reportLockFailure('Autopilot workflow state refresh'); return { committed: false, state: readJsonFile(path) }; }
   let result;
   try {
     const current = readJsonFile(path);
@@ -216,7 +230,7 @@ function refreshNamedWorkflowDispatch(path, expected) {
         : { committed: false, state: readJsonFile(path) };
     }
   } finally {
-    if (!releaseStateFileLockSync(lock)) result = { committed: false, state: readJsonFile(path), lockFailure: lockFailureReason('Autopilot workflow state refresh release') };
+    if (!releaseStateFileLockSync(lock)) { reportLockFailure('Autopilot workflow state refresh release'); result = { committed: false, state: readJsonFile(path) }; }
   }
   return result;
 }
@@ -1387,8 +1401,6 @@ async function main() {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: workflowAdvance.nextStage
               ? workflowAdvance.nextStagePrompt
               : "[AUTOPILOT WORKFLOW] All selected stages are complete." }));
-          } else if (commit.lockFailure) {
-            console.log(JSON.stringify({ continue: false, decision: "block", reason: commit.lockFailure }));
           } else if (takeWorkflowTranscriptFailure(sessionId) === 'workflow_transcript_record_too_large') {
             console.log(JSON.stringify({ continue: false, decision: 'block', reason: '[AUTOPILOT WORKFLOW] workflow_transcript_record_too_large. Run /cancel and re-invoke the workflow.' }));
           } else if (hasNamedWorkflowMarkers(commit.state) && (!isValidWorkflowDescriptor(commit.state.workflow) || !isValidWorkflowTrackingState(commit.state, sessionId))) {
@@ -1419,8 +1431,6 @@ async function main() {
           const refresh = refreshNamedWorkflowDispatch(autopilot.path, expected);
           if (refresh.integrityFailed || (hasNamedWorkflowMarkers(refresh.state) && (!isValidWorkflowDescriptor(refresh.state.workflow) || !isValidWorkflowTrackingState(refresh.state, sessionId)))) {
             console.log(JSON.stringify({ continue: false, decision: "block", reason: "[AUTOPILOT WORKFLOW] workflow_descriptor_integrity_failed. Run /cancel and re-invoke the workflow." }));
-          } else if (refresh.lockFailure) {
-            console.log(JSON.stringify({ continue: false, decision: "block", reason: refresh.lockFailure }));
           } else {
             console.log(JSON.stringify(refresh.committed ? workflowStopResponse(refresh.state) : SAFE_CONTINUE));
           }
@@ -1441,9 +1451,8 @@ async function main() {
               committed = writeJsonFile(autopilot.path, reinforced);
             });
             if (!locked.acquired || !committed) {
-              console.log(JSON.stringify(locked.acquired
-                ? SAFE_CONTINUE
-                : { continue: false, decision: "block", reason: lockFailureReason('Autopilot state reinforcement') }));
+              if (!locked.acquired) reportLockFailure('Autopilot state reinforcement');
+              console.log(JSON.stringify(SAFE_CONTINUE));
               return;
             }
             autopilot.state = reinforced;

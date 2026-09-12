@@ -270,8 +270,11 @@ export function getStateFileLockFailureMessage() {
 
 export function isStateFileLockingSupported() {
   // The owner-file fallback is a real exclusive backend, so callers must not
-  // downgrade to an unlocked read when SQLite is unavailable.
-  return true;
+  // downgrade to an unlocked read merely because SQLite is unavailable. The
+  // test override still simulates a host with no exclusive backend at all,
+  // which is the state the pre-SQLite fallback contract is written against.
+  const override = stateFileLockingTestOverride();
+  return override !== null ? override : true;
 }
 
 function acquireFileLock(lockPath, attempts) {
@@ -366,6 +369,12 @@ export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusi
   }
 
   if (!bypassTestOverride && stateFileLockingTestOverride() === false) {
+    // Pre-SQLite fallback contract (dev 2b6ee1042): with the flock binary
+    // simulated absent, an exclusive-required caller fails closed while a
+    // non-exclusive caller proceeds best-effort through the file lock. The
+    // cancel-signal validation lock is exclusive-required, so relaxing this
+    // would let an exact legacy signal be honored without exclusive locking.
+    if (requireExclusive) return null;
     if (process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE === '1') {
       sqliteBindingLoadError = nativeBindingDiagnostic('simulated native binding load failure');
     }
