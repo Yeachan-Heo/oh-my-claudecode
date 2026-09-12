@@ -3,6 +3,7 @@ name: harbor
 description: Harbor intake for external work — the captain only handles unresolved decisions. Sweeps incoming issues and PRs, verifies every claim before disposition, reuses every decision already made, and hands the maintainer a docket whose pending items each carry one question with options, recommendation, impact and evidence. Agent-autonomous for facts and for actions covered by standing authorization; signed for every new judgment. Never merges.
 argument-hint: "[sweep | look at #N | sign ... | what's ready?]"
 level: 3
+disable-model-invocation: true
 ---
 
 # Harbor
@@ -79,7 +80,7 @@ Eight labels, no new enums. A ship carries exactly one current `harbor:*` state 
 1. Freeze this round's candidate snapshot; process by urgency and age; paginate fully — no skipped pages. Security-sensitive ships move to the restricted path first.
 2. Read current native records and handoff state. Skip ships with no relevant change; do not repeat satisfied asks.
 3. Check existing decisions and scope first; for PRs without declared intent, static survey precedes expensive verification.
-4. Check duplicates and existing implementations, then reproduce claims as needed. **Existing code is not proof a feature is satisfied; a failed reproduction is not proof the report is false.** A valid in-scope prior refusal may skip an expensive reproduction that would not change the decision — marked explicitly as not-run, with the reason.
+4. Check duplicates and existing implementations, then reproduce claims as needed. **Existing code is not proof a feature is satisfied; a failed reproduction is not proof the report is false.** A valid in-scope prior refusal may skip an expensive reproduction that would not change the decision — marked explicitly as not-run, with the reason. Match rejections by concept, not by title: the same defect under new wording reuses the prior signed rule or prior refusal — wording changes do not create new work.
 5. Each unknown fact gets one informative verification step. Stop retrying when methods stop reducing uncertainty or the environment is missing; record the blocker and the minimal ask. Do not promise exhaustive fact-finding.
 6. Disposition per the three classes (facts / standing authorization / new judgment). One stuck ship never blocks the others; if the remote goes down mid-sweep, report the failure — never fake posted state.
 7. Refresh the same docket (one consolidated update when needed), keeping each ship's latest visible conclusion linked to its evidence.

@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "9407d25f54073bf73413de2bcd3235a36cb75a27",
-    "sourceSha256": "51e5cdea7004d123d0773eba103d3b5a28f581ee416199bd1d96122e63324db7",
+    "head": "589d7fa5872fd73e91b786af234758c5d94fec4f",
+    "sourceSha256": "a6b6bce35e0107ba2366eabd0d20cff9c481de2147fcc8ee4ca4d2518ea8f2ae",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "9407d25f54073bf73413de2bcd3235a36cb75a27",
-  "sourceSha256": "51e5cdea7004d123d0773eba103d3b5a28f581ee416199bd1d96122e63324db7",
+  "head": "589d7fa5872fd73e91b786af234758c5d94fec4f",
+  "sourceSha256": "a6b6bce35e0107ba2366eabd0d20cff9c481de2147fcc8ee4ca4d2518ea8f2ae",
   "counts": {
     "public": {
-      "skills": 39,
+      "skills": 41,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 88
+      "total": 90
     },
     "internal": {
       "hookFiles": 296,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 39,
+    "skills": 41,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -50,6 +50,7 @@
     "skills": [
       "agent-doc-discipline",
       "ai-slop-cleaner",
+      "architecture-survey",
       "ask",
       "ask-navigator",
       "autopilot",
@@ -59,6 +60,7 @@
       "debug",
       "deep-interview",
       "deepinit",
+      "diagram",
       "drydock",
       "execute",
       "external-context",
@@ -33796,6 +33798,11 @@
         "path": "skills/ai-slop-cleaner/SKILL.md"
       },
       {
+        "id": "skills/architecture-survey/SKILL.md",
+        "kind": "skill",
+        "path": "skills/architecture-survey/SKILL.md"
+      },
+      {
         "id": "skills/ask-navigator/SKILL.md",
         "kind": "skill",
         "path": "skills/ask-navigator/SKILL.md"
@@ -33839,6 +33846,11 @@
         "id": "skills/deepinit/SKILL.md",
         "kind": "skill",
         "path": "skills/deepinit/SKILL.md"
+      },
+      {
+        "id": "skills/diagram/SKILL.md",
+        "kind": "skill",
+        "path": "skills/diagram/SKILL.md"
       },
       {
         "id": "skills/drydock/SKILL.md",
@@ -41186,11 +41198,6 @@
         "path": "tests/lint/subagent-lock-test-contract.test.ts"
       },
       {
-        "id": "tests/lint/team-resume-contract.test.ts",
-        "kind": "other",
-        "path": "tests/lint/team-resume-contract.test.ts"
-      },
-      {
         "id": "tests/lint/windows-hide-hooks.test.ts",
         "kind": "other",
         "path": "tests/lint/windows-hide-hooks.test.ts"
@@ -43488,6 +43495,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/architecture-survey/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/ask-navigator/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -43529,6 +43541,11 @@
       },
       {
         "from": "skills/deepinit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/diagram/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -49395,6 +49412,26 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skills-frontmatter-regression.test.ts",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -59100,11 +59137,6 @@
       {
         "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
         "to": "src/hooks/persistent-mode/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
-        "to": "src/hooks/todo-continuation/index.ts",
         "kind": "imports"
       },
       {
@@ -75464,16 +75496,6 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -75500,11 +75522,6 @@
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/platform/process-utils.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/state-tools.test.ts",
-        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -76804,11 +76821,6 @@
       },
       {
         "from": "src/tools/state-tools.ts",
-        "to": "src/lib/atomic-write.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/state-tools.ts",
         "to": "src/lib/mode-state-io.ts",
         "kind": "imports"
       },
@@ -76830,11 +76842,6 @@
       {
         "from": "src/tools/state-tools.ts",
         "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/state-tools.ts",
-        "to": "src/team/process-identity-lock.ts",
         "kind": "imports"
       },
       {
@@ -78468,21 +78475,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/lint/team-resume-contract.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
         "from": "tests/lint/windows-hide-hooks.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -78554,12 +78546,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6967,
-      "edgeCount": 7464,
-      "importEdgeCount": 6149,
-      "registerEdgeCount": 60
+      "nodeCount": 6968,
+      "edgeCount": 7461,
+      "importEdgeCount": 6144,
+      "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "393d61244fc9310c5bc77a0896697a4cc00ececbbb5ddac927d54763335275ec",
-  "manifestSha256": "455d13cd48433b16bd528dbd4aa1ed0055063d90afd0d637d48619f28ce246bf"
+  "inventorySha256": "b54c934dddcbb51bf4a10243b5eb1015488bc7e7a0f9160a61eff3f2730e9384",
+  "manifestSha256": "33cefeed198527b61695cd2516fa414165949b3a5029dbecb0e4aa8dc8ff993f"
 }

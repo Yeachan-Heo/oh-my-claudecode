@@ -43,8 +43,8 @@ describe('registry projections — canonical JSON and digest', () => {
 describe('registry projections — drift check against installed surfaces', () => {
   it('matches the repository skills/ and commands/ surface exactly', () => {
     const installed = enumerateInstalledSurfaces(process.cwd());
-    // The installed tree currently contains 39 skill directories.
-    expect(installed.skills.length).toBe(39);
+    // The installed tree currently contains 41 skill directories.
+    expect(installed.skills.length).toBe(41);
     expect(installed.commands.length).toBe(21);
     const drift = checkProjectionDrift(installed);
     expect(drift.unregistered).toEqual([]);
