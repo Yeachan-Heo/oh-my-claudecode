@@ -27,6 +27,7 @@
     "./skills/debug/",
     "./skills/deep-interview/",
     "./skills/deepinit/",
+    "./skills/diagram/",
     "./skills/drydock/",
     "./skills/execute/",
     "./skills/external-context/",
