@@ -5,7 +5,7 @@
  * descriptor-supplied and therefore untrusted: resolving it must never let a
  * traversal-shaped id or a symlinked run directory redirect writes outside
  * the runs root. resolveRunDir validates, creates, and containment-checks
- * the directory with a Linux directory FD, failing closed on any escape or
+ * the directory with directory-FD-relative operations, failing closed on any escape or
  * on platforms without that primitive.
  */
 
@@ -14,13 +14,11 @@ import {
   constants as fsConstants,
   fstatSync,
   lstatSync,
-  mkdirSync,
   openSync,
-  realpathSync,
 } from "fs";
 import { join, resolve, sep } from "path";
 import {
-  containedFdPath,
+  directoryOperations,
   containedFsPlatformSupported,
 } from "./contained-fd.js";
 
@@ -30,10 +28,6 @@ const DIRECTORY_FLAGS =
   fsConstants.O_RDONLY |
   (fsConstants.O_DIRECTORY ?? 0) |
   (fsConstants.O_NOFOLLOW ?? 0);
-
-function fdPath(directoryFd: number, child?: string): string {
-  return containedFdPath(directoryFd, process.platform, child);
-}
 
 function isErrno(error: unknown, code: string): boolean {
   return (error as NodeJS.ErrnoException).code === code;
@@ -67,18 +61,50 @@ function openDirectory(path: string, label: string): number {
  * Both the mkdir and the subsequent open are anchored at the parent FD, so a
  * pathname replacement cannot redirect creation through a symlink.
  */
-function openOrCreateDirectoryAt(parentFd: number, name: string, label: string): number {
-  const childPath = fdPath(parentFd, name);
+export function openOrCreateDirectoryAt(parentFd: number, name: string, label: string): number {
+  const operations = directoryOperations(parentFd);
+  const open = (): number => {
+    try {
+      return operations.open(name, DIRECTORY_FLAGS);
+    } catch (error) {
+      if (isErrno(error, "ELOOP") || (isErrno(error, "ENOTDIR") && operations.lstat(name).isSymbolicLink())) {
+        throw new Error(`${label} must not be a symbolic link`);
+      }
+      throw error;
+    }
+  };
   try {
-    return openDirectory(childPath, label);
+    return open();
   } catch (error) {
     if (!isErrno(error, "ENOENT")) throw error;
     try {
-      mkdirSync(childPath);
+      operations.mkdir(name);
     } catch (mkdirError) {
       if (!isErrno(mkdirError, "EEXIST")) throw mkdirError;
     }
-    return openDirectory(childPath, label);
+    return open();
+  }
+}
+
+/**
+ * Open one existing directory component below an already-open directory
+ * without following a symlink at that component. Returns null when the
+ * component does not exist; a symlinked component fails closed.
+ */
+export function openExistingDirectoryAt(
+  parentFd: number,
+  name: string,
+  label: string,
+): number | null {
+  const operations = directoryOperations(parentFd);
+  try {
+    return operations.open(name, DIRECTORY_FLAGS);
+  } catch (error) {
+    if (isErrno(error, "ENOENT")) return null;
+    if (isErrno(error, "ELOOP") || (isErrno(error, "ENOTDIR") && operations.lstat(name).isSymbolicLink())) {
+      throw new Error(`${label} must not be a symbolic link`);
+    }
+    throw error;
   }
 }
 
@@ -158,7 +184,7 @@ export function resolveRunDirHandle(
   const target = join(runsRoot, runId);
   const runsRootFd = openOrCreateRunsRoot(runsRoot);
   try {
-    const runsRootReal = realpathSync(fdPath(runsRootFd));
+    const runsRootReal = directoryOperations(runsRootFd).realpath();
     // Keep the target directory open while both containment and identity are
     // checked. Creation is rooted at the runs-root FD rather than at `target`.
     // Thus replacing the root pathname or target pathname during mkdir cannot
@@ -169,7 +195,7 @@ export function resolveRunDirHandle(
       "run directory",
     );
     try {
-      const resolved = realpathSync(fdPath(directoryFd));
+      const resolved = directoryOperations(directoryFd).realpath();
       const prefixCmp = runsRootReal === sep ? sep : `${runsRootReal}${sep}`;
       if (!resolved.startsWith(prefixCmp)) {
         throw new Error(

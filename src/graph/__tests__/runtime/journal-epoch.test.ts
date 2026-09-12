@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   readFileSync,
   rmSync,
   utimesSync,
@@ -46,7 +46,7 @@ function loadFixture(name: string): GraphDescriptorInput {
 const tempDirs: string[] = [];
 
 function makeRunsRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "omc-journal-epoch-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-journal-epoch-"));
   tempDirs.push(dir);
   return dir;
 }

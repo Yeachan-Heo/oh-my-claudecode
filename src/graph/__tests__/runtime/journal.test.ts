@@ -5,7 +5,7 @@
 
 import {
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   linkSync,
   readFileSync,
   rmSync,
@@ -57,7 +57,7 @@ describe("FileJournal", () => {
   const tempDirs: string[] = [];
 
   function makeRunsRoot(): string {
-    const dir = mkdtempSync(join(tmpdir(), "omc-journal-test-"));
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-journal-test-"));
     tempDirs.push(dir);
     return dir;
   }
