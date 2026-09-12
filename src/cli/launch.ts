@@ -11,6 +11,7 @@ import {
   lstatSync,
   linkSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   readlinkSync,
   renameSync,
@@ -18,7 +19,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'fs';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../lib/file-lock.js';
@@ -1041,15 +1042,54 @@ export const TMUX_ENV_FORWARD = [
   'NODE_EXTRA_CA_CERTS',
 ];
 
+/**
+ * Credential-shaped variables must never reach a command line.
+ * `buildEnvExportPrefix` output is handed to tmux as an argument, so anything
+ * it interpolates is readable through `/proc/<pid>/cmdline` (world-readable by
+ * default on Linux) and through `#{pane_start_command}`. Pattern-matched
+ * rather than enumerated so a newly supported provider key is contained by
+ * default instead of leaking until someone remembers to add it.
+ */
+export function isSensitiveTmuxEnvironmentVariable(name: string): boolean {
+  return /(?:_API_KEY|_AUTH_TOKEN|_SESSION_TOKEN|_ACCESS_KEY_ID|SECRET|PASSWORD|PASSWD|_CREDENTIALS?|_TOKEN)$/i.test(name)
+    || /^(?:AWS_SECRET_ACCESS_KEY|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)$/i.test(name);
+}
+
 export function buildEnvExportPrefix(vars: string[]): string {
   const parts: string[] = [];
   for (const name of vars) {
+    if (isSensitiveTmuxEnvironmentVariable(name)) continue;
     const value = process.env[name];
     if (value !== undefined) {
       parts.push(`export ${name}=${quoteShellArg(value)}`);
     }
   }
   return parts.length > 0 ? parts.join('; ') + '; ' : '';
+}
+
+/**
+ * Forward credential-shaped variables through a 0600 file that the launched
+ * shell sources and immediately removes, so only the path appears in any
+ * command line. Returns an empty prefix when there is nothing sensitive to
+ * forward, and on any write failure — a launch must not be blocked by an
+ * unwritable temp directory, it just proceeds without those values.
+ */
+export function buildSensitiveEnvFilePrefix(vars: string[]): string {
+  const sensitive = vars.filter(
+    (name) => isSensitiveTmuxEnvironmentVariable(name) && process.env[name] !== undefined,
+  );
+  if (sensitive.length === 0) return '';
+  try {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-launch-env-'));
+    const file = join(dir, 'env.sh');
+    const body = sensitive
+      .map((name) => `export ${name}=${quoteShellArg(process.env[name] as string)}`)
+      .join('\n');
+    writeFileSync(file, `${body}\n`, { mode: 0o600 });
+    return `. ${quoteShellArg(file)}; rm -f ${quoteShellArg(file)}; rmdir ${quoteShellArg(dir)} 2>/dev/null; `;
+  } catch {
+    return '';
+  }
 }
 
 const TMUX_SESSION_ENV_VARS = new Set(['TMUX', 'TMUX_PANE', 'PSMUX_SESSION', 'CLAUDECODE']);
@@ -1105,7 +1145,7 @@ export function buildTmuxClaudeCommand(args: string[]): string {
     ? buildTmuxShellCommandWithEnv('claude', args, forwardedEnv)
     : buildTmuxShellCommand('claude', args);
   const envPrefix = !nativeWindows && forwardedEnvNames.length > 0
-    ? buildEnvExportPrefix(forwardedEnvNames)
+    ? `${buildEnvExportPrefix(forwardedEnvNames)}${buildSensitiveEnvFilePrefix(forwardedEnvNames)}`
     : '';
   const missingBinaryGuard = nativeWindows
     ? 'where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1) && '

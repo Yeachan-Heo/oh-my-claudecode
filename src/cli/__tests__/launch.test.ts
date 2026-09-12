@@ -10,7 +10,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -327,20 +327,52 @@ describe('runClaude — exit code propagation', () => {
       expect(posixRespawn).not.toContain('--');
     });
 
-    it('forwards effective provider credentials that are absent from the tmux server snapshot', () => {
+    it('forwards effective provider credentials without putting the value on a command line', () => {
       const savedApiKey = process.env.ANTHROPIC_API_KEY;
-      process.env.ANTHROPIC_API_KEY = "key with spaces; it's still one value";
+      const secret = "key with spaces; it's still one value";
+      process.env.ANTHROPIC_API_KEY = secret;
       try {
         runClaude('/tmp', [], 'sid');
         const command = String(
           vi.mocked(tmuxExec).mock.calls.find(([args]) => args[0] === 'respawn-pane')?.[0].at(-1),
         );
-        expect(command).toContain('ANTHROPIC_API_KEY');
-        expect(command).toContain('key with spaces');
-        expect(command).toContain('still one value');
+        // The command reaches tmux as an argument, so anything interpolated
+        // into it is readable via /proc/<pid>/cmdline and
+        // #{pane_start_command}. The credential must travel by 0600 file.
+        expect(command).not.toContain(secret);
+        expect(command).not.toContain('key with spaces');
+        expect(command).toMatch(/omc-launch-env-[^'\s]*\/env\.sh/);
+        expect(command).toContain('rm -f ');
+
+        const envFile = command.match(/(\/[^'\s]*omc-launch-env-[^'\s]*\/env\.sh)/)?.[1];
+        expect(envFile).toBeDefined();
+        expect(lstatSync(envFile as string).mode & 0o777).toBe(0o600);
+        const body = readFileSync(envFile as string, 'utf8');
+        // Shell-quoted in the file, so assert the export shape plus the
+        // distinctive payload rather than the raw value.
+        expect(body).toMatch(/^export ANTHROPIC_API_KEY='/);
+        expect(body).toContain('key with spaces');
+        expect(body).toContain('still one value');
+        rmSync(dirname(envFile as string), { recursive: true, force: true });
       } finally {
         if (savedApiKey === undefined) delete process.env.ANTHROPIC_API_KEY;
         else process.env.ANTHROPIC_API_KEY = savedApiKey;
+      }
+    });
+
+    it('keeps non-sensitive forwarded variables in the inline export prefix', () => {
+      const savedNotify = process.env.OMC_NOTIFY;
+      process.env.OMC_NOTIFY = 'plain value';
+      try {
+        runClaude('/tmp', [], 'sid');
+        const command = String(
+          vi.mocked(tmuxExec).mock.calls.find(([args]) => args[0] === 'respawn-pane')?.[0].at(-1),
+        );
+        expect(command).toContain('export OMC_NOTIFY=');
+        expect(command).toContain('plain value');
+      } finally {
+        if (savedNotify === undefined) delete process.env.OMC_NOTIFY;
+        else process.env.OMC_NOTIFY = savedNotify;
       }
     });
 
