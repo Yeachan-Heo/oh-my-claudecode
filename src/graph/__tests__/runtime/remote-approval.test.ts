@@ -3,7 +3,7 @@
  * fail-closed parsing, timeout policy, and CLI-facing list/decide helpers.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,7 +26,7 @@ const REQUEST: ApprovalRequest = {
 const tempDirs: string[] = [];
 
 function makeRunsRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "omc-remote-approval-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-remote-approval-"));
   tempDirs.push(dir);
   return dir;
 }

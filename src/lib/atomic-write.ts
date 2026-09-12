@@ -8,6 +8,16 @@ import * as fsSync from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 
+/** Optional basename-based backend for an already-open directory. */
+export interface AtomicWriteOperations {
+  open(name: string, flags: number, mode?: number): number;
+  lstat(name: string): Pick<fsSync.Stats, "dev" | "ino" | "mode" | "nlink" | "isFile">;
+  rename(source: string, destination: string): void;
+  unlink(name: string): void;
+  link(source: string, destination: string): void;
+  sync(): void;
+}
+
 /**
  * Create directory recursively (inline implementation).
  * Ensures parent directories exist before creating the target directory.
@@ -56,16 +66,17 @@ function verifyPrivateTempFile(
   fd: number,
   tempPath: string,
   label: string,
+  operations?: AtomicWriteOperations,
 ): void {
   const fdStats = fsSync.fstatSync(fd);
-  let pathStats: fsSync.Stats;
+  let pathStats: ReturnType<AtomicWriteOperations["lstat"]>;
   try {
-    pathStats = fsSync.lstatSync(tempPath);
+    pathStats = (operations?.lstat ?? fsSync.lstatSync)(tempPath);
   } catch {
     throw new Error(`${label} temporary file was replaced before rename`);
   }
   const isWindows = process.platform === "win32";
-  const isPrivateRegularSingleLink = (stats: fsSync.Stats): boolean =>
+  const isPrivateRegularSingleLink = (stats: ReturnType<AtomicWriteOperations["lstat"]>): boolean =>
     stats.isFile() &&
     (isWindows ? stats.nlink <= 1 : stats.nlink === 1) &&
     (isWindows || (stats.mode & 0o777) === 0o600);
@@ -83,11 +94,11 @@ function verifyPrivateTempFile(
 }
 
 /** Verify that publication installed the exact inode we opened and wrote. */
-function verifyPublishedFile(fd: number, filePath: string, label: string): void {
+function verifyPublishedFile(fd: number, filePath: string, label: string, operations?: AtomicWriteOperations): void {
   const fdStats = fsSync.fstatSync(fd);
-  let pathStats: fsSync.Stats;
+  let pathStats: ReturnType<AtomicWriteOperations["lstat"]>;
   try {
-    pathStats = fsSync.lstatSync(filePath);
+    pathStats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
   } catch {
     throw new Error(`${label} target was replaced at publication`);
   }
@@ -107,10 +118,10 @@ export interface AtomicWriteHooks {
 }
 
 /** Keep a hard-link to the prior target so failed publication can roll back. */
-function preservePriorTarget(filePath: string): string | null {
+function preservePriorTarget(filePath: string, operations?: AtomicWriteOperations): string | null {
   const backupPath = `${filePath}.rollback.${crypto.randomUUID()}`;
   try {
-    const stats = fsSync.lstatSync(filePath);
+    const stats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
     const isWindows = process.platform === "win32";
     if (
       !stats.isFile() ||
@@ -118,12 +129,12 @@ function preservePriorTarget(filePath: string): string | null {
     ) {
       return null;
     }
-    fsSync.linkSync(filePath, backupPath);
+    (operations?.link ?? fsSync.linkSync)(filePath, backupPath);
     return backupPath;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       try {
-        fsSync.unlinkSync(backupPath);
+        (operations?.unlink ?? fsSync.unlinkSync)(backupPath);
       } catch {
         // Best effort cleanup of an uncreated backup.
       }
@@ -138,9 +149,9 @@ interface FileIdentity {
   readonly ino: number;
 }
 
-function currentFileIdentity(filePath: string): FileIdentity | null {
+function currentFileIdentity(filePath: string, operations?: AtomicWriteOperations): FileIdentity | null {
   try {
-    const stats = fsSync.lstatSync(filePath);
+    const stats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
     return { dev: stats.dev, ino: stats.ino };
   } catch {
     return null;
@@ -160,11 +171,12 @@ function rollbackPriorTarget(
   filePath: string,
   backupPath: string | null,
   expectedIdentity: FileIdentity | null,
+  operations?: AtomicWriteOperations,
 ): void {
   // Without a positively identified published inode, the target may be a
   // concurrent foreign replacement. Leave it untouched and fail closed.
   if (expectedIdentity === null) return;
-  const current = currentFileIdentity(filePath);
+  const current = currentFileIdentity(filePath, operations);
   if (current === null) return;
   if (expectedIdentity !== null &&
     (current.dev !== expectedIdentity.dev || current.ino !== expectedIdentity.ino)) {
@@ -172,19 +184,19 @@ function rollbackPriorTarget(
   }
   try {
     if (backupPath === null) {
-      fsSync.unlinkSync(filePath);
+      (operations?.unlink ?? fsSync.unlinkSync)(filePath);
     } else {
-      fsSync.renameSync(backupPath, filePath);
+      (operations?.rename ?? fsSync.renameSync)(backupPath, filePath);
     }
   } catch {
     // The caller still fails closed; retain whichever durable target remains.
   }
 }
 
-function removeBackup(backupPath: string | null): void {
+function removeBackup(backupPath: string | null, operations?: AtomicWriteOperations): void {
   if (backupPath === null) return;
   try {
-    fsSync.unlinkSync(backupPath);
+    (operations?.unlink ?? fsSync.unlinkSync)(backupPath);
   } catch {
     // Best effort cleanup after a successful publication.
   }
@@ -320,7 +332,9 @@ export function atomicWriteFileSync(
   filePath: string,
   content: string,
   hooks?: AtomicWriteHooks,
+  operations?: AtomicWriteOperations,
 ): void {
+  if (operations && (!filePath || path.basename(filePath) !== filePath || filePath === "." || filePath === "..")) throw new RangeError("contained atomic write requires a basename");
   const dir = path.dirname(filePath);
   const base = path.basename(filePath);
   const tempPath = path.join(dir, `.${base}.tmp.${crypto.randomUUID()}`);
@@ -331,10 +345,12 @@ export function atomicWriteFileSync(
 
   try {
     // Ensure parent directory exists
-    ensureDirSync(dir);
+    if (!operations) ensureDirSync(dir);
 
     // Open temp file with exclusive creation (O_CREAT | O_EXCL | O_WRONLY)
-    fd = fsSync.openSync(tempPath, "wx", 0o600);
+    fd = operations
+      ? operations.open(tempPath, fsSync.constants.O_CREAT | fsSync.constants.O_EXCL | fsSync.constants.O_WRONLY, 0o600)
+      : fsSync.openSync(tempPath, "wx", 0o600);
 
     // Write content
     writeAllSync(fd, content, "atomic write");
@@ -342,24 +358,25 @@ export function atomicWriteFileSync(
     // Sync file data to disk before rename
     fsSync.fsyncSync(fd);
 
-    verifyPrivateTempFile(fd, tempPath, "atomic write");
+    verifyPrivateTempFile(fd, tempPath, "atomic write", operations);
 
-    backupPath = preservePriorTarget(filePath);
+    backupPath = preservePriorTarget(filePath, operations);
     hooks?.beforeRename?.();
     // Keep the opened descriptor live through rename so publication can be
     // checked against the inode that was actually written.
-    fsSync.renameSync(tempPath, filePath);
+    (operations?.rename ?? fsSync.renameSync)(tempPath, filePath);
     let publishedIdentity: FileIdentity | null = null;
     try {
-      verifyPublishedFile(fd, filePath, "atomic write");
+      verifyPublishedFile(fd, filePath, "atomic write", operations);
       publishedIdentity = descriptorIdentity(fd);
       hooks?.afterRename?.();
-      verifyPublishedFile(fd, filePath, "atomic write");
+      verifyPublishedFile(fd, filePath, "atomic write", operations);
     } catch (error) {
       rollbackPriorTarget(
         filePath,
         backupPath,
         publishedIdentity,
+        operations,
       );
       throw error;
     }
@@ -368,15 +385,19 @@ export function atomicWriteFileSync(
     fd = null;
 
     success = true;
-    removeBackup(backupPath);
+    removeBackup(backupPath, operations);
 
     // Best-effort directory fsync to ensure rename is durable
     try {
-      const dirFd = fsSync.openSync(dir, "r");
-      try {
-        fsSync.fsyncSync(dirFd);
-      } finally {
-        fsSync.closeSync(dirFd);
+      if (operations) {
+        operations.sync();
+      } else {
+        const dirFd = fsSync.openSync(dir, "r");
+        try {
+          fsSync.fsyncSync(dirFd);
+        } finally {
+          fsSync.closeSync(dirFd);
+        }
       }
     } catch {
       // Some platforms don't support directory fsync - that's okay
@@ -393,11 +414,11 @@ export function atomicWriteFileSync(
     // Clean up temp file on error
     if (!success) {
       try {
-        fsSync.unlinkSync(tempPath);
+        (operations?.unlink ?? fsSync.unlinkSync)(tempPath);
       } catch {
         // Ignore cleanup errors
       }
-      removeBackup(backupPath);
+      removeBackup(backupPath, operations);
     }
   }
 }
@@ -414,9 +435,10 @@ export function atomicWriteJsonSync(
   filePath: string,
   data: unknown,
   hooks?: AtomicWriteHooks,
+  operations?: AtomicWriteOperations,
 ): void {
   const jsonContent = JSON.stringify(data, null, 2);
-  atomicWriteFileSync(filePath, jsonContent, hooks);
+  atomicWriteFileSync(filePath, jsonContent, hooks, operations);
 }
 
 /**

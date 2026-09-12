@@ -1,5 +1,9 @@
 # Architecture
 
+Graph persistence uses directory-descriptor-relative operations on Linux and
+macOS; see [Graph contained filesystem](graph-contained-filesystem.md) for the
+backend boundary, ownership semantics, and packaging requirements.
+
 > How oh-my-claudecode orchestrates multi-agent workflows.
 
 ## Overview

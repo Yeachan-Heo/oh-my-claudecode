@@ -39,7 +39,7 @@ import { FileProjectionStore } from "./store.js";
 import {
   assertContainedFsSupported,
   readContainedFileNoFollow,
-  withContainedPath,
+  withContainedOperations,
 } from "./safe-fs.js";
 
 import { EXIT_CODES, FenceError, JournalCorruptionError } from "./types.js";
@@ -596,8 +596,8 @@ export async function runGraph(
     }
     let descriptorIsFresh = false;
     if (rawDescriptor === null) {
-      withContainedPath(runDirHandle, DESCRIPTOR_FILE_NAME, (path) => {
-        atomicWriteFileSync(path, canonicalJson(sealed));
+      withContainedOperations(runDirHandle, (operations) => {
+        atomicWriteFileSync(DESCRIPTOR_FILE_NAME, canonicalJson(sealed), undefined, operations);
       });
       stored = sealed;
       descriptorIsFresh = true;
