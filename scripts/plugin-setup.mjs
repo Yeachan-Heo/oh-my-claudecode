@@ -137,6 +137,14 @@ try {
 //    very setup script (and any other lifecycle hooks).  Fixes #1113.
 const packageDir = join(__dirname, '..');
 const commanderCheck = join(packageDir, 'node_modules', 'commander');
+const betterSqliteBindingCheck = join(
+  packageDir,
+  'node_modules',
+  'better-sqlite3',
+  'build',
+  'Release',
+  'better_sqlite3.node',
+);
 if (!existsSync(commanderCheck)) {
   console.log('[OMC] Installing runtime dependencies...');
   try {
@@ -151,6 +159,23 @@ if (!existsSync(commanderCheck)) {
   }
 } else {
   console.log('[OMC] Runtime dependencies already present');
+}
+
+// better-sqlite3 has a native install script.  The dependency bootstrap above
+// intentionally ignores package lifecycle scripts so it cannot recurse into
+// this setup entry point; rebuild this one native package explicitly instead.
+if (!existsSync(betterSqliteBindingCheck)) {
+  console.log('[OMC] Building better-sqlite3 native binding...');
+  try {
+    execSync('npm rebuild better-sqlite3', {
+      cwd: packageDir,
+      stdio: 'pipe',
+      timeout: 60000,
+    });
+    console.log('[OMC] better-sqlite3 native binding built successfully');
+  } catch (e) {
+    console.log('[OMC] Warning: Could not build better-sqlite3 native binding:', e.message);
+  }
 }
 
 console.log('[OMC] Setup complete! Restart Claude Code to activate HUD.');

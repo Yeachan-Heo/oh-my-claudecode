@@ -34,6 +34,11 @@ describe('plugin-setup.mjs dependency installation', () => {
     expect(scriptContent).toContain("node_modules', 'commander'");
   });
 
+  it('checks for the better-sqlite3 native binding separately', () => {
+    expect(scriptContent).toContain("'better-sqlite3'");
+    expect(scriptContent).toContain("'better_sqlite3.node'");
+  });
+
   it('runs npm install with --omit=dev flag', () => {
     expect(scriptContent).toContain('npm install --omit=dev --ignore-scripts');
   });
@@ -43,6 +48,11 @@ describe('plugin-setup.mjs dependency installation', () => {
     const installMatches = scriptContent.match(/npm install[^'"]+/g) || [];
     expect(installMatches.length).toBeGreaterThan(0);
     expect(installMatches.some(m => m.includes('--ignore-scripts'))).toBe(true);
+  });
+
+  it('rebuilds better-sqlite3 when its native binding is missing', () => {
+    expect(scriptContent).toContain('npm rebuild better-sqlite3');
+    expect(scriptContent).toContain('Could not build better-sqlite3 native binding');
   });
 
   it('sets a timeout on execSync to avoid hanging', () => {

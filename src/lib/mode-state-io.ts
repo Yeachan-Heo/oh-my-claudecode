@@ -9,7 +9,7 @@
 import { closeSync, existsSync, fstatSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { createHash, randomUUID } from 'crypto';
-import Database from 'better-sqlite3';
+import { createRequire } from 'module';
 import {
   getOmcRoot,
   probeGitTopLevel,
@@ -23,10 +23,57 @@ import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { atomicWriteJsonSync } from './atomic-write.js';
 
 type MutationLockOwner = { version: 1; pid: number; processStart: string; createdAt: string; nonce: string };
- type MutationLock = { db: BetterSqlite3; key: string; path: string; owner: MutationLockOwner; depth: number } | { unlocked: true };
 type BetterSqlite3 = import('better-sqlite3').Database;
 type BetterSqlite3Constructor = new (path: string) => BetterSqlite3;
+type MutationLock =
+  | { backend: 'sqlite'; db: BetterSqlite3; key: string; path: string; owner: MutationLockOwner; depth: number }
+  | { backend: 'file'; key: string; path: string; owner: MutationLockOwner; depth: number };
+
+// better-sqlite3 is externalized from plugin bundles and its native install
+// script may not have run in a Claude Code plugin cache. Keep loading optional
+// so mode state can use the owner-file lock fallback instead of failing import.
+const require = createRequire(
+  import.meta.url || (typeof __filename === 'string' ? __filename : process.cwd() + '/'),
+);
+const SQLITE_NATIVE_BINDING = 'better_sqlite3.node';
+const SQLITE_NATIVE_BINDING_REMEDIATION =
+  'Run `npm rebuild better-sqlite3` in the OMC plugin directory, then restart Claude Code.';
+let Database: BetterSqlite3Constructor | null = null;
+let sqliteBindingLoadError: string | null = null;
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function nativeBindingDiagnostic(detail?: string): string {
+  const normalizedDetail = detail?.split(/\r?\n/, 1)[0].replace(/\s+/g, ' ').trim().slice(0, 240);
+  const suffix = normalizedDetail ? ` Loader error: ${normalizedDetail}` : '';
+  return `better-sqlite3 native binding (${SQLITE_NATIVE_BINDING}) is unavailable. State mutation is using the file-lock fallback. ${SQLITE_NATIVE_BINDING_REMEDIATION}${suffix}`;
+}
+
+function isNativeBindingError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return /better[_-]sqlite3(?:\.node)?|bindings(?:\.js)?|MODULE_NOT_FOUND|NODE_MODULE_VERSION|did not self-register|Could not locate the bindings file/i.test(message);
+}
+
+try {
+  const loaded = require('better-sqlite3') as unknown;
+  const candidate = typeof loaded === 'function'
+    ? loaded
+    : loaded && typeof loaded === 'object' && 'default' in loaded
+      ? loaded.default
+      : null;
+  if (typeof candidate !== 'function') {
+    throw new Error('better-sqlite3 did not export a Database constructor');
+  }
+  Database = candidate as BetterSqlite3Constructor;
+} catch (error) {
+  sqliteBindingLoadError = nativeBindingDiagnostic(errorMessage(error));
+}
+
 const localLocks = new Map<string, MutationLock>();
+type MutationLockFailure = 'contention' | 'unverifiable';
+let lastMutationLockFailure: MutationLockFailure | null = null;
 // The current process's own start identity is immutable for the process
 // lifetime once successfully captured. acquireLockAt spawns a real
 // subprocess (ps on Darwin, powershell on Windows) to compute it; caching
@@ -43,8 +90,37 @@ function ownProcessStartIdentity(): string | null {
   return ownProcessStartIdentityCache;
 }
 
-function sqliteConstructor(): BetterSqlite3Constructor {
+function sqliteConstructor(): BetterSqlite3Constructor | null {
+  if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE === '1') {
+    sqliteBindingLoadError = nativeBindingDiagnostic('simulated native binding load failure');
+    return null;
+  }
   return Database;
+}
+
+/** Explain why SQLite coordination is unavailable, when that is the cause. */
+export function getStateMutationLockDiagnostic(): string | null {
+  if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE === '1') {
+    sqliteBindingLoadError = nativeBindingDiagnostic('simulated native binding load failure');
+  }
+  return sqliteBindingLoadError;
+}
+
+/** Preserve lock-contention errors while making native binding failures actionable. */
+export function getStateMutationLockFailureMessage(): string {
+  getStateMutationLockDiagnostic();
+  if (!sqliteBindingLoadError) {
+    return lastMutationLockFailure === 'unverifiable'
+      ? 'State mutation lock metadata could not be verified.'
+      : 'state mutation lock unavailable';
+  }
+  if (lastMutationLockFailure === 'contention') {
+    return `State mutation lock contention prevented the file-lock fallback. ${sqliteBindingLoadError}`;
+  }
+  if (lastMutationLockFailure === 'unverifiable') {
+    return `${sqliteBindingLoadError} The file-lock fallback metadata could not be verified.`;
+  }
+  return sqliteBindingLoadError;
 }
 
 function mutationDbPath(lockPath: string): string {
@@ -141,22 +217,104 @@ function openMutationDb(lockPath: string): BetterSqlite3 | null {
     return db;
   } catch (error) {
     if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] openMutationDb open/exec failed for ${lockPath}: ${(error as Error)?.message}`);
+    if (isNativeBindingError(error)) {
+      sqliteBindingLoadError = nativeBindingDiagnostic(errorMessage(error));
+    }
     try { db?.close(); } catch { /* best effort */ }
     return null;
   }
+}
+
+function acquireFileLockAt(path: string, attempts: number): MutationLock | null {
+  const key = (() => {
+    try { return resolve(realpathSync(dirname(path)), basename(path)); }
+    catch { return resolve(path); }
+  })();
+  const processStart = ownProcessStartIdentity();
+  if (!processStart || processStart === 'absent') {
+    lastMutationLockFailure = 'unverifiable';
+    return null;
+  }
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const owner: MutationLockOwner = {
+      version: 1,
+      pid: process.pid,
+      processStart,
+      createdAt: new Date().toISOString(),
+      nonce: randomUUID(),
+    };
+    const tempPath = `${path}.${owner.pid}.${owner.nonce}.tmp`;
+    let fd: number | undefined;
+    try {
+      fd = openSync(tempPath, 'wx', 0o600);
+      writeAllSync(fd, JSON.stringify(owner), 'lock owner publication');
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
+      linkSync(tempPath, path);
+      unlinkSync(tempPath);
+      const lock: MutationLock = { backend: 'file', key, path, owner, depth: 1 };
+      localLocks.set(key, lock);
+      lastMutationLockFailure = null;
+      return lock;
+    } catch (error) {
+      try { if (fd !== undefined) closeSync(fd); } catch { /* best effort */ }
+      try { unlinkSync(tempPath); } catch { /* best effort */ }
+      const code = (error as NodeJS.ErrnoException)?.code;
+      if (code !== 'EEXIST') {
+        lastMutationLockFailure = 'unverifiable';
+        return null;
+      }
+
+      const existing = readLockOwner(path);
+      if (existing === 'absent') continue;
+      if (!existing) {
+        lastMutationLockFailure = 'unverifiable';
+        return null;
+      }
+      const live = ownerLive(existing);
+      if (live === null) {
+        lastMutationLockFailure = 'unverifiable';
+        return null;
+      }
+      if (live) {
+        lastMutationLockFailure = 'contention';
+        if (attempt + 1 < attempts) {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+          continue;
+        }
+        return null;
+      }
+      try {
+        unlinkSync(path);
+      } catch {
+        lastMutationLockFailure = 'unverifiable';
+        return null;
+      }
+    }
+  }
+  lastMutationLockFailure = 'contention';
+  return null;
 }
 
 function acquireLockAt(path: string, attempts = 50): MutationLock | null {
   mkdirSync(dirname(path), { recursive: true });
   const key = (() => { try { return resolve(realpathSync(dirname(path)), basename(path)); } catch { return resolve(path); } })();
   const held = localLocks.get(key);
-  if (held && !('unlocked' in held)) { held.depth += 1; return held; }
+  if (held) { held.depth += 1; return held; }
   const db = openMutationDb(path);
   if (!db) {
+    if (sqliteBindingLoadError) {
+      return acquireFileLockAt(path, attempts);
+    }
     // Transient: sidecar validation can observe a mid-write WAL/SHM state
     // from a concurrent owner. Retry with the same backoff as contention,
     // rather than failing closed on a race that isn't a real integrity issue.
-    if (attempts <= 1) return null;
+    if (attempts <= 1) {
+      lastMutationLockFailure = 'unverifiable';
+      return null;
+    }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     return acquireLockAt(path, attempts - 1);
   }
@@ -167,7 +325,10 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
     // Transient: the identity probe (spawnSync ps/powershell) can time out
     // under CI/system load without the process itself being unavailable.
     // Retry within budget instead of failing closed on the first probe miss.
-    if (attempts <= 1) return null;
+    if (attempts <= 1) {
+      lastMutationLockFailure = 'unverifiable';
+      return null;
+    }
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
     return acquireLockAt(path, attempts - 1);
   }
@@ -177,13 +338,22 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
     const rawRow = db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(key) as Record<string, unknown> | undefined;
     if (rawRow) {
       const row = ownerFromRow(rawRow);
-      if (!row) { db.exec('ROLLBACK'); db.close(); if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-invalid ${path}`); return null; }
+      if (!row) {
+        db.exec('ROLLBACK');
+        db.close();
+        lastMutationLockFailure = 'unverifiable';
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-invalid ${path}`);
+        return null;
+      }
       const live = ownerLive(row);
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
         if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt row-live=${live} ${path}`);
-        if (live === null || attempts <= 1) return null;
+        if (live === null || attempts <= 1) {
+          lastMutationLockFailure = live === null ? 'unverifiable' : 'contention';
+          return null;
+        }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path, attempts - 1);
       }
@@ -191,17 +361,34 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
     }
     const artifact = readLockOwner(path);
     if (artifact !== 'absent') {
-      if (!artifact) { db.exec('ROLLBACK'); db.close(); console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path}`); return null; }
+      if (!artifact) {
+        db.exec('ROLLBACK');
+        db.close();
+        lastMutationLockFailure = 'unverifiable';
+        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${path}`);
+        return null;
+      }
       const live = ownerLive(artifact);
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
         if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-live=${live} ${path}`);
-        if (live === null || attempts <= 1) return null;
+        if (live === null || attempts <= 1) {
+          lastMutationLockFailure = live === null ? 'unverifiable' : 'contention';
+          return null;
+        }
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
         return acquireLockAt(path, attempts - 1);
       }
-      try { unlinkSync(path); } catch (error) { db.exec('ROLLBACK'); db.close(); if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-unlink-failed ${path} ${(error as NodeJS.ErrnoException).code}`); return null; }
+      try {
+        unlinkSync(path);
+      } catch (error) {
+        db.exec('ROLLBACK');
+        db.close();
+        lastMutationLockFailure = 'unverifiable';
+        if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireLockAt artifact-unlink-failed ${path} ${(error as NodeJS.ErrnoException).code}`);
+        return null;
+      }
     }
     db.prepare('INSERT INTO state_mutation_locks (lock_key, version, pid, process_start, created_at, nonce) VALUES (?, 1, ?, ?, ?, ?)').run(key, owner.pid, owner.processStart, owner.createdAt, owner.nonce);
     if (!publishLockOwner(path, owner)) {
@@ -212,13 +399,17 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
       // between our absent/dead check and this publish (e.g. linkSync sees
       // EEXIST). This is contention, not corruption; retry within budget
       // instead of failing closed on the first race.
-      if (attempts <= 1) return null;
+      if (attempts <= 1) {
+        lastMutationLockFailure = 'contention';
+        return null;
+      }
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       return acquireLockAt(path, attempts - 1);
     }
     db.exec('COMMIT');
-    const lock = { db, key, path, owner, depth: 1 } as MutationLock;
+    const lock: MutationLock = { backend: 'sqlite', db, key, path, owner, depth: 1 };
     localLocks.set(key, lock);
+    lastMutationLockFailure = null;
     return lock;
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch { /* best effort */ }
@@ -233,6 +424,9 @@ function acquireLockAt(path: string, attempts = 50): MutationLock | null {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
       return acquireLockAt(path, attempts - 1);
     }
+    lastMutationLockFailure = code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED'
+      ? 'contention'
+      : 'unverifiable';
     return null;
   }
 }
@@ -242,9 +436,18 @@ function acquireMutationLock(filePath: string): MutationLock | null {
 }
 
 function releaseMutationLock(lock: MutationLock | null): void {
-  if (!lock || 'unlocked' in lock) return;
+  if (!lock) return;
   if (lock.depth > 1) { lock.depth -= 1; return; }
   localLocks.delete(lock.key);
+  if (lock.backend === 'file') {
+    try {
+      const artifact = readLockOwner(lock.path);
+      if (artifact !== 'absent' && artifact && sameOwner(artifact, lock.owner)) {
+        unlinkSync(lock.path);
+      }
+    } catch { /* best effort */ }
+    return;
+  }
   try {
     lock.db.exec('BEGIN IMMEDIATE');
     const row = ownerFromRow(lock.db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(lock.key) as Record<string, unknown> | undefined);
@@ -599,7 +802,7 @@ function acquireRecoveryClaim(path: string, attempts = 50): MutationLockOwner | 
     return acquireRecoveryClaim(path, attempts - 1);
   }
   const lock = acquireLockAt(`${path}.recovery.guard`, attempts);
-  if (!lock || 'unlocked' in lock) { if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireRecoveryClaim guard-lock-null ${path}`); return null; }
+  if (!lock) { if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] acquireRecoveryClaim guard-lock-null ${path}`); return null; }
   const existing = readRecoveryClaim(path);
   if (existing) {
     const live = ownerLive(existing);

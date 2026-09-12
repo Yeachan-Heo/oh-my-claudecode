@@ -40,6 +40,8 @@ import {
   clearStateFileLockedIf,
   emergencyMutateStateFileIf,
   recoverEmergencyStateFile,
+  getStateMutationLockDiagnostic,
+  getStateMutationLockFailureMessage,
 } from '../lib/mode-state-io.js';
 import {
   isModeActive,
@@ -761,7 +763,7 @@ function writeSessionCancelSignal(
     ...(candidate ? { target_state_sha256: createHash('sha256').update(candidate.snapshot).digest('hex') } : {}),
   };
   if (!writeStateFileLocked(cancelSignalPath, payload)) {
-    throw new Error(`state mutation lock unavailable for cancel signal: ${cancelSignalPath}`);
+    throw new Error(`${getStateMutationLockFailureMessage()} for cancel signal: ${cancelSignalPath}`);
   }
 }
 
@@ -1193,7 +1195,7 @@ export const stateWriteTool: ToolDefinition<{
             );
             if (result !== 'written') {
               throw new Error(result === 'failed'
-                ? 'state mutation lock unavailable'
+                ? getStateMutationLockFailureMessage()
                 : 'named autopilot run changed, is stale, or failed integrity validation');
             }
             namedPauseCommitted = true;
@@ -1218,7 +1220,7 @@ export const stateWriteTool: ToolDefinition<{
               return writtenState;
             },
           );
-          if (result !== 'written') throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot run changed before deactivation');
+          if (result !== 'written') throw new Error(result === 'failed' ? getStateMutationLockFailureMessage() : 'autopilot run changed before deactivation');
         }
       } else if (mode === 'autopilot') {
         let namedWorkflowExists = false;
@@ -1237,7 +1239,7 @@ export const stateWriteTool: ToolDefinition<{
         );
         if (result !== 'written') {
           if (namedWorkflowExists) throw new Error('named autopilot workflow state is runtime-owned; only exact-run deactivation is allowed');
-          throw new Error(result === 'failed' ? 'state mutation lock unavailable' : 'autopilot state changed before write');
+          throw new Error(result === 'failed' ? getStateMutationLockFailureMessage() : 'autopilot state changed before write');
         }
       } else {
         const result = writeStateFileLockedCreateIf(
@@ -1247,20 +1249,21 @@ export const stateWriteTool: ToolDefinition<{
         );
         if (result !== 'written') {
           throw new Error(result === 'failed'
-            ? 'state mutation lock unavailable'
+            ? getStateMutationLockFailureMessage()
             : `state is owned by another session and cannot be modified by session '${sessionId ?? 'legacy'}'`);
         }
       }
 
-
       const sessionInfo = sessionId ? ` (session: ${sessionId})` : ' (legacy path)';
       const warningMessage = sessionId ? '' : '\n\nWARNING: No session_id provided. State written to legacy shared path which may leak across parallel sessions. Pass session_id for session-scoped isolation.';
+      const nativeBindingWarning = getStateMutationLockDiagnostic();
+      const nativeBindingWarningMessage = nativeBindingWarning ? `\n\nWARNING: ${nativeBindingWarning}` : '';
       return {
         content: [{
           type: 'text' as const,
           text: namedPauseCommitted
-            ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.`
-            : `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}`
+            ? `Paused named autopilot workflow${sessionInfo}. Resume state is preserved.${nativeBindingWarningMessage}`
+            : `Successfully wrote state for ${mode}${sessionInfo}\nPath: ${statePath}\n\n\`\`\`json\n${JSON.stringify(writtenState, null, 2)}\n\`\`\`${warningMessage}${nativeBindingWarningMessage}`
         }]
       };
     } catch (error) {
