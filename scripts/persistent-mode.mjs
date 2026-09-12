@@ -96,7 +96,7 @@ process.on("unhandledRejection", (error) => {
   forceSafeExit(`[persistent-mode] Unhandled rejection: ${error?.message || error}`);
 });
 const { advanceWorkflowOnStop, isValidWorkflowDescriptor, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, refreshWorkflowBoundaryForCommit, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } = await import(pathToFileURL(join(__dirname, "lib", "workflow-profile-runtime.mjs")).href);
-const { acquireStateFileLockSync, atomicWriteFileSync, getStateFileLockFailureMessage, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
+const { acquireStateFileLockSync, atomicWriteFileSync, getStateFileLockFailureMessage, isExclusiveStateLockingAvailable, isStateFileLockingSupported, releaseStateFileLockSync, withStateFileLockSync } = await import(pathToFileURL(join(__dirname, "lib", "atomic-write.mjs")).href);
 
 const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib", "config-dir.mjs")).href);
 const { readStdin } = await import(
@@ -827,7 +827,9 @@ function isSessionCancelInProgress(stateDir, sessionId, currentAutopilotPath, ca
     if (!currentAutopilotPath || !cancellationContext) return validateSignal(signalPath, null);
     const stateLock = acquireStateFileLockSync(currentAutopilotPath, 50, true);
     if (!stateLock) {
-      if (isStateFileLockingSupported()) return false;
+      // A real contender holds the lock only when exclusive acquisition is
+      // actually available; without it, fall through to the enforceability check.
+      if (isExclusiveStateLockingAvailable()) return false;
       const currentAutopilot = readJsonFile(currentAutopilotPath);
       if (isEnforceableAutopilotCancellationTarget(currentAutopilot, cancellationContext.directory, cancellationContext.isGlobal, cancellationContext.hasValidSessionId, sessionId)) return false;
       return validateSignal(signalPath, null);

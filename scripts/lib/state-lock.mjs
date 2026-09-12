@@ -270,9 +270,19 @@ export function getStateFileLockFailureMessage() {
 
 export function isStateFileLockingSupported() {
   // The owner-file fallback is a real exclusive backend, so callers must not
-  // downgrade to an unlocked read merely because SQLite is unavailable. The
-  // test override still simulates a host with no exclusive backend at all,
-  // which is the state the pre-SQLite fallback contract is written against.
+  // downgrade to an unlocked read when SQLite is unavailable.
+  return true;
+}
+
+/**
+ * Whether exclusive acquisition can be relied on right now. This is a
+ * different question from "is any locking backend present": the flock
+ * simulation used by the pre-SQLite fallback tests describes a host where an
+ * exclusive-required caller has no backend to fail closed against, while
+ * emergency recovery still has SQLite. Callers that authenticate state before
+ * acting on it (cancel-signal validation) must ask this one.
+ */
+export function isExclusiveStateLockingAvailable() {
   const override = stateFileLockingTestOverride();
   return override !== null ? override : true;
 }
