@@ -181,6 +181,7 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
       .filter((name): name is string => Boolean(name))
       .sort();
     expect(commands).toEqual([
+      'post-tool-directory-context-injector.mjs',
       'post-tool-rules-injector.mjs',
       'post-tool-use-failure.mjs',
       'project-memory-posttool.mjs',

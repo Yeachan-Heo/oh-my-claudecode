@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b2d1d93d7ed4c551e2a6e99598c5755226d37b53",
-    "sourceSha256": "1e22b0cc6f1aa2cf123a97bc6b7317259f6e50f2b27ad478c626e0f51fb2852c",
+    "head": "70bf898eec2d16509ee7e683f40ab6a24aa8c885",
+    "sourceSha256": "82f68950dc2c33c1b041bd86ce8356354866e44b28e88b4aa52145b2c0873a87",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b2d1d93d7ed4c551e2a6e99598c5755226d37b53",
-  "sourceSha256": "1e22b0cc6f1aa2cf123a97bc6b7317259f6e50f2b27ad478c626e0f51fb2852c",
+  "head": "70bf898eec2d16509ee7e683f40ab6a24aa8c885",
+  "sourceSha256": "82f68950dc2c33c1b041bd86ce8356354866e44b28e88b4aa52145b2c0873a87",
   "counts": {
     "public": {
       "skills": 41,
@@ -787,6 +787,7 @@
       "scripts/persistent-mode.mjs",
       "scripts/plugin-setup.mjs",
       "scripts/plugin-shipping-surface.mjs",
+      "scripts/post-tool-directory-context-injector.mjs",
       "scripts/post-tool-rules-injector.mjs",
       "scripts/post-tool-use-failure.mjs",
       "scripts/post-tool-verifier.mjs",
@@ -33506,6 +33507,11 @@
         "path": "scripts/plugin-shipping-surface.mjs"
       },
       {
+        "id": "scripts/post-tool-directory-context-injector.mjs",
+        "kind": "script",
+        "path": "scripts/post-tool-directory-context-injector.mjs"
+      },
+      {
         "id": "scripts/post-tool-rules-injector.mjs",
         "kind": "script",
         "path": "scripts/post-tool-rules-injector.mjs"
@@ -34389,6 +34395,11 @@
         "id": "src/__tests__/delegation-enforcer.test.ts",
         "kind": "src",
         "path": "src/__tests__/delegation-enforcer.test.ts"
+      },
+      {
+        "id": "src/__tests__/directory-context-injector-registration.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/directory-context-injector-registration.test.ts"
       },
       {
         "id": "src/__tests__/directory-context-injector.test.ts",
@@ -35889,11 +35900,6 @@
         "id": "src/cli/__tests__/hud-watch.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/hud-watch.test.ts"
-      },
-      {
-        "id": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "kind": "src",
-        "path": "src/cli/__tests__/launch-secure-transport.test.ts"
       },
       {
         "id": "src/cli/__tests__/launch.test.ts",
@@ -42743,6 +42749,21 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-directory-context-injector.mjs",
+        "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/post-tool-rules-injector.mjs",
         "to": "external:path",
         "kind": "imports"
@@ -44675,6 +44696,31 @@
       {
         "from": "src/__tests__/delegation-enforcer.test.ts",
         "to": "src/features/delegation-routing/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -51496,31 +51542,6 @@
         "from": "src/cli/__tests__/hud-watch.test.ts",
         "to": "src/mcp/standalone-shutdown.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/__tests__/launch-secure-transport.test.ts",
-        "to": "src/cli/launch.ts",
-        "kind": "imports"
       },
       {
         "from": "src/cli/__tests__/launch.test.ts",
@@ -78849,12 +78870,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6978,
-      "edgeCount": 7511,
-      "importEdgeCount": 6191,
+      "nodeCount": 6979,
+      "edgeCount": 7514,
+      "importEdgeCount": 6194,
       "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "1cf792d0a5f5622af60dddd9e745930b12ccc8cd31345a413e8334b39bdfc2dc",
-  "manifestSha256": "9c9f238f376afbf26f206e90b03a39d27221ce1742f1d3aa062e827b5eac581e"
+  "inventorySha256": "5c329e1a4e7f65c9f1e9db881c4a1d10bd49d540f4f0518373b29ea856a42a37",
+  "manifestSha256": "bb61017e31c38c474fee110750612158b30cc78c5d048f25bc7bc0d3b86bd253"
 }
