@@ -10,7 +10,8 @@
  */
 
 import { existsSync } from 'fs';
-import { readFile, mkdir } from 'fs/promises';
+import { readFile, mkdir, rm, writeFile, rename } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'path';
 import { performance } from 'perf_hooks';
 import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES } from '../shared/types.js';
@@ -28,7 +29,6 @@ import type {
   WorkerStatus,
   WorkerHeartbeat,
   WorkerInfo,
-  TeamTask,
   TeamSummary,
   TeamSummaryPerformance,
 } from './types.js';
@@ -61,12 +61,14 @@ async function readJsonFileState<T>(filePath: string): Promise<JsonFileState<T>>
 }
 
 async function writeAtomic(filePath: string, data: string): Promise<void> {
-  const { writeFile } = await import('fs/promises');
   await mkdir(dirname(filePath), { recursive: true });
-  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-  await writeFile(tmpPath, data, 'utf-8');
-  const { rename } = await import('fs/promises');
-  await rename(tmpPath, filePath);
+  const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, data, 'utf-8');
+    await rename(tmpPath, filePath);
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => undefined);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -670,58 +672,6 @@ export async function readWorkerHeartbeat(
 }
 
 // ---------------------------------------------------------------------------
-// Monitor snapshot persistence
-// ---------------------------------------------------------------------------
-
-export async function readMonitorSnapshot(
-  teamName: string,
-  cwd: string,
-): Promise<TeamMonitorSnapshotState | null> {
-  const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
-  if (!existsSync(p)) return null;
-  try {
-    const raw = await readFile(p, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<TeamMonitorSnapshotState>;
-    if (!parsed || typeof parsed !== 'object') return null;
-    const monitorTimings = (() => {
-      const candidate = parsed.monitorTimings as TeamMonitorSnapshotState['monitorTimings'];
-      if (!candidate || typeof candidate !== 'object') return undefined;
-      if (
-        typeof candidate.list_tasks_ms !== 'number' ||
-        typeof candidate.worker_scan_ms !== 'number' ||
-        typeof candidate.mailbox_delivery_ms !== 'number' ||
-        typeof candidate.total_ms !== 'number' ||
-        typeof candidate.updated_at !== 'string'
-      ) {
-        return undefined;
-      }
-      return candidate;
-    })();
-    return {
-      taskStatusById: parsed.taskStatusById ?? {},
-      workerAliveByName: parsed.workerAliveByName ?? {},
-      workerLivenessByName: parsed.workerLivenessByName ?? {},
-      workerStateByName: parsed.workerStateByName ?? {},
-      workerTurnCountByName: parsed.workerTurnCountByName ?? {},
-      workerTaskIdByName: parsed.workerTaskIdByName ?? {},
-      mailboxNotifiedByMessageId: parsed.mailboxNotifiedByMessageId ?? {},
-      completedEventTaskIds: parsed.completedEventTaskIds ?? {},
-      monitorTimings,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function writeMonitorSnapshot(
-  teamName: string,
-  snapshot: TeamMonitorSnapshotState,
-  cwd: string,
-): Promise<void> {
-  await writeAtomic(absPath(cwd, TeamPaths.monitorSnapshot(teamName)), JSON.stringify(snapshot, null, 2));
-}
-
-// ---------------------------------------------------------------------------
 // Phase state persistence
 // ---------------------------------------------------------------------------
 
@@ -801,28 +751,6 @@ export async function writeWorkerIdentity(
 }
 
 // ---------------------------------------------------------------------------
-// Task listing (reads task files from the tasks directory)
-// ---------------------------------------------------------------------------
-
-export async function listTasksFromFiles(
-  teamName: string,
-  cwd: string,
-): Promise<TeamTask[]> {
-  const tasksDir = absPath(cwd, TeamPaths.tasks(teamName));
-  if (!existsSync(tasksDir)) return [];
-  const { readdir } = await import('fs/promises');
-  const entries = await readdir(tasksDir);
-  const tasks: TeamTask[] = [];
-  for (const entry of entries) {
-    const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
-    if (!match) continue;
-    const task = await readJsonSafe<TeamTask>(absPath(cwd, `${TeamPaths.tasks(teamName)}/${entry}`));
-    if (task) tasks.push(task);
-  }
-  return tasks.sort((a, b) => Number(a.id) - Number(b.id));
-}
-
-// ---------------------------------------------------------------------------
 // Worker inbox I/O
 // ---------------------------------------------------------------------------
 
@@ -848,7 +776,8 @@ export async function getTeamSummary(
   if (!config) return null;
 
   const tasksStartMs = performance.now();
-  const tasks = await listTasksFromFiles(teamName, cwd);
+  const { teamListTasks } = await import('./team-ops.js');
+  const tasks = await teamListTasks(teamName, cwd);
   const tasksLoadedMs = performance.now() - tasksStartMs;
 
   const counts = { total: tasks.length, pending: 0, blocked: 0, in_progress: 0, completed: 0, failed: 0 };
