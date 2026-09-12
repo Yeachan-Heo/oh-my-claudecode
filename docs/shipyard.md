@@ -73,6 +73,8 @@ The gates form one chain with the same anatomy — run checks, list findings ver
 
 They share one rule of thumb: **starting needs no permission; landing goes into a shipyard slot.** A change that cannot say which slot it lands in (or explicitly none) is the smell.
 
+Two levers every checkpoint pulls: **push right** — a checkpoint is deferred as late as it can be, so the captain is asked once, late, with everything prepared (launch's batched C4 decisions are this lever in operation); and **the brief** — what a checkpoint presents is a decision-ready summary (what was produced, why, where the evidence lives), never the raw draft.
+
 `omc lookout` (a CLI command, not a skill) is the mast watch that can feed these gates: before an unattended effort starts it scans the task briefing and the workspace for high-confidence danger signals and reports them in the same findings vocabulary (severity / confidence / actionable) drydock's `--check` audit documents — the structured contract drydock marks as a planned follow-up can adopt the same shape. Advisory only, by design: it never blocks, and it pairs with the remote approval gates and checkpoints when a signal is real.
 
 ## The invocation contract
