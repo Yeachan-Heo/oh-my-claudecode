@@ -6,7 +6,7 @@
  */
 import {
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   renameSync,
   readFileSync,
   rmSync,
@@ -59,7 +59,7 @@ describe("FileProjectionStore", () => {
   let runsRoot: string;
 
   beforeEach(() => {
-    runsRoot = mkdtempSync(join(tmpdir(), "omc-projection-store-"));
+    runsRoot = mkdtempSync(join(realpathSync(tmpdir()), "omc-projection-store-"));
   });
 
   afterEach(() => {

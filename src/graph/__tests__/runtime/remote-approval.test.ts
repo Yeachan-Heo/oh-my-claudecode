@@ -3,7 +3,7 @@
  * fail-closed parsing, timeout policy, and CLI-facing list/decide helpers.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,7 +26,7 @@ const REQUEST: ApprovalRequest = {
 const tempDirs: string[] = [];
 
 function makeRunsRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "omc-remote-approval-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-remote-approval-"));
   tempDirs.push(dir);
   return dir;
 }
@@ -267,5 +267,107 @@ describe("createRemoteApprovalGate abort", () => {
     expect(
       existsSync(join(runsRoot, "run-1", "approvals", "pending", "act-1.json")),
     ).toBe(false);
+  });
+});
+
+describe("approval artifact containment (#4011 follow-up)", () => {
+  /**
+   * The approval artifacts live two components below the run directory, so the
+   * nested traversal is the boundary that matters: if `approvals` or its child
+   * is swapped for a symlink after the run directory is validated, a remote
+   * approval must fail closed rather than write or poll a trust decision
+   * outside the contained run. On Darwin this exercises the native
+   * openat/mkdirat backend; on Linux the procfs-relative one.
+   */
+  function prepareRun(runsRoot: string, runId: string): string {
+    const gate = createRemoteApprovalGate({ runsRoot, runId, sleep: async () => {} });
+    void gate;
+    const runDir = join(runsRoot, runId);
+    mkdirSync(runDir, { recursive: true });
+    return runDir;
+  }
+
+  it("refuses to publish a decision through a symlinked approvals directory", () => {
+    const runsRoot = makeRunsRoot();
+    const runDir = prepareRun(runsRoot, "run-swap-approvals");
+    const outside = join(runsRoot, "outside-approvals");
+    mkdirSync(outside, { recursive: true });
+    symlinkSync(outside, join(runDir, "approvals"), "dir");
+
+    expect(() =>
+      writeApprovalDecision(runsRoot, "run-swap-approvals", "act-1", "approved", "cli"),
+    ).toThrow(/symbolic link/);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("refuses to publish a decision through a symlinked decisions directory", () => {
+    const runsRoot = makeRunsRoot();
+    const runDir = prepareRun(runsRoot, "run-swap-decisions");
+    const outside = join(runsRoot, "outside-decisions");
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(join(runDir, "approvals"), { recursive: true });
+    symlinkSync(outside, join(runDir, "approvals", "decisions"), "dir");
+
+    expect(() =>
+      writeApprovalDecision(runsRoot, "run-swap-decisions", "act-1", "approved", "cli"),
+    ).toThrow(/symbolic link/);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("refuses to publish a pending artifact through a symlinked pending directory", async () => {
+    const runsRoot = makeRunsRoot();
+    const runDir = prepareRun(runsRoot, "run-1");
+    const outside = join(runsRoot, "outside-pending");
+    mkdirSync(outside, { recursive: true });
+    mkdirSync(join(runDir, "approvals"), { recursive: true });
+    symlinkSync(outside, join(runDir, "approvals", "pending"), "dir");
+
+    const gate = createRemoteApprovalGate({ runsRoot, runId: "run-1", sleep: async () => {} });
+    await expect(gate.prompt(REQUEST)).rejects.toThrow(/symbolic link/);
+    expect(readdirSync(outside)).toEqual([]);
+  });
+
+  it("never reads a decision planted behind a symlinked decisions directory", async () => {
+    const runsRoot = makeRunsRoot();
+    const runDir = prepareRun(runsRoot, "run-1");
+    const outside = join(runsRoot, "outside-planted");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(
+      join(outside, "act-1.json"),
+      JSON.stringify({ decision: "approved", decided_by: "attacker" }),
+    );
+    mkdirSync(join(runDir, "approvals", "pending"), { recursive: true });
+    symlinkSync(outside, join(runDir, "approvals", "decisions"), "dir");
+
+    // A forged approval outside the run directory must not resolve the gate:
+    // the poll times out and the fail-closed timeout policy applies instead.
+    const gate = createRemoteApprovalGate({
+      runsRoot,
+      runId: "run-1",
+      timeoutMs: 0,
+      sleep: async () => {},
+    });
+    expect(await gate.prompt(REQUEST)).toBe("denied");
+  });
+
+  it("skips runs whose pending directory is a symlink when listing", () => {
+    const runsRoot = makeRunsRoot();
+    const runDir = prepareRun(runsRoot, "run-listed");
+    const outside = join(runsRoot, "outside-listed");
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(
+      join(outside, "act-9.json"),
+      JSON.stringify({
+        run_id: "run-listed",
+        node_id: "gate-9",
+        activation_id: "act-9",
+        prompt_text: "forged",
+        created_at: new Date().toISOString(),
+      }),
+    );
+    mkdirSync(join(runDir, "approvals"), { recursive: true });
+    symlinkSync(outside, join(runDir, "approvals", "pending"), "dir");
+
+    expect(listPendingApprovals(runsRoot)).toEqual([]);
   });
 });

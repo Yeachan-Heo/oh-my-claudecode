@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   readdirSync,
   readFileSync,
   rmSync,
@@ -66,7 +66,7 @@ function loadFixture(name: string): GraphDescriptorInput {
 const tempDirs: string[] = [];
 
 function makeRunsRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "omc-regression-matrix-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-regression-matrix-"));
   tempDirs.push(dir);
   return dir;
 }

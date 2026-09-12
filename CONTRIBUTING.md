@@ -84,6 +84,11 @@ Note: The repo has two main branches:
 
 All TypeScript and bundling steps are handled. The output goes to `dist/` and `bridge/`.
 
+On macOS, the graph filesystem backend also requires clang and Node development
+headers and produces ignored binaries in `native/`. See
+[Graph contained filesystem](docs/graph-contained-filesystem.md) for header
+configuration, packaging, and the real-host acceptance checks.
+
 ---
 
 ## 4. Linking Your Checkout as the Active OMC Plugin

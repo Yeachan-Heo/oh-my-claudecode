@@ -16,7 +16,7 @@ import {
 
 import { resolveRunDirHandle } from "./run-dir.js";
 import type { RunDirHandle } from "./run-dir.js";
-import { readContainedFileNoFollow, withContainedPath } from "./safe-fs.js";
+import { readContainedFileNoFollow, withContainedOperations } from "./safe-fs.js";
 import type {
   ProjectionSnapshotEnvelope,
   ProjectionStore,
@@ -181,7 +181,7 @@ export class FileProjectionStore implements ProjectionStore {
       );
     }
 
-    withContainedPath(this.runDir(), PROJECTION_FILE_NAME, (filePath) => {
+    withContainedOperations(this.runDir(), (operations) => {
       assertOwnership?.();
       const hooks: AtomicWriteHooks | undefined = assertOwnership
         ? {
@@ -189,7 +189,7 @@ export class FileProjectionStore implements ProjectionStore {
             afterRename: assertOwnership,
           }
         : undefined;
-      atomicWriteJsonSync(filePath, envelope, hooks);
+      atomicWriteJsonSync(PROJECTION_FILE_NAME, envelope, hooks, operations);
     });
   }
 

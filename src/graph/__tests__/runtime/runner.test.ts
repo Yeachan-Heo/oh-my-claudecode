@@ -7,7 +7,7 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
+  mkdtempSync, realpathSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -42,7 +42,7 @@ import {
 const tempDirs: string[] = [];
 
 function makeRunsRoot(): string {
-  const dir = mkdtempSync(join(tmpdir(), "omc-runner-test-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-runner-test-"));
   tempDirs.push(dir);
   return dir;
 }

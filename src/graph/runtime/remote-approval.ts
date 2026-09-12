@@ -20,16 +20,18 @@
  *     human-approval node, exactly like typing y at the stdin prompt
  */
 
-import { existsSync, mkdirSync, readdirSync, rmSync, unlinkSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 
-import { atomicWriteJsonSync } from "../../lib/atomic-write.js";
 import {
   assertSafeContainedFileName,
-  readFileNoFollow,
+  readOperationFileNoFollow,
+  withContainedSubdirectoryOperations,
+  writeOperationFileAtomically,
 } from "./safe-fs.js";
 import { resolveRunDirHandle } from "./run-dir.js";
 import type { RunDirHandle } from "./run-dir.js";
+import type { DirectoryOperations } from "./contained-fd.js";
 import type {
   ApprovalRequest,
   HumanApprovalPrompter,
@@ -92,12 +94,23 @@ const DEFAULT_TIMEOUT_POLICY: Decision = "denied";
 
 const DECISION_VALUES: ReadonlySet<string> = new Set(["approved", "denied"]);
 
-function pendingDirPath(runDir: RunDirHandle): string {
-  return join(runDir.path, APPROVALS_DIR, PENDING_DIR);
-}
+const PENDING_COMPONENTS = [APPROVALS_DIR, PENDING_DIR] as const;
+const DECISIONS_COMPONENTS = [APPROVALS_DIR, DECISIONS_DIR] as const;
 
-function decisionsDirPath(runDir: RunDirHandle): string {
-  return join(runDir.path, APPROVALS_DIR, DECISIONS_DIR);
+/**
+ * Approval artifacts live two components below the run directory, so the
+ * nested traversal is the containment boundary: both `approvals` and its
+ * child are opened O_NOFOLLOW from the parent descriptor. A directory swapped
+ * for a symlink between validation and use fails closed instead of
+ * redirecting a trust decision outside the run directory.
+ */
+function withApprovalOperations<T>(
+  runDir: RunDirHandle,
+  components: readonly string[],
+  create: boolean,
+  operation: (operations: DirectoryOperations) => T,
+): T | null {
+  return withContainedSubdirectoryOperations(runDir, components, operation, { create });
 }
 
 function artifactFileName(activationId: string): string {
@@ -149,12 +162,25 @@ function readDecisionFile(
   runDir: RunDirHandle,
   activationId: string,
 ): ApprovalDecisionRecord | null {
-  const filePath = join(decisionsDirPath(runDir), artifactFileName(activationId));
-  if (!existsSync(filePath)) return null;
+  const fileName = artifactFileName(activationId);
   try {
-    return parseDecisionArtifact(readFileNoFollow(filePath));
+    return withApprovalOperations(runDir, DECISIONS_COMPONENTS, false, (operations) =>
+      parseDecisionArtifact(readOperationFileNoFollow(operations, fileName)),
+    );
   } catch {
     return null;
+  }
+}
+
+/** Retire our own pending artifact through the contained descriptor. */
+function retirePendingArtifact(runDir: RunDirHandle, activationId: string): void {
+  try {
+    withApprovalOperations(runDir, PENDING_COMPONENTS, false, (operations) => {
+      operations.unlink(artifactFileName(activationId));
+    });
+  } catch {
+    // A missing pending file is fine; leaving one behind only affects
+    // `approvals list` freshness, never run correctness.
   }
 }
 
@@ -177,7 +203,6 @@ export function createRemoteApprovalGate(
       assertSafeContainedFileName(request.activation_id);
       assertSafeContainedFileName(request.node_id);
 
-      const pendingDir = pendingDirPath(runDir);
       const record: PendingApprovalRecord = {
         run_id: request.run_id,
         node_id: request.node_id,
@@ -185,11 +210,13 @@ export function createRemoteApprovalGate(
         prompt_text: request.prompt_text,
         created_at: new Date(now()).toISOString(),
       };
-      mkdirSync(pendingDir, { recursive: true });
-      atomicWriteJsonSync(
-        join(pendingDir, artifactFileName(request.activation_id)),
-        record,
-      );
+      withApprovalOperations(runDir, PENDING_COMPONENTS, true, (operations) => {
+        writeOperationFileAtomically(
+          operations,
+          artifactFileName(request.activation_id),
+          `${JSON.stringify(record, null, 2)}\n`,
+        );
+      });
 
       if (options.notifier !== undefined) {
         try {
@@ -205,33 +232,20 @@ export function createRemoteApprovalGate(
         const decision = readDecisionFile(runDir, request.activation_id);
         if (decision !== null) {
           // Resolution observed: retire the pending artifact (best-effort).
-          try {
-            unlinkSync(join(pendingDir, artifactFileName(request.activation_id)));
-          } catch {
-            // A missing pending file is fine; leaving one behind only
-            // affects `approvals list` freshness, never run correctness.
-          }
+          retirePendingArtifact(runDir, request.activation_id);
           return decision.decision;
         }
         // An aborted/killed run must not hang in the poll loop: resolve
         // denied (fail closed) and let the runner's fence settle ownership.
         if (options.signal?.aborted === true) {
-          try {
-            unlinkSync(join(pendingDir, artifactFileName(request.activation_id)));
-          } catch {
-            // Same best-effort retirement as above.
-          }
+          retirePendingArtifact(runDir, request.activation_id);
           return "denied";
         }
         if (
           options.timeoutMs !== undefined &&
           now() - startedAtMs >= options.timeoutMs
         ) {
-          try {
-            unlinkSync(join(pendingDir, artifactFileName(request.activation_id)));
-          } catch {
-            // Same best-effort retirement as above.
-          }
+          retirePendingArtifact(runDir, request.activation_id);
           return timeoutPolicy;
         }
         await sleep(pollIntervalMs);
@@ -254,38 +268,44 @@ export function listPendingApprovals(runsRoot: string): PendingApprovalEntry[] {
 
   const entries: PendingApprovalEntry[] = [];
   for (const runId of runIds) {
-    const pendingDir = join(runsRoot, runId, APPROVALS_DIR, PENDING_DIR);
-    if (!existsSync(pendingDir)) continue;
-    let files: string[];
+    let runDir: RunDirHandle;
     try {
-      files = readdirSync(pendingDir);
+      runDir = resolveRunDirHandle(runsRoot, runId);
     } catch {
+      // Malformed run id or a symlinked run directory: never listed.
       continue;
     }
-    for (const file of files) {
-      if (!file.endsWith(".json")) continue;
-      try {
-        const raw = readFileNoFollow(join(pendingDir, file));
-        const parsed = JSON.parse(raw) as Partial<PendingApprovalRecord>;
-        if (
-          typeof parsed.run_id !== "string" ||
-          typeof parsed.node_id !== "string" ||
-          typeof parsed.activation_id !== "string" ||
-          typeof parsed.prompt_text !== "string" ||
-          typeof parsed.created_at !== "string"
-        ) {
-          continue;
+    try {
+      withApprovalOperations(runDir, PENDING_COMPONENTS, false, (operations) => {
+        for (const file of operations.readDir()) {
+          if (!file.endsWith(".json")) continue;
+          try {
+            const parsed = JSON.parse(
+              readOperationFileNoFollow(operations, file),
+            ) as Partial<PendingApprovalRecord>;
+            if (
+              typeof parsed.run_id !== "string" ||
+              typeof parsed.node_id !== "string" ||
+              typeof parsed.activation_id !== "string" ||
+              typeof parsed.prompt_text !== "string" ||
+              typeof parsed.created_at !== "string"
+            ) {
+              continue;
+            }
+            entries.push({
+              run_id: parsed.run_id,
+              activation_id: parsed.activation_id,
+              node_id: parsed.node_id,
+              prompt_text: parsed.prompt_text,
+              created_at: parsed.created_at,
+            });
+          } catch {
+            continue;
+          }
         }
-        entries.push({
-          run_id: parsed.run_id,
-          activation_id: parsed.activation_id,
-          node_id: parsed.node_id,
-          prompt_text: parsed.prompt_text,
-          created_at: parsed.created_at,
-        });
-      } catch {
-        continue;
-      }
+      });
+    } catch {
+      continue;
     }
   }
   return entries.sort((a, b) => a.created_at.localeCompare(b.created_at));
@@ -311,28 +331,41 @@ export function writeApprovalDecision(
     throw new Error(`unknown run "${runId}" (no run directory under ${runsRoot})`);
   }
   const runDir = resolveRunDirHandle(runsRoot, runId);
-  const decisionsDir = decisionsDirPath(runDir);
-  mkdirSync(decisionsDir, { recursive: true });
-
   const record: ApprovalDecisionRecord = {
     decision,
     decided_at: new Date().toISOString(),
     ...(decidedBy !== undefined ? { decided_by: decidedBy } : {}),
   };
-  atomicWriteJsonSync(
-    join(decisionsDir, artifactFileName(activationId)),
-    record,
-  );
+  withApprovalOperations(runDir, DECISIONS_COMPONENTS, true, (operations) => {
+    writeOperationFileAtomically(
+      operations,
+      artifactFileName(activationId),
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+  });
   return record;
 }
 
-/** Remove a run's pending artifact directory (best-effort housekeeping). */
+/**
+ * Remove a run's pending artifacts (best-effort housekeeping).
+ *
+ * Descriptor-relative unlink of the entries rather than a recursive pathname
+ * removal: `rmSync` on `<runDir>/approvals/pending` would re-resolve the
+ * nested pathname and could follow a swapped component. The now-empty
+ * directory is left in place, which only affects listing freshness.
+ */
 export function prunePendingApprovals(runsRoot: string, runId: string): void {
   try {
     assertSafeContainedFileName(runId);
-    rmSync(join(runsRoot, runId, APPROVALS_DIR, PENDING_DIR), {
-      recursive: true,
-      force: true,
+    const runDir = resolveRunDirHandle(runsRoot, runId);
+    withApprovalOperations(runDir, PENDING_COMPONENTS, false, (operations) => {
+      for (const file of operations.readDir()) {
+        try {
+          operations.unlink(file);
+        } catch {
+          // Skip entries we cannot retire; housekeeping never surfaces.
+        }
+      }
     });
   } catch {
     // Housekeeping only; never surface.

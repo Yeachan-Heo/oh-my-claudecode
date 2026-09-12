@@ -22,13 +22,19 @@ const mkdirInterlock = vi.hoisted(() => ({
   before: undefined as ((path: unknown) => void) | undefined,
 }));
 
-vi.mock("fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("fs")>();
+vi.mock("../../runtime/contained-fd.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../runtime/contained-fd.js")>();
   return {
     ...actual,
-    mkdirSync: (...args: unknown[]) => {
-      mkdirInterlock.before?.(args[0]);
-      return Reflect.apply(actual.mkdirSync, actual, args);
+    directoryOperations: (...args: Parameters<typeof actual.directoryOperations>) => {
+      const operations = actual.directoryOperations(...args);
+      return {
+        ...operations,
+        mkdir: (name: string, mode?: number) => {
+          mkdirInterlock.before?.(name);
+          operations.mkdir(name, mode);
+        },
+      };
     },
   };
 });
@@ -75,7 +81,7 @@ describe("resolveRunDir containment [P1-3]", () => {
   const tempDirs: string[] = [];
 
   function makeRunsRoot(): string {
-    const dir = mkdtempSync(join(tmpdir(), "omc-rundir-test-"));
+    const dir = mkdtempSync(join(realpathSync(tmpdir()), "omc-rundir-test-"));
     tempDirs.push(dir);
     return dir;
   }
@@ -168,7 +174,7 @@ describe("resolveRunDir containment [P1-3]", () => {
       if (
         !swapped &&
         typeof path === "string" &&
-        (path === target || /\/proc\/self\/fd\/\d+\/run-root-replaced$/.test(path))
+        path === runId
       ) {
         swapped = true;
         renameSync(runsRoot, originalRoot);
@@ -204,7 +210,7 @@ describe("resolveRunDir containment [P1-3]", () => {
       if (
         !swapped &&
         typeof path === "string" &&
-        (path === target || /\/proc\/self\/fd\/\d+\/run-target-replaced$/.test(path))
+        path === runId
       ) {
         swapped = true;
         symlinkSync(escaped, target, "dir");

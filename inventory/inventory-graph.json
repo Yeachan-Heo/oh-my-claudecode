@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
-    "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
+    "head": "8ca178dcadf88e5f5c8eb8ec3ffa02face91a43f",
+    "sourceSha256": "ad56d26bfd7f4b07241462328b9094ecfeac775c51cf46b6d770721e81fe2b32",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6eab26d6d3c1b758629d5aec7ef0e0bad9e9a275",
-  "sourceSha256": "05821a2a7b0ec0a29316cd58c662b70a6923e2b3b5bdb99faef69f9825ce6b1c",
+  "head": "8ca178dcadf88e5f5c8eb8ec3ffa02face91a43f",
+  "sourceSha256": "ad56d26bfd7f4b07241462328b9094ecfeac775c51cf46b6d770721e81fe2b32",
   "counts": {
     "public": {
       "skills": 41,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 42,
       "templateHooks": 22,
-      "srcFiles": 1348,
-      "total": 1370
+      "srcFiles": 1350,
+      "total": 1372
     },
     "generated": {
       "distFiles": 5032,
@@ -727,6 +727,7 @@
       "scripts/build-bridge-entry.mjs",
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
+      "scripts/build-contained-fs.mjs",
       "scripts/build-mcp-server.mjs",
       "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
@@ -823,6 +824,7 @@
       "scripts/verify-deliverables.mjs",
       "scripts/verify-epic-3698-closure.mjs",
       "scripts/verify-generated-artifact-authorization.mjs",
+      "scripts/verify-graph-contained-fs.mjs",
       "scripts/wiki-pre-compact.mjs",
       "scripts/wiki-session-end.mjs",
       "scripts/wiki-session-start.mjs",
@@ -32638,6 +32640,11 @@
         "path": "docs/geobench.md"
       },
       {
+        "id": "docs/graph-contained-filesystem.md",
+        "kind": "other",
+        "path": "docs/graph-contained-filesystem.md"
+      },
+      {
         "id": "docs/issues/issue-3668-ralph-namespace.md",
         "kind": "other",
         "path": "docs/issues/issue-3668-ralph-namespace.md"
@@ -32826,6 +32833,11 @@
         "id": "external:net",
         "kind": "external",
         "path": "net"
+      },
+      {
+        "id": "external:node:assert/strict",
+        "kind": "external",
+        "path": "node:assert/strict"
       },
       {
         "id": "external:node:async_hooks",
@@ -33078,6 +33090,11 @@
         "path": "missions/prove-reliability-by-finding-and-fixing-flaky-te/sandbox.md"
       },
       {
+        "id": "native/contained-fs.c",
+        "kind": "other",
+        "path": "native/contained-fs.c"
+      },
+      {
         "id": "package-lock.json",
         "kind": "other",
         "path": "package-lock.json"
@@ -33191,6 +33208,11 @@
         "id": "scripts/build-cli.mjs",
         "kind": "script",
         "path": "scripts/build-cli.mjs"
+      },
+      {
+        "id": "scripts/build-contained-fs.mjs",
+        "kind": "script",
+        "path": "scripts/build-contained-fs.mjs"
       },
       {
         "id": "scripts/build-mcp-server.mjs",
@@ -33671,6 +33693,11 @@
         "id": "scripts/verify-generated-artifact-authorization.mjs",
         "kind": "script",
         "path": "scripts/verify-generated-artifact-authorization.mjs"
+      },
+      {
+        "id": "scripts/verify-graph-contained-fs.mjs",
+        "kind": "script",
+        "path": "scripts/verify-graph-contained-fs.mjs"
       },
       {
         "id": "scripts/wiki-pre-compact.mjs",
@@ -36658,6 +36685,11 @@
         "path": "src/graph/__tests__/runtime/journal.test.ts"
       },
       {
+        "id": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "kind": "src",
+        "path": "src/graph/__tests__/runtime/native-contained-fs.test.ts"
+      },
+      {
         "id": "src/graph/__tests__/runtime/progress.test.ts",
         "kind": "src",
         "path": "src/graph/__tests__/runtime/progress.test.ts"
@@ -36741,6 +36773,11 @@
         "id": "src/graph/runtime/journal.ts",
         "kind": "src",
         "path": "src/graph/runtime/journal.ts"
+      },
+      {
+        "id": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "src",
+        "path": "src/graph/runtime/native-contained-fs.ts"
       },
       {
         "id": "src/graph/runtime/progress.ts",
@@ -41745,6 +41782,31 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-contained-fs.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/build-mcp-server.mjs",
         "to": "external:esbuild",
         "kind": "imports"
@@ -43427,6 +43489,36 @@
       {
         "from": "scripts/verify-generated-artifact-authorization.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:assert/strict",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/verify-graph-contained-fs.mjs",
+        "to": "external:node:path",
         "kind": "imports"
       },
       {
@@ -54865,6 +54957,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/native-contained-fs.test.ts",
+        "to": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/__tests__/runtime/progress.test.ts",
         "to": "external:stream",
         "kind": "imports"
@@ -55116,12 +55233,22 @@
       },
       {
         "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
         "to": "src/graph/runtime/run-dir.ts",
         "kind": "imports"
       },
       {
         "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
         "to": "src/graph/runtime/safe-fs.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/__tests__/runtime/safe-fs.test.ts",
+        "to": "src/lib/atomic-write.ts",
         "kind": "imports"
       },
       {
@@ -55250,6 +55377,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/graph/runtime/contained-fd.ts",
+        "to": "src/graph/runtime/native-contained-fs.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/runtime/executors/agent.ts",
         "to": "external:@anthropic-ai/claude-agent-sdk",
         "kind": "imports"
@@ -55316,13 +55448,8 @@
       },
       {
         "from": "src/graph/runtime/fence.ts",
-        "to": "external:fs",
+        "to": "src/graph/runtime/contained-fd.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/fence.ts",
-        "to": "external:path",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/fence.ts",
@@ -55405,6 +55532,26 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/native-contained-fs.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "src/graph/runtime/progress.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
@@ -55418,6 +55565,11 @@
         "from": "src/graph/runtime/remote-approval.ts",
         "to": "external:path",
         "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/remote-approval.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/graph/runtime/remote-approval.ts",
@@ -55438,11 +55590,6 @@
         "from": "src/graph/runtime/remote-approval.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/remote-approval.ts",
-        "to": "src/lib/atomic-write.ts",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/run-dir.ts",
@@ -55526,6 +55673,11 @@
       },
       {
         "from": "src/graph/runtime/safe-fs.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -55537,6 +55689,16 @@
       {
         "from": "src/graph/runtime/safe-fs.ts",
         "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/contained-fd.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/graph/runtime/safe-fs.ts",
+        "to": "src/graph/runtime/run-dir.ts",
         "kind": "imports"
       },
       {
@@ -78596,12 +78758,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6969,
-      "edgeCount": 7470,
-      "importEdgeCount": 6153,
+      "nodeCount": 6976,
+      "edgeCount": 7495,
+      "importEdgeCount": 6175,
       "registerEdgeCount": 62
     }
   },
-  "inventorySha256": "c6ce36cc1dfb2b18c7f15643dbca83e26493128825334ceaac60eb56b1213c43",
-  "manifestSha256": "104caea5f1eb0c00e02db25fc49a8c5f06fc8ea640fd90c2f21007dbc5a87202"
+  "inventorySha256": "b91d5da737a59edbb4f5c44ba08b482c12bb6d9f87afe4e4f77ac085189a0694",
+  "manifestSha256": "1e522e81f6094d8863b39ef4bf6abd4b332debb749ccdc6ffd0f7b290810d716"
 }

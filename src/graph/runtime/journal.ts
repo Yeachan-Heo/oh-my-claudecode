@@ -22,10 +22,9 @@ import { canonicalJson } from "../descriptor.js";
 import { resolveRunDirHandle } from "./run-dir.js";
 import type { RunDirHandle } from "./run-dir.js";
 import {
-  openNoFollow,
   assertPrivateRegularFile,
   readContainedFileNoFollow,
-  withContainedPath,
+  withContainedOperations,
 } from "./safe-fs.js";
 import { JournalCorruptionError } from "./types.js";
 import type {
@@ -137,10 +136,11 @@ export class FileJournal implements Journal {
     };
     const line = `${canonicalJson(committed)}\n`;
     // O_APPEND single writeSync + fsync: one complete line per append by contract.
-    withContainedPath(runDir, "journal.jsonl", (filePath) => {
+    withContainedOperations(runDir, (operations) => {
+      const filePath = "journal.jsonl";
       let fd: number;
       try {
-        fd = openNoFollow(
+        fd = operations.open(
           filePath,
           fsConstants.O_APPEND |
             fsConstants.O_CREAT |
