@@ -589,11 +589,15 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
       expect(command).toContain('claude CLI not found in PATH.');
       expect(command).toContain('exec');
       expect(command).toContain('claude');
-      expect(command).not.toContain('node');
       expect(vi.mocked(buildTmuxShellCommand)).toHaveBeenCalledWith('claude', args);
       const execIndex = command.lastIndexOf('exec ');
       expect(execIndex).toBeGreaterThanOrEqual(0);
-      expect(command.slice(execIndex)).toContain('claude');
+      // The pane's final process image must be the agent binary, never a node
+      // wrapper. Only the exec target is asserted: forwarded values such as PATH
+      // legitimately mention node on toolchain-provisioned machines.
+      const execTarget = command.slice(execIndex);
+      expect(execTarget).toContain('claude');
+      expect(execTarget).not.toMatch(/\bnode\b/);
     } finally {
       if (savedConfigDir === undefined) {
         delete process.env.CLAUDE_CONFIG_DIR;
