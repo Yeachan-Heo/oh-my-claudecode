@@ -18,7 +18,7 @@ Optional argument narrows the survey to a directory or area; with no argument, s
 ## The survey
 
 1. Read the repo's architecture principles (CLAUDE.md, ADRs) and the seeded seam vocabulary in `docs/standards/architecture.md` — the definitions of seam and deep module.
-2. Walk the module graph of the target area.
+2. Walk the module graph of the target area — and when no direction was given, weight the walk toward the yard's busy water: read a good stretch of the commit history first and let the areas that keep coming up pull the survey, because deepening pays off where future edits will land. A scattered history with no hot spot widens the net.
 3. Look for three finding classes:
    - **Shallow modules** — wide interface, thin behavior; callers know more than the module hides.
    - **Hypothetical seams** — a boundary crossed by exactly one adapter with no second caller; checkable by counting callers.
