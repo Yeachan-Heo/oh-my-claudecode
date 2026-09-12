@@ -38,6 +38,8 @@ Every candidate states the yard's shared findings vocabulary — **severity** (h
 
 **Logbook conflicts.** A candidate that contradicts an existing ADR is nominated only when the friction is real: the card names the ADR and why the water has changed. Theoretical conflicts stay off the report — the logbook's rejections are not re-litigated by default.
 
+The report may be rendered visually with the repo's diagram skill when the yard has one; the prose report stays the source of truth either way.
+
 ## Handoff
 
 The report is decision input, not work. Candidates feed the mission brief (launch Phase 1) or grilling material for the next effort. Survey proposes; the captain disposes.
