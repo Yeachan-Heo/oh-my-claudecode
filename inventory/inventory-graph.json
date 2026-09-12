@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5093425ef98254dfe3413946f849309a2bbabf85",
-    "sourceSha256": "1bae3ebaf902f20e897c295fc0bc6907b4c77206821cd96f1de710d14dfacc0e",
+    "head": "3732d4ddc61282ba2a0d331b671f32e6ebff8fed",
+    "sourceSha256": "3974923e35d0a418f1642be40c5e81dc13676b632e5d02eefb96a2c9cc20f8ed",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5093425ef98254dfe3413946f849309a2bbabf85",
-  "sourceSha256": "1bae3ebaf902f20e897c295fc0bc6907b4c77206821cd96f1de710d14dfacc0e",
+  "head": "3732d4ddc61282ba2a0d331b671f32e6ebff8fed",
+  "sourceSha256": "3974923e35d0a418f1642be40c5e81dc13676b632e5d02eefb96a2c9cc20f8ed",
   "counts": {
     "public": {
       "skills": 39,
@@ -23,25 +23,25 @@
       "total": 88
     },
     "internal": {
-      "hookFiles": 295,
+      "hookFiles": 296,
       "featureFiles": 80,
       "toolFiles": 61,
       "libFiles": 42,
-      "templateHooks": 21,
-      "srcFiles": 1347,
-      "total": 1368
+      "templateHooks": 22,
+      "srcFiles": 1348,
+      "total": 1370
     },
     "generated": {
-      "distFiles": 4986,
+      "distFiles": 5032,
       "bridgeFiles": 9,
-      "total": 4995
+      "total": 5041
     },
     "prompt": {
       "promptLikeFiles": 62
     },
     "skills": 39,
     "commands": 21,
-    "hookFiles": 295,
+    "hookFiles": 296,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 62
@@ -379,6 +379,7 @@
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
+      "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/index.ts",
       "src/hooks/session-end/worker.ts",
       "src/hooks/setup/README.md",
@@ -642,6 +643,7 @@
       "templates/hooks/lib/precompact-publisher.mjs",
       "templates/hooks/lib/precompact-restore.mjs",
       "templates/hooks/lib/skill-entitlements.mjs",
+      "templates/hooks/lib/state-lock.mjs",
       "templates/hooks/lib/state-root.mjs",
       "templates/hooks/lib/stdin.mjs",
       "templates/hooks/lib/workflow-profile-runtime.mjs",
@@ -768,6 +770,7 @@
       "scripts/lib/precompact-publisher.mjs",
       "scripts/lib/precompact-restore.mjs",
       "scripts/lib/skill-entitlements.mjs",
+      "scripts/lib/state-lock.mjs",
       "scripts/lib/state-root.cjs",
       "scripts/lib/state-root.mjs",
       "scripts/lib/stdin.mjs",
@@ -2162,6 +2165,8 @@
       "dist/cli/autoresearch.d.ts.map",
       "dist/cli/autoresearch.js",
       "dist/cli/autoresearch.js.map",
+      "dist/cli/checkpoint.d.ts",
+      "dist/cli/checkpoint.d.ts.map",
       "dist/cli/checkpoint.js",
       "dist/cli/claude-md-coordinator.d.ts",
       "dist/cli/claude-md-coordinator.d.ts.map",
@@ -2253,6 +2258,10 @@
       "dist/cli/launch.d.ts.map",
       "dist/cli/launch.js",
       "dist/cli/launch.js.map",
+      "dist/cli/lookout.d.ts",
+      "dist/cli/lookout.d.ts.map",
+      "dist/cli/lookout.js",
+      "dist/cli/lookout.js.map",
       "dist/cli/team.d.ts",
       "dist/cli/team.d.ts.map",
       "dist/cli/team.js",
@@ -2386,6 +2395,8 @@
       "dist/features/builtin-skills/types.d.ts.map",
       "dist/features/builtin-skills/types.js",
       "dist/features/builtin-skills/types.js.map",
+      "dist/features/checkpoint/index.d.ts",
+      "dist/features/checkpoint/index.d.ts.map",
       "dist/features/checkpoint/index.js",
       "dist/features/context-injector/collector.d.ts",
       "dist/features/context-injector/collector.d.ts.map",
@@ -2447,6 +2458,34 @@
       "dist/features/index.d.ts.map",
       "dist/features/index.js",
       "dist/features/index.js.map",
+      "dist/features/lookout/command-parser.d.ts",
+      "dist/features/lookout/command-parser.d.ts.map",
+      "dist/features/lookout/command-parser.js",
+      "dist/features/lookout/command-parser.js.map",
+      "dist/features/lookout/index.d.ts",
+      "dist/features/lookout/index.d.ts.map",
+      "dist/features/lookout/index.js",
+      "dist/features/lookout/index.js.map",
+      "dist/features/lookout/substitution-parser.d.ts",
+      "dist/features/lookout/substitution-parser.d.ts.map",
+      "dist/features/lookout/substitution-parser.js",
+      "dist/features/lookout/substitution-parser.js.map",
+      "dist/features/lookout/test-artifact-parser.d.ts",
+      "dist/features/lookout/test-artifact-parser.d.ts.map",
+      "dist/features/lookout/test-artifact-parser.js",
+      "dist/features/lookout/test-artifact-parser.js.map",
+      "dist/features/lookout/types.d.ts",
+      "dist/features/lookout/types.d.ts.map",
+      "dist/features/lookout/types.js",
+      "dist/features/lookout/types.js.map",
+      "dist/features/lookout/workspace.d.ts",
+      "dist/features/lookout/workspace.d.ts.map",
+      "dist/features/lookout/workspace.js",
+      "dist/features/lookout/workspace.js.map",
+      "dist/features/lookout/wrapper-parser.d.ts",
+      "dist/features/lookout/wrapper-parser.d.ts.map",
+      "dist/features/lookout/wrapper-parser.js",
+      "dist/features/lookout/wrapper-parser.js.map",
       "dist/features/magic-keywords.d.ts",
       "dist/features/magic-keywords.d.ts.map",
       "dist/features/magic-keywords.js",
@@ -2605,6 +2644,10 @@
       "dist/graph/index.js.map",
       "dist/graph/runtime/approval.d.ts",
       "dist/graph/runtime/approval.js",
+      "dist/graph/runtime/contained-fd.d.ts",
+      "dist/graph/runtime/contained-fd.d.ts.map",
+      "dist/graph/runtime/contained-fd.js",
+      "dist/graph/runtime/contained-fd.js.map",
       "dist/graph/runtime/executors/agent.d.ts",
       "dist/graph/runtime/executors/agent.js",
       "dist/graph/runtime/executors/authority.d.ts",
@@ -2617,6 +2660,8 @@
       "dist/graph/runtime/journal.js",
       "dist/graph/runtime/progress.d.ts",
       "dist/graph/runtime/progress.js",
+      "dist/graph/runtime/remote-approval.d.ts",
+      "dist/graph/runtime/remote-approval.d.ts.map",
       "dist/graph/runtime/remote-approval.js",
       "dist/graph/runtime/run-dir.d.ts",
       "dist/graph/runtime/run-dir.js",
@@ -3568,6 +3613,10 @@
       "dist/hooks/session-end/cleanup-manifest.d.ts.map",
       "dist/hooks/session-end/cleanup-manifest.js",
       "dist/hooks/session-end/cleanup-manifest.js.map",
+      "dist/hooks/session-end/foreground-bootstrap.d.ts",
+      "dist/hooks/session-end/foreground-bootstrap.d.ts.map",
+      "dist/hooks/session-end/foreground-bootstrap.js",
+      "dist/hooks/session-end/foreground-bootstrap.js.map",
       "dist/hooks/session-end/index.d.ts",
       "dist/hooks/session-end/index.d.ts.map",
       "dist/hooks/session-end/index.js",
@@ -6060,6 +6109,7 @@
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
+      "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/index.ts",
       "src/hooks/session-end/worker.ts",
       "src/hooks/setup/README.md",
@@ -13906,6 +13956,16 @@
         "path": "dist/cli/autoresearch.js.map"
       },
       {
+        "id": "dist/cli/checkpoint.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/checkpoint.d.ts"
+      },
+      {
+        "id": "dist/cli/checkpoint.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/checkpoint.d.ts.map"
+      },
+      {
         "id": "dist/cli/checkpoint.js",
         "kind": "generated-dist",
         "path": "dist/cli/checkpoint.js"
@@ -14359,6 +14419,26 @@
         "id": "dist/cli/launch.js.map",
         "kind": "generated-dist",
         "path": "dist/cli/launch.js.map"
+      },
+      {
+        "id": "dist/cli/lookout.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/lookout.d.ts"
+      },
+      {
+        "id": "dist/cli/lookout.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/lookout.d.ts.map"
+      },
+      {
+        "id": "dist/cli/lookout.js",
+        "kind": "generated-dist",
+        "path": "dist/cli/lookout.js"
+      },
+      {
+        "id": "dist/cli/lookout.js.map",
+        "kind": "generated-dist",
+        "path": "dist/cli/lookout.js.map"
       },
       {
         "id": "dist/cli/team.d.ts",
@@ -15026,6 +15106,16 @@
         "path": "dist/features/builtin-skills/types.js.map"
       },
       {
+        "id": "dist/features/checkpoint/index.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/checkpoint/index.d.ts"
+      },
+      {
+        "id": "dist/features/checkpoint/index.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/checkpoint/index.d.ts.map"
+      },
+      {
         "id": "dist/features/checkpoint/index.js",
         "kind": "generated-dist",
         "path": "dist/features/checkpoint/index.js"
@@ -15329,6 +15419,146 @@
         "id": "dist/features/index.js.map",
         "kind": "generated-dist",
         "path": "dist/features/index.js.map"
+      },
+      {
+        "id": "dist/features/lookout/command-parser.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/command-parser.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/command-parser.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/command-parser.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/command-parser.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/command-parser.js"
+      },
+      {
+        "id": "dist/features/lookout/command-parser.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/command-parser.js.map"
+      },
+      {
+        "id": "dist/features/lookout/index.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/index.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/index.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/index.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/index.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/index.js"
+      },
+      {
+        "id": "dist/features/lookout/index.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/index.js.map"
+      },
+      {
+        "id": "dist/features/lookout/substitution-parser.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/substitution-parser.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/substitution-parser.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/substitution-parser.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/substitution-parser.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/substitution-parser.js"
+      },
+      {
+        "id": "dist/features/lookout/substitution-parser.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/substitution-parser.js.map"
+      },
+      {
+        "id": "dist/features/lookout/test-artifact-parser.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/test-artifact-parser.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/test-artifact-parser.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/test-artifact-parser.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/test-artifact-parser.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/test-artifact-parser.js"
+      },
+      {
+        "id": "dist/features/lookout/test-artifact-parser.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/test-artifact-parser.js.map"
+      },
+      {
+        "id": "dist/features/lookout/types.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/types.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/types.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/types.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/types.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/types.js"
+      },
+      {
+        "id": "dist/features/lookout/types.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/types.js.map"
+      },
+      {
+        "id": "dist/features/lookout/workspace.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/workspace.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/workspace.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/workspace.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/workspace.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/workspace.js"
+      },
+      {
+        "id": "dist/features/lookout/workspace.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/workspace.js.map"
+      },
+      {
+        "id": "dist/features/lookout/wrapper-parser.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/wrapper-parser.d.ts"
+      },
+      {
+        "id": "dist/features/lookout/wrapper-parser.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/wrapper-parser.d.ts.map"
+      },
+      {
+        "id": "dist/features/lookout/wrapper-parser.js",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/wrapper-parser.js"
+      },
+      {
+        "id": "dist/features/lookout/wrapper-parser.js.map",
+        "kind": "generated-dist",
+        "path": "dist/features/lookout/wrapper-parser.js.map"
       },
       {
         "id": "dist/features/magic-keywords.d.ts",
@@ -16121,6 +16351,26 @@
         "path": "dist/graph/runtime/approval.js"
       },
       {
+        "id": "dist/graph/runtime/contained-fd.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/contained-fd.d.ts"
+      },
+      {
+        "id": "dist/graph/runtime/contained-fd.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/contained-fd.d.ts.map"
+      },
+      {
+        "id": "dist/graph/runtime/contained-fd.js",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/contained-fd.js"
+      },
+      {
+        "id": "dist/graph/runtime/contained-fd.js.map",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/contained-fd.js.map"
+      },
+      {
         "id": "dist/graph/runtime/executors/agent.d.ts",
         "kind": "generated-dist",
         "path": "dist/graph/runtime/executors/agent.d.ts"
@@ -16179,6 +16429,16 @@
         "id": "dist/graph/runtime/progress.js",
         "kind": "generated-dist",
         "path": "dist/graph/runtime/progress.js"
+      },
+      {
+        "id": "dist/graph/runtime/remote-approval.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/remote-approval.d.ts"
+      },
+      {
+        "id": "dist/graph/runtime/remote-approval.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/remote-approval.d.ts.map"
       },
       {
         "id": "dist/graph/runtime/remote-approval.js",
@@ -20934,6 +21194,26 @@
         "id": "dist/hooks/session-end/cleanup-manifest.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/session-end/cleanup-manifest.js.map"
+      },
+      {
+        "id": "dist/hooks/session-end/foreground-bootstrap.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/session-end/foreground-bootstrap.d.ts"
+      },
+      {
+        "id": "dist/hooks/session-end/foreground-bootstrap.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/session-end/foreground-bootstrap.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/session-end/foreground-bootstrap.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/session-end/foreground-bootstrap.js"
+      },
+      {
+        "id": "dist/hooks/session-end/foreground-bootstrap.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/session-end/foreground-bootstrap.js.map"
       },
       {
         "id": "dist/hooks/session-end/index.d.ts",
@@ -33136,6 +33416,11 @@
         "path": "scripts/lib/skill-entitlements.mjs"
       },
       {
+        "id": "scripts/lib/state-lock.mjs",
+        "kind": "script",
+        "path": "scripts/lib/state-lock.mjs"
+      },
+      {
         "id": "scripts/lib/state-root.cjs",
         "kind": "script",
         "path": "scripts/lib/state-root.cjs"
@@ -37661,6 +37946,11 @@
         "path": "src/hooks/session-end/cleanup-manifest.ts"
       },
       {
+        "id": "src/hooks/session-end/foreground-bootstrap.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/foreground-bootstrap.ts"
+      },
+      {
         "id": "src/hooks/session-end/index.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/index.ts"
@@ -40661,6 +40951,11 @@
         "path": "templates/hooks/lib/skill-entitlements.mjs"
       },
       {
+        "id": "templates/hooks/lib/state-lock.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/lib/state-lock.mjs"
+      },
+      {
         "id": "templates/hooks/lib/state-root.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/state-root.mjs"
@@ -41879,11 +42174,6 @@
       },
       {
         "from": "scripts/lib/atomic-write.mjs",
-        "to": "external:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/atomic-write.mjs",
         "to": "external:crypto",
         "kind": "imports"
       },
@@ -41895,6 +42185,11 @@
       {
         "from": "scripts/lib/atomic-write.mjs",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/atomic-write.mjs",
+        "to": "scripts/lib/state-lock.mjs",
         "kind": "imports"
       },
       {
@@ -42020,6 +42315,36 @@
       {
         "from": "scripts/lib/precompact-restore.mjs",
         "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:better-sqlite3",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:module",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/state-lock.mjs",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -42729,7 +43054,7 @@
       },
       {
         "from": "scripts/session-end.mjs",
-        "to": "dist/hooks/session-end/index.js",
+        "to": "dist/hooks/session-end/foreground-bootstrap.js",
         "kind": "imports"
       },
       {
@@ -46179,7 +46504,17 @@
       },
       {
         "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/keyword-detector-script.test.ts",
+        "to": "src/installer/index.ts",
         "kind": "imports"
       },
       {
@@ -48009,6 +48344,11 @@
       },
       {
         "from": "src/__tests__/release-guidance.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/release-guidance.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -48355,6 +48695,11 @@
       {
         "from": "src/__tests__/session-end-process-exit.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-process-exit.test.ts",
+        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -49040,6 +49385,11 @@
       {
         "from": "src/__tests__/skill-injector-script.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/skill-injector-script.test.ts",
+        "to": "src/installer/index.ts",
         "kind": "imports"
       },
       {
@@ -49845,6 +50195,11 @@
       {
         "from": "src/__tests__/workflow-profile-activation-script.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/workflow-profile-activation-script.test.ts",
+        "to": "src/installer/index.ts",
         "kind": "imports"
       },
       {
@@ -58488,6 +58843,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/mode-registry/__tests__/session-isolation.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/mode-registry/index.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -60233,11 +60593,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/ralph/loop.ts",
-        "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/ralph/prd.ts",
         "to": "external:crypto",
         "kind": "imports"
@@ -61259,6 +61614,11 @@
       },
       {
         "from": "src/hooks/session-end/__tests__/session-end-timeout.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/session-end-timeout.test.ts",
         "to": "external:os",
         "kind": "imports"
       },
@@ -61499,6 +61859,21 @@
       },
       {
         "from": "src/hooks/session-end/cleanup-manifest.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/foreground-bootstrap.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/foreground-bootstrap.ts",
+        "to": "src/hooks/session-end/worker.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/foreground-bootstrap.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -61819,6 +62194,11 @@
       },
       {
         "from": "src/hooks/subagent-tracker/__tests__/flow-tracer.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/subagent-tracker/__tests__/flow-tracer.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -61976,6 +62356,11 @@
         "from": "src/hooks/subagent-tracker/__tests__/session-isolation.test.ts",
         "to": "src/hooks/subagent-tracker/index.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/subagent-tracker/__tests__/session-replay.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/subagent-tracker/__tests__/session-replay.test.ts",
@@ -62149,11 +62534,6 @@
       },
       {
         "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "external:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -62165,11 +62545,6 @@
       {
         "from": "src/hooks/team-dispatch-hook.ts",
         "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "external:util",
         "kind": "imports"
       },
       {
@@ -64493,6 +64868,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/installer/__tests__/hook-templates.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/installer/__tests__/hud-cache-wrapper.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -65248,6 +65628,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/atomic-write.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -65260,6 +65645,11 @@
       {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-io.test.ts",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -65284,6 +65674,11 @@
       },
       {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "src/lib/atomic-write.ts",
         "kind": "imports"
       },
@@ -65299,7 +65694,7 @@
       },
       {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
-        "to": "templates/hooks/lib/atomic-write.mjs",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -65385,11 +65780,6 @@
       {
         "from": "src/lib/__tests__/sync-publication-short-write.test.ts",
         "to": "src/lib/mode-state-io.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/sync-publication-short-write.test.ts",
-        "to": "templates/hooks/lib/atomic-write.mjs",
         "kind": "imports"
       },
       {
@@ -65839,7 +66229,7 @@
       },
       {
         "from": "src/lib/mode-state-io.ts",
-        "to": "external:child_process",
+        "to": "external:better-sqlite3",
         "kind": "imports"
       },
       {
@@ -65865,6 +66255,11 @@
       {
         "from": "src/lib/mode-state-io.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/mode-state-io.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -67774,6 +68169,11 @@
       },
       {
         "from": "src/platform/__tests__/process-utils-identity.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/platform/__tests__/process-utils-identity.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -68536,16 +68936,6 @@
         "from": "src/team/__tests__/auto-merge-restart.test.ts",
         "to": "src/team/merge-orchestrator.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/team/__tests__/auto-merge.perf.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/auto-merge.perf.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
       },
       {
         "from": "src/team/__tests__/auto-merge.perf.test.ts",
@@ -70343,6 +70733,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/team/__tests__/runtime-prompt-mode.test.ts",
+        "to": "src/team/state-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/runtime-v2-role-routing.test.ts",
         "to": "external:fs/promises",
         "kind": "imports"
@@ -71361,11 +71756,6 @@
         "from": "src/team/__tests__/teardown-invariant.test.ts",
         "to": "src/team/merge-orchestrator.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/team/__tests__/teardown-invariant.test.ts",
-        "to": "src/team/tmux-session.ts",
-        "kind": "imports"
       },
       {
         "from": "src/team/__tests__/tmux-comm.test.ts",
@@ -75089,6 +75479,11 @@
       },
       {
         "from": "src/tools/__tests__/state-tools.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/state-tools.test.ts",
         "to": "src/tools/state-tools.ts",
         "kind": "imports"
       },
@@ -76834,6 +77229,11 @@
       },
       {
         "from": "src/workflow/__tests__/alias-resolver.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/workflow/__tests__/alias-resolver.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -77034,11 +77434,6 @@
       },
       {
         "from": "templates/hooks/lib/atomic-write.mjs",
-        "to": "external:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/atomic-write.mjs",
         "to": "external:crypto",
         "kind": "imports"
       },
@@ -77061,6 +77456,11 @@
         "from": "templates/hooks/lib/atomic-write.mjs",
         "to": "src/hooks/bridge.ts",
         "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/atomic-write.mjs",
+        "to": "templates/hooks/lib/state-lock.mjs",
+        "kind": "imports"
       },
       {
         "from": "templates/hooks/lib/bounded-git-timeout.mjs",
@@ -77199,6 +77599,16 @@
       },
       {
         "from": "templates/hooks/lib/skill-entitlements.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/state-lock.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/state-lock.mjs",
         "to": "src/hooks/bridge.ts",
         "kind": "projects"
       },
@@ -77763,6 +78173,11 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/workflow-profile-keyword-activation.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/workflow-profile-lock-recovery.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -77795,6 +78210,16 @@
       {
         "from": "tests/integration/workflow-profile-lock-recovery.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/workflow-profile-lock-recovery.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/workflow-profile-lock-recovery.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -77835,6 +78260,16 @@
       {
         "from": "tests/integration/workflow-profile-stop-transition.test.ts",
         "to": "scripts/lib/workflow-stage-prompts.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/workflow-profile-stop-transition.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/workflow-profile-stop-transition.test.ts",
+        "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
       {
@@ -78059,7 +78494,7 @@
       },
       {
         "from": "vitest.config.ts",
-        "to": "external:path",
+        "to": "external:node:url",
         "kind": "imports"
       },
       {
@@ -78069,12 +78504,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6917,
-      "edgeCount": 7427,
-      "importEdgeCount": 6114,
+      "nodeCount": 6966,
+      "edgeCount": 7455,
+      "importEdgeCount": 6140,
       "registerEdgeCount": 60
     }
   },
-  "inventorySha256": "bc33e9b6f8bcdb58666930db3ce4a6786f4e688d35331f3f647be533e6820a84",
-  "manifestSha256": "edd4da749d22f37bca872c1e9a4956f64dd21b58439bc8c83a1db6f8126f18b0"
+  "inventorySha256": "5ad3903bbd001ae2d1ce8d943bbbf338edc7231078189389641f989809a1d297",
+  "manifestSha256": "b78a4f8a9c0bace3038c36f609166bcc92d1a298f9395c7df38566f977ae7802"
 }

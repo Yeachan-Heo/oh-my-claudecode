@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'crypto';
+import { getProcessStartIdentitySync } from '../../platform/process-utils.js';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -66,8 +67,8 @@ vi.mock('../../lib/worktree-paths.js', async () => {
 });
 
 function liveLockOwner() {
-  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-  const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+  const processStart = getProcessStartIdentitySync(process.pid);
+  if (processStart === null) throw new Error('current process identity unavailable');
   return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
 }
 

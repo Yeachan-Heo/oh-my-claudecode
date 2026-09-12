@@ -1511,6 +1511,33 @@ export async function deliverStartupInbox(context, message, options = {}) {
         return { ok: false, reason: 'startup_send_failed' };
     }
 }
+export async function probeStartupPaneActivity(context, options = {}) {
+    if (!await startupContextIsActive(context, options.attemptAlreadyFenced))
+        return 'unknown';
+    const membership = await verifyTeamTargetOwnership({
+        provider: context.ownership.provider,
+        providerTarget: context.ownership.providerTarget,
+        recipient: 'worker',
+        recipientRole: 'worker',
+        paneId: context.ownership.paneId,
+    });
+    if (membership.kind !== 'owned')
+        return 'unknown';
+    const liveness = await getWorkerLiveness(context.ownership.paneId);
+    if (liveness !== 'alive')
+        return liveness;
+    const copyMode = await paneCopyModeObservation(context.ownership.paneId);
+    if (copyMode !== false)
+        return 'unknown';
+    const observation = await capturePaneObservation(context.ownership.paneId, {
+        operation: 'startup-activity-probe',
+    });
+    if (!observation.ok)
+        return 'unknown';
+    if (detectPaneTrustPromptKind(observation.captured, context.provider))
+        return 'idle';
+    return paneHasActiveTask(observation.captured, context.provider) ? 'busy' : 'idle';
+}
 export async function retryStartupInboxSubmit(context, message, options = {}) {
     if (!await startupContextIsActive(context, options.attemptAlreadyFenced))
         return 'unavailable';

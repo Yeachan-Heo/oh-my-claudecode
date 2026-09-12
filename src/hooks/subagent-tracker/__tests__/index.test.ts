@@ -38,6 +38,7 @@ import { readReplayEvents, getReplaySummary } from "../session-replay.js";
 
 describe("subagent-tracker", () => {
   let testDir: string;
+  const previousStateDir = process.env.OMC_STATE_DIR;
   let previousHome: string | undefined;
   let previousUserProfile: string | undefined;
 
@@ -47,6 +48,7 @@ describe("subagent-tracker", () => {
     previousUserProfile = process.env.USERPROFILE;
     process.env.HOME = testDir;
     process.env.USERPROFILE = testDir;
+    delete process.env.OMC_STATE_DIR;
     mkdirSync(join(testDir, ".omc", "state"), { recursive: true });
   });
 
@@ -57,6 +59,8 @@ describe("subagent-tracker", () => {
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousUserProfile;
+    if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = previousStateDir;
   });
 
   describe("recordToolUsage", () => {

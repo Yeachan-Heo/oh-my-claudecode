@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import { getProcessStartIdentitySync } from '../../../platform/process-utils.js';
 import { spawn } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from 'fs';
@@ -48,8 +49,8 @@ describe('Session-Scoped State Isolation', () => {
   });
 
   function liveLockOwner() {
-    const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-    const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+    const processStart = getProcessStartIdentitySync(process.pid);
+    if (processStart === null) throw new Error('current process identity unavailable');
     return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
   }
 

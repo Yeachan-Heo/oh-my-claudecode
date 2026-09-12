@@ -202,6 +202,17 @@ export function mutateSessionEndJob(directory, sessionId, expectedRevision, muta
         return null;
     }
 }
+export function updateSessionEndActionPayload(directory, sessionId, authority, actionNames, payload) {
+    return mutateLatest(directory, sessionId, (job) => {
+        if (job.jobId !== authority.jobId || !job.owner || job.owner.nonce !== authority.ownerNonce)
+            throw new Error('owner-conflict');
+        const claimed = job.actions[authority.actionName];
+        if (claimed.status !== 'claimed' || claimed.attempts !== authority.attempt || claimed.claimantNonce !== authority.ownerNonce || claimed.runner?.runnerNonce !== authority.runnerNonce || claimed.runner.phase !== 'armed')
+            throw new Error('runner-conflict');
+        for (const name of actionNames)
+            job.actions[name].payload = { ...job.actions[name].payload, ...payload };
+    });
+}
 function mutateLatest(directory, sessionId, mutate) { for (let i = 0; i < 8; i++) {
     const current = readSessionEndJob(directory, sessionId);
     if (!current)

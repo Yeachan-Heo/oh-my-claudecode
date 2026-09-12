@@ -68,10 +68,13 @@ import { notify } from '../../../notifications/index.js';
 
 describe('processSessionEnd notification deduplication (issue #1440)', () => {
   let tmpDir: string;
+  let stateRoot: string;
   let transcriptPath: string;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-dedupe-'));
+    stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-state-'));
+    vi.stubEnv('OMC_STATE_DIR', stateRoot);
     transcriptPath = path.join(tmpDir, 'transcript.jsonl');
     fs.writeFileSync(
       transcriptPath,
@@ -88,6 +91,7 @@ describe('processSessionEnd notification deduplication (issue #1440)', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(stateRoot, { recursive: true, force: true });
     vi.unstubAllEnvs();
   });
 

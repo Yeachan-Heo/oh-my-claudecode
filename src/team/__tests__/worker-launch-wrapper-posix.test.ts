@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildWorkerLaunchWrapper, quotePosixShellArgument, quoteWindowsCreateProcessArgument } from '../worker-launch-ack.js';
+import { buildWorkerLaunchWrapper, quotePosixShellArgument } from '../worker-launch-ack.js';
 import type { WorkerLaunchAttempt } from '../worker-launch-ack.js';
 
 function makeAttempt(overrides: Partial<WorkerLaunchAttempt> = {}): WorkerLaunchAttempt {

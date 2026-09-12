@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { collectWorktreeDirtyEvidence, buildDirtyWorktreeNotice, isAbnormalTermination, MAX_EVIDENCE_ENTRIES, } from "../worktree-evidence.js";
@@ -51,7 +51,7 @@ describe("collectWorktreeDirtyEvidence", () => {
         expect(evidence.ignoredCount).toBe(0);
         expect(evidence.entries).toEqual([]);
         expect(evidence.truncated).toBe(false);
-        expect(evidence.worktreeRoot).toBe(repo);
+        expect(evidence.worktreeRoot).toBe(realpathSync(repo));
     });
     it("flags dirty when a tracked file is modified", () => {
         const repo = makeTempDir();
@@ -151,7 +151,7 @@ describe("collectWorktreeDirtyEvidence", () => {
         git(repo, ["worktree", "add", "-b", "linked-branch", worktree]);
         const evidence = collectWorktreeDirtyEvidence(worktree);
         expect(evidence.isLinkedWorktree).toBe(true);
-        expect(evidence.worktreeRoot).toBe(worktree);
+        expect(evidence.worktreeRoot).toBe(realpathSync(worktree));
         expect(evidence.kind).toBe("clean");
         // Dirty the linked worktree.
         writeFileSync(join(worktree, "README.md"), "# modified in worktree\n");
@@ -286,7 +286,7 @@ exit 0
         // Ignored info is unavailable, so it degrades to 0 — never to lost evidence.
         expect(evidence.ignoredCount).toBe(0);
         expect(evidence.error).toContain("ignored_scan_failed");
-        expect(evidence.worktreeRoot).toBe(repo);
+        expect(evidence.worktreeRoot).toBe(realpathSync(repo));
         // The coordinator notice and the replay dirty gate both key off kind.
         expect(buildDirtyWorktreeNotice(evidence, "agent-p1", "executor")).toContain("2 uncommitted file(s)");
     });

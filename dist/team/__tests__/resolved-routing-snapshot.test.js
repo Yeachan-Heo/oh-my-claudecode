@@ -13,7 +13,7 @@ const ENV_KEYS = [
     'ANTHROPIC_DEFAULT_SONNET_MODEL',
     'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ];
-let savedEnv = {};
+const savedEnv = {};
 beforeAll(() => {
     for (const key of ENV_KEYS) {
         savedEnv[key] = process.env[key];

@@ -18,7 +18,7 @@
 import type { TeamConfig, TeamManifestV2, TeamTask, TeamTaskDelegationPlan, WorkerInfo, WorkerStatus, WorkerHeartbeat } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
 import type { CliAgentType } from './model-contract.js';
-import { type StartupInboxResubmitOutcome, type WorkerPaneLiveness } from './tmux-session.js';
+import { type StartupPaneActivity, type StartupInboxResubmitOutcome, type WorkerPaneLiveness } from './tmux-session.js';
 import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
 import { type CliWorkerOutputPayload } from './cli-worker-contract.js';
 import { type RecoveryDurableOutcome } from './recovery-request-store.js';
@@ -120,8 +120,9 @@ export type ShutdownTeamV2Result = {
  *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
  *      fails (role outside canonical vocabulary or snapshot missing).
  *
- * Returns the primary assignment by default; callers swap to the Claude
- * fallback if the primary provider's CLI binary is missing at spawn time.
+ * Returns the authoritative primary assignment for the selected route.
+ * A missing provider binary is a startup error; routing never changes
+ * providers implicitly.
  */
 export declare function resolveTaskAssignment(task: {
     subject: string;
@@ -130,7 +131,7 @@ export declare function resolveTaskAssignment(task: {
 }, resolvedRouting: Record<CanonicalTeamRole, {
     primary: RoleAssignment;
     fallback: RoleAssignment;
-}>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, resolvedBinaryPaths: Partial<Record<CliAgentType, string>>, fallbackAgent: CliAgentType): {
+}>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, fallbackAgent: CliAgentType): {
     agentType: CliAgentType;
     model: string;
     role: CanonicalTeamRole | null;
@@ -187,10 +188,11 @@ export declare function waitForStartupEvidenceBudget(hasEvidence: () => Promise<
  * actively working, so resubmitting would duplicate the inbox and stopping the
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
- * the caller's fail-closed teardown. Panes that are idle, wrong, or dead never
- * earn that recheck and keep the existing fast failure path.
+ * the caller's fail-closed teardown. Interactive providers may also supply a
+ * read-only activity probe when resubmission is disabled. Panes that are idle,
+ * wrong, or dead never earn that recheck and keep the existing fast failure path.
  */
-export declare function settleStartupEvidence(policy: WorkerStartupEvidencePolicy, waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>, resubmit?: () => Promise<StartupInboxResubmitOutcome>): Promise<boolean>;
+export declare function settleStartupEvidence(policy: WorkerStartupEvidencePolicy, waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>, resubmit?: () => Promise<StartupInboxResubmitOutcome>, probeActivity?: () => Promise<StartupPaneActivity>): Promise<boolean>;
 export declare function promptModeRecoveryRequiresProgressEvidence(promptMode: boolean, continuationCount: number): boolean;
 interface RecoveryOwnerFinalizationDeps {
     readRevisionedConfig: (teamName: string, cwd: string) => Promise<{

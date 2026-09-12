@@ -370,13 +370,6 @@ function paneLooksReady(captured: string, provider?: CliAgentType): boolean {
   return lines.some((line) => paneLineLooksLikeIdlePrompt(line, provider));
 }
 
-async function runProcess(cmd: string, args: string[], timeoutMs: number): Promise<{ stdout: string; stderr: string }> {
-  const { execFile } = await import('child_process');
-  const { promisify } = await import('util');
-  const execFileAsync = promisify(execFile);
-  const result = await execFileAsync(cmd, args, { timeout: timeoutMs });
-  return { stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
-}
 
 async function defaultInjector(request: DispatchRequest, config: TeamConfig, _cwd: string): Promise<InjectionResult> {
   const target = defaultInjectTarget(request, config);

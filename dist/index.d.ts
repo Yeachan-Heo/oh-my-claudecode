@@ -24,6 +24,8 @@ export { createMagicKeywordProcessor, detectMagicKeywords } from './features/mag
 export { createBackgroundTaskManager, shouldRunInBackground, getBackgroundTaskGuidance, DEFAULT_MAX_BACKGROUND_TASKS, LONG_RUNNING_PATTERNS, BLOCKING_PATTERNS, type BackgroundTaskManager, type TaskExecutionDecision } from './features/background-tasks.js';
 export { type VersionMetadata, type ReleaseInfo, type UpdateCheckResult, type UpdateResult, REPO_OWNER, REPO_NAME, GITHUB_API_URL, CLAUDE_CONFIG_DIR, VERSION_FILE, getInstalledVersion, saveVersionMetadata, checkForUpdates, performUpdate, formatUpdateNotification, shouldCheckForUpdates, backgroundUpdateCheck, compareVersions } from './features/auto-update.js';
 export * from './shared/index.js';
+export { LookoutError, resolveBriefArg, scanLookout } from './features/lookout/index.js';
+export type { LookoutConfidence, LookoutFinding, LookoutReport, LookoutSeverity, LookoutVerdict, ScanLookoutOptions, } from './features/lookout/index.js';
 export * from './hooks/index.js';
 export { recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome, readRecoverDeadWorkerV2Result, teamPublishTaskRecoveryCheckpoint, } from './team/index.js';
 export type { RecoverDeadWorkerV2Options, RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Success, RecoverDeadWorkerV2Failure, PublishTaskRecoveryCheckpointInput, PublishTaskRecoveryCheckpointResult, } from './team/index.js';

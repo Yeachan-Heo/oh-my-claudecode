@@ -220,6 +220,17 @@ async function fetchCompareCommitAuthors(prevTag: string): Promise<string[]> {
     .filter((author): author is string => Boolean(author));
 }
 
+type ReleaseCommand = (command: string, options: { cwd: string; stdio: 'inherit' }) => unknown;
+
+export function regeneratePackageLock(runCommand: ReleaseCommand = execSync): void {
+  runCommand('npm install --package-lock-only --ignore-scripts', { cwd: ROOT, stdio: 'inherit' });
+}
+
+export function syncMetadata(runCommand: ReleaseCommand = execSync): void {
+  runCommand('npx tsx scripts/sync-metadata.ts', { cwd: ROOT, stdio: 'inherit' });
+}
+
+
 // ── Version file bumping ────────────────────────────────────────────────────
 
 function bumpVersionFiles(newVersion: string, dryRun: boolean): string[] {
@@ -262,14 +273,9 @@ function bumpVersionFiles(newVersion: string, dryRun: boolean): string[] {
       changes.push(`docs/CLAUDE.md: version marker → ${newVersion}`);
     }
   }
-
   if (!dryRun) {
-    try {
-      execSync('npm install --package-lock-only --ignore-scripts 2>/dev/null', { cwd: ROOT });
-      changes.push('package-lock.json: regenerated');
-    } catch {
-      changes.push('package-lock.json: FAILED to regenerate');
-    }
+    regeneratePackageLock();
+    changes.push('package-lock.json: regenerated');
   } else {
     changes.push('package-lock.json: would regenerate');
   }
@@ -425,14 +431,11 @@ ${releaseNextSteps('X.Y.Z')}
 
   console.log(clr('\n🔄 Sync Metadata', c.cyan));
   if (!dryRun) {
-    try {
-      execSync('npx tsx scripts/sync-metadata.ts', { cwd: ROOT, stdio: 'inherit' });
-    } catch {
-      console.log(`  ${clr('⚠', c.yellow)} sync-metadata had warnings (non-fatal)`);
-    }
+    syncMetadata();
   } else {
     console.log(`  ${clr('→', c.yellow)} Would run sync-metadata`);
   }
+
 
   console.log(clr('\n✅ Done!', c.green));
   if (!dryRun) {

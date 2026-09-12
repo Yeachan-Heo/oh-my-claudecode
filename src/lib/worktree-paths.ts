@@ -306,7 +306,7 @@ export function isSensitiveStateLocation(dir: string): boolean {
   } catch {
     return true;
   }
-  const home = (() => { try { return resolve(homedir()); } catch { return null; } })();
+  const home = (() => { try { const path = resolve(homedir()); try { return realpathSync(path); } catch { return path; } } catch { return null; } })();
   let cursor = candidate;
   for (;;) {
     const name = basename(cursor);
@@ -321,7 +321,9 @@ export function isSensitiveStateLocation(dir: string): boolean {
   if (isFilesystemRoot(candidate)) return true;
   return sensitiveAbsoluteRoots().some((root) => {
     const normalizedCandidate = process.platform === 'win32' ? candidate.toLowerCase() : candidate;
-    const normalizedRoot = process.platform === 'win32' ? root.toLowerCase() : root;
+    let canonicalRoot = root;
+    try { canonicalRoot = realpathSync(root); } catch { /* missing roots retain lexical protection */ }
+    const normalizedRoot = process.platform === 'win32' ? canonicalRoot.toLowerCase() : canonicalRoot;
     return normalizedCandidate === normalizedRoot || isWithinPath(normalizedRoot, normalizedCandidate);
   });
 }
@@ -385,6 +387,12 @@ interface WorktreePathRenderScope {
 }
 
 const worktreePathRenderScope = new AsyncLocalStorage<WorktreePathRenderScope>();
+const projectIdentifierOperationScope = new AsyncLocalStorage<Map<string, string>>();
+
+/** Run project-identity lookups in an operation-local memo scope. */
+export function withProjectIdentifierScope<T>(fn: () => T): T {
+  return projectIdentifierOperationScope.run(new Map(), fn);
+}
 
 /**
  * Run path lookups in an isolated render scope.
@@ -1151,6 +1159,12 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   // submodule still resolves the submodule's own identity, and findWorkspaceRoot
   // below sees the unclimbed root so an inner `.omc-workspace` marker is honored.
   const root = worktreeRoot || getGitTopLevel() || process.cwd();
+  const operationScope = projectIdentifierOperationScope.getStore();
+  const operationScopeKey = operationScope ? canonicalizeExistingPath(root) ?? resolve(root) : null;
+  if (operationScope && operationScopeKey) {
+    const cached = operationScope.get(operationScopeKey);
+    if (cached !== undefined) return cached;
+  }
   const scope = worktreePathRenderScope.getStore();
   const scopeKey = scope ? canonicalizeExistingPath(root) ?? resolve(root) : null;
   if (scope && scopeKey) {
@@ -1167,6 +1181,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
       const safeId = cfg.id.trim().replace(/[^a-zA-Z0-9_-]/g, '_');
       const hash = createHash('sha256').update(safeId).digest('hex').slice(0, 16);
       const identifier = `${safeId}-${hash}`;
+      if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier);
       if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier);
       return identifier;
     }
@@ -1175,6 +1190,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
     const hash = createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 16);
     const dirName = basename(workspaceRoot).replace(/[^a-zA-Z0-9_-]/g, '_');
     const identifier = `${dirName}-${hash}`;
+    if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier);
     if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier);
     return identifier;
   }
@@ -1228,6 +1244,7 @@ export function getProjectIdentifier(worktreeRoot?: string): string {
   const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
   const dirName = basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, '_');
   const identifier = `${dirName}-${hash}`;
+  if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier);
   if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier);
   return identifier;
 }

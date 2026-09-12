@@ -111,6 +111,7 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
   it('user overrides take precedence over deprecated mode', () => {
     // ultrapilot sets execution=team, but explicit solo overrides it
     const config = resolvePipelineConfig({ execution: 'solo' }, 'ultrapilot');
+    expect(config.execution).toBe('solo');
   });
 
   it('getDeprecationWarning returns null for non-deprecated modes: autopilot', () => {

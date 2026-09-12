@@ -127,6 +127,7 @@ interface CredentialFileInspection {
   valid: boolean;
   parsed: Record<string, unknown> | null;
   candidate: OAuthCredentialCandidate | null;
+  writePath: string | null;
 }
 
 const OAUTH_CREDENTIAL_FIELDS = [
@@ -173,69 +174,12 @@ function hasLinkableCredentials(inspection: CredentialFileInspection): boolean {
   return typeof source.accessToken === 'string' && source.accessToken.trim().length > 0;
 }
 
-function inspectCredentialFile(path: string): CredentialFileInspection {
-  let stat: ReturnType<typeof lstatSync>;
-  try {
-    stat = lstatSync(path);
-  } catch (error) {
-    const code = error && typeof error === 'object' && 'code' in error
-      ? (error as { code?: unknown }).code
-      : undefined;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-      return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null };
-    }
-    return { exists: false, regularFile: false, readable: false, valid: false, parsed: null, candidate: null };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-  } catch {
-    return {
-      exists: true,
-      regularFile: stat.isFile(),
-      readable: false,
-      valid: false,
-      parsed: null,
-      candidate: null,
-    };
-  }
-
-  if (!isJsonObject(parsed)) {
-    return {
-      exists: true,
-      regularFile: stat.isFile(),
-      readable: true,
-      valid: false,
-      parsed: null,
-      candidate: null,
-    };
-  }
-
-  return {
-    exists: true,
-    regularFile: stat.isFile(),
-    readable: true,
-    valid: true,
-    parsed,
-    candidate: extractOAuthCandidate(parsed),
-  };
-}
-
-function credentialExpiry(parsed: Record<string, unknown>): number | null {
-  const source = isJsonObject(parsed.claudeAiOauth) ? parsed.claudeAiOauth : parsed;
-  const expiresAt = source.expiresAt;
-  return typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null;
-}
-
-function resolveCredentialWritePath(path: string): string {
+function resolveCredentialTarget(path: string): string | null {
   let current = resolve(path);
   const visited = new Set<string>();
 
   while (true) {
-    if (visited.has(current)) {
-      throw new Error('Claude credential symlink chain contains a cycle');
-    }
+    if (visited.has(current)) throw new Error('Claude credential symlink chain contains a cycle');
     visited.add(current);
 
     let stat: ReturnType<typeof lstatSync>;
@@ -245,15 +189,76 @@ function resolveCredentialWritePath(path: string): string {
       const code = error && typeof error === 'object' && 'code' in error
         ? (error as { code?: unknown }).code
         : undefined;
-      if (code === 'ENOENT' || code === 'ENOTDIR') return current;
+      if (code === 'ENOENT' || code === 'ENOTDIR') return null;
       throw error;
     }
-
     if (!stat.isSymbolicLink()) return current;
     const target = readlinkSync(current);
     current = isAbsolute(target) ? resolve(target) : resolve(dirname(current), target);
   }
 }
+
+function inspectCredentialFile(path: string): CredentialFileInspection {
+  try {
+    lstatSync(path);
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    return { exists: false, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+  }
+
+  let resolvedPath: string | null;
+  try {
+    resolvedPath = resolveCredentialTarget(path);
+  } catch {
+    return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+  }
+  if (!resolvedPath) {
+    return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+  }
+
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(resolvedPath);
+  } catch {
+    return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+  }
+  if (!stat.isFile()) {
+    return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(resolvedPath, 'utf-8')) as unknown;
+  } catch {
+    return { exists: true, regularFile: true, readable: false, valid: false, parsed: null, candidate: null, writePath: resolvedPath };
+  }
+
+  if (!isJsonObject(parsed)) {
+    return { exists: true, regularFile: true, readable: true, valid: false, parsed: null, candidate: null, writePath: resolvedPath };
+  }
+
+  return {
+    exists: true,
+    regularFile: true,
+    readable: true,
+    valid: true,
+    parsed,
+    candidate: extractOAuthCandidate(parsed),
+    writePath: resolvedPath,
+  };
+}
+
+function credentialExpiry(parsed: Record<string, unknown>): number | null {
+  const source = isJsonObject(parsed.claudeAiOauth) ? parsed.claudeAiOauth : parsed;
+  const expiresAt = source.expiresAt;
+  return typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null;
+}
+
 
 /** True only when source and runtime can be proven to be the same account. */
 function accountsProvenSame(
@@ -470,7 +475,7 @@ function reconcileRuntimeCredentials(
     Object.assign(mergedBaseCredentials, runtimeCandidate.fields);
   }
 
-  atomicWriteJsonSync(resolveCredentialWritePath(baseCredentialsPath), mergedBaseCredentials);
+  atomicWriteJsonSync(baseInspection.writePath ?? baseCredentialsPath, mergedBaseCredentials);
 }
 
 function swapRuntimeConfigDir(runtimeConfigDir: string, nextConfigDir: string): void {

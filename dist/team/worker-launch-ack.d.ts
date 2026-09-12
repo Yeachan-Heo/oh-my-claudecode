@@ -77,6 +77,8 @@ export interface MaterializedProviderSpawnInvocation {
     cleanup: () => Promise<void>;
     completionPath?: string;
     stdinPayload?: string;
+    /** Extra POSIX descriptor used to hold provider execution until ownership is proven. */
+    providerGateFd?: number;
 }
 export interface MaterializedWorkerLaunchTransport {
     wrapperPath: string;
@@ -153,6 +155,7 @@ export declare function buildProviderSpawnInvocation(providerArgv: readonly stri
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation, options?: {
     superviseWindowsTree?: boolean;
     superviseProcessTree?: boolean;
+    gateProviderExecution?: boolean;
 }): Promise<MaterializedProviderSpawnInvocation>;
 export declare function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLaunchBootstrapResult>;
 export {};

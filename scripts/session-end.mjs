@@ -8,18 +8,14 @@ const fallback = { continue: true, suppressOutput: true };
 
 export async function runSessionEndHook() {
   const frame = await readSessionEndFrame();
-
   if (frame.status !== 'ok') {
     console.log(JSON.stringify(fallback));
     return;
   }
-
   try {
-    const { processSessionEnd } = await import('../dist/hooks/session-end/index.js');
-    const result = await processSessionEnd(frame.value);
-    console.log(JSON.stringify(result));
-  } catch (error) {
-    console.error('[session-end] Error:', error.message);
+    const { publishSessionEndBootstrap } = await import('../dist/hooks/session-end/foreground-bootstrap.js');
+    console.log(JSON.stringify(await publishSessionEndBootstrap(frame.value)));
+  } catch {
     console.log(JSON.stringify(fallback));
   }
 }

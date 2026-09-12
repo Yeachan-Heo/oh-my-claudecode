@@ -17,17 +17,17 @@ oh-my-claudecode enables Claude Code to orchestrate specialized agents through a
        │                                │                              │
        ▼                                ▼                              ▼
 ┌─────────────┐              ┌──────────────────┐           ┌─────────────────┐
-│  "execute   │              │   CLAUDE.md      │           │ SKILL ACTIVATED │
+│  "team      │              │   CLAUDE.md      │           │ SKILL ACTIVATED │
 │   refactor  │─────────────▶│   Auto-Routing   │──────────▶│                 │
-│   the API"  │              │                  │           │ execute +       │
-└─────────────┘              │ Task Type:       │           │ default +       │
+│   the API"  │              │                  │           │ team + execute  │
+└─────────────┘              │ Task Type:       │           │                 │
                              │  - Implementation│           │ git-master      │
                              │  - Multi-file    │           │                 │
                              │  - Parallel OK   │           │ ┌─────────────┐ │
                              │                  │           │ │ Parallel    │ │
                              │ Skills:          │           │ │ agents      │ │
-                             │  - execute ✓     │           │ │ launched    │ │
-                             │  - default ✓     │           │ └─────────────┘ │
+                             │  - team ✓       │           │ │ launched    │ │
+                             │  - execute ✓    │           │ └─────────────┘ │
                              │  - git-master ✓  │           │                 │
                              └──────────────────┘           │ ┌─────────────┐ │
                                                             │ │ Atomic      │ │
@@ -190,13 +190,13 @@ Skills compose in three layers:
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  ENHANCEMENT LAYER (0-N skills)                              │
-│  team (parallel) | git-master (commits) | frontend-ui-ux│
+│  team (parallel) | git-master (commits) | execute          │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  EXECUTION LAYER (primary skill)                             │
-│  execute (build) | team (coordinate) | omc-plan (plan)      │
+│  execute (approved work) | autopilot (end to end) | planner (plan) │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,8 +204,8 @@ Skills compose in three layers:
 
 Example:
 ```
-Task: "execute: refactor API with proper commits"
-Active skills: execute + default + git-master
+Task: "team: refactor API with proper commits"
+Active skills: team + execute + git-master
 ```
 
 ### How to Invoke Skills
@@ -223,7 +223,7 @@ Active skills: execute + default + git-master
 ```bash
 autopilot build me a todo app      # activates autopilot
 ralph: refactor the auth module    # activates ralph
-/oh-my-claudecode:execute implement OAuth  # explicit invocation, not a keyword trigger
+/oh-my-claudecode:team 3:executor "implement OAuth"  # explicit parallel team skill
 ```
 
 ### Core Workflow Skills
@@ -243,7 +243,8 @@ ralph: refactor the authentication module
 ```
 
 #### execute
-Carries an approved task through to working, verified code. Use an explicit invocation; the retired `ultrawork`/`ulw` names are not aliases.
+Carries an approved task through to working, verified code.
+- Manual command: `/oh-my-claudecode:execute`
 ```bash
 /oh-my-claudecode:execute implement user authentication with OAuth
 ```
@@ -283,10 +284,11 @@ ralplan this feature
 | `trace` | Evidence-driven causal tracing | `/oh-my-claudecode:trace` |
 | `release` | Automated release workflow | `/oh-my-claudecode:release` |
 | `deepinit` | Generate hierarchical AGENTS.md | `/oh-my-claudecode:deepinit` |
-| `deep-interview` | Socratic deep interview | `/oh-my-claudecode:deep-interview` |
+| `deep-interview` | Socratic deep interview | `/deep-interview` |
 | `research` | Parallel or focused research | `/oh-my-claudecode:research` |
 | `external-context` | Parallel document-specialist research | `/oh-my-claudecode:external-context` |
 | `ai-slop-cleaner` | Clean AI expression patterns | `/oh-my-claudecode:ai-slop-cleaner` |
+| `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations | `/oh-my-claudecode:configure-notifications` |
 | `remember` | Save durable session memory | `/oh-my-claudecode:remember` |
 
 ### Shipyard document discipline
@@ -322,7 +324,7 @@ cross-ranked; the ticket fails when either axis fails.
 | `deslop`, `anti-slop` | AI expression cleanup |
 | `cancelomc`, `stopomc` | Cancel active execution mode |
 
-Canonical execution, planning, review, verification, and team workflows use explicit `/oh-my-claudecode:<registered-name>` invocations. The `team` detector never auto-matches, and `plan this`/`plan the` do not activate a workflow.
+Parallel work is not a magic keyword; invoke `/oh-my-claudecode:team` explicitly. Use `/oh-my-claudecode:execute` to carry an approved task through verified code.
 
 ### Keyword Detection Sources
 
@@ -330,10 +332,10 @@ Keywords are processed in two places:
 
 | Source | Role | Customizable |
 |--------|------|--------------|
-| `config.jsonc` `magicKeywords` | 3 categories (`search`, `analyze`, `ultrathink`) | Yes |
-| `keyword-detector` hook | Built-in workflow and mode triggers | No |
+| `config.jsonc` `magicKeywords` | Supported search, analyze, and ultrathink categories | Yes |
+| `keyword-detector` hook | Hardcoded triggers such as autopilot and ralph | No |
 
-Workflow keywords such as `autopilot`, `ralph`, `ralplan`, and `deep interview` are handled by the keyword-detector hook and cannot be changed through config. Team orchestration and the `omc-plan`/`omc-review` workflows require explicit slash invocations.
+The `autopilot` and `ralph` triggers are hardcoded in the hook and cannot be changed through config.
 
 ---
 

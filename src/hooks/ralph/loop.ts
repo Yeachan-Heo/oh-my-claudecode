@@ -40,10 +40,6 @@ import {
   initProgress,
   addPattern,
 } from "./progress.js";
-import {
-  resolveSessionStatePath,
-  getOmcRoot,
-} from "../../lib/worktree-paths.js";
 import { readTeamPipelineState } from "../team-pipeline/state.js";
 import type { TeamPipelinePhase } from "../team-pipeline/types.js";
 

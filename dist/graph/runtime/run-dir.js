@@ -10,14 +10,13 @@
  */
 import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, realpathSync, } from "fs";
 import { join, resolve, sep } from "path";
+import { containedFdPath, containedFsPlatformSupported, } from "./contained-fd.js";
 const RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const DIRECTORY_FLAGS = fsConstants.O_RDONLY |
     (fsConstants.O_DIRECTORY ?? 0) |
     (fsConstants.O_NOFOLLOW ?? 0);
 function fdPath(directoryFd, child) {
-    return child === undefined
-        ? `/proc/self/fd/${directoryFd}`
-        : `/proc/self/fd/${directoryFd}/${child}`;
+    return containedFdPath(directoryFd, process.platform, child);
 }
 function isErrno(error, code) {
     return error.code === code;
@@ -118,7 +117,7 @@ export function resolveRunDirHandle(runsRoot, runId) {
         runId === "..") {
         throw new RangeError("invalid run_id");
     }
-    if (process.platform !== "linux") {
+    if (!containedFsPlatformSupported(process.platform)) {
         throw new Error(`contained directory-FD traversal is unavailable on ${process.platform}; refusing pathname fallback`);
     }
     const target = join(runsRoot, runId);

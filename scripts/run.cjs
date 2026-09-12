@@ -408,6 +408,10 @@ function ensureProcessDestGuards() {
 }
 
 function createProtocolSink(hooks = {}) {
+  const destinations = {
+    stdout: hooks.stdout || process.stdout,
+    stderr: hooks.stderr || process.stderr,
+  };
   const discarded = { stdout: false, stderr: false };
   const closedDest = { stdout: false, stderr: false };
   const bindings = { stdout: [], stderr: [] };
@@ -415,8 +419,8 @@ function createProtocolSink(hooks = {}) {
   let installed = false;
   let pendingWrites = 0;
   let uninstallRequested = false;
-  const onStdoutError = (error) => handleDestError('stdout', process.stdout, error);
-  const onStderrError = (error) => handleDestError('stderr', process.stderr, error);
+  const onStdoutError = (error) => handleDestError('stdout', destinations.stdout, error);
+  const onStderrError = (error) => handleDestError('stderr', destinations.stderr, error);
 
   function teardownChannel(name) {
     discarded[name] = true;
@@ -475,15 +479,15 @@ function createProtocolSink(hooks = {}) {
     ensureProcessDestGuards();
     if (installed) return;
     installed = true;
-    process.stdout.on('error', onStdoutError);
-    process.stderr.on('error', onStderrError);
+    destinations.stdout.on('error', onStdoutError);
+    destinations.stderr.on('error', onStderrError);
   }
 
   function flushUninstall() {
     if (!uninstallRequested || pendingWrites > 0 || !installed) return;
     installed = false;
-    process.stdout.removeListener('error', onStdoutError);
-    process.stderr.removeListener('error', onStderrError);
+    destinations.stdout.removeListener('error', onStdoutError);
+    destinations.stderr.removeListener('error', onStderrError);
     // Process-lifetime closed-dest guards remain so a late write callback
     // EPIPE after finish() cannot crash the runner.
   }
@@ -500,13 +504,14 @@ function createProtocolSink(hooks = {}) {
   }
 
   function closeDestinations() {
-    try { process.stdout.destroy(); } catch { /* already closed */ }
-    try { process.stderr.destroy(); } catch { /* already closed */ }
+    for (const dest of [destinations.stdout, destinations.stderr]) {
+      try { dest.destroy(); } catch { /* already closed */ }
+    }
   }
 
   function write(dest, data) {
     install();
-    const name = dest === process.stderr ? 'stderr' : 'stdout';
+    const name = dest === destinations.stderr ? 'stderr' : 'stdout';
     if (discarded[name] || !dest || dest.destroyed || !dest.writable) return Promise.resolve();
     if (dest.writableNeedDrain) {
       discarded[name] = true;
@@ -598,8 +603,8 @@ function createProtocolSink(hooks = {}) {
       writer.on('finish', () => { binding.completed = true; });
       writer.on('error', (error) => handleDestError(name, dest, error));
     };
-    bind(child.stdout, process.stdout, 'stdout');
-    bind(child.stderr, process.stderr, 'stderr');
+    bind(child.stdout, destinations.stdout, 'stdout');
+    bind(child.stderr, destinations.stderr, 'stderr');
   }
 
   function settleOutputs(timeoutMs, idleMs = PROTOCOL_SOURCE_IDLE_MS, reapIdleSources = true) {
@@ -620,7 +625,7 @@ function createProtocolSink(hooks = {}) {
           finish(false);
           return;
         }
-        if (active.every(binding => binding.completed || binding.writer.destroyed)) {
+        if (active.every(binding => (binding.completed && !binding.dest.writableNeedDrain) || binding.writer.destroyed)) {
           finish(true);
           return;
         }
@@ -716,7 +721,7 @@ function superviseGenericChild(targetPath, extraArgs) {
   child.once('error', () => finish(0));
 }
 
-function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
+function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook, options = {}) {
   let child;
   let childIdentity = null;
   let reaped = false;
@@ -728,6 +733,8 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook) {
   let destinationClosed = false;
   let startClosedDestinationCleanup = () => {};
   const sink = createProtocolSink({
+    stdout: options.stdout,
+    stderr: options.stderr,
     beforeSourceDestroy: reapOnce,
     onDestinationClose: () => {
       destinationClosed = true;

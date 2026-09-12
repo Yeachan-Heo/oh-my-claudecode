@@ -1,17 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { provisionStandaloneStateLockBridge } from '../installer/index.js';
 import { clearWorktreeCache, getOmcRoot } from '../lib/worktree-paths.js';
 const ROOT = process.cwd();
 const NODE = process.execPath;
+const TEMPLATE_FIXTURE_ROOT = mkdtempSync(join(tmpdir(), 'omc-workflow-template-'));
+const TEMPLATE_HOOK_ROOT = join(TEMPLATE_FIXTURE_ROOT, 'hooks');
+cpSync(join(ROOT, 'templates', 'hooks'), TEMPLATE_HOOK_ROOT, { recursive: true });
+provisionStandaloneStateLockBridge(ROOT, join(TEMPLATE_HOOK_ROOT, 'lib', 'state-lock.mjs'));
 const HOOKS = [
     join(ROOT, 'scripts', 'keyword-detector.mjs'),
-    join(ROOT, 'templates', 'hooks', 'keyword-detector.mjs'),
+    join(TEMPLATE_HOOK_ROOT, 'keyword-detector.mjs'),
 ];
+afterAll(() => rmSync(TEMPLATE_FIXTURE_ROOT, { recursive: true, force: true }));
 const SESSION_ID = 'workflow-activation-fixture';
 const STATE_DIR_NAME = '.omc-state';
 function fixtureStateDir(cwd) {
@@ -875,7 +881,7 @@ describe('workflow profile activation hook fixtures (#3487)', () => {
         }
     });
     it('preserves foreign shared-home recovery claims and publication temps while the template activates project A', () => {
-        const script = join(ROOT, 'templates', 'hooks', 'keyword-detector.mjs');
+        const script = join(TEMPLATE_HOOK_ROOT, 'keyword-detector.mjs');
         const projectA = createFixture();
         const projectB = createFixture();
         const sharedStateDir = join(projectA.cwd, STATE_DIR_NAME);

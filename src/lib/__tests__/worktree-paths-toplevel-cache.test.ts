@@ -6,6 +6,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  realpathSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -18,8 +19,11 @@ vi.mock("child_process", async () => {
     execFileSync: vi.fn(actual.execFileSync),
   };
 });
-
 import { execFileSync } from "child_process";
+
+function canonical(path: string): string {
+  return realpathSync(path);
+}
 import {
   clearWorktreeCache,
   getGitTopLevel,
@@ -30,6 +34,7 @@ import {
   setGitShowToplevelProbeForTests,
   validateWorkingDirectory,
   withWorktreePathRenderScope,
+  withProjectIdentifierScope,
 } from "../worktree-paths.js";
 
 const mockedExecFileSync = vi.mocked(execFileSync);
@@ -112,9 +117,9 @@ describe("git top-level memoization", () => {
     initRepo(repo);
     mkdirSync(child, { recursive: true });
 
-    expect(getGitTopLevel(repo)).toBe(repo);
-    expect(getGitTopLevel(child)).toBe(repo);
-    expect(getGitTopLevel(child)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
+    expect(getGitTopLevel(child)).toBe(canonical(repo));
+    expect(getGitTopLevel(child)).toBe(canonical(repo));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -129,8 +134,8 @@ describe("git top-level memoization", () => {
       return;
     }
 
-    expect(getGitTopLevel(repo)).toBe(repo);
-    expect(getGitTopLevel(alias)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
+    expect(getGitTopLevel(alias)).toBe(canonical(repo));
     expect(showToplevelCalls()).toBe(1);
   });
 
@@ -147,9 +152,9 @@ describe("git top-level memoization", () => {
       linked,
     ]);
 
-    expect(getGitTopLevel(repo)).toBe(repo);
-    expect(getGitTopLevel(linked)).toBe(linked);
-    expect(getGitTopLevel(linked)).toBe(linked);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
+    expect(getGitTopLevel(linked)).toBe(canonical(linked));
+    expect(getGitTopLevel(linked)).toBe(canonical(linked));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -166,10 +171,10 @@ describe("git top-level memoization", () => {
       linked,
     ]);
 
-    expect(getGitTopLevel(linked)).toBe(linked);
+    expect(getGitTopLevel(linked)).toBe(canonical(linked));
     git(repo, ["config", "core.bare", "false"]);
 
-    expect(getGitTopLevel(linked)).toBe(linked);
+    expect(getGitTopLevel(linked)).toBe(canonical(linked));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -179,9 +184,9 @@ describe("git top-level memoization", () => {
     initRepo(repo);
     mkdirSync(nested, { recursive: true });
 
-    expect(getGitTopLevel(nested)).toBe(repo);
+    expect(getGitTopLevel(nested)).toBe(canonical(repo));
     initRepo(nested);
-    expect(getGitTopLevel(nested)).toBe(nested);
+    expect(getGitTopLevel(nested)).toBe(canonical(nested));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -191,9 +196,9 @@ describe("git top-level memoization", () => {
     initRepo(repo);
     mkdirSync(nested, { recursive: true });
 
-    expect(getWorktreeRoot(nested)).toBe(repo);
+    expect(getWorktreeRoot(nested)).toBe(canonical(repo));
     initRepo(nested);
-    expect(getWorktreeRoot(nested)).toBe(nested);
+    expect(getWorktreeRoot(nested)).toBe(canonical(nested));
   });
 
   it("invalidates the state-anchor cache when Git discovery environment changes", () => {
@@ -201,10 +206,10 @@ describe("git top-level memoization", () => {
     initRepo(repo);
     const previousPath = process.env.PATH;
     try {
-      expect(getWorktreeRoot(repo)).toBe(repo);
+      expect(getWorktreeRoot(repo)).toBe(canonical(repo));
       process.env.PATH = `${previousPath ?? ""}${process.platform === "win32" ? ";" : ":"}${tempDir}`;
 
-      expect(getWorktreeRoot(repo)).toBe(repo);
+      expect(getWorktreeRoot(repo)).toBe(canonical(repo));
       expect(showToplevelCalls()).toBe(2);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
@@ -238,7 +243,7 @@ describe("git top-level memoization", () => {
       "add submodule",
     ]);
 
-    expect(getWorktreeRoot(checkedOutSubmodule)).toBe(superproject);
+    expect(getWorktreeRoot(checkedOutSubmodule)).toBe(canonical(superproject));
     git(superproject, ["update-index", "--force-remove", "nested"]);
     git(superproject, [
       "-c",
@@ -251,7 +256,7 @@ describe("git top-level memoization", () => {
       "remove submodule gitlink",
     ]);
 
-    expect(getWorktreeRoot(checkedOutSubmodule)).toBe(checkedOutSubmodule);
+    expect(getWorktreeRoot(checkedOutSubmodule)).toBe(canonical(checkedOutSubmodule));
   });
 
   it("invalidates a linked-worktree entry when its gitdir disappears", () => {
@@ -267,7 +272,7 @@ describe("git top-level memoization", () => {
       linked,
     ]);
 
-    expect(getGitTopLevel(linked)).toBe(linked);
+    expect(getGitTopLevel(linked)).toBe(canonical(linked));
     const gitDir = readFileSync(join(linked, ".git"), "utf8").match(
       /^\s*gitdir:\s*(.+?)\s*$/im,
     );
@@ -282,7 +287,7 @@ describe("git top-level memoization", () => {
     const repo = join(tempDir, "repo");
     initRepo(repo);
 
-    expect(getGitTopLevel(repo)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
     rmSync(join(repo, ".git", "HEAD"));
 
     expect(getGitTopLevel(repo)).toBeNull();
@@ -294,10 +299,10 @@ describe("git top-level memoization", () => {
     initRepo(repo);
     const previousGitDir = process.env.GIT_DIR;
     try {
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       process.env.GIT_DIR = join(repo, ".git");
 
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       expect(showToplevelCalls()).toBe(2);
     } finally {
       if (previousGitDir === undefined) delete process.env.GIT_DIR;
@@ -315,13 +320,13 @@ describe("git top-level memoization", () => {
       return `${repo}\n`;
     });
     try {
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       delete process.env.PATH;
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       process.env.PATH = "";
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       process.env.PATH = "<unset>";
-      expect(getGitTopLevel(repo)).toBe(repo);
+      expect(getGitTopLevel(repo)).toBe(canonical(repo));
       expect(probeCalls).toBe(4);
     } finally {
       if (previousPath === undefined) delete process.env.PATH;
@@ -333,10 +338,10 @@ describe("git top-level memoization", () => {
     const repo = join(tempDir, "repo");
     initRepo(repo);
 
-    expect(getGitTopLevel(repo)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
     git(repo, ["config", "core.bare", "false"]);
 
-    expect(getGitTopLevel(repo)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -345,7 +350,7 @@ describe("git top-level memoization", () => {
 
     expect(getGitTopLevel(repo)).toBeNull();
     initRepo(repo);
-    expect(getGitTopLevel(repo)).toBe(repo);
+    expect(getGitTopLevel(repo)).toBe(canonical(repo));
     expect(showToplevelCalls()).toBe(2);
   });
 
@@ -458,6 +463,19 @@ describe("git top-level memoization", () => {
     });
 
     expect(secondIdentifier!).not.toBe(firstIdentifier!);
+  });
+
+  it("memoizes project identifiers only within an explicit operation scope", () => {
+    const repo = join(tempDir, "repo");
+    initRepo(repo);
+    const remoteCalls = () => mockedExecFileSync.mock.calls.filter(([command, args]) => command === "git" && Array.isArray(args) && args[0] === "remote" && args[1] === "get-url").length;
+    withProjectIdentifierScope(() => {
+      getProjectIdentifier(repo);
+      getProjectIdentifier(repo);
+    });
+    expect(remoteCalls()).toBe(1);
+    withProjectIdentifierScope(() => getProjectIdentifier(repo));
+    expect(remoteCalls()).toBe(2);
   });
 
   it("keeps concurrent render scopes isolated", async () => {

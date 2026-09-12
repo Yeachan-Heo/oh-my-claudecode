@@ -6,6 +6,10 @@ import { join, resolve } from 'path';
 import { getClaudeConfigDir } from './config-dir.js';
 const REGISTRY_VERSION = 1;
 const RECORD_PATTERN = /^[a-f0-9]{64}\.json$/;
+// Issue #3995: on win32 every identity probe is a PowerShell host
+// (~1.6-2.0s), so same-process startup paths must not need two. Both
+// operations accept a precomputed identity / identity map so callers can reuse
+// the ONE batched host instead of spawning an extra per-process probe.
 /** Resolve paths for identity comparisons; only Windows has case-insensitive paths. */
 export function pathIdentity(path) {
     const normalized = resolve(path);
@@ -83,9 +87,13 @@ function recordName(pluginRoot, pid, identity) {
 function recordPath(pluginRoot, pid, identity, configDir) {
     return join(getCacheOccupancyDir(configDir), recordName(pluginRoot, pid, identity));
 }
-export async function publishCacheOccupancy(pluginRoot, configDir) {
+export async function publishCacheOccupancy(pluginRoot, configDir, precomputedIdentity) {
     const normalizedRoot = pathIdentity(pluginRoot);
-    const identity = processStartIdentity(process.pid);
+    // Precomputed identity handoff (issue #3995): a caller that already resolved
+    // an identity with the same algorithm (the batched readOccupiedPluginRoots()
+    // host on win32) passes it here so publish skips the extra per-process
+    // PowerShell spawn instead of paying for two hosts on one startup path.
+    const identity = precomputedIdentity ?? processStartIdentity(process.pid);
     if (!identity)
         return false;
     const record = {
@@ -117,14 +125,14 @@ function validRecord(value) {
         && typeof record.pluginRoot === 'string' && record.pluginRoot.length > 0
         && typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt));
 }
-export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()) {
+export function readOccupiedPluginRoots(configDir = getClaudeConfigDir(), options = {}) {
     const directory = getCacheOccupancyDir(configDir);
     let names;
     try {
         names = readdirSync(directory).filter(name => RECORD_PATTERN.test(name));
     }
     catch (error) {
-        return { roots: new Set(), unavailable: error.code !== 'ENOENT' };
+        return { roots: new Set(), unavailable: error.code !== 'ENOENT', identities: new Map() };
     }
     const roots = new Set();
     const records = [];
@@ -166,7 +174,11 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()) {
         }
         records.push({ path, record });
     }
-    const currentIdentities = processStartIdentities(records.map(({ record }) => record.pid));
+    // A precomputed map (same-process reuse, issue #3995) verifies records
+    // without a second PowerShell host; the fresh batched probe runs otherwise.
+    const currentIdentities = options.identities instanceof Map
+        ? options.identities
+        : processStartIdentities([...records.map(({ record }) => record.pid), ...(options.includePids ?? [])]);
     for (const { path, record } of records) {
         const currentIdentity = process.platform === 'win32'
             ? currentIdentities.get(record.pid)
@@ -182,6 +194,6 @@ export function readOccupiedPluginRoots(configDir = getClaudeConfigDir()) {
         // conservatively; only a proven-dead PID or proven mismatch self-invalidates.
         roots.add(pathIdentity(record.pluginRoot));
     }
-    return { roots, unavailable: false };
+    return { roots, unavailable: false, identities: currentIdentities };
 }
 //# sourceMappingURL=cache-occupancy.js.map

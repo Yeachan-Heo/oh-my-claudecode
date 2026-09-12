@@ -8,8 +8,8 @@ vi.mock('os', async () => {
   return { ...actual, homedir: vi.fn(() => osPaths.home), tmpdir: vi.fn(() => osPaths.tmp) };
 });
 
-const realTmp = process.env.TMPDIR || process.env.TEMP || process.env.TMP || '/tmp';
-const suiteRoot = mkdtempSync(join(resolve(realTmp), 'omc-3873-owner-'));
+const suiteParent = resolve(process.env.HOME || '/Users');
+const suiteRoot = mkdtempSync(join(suiteParent, 'omc-3873-owner-'));
 osPaths.home = join(suiteRoot, 'home');
 osPaths.tmp = join(suiteRoot, 'tmp');
 mkdirSync(osPaths.home, { recursive: true });

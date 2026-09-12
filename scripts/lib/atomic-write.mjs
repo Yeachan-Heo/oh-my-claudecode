@@ -6,7 +6,22 @@
 import { openSync, writeSync, fsyncSync, closeSync, renameSync, unlinkSync, mkdirSync, existsSync, readFileSync, readdirSync, linkSync, statSync, fstatSync } from 'fs';
 import { dirname, basename, join } from 'path';
 import { createHash, randomUUID } from 'crypto';
-import { spawnSync } from 'child_process';
+import { processStartIdentity, acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported, acquireRecoveryClaim, readRecoveryClaim, releaseRecoveryClaim, sameRecoveryClaim, isEmergencyOwnerLive } from './state-lock.mjs';
+export { acquireStateFileLockSync, releaseStateFileLockSync, withStateFileLockSync, isStateFileLockingSupported };
+function journalIsOwned(path, transactionId, owner) { const current = readEmergencyJournal(path); return current !== null && current.transactionId === transactionId && isSameEmergencyOwner(current.owner, owner); }
+function isSameEmergencyOwner(left, right) { return left && right && left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce; }
+function emergencyJournalPath(path) { return `${path}.emergency-journal.json`; }
+function stateDigest(raw) { return createHash('sha256').update(raw).digest('hex'); }
+function publishEmergencyFileExclusive(path, content) { const processStart = processStartIdentity(process.pid); if (!processStart || processStart === 'absent') return false; const tempPath = `${path}.${process.pid}.${processStart}.${randomUUID()}.tmp`; let fd; try { ensureDirSync(dirname(path)); fd = openSync(tempPath, 'wx', 0o600); writeAllSync(fd, content, 'emergency publication'); fsyncSync(fd); closeSync(fd); fd = undefined; linkSync(tempPath, path); unlinkSync(tempPath); return true; } catch { try { if (fd !== undefined) closeSync(fd); } catch {} try { unlinkSync(tempPath); } catch {} return false; } }
+function writeEmergencyJournal(path, journal, requireOwnership = true) {
+  try {
+    if (requireOwnership && !journalIsOwned(path, journal.transactionId, journal.owner)) return false;
+    atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
+    return !requireOwnership || journalIsOwned(path, journal.transactionId, journal.owner);
+  } catch { return false; }
+}
+
+
 
 /**
  * Ensure directory exists
@@ -105,298 +120,10 @@ export function atomicWriteFileSync(filePath, content) {
   }
 }
 
-const LOCK_SCHEMA_VERSION = 1;
-function flockPath() { return process.env.NODE_ENV === 'test' && process.env.OMC_TEST_FLOCK_AVAILABLE === '0' ? null : existsSync('/usr/bin/flock') ? '/usr/bin/flock' : existsSync('/bin/flock') ? '/bin/flock' : null; }
-const LOCK_REMOVAL_SCRIPT = String.raw`
-const fs = require('fs');
-const [operation, lockPath, expectedRaw] = process.argv.slice(1);
-const keys = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
-function readOwner() {
-  try {
-    const value = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
-    const actual = Object.keys(value).sort();
-    if (actual.length !== keys.length || !actual.every((key, index) => key === keys[index]) || value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.processStart !== 'string' || !/^\d+$/.test(value.processStart) || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
-    return value;
-  } catch (error) { if (error && error.code === 'ENOENT') process.exit(0); return null; }
-}
-const owner = readOwner();
-if (!owner) process.exit(3);
-if (operation === 'release') {
-  let expected;
-  try { expected = JSON.parse(expectedRaw); } catch { process.exit(3); }
-  if (owner.pid !== expected.pid || owner.processStart !== expected.processStart || owner.nonce !== expected.nonce) process.exit(4);
-  try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
-}
-if (process.platform !== 'linux') process.exit(3);
-let currentStart;
-try {
-  const stat = fs.readFileSync('/proc/' + owner.pid + '/stat', 'utf8');
-  const end = stat.lastIndexOf(')');
-  const fields = end >= 0 ? stat.slice(end + 2).trim().split(/\s+/) : [];
-  currentStart = fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-} catch (error) { currentStart = error && error.code === 'ENOENT' ? 'absent' : null; }
-if (currentStart === null) process.exit(3);
-if (currentStart !== 'absent' && currentStart === owner.processStart) process.exit(2);
-try { fs.unlinkSync(lockPath); process.exit(0); } catch { process.exit(3); }
-`;
-
-function processStartIdentity(pid) {
-  if (process.env.NODE_ENV === 'test' && process.env.OMC_TEST_EMERGENCY_PROCESS_START_UNKNOWN_PID === String(pid)) return null;
-  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
-  if (process.platform !== 'linux') return pid === process.pid ? String(Math.max(1, Math.floor(Date.now() - process.uptime() * 1000))) : null;
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const end = stat.lastIndexOf(')');
-    if (end < 0) return null;
-    const fields = stat.slice(end + 2).trim().split(/\s+/);
-    return fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-  } catch (error) { return error?.code === 'ENOENT' ? 'absent' : null; }
-}
-function guardedLockRemoval(lockPath, operation, owner) {
-  const flock = flockPath();
-  if (!flock) return 'unverifiable';
-  const result = spawnSync(flock, ['-x', `${lockPath}.reclaim.guard`, process.execPath, '-e', LOCK_REMOVAL_SCRIPT, operation, lockPath, owner ? JSON.stringify(owner) : ''], { stdio: 'ignore', timeout: 2000 });
-  if (result.status === 0) return 'retry';
-  if (result.status === 2) return 'live';
-  if (result.status === 4) return 'replaced';
-  return 'unverifiable';
-}
-
-export function isStateFileLockingSupported() {
-  return Boolean(flockPath());
-}
-
-function acquireLockAt(lockPath, attempts = 50, requireExclusive = false) {
-  ensureDirSync(dirname(lockPath));
-  if (!flockPath()) return requireExclusive ? null : { unlocked: true };
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === 'absent') {
-    console.error(`[omc-lock] state_mutation_lock_owner_unverifiable: ${lockPath}`);
-    return null;
-  }
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const owner = { version: LOCK_SCHEMA_VERSION, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
-    const tempPath = `${lockPath}.${process.pid}.${owner.nonce}.tmp`;
-    let fd;
-    try {
-      fd = openSync(tempPath, 'wx', 0o600);
-      writeAllSync(fd, JSON.stringify(owner), 'lock owner publication');
-      fsyncSync(fd);
-      linkSync(tempPath, lockPath);
-      unlinkSync(tempPath);
-      return { fd, lockPath, owner };
-    } catch (error) {
-      if (fd !== undefined) { try { closeSync(fd); } catch {} }
-      try { unlinkSync(tempPath); } catch {}
-      if (error?.code !== 'EEXIST') return null;
-      const disposition = guardedLockRemoval(lockPath, 'reclaim');
-      if (disposition === 'unverifiable') {
-        console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
-        return null;
-      }
-      if (disposition === 'live') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
-    }
-  }
-  return null;
-}
-
-export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false) {
-  return acquireLockAt(`${filePath}.mutation.lock`, attempts, requireExclusive);
-}
-
-export function releaseStateFileLockSync(lock) {
-  if (!lock || lock.unlocked) return;
-  try { closeSync(lock.fd); } catch {}
-  guardedLockRemoval(lock.lockPath, 'release', lock.owner);
-}
-
-export function withStateFileLockSync(filePath, callback, requireExclusive = false) {
-  const lock = acquireStateFileLockSync(filePath, 50, requireExclusive);
-  if (!lock) return { acquired: false, value: undefined };
-  try {
-    return { acquired: true, value: callback() };
-  } finally {
-    releaseStateFileLockSync(lock);
-  }
-}
-
-/** Recover an interrupted exact emergency state mutation without touching replacements. */
-function stateDigest(raw) {
-  return createHash('sha256').update(raw).digest('hex');
-}
-
-function emergencyJournalPath(filePath) {
-  return `${filePath}.emergency-journal.json`;
-}
-
-
-function sameEmergencyOwner(left, right) {
-  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
-}
-
-/** Unknown process identity is treated as live; only an exact start identity proves ownership. */
-function isEmergencyOwnerLive(owner) {
-  const currentStart = processStartIdentity(owner.pid);
-  return currentStart !== 'absent' && (currentStart === null || currentStart === owner.processStart);
-}
-
-function journalIsOwned(path, transactionId, owner) {
-  const current = readEmergencyJournal(path);
-  return current !== null && current.transactionId === transactionId && sameEmergencyOwner(current.owner, owner);
-}
-
-function writeEmergencyJournal(path, journal, requireOwnership = true) {
-  try {
-    if (requireOwnership && !journalIsOwned(path, journal.transactionId, journal.owner)) return false;
-    atomicWriteFileSync(path, JSON.stringify(journal, null, 2));
-    return !requireOwnership || journalIsOwned(path, journal.transactionId, journal.owner);
-  } catch { return false; }
-}
-
-function emergencyPublicationTempPath(path) {
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === 'absent') return null;
-  return `${path}.${process.pid}.${processStart}.${randomUUID()}.tmp`;
-}
-
-/** Publishes a complete, durable transaction file without exposing a partial final path. */
-function publishEmergencyFileExclusive(path, content) {
-  const tempPath = emergencyPublicationTempPath(path);
-  let fd;
-  try {
-    if (!tempPath) return false;
-    ensureDirSync(dirname(path));
-    fd = openSync(tempPath, 'wx', 0o600);
-    const bytes = Buffer.from(content);
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = writeSync(fd, bytes, offset, bytes.length - offset);
-      if (written <= 0) throw new Error('emergency publication made no progress');
-      offset += written;
-    }
-    fsyncSync(fd);
-    if (statSync(tempPath).size !== bytes.length) throw new Error('emergency publication truncated');
-    closeSync(fd);
-    fd = undefined;
-    linkSync(tempPath, path);
-    unlinkSync(tempPath);
-    return true;
-  } catch { return false; }
-  finally {
-    if (fd !== undefined) try { closeSync(fd); } catch {}
-    if (tempPath) {
-      const generation = fileIdentity(tempPath);
-      try { if (generation && sameFile(tempPath, generation)) unlinkSync(tempPath); } catch {}
-    }
-  }
-}
-
-const RECOVERY_CLAIM_SCRIPT = String.raw`
-const fs = require('fs');
-const [operation, claimPath, expectedRaw] = process.argv.slice(1);
-const keys = ['createdAt', 'nonce', 'pid', 'processStart', 'version'];
-function readOwner() {
-  try {
-    const value = JSON.parse(fs.readFileSync(claimPath, 'utf8'));
-    const actual = Object.keys(value).sort();
-    if (actual.length !== keys.length || !actual.every((key, index) => key === keys[index]) || value.version !== 1 || !Number.isSafeInteger(value.pid) || value.pid <= 0 || typeof value.processStart !== 'string' || !/^\d+$/.test(value.processStart) || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt)) || typeof value.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(value.nonce)) return null;
-    return value;
-  } catch (error) { return error && error.code === 'ENOENT' ? 'absent' : null; }
-}
-function exact(left, right) { return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce; }
-function stale(owner) {
-  if (process.platform !== 'linux') return null;
-  try {
-    const stat = fs.readFileSync('/proc/' + owner.pid + '/stat', 'utf8');
-    const end = stat.lastIndexOf(')');
-    const fields = end >= 0 ? stat.slice(end + 2).trim().split(/\s+/) : [];
-    const start = fields[19] && /^\d+$/.test(fields[19]) ? fields[19] : null;
-    return start === null ? null : start !== owner.processStart;
-  } catch (error) { return error && error.code === 'ENOENT' ? true : null; }
-}
-let expected;
-try { expected = JSON.parse(expectedRaw); } catch { process.exit(3); }
-if (operation === 'release') {
-  const current = readOwner();
-  if (current === 'absent') process.exit(0);
-  if (!current || !exact(current, expected)) process.exit(4);
-  try { fs.unlinkSync(claimPath); process.exit(0); } catch { process.exit(3); }
-}
-const current = readOwner();
-if (current !== 'absent') {
-  if (!current) process.exit(3);
-  const isStale = stale(current);
-  if (isStale !== true) process.exit(isStale === false ? 2 : 3);
-  try { fs.unlinkSync(claimPath); } catch { process.exit(3); }
-}
-let fd;
-try {
-  fd = fs.openSync(claimPath, 'wx', 0o600);
-  const bytes = Buffer.from(JSON.stringify(expected));
-  let offset = 0;
-  while (offset < bytes.length) {
-    const written = fs.writeSync(fd, bytes, offset, bytes.length - offset);
-    if (written <= 0) throw new Error('recovery claim made no progress');
-    offset += written;
-  }
-  fs.fsyncSync(fd);
-  if (fs.statSync(claimPath).size !== bytes.length) throw new Error('recovery claim truncated');
-  fs.closeSync(fd);
-  process.exit(0);
-} catch { try { if (fd !== undefined) fs.closeSync(fd); } catch {} try { fs.unlinkSync(claimPath); } catch {} process.exit(3); }
-`;
-
-function guardedRecoveryClaim(path, operation, owner) {
-  const flock = flockPath();
-  if (!flock) return 'unverifiable';
-  const result = spawnSync(flock, ['-x', `${path}.recovery.guard`, process.execPath, '-e', RECOVERY_CLAIM_SCRIPT, operation, path, JSON.stringify(owner)], { stdio: 'ignore', timeout: 2000 });
-  if (result.status === 0) return 'claimed';
-  if (result.status === 2) return 'live';
-  if (result.status === 4) return 'replaced';
-  return 'unverifiable';
-}
-
-function acquireRecoveryClaim(path) {
-  const processStart = processStartIdentity(process.pid);
-  if (!processStart || processStart === 'absent') return null;
-  const owner = { version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() };
-  if (!flockPath()) return publishEmergencyFileExclusive(path, JSON.stringify(owner)) ? owner : null;
-  return guardedRecoveryClaim(path, 'acquire', owner) === 'claimed' ? owner : null;
-}
-
-function readRecoveryClaim(path) {
-  try {
-    const owner = JSON.parse(readFileSync(path, 'utf8'));
-    return owner.version === 1 && Number.isSafeInteger(owner.pid) && owner.pid > 0 && typeof owner.processStart === 'string' && typeof owner.createdAt === 'string' && typeof owner.nonce === 'string' ? owner : null;
-  } catch { return null; }
-}
-
-function sameRecoveryClaim(left, right) {
-  return left.pid === right.pid && left.processStart === right.processStart && left.nonce === right.nonce;
-}
-
-function releaseRecoveryClaim(path, owner) {
-  if (!flockPath()) {
-    try {
-      const current = readRecoveryClaim(path);
-      if (current && sameRecoveryClaim(current, owner)) unlinkSync(path);
-    } catch { /* best-effort exact-owner release */ }
-    return;
-  }
-  guardedRecoveryClaim(path, 'release', owner);
-}
-
 function readEmergencyJournal(path) {
   try {
     const journal = JSON.parse(readFileSync(path, 'utf8'));
-    if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) ||
-      !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== 'string' ||
-      typeof journal.owner.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) ||
-      (journal.originalDigest !== undefined && (typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest))) ||
-      (journal.intendedDigest !== undefined && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) ||
-      (journal.intent !== undefined && journal.intent !== 'clear' && journal.intent !== 'publish') ||
-      typeof journal.quarantinePath !== 'string' ||
-      (journal.phase !== 'preparing' && journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
+    if (journal.version !== 1 || typeof journal.transactionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.transactionId) || !journal.owner || !Number.isInteger(journal.owner.pid) || journal.owner.pid <= 0 || typeof journal.owner.processStart !== 'string' || typeof journal.owner.nonce !== 'string' || !/^[0-9a-f-]{36}$/i.test(journal.owner.nonce) || (journal.originalDigest !== undefined && (typeof journal.originalDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.originalDigest))) || (journal.intendedDigest !== undefined && (typeof journal.intendedDigest !== 'string' || !/^[0-9a-f]{64}$/i.test(journal.intendedDigest))) || (journal.intent !== undefined && journal.intent !== 'clear' && journal.intent !== 'publish') || typeof journal.quarantinePath !== 'string' || (journal.phase !== 'preparing' && journal.phase !== 'prepared' && journal.phase !== 'quarantined' && journal.phase !== 'published')) return null;
     const complete = typeof journal.originalDigest === 'string' && (journal.intent === 'clear' || (journal.intent === 'publish' && typeof journal.intendedDigest === 'string'));
     return journal.phase === 'preparing' || complete ? journal : null;
   } catch { return null; }

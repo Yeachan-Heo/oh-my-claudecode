@@ -310,7 +310,7 @@ export function getProcessStartIdentitySync(pid) {
     }
     if (process.platform === 'darwin') {
         try {
-            const result = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000, windowsHide: true });
+            const result = spawnSync('ps', ['-p', String(pid), '-o', 'lstart='], { encoding: 'utf8', timeout: 2000, windowsHide: true, env: { ...process.env, LC_ALL: 'C' } });
             if (result.status !== 0 || !result.stdout)
                 return null;
             const time = new Date(result.stdout.trim()).getTime();

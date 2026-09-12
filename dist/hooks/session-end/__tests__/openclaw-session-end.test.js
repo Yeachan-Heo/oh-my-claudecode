@@ -49,6 +49,7 @@ describe("session-end OpenClaw behavior (issue #1456)", () => {
     let transcriptPath;
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "omc-session-end-claw-"));
+        vi.stubEnv('OMC_STATE_DIR', path.join(tmpDir, 'state-root'));
         transcriptPath = path.join(tmpDir, "transcript.jsonl");
         // Write a minimal transcript so processSessionEnd doesn't fail
         fs.writeFileSync(transcriptPath, JSON.stringify({

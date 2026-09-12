@@ -341,21 +341,21 @@ process.stdout.write(JSON.stringify({
   });
 
   it('accepts a linked worktree of the same repository (preserves #2880)', () => {
-    expect(validateWorkingDirectoryOrLinkedWorktree(linkedWorktree)).toBe(linkedWorktree);
+    expect(validateWorkingDirectoryOrLinkedWorktree(linkedWorktree)).toBe(canonical(linkedWorktree));
     expect(resolveWorkingDirectoryOrLinkedWorktree(linkedWorktree)).toEqual({
       status: 'ok',
-      root: linkedWorktree,
+      root: canonical(linkedWorktree),
     });
   });
 
   it('accepts the same root and a subdirectory of the trusted repo', () => {
-    expect(validateWorkingDirectoryOrLinkedWorktree(sessionRepo)).toBe(sessionRepo);
-    expect(validateWorkingDirectoryOrLinkedWorktree()).toBe(sessionRepo);
+    expect(validateWorkingDirectoryOrLinkedWorktree(sessionRepo)).toBe(canonicalSession);
+    expect(validateWorkingDirectoryOrLinkedWorktree()).toBe(canonicalSession);
 
     const sub = join(sessionRepo, 'docs');
     mkdirSync(sub, { recursive: true });
     // Non-repo directory inside the trusted root normalizes to the trusted root.
-    expect(validateWorkingDirectoryOrLinkedWorktree(sub)).toBe(sessionRepo);
+    expect(validateWorkingDirectoryOrLinkedWorktree(sub)).toBe(canonicalSession);
   });
 
   it('still throws for a non-git path outside the trusted root without leaking the full trusted root', () => {

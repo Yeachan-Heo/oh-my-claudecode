@@ -6,7 +6,7 @@
  * share state.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, realpathSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -87,7 +87,7 @@ describe('self-improve session isolation (Wave B2)', () => {
         const slug = 'code-quality';
         const sid = 'abc123';
         const paths = readJson('node', [RESOLVER, '--project-root', root, '--slug', slug, '--session-id', sid]);
-        const expectedRoot = join(root, '.omc', 'self-improve', 'topics', slug, 'sessions', sid);
+        const expectedRoot = join(realpathSync(root), '.omc', 'self-improve', 'topics', slug, 'sessions', sid);
         expect(paths.root).toBe(expectedRoot);
     });
     it('without session-id, two runs with same slug share the same topic root', () => {

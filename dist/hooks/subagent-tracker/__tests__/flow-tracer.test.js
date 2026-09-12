@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'child_process';
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -6,13 +7,20 @@ import { readReplayEvents, resetSessionStartTimes } from '../session-replay.js';
 import { recordHookFire, recordHookResult, recordKeywordDetected, recordSkillActivated, recordSkillInvoked, recordModeChange, } from '../flow-tracer.js';
 describe('flow-tracer', () => {
     let testDir;
+    const previousStateDir = process.env.OMC_STATE_DIR;
     beforeEach(() => {
         testDir = join(tmpdir(), `flow-tracer-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         mkdirSync(join(testDir, '.omc', 'state'), { recursive: true });
+        execFileSync('git', ['init', '--quiet'], { cwd: testDir, stdio: 'ignore' });
+        delete process.env.OMC_STATE_DIR;
         resetSessionStartTimes();
     });
     afterEach(() => {
         rmSync(testDir, { recursive: true, force: true });
+        if (previousStateDir === undefined)
+            delete process.env.OMC_STATE_DIR;
+        else
+            process.env.OMC_STATE_DIR = previousStateDir;
     });
     describe('recordHookFire', () => {
         it('should record hook_fire event with hook name and event', () => {

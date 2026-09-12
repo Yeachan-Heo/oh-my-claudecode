@@ -140,7 +140,11 @@ function resolveSuperprojectRoot(cwd) {
         encoding: "utf-8",
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
-        timeout: 5e3
+        timeout: 5e3,
+        // Force English error text so isDefinitiveNonGitError's stderr match is
+        // locale-independent (localized git output otherwise fails to match
+        // and mis-classifies a plain "not a repository" as a generic failure).
+        env: { ...process.env, LC_ALL: "C" }
       }).trim();
     } catch (error) {
       completed = depth === 0 && isDefinitiveNonGitError(error);
@@ -208,7 +212,12 @@ function isSensitiveStateLocation(dir) {
   }
   const home = (() => {
     try {
-      return resolve(homedir2());
+      const path4 = resolve(homedir2());
+      try {
+        return realpathSync(path4);
+      } catch {
+        return path4;
+      }
     } catch {
       return null;
     }
@@ -227,7 +236,12 @@ function isSensitiveStateLocation(dir) {
   if (isFilesystemRoot(candidate)) return true;
   return sensitiveAbsoluteRoots().some((root) => {
     const normalizedCandidate = process.platform === "win32" ? candidate.toLowerCase() : candidate;
-    const normalizedRoot = process.platform === "win32" ? root.toLowerCase() : root;
+    let canonicalRoot = root;
+    try {
+      canonicalRoot = realpathSync(root);
+    } catch {
+    }
+    const normalizedRoot = process.platform === "win32" ? canonicalRoot.toLowerCase() : canonicalRoot;
     return normalizedCandidate === normalizedRoot || isWithinPath(normalizedRoot, normalizedCandidate);
   });
 }
@@ -308,7 +322,7 @@ function isNotAGitRepositoryError(error) {
     return false;
   }
   const stderr = gitErrorStderr(error);
-  return err.status === 128 && /not a git repository/i.test(stderr);
+  return err.status === 128 && /(?:not a git repository|must be run in a work tree)/i.test(stderr);
 }
 function formatGitProbeDetail(error) {
   if (!error || typeof error !== "object") {
@@ -435,7 +449,12 @@ function runGitShowToplevel(cwd) {
     encoding: "utf-8",
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
-    timeout: 5e3
+    timeout: 5e3,
+    // Force English error text so isNotAGitRepositoryError's stderr match is
+    // locale-independent (localized git output otherwise fails to match and
+    // mis-classifies a plain "not a repository" as probe_failed, which then
+    // fails closed and breaks callers such as the HUD statusline).
+    env: { ...process.env, LC_ALL: "C" }
   });
 }
 function probeGitTopLevel(cwd) {
@@ -693,6 +712,12 @@ function discoverCentralizedDirFromSettings() {
 }
 function getProjectIdentifier(worktreeRoot) {
   const root = worktreeRoot || getGitTopLevel() || process.cwd();
+  const operationScope = projectIdentifierOperationScope.getStore();
+  const operationScopeKey = operationScope ? canonicalizeExistingPath(root) ?? resolve(root) : null;
+  if (operationScope && operationScopeKey) {
+    const cached = operationScope.get(operationScopeKey);
+    if (cached !== void 0) return cached;
+  }
   const scope = worktreePathRenderScope.getStore();
   const scopeKey = scope ? canonicalizeExistingPath(root) ?? resolve(root) : null;
   if (scope && scopeKey) {
@@ -706,12 +731,14 @@ function getProjectIdentifier(worktreeRoot) {
       const safeId = cfg.id.trim().replace(/[^a-zA-Z0-9_-]/g, "_");
       const hash3 = createHash("sha256").update(safeId).digest("hex").slice(0, 16);
       const identifier3 = `${safeId}-${hash3}`;
+      if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier3);
       if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier3);
       return identifier3;
     }
     const hash2 = createHash("sha256").update(workspaceRoot).digest("hex").slice(0, 16);
     const dirName2 = basename(workspaceRoot).replace(/[^a-zA-Z0-9_-]/g, "_");
     const identifier2 = `${dirName2}-${hash2}`;
+    if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier2);
     if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier2);
     return identifier2;
   }
@@ -749,6 +776,7 @@ function getProjectIdentifier(worktreeRoot) {
   const hash = createHash("sha256").update(source).digest("hex").slice(0, 16);
   const dirName = basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, "_");
   const identifier = `${dirName}-${hash}`;
+  if (operationScope && operationScopeKey) operationScope.set(operationScopeKey, identifier);
   if (scope && scopeKey) scope.projectIdentifiers.set(scopeKey, identifier);
   return identifier;
 }
@@ -863,7 +891,7 @@ function redactErrorStack(stack, providedRoot, trustedRoot) {
   const [header, ...frames] = lines;
   return [header, ...frames.map((frame) => redactCanonicalRoots(frame, providedRoot, trustedRoot))].join(newline);
 }
-var WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, gitTopLevelCacheMap, superprojectCacheMap, canonicalWorkingDirectoryRoots, GIT_PROBE_ENVIRONMENT_KEYS, MAX_GIT_MARKER_BYTES, workspaceCacheMap, SENSITIVE_DIR_BASENAMES, worktreePathRenderScope, gitShowToplevelProbeForTests, dualDirWarnings, ForeignWorkingDirectoryError;
+var WORKSPACE_MARKER, OmcPaths, MAX_WORKTREE_CACHE_SIZE, worktreeCacheMap, gitTopLevelCacheMap, superprojectCacheMap, canonicalWorkingDirectoryRoots, GIT_PROBE_ENVIRONMENT_KEYS, MAX_GIT_MARKER_BYTES, workspaceCacheMap, SENSITIVE_DIR_BASENAMES, worktreePathRenderScope, projectIdentifierOperationScope, gitShowToplevelProbeForTests, dualDirWarnings, ForeignWorkingDirectoryError;
 var init_worktree_paths = __esm({
   "src/lib/worktree-paths.ts"() {
     "use strict";
@@ -944,6 +972,7 @@ var init_worktree_paths = __esm({
       "library"
     ]);
     worktreePathRenderScope = new AsyncLocalStorage();
+    projectIdentifierOperationScope = new AsyncLocalStorage();
     dualDirWarnings = /* @__PURE__ */ new Set();
     ForeignWorkingDirectoryError = class extends Error {
       callerLabel;
@@ -1122,11 +1151,12 @@ var init_contracts = __esm({
 });
 
 // src/team/types.ts
-var DEFAULT_MAX_WORKERS;
+var DEFAULT_MAX_WORKERS, ABSOLUTE_MAX_WORKERS;
 var init_types = __esm({
   "src/team/types.ts"() {
     "use strict";
     DEFAULT_MAX_WORKERS = 20;
+    ABSOLUTE_MAX_WORKERS = 20;
   }
 });
 
@@ -4490,7 +4520,7 @@ function getProcessStartIdentitySync(pid) {
       const result = spawnSync2(
         "ps",
         ["-p", String(pid), "-o", "lstart="],
-        { encoding: "utf8", timeout: 2e3, windowsHide: true }
+        { encoding: "utf8", timeout: 2e3, windowsHide: true, env: { ...process.env, LC_ALL: "C" } }
       );
       if (result.status !== 0 || !result.stdout) return null;
       const time = new Date(result.stdout.trim()).getTime();
@@ -5558,18 +5588,31 @@ async function readWorkerLaunchCleanupProof(attempt, started) {
     return started === void 0 || Number.isSafeInteger(started.process_group_id) && Number(started.process_group_id) > 0 && value.process_group_id === started.process_group_id;
   };
   const terminal = await readJson(`${startedPath}.terminal`);
-  if (terminal.kind === "value") {
+  if (terminal.kind === "value" && terminal.value && typeof terminal.value === "object" && !Array.isArray(terminal.value)) {
     const value = terminal.value;
     const matchesStarted = !started || value.pid === started.pid && value.process_start_identity === started.process_start_identity;
-    if (matchesStarted && identityMatches(value, attempt) && value.kind === "worker_launch_provider_terminal" && value.outcome === "exit" && value.cleanup_verified === true && Number.isSafeInteger(value.pid) && Number(value.pid) > 0 && isValidProcessStartIdentity2(value.process_start_identity) && matchesProcessGroup(value)) return true;
+    if (matchesStarted && identityMatches(value, attempt) && value.kind === "worker_launch_provider_terminal" && value.outcome === "exit" && value.cleanup_verified === true && Number.isSafeInteger(value.pid) && Number(value.pid) > 0 && isValidProcessStartIdentity2(value.process_start_identity) && (process.platform === "win32" || value.child_reaped === void 0 || value.child_reaped === true) && matchesProcessGroup(value)) return true;
   }
   const completed = await readJson(`${startedPath}.termination-complete`);
-  if (completed.kind === "value") {
+  if (completed.kind === "value" && completed.value && typeof completed.value === "object" && !Array.isArray(completed.value)) {
     const value = completed.value;
     const matchesStarted = !started || value.pid === started.pid && value.process_start_identity === started.process_start_identity;
     if (matchesStarted && identityMatches(value, attempt) && value.kind === "worker_launch_termination_complete" && value.cleanup_verified === true && Number.isSafeInteger(value.pid) && Number(value.pid) > 0 && isValidProcessStartIdentity2(value.process_start_identity) && matchesProcessGroup(value)) return true;
   }
   return false;
+}
+async function readWorkerLaunchTerminalState(attempt, started) {
+  if (process.platform === "win32") return "absent";
+  const terminal = await readJson(`${attempt.startedPath}.terminal`);
+  if (terminal.kind === "absent") return "absent";
+  if (terminal.kind !== "value") return "invalid";
+  if (!terminal.value || typeof terminal.value !== "object" || Array.isArray(terminal.value)) return "invalid";
+  const value = terminal.value;
+  const matchesProcessGroup = Number.isSafeInteger(started.process_group_id) && Number(started.process_group_id) > 0 && value.process_group_id === started.process_group_id;
+  if (!identityMatches(value, attempt) || value.kind !== "worker_launch_provider_terminal" || value.pid !== started.pid || value.process_start_identity !== started.process_start_identity || !Number.isSafeInteger(value.pid) || Number(value.pid) <= 0 || !isValidProcessStartIdentity2(value.process_start_identity) || !matchesProcessGroup || typeof value.child_reaped !== "boolean" || typeof value.cleanup_verified !== "boolean") return "invalid";
+  if (value.child_reaped === true && (value.outcome === "exit" || value.outcome === "cleanup_unverified")) return "reaped";
+  if (value.child_reaped === false && value.outcome === "cleanup_unverified" && value.cleanup_verified === false) return "live-unreaped";
+  return "invalid";
 }
 async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   const started = await readJson(attempt.startedPath);
@@ -5582,6 +5625,12 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
   const record = started.value;
   if (!identityMatches(record, attempt) || record.kind !== "worker_launch_provider_started" || !Number.isSafeInteger(record.pid) || Number(record.pid) <= 0 || !isValidProcessStartIdentity2(record.process_start_identity)) return false;
   if (terminalCleanupVerified) return true;
+  if (process.platform !== "win32") {
+    const terminalState2 = await readWorkerLaunchTerminalState(attempt, record);
+    if (terminalState2 === "reaped" || terminalState2 === "invalid") {
+      return await readWorkerLaunchCleanupProof(attempt, record);
+    }
+  }
   if (process.platform !== "win32" && (!Number.isSafeInteger(record.process_group_id) || Number(record.process_group_id) <= 0)) return false;
   const terminationRequestPath = `${attempt.startedPath}.termination-request`;
   const terminationCompletePath = `${attempt.startedPath}.termination-complete`;
@@ -5631,6 +5680,10 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
     const value = existingRequest.kind === "value" ? existingRequest.value : null;
     if (!value || !identityMatches(value, attempt) || value.kind !== "worker_launch_termination_request" || value.pid !== record.pid || value.process_start_identity !== record.process_start_identity) return false;
   }
+  const terminalState = await readWorkerLaunchTerminalState(attempt, record);
+  if (terminalState === "reaped" || terminalState === "invalid") {
+    return await readWorkerLaunchCleanupProof(attempt, record);
+  }
   const deadlineAt = new Date(Date.now() + timeoutMs).toISOString();
   const result = await terminateOwnedProcessGroup({
     pid: record.pid,
@@ -5640,7 +5693,7 @@ async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2e3) {
     force: true
   });
   if (result === "already-dead" || result === "identity-mismatch") {
-    return terminalCleanupVerified;
+    return await readWorkerLaunchCleanupProof(attempt, record);
   }
   if (result !== "terminated") return false;
   const deadline = Date.parse(deadlineAt);
@@ -5688,6 +5741,7 @@ async function readValidProviderStarted(attempt) {
   const started = await readJson(attempt.startedPath);
   if ((await readJson(`${attempt.startedPath}.terminal`)).kind !== "absent") return null;
   if (started.kind !== "value") return null;
+  if (!started.value || typeof started.value !== "object" || Array.isArray(started.value)) return null;
   const record = started.value;
   if (record.supervisor_completion_path !== void 0 && (typeof record.supervisor_completion_path !== "string" || record.supervisor_completion_path.trim().length === 0 || existsSync10(record.supervisor_completion_path))) return null;
   return identityMatches(record, attempt) && record.kind === "worker_launch_provider_started" && Number.isSafeInteger(record.pid) && record.pid > 0 && typeof record.process_start_identity === "string" && record.process_start_identity.trim().length > 0 && (record.containment_nonce === void 0 || isExactText(record.containment_nonce)) && typeof record.written_at === "string" && Number.isFinite(Date.parse(record.written_at)) ? record : null;
@@ -5785,6 +5839,7 @@ __export(tmux_session_exports, {
   paneHasCursorWorkspaceTrustPrompt: () => paneHasCursorWorkspaceTrustPrompt,
   paneHasTrustPrompt: () => paneHasTrustPrompt,
   paneLooksReady: () => paneLooksReady,
+  probeStartupPaneActivity: () => probeStartupPaneActivity,
   proveWorkerPaneOwnership: () => proveWorkerPaneOwnership,
   redactBoundedDiagnostic: () => redactBoundedDiagnostic,
   resolveShellFromCandidates: () => resolveShellFromCandidates,
@@ -7097,6 +7152,27 @@ async function deliverStartupInbox(context, message, options = {}) {
     );
     return { ok: false, reason: "startup_send_failed" };
   }
+}
+async function probeStartupPaneActivity(context, options = {}) {
+  if (!await startupContextIsActive(context, options.attemptAlreadyFenced)) return "unknown";
+  const membership = await verifyTeamTargetOwnership({
+    provider: context.ownership.provider,
+    providerTarget: context.ownership.providerTarget,
+    recipient: "worker",
+    recipientRole: "worker",
+    paneId: context.ownership.paneId
+  });
+  if (membership.kind !== "owned") return "unknown";
+  const liveness = await getWorkerLiveness(context.ownership.paneId);
+  if (liveness !== "alive") return liveness;
+  const copyMode = await paneCopyModeObservation(context.ownership.paneId);
+  if (copyMode !== false) return "unknown";
+  const observation = await capturePaneObservation(context.ownership.paneId, {
+    operation: "startup-activity-probe"
+  });
+  if (!observation.ok) return "unknown";
+  if (detectPaneTrustPromptKind(observation.captured, context.provider)) return "idle";
+  return paneHasActiveTask(observation.captured, context.provider) ? "busy" : "idle";
 }
 async function retryStartupInboxSubmit(context, message, options = {}) {
   if (!await startupContextIsActive(context, options.attemptAlreadyFenced)) return "unavailable";
@@ -14508,7 +14584,7 @@ function resolveLeaderBranch(cwd) {
   }
   return out;
 }
-function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
+function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, fallbackAgent) {
   const canonicalRoles = new Set(CANONICAL_TEAM_ROLES);
   const hasExplicitRole = typeof task.role === "string" && task.role.length > 0;
   const rawRole = hasExplicitRole ? task.role : routeTaskToRole(task.subject, task.description, "executor").role;
@@ -14706,7 +14782,7 @@ async function waitForWorkerStatusTransition(teamName, workerName, cwd, baseline
     return status.state !== "unknown" && status.launch_attempt_id === launchAttemptId && workerStatusStartupFingerprint(status) !== baselineFingerprint;
   }, budgetMs, delayMs);
 }
-async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit) {
+async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit, probeActivity) {
   let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
   let engagedPane = false;
   for (let attempt = 1; !settled && resubmit && attempt <= policy.resubmitAttempts; attempt++) {
@@ -14717,6 +14793,12 @@ async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit) {
     }
     if (outcome !== "resubmitted") break;
     settled = await waitForCurrentEvidence(policy.resubmitBudgetMs);
+  }
+  if (!settled && !engagedPane && probeActivity) {
+    try {
+      engagedPane = await probeActivity() === "busy";
+    } catch {
+    }
   }
   if (!settled) {
     settled = await waitForCurrentEvidence(engagedPane ? policy.engagedPaneRecheckBudgetMs : policy.finalRecheckBudgetMs);
@@ -14863,7 +14945,8 @@ async function spawnV2Worker(opts) {
     startupContext.attempt.attempt_id,
     budgetMs
   );
-  const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+  const probeActivity = opts.agentType === "cursor" || opts.agentType === "codex" ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true }) : void 0;
+  const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
   const fencedDispatch = await (async () => {
     try {
       return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -14892,7 +14975,9 @@ async function spawnV2Worker(opts) {
             if (!attempted.ok) {
               return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
             }
-            const settled = await waitForBoundedStartupEvidence(() => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
+            const settled = await waitForBoundedStartupEvidence(
+              opts.agentType === "cursor" || opts.agentType === "codex" ? void 0 : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })
+            );
             return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
           },
           deps: { writeWorkerInbox }
@@ -16207,7 +16292,8 @@ async function executeRecoverDeadWorkerV2Owner(input) {
           startupAttemptId,
           budgetMs
         );
-        const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+        const probeActivity = pending.agentType === "cursor" || pending.agentType === "codex" ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true }) : void 0;
+        const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
         const instruction = continuations.length > 0 ? continuations.map((continuation) => {
           const continuationInstruction = renderRecoveryContinuationInstruction({
             teamName: input.teamName,
@@ -16304,7 +16390,7 @@ ${recoveryContract}` : ""}`;
                   return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
                 }
                 const settled = await waitForBoundedStartupEvidence(
-                  () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })
+                  pending.agentType === "cursor" || pending.agentType === "codex" ? void 0 : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })
                 );
                 return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
               },
@@ -16470,6 +16556,12 @@ async function rollbackStartedNativeWorktreeStartup(args) {
   }
 }
 async function startTeamV2(config) {
+  if (!Array.isArray(config.agentTypes) || config.agentTypes.length === 0) {
+    throw new Error("Invalid agent types. Expected at least one provider.");
+  }
+  if (!Number.isInteger(config.workerCount) || config.workerCount < 1 || config.workerCount > ABSOLUTE_MAX_WORKERS) {
+    throw new Error(`Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`);
+  }
   const sanitized = sanitizeTeamName(config.teamName);
   const leaderCwd = resolve10(config.cwd);
   validateTeamName(sanitized);
@@ -16494,71 +16586,12 @@ async function startTeamV2(config) {
   }
   const workspaceMode = worktreeMode === "disabled" ? "single" : "worktree";
   const agentTypes = config.agentTypes;
-  const resolvedBinaryPaths = {};
-  const missingBinaryReasons = [];
-  for (const agentType of [...new Set(agentTypes)]) {
-    try {
-      resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      missingBinaryReasons.push({ agentType, reason });
-    }
-  }
-  if (missingBinaryReasons.length > 0) {
-    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(";");
-    throw new Error(`cli_binary_preflight_failed:${missing}`);
-  }
-  for (const { primary } of Object.values(resolvedRouting)) {
-    const provider = primary.provider;
-    if (resolvedBinaryPaths[provider]) continue;
-    if (missingBinaryReasons.some((m) => m.agentType === provider)) continue;
-    try {
-      resolvedBinaryPaths[provider] = resolvePreflightBinaryPath(provider).path;
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      missingBinaryReasons.push({ agentType: provider, reason });
-    }
-  }
-  if (missingBinaryReasons.length > 0) {
-    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(";");
-    throw new Error(`cli_binary_preflight_failed:${missing}`);
-  }
-  await mkdir16(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-  await mkdir16(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-  await mkdir16(join34(getOmcRoot(leaderCwd), "state", "team", sanitized, "mailbox"), { recursive: true });
-  for (let i = 0; i < config.tasks.length; i++) {
-    const taskId = String(i + 1);
-    const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    await mkdir16(join34(taskFilePath, ".."), { recursive: true });
-    await writeFile10(taskFilePath, JSON.stringify({
-      id: taskId,
-      subject: config.tasks[i].subject,
-      description: config.tasks[i].description,
-      status: "pending",
-      owner: null,
-      result: null,
-      ...config.tasks[i].role ? { role: config.tasks[i].role } : {},
-      ...config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {},
-      created_at: (/* @__PURE__ */ new Date()).toISOString()
-    }, null, 2), "utf-8");
-  }
   const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
-  const workerWorktrees = /* @__PURE__ */ new Map();
-  try {
-    if (worktreeMode !== "disabled") {
-      for (const workerName of workerNames) {
-        const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
-          mode: worktreeMode,
-          requireCleanLeader: true
-        });
-        if (worktree) workerWorktrees.set(workerName, worktree);
-      }
-    }
-  } catch (error) {
-    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
-    throw error;
-  }
   const workerNameSet = new Set(workerNames);
+  const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
+  const resolveDefaultModel = (agentType) => {
+    return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
+  };
   const startupAllocations = [];
   const unownedTaskIndices = [];
   for (let i = 0; i < config.tasks.length; i++) {
@@ -16585,24 +16618,86 @@ async function startTeamV2(config) {
       startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
     }
   }
-  const startupByWorker = new Map(startupAllocations.map((item) => [item.workerName, item.taskIndex]));
-  const preparedLaunches = /* @__PURE__ */ new Map();
-  const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
-  const resolveDefaultModel = (agentType) => {
-    return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
-  };
+  const startupByWorker = /* @__PURE__ */ new Map();
+  for (const allocation of startupAllocations) {
+    if (!startupByWorker.has(allocation.workerName)) {
+      startupByWorker.set(allocation.workerName, allocation.taskIndex);
+    }
+  }
+  const resolvedBinaryPaths = {};
+  const missingBinaryReasons = [];
+  const startupAssignments = /* @__PURE__ */ new Map();
+  const effectiveAgentTypes = /* @__PURE__ */ new Set();
   for (let i = 0; i < workerNames.length; i++) {
     const workerName = workerNames[i];
     const taskIndex = startupByWorker.get(workerName);
     const fallbackAgent = agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? "claude";
-    const assignment = taskIndex === void 0 ? { agentType: fallbackAgent, model: resolveDefaultModel(fallbackAgent), role: void 0 } : resolveTaskAssignment(
+    const resolvedAssignment = taskIndex === void 0 ? { agentType: fallbackAgent, model: "", role: void 0 } : resolveTaskAssignment(
       config.tasks[taskIndex],
       resolvedRouting,
       pluginCfg.team?.roleRouting,
-      resolvedBinaryPaths,
       fallbackAgent
     );
-    const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
+    const assignment = {
+      agentType: resolvedAssignment.agentType,
+      model: resolvedAssignment.model || resolveDefaultModel(resolvedAssignment.agentType),
+      ...resolvedAssignment.role ? { role: resolvedAssignment.role } : {}
+    };
+    startupAssignments.set(workerName, assignment);
+    effectiveAgentTypes.add(assignment.agentType);
+  }
+  for (const agentType of effectiveAgentTypes) {
+    try {
+      resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      missingBinaryReasons.push({ agentType, reason });
+    }
+  }
+  if (missingBinaryReasons.length > 0) {
+    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(";");
+    throw new Error(`cli_binary_preflight_failed:${missing}`);
+  }
+  await mkdir16(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
+  await mkdir16(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
+  await mkdir16(join34(getOmcRoot(leaderCwd), "state", "team", sanitized, "mailbox"), { recursive: true });
+  for (let i = 0; i < config.tasks.length; i++) {
+    const taskId = String(i + 1);
+    const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
+    await mkdir16(join34(taskFilePath, ".."), { recursive: true });
+    await writeFile10(taskFilePath, JSON.stringify({
+      id: taskId,
+      subject: config.tasks[i].subject,
+      description: config.tasks[i].description,
+      status: "pending",
+      owner: null,
+      result: null,
+      ...config.tasks[i].role ? { role: config.tasks[i].role } : {},
+      ...config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {},
+      created_at: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2), "utf-8");
+  }
+  const workerWorktrees = /* @__PURE__ */ new Map();
+  try {
+    if (worktreeMode !== "disabled") {
+      for (const workerName of workerNames) {
+        const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+          mode: worktreeMode,
+          requireCleanLeader: true
+        });
+        if (worktree) workerWorktrees.set(workerName, worktree);
+      }
+    }
+  } catch (error) {
+    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
+    throw error;
+  }
+  const preparedLaunches = /* @__PURE__ */ new Map();
+  for (let i = 0; i < workerNames.length; i++) {
+    const workerName = workerNames[i];
+    const taskIndex = startupByWorker.get(workerName);
+    const assignment = startupAssignments.get(workerName);
+    if (!assignment) throw new Error(`Missing startup assignment for ${workerName}`);
     const worktree = workerWorktrees.get(workerName);
     const verdictAssignmentId = taskIndex !== void 0 ? randomUUID12() : void 0;
     const outputFile = taskIndex !== void 0 && assignment.role && shouldInjectContract(assignment.role, assignment.agentType) ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
@@ -16625,7 +16720,7 @@ async function startTeamV2(config) {
       workerName,
       cwd: worktree?.path ?? leaderCwd,
       resolvedBinaryPath: binary,
-      model: effectiveModel
+      model: assignment.model
     }, promptArgs);
     preparedLaunches.set(workerName, {
       agentType: assignment.agentType,
@@ -16637,12 +16732,13 @@ async function startTeamV2(config) {
   try {
     for (let i = 0; i < workerNames.length; i++) {
       const wName = workerNames[i];
-      const agentType = agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? "claude";
+      const prepared = preparedLaunches.get(wName);
+      if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
       await ensureWorkerStateDir(sanitized, wName, leaderCwd);
       const overlayPath = await writeWorkerOverlay({
         teamName: sanitized,
         workerName: wName,
-        agentType,
+        agentType: prepared.agentType,
         tasks: config.tasks.map((t, idx) => ({
           id: String(idx + 1),
           subject: t.subject,
@@ -16651,10 +16747,7 @@ async function startTeamV2(config) {
         cwd: leaderCwd,
         ...config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {},
         instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
-        ...preparedLaunches.get(wName)?.role && shouldInjectContract(
-          preparedLaunches.get(wName).role,
-          preparedLaunches.get(wName).agentType
-        ) ? { reviewerRole: true } : {}
+        ...prepared.role && shouldInjectContract(prepared.role, prepared.agentType) ? { reviewerRole: true } : {}
       });
       const worktree = workerWorktrees.get(wName);
       if (worktree) {
@@ -16708,7 +16801,7 @@ async function startTeamV2(config) {
     policy: DEFAULT_TEAM_TRANSPORT_POLICY,
     governance: DEFAULT_TEAM_GOVERNANCE,
     worker_count: config.workerCount,
-    max_workers: 20,
+    max_workers: ABSOLUTE_MAX_WORKERS,
     workers: workersInfo,
     created_at: (/* @__PURE__ */ new Date()).toISOString(),
     tmux_session: sessionName2,
@@ -16807,21 +16900,12 @@ async function startTeamV2(config) {
     });
     throw error;
   }
-  const initialStartupAllocations = [];
-  const seenStartupWorkers = /* @__PURE__ */ new Set();
-  for (const decision of startupAllocations) {
-    if (seenStartupWorkers.has(decision.workerName)) continue;
-    initialStartupAllocations.push(decision);
-    seenStartupWorkers.add(decision.workerName);
-    if (initialStartupAllocations.length >= config.workerCount) break;
-  }
   const launchedWorkers = [];
   try {
-    for (const decision of initialStartupAllocations) {
-      const wName = decision.workerName;
+    for (const [wName, taskIndex] of startupByWorker) {
       const workerIndex = Number.parseInt(wName.replace("worker-", ""), 10) - 1;
-      const taskId = String(decision.taskIndex + 1);
-      const task = config.tasks[decision.taskIndex];
+      const taskId = String(taskIndex + 1);
+      const task = config.tasks[taskIndex];
       if (!task || workerIndex < 0) continue;
       const prepared = preparedLaunches.get(wName);
       if (!prepared) continue;
@@ -17933,6 +18017,7 @@ var init_runtime_v2 = __esm({
     init_events();
     init_governance();
     init_phase_controller();
+    init_types();
     init_team_name();
     init_contracts();
     init_model_contract();
@@ -17984,9 +18069,12 @@ var init_runtime_v2 = __esm({
       // External providers can be visibly ready before they publish task/status
       // evidence. Give that distinct evidence gate enough time for a cold start,
       // then perform one bounded read-only recheck without duplicating the inbox.
-      codex: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
       gemini: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
-      cursor: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
+      // Interactive external panes can consume the trigger while their first file
+      // read is still in flight. A read-only activity probe earns one bounded
+      // engaged recheck; it never resends the trigger or proves startup itself.
+      codex: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 3e4 },
+      cursor: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 3e4 },
       grok: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
       antigravity: { initialBudgetMs: 3e4, finalRecheckBudgetMs: 1e3, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 }
     };

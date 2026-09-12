@@ -124,6 +124,7 @@ export declare function isRunningAsPlugin(): boolean;
  * @returns true if running as a project-scoped plugin, false otherwise
  */
 export declare function isProjectScopedPlugin(): boolean;
+export declare function provisionStandaloneStateLockBridge(packageDir: string, targetPath: string): void;
 /**
  * Remove stale OMC agents only when their exact raw bytes match the bounded,
  * release-authenticated historical inventory and their basename is absent from

@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { getOmcRoot, clearWorktreeCache, validateWorkingDirectory } from '../lib/worktree-paths.js';
@@ -544,7 +544,7 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
         process.chdir(currentCwd);
         try {
             clearWorktreeCache();
-            expect(validateWorkingDirectory(requestedCwd)).toBe(resolve(requestedCwd));
+            expect(validateWorkingDirectory(requestedCwd)).toBe(realpathSync(requestedCwd));
         }
         finally {
             process.chdir(originalCwd);

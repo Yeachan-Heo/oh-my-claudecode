@@ -1,11 +1,12 @@
 import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, } from "fs";
 import { isAbsolute, join, normalize, win32 } from "path";
+import { containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
 const NO_FOLLOW = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
 const UNSAFE_CONTROL = /[\u0000-\u001f\u007f]/;
 const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|clock\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
 /** Fail closed before acquiring any run-scoped locks on unsupported platforms. */
 export function assertContainedFsSupported(platform = process.platform) {
-    if (platform !== "linux") {
+    if (!containedFsPlatformSupported(platform)) {
         throw new Error(`contained directory-FD traversal is unavailable on ${platform}; refusing pathname fallback`);
     }
 }
@@ -71,11 +72,8 @@ export function readFileNoFollow(filePath) {
  */
 export function containedPathForPlatform(directoryFd, runDirPath, fileName, platform = process.platform) {
     assertSafeContainedFileName(fileName, platform);
-    if (platform === "linux") {
-        return join(`/proc/self/fd/${directoryFd}`, fileName);
-    }
     assertContainedFsSupported(platform);
-    throw new Error("unreachable");
+    return join(containedFdPath(directoryFd, platform), fileName);
 }
 /**
  * Run a synchronous operation against a directory FD on Linux. If the
@@ -95,7 +93,7 @@ export function withContainedDirectory(runDir, operation, platform = process.pla
         if (stats.dev !== runDir.device || stats.ino !== runDir.inode) {
             throw new Error("run directory identity changed");
         }
-        return operation(`/proc/self/fd/${directoryFd}`);
+        return operation(containedFdPath(directoryFd, platform));
     }
     finally {
         closeSync(directoryFd);

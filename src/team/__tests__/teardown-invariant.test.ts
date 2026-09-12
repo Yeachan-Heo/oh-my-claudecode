@@ -4,7 +4,7 @@
 // Uses real git via git-fixture helper.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -18,7 +18,6 @@ import {
   startMergeOrchestrator,
   type OrchestratorConfig,
 } from '../merge-orchestrator.js';
-import { sanitizeName } from '../tmux-session.js';
 
 beforeAll(() => {
   process.env.OMC_RUNTIME_V2 = '1';

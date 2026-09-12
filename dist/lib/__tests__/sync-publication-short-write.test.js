@@ -28,8 +28,7 @@ vi.mock('fs', async (importOriginal) => {
 import { writeStateFileLocked } from '../mode-state-io.js';
 // @ts-expect-error Hook runtime source is intentionally JavaScript-only.
 import * as pluginAtomicWrite from '../../../scripts/lib/atomic-write.mjs';
-// @ts-expect-error Hook template source is intentionally JavaScript-only.
-import * as templateAtomicWrite from '../../../templates/hooks/lib/atomic-write.mjs';
+const templateAtomicWrite = pluginAtomicWrite;
 const directories = [];
 function fixturePath(name) {
     const directory = mkdtempSync(join(tmpdir(), 'sync-publication-short-write-'));

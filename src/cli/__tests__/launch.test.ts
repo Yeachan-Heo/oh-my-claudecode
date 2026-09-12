@@ -1647,6 +1647,26 @@ describe('prepareOmcLaunchConfigDir / launchCommand OMC companion loading', () =
     expect((finalCredentials.claudeAiOauth as Record<string, unknown>).accessToken).toBe('runtime-token');
   });
 
+  it.skipIf(process.platform === 'win32')('fails closed for a credential symlink cycle without mutating the final target', () => {
+    const configDir = join(tempRoot!, '.claude');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE-omc.md'), '<!-- OMC:START -->\n# OMC\n<!-- OMC:END -->\n');
+    writeFileSync(join(tempRoot!, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+    const first = join(tempRoot!, 'cycle-a.json');
+    const second = join(tempRoot!, 'cycle-b.json');
+    const credentialsPath = join(configDir, '.credentials.json');
+    symlinkSync(second, first);
+    symlinkSync(first, second);
+    symlinkSync(first, credentialsPath);
+    const runtimeDir = prepareOmcLaunchConfigDir(configDir);
+    writeFileSync(join(runtimeDir, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'same-account' } }));
+    rmSync(join(runtimeDir, '.credentials.json'), { force: true });
+    writeFileSync(join(runtimeDir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'runtime-token', expiresAt: 200 } }));
+    expect(() => prepareOmcLaunchConfigDir(configDir)).toThrow(/Unable to read or parse base Claude credentials/);
+    expect(readlinkSync(credentialsPath)).toBe(first);
+    expect(readlinkSync(second)).toBe(first);
+  });
+
   it('preserves runtime .claude.json when source .claude.json is absent, invalid, or has no mcpServers', () => {
     const configDir = join(tempRoot!, '.claude');
     mkdirSync(configDir, { recursive: true });

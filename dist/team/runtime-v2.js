@@ -27,10 +27,11 @@ import { readTeamConfig, readWorkerStatus, readWorkerHeartbeat, readMonitorSnaps
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
 import { DEFAULT_TEAM_GOVERNANCE, DEFAULT_TEAM_TRANSPORT_POLICY, getConfigGovernance, } from './governance.js';
 import { inferPhase } from './phase-controller.js';
+import { ABSOLUTE_MAX_WORKERS } from './types.js';
 import { validateTeamName } from './team-name.js';
 import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveDefaultWorkerModel, resolveExternalModelsDefaults, assertHeadlessSupported, } from './model-contract.js';
-import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, verifyTeamTargetOwnership, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToProviderTarget, } from './tmux-session.js';
+import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, probeStartupPaneActivity, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, killOwnedWorkerPane, verifyTeamTargetOwnership, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, getWorkerLiveness, captureTeamPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToProviderTarget, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, renderCursorWorkerGuidance, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
@@ -357,10 +358,11 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
  *   3. Fallback to the `fallbackAgent` round-robin pick if snapshot lookup
  *      fails (role outside canonical vocabulary or snapshot missing).
  *
- * Returns the primary assignment by default; callers swap to the Claude
- * fallback if the primary provider's CLI binary is missing at spawn time.
+ * Returns the authoritative primary assignment for the selected route.
+ * A missing provider binary is a startup error; routing never changes
+ * providers implicitly.
  */
-export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, resolvedBinaryPaths, fallbackAgent) {
+export function resolveTaskAssignment(task, resolvedRouting, roleRoutingConfig, fallbackAgent) {
     const canonicalRoles = new Set(CANONICAL_TEAM_ROLES);
     const hasExplicitRole = typeof task.role === 'string' && task.role.length > 0;
     const rawRole = hasExplicitRole
@@ -577,9 +579,12 @@ const WORKER_STARTUP_EVIDENCE_POLICIES = {
     // External providers can be visibly ready before they publish task/status
     // evidence. Give that distinct evidence gate enough time for a cold start,
     // then perform one bounded read-only recheck without duplicating the inbox.
-    codex: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
     gemini: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
-    cursor: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
+    // Interactive external panes can consume the trigger while their first file
+    // read is still in flight. A read-only activity probe earns one bounded
+    // engaged recheck; it never resends the trigger or proves startup itself.
+    codex: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
+    cursor: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
     grok: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
     antigravity: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
 };
@@ -628,10 +633,11 @@ async function waitForWorkerStatusTransition(teamName, workerName, cwd, baseline
  * actively working, so resubmitting would duplicate the inbox and stopping the
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
- * the caller's fail-closed teardown. Panes that are idle, wrong, or dead never
- * earn that recheck and keep the existing fast failure path.
+ * the caller's fail-closed teardown. Interactive providers may also supply a
+ * read-only activity probe when resubmission is disabled. Panes that are idle,
+ * wrong, or dead never earn that recheck and keep the existing fast failure path.
  */
-export async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit) {
+export async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit, probeActivity) {
     let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
     let engagedPane = false;
     for (let attempt = 1; !settled && resubmit && attempt <= policy.resubmitAttempts; attempt++) {
@@ -643,6 +649,15 @@ export async function settleStartupEvidence(policy, waitForCurrentEvidence, resu
         if (outcome !== 'resubmitted')
             break;
         settled = await waitForCurrentEvidence(policy.resubmitBudgetMs);
+    }
+    if (!settled && !engagedPane && probeActivity) {
+        try {
+            engagedPane = (await probeActivity()) === 'busy';
+        }
+        catch {
+            // A failed activity observation must not turn an unverified pane into
+            // startup evidence or extend the fail-closed path.
+        }
     }
     if (!settled) {
         settled = await waitForCurrentEvidence(engagedPane
@@ -782,7 +797,10 @@ async function spawnV2Worker(opts) {
     };
     const evidencePolicy = getWorkerStartupEvidencePolicy(opts.agentType);
     const waitForCurrentEvidence = (budgetMs) => waitForWorkerStartupEvidence(opts.teamName, opts.workerName, opts.taskId, opts.cwd, startupBaseline, startupContext.attempt.attempt_id, budgetMs);
-    const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+    const probeActivity = opts.agentType === 'cursor' || opts.agentType === 'codex'
+        ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
+        : undefined;
+    const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
     const fencedDispatch = await (async () => {
         try {
             return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -814,7 +832,9 @@ async function spawnV2Worker(opts) {
                         if (!attempted.ok) {
                             return { ok: false, transport: 'tmux_send_keys', reason: `worker_notify_failed:${attempted.reason}` };
                         }
-                        const settled = await waitForBoundedStartupEvidence(() => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
+                        const settled = await waitForBoundedStartupEvidence(opts.agentType === 'cursor' || opts.agentType === 'codex'
+                            ? undefined
+                            : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
                         return settled
                             ? { ok: true, transport: 'tmux_send_keys', reason: 'worker_startup_confirmed' }
                             : { ok: false, transport: 'tmux_send_keys', reason: 'worker_startup_evidence_missing' };
@@ -2258,7 +2278,10 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                 const waitForCurrentEvidence = (budgetMs) => primaryTaskId && startupBaseline
                     ? waitForWorkerStartupEvidence(input.teamName, sagaInput.workerName, primaryTaskId, input.cwd, startupBaseline, startupAttemptId, budgetMs)
                     : waitForWorkerStatusTransition(input.teamName, sagaInput.workerName, input.cwd, statusBaseline, startupAttemptId, budgetMs);
-                const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit);
+                const probeActivity = pending.agentType === 'cursor' || pending.agentType === 'codex'
+                    ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
+                    : undefined;
+                const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
                 const instruction = continuations.length > 0
                     ? continuations.map(continuation => {
                         const continuationInstruction = renderRecoveryContinuationInstruction({
@@ -2365,7 +2388,9 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                                 if (!attempted.ok) {
                                     return { ok: false, transport: 'tmux_send_keys', reason: `worker_notify_failed:${attempted.reason}` };
                                 }
-                                const settled = await waitForBoundedStartupEvidence(() => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
+                                const settled = await waitForBoundedStartupEvidence(pending.agentType === 'cursor' || pending.agentType === 'codex'
+                                    ? undefined
+                                    : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
                                 return settled
                                     ? { ok: true, transport: 'tmux_send_keys', reason: 'worker_startup_confirmed' }
                                     : { ok: false, transport: 'tmux_send_keys', reason: 'worker_startup_evidence_missing' };
@@ -2563,6 +2588,12 @@ async function rollbackStartedNativeWorktreeStartup(args) {
  * NO watchdog polling — the leader drives monitoring via monitorTeamV2().
  */
 export async function startTeamV2(config) {
+    if (!Array.isArray(config.agentTypes) || config.agentTypes.length === 0) {
+        throw new Error('Invalid agent types. Expected at least one provider.');
+    }
+    if (!Number.isInteger(config.workerCount) || config.workerCount < 1 || config.workerCount > ABSOLUTE_MAX_WORKERS) {
+        throw new Error(`Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`);
+    }
     const sanitized = sanitizeTeamName(config.teamName);
     const leaderCwd = resolve(config.cwd);
     validateTeamName(sanitized);
@@ -2591,88 +2622,16 @@ export async function startTeamV2(config) {
         }
     }
     const workspaceMode = worktreeMode === 'disabled' ? 'single' : 'worktree';
-    // Validate CLIs and pin absolute binary paths for user-declared agentTypes.
-    // Unsupported, relative, missing, or untrusted providers fail before any team
-    // state or multiplexer side effect is created.
     const agentTypes = config.agentTypes;
-    const resolvedBinaryPaths = {};
-    const missingBinaryReasons = [];
-    for (const agentType of [...new Set(agentTypes)]) {
-        try {
-            resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
-        }
-        catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            missingBinaryReasons.push({ agentType, reason });
-        }
-    }
-    if (missingBinaryReasons.length > 0) {
-        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
-        throw new Error(`cli_binary_preflight_failed:${missing}`);
-    }
-    // Resolve extra providers referenced by routing snapshots. A selected route
-    // without an exact validated path fails before worker launch.
-    for (const { primary } of Object.values(resolvedRouting)) {
-        const provider = primary.provider;
-        if (resolvedBinaryPaths[provider])
-            continue;
-        if (missingBinaryReasons.some((m) => m.agentType === provider))
-            continue;
-        try {
-            resolvedBinaryPaths[provider] = resolvePreflightBinaryPath(provider).path;
-        }
-        catch (err) {
-            const reason = err instanceof Error ? err.message : String(err);
-            missingBinaryReasons.push({ agentType: provider, reason });
-        }
-    }
-    if (missingBinaryReasons.length > 0) {
-        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
-        throw new Error(`cli_binary_preflight_failed:${missing}`);
-    }
-    // Create state directories
-    await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-    await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-    await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
-    // Write task files
-    for (let i = 0; i < config.tasks.length; i++) {
-        const taskId = String(i + 1);
-        const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-        await mkdir(join(taskFilePath, '..'), { recursive: true });
-        await writeFile(taskFilePath, JSON.stringify({
-            id: taskId,
-            subject: config.tasks[i].subject,
-            description: config.tasks[i].description,
-            status: 'pending',
-            owner: null,
-            result: null,
-            ...(config.tasks[i].role ? { role: config.tasks[i].role } : {}),
-            ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
-            created_at: new Date().toISOString(),
-        }, null, 2), 'utf-8');
-    }
-    // Build allocation inputs for the new role-aware allocator
     const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
-    const workerWorktrees = new Map();
-    try {
-        if (worktreeMode !== 'disabled') {
-            for (const workerName of workerNames) {
-                const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
-                    mode: worktreeMode,
-                    requireCleanLeader: true,
-                });
-                if (worktree)
-                    workerWorktrees.set(workerName, worktree);
-            }
-        }
-    }
-    catch (error) {
-        if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error))
-            throw startupCleanupIncompleteError(error);
-        throw error;
-    }
     const workerNameSet = new Set(workerNames);
-    // Respect explicit owner fields first, then allocate remaining tasks
+    const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
+    const resolveDefaultModel = (agentType) => {
+        return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
+    };
+    // Resolve the exact startup allocation before any side effects so preflight
+    // covers only providers that can actually be launched. Explicit owners win;
+    // the remaining tasks use the same role-aware allocator as startup below.
     const startupAllocations = [];
     const unownedTaskIndices = [];
     for (let i = 0; i < config.tasks.length; i++) {
@@ -2701,20 +2660,96 @@ export async function startTeamV2(config) {
             startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
         }
     }
-    const startupByWorker = new Map(startupAllocations.map(item => [item.workerName, item.taskIndex]));
-    const preparedLaunches = new Map();
-    const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
-    const resolveDefaultModel = (agentType) => {
-        return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
-    };
+    // Keep the first allocation for each worker as the initial startup task.
+    // Explicit owners are appended before allocator results, so this preserves
+    // owner priority when a worker also receives later unowned work.
+    const startupByWorker = new Map();
+    for (const allocation of startupAllocations) {
+        if (!startupByWorker.has(allocation.workerName)) {
+            startupByWorker.set(allocation.workerName, allocation.taskIndex);
+        }
+    }
+    // Validate CLIs and pin absolute binary paths for effective startup
+    // assignments only. Unsupported, relative, missing, or untrusted selected
+    // providers fail before any team state or multiplexer side effect is created.
+    const resolvedBinaryPaths = {};
+    const missingBinaryReasons = [];
+    const startupAssignments = new Map();
+    const effectiveAgentTypes = new Set();
     for (let i = 0; i < workerNames.length; i++) {
         const workerName = workerNames[i];
         const taskIndex = startupByWorker.get(workerName);
         const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
-        const assignment = taskIndex === undefined
-            ? { agentType: fallbackAgent, model: resolveDefaultModel(fallbackAgent), role: undefined }
-            : resolveTaskAssignment(config.tasks[taskIndex], resolvedRouting, pluginCfg.team?.roleRouting, resolvedBinaryPaths, fallbackAgent);
-        const effectiveModel = assignment.model || resolveDefaultModel(assignment.agentType);
+        const resolvedAssignment = taskIndex === undefined
+            ? { agentType: fallbackAgent, model: '', role: undefined }
+            : resolveTaskAssignment(config.tasks[taskIndex], resolvedRouting, pluginCfg.team?.roleRouting, fallbackAgent);
+        const assignment = {
+            agentType: resolvedAssignment.agentType,
+            model: resolvedAssignment.model || resolveDefaultModel(resolvedAssignment.agentType),
+            ...(resolvedAssignment.role ? { role: resolvedAssignment.role } : {}),
+        };
+        startupAssignments.set(workerName, assignment);
+        effectiveAgentTypes.add(assignment.agentType);
+    }
+    for (const agentType of effectiveAgentTypes) {
+        try {
+            resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
+        }
+        catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
+            missingBinaryReasons.push({ agentType, reason });
+        }
+    }
+    if (missingBinaryReasons.length > 0) {
+        const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
+        throw new Error(`cli_binary_preflight_failed:${missing}`);
+    }
+    // Create state directories
+    await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
+    await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
+    await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
+    // Write task files
+    for (let i = 0; i < config.tasks.length; i++) {
+        const taskId = String(i + 1);
+        const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
+        await mkdir(join(taskFilePath, '..'), { recursive: true });
+        await writeFile(taskFilePath, JSON.stringify({
+            id: taskId,
+            subject: config.tasks[i].subject,
+            description: config.tasks[i].description,
+            status: 'pending',
+            owner: null,
+            result: null,
+            ...(config.tasks[i].role ? { role: config.tasks[i].role } : {}),
+            ...(config.tasks[i].delegation ? { delegation: config.tasks[i].delegation } : {}),
+            created_at: new Date().toISOString(),
+        }, null, 2), 'utf-8');
+    }
+    const workerWorktrees = new Map();
+    try {
+        if (worktreeMode !== 'disabled') {
+            for (const workerName of workerNames) {
+                const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
+                    mode: worktreeMode,
+                    requireCleanLeader: true,
+                });
+                if (worktree)
+                    workerWorktrees.set(workerName, worktree);
+            }
+        }
+    }
+    catch (error) {
+        if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error))
+            throw startupCleanupIncompleteError(error);
+        throw error;
+    }
+    const preparedLaunches = new Map();
+    for (let i = 0; i < workerNames.length; i++) {
+        const workerName = workerNames[i];
+        const taskIndex = startupByWorker.get(workerName);
+        const assignment = startupAssignments.get(workerName);
+        if (!assignment)
+            throw new Error(`Missing startup assignment for ${workerName}`);
         const worktree = workerWorktrees.get(workerName);
         const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
         const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
@@ -2735,7 +2770,7 @@ export async function startTeamV2(config) {
         const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
         const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
             teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
-            model: effectiveModel,
+            model: assignment.model,
         }, promptArgs);
         preparedLaunches.set(workerName, { agentType: assignment.agentType,
             ...(assignment.role ? { role: assignment.role } : {}), descriptor,
@@ -2745,17 +2780,20 @@ export async function startTeamV2(config) {
     try {
         for (let i = 0; i < workerNames.length; i++) {
             const wName = workerNames[i];
-            const agentType = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude');
+            const prepared = preparedLaunches.get(wName);
+            if (!prepared)
+                throw new Error(`Missing prepared launch for ${wName}`);
             await ensureWorkerStateDir(sanitized, wName, leaderCwd);
             const overlayPath = await writeWorkerOverlay({
-                teamName: sanitized, workerName: wName, agentType,
+                teamName: sanitized, workerName: wName, agentType: prepared.agentType,
                 tasks: config.tasks.map((t, idx) => ({
                     id: String(idx + 1), subject: t.subject, description: t.description,
                 })),
                 cwd: leaderCwd,
                 ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
                 instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
-                ...(preparedLaunches.get(wName)?.role && shouldInjectContract(preparedLaunches.get(wName).role, preparedLaunches.get(wName).agentType) ? { reviewerRole: true } : {}),
+                ...(prepared.role && shouldInjectContract(prepared.role, prepared.agentType)
+                    ? { reviewerRole: true } : {}),
             });
             const worktree = workerWorktrees.get(wName);
             if (worktree) {
@@ -2818,7 +2856,7 @@ export async function startTeamV2(config) {
         policy: DEFAULT_TEAM_TRANSPORT_POLICY,
         governance: DEFAULT_TEAM_GOVERNANCE,
         worker_count: config.workerCount,
-        max_workers: 20,
+        max_workers: ABSOLUTE_MAX_WORKERS,
         workers: workersInfo,
         created_at: new Date().toISOString(),
         tmux_session: sessionName,
@@ -2910,24 +2948,14 @@ export async function startTeamV2(config) {
         });
         throw error;
     }
-    // Spawn workers for initial tasks (at most one startup task per worker)
-    const initialStartupAllocations = [];
-    const seenStartupWorkers = new Set();
-    for (const decision of startupAllocations) {
-        if (seenStartupWorkers.has(decision.workerName))
-            continue;
-        initialStartupAllocations.push(decision);
-        seenStartupWorkers.add(decision.workerName);
-        if (initialStartupAllocations.length >= config.workerCount)
-            break;
-    }
     const launchedWorkers = [];
     try {
-        for (const decision of initialStartupAllocations) {
-            const wName = decision.workerName;
+        // Reuse the same first-per-worker selection used by assignment and
+        // preflight; no second dedupe policy may diverge from startupByWorker.
+        for (const [wName, taskIndex] of startupByWorker) {
             const workerIndex = Number.parseInt(wName.replace('worker-', ''), 10) - 1;
-            const taskId = String(decision.taskIndex + 1);
-            const task = config.tasks[decision.taskIndex];
+            const taskId = String(taskIndex + 1);
+            const task = config.tasks[taskIndex];
             if (!task || workerIndex < 0)
                 continue;
             const prepared = preparedLaunches.get(wName);

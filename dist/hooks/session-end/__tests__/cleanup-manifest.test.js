@@ -1,9 +1,14 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { claimSessionEndAction, claimSessionEndJob, finishSessionEndAction, isManifestTerminal, markSessionEndActionRunner, mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, reapStaleSessionEndOwner, releaseSessionEndJob, renewSessionEndLease, sealCoreManifest, sealWikiManifest, sessionEndJobsDirectory, takeSessionEndDiscoveryPage, } from '../cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndJob, finishSessionEndAction, isManifestTerminal, markSessionEndActionRunner, mutateSessionEndJob, prepareCoreManifest, readSessionEndJob, reapStaleSessionEndOwner, releaseSessionEndJob, renewSessionEndLease, sealCoreManifest, sealWikiManifest, sessionEndJobsDirectory, takeSessionEndDiscoveryPage, updateSessionEndActionPayload, } from '../cleanup-manifest.js';
 const directories = [];
+beforeEach(() => {
+    const stateRoot = mkdtempSync(join(tmpdir(), 'omc-cleanup-state-'));
+    directories.push(stateRoot);
+    vi.stubEnv('OMC_STATE_DIR', stateRoot);
+});
 function project() {
     const directory = mkdtempSync(join(tmpdir(), 'omc-cleanup-manifest-'));
     directories.push(directory);
@@ -18,6 +23,7 @@ function preparedAndSealed(directory, sessionId = 'session-a') {
 afterEach(() => {
     for (const directory of directories.splice(0))
         rmSync(directory, { recursive: true, force: true });
+    vi.unstubAllEnvs();
 });
 describe('durable SessionEnd cleanup manifest', () => {
     it('serializes concurrent core/wiki producers and rejects a second worker claim', async () => {
@@ -76,6 +82,21 @@ describe('durable SessionEnd cleanup manifest', () => {
         writeFileSync(path, JSON.stringify(expiresAgain));
         expect(again?.owner).toBeTruthy();
         expect(reapStaleSessionEndOwner(directory, sessionId, 'reused-owner', 1, 'mismatch')?.owner).toBeNull();
+    });
+    it('binds payload enrichment to the captured armed runner rather than the current owner', () => {
+        const directory = project();
+        const sessionId = preparedAndSealed(directory, 'payload-authority');
+        const owner = claimSessionEndJob(directory, sessionId, 'owner', 'identity', Date.now() + 5_000);
+        const claimed = claimSessionEndAction(directory, sessionId, 'owner', 'foreground-cleanup', Date.now() + 5_000);
+        const action = claimed.actions['foreground-cleanup'];
+        const authority = { jobId: owner.jobId, actionName: 'foreground-cleanup', attempt: action.attempts, ownerNonce: 'owner', runnerNonce: action.runner.runnerNonce };
+        expect(updateSessionEndActionPayload(directory, sessionId, authority, ['callback'], { proof: 'early' })).toBeNull();
+        markSessionEndActionRunner(directory, sessionId, 'owner', 'foreground-cleanup', authority.runnerNonce, 'armed');
+        expect(updateSessionEndActionPayload(directory, sessionId, authority, ['callback'], { proof: 'valid' })).not.toBeNull();
+        for (const invalid of [{ ...authority, ownerNonce: 'stale-owner' }, { ...authority, runnerNonce: 'stale-runner' }, { ...authority, attempt: authority.attempt + 1 }, { ...authority, jobId: 'foreign-job' }]) {
+            expect(updateSessionEndActionPayload(directory, sessionId, invalid, ['callback'], { proof: 'forged' })).toBeNull();
+            expect(readSessionEndJob(directory, sessionId)?.actions.callback.payload.proof).toBe('valid');
+        }
     });
     it('persists action claim, runner arm, result, and terminality separately from discovery tickets', () => {
         const directory = project();

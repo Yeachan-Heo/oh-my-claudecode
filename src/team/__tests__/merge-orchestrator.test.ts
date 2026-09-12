@@ -5,7 +5,7 @@
 // the mocked exec*Sync surface.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
@@ -445,7 +445,6 @@ describe('commit watcher + auto-merge', () => {
       const branchA = `omc-team/demo-team/${sanitizeName('alice')}`;
       const branchB = `omc-team/demo-team/${sanitizeName('bob')}`;
       let aCount = 0;
-      let bCount = 0;
       on(
         (args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchA}`,
         () => {
@@ -456,7 +455,6 @@ describe('commit watcher + auto-merge', () => {
       on(
         (args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchB}`,
         () => {
-          bCount += 1;
           // Bob never advances — stays at the same sha.
           return 'b-sha-0\n';
         },

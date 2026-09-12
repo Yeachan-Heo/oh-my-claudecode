@@ -347,13 +347,11 @@ describe('commit watcher + auto-merge', () => {
             const branchA = `omc-team/demo-team/${sanitizeName('alice')}`;
             const branchB = `omc-team/demo-team/${sanitizeName('bob')}`;
             let aCount = 0;
-            let bCount = 0;
             on((args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchA}`, () => {
                 aCount += 1;
                 return aCount === 1 ? 'a-sha-0\n' : 'a-sha-1\n';
             });
             on((args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchB}`, () => {
-                bCount += 1;
                 // Bob never advances — stays at the same sha.
                 return 'b-sha-0\n';
             });

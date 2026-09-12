@@ -85,6 +85,8 @@ type GitTopLevelProbe = {
     status: 'probe_failed';
     detail: string;
 };
+/** Run project-identity lookups in an operation-local memo scope. */
+export declare function withProjectIdentifierScope<T>(fn: () => T): T;
 /**
  * Run path lookups in an isolated render scope.
  *

@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, normalize } from 'node:path';
 import { execFileSync } from 'node:child_process';
+function canonical(path) {
+    return realpathSync(path);
+}
 const RESOLVER = join(process.cwd(), 'skills', 'self-improve', 'scripts', 'resolve-paths.mjs');
 const VALIDATE = join(process.cwd(), 'skills', 'self-improve', 'scripts', 'validate.sh');
 function readJson(command, args) {
@@ -21,13 +24,13 @@ describe('self-improve path scoping helpers', () => {
         const result = readJson('node', [RESOLVER, '--project-root', root]);
         expect(result.topic_slug).toBe('default');
         expect(result.scope_mode).toBe('default-scoped');
-        expect(result.root).toBe(join(root, '.omc', 'self-improve', 'topics', 'default'));
+        expect(result.root).toBe(join(canonical(root), '.omc', 'self-improve', 'topics', 'default'));
     });
     it('uses a slugified topic-specific root when topic text is provided', () => {
         const result = readJson('node', [RESOLVER, '--project-root', root, '--topic', 'Latency & Throughput']);
         expect(result.topic_slug).toBe('latency-throughput');
         expect(result.scope_mode).toBe('topic-scoped');
-        expect(result.root).toBe(join(root, '.omc', 'self-improve', 'topics', 'latency-throughput'));
+        expect(result.root).toBe(join(canonical(root), '.omc', 'self-improve', 'topics', 'latency-throughput'));
     });
     it('falls back to the legacy flat root when legacy state already exists and no topic is provided', () => {
         const legacyConfigDir = join(root, '.omc', 'self-improve', 'config');
@@ -36,7 +39,7 @@ describe('self-improve path scoping helpers', () => {
         const result = readJson('node', [RESOLVER, '--project-root', root]);
         expect(result.topic_slug).toBe('default');
         expect(result.scope_mode).toBe('legacy-flat-root');
-        expect(result.root).toBe(join(root, '.omc', 'self-improve'));
+        expect(result.root).toBe(join(canonical(root), '.omc', 'self-improve'));
     });
     it('creates the resolved scoped directories when asked', () => {
         const result = readJson('node', [RESOLVER, '--project-root', root, '--slug', 'perf-track', '--ensure-dirs']);

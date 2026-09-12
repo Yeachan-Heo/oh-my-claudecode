@@ -31,12 +31,14 @@ describe('processSessionEndCleanupWorker python bridge cleanup', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-bridge-'));
+    vi.stubEnv('OMC_STATE_DIR', path.join(tmpDir, 'state-root'));
     transcriptPath = path.join(tmpDir, 'transcript.jsonl');
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('passes extracted python_repl sessions to cleanupBridgeSessions', async () => {

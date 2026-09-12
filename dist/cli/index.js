@@ -9,7 +9,7 @@
  * - config: Show or edit configuration
  * - setup: Sync all OMC components (hooks, agents, skills)
  */
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import chalk from 'chalk';
 import { join } from 'path';
 import { writeFileSync, existsSync } from 'fs';
@@ -37,6 +37,7 @@ import { interopCommand } from './interop.js';
 import { askCommand, ASK_USAGE } from './ask.js';
 import { graphCommand } from './graph.js';
 import { checkpointCommand } from './checkpoint.js';
+import { lookoutCommand } from './lookout.js';
 import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
 import { runHudWatchLoop } from './hud-watch.js';
@@ -1419,6 +1420,7 @@ program
  */
 program.addCommand(graphCommand());
 program.addCommand(checkpointCommand());
+program.addCommand(lookoutCommand());
 /**
  * Returns the fully-configured commander program.
  *
@@ -1437,6 +1439,21 @@ export function buildProgram() {
 // and child processes inherit VITEST from the parent vitest worker, which
 // would cause the CLI to silently exit with no output.
 if (!process.env.OMC_CLI_SKIP_PARSE) {
-    program.parse();
+    try {
+        program.parse();
+    }
+    catch (error) {
+        // Commands with an exitOverride (e.g. lookout remaps usage errors to 2)
+        // surface parse failures as CommanderError. Commander has already
+        // printed the message; honor the remapped exit code without a stack.
+        // Other commands keep commander's default process.exit behavior, and
+        // non-Commander errors stay fatal.
+        if (error instanceof CommanderError) {
+            process.exitCode = error.exitCode;
+        }
+        else {
+            throw error;
+        }
+    }
 }
 //# sourceMappingURL=index.js.map

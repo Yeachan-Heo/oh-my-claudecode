@@ -25,7 +25,7 @@ vi.mock('../../team/tmux-session.js', async (importOriginal) => {
 });
 
 const originalEnv = { ...process.env };
-
+const originalOmcStateDir = process.env.OMC_STATE_DIR;
 function parseResponseText(text: string): Record<string, unknown> {
   return JSON.parse(text) as Record<string, unknown>;
 }
@@ -54,6 +54,7 @@ describe('team-server artifact convergence + scoped cleanup', () => {
     previousUserProfile = process.env.USERPROFILE;
     process.env.HOME = testRoot;
     process.env.USERPROFILE = testRoot;
+    process.env.OMC_STATE_DIR = '';
     mkdirSync(jobsDir, { recursive: true });
   });
 
@@ -62,6 +63,8 @@ describe('team-server artifact convergence + scoped cleanup', () => {
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousUserProfile;
+    if (originalOmcStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = originalOmcStateDir;
     rmSync(testRoot, { recursive: true, force: true });
     process.env = { ...originalEnv };
     vi.clearAllMocks();
@@ -134,6 +137,8 @@ describe('team-server artifact convergence + scoped cleanup', () => {
 
     const jobId = 'omc-art3';
     const cwd = join(testRoot, 'workspace');
+    mkdirSync(cwd, { recursive: true });
+    execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'ignore' });
     const teamOneDir = teamStateDir(cwd, 'team-one');
     const teamTwoDir = teamStateDir(cwd, 'team-two');
 

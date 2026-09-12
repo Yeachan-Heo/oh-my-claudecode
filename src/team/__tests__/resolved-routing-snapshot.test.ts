@@ -18,7 +18,7 @@ const ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
 ];
 
-let savedEnv: Record<string, string | undefined> = {};
+const savedEnv: Record<string, string | undefined> = {};
 
 beforeAll(() => {
   for (const key of ENV_KEYS) {

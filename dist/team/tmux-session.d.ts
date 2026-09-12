@@ -251,6 +251,16 @@ export declare function deliverStartupInbox(context: StartupPaneContext, message
  *   copy mode, capture failure, selector, or the trigger text is gone).
  */
 export type StartupInboxResubmitOutcome = 'resubmitted' | 'pane_busy' | 'unavailable';
+/**
+ * Read-only observation of the pane after the startup trigger was delivered.
+ * `busy` is the only state that can extend the evidence wait; all other
+ * outcomes fail closed to the normal final recheck. This probe intentionally
+ * never inspects or mutates the input buffer, so it cannot resubmit Enter.
+ */
+export type StartupPaneActivity = 'busy' | 'idle' | 'dead' | 'unknown';
+export declare function probeStartupPaneActivity(context: StartupPaneContext, options?: {
+    attemptAlreadyFenced?: boolean;
+}): Promise<StartupPaneActivity>;
 export declare function retryStartupInboxSubmit(context: StartupPaneContext, message: string, options?: {
     attemptAlreadyFenced?: boolean;
 }): Promise<StartupInboxResubmitOutcome>;

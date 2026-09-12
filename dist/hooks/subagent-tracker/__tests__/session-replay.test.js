@@ -1,17 +1,25 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { getReplayFilePath, appendReplayEvent, recordAgentStart, recordAgentStop, recordToolEvent, recordFileTouch, recordIntervention, readReplayEvents, getReplaySummary, resetSessionStartTimes, } from '../session-replay.js';
 describe('session-replay', () => {
     let testDir;
+    const previousStateDir = process.env.OMC_STATE_DIR;
     beforeEach(() => {
         testDir = join(tmpdir(), `replay-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         mkdirSync(join(testDir, '.omc', 'state'), { recursive: true });
+        execFileSync('git', ['init', '--quiet'], { cwd: testDir, stdio: 'ignore' });
+        delete process.env.OMC_STATE_DIR;
         resetSessionStartTimes();
     });
     afterEach(() => {
         rmSync(testDir, { recursive: true, force: true });
+        if (previousStateDir === undefined)
+            delete process.env.OMC_STATE_DIR;
+        else
+            process.env.OMC_STATE_DIR = previousStateDir;
     });
     describe('getReplayFilePath', () => {
         it('should return correct path for session', () => {

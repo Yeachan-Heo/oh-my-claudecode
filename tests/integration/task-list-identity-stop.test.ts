@@ -33,6 +33,7 @@ function makeFixture(kind: 'mjs' | 'cjs' | 'template') {
     // install does and run the copied persistent-mode.mjs.
     const installed = join(dir, 'installed-hooks');
     cpSync(join(root, 'templates', 'hooks'), installed, { recursive: true });
+    execFileSync('npx', ['tsx', '-e', `import { provisionStandaloneStateLockBridge } from './src/installer/index.ts'; provisionStandaloneStateLockBridge(${JSON.stringify(root)}, ${JSON.stringify(join(installed, 'lib', 'state-lock.mjs'))});`], { cwd: root, stdio: 'inherit' });
     hook = join(installed, 'persistent-mode.mjs');
   }
 

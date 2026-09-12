@@ -63,19 +63,16 @@ describe('package.json prepare script removal', () => {
         expect(pkg.scripts.prepublishOnly).toContain('npm run build');
     });
 });
-describe('plugin-setup.mjs Ralph Ruby dependency guidance (issue #2969)', () => {
+describe('plugin-setup.mjs never probes Ruby (issue #3996)', () => {
     const scriptContent = existsSync(PLUGIN_SETUP_PATH)
         ? readFileSync(PLUGIN_SETUP_PATH, 'utf-8')
         : '';
-    it('checks for Ruby during plugin setup before Ralph workflows fail later', () => {
-        expect(scriptContent).toContain('checkRalphRubyDependency');
-        expect(scriptContent).toContain("execFileSync('ruby', ['--version']");
-        expect(scriptContent).toContain('Ruby was not found on PATH');
-    });
-    it('prints actionable install guidance for fresh Ubuntu users', () => {
-        expect(scriptContent).toContain('Ralph workflows require Ruby');
-        expect(scriptContent).toContain('sudo apt update && sudo apt install ruby-full');
-        expect(scriptContent).toContain('restart Claude Code');
+    it('does not probe Ruby or claim Ralph requires it', () => {
+        expect(scriptContent).not.toMatch(/\bruby\b/i);
+        expect(scriptContent).not.toContain('checkRalphRubyDependency');
+        expect(scriptContent).not.toContain('execFileSync');
+        expect(scriptContent).not.toContain('ruby-full');
+        expect(scriptContent).not.toContain('brew install ruby');
     });
 });
 describe('plugin-setup.mjs hook command portability', () => {

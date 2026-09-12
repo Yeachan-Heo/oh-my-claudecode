@@ -17,4 +17,5 @@ export { createProtocol, createChecklist, runVerification, checkEvidence, format
 export { decomposeTask, analyzeTask, identifyComponents, generateSubtasks, assignFileOwnership, identifySharedFiles, type TaskAnalysis, type Component, type Subtask, type SharedFile, type DecompositionResult, type ProjectContext, type TaskType, type ComponentRole, type FileOwnership, type DecompositionStrategy } from './task-decomposer/index.js';
 export { searchSessionHistory, parseSinceSpec, type SessionHistoryMatch, type SessionHistorySearchOptions, type SessionHistorySearchReport, } from './session-history-search/index.js';
 export { shortId, hasExplicitName, hasDescription, addressFor, listingLabel, notificationReference, resolveAgent, formatAgentList, SHORT_ID_LENGTH, type AgentStatus, type AddressableAgent, type MatchKind, type ResolveResult, type FormatAgentListOptions, } from './agent-addressability/index.js';
+export { LookoutError, resolveBriefArg, scanLookout, type LookoutConfidence, type LookoutFinding, type LookoutReport, type LookoutSeverity, type LookoutVerdict, type ScanLookoutOptions, } from './lookout/index.js';
 //# sourceMappingURL=index.d.ts.map

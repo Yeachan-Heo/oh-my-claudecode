@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getOmcRoot } from '../lib/worktree-paths.js';
 import { pathToFileURL } from 'node:url';
 
 const REPO_ROOT = process.cwd();
@@ -95,7 +96,7 @@ function configureDeferredAdapters(cwd: string): void {
 
 async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<void> {
   const callbackPath = join(cwd, 'callback.md');
-  const manifestPath = join(cwd, '.omc', 'state', 'session-end-jobs', `${sessionId}.json`);
+  const manifestPath = join(getOmcRoot(cwd), 'state', 'session-end-jobs', `${sessionId}.json`);
   let deadline = Date.now() + DETACHED_WORKER_CEILING_MS;
   const hardCeiling = Date.now() + DETACHED_WORKER_CEILING_MS * 2;
   let lastRevision = -1;
@@ -155,12 +156,17 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     for (const directory of tempDirs.splice(0)) {
       rmSync(directory, { recursive: true, force: true, maxRetries: 40, retryDelay: 25 });
     }
+    vi.unstubAllEnvs();
   });
 
   function createProject(): string {
     const cwd = mkdtempSync(join(homedir(), 'omc-session-end-process-exit-'));
     tempDirs.push(cwd);
+    vi.stubEnv('HOME', cwd);
+    vi.stubEnv('USERPROFILE', cwd);
+    vi.stubEnv('OMC_STATE_DIR', '');
     writeFileSync(join(cwd, 'transcript.jsonl'), '');
+    mkdirSync(getOmcRoot(cwd), { recursive: true });
     return cwd;
   }
 
@@ -189,7 +195,7 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     expectPromptExit(result);
 
     if (_name === 'session-end') {
-      const manifestPath = join(cwd, '.omc', 'state', 'session-end-jobs', `${sessionId}.json`);
+      const manifestPath = join(getOmcRoot(cwd), 'state', 'session-end-jobs', `${sessionId}.json`);
       const deadline = Date.now() + (IS_CI ? 1_000 : 250);
       while (!existsSync(manifestPath) && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -265,7 +271,13 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
       },
     );
     expectPromptExit(result);
-    const manifest = JSON.parse(readFileSync(join(cwd, '.omc', 'state', 'session-end-jobs', 'configured-network-routing.json'), 'utf8')) as { actions: Record<string, { phase: string }> };
+    const manifestPath = join(getOmcRoot(cwd), 'state', 'session-end-jobs', 'configured-network-routing.json');
+    const publicationDeadline = Date.now() + 2_000;
+    while (!existsSync(manifestPath) && Date.now() < publicationDeadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(existsSync(manifestPath)).toBe(true);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { actions: Record<string, { phase: string }> };
     expect(manifest.actions.callback.phase).toBe('deferred-best-effort');
     expect(manifest.actions.notification.phase).toBe('deferred-best-effort');
   });
@@ -273,9 +285,9 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
   it.skipIf(!HAS_GENERATED_DIST)('wiki-session-end exits without waiting for a live wiki lock', async () => {
     const cwd = createProject();
     configureDeferredAdapters(cwd);
-    const wikiDir = join(cwd, '.omc', 'wiki');
+    const wikiDir = join(getOmcRoot(cwd), 'wiki');
     mkdirSync(wikiDir, { recursive: true });
-    writeFileSync(join(cwd, '.omc', '.omc-config.json'), JSON.stringify({ wiki: { autoCapture: true } }));
+    writeFileSync(join(getOmcRoot(cwd), '.omc-config.json'), JSON.stringify({ wiki: { autoCapture: true } }));
     writeFileSync(join(wikiDir, '.wiki-lock.lock'), JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
 
     const result = await runUntilClose(

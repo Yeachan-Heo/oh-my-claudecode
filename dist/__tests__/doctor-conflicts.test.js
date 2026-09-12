@@ -706,7 +706,7 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
         const collisions = checkLegacySkills();
         expect(collisions).toHaveLength(0);
     });
-    it('does NOT flag setup-installed omc-reference fallback when it matches CLAUDE_PLUGIN_ROOT (issue #2992)', () => {
+    it('flags setup-installed omc-reference fallback when an active plugin root is present', () => {
         const currentContent = '# Current omc-reference skill\n';
         const sessionContent = '# Session root omc-reference skill\n';
         const sessionPluginRoot = join(TEST_PROJECT_DIR, 'session-plugin-root');
@@ -715,9 +715,10 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
         process.env.CLAUDE_PLUGIN_ROOT = sessionPluginRoot;
         const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
         mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
-        writeFileSync(join(skillsDir, 'omc-reference', 'SKILL.md'), sessionContent);
+        const installedPath = join(skillsDir, 'omc-reference');
+        writeFileSync(join(installedPath, 'SKILL.md'), sessionContent);
         const collisions = checkLegacySkills();
-        expect(collisions).toHaveLength(0);
+        expect(collisions).toEqual([{ name: 'omc-reference', path: installedPath }]);
     });
     it('flags user-modified omc-reference fallback content as a real collision (issue #2992)', () => {
         writeCanonicalOmcReferenceSkill('# Canonical omc-reference skill\n');
@@ -746,6 +747,37 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
         const report = runConflictCheck();
         expect(report.legacySkills).toHaveLength(0);
         expect(report.hasConflicts).toBe(false);
+    });
+    it('does not flag an unchanged marker-owned standalone skill without an active plugin', () => {
+        const canonicalContent = '# Canonical autopilot skill\n';
+        mkdirSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot'), { recursive: true });
+        writeFileSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot', 'SKILL.md'), canonicalContent);
+        const installedDir = join(TEST_CLAUDE_DIR, 'skills', 'autopilot');
+        mkdirSync(installedDir, { recursive: true });
+        writeFileSync(join(installedDir, 'SKILL.md'), canonicalContent);
+        writeFileSync(join(installedDir, '.omc-managed'), 'omc-managed\n');
+        expect(checkLegacySkills()).toEqual([]);
+    });
+    it('flags marker-owned skills when the content was modified', () => {
+        const canonicalContent = '# Canonical autopilot skill\n';
+        mkdirSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot'), { recursive: true });
+        writeFileSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot', 'SKILL.md'), canonicalContent);
+        const installedDir = join(TEST_CLAUDE_DIR, 'skills', 'autopilot');
+        mkdirSync(installedDir, { recursive: true });
+        writeFileSync(join(installedDir, 'SKILL.md'), `${canonicalContent}user edit\n`);
+        writeFileSync(join(installedDir, '.omc-managed'), 'omc-managed\n');
+        expect(checkLegacySkills()).toEqual([{ name: 'autopilot', path: installedDir }]);
+    });
+    it('keeps marker-owned skills visible when an OMC plugin is active', () => {
+        const canonicalContent = '# Canonical autopilot skill\n';
+        mkdirSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot'), { recursive: true });
+        writeFileSync(join(TEST_DIRS.builtinSkillsDir, 'autopilot', 'SKILL.md'), canonicalContent);
+        const installedDir = join(TEST_CLAUDE_DIR, 'skills', 'autopilot');
+        mkdirSync(installedDir, { recursive: true });
+        writeFileSync(join(installedDir, 'SKILL.md'), canonicalContent);
+        writeFileSync(join(installedDir, '.omc-managed'), 'omc-managed\n');
+        writeFileSync(join(TEST_CLAUDE_DIR, 'settings.json'), JSON.stringify({ enabledPlugins: ['oh-my-claudecode@omc'] }));
+        expect(checkLegacySkills()).toEqual([{ name: 'autopilot', path: installedDir }]);
     });
     it('reports hasConflicts when legacy skills collide (issue #1101)', () => {
         const skillsDir = join(TEST_CLAUDE_DIR, 'skills');

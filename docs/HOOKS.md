@@ -47,7 +47,7 @@ Handle orchestration, keyword detection, and mode persistence.
 | Hook | Description |
 |------|-------------|
 | keyword-detector | Detects magic keywords and activates corresponding skills |
-| persistent-mode | Enforces continuation when an active execution mode (ralph, autopilot, ultragoal, or team) is active — injects reinforcement messages on Stop to prevent premature halting |
+| persistent-mode | Enforces continuation when an execution mode (ralph, autopilot, team, etc.) is active — injects reinforcement messages on Stop to prevent premature halting |
 
 ### Context Management Hooks
 
@@ -101,7 +101,7 @@ Fires when the user submits a prompt.
 | `keyword-detector.mjs` | Detects magic keywords and invokes the corresponding skill | 30s outer host fuse; 8s trusted Worker limit |
 | `skill-injector.mjs` | Injects skill prompts | 30s outer host fuse; 12s trusted Worker limit |
 
-Runs on all user input (`matcher: "*"`). When the keyword detector finds supported keywords such as "ralph", "autopilot", "ralplan", or "deep interview", it injects the corresponding skill invocation instruction via `additionalContext`.
+Runs on all user input (`matcher: "*"`). When the keyword detector finds keywords like "ralph" or "autopilot", it injects the corresponding skill invocation instruction via `additionalContext`. Parallel work is invoked explicitly with `/oh-my-claudecode:team` and is not auto-detected.
 
 The 30s timeout is a per-command outer host fuse that includes launcher startup before `run.cjs`. Once the runner reaches its exact trusted Worker branch, `keyword-detector.mjs` is limited to 8s and `skill-injector.mjs` to 12s; lower manifest limits are never extended. A command that never reaches `run.cjs` can consume its full 30s outer fuse. The host schedules the two commands externally, so this does not claim an aggregate prompt latency.
 
@@ -201,7 +201,7 @@ Fires when Claude finishes a response.
 |--------|------|---------|
 | `context-guard-stop.mjs` | Monitors context usage | 5s |
 | `workflow-drift-guard.mjs` | Blocks narrow structured-question and fake-completion drift | 3s |
-| `persistent-mode.mjs` | Maintains active mode state (ralph, autopilot, ultragoal, team, etc.) | 10s |
+| `persistent-mode.mjs` | Maintains active mode state (ralph, team, etc.) | 10s |
 | `code-simplifier.mjs` | Auto-simplifies modified files (opt-in) | 5s |
 
 `persistent-mode` injects a reinforcement message like "The boulder never stops" when an active execution mode is running, prompting continued work. A fresh unconfirmed ultragoal is exempt while Claude `/goal` confirmation is pending; confirmed runs remain fail-closed.
@@ -228,7 +228,7 @@ Detects magic keywords in user prompts and invokes the corresponding skill.
 
 - **Event**: UserPromptSubmit
 - **Behavior**: Sanitizes the prompt (removes code blocks, URLs, file paths) then matches keyword patterns
-- **Conflict resolution**: cancel has highest priority, then ralph > autopilot > ralplan
+- **Conflict resolution**: cancel has highest priority, then ralph > autopilot
 
 - **Safety**: Disabled inside team workers to prevent infinite spawning
 
@@ -263,17 +263,17 @@ Ambiguous-regex and malformed-ternary uncertainty is bounded to the current phys
 
 #### persistent-mode
 
-Enforces continuation when an execution mode is active. This is the hook that keeps skills like autopilot and ralph running.
+Enforces continuation when an execution mode is active. This is the hook that keeps skills like autopilot, ralph, and team running.
 
 - **Event**: Stop
-- **Behavior**: Checks `.omc/state/` for active mode state files. If any mode (ralph, ultragoal, autopilot, or team) is active, injects a reinforcement message to prevent Claude from stopping.
+- **Behavior**: Checks `.omc/state/` for active mode state files. If any current mode (ralph, ultragoal, autopilot, team) or legacy/retired state (ultrawork, pipeline) is active, injects a reinforcement message to prevent Claude from stopping.
 
 - **Reinforcement message**: "The boulder never stops" — prompts Claude to continue working
 - **Staleness check**: States older than 2 hours are treated as inactive to prevent stale state from blocking new sessions
 - **Notification**: Sends Discord/Telegram/Slack notification on first stop (if configured)
 - **Cancel**: Use `/oh-my-claudecode:cancel` to deactivate modes
 
-> **Note**: autopilot and ralph are **skills** (invoked via keyword-detector), while team and ultragoal are explicit workflow invocations. The persistent-mode hook is what enforces their continuation by blocking the Stop event.
+> **Note**: autopilot, ralph, and team are **skills** (invoked through their current skill surfaces), not hooks. Legacy/retired `ultrawork` and `pipeline` state is cleanup-only and must never be invoked or reactivated. The persistent-mode hook enforces continuation by blocking the Stop event.
 
 ### Mode State Management
 
@@ -320,7 +320,7 @@ or
 /oh-my-claudecode:cancel
 ```
 
-`cancel` removes state files for all active modes, including ralph, autopilot, ultragoal, and team, and clears legacy retired-mode artifacts when present.
+`cancel` removes state files for all active modes: ralph, autopilot, team, and any others; it also clears legacy/retired `ultrawork` state.
 
 
 ---

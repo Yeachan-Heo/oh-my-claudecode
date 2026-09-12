@@ -16,13 +16,13 @@ vi.mock('child_process', async () => {
     const actual = await vi.importActual('child_process');
     return {
         ...actual,
-        execSync: vi.fn(),
+        execFileSync: vi.fn(),
         spawnSync: vi.fn(),
         spawn: vi.fn(),
     };
 });
 import { getUsage } from '../../hud/usage-api.js';
-import { execSync, spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { checkRateLimitStatus, analyzePaneContent, scanForBlockedPanes, formatDaemonState, shouldMonitorBlockedPanes, } from '../../features/rate-limit-wait/index.js';
 describe('Rate Limit Wait Integration Tests', () => {
     const testDir = join(tmpdir(), 'omc-integration-test-' + Date.now());
@@ -353,7 +353,7 @@ Assistant: I can help with more tasks.
                 pid: 1234,
                 output: [],
             });
-            vi.mocked(execSync).mockReturnValue('malformed output without proper format');
+            vi.mocked(execFileSync).mockReturnValue('malformed output without proper format');
             // Should not throw, just return empty
             const blocked = scanForBlockedPanes();
             expect(blocked).toEqual([]);

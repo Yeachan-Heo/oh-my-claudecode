@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
+import { execFileSync } from 'node:child_process';
 import * as os from 'os';
 import * as path from 'path';
 const workerMocks = vi.hoisted(() => ({
@@ -20,15 +21,24 @@ import { processSessionEnd, resolveSessionEndCleanupBudgetMs } from '../index.js
 import { readSessionEndJob } from '../cleanup-manifest.js';
 describe('SessionEnd foreground manifest handoff (issue #1700)', () => {
     let tmpDir;
+    let repoRoot;
     let transcriptPath;
+    let stateRoot;
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-timeout-'));
+        repoRoot = path.join(tmpDir, 'repo');
+        fs.mkdirSync(repoRoot, { recursive: true });
+        execFileSync('git', ['init', '--quiet'], { cwd: repoRoot, stdio: 'ignore' });
+        stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-state-'));
+        vi.stubEnv('OMC_STATE_DIR', stateRoot);
         transcriptPath = path.join(tmpDir, 'transcript.jsonl');
         fs.writeFileSync(transcriptPath, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } }), 'utf-8');
         vi.clearAllMocks();
     });
     afterEach(() => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
+        vi.unstubAllEnvs();
     });
     it('keeps the SessionEnd manifest timeout at least 30 seconds', () => {
         const hooksJsonPath = path.resolve(__dirname, '../../../../hooks/hooks.json');
@@ -45,14 +55,14 @@ describe('SessionEnd foreground manifest handoff (issue #1700)', () => {
         await expect(processSessionEnd({
             session_id: sessionId,
             transcript_path: transcriptPath,
-            cwd: tmpDir,
+            cwd: repoRoot,
             permission_mode: 'default',
             hook_event_name: 'SessionEnd',
             reason: 'clear',
         })).resolves.toEqual({ continue: true });
         expect(Date.now() - startedAt).toBeLessThanOrEqual(500);
-        expect(workerMocks.spawnSessionEndWorker).toHaveBeenCalledWith({ directory: tmpDir, sessionId });
-        const manifest = readSessionEndJob(tmpDir, sessionId);
+        expect(workerMocks.spawnSessionEndWorker).toHaveBeenCalledWith({ directory: repoRoot, sessionId });
+        const manifest = readSessionEndJob(repoRoot, sessionId);
         expect(manifest).toEqual(expect.objectContaining({
             sessionId,
             producers: expect.objectContaining({ core: expect.objectContaining({ state: 'sealed' }) }),

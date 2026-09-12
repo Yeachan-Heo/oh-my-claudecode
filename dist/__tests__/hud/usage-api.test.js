@@ -361,6 +361,7 @@ describe('getUsage routing', () => {
         // Reset env
         delete process.env.ANTHROPIC_BASE_URL;
         delete process.env.ANTHROPIC_AUTH_TOKEN;
+        delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
         // Get the mocked https module for assertions
         httpsModule = await import('https');
     });
@@ -373,6 +374,81 @@ describe('getUsage routing', () => {
         expect(result.error).toBe('no_credentials');
         // No network call should be made without credentials
         expect(httpsModule.default.request).not.toHaveBeenCalled();
+    });
+    it('prefers CLAUDE_CODE_OAUTH_TOKEN over Keychain and uses it as the Bearer token', async () => {
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-oauth-token';
+        let capturedAuth;
+        httpsModule.default.request.mockImplementationOnce((options, callback) => {
+            capturedAuth = options?.headers?.Authorization;
+            const req = new EventEmitter();
+            req.destroy = vi.fn();
+            req.end = () => {
+                const res = new EventEmitter();
+                res.statusCode = 200;
+                callback(res);
+                res.emit('data', JSON.stringify({
+                    five_hour: { utilization: 20 },
+                    seven_day: { utilization: 40 },
+                }));
+                res.emit('end');
+            };
+            return req;
+        });
+        const result = await getUsage();
+        // Usage is fetched successfully using the env token...
+        expect(result).toEqual({
+            rateLimits: {
+                fiveHourPercent: 20,
+                weeklyPercent: 40,
+                fiveHourResetsAt: null,
+                weeklyResetsAt: null,
+            },
+        });
+        // ...sent as the Bearer credential...
+        expect(capturedAuth).toBe('Bearer env-oauth-token');
+        // ...and the Keychain is never consulted (the env override short-circuits it).
+        expect(vi.mocked(childProcess.execFileSync)).not.toHaveBeenCalled();
+    });
+    it('does not reuse Anthropic usage cache data across env OAuth tokens', async () => {
+        const cachePath = '/tmp/test-claude/plugins/oh-my-claudecode/.usage-cache-anthropic.json';
+        let cacheContent = '{}';
+        const capturedAuth = [];
+        vi.mocked(fs.existsSync).mockImplementation(path => String(path) === cachePath);
+        vi.mocked(fs.readFileSync).mockImplementation(path => {
+            if (String(path) === cachePath)
+                return cacheContent;
+            return '{}';
+        });
+        vi.mocked(fs.writeFileSync).mockImplementation((path, content) => {
+            if (String(path) === cachePath)
+                cacheContent = String(content);
+        });
+        const mockUsageResponse = (fiveHourPercent) => {
+            httpsModule.default.request.mockImplementationOnce((options, callback) => {
+                capturedAuth.push(options.headers?.Authorization ?? '');
+                const req = new EventEmitter();
+                req.destroy = vi.fn();
+                req.end = () => {
+                    const res = new EventEmitter();
+                    res.statusCode = 200;
+                    callback(res);
+                    res.emit('data', JSON.stringify({ five_hour: { utilization: fiveHourPercent } }));
+                    res.emit('end');
+                };
+                return req;
+            });
+        };
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token-one';
+        mockUsageResponse(10);
+        const first = await getUsage();
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token-two';
+        mockUsageResponse(80);
+        const second = await getUsage();
+        expect(first.rateLimits?.fiveHourPercent).toBe(10);
+        expect(second.rateLimits?.fiveHourPercent).toBe(80);
+        expect(capturedAuth).toEqual(['Bearer env-token-one', 'Bearer env-token-two']);
+        expect(cacheContent).not.toContain('env-token-one');
+        expect(cacheContent).not.toContain('env-token-two');
     });
     it('uses the raw ~-prefixed CLAUDE_CONFIG_DIR value for Keychain service lookup', async () => {
         process.env.CLAUDE_CONFIG_DIR = '~/.claude-personal';

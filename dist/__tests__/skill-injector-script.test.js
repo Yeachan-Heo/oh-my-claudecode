@@ -2,8 +2,10 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { provisionStandaloneStateLockBridge } from '../installer/index.js';
 import { afterEach, describe, expect, it } from 'vitest';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'skill-injector.mjs');
+const PACKAGE_ROOT = process.cwd();
 const NODE = process.execPath;
 const tempDirs = [];
 function makeTempDir(prefix) {
@@ -119,6 +121,7 @@ Write concise release notes.`);
         const libDir = join(scriptsDir, 'lib');
         mkdirSync(libDir, { recursive: true });
         mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
+        provisionStandaloneStateLockBridge(PACKAGE_ROOT, join(libDir, 'state-lock.mjs'));
         for (const file of ['config-dir.mjs', 'stdin.mjs', 'atomic-write.mjs']) {
             writeFileSync(join(libDir, file), readFileSync(join(process.cwd(), 'scripts', 'lib', file)));
         }

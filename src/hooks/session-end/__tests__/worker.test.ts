@@ -11,6 +11,15 @@ const actions = vi.hoisted(() => ({
   runSessionEndNotifications: vi.fn(async () => undefined),
   runSessionEndOpenClaw: vi.fn(async () => undefined),
   runForegroundSessionEndCleanup: vi.fn(async () => undefined),
+  exportSessionSummary: vi.fn(() => undefined),
+  prepareSessionEndWorkerInput: vi.fn(async (_directory: string, input: Record<string, unknown>) => ({
+    transcriptPath: input.transcript_path,
+    cwd: input.cwd,
+    reason: input.reason,
+    input,
+    metrics: { session_id: (input as { session_id?: string }).session_id, reason: input.reason },
+    initialTeamNames: [],
+  })),
 }));
 const processIdentity = vi.hoisted(() => ({
   getProcessStartIdentity: vi.fn(async () => 'test-process-start'),

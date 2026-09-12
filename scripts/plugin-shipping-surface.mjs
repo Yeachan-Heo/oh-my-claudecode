@@ -410,8 +410,9 @@ function moduleReferences(source, repoPath) {
 }
 
 function resolveLocalReference(root, importer, specifier) {
-  const base = resolve(dirname(join(root, importer)), specifier);
-  if (!isInside(realpathSync(root), base)) fail(`runtime import escapes package root: ${importer} -> ${specifier}`);
+  const canonicalRoot = realpathSync(root);
+  const base = resolve(dirname(join(canonicalRoot, importer)), specifier);
+  if (!isInside(canonicalRoot, base)) fail(`runtime import escapes package root: ${importer} -> ${specifier}`);
   const candidates = [];
   if (isDeclarationPath(importer) && MODULE_EXTENSIONS.has(extname(base))) {
     candidates.push(`${base.slice(0, -extname(base).length)}${DECLARATION_EXTENSION}`);
@@ -423,7 +424,7 @@ function resolveLocalReference(root, importer, specifier) {
   }
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue;
-    const repoPath = normalizeRepoPath(relative(root, candidate).split(sep).join('/'), 'resolved runtime dependency');
+    const repoPath = normalizeRepoPath(relative(canonicalRoot, candidate).split(sep).join('/'), 'resolved runtime dependency');
     containedRegularFile(root, repoPath, `runtime dependency ${importer} -> ${specifier}`);
     return repoPath;
   }

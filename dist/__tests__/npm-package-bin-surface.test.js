@@ -226,9 +226,9 @@ describe("npm package bin surface regression", () => {
         const source = readFileSync(join(PACKAGE_ROOT, "src", "lib", "worktree-paths.ts"), "utf-8");
         const packedDist = readFileSync(join(packedPackageFixture.extractedPackageRoot, "dist", "lib", "worktree-paths.js"), "utf-8");
         expect(packedPackageFixture.files.has("dist/lib/worktree-paths.js")).toBe(true);
-        expect(source.match(/windowsHide/g)).toHaveLength(7);
+        expect(source.match(/windowsHide/g)).toHaveLength(8);
         expect(packedDist).not.toContain("execSync(");
-        expect(packedDist.match(/windowsHide: true/g)).toHaveLength(7);
+        expect(packedDist.match(/windowsHide: true/g)).toHaveLength(8);
         expect(packedDist).toContain("gitTopLevelCacheMap");
     });
     it("packs the complete source-controlled plugin and hook payload", () => {

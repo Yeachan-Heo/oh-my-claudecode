@@ -6,7 +6,7 @@ import { getOMCConfig } from '../../features/auto-update.js';
 import { buildConfigFromEnv, getEnabledPlatforms, getNotificationConfig } from '../../notifications/config.js';
 import type { NotificationPlatform } from '../../notifications/types.js';
 import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js';
-import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath } from '../../lib/worktree-paths.js';
+import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath, withProjectIdentifierScope } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { canClearStateForSession, clearModeStateFile, clearStateFileLockedIf, readModeStateWithMeta } from '../../lib/mode-state-io.js';
 import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob, sealWikiManifest } from './cleanup-manifest.js';
@@ -660,7 +660,7 @@ function extractTeamNameFromState(state: Record<string, unknown> | null): string
   return normalizeSessionEndTeamName(state.team_name ?? state.teamName);
 }
 
-async function findSessionOwnedTeams(directory: string, sessionId: string): Promise<string[]> {
+export async function findSessionOwnedTeams(directory: string, sessionId: string): Promise<string[]> {
   const teamNames = new Set<string>();
   const teamState = readModeStateWithMeta<Record<string, unknown>>('team', directory, sessionId);
   const stateTeamName = canClearStateForSession(teamState, sessionId)
@@ -887,6 +887,12 @@ export async function runForegroundSessionEndCleanup(directory: string, sessionI
   return outcome;
 }
 
+export async function prepareSessionEndWorkerInput(directory: string, input: SessionEndInput): Promise<Record<string, unknown>> {
+  const metrics = recordSessionMetrics(directory, input);
+  const teamNames = await findSessionOwnedTeams(directory, input.session_id);
+  return { transcriptPath: input.transcript_path, cwd: input.cwd, reason: input.reason, input, metrics, initialTeamNames: teamNames };
+}
+
 /** Foreground path: only durable local state and worker launch; deferred adapters are worker-owned. */
 function buildDurableSessionEndPayload(directory: string, input: SessionEndInput, metrics: SessionMetrics): Record<string, unknown> {
   const teamState = readModeStateWithMeta<Record<string, unknown>>('team', directory, input.session_id);
@@ -907,26 +913,28 @@ function buildDurableSessionEndPayload(directory: string, input: SessionEndInput
 }
 
 export async function processSessionEnd(input: SessionEndInput): Promise<HookOutput> {
-  const directory = resolveToWorktreeRoot(input.cwd);
+  return withProjectIdentifierScope(async () => {
+    const directory = resolveToWorktreeRoot(input.cwd);
 
-  // Stale-unfinished-PRD warning (#3669): surface the divergence at session end
-  // BEFORE mode-state cleanup removes the ralph state (the abnormal-exit
-  // signal). Never blocks session end.
-  const stalePrdWarning = getSessionEndStalePrdWarning(directory, input.session_id);
-  if (stalePrdWarning) {
-    console.warn(stalePrdWarning);
-  }
+    // Stale-unfinished-PRD warning (#3669): surface the divergence at session end
+    // BEFORE mode-state cleanup removes the ralph state (the abnormal-exit
+    // signal). Never blocks session end.
+    const stalePrdWarning = getSessionEndStalePrdWarning(directory, input.session_id);
+    if (stalePrdWarning) {
+      console.warn(stalePrdWarning);
+    }
 
-  const metrics = recordSessionMetrics(directory, input);
-  const payload = buildDurableSessionEndPayload(directory, input, metrics);
-  const manifest = prepareCoreManifest(directory, input.session_id, payload);
-  if (!manifest) return { continue: true };
-  exportSessionSummary(directory, metrics);
-  let foregroundOutcome: Record<string, unknown>;
-  try { foregroundOutcome = await runForegroundSessionEndCleanup(directory, input.session_id, false); } catch { return { continue: true }; }
-  const sealed = completeForegroundCleanupAndSealCore(directory, input.session_id, foregroundOutcome);
-  if (sealed) spawnSessionEndWorker({ directory, sessionId: input.session_id });
-  return { continue: true };
+    const metrics = recordSessionMetrics(directory, input);
+    const payload = buildDurableSessionEndPayload(directory, input, metrics);
+    const manifest = prepareCoreManifest(directory, input.session_id, payload);
+    if (!manifest) return { continue: true };
+    exportSessionSummary(directory, metrics);
+    let foregroundOutcome: Record<string, unknown>;
+    try { foregroundOutcome = await runForegroundSessionEndCleanup(directory, input.session_id, false); } catch { return { continue: true }; }
+    const sealed = completeForegroundCleanupAndSealCore(directory, input.session_id, foregroundOutcome);
+    if (sealed) spawnSessionEndWorker({ directory, sessionId: input.session_id });
+    return { continue: true };
+  });
 }
 
 /** Wiki producer has no foreground lock or write; it only seals a durable capture/no-op intent. */

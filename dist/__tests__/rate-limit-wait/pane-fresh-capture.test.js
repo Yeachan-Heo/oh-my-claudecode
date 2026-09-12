@@ -23,7 +23,6 @@ function noStateFile() {
 /** Set up fs mock so state file contains the given pane positions. */
 function withStateFile(positions) {
     vi.mocked(existsSync).mockReturnValue(true);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     vi.mocked(readFileSync).mockReturnValue(JSON.stringify(positions));
 }
 /** Queue tmuxExec to return history_size then (optionally) captured lines. */

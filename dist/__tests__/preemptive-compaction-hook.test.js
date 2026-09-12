@@ -126,7 +126,7 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
             tool_response: 'read output',
         }, env);
         expect(first.hookSpecificOutput).toBeDefined();
-        expect(second).toEqual({ continue: true, suppressOutput: true });
+        expect(second).toEqual({ continue: true });
     });
     it('does not let one session suppress another session in the same repo', () => {
         const dir = makeTempDir();
@@ -289,7 +289,7 @@ describe('post-tool-verifier Write/Edit response envelopes', () => {
                 content: longFailureProse,
             },
         }, { OMC_QUIET: '2' });
-        expect(result).toEqual({ continue: true, suppressOutput: true });
+        expect(result).toEqual({ continue: true });
     });
     it('trusts Edit success markers extracted from object response message before JSON stringify analysis', () => {
         const result = runPostToolVerifier({
@@ -301,7 +301,7 @@ describe('post-tool-verifier Write/Edit response envelopes', () => {
                 content: longFailureProse,
             },
         }, { OMC_QUIET: '2' });
-        expect(result).toEqual({ continue: true, suppressOutput: true });
+        expect(result).toEqual({ continue: true });
     });
     it('keeps real plain string Write failures failing', () => {
         const result = runPostToolVerifier({

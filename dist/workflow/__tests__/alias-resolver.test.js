@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { resolveWorkflowAlias, resolveWorkflowAliasViaRegistry, normalizeWorkflowInput, formatAliasWarning, isResolverEnabled, isWarningOptedOut, shouldEmitWarning, markWarningEmitted, maybeGetAliasWarning, getAliasMapping, getDiagnostics, recordAliasTelemetry, readUsageReceipts, readTelemetryTail, clearAliasTelemetryForTests, clearAliasWarningsForTests, ALIAS_REGISTRY, TIER0_WORKFLOWS, } from '../alias-resolver.js';
@@ -193,28 +194,29 @@ describe('alias-resolver — automation opt-out', () => {
         const worktreeRoot = mkdtempSync(join(tmpdir(), 'alias-optout-'));
         const sessionId = '00000000-0000-4000-a000-000000000000';
         const sidSafe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
-        // ensure worktree root looks git-like so getOmcRoot resolves under it, but alias-resolver uses worktreeRoot param
-        // We just exercise the file path directly via worktreeRoot override
+        const previousStateDir = process.env.OMC_STATE_DIR;
         try {
-            // without opt-out, first call emits
+            execFileSync('git', ['init', '--quiet'], { cwd: worktreeRoot, stdio: 'ignore' });
+            delete process.env.OMC_STATE_DIR;
             delete process.env.OMC_QUIET;
             const res = resolveWorkflowAlias('psm');
             const w1 = maybeGetAliasWarning(res, sidSafe, worktreeRoot);
             expect(w1).not.toBe(null);
-            // second call for same alias/session is suppressed
             const w2 = maybeGetAliasWarning(res, sidSafe, worktreeRoot);
             expect(w2).toBe(null);
-            // but a different alias still emits
             const res2 = resolveWorkflowAlias('release');
             const w3 = maybeGetAliasWarning(res2, sidSafe, worktreeRoot);
             expect(w3).not.toBe(null);
-            // opt-out suppresses even first warning for a fresh alias
             process.env.OMC_QUIET = '1';
             const res3 = resolveWorkflowAlias('verify');
             const w4 = maybeGetAliasWarning(res3, sidSafe, worktreeRoot);
             expect(w4).toBe(null);
         }
         finally {
+            if (previousStateDir === undefined)
+                delete process.env.OMC_STATE_DIR;
+            else
+                process.env.OMC_STATE_DIR = previousStateDir;
             rmSync(worktreeRoot, { recursive: true, force: true });
             delete process.env.OMC_QUIET;
         }

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../../cli/tmux-utils.js', () => ({
   tmuxExec: vi.fn(async () => ({ stdout: '', stderr: '', code: 0 })),

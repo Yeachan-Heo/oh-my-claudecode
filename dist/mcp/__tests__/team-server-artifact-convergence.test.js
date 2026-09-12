@@ -22,6 +22,7 @@ vi.mock('../../team/tmux-session.js', async (importOriginal) => {
     };
 });
 const originalEnv = { ...process.env };
+const originalOmcStateDir = process.env.OMC_STATE_DIR;
 function parseResponseText(text) {
     return JSON.parse(text);
 }
@@ -45,6 +46,7 @@ describe('team-server artifact convergence + scoped cleanup', () => {
         previousUserProfile = process.env.USERPROFILE;
         process.env.HOME = testRoot;
         process.env.USERPROFILE = testRoot;
+        process.env.OMC_STATE_DIR = '';
         mkdirSync(jobsDir, { recursive: true });
     });
     afterEach(() => {
@@ -56,6 +58,10 @@ describe('team-server artifact convergence + scoped cleanup', () => {
             delete process.env.USERPROFILE;
         else
             process.env.USERPROFILE = previousUserProfile;
+        if (originalOmcStateDir === undefined)
+            delete process.env.OMC_STATE_DIR;
+        else
+            process.env.OMC_STATE_DIR = originalOmcStateDir;
         rmSync(testRoot, { recursive: true, force: true });
         process.env = { ...originalEnv };
         vi.clearAllMocks();
@@ -102,6 +108,8 @@ describe('team-server artifact convergence + scoped cleanup', () => {
         const { handleCleanup } = await importTeamServerWithJobsDir(jobsDir);
         const jobId = 'omc-art3';
         const cwd = join(testRoot, 'workspace');
+        mkdirSync(cwd, { recursive: true });
+        execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'ignore' });
         const teamOneDir = teamStateDir(cwd, 'team-one');
         const teamTwoDir = teamStateDir(cwd, 'team-two');
         mkdirSync(teamOneDir, { recursive: true });

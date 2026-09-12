@@ -15,7 +15,7 @@ import { getPrimaryKeyword } from '../hooks/keyword-detector/index.js';
 /**
  * Keyword mode types, which are independent of shipped skill files.
  */
-const TIER0_KEYWORD_MODES = ['team', 'ralph', 'autopilot'] as const;
+type Tier0KeywordMode = 'team' | 'ralph' | 'autopilot';
 
 /** Skills that must exist as canonical unprefixed entries in the catalog. */
 const TIER0_SKILLS = ['team', 'execute', 'ultragoal', 'autopilot'] as const;
@@ -51,7 +51,7 @@ describe('Tier-0 contract: keyword routing fidelity', () => {
   it('routes canonical trigger words to their canonical mode types', () => {
     // Team keyword detection disabled — team is now explicit-only via /team skill
     // to prevent infinite spawning in team workers
-    const cases: Array<{ prompt: string; expected: (typeof TIER0_KEYWORD_MODES)[number] }> = [
+    const cases: Array<{ prompt: string; expected: Tier0KeywordMode }> = [
       { prompt: 'autopilot build a dashboard', expected: 'autopilot' },
       { prompt: 'ralph finish this refactor', expected: 'ralph' },
     ];

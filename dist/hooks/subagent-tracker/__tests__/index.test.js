@@ -10,6 +10,7 @@ import { readMissionBoardState } from "../../../hud/mission-board.js";
 import { readReplayEvents, getReplaySummary } from "../session-replay.js";
 describe("subagent-tracker", () => {
     let testDir;
+    const previousStateDir = process.env.OMC_STATE_DIR;
     let previousHome;
     let previousUserProfile;
     beforeEach(() => {
@@ -18,6 +19,7 @@ describe("subagent-tracker", () => {
         previousUserProfile = process.env.USERPROFILE;
         process.env.HOME = testDir;
         process.env.USERPROFILE = testDir;
+        delete process.env.OMC_STATE_DIR;
         mkdirSync(join(testDir, ".omc", "state"), { recursive: true });
     });
     afterEach(() => {
@@ -31,6 +33,10 @@ describe("subagent-tracker", () => {
             delete process.env.USERPROFILE;
         else
             process.env.USERPROFILE = previousUserProfile;
+        if (previousStateDir === undefined)
+            delete process.env.OMC_STATE_DIR;
+        else
+            process.env.OMC_STATE_DIR = previousStateDir;
     });
     describe("recordToolUsage", () => {
         it("should record tool usage for a running agent", () => {

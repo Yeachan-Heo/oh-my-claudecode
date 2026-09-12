@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -239,7 +239,7 @@ describe('SessionEnd action runner', () => {
     } else if (process.platform === 'darwin') {
       const cp = nodeRequire('node:child_process');
       const result = cp.spawnSync('ps', ['-p', String(pid), '-o', 'lstart='],
-        { encoding: 'utf8', timeout: 2000, windowsHide: true });
+        { encoding: 'utf8', timeout: 2000, windowsHide: true, env: { ...process.env, LC_ALL: 'C' } });
       if (result.status === 0 && result.stdout) {
         const time = new Date(result.stdout.trim()).getTime();
         if (!Number.isNaN(time)) identity = `mac:${time}`;

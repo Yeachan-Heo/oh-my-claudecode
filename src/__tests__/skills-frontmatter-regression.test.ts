@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createBuiltinSkills, clearSkillsCache, getBuiltinSkill } from '../features/builtin-skills/skills.js';
+import { createBuiltinSkills, clearSkillsCache } from '../features/builtin-skills/skills.js';
 
 describe('builtin skill drafting contracts for learned skills (issue #2425)', () => {
   const originalUserType = process.env.USER_TYPE;

@@ -65,7 +65,7 @@ npm i -g oh-my-claude-sisyphus@latest
 > yet. The warning is tracked in [#2913](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/2913)
 > and does not by itself mean the OMC CLI install failed.
 
-Both can be installed at the same time. The CLI auto-detects the plugin install and will not double-register skills under `~/.claude/skills/` (if you previously hit the duplicate-skill bug, run `omc update` once on 4.11.2+ — it self-heals leftover standalone skills that the plugin now provides via `prunePluginDuplicateSkills`).
+Both can be installed at the same time. The CLI auto-detects the plugin install and will not double-register skills under `~/.claude/skills/` (if you previously hit the duplicate-skill bug, run `omc update` once on 5.3.0+ — it self-heals leftover standalone skills that the plugin now provides via `prunePluginDuplicateSkills`).
 
 ### Step 3: Run initial setup
 
@@ -216,7 +216,7 @@ To configure the HUD display, run:
 
 ### Starting smaller
 
-If autopilot feels too large, start with a single-task command:
+If autopilot feels too large, start with a focused skill:
 
 ```bash
 # Code analysis
@@ -225,12 +225,11 @@ analyze why this test is failing
 # File search
 deepsearch for files that handle authentication
 
-# Simple implementation
+# Approved implementation task
 /oh-my-claudecode:execute add a health check endpoint
-
 ```
 
-The analysis and search examples use keyword shortcuts; use the explicit execute invocation for implementation.
+These surfaces invoke focused work without running the full autopilot pipeline. Use `/oh-my-claudecode:team` when the task needs parallel agents.
 
 ### Next steps
 
@@ -357,7 +356,7 @@ You can change the AI model used by each agent:
 
 ### Customizing magic keywords
 
-You can change keywords in three categories via the `magicKeywords` section of `config.jsonc`:
+You can customize the supported search, analysis, and deep-reasoning categories via the `magicKeywords` section of `config.jsonc`:
 
 ```jsonc
 {
@@ -374,7 +373,7 @@ You can change keywords in three categories via the `magicKeywords` section of `
 }
 ```
 
-> ℹ️ **Note:** The `magicKeywords` section in `config.jsonc` only allows customizing three categories: `search`, `analyze`, and `ultrathink`. Workflow keywords such as `autopilot`, `ralph`, `ralplan`, and `deep interview` are handled by the keyword-detector hook and cannot be changed through this config section.
+> ℹ️ **Note:** Parallel work is not configured as a magic keyword. Use `/oh-my-claudecode:team` for coordinated agents, or `/oh-my-claudecode:execute` to carry an approved task through verified implementation. Keywords such as `autopilot` and `ralph` are hardcoded in the keyword-detector hook and cannot be changed via config files.
 
 ### Model routing configuration
 

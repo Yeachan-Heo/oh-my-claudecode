@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 const REPO_ROOT = join(__dirname, '..', '..');
 const CI_WORKFLOW = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'ci.yml'), 'utf-8');
 const CONTRIBUTING = readFileSync(join(REPO_ROOT, 'CONTRIBUTING.md'), 'utf-8');
 const RELEASE_SCRIPT = readFileSync(join(REPO_ROOT, 'scripts', 'release.ts'), 'utf-8');
 const SHIPPING_SCRIPT = readFileSync(join(REPO_ROOT, 'scripts', 'plugin-shipping-surface.mjs'), 'utf-8');
 const PACKAGE_JSON = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf-8'));
+async function loadReleaseHelpers() {
+    return await import(pathToFileURL(join(REPO_ROOT, 'scripts', 'release.ts')).href);
+}
 describe('plugin shipping release guidance', () => {
     it('verifies the committed shipping surface before CI can build it', () => {
         expect(PACKAGE_JSON.scripts?.['plugin:shipping:verify']).toBe('node scripts/plugin-shipping-surface.mjs verify');
@@ -47,6 +51,12 @@ describe('plugin shipping release guidance', () => {
         expect(RELEASE_SCRIPT).not.toMatch(/git push origin (?:dev|main)\b/);
         expect(RELEASE_SCRIPT).not.toMatch(/git (?:checkout|switch) main\b/);
         expect(RELEASE_SCRIPT).not.toMatch(/git merge (?:dev|main)\b/);
+    });
+    it('fails when required release preparation commands fail', async () => {
+        const { regeneratePackageLock, syncMetadata } = await loadReleaseHelpers();
+        const failing = () => { throw new Error('command failed'); };
+        expect(() => regeneratePackageLock(failing)).toThrow('command failed');
+        expect(() => syncMetadata(failing)).toThrow('command failed');
     });
 });
 //# sourceMappingURL=release-guidance.test.js.map

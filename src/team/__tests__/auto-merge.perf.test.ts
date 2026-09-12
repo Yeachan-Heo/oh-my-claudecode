@@ -3,17 +3,14 @@
 // Acceptance #4: auto-merge latency — p95 < 2000ms over 50 sequential merges.
 // Skip if CI=1 (constrained machines may exceed the threshold).
 //
-// Each merge: 1 worker commits 10 files × 100 LoC each → single merge into leader.
+// Each merge: 1 worker commits one 100-line file into the leader branch.
 // Latency is measured from commitFile() call to merge_succeeded event observed.
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 
 import {
   createGitFixture,
   orchestratorEventLogPath,
-  readEventLog,
   waitForEventInLog,
   type GitFixture,
 } from './helpers/git-fixture.js';
@@ -74,14 +71,12 @@ describe.skipIf(process.env.CI === '1')(
 
     it('50 sequential merges complete with p95 latency < 2000ms', async () => {
       const MERGE_COUNT = 50;
-      const FILES_PER_MERGE = 10;
       const LINES_PER_FILE = 100;
       const eventLog = orchestratorEventLogPath(fixture.repoRoot, fixture.teamName);
       const latencies: number[] = [];
 
       for (let m = 1; m <= MERGE_COUNT; m++) {
-        // Build a commit with FILES_PER_MERGE files × LINES_PER_FILE LoC
-        // Use a single commit (commitFile writes one file; add more via direct git)
+        // Build one file per commit with LINES_PER_FILE lines.
         const content = Array.from(
           { length: LINES_PER_FILE },
           (_, i) => `export const m${m}f0l${i} = ${i + m};`,

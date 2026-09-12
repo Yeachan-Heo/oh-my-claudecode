@@ -15,7 +15,7 @@ function extractJob(workflow: string, jobName: string): string {
   const start = workflow.indexOf(`  ${jobName}:`, jobs?.index);
   expect(start, `workflow must define the ${jobName} job`).toBeGreaterThanOrEqual(0);
   const remainder = workflow.slice(start);
-  const nextJob = remainder.slice(1).search(/^  [\w-]+:\s*$/m);
+  const nextJob = remainder.slice(1).search(/^ {2}[\w-]+:\s*$/m);
   return nextJob < 0 ? remainder : remainder.slice(0, nextJob + 1);
 }
 
@@ -36,7 +36,7 @@ describe('npm trusted publishing contract', () => {
     expect(ci).toMatch(/^name: CI$/m);
     expect(ci).toContain('    tags:\n      - "v*"');
     expect(ci).toContain("  cancel-in-progress: ${{ github.ref_type != 'tag' }}");
-    expect(ci).toMatch(/^permissions:\n  contents: read$/m);
+    expect(ci).toMatch(/^permissions:\n {2}contents: read$/m);
     expect(releaseJob).toContain(RELEASE_JOB_IF);
     expect(releaseJob).toContain('permissions:\n      contents: write\n      id-token: write');
     expect(releaseJob).toContain('runs-on: ubuntu-latest');

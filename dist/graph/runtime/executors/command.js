@@ -104,7 +104,6 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
         let timedOut = false;
         let exitCode = null;
         let infraError;
-        let timeoutTimer;
         let escalationTimer;
         const settle = () => {
             if (settled) {
@@ -133,7 +132,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
             exitCode = code;
             settle();
         });
-        timeoutTimer = setTimeout(() => {
+        const timeoutTimer = setTimeout(() => {
             timedOut = true;
             // Soft kill first: SIGTERM to the whole process group (POSIX) or the
             // taskkill tree kill (Windows). Escalation below applies SIGKILL.

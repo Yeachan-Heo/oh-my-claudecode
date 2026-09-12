@@ -389,50 +389,49 @@ describe('run.cjs Windows/protocol stdio contract (#3920)', () => {
 
   it.skipIf(process.platform === 'win32')('exits nonzero when a successful hook leaves output queued to a paused consumer', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-stdio-paused-success-'));
-    let runner: ReturnType<typeof spawn> | undefined;
     try {
       const pluginRoot = join(directory, 'plugin');
+      const exitFile = join(directory, 'exit');
       const fixture = writePluginHook(
         pluginRoot,
         'paused-success.cjs',
-        `process.stdout.write(Buffer.alloc(1024 * 1024, 120));\nprocess.stderr.write('PAUSE-MARKER\\n');\nprocess.exit(0);`,
+        `const { writeFileSync } = require('node:fs');
+process.stderr.write('PAUSE-MARKER\\n');
+process.stdout.write(Buffer.alloc(256 * 1024, 120));
+writeFileSync(${JSON.stringify(exitFile)}, 'exited');
+process.exit(0);`,
         2,
       );
+      const destinationWrites: Buffer[] = [];
+      let releaseDestination: (() => void) | undefined;
+      let destinationPending = false;
+      const pausedDestination = new Writable({
+        write(chunk, _encoding, callback) {
+          destinationWrites.push(Buffer.from(chunk));
+          destinationPending = true;
+          releaseDestination = () => {
+            destinationPending = false;
+            callback();
+          };
+        },
+      });
       const startedAt = Date.now();
-      runner = spawn(process.execPath, [RUN_CJS_PATH, fixture], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot },
-        windowsHide: true,
+      const status = await runCjs.runGenericChild(fixture, [], 1000, null, {
+        stdout: pausedDestination,
+        stderr: process.stderr,
       });
-      let stderr = '';
-      let maxQueuedBytes = 0;
-      runner.stderr!.setEncoding('utf8');
-      runner.stderr!.on('data', chunk => { stderr += chunk; });
-      runner.stdout!.pause();
-      runner.stdout!.on('readable', () => {
-        maxQueuedBytes = Math.max(maxQueuedBytes, runner!.stdout!.readableLength);
-      });
-      const exitPromise = new Promise<number | null>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('queued protocol destination pinned run.cjs')), 5000);
-        runner!.once('exit', code => {
-          clearTimeout(timer);
-          resolve(code);
-        });
-      });
-      const stderrEnd = new Promise<void>(resolve => runner!.stderr!.once('end', resolve));
-      const [exitCode] = await Promise.all([exitPromise, stderrEnd]);
-      const innerMs = runCjs.resolveGenericTimeoutMs({ timeoutMs: 2000, event: 'PostToolUse' });
-      expect(exitCode).toBe(1);
-      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(innerMs - 300);
-      expect(Date.now() - startedAt).toBeLessThan(5000);
-      expect(maxQueuedBytes).toBeGreaterThan(0);
-      expect(stderr).toContain('PAUSE-MARKER');
+      expect(readFileSync(exitFile, 'utf8')).toBe('exited');
+      expect(destinationWrites.length).toBeGreaterThan(0);
+      expect(destinationPending).toBe(true);
+      expect(status).toBe(1);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(700);
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+      releaseDestination?.();
+      pausedDestination.destroy();
     } finally {
-      try { runner?.stdout?.destroy(); } catch { /* already closed */ }
-      try { runner?.kill('SIGKILL'); } catch { /* already gone */ }
       rmSync(directory, { recursive: true, force: true });
     }
-  }, 7000);
+  }, 5000);
   it('classifies consumer-closed protocol destinations as fail-open errors', () => {
     expect(runCjs.isClosedDestinationError({ code: 'EPIPE' })).toBe(true);
     expect(runCjs.isClosedDestinationError({ code: 'ERR_STREAM_DESTROYED' })).toBe(true);

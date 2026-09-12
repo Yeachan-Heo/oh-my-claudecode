@@ -234,7 +234,7 @@ describe('git probe fail-closed classification (#3858 remaining P1)', () => {
   it('does not reuse a successful probe after PATH is replaced with fake git', () => {
     expect(resolveWorkingDirectoryOrLinkedWorktree(srcDir)).toEqual({
       status: 'ok',
-      root: sessionRepo,
+      root: realpathSync(sessionRepo),
     });
     const bin = installFakeGit(tempDir, 'exit 1', 'exit /b 1');
     process.env.PATH = `${bin}${delimiter}${originalPath ?? ''}`;
@@ -314,7 +314,7 @@ describe('git probe fail-closed classification (#3858 remaining P1)', () => {
     });
     clearWorktreeCache();
 
-    expect(validateWorkingDirectoryOrLinkedWorktree(srcDir)).toBe(sessionRepo);
+    expect(validateWorkingDirectoryOrLinkedWorktree(srcDir)).toBe(realpathSync(sessionRepo));
   });
 
   it('rev-parse 128 not-a-repo still rejects a non-git path outside the trusted root', () => {
@@ -361,7 +361,7 @@ describe('git probe fail-closed classification (#3858 remaining P1)', () => {
   it('linked worktree still accepts when git works', () => {
     expect(resolveWorkingDirectoryOrLinkedWorktree(linkedWorktree)).toEqual({
       status: 'ok',
-      root: linkedWorktree,
+      root: realpathSync(linkedWorktree),
     });
   });
 

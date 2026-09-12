@@ -54,9 +54,12 @@ import { buildConfigFromEnv, getEnabledPlatforms, getNotificationConfig } from '
 import { notify } from '../../../notifications/index.js';
 describe('processSessionEnd notification deduplication (issue #1440)', () => {
     let tmpDir;
+    let stateRoot;
     let transcriptPath;
     beforeEach(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-dedupe-'));
+        stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'omc-session-end-state-'));
+        vi.stubEnv('OMC_STATE_DIR', stateRoot);
         transcriptPath = path.join(tmpDir, 'transcript.jsonl');
         fs.writeFileSync(transcriptPath, JSON.stringify({
             type: 'assistant',
@@ -68,6 +71,7 @@ describe('processSessionEnd notification deduplication (issue #1440)', () => {
     });
     afterEach(() => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
+        fs.rmSync(stateRoot, { recursive: true, force: true });
         vi.unstubAllEnvs();
     });
     it('defers legacy callbacks without re-dispatching session-end through notify() when config only comes from stopHookCallbacks', async () => {

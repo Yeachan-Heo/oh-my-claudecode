@@ -1,7 +1,7 @@
 /** Lookout workspace and briefing-file boundary tests. */
 
 import { execFileSync } from "child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -127,7 +127,7 @@ describe("scanLookout: workspace rules", () => {
     git(dir, ["init", "-q"]);
     git(dir, ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init"]);
     const report = scanLookout({ repo: dir, now: new Date("2026-09-08T00:00:00Z") });
-    expect(report.repo).toBe(dir);
+    expect(report.repo).toBe(realpathSync(dir));
   });
 
   it("fails closed on a broken repository instead of reporting clear", () => {

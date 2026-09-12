@@ -88,12 +88,6 @@ interface CheckpointOrder {
   contentSha256: string;
 }
 
-interface OwnedStage {
-  path: string;
-  dev: number;
-  ino: number;
-  size: number;
-}
 
 interface CandidateFile {
   name: string;

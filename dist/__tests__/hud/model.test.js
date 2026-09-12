@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { cyan } from '../../hud/colors.js';
 import { formatModelName, renderModel } from '../../hud/elements/model.js';
 describe('model element', () => {
     describe('formatModelName', () => {
@@ -23,6 +24,21 @@ describe('model element', () => {
             expect(formatModelName('claude-sonnet-5', 'versioned')).toBe('Sonnet 5');
             expect(formatModelName('global.anthropic.claude-sonnet-5', 'versioned')).toBe('Sonnet 5');
             expect(formatModelName('claude-haiku-4-5-20251001', 'versioned')).toBe('Haiku 4.5');
+        });
+        it.each([
+            ['claude-sonnet-4-20250514', 'Sonnet 4'],
+            ['claude-opus-4-20250514', 'Opus 4'],
+            ['anthropic.claude-sonnet-4-20250514-v1:0', 'Sonnet 4'],
+            ['us.anthropic.claude-opus-4-20250514-v1:0', 'Opus 4'],
+        ])('returns the version for dated single-major model %s', (modelId, expected) => {
+            expect(formatModelName(modelId, 'versioned')).toBe(expected);
+        });
+        it.each([
+            ['claude-sonnet-4-20250514', 'Sonnet'],
+            ['claude-opus-4-20250514', 'Opus'],
+        ])('preserves short and full formats for dated single-major model %s', (modelId, expected) => {
+            expect(formatModelName(modelId, 'short')).toBe(expected);
+            expect(formatModelName(modelId, 'full')).toBe(modelId);
         });
         it('returns versioned name from display names', () => {
             expect(formatModelName('Sonnet 4.5', 'versioned')).toBe('Sonnet 4.5');
@@ -51,6 +67,12 @@ describe('model element', () => {
             const result = renderModel('claude-opus-4-8-20260528');
             expect(result).not.toBeNull();
             expect(result).toContain('Model: Opus 4.8');
+        });
+        it.each([
+            ['claude-sonnet-4-20250514', 'Sonnet 4'],
+            ['claude-opus-4-20250514', 'Opus 4'],
+        ])('renders dated single-major model %s with the default format', (modelId, expected) => {
+            expect(renderModel(modelId)).toBe(cyan(`Model: ${expected}`));
         });
         it('renders versioned format', () => {
             const result = renderModel('claude-opus-4-8-20260528', 'versioned');

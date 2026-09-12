@@ -98,6 +98,15 @@ afterEach(() => {
     }
 });
 describe('plugin shipping surface transaction', () => {
+    it('resolves runtime dependencies beneath a symlinked trusted package root', async () => {
+        const fixture = createFixture({ trackCli: false });
+        const aliasParent = mkdtempSync(join(tmpdir(), 'omc-shipping-root-alias-'));
+        tempRoots.push(aliasParent);
+        const alias = join(aliasParent, 'package');
+        symlinkSync(fixture.root, alias, process.platform === 'win32' ? 'junction' : 'dir');
+        const module = await shippingSurface;
+        expect(module.inspectPluginShippingSurface(alias).stagePaths).toEqual(module.inspectPluginShippingSurface(fixture.root).stagePaths);
+    });
     it('fails closed when the declared coordinator is absent from a clean plugin checkout', () => {
         const fixture = createFixture({ includeCoordinator: false });
         const result = run(fixture.root, 'verify');

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chmodSync, existsSync, linkSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, unlinkSync, writeFileSync, } from 'fs';
+import { chmodSync, existsSync, linkSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync, } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { getProcessStartIdentitySync } from '../../platform/process-utils.js';
 // @ts-expect-error Hook runtime source is intentionally JavaScript-only.
 import { withStateFileLockSync } from '../../../scripts/lib/atomic-write.mjs';
 import { tmpdir } from 'os';
@@ -153,8 +154,11 @@ describe('atomicWriteJson', () => {
         const oldValue = { status: 'old' };
         writeFileSync(filePath, JSON.stringify(oldValue));
         let extraPath;
-        fsPromisesControl.writeHook = fd => {
-            const tempPath = readlinkSync(`/proc/self/fd/${fd.fd}`);
+        fsPromisesControl.writeHook = () => {
+            const tempName = readdirSync(directory).find(name => name.startsWith('.state.json.tmp.'));
+            if (!tempName)
+                throw new Error('atomic temp generation unavailable');
+            const tempPath = join(directory, tempName);
             if (kind === 'hardlink') {
                 extraPath = `${tempPath}.link`;
                 linkSync(tempPath, extraPath);
@@ -232,7 +236,7 @@ describe('atomicWriteJson', () => {
         expect(readdirSync(directory)).toEqual(['state.json']);
         expect(existsSync(filePath)).toBe(true);
     });
-    it('bypasses stale generic lock artifacts without flock', () => {
+    it('reclaims stale generic lock artifacts under the SQLite guard', () => {
         const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-'));
         directories.push(directory);
         process.env.NODE_ENV = 'test';
@@ -240,18 +244,19 @@ describe('atomicWriteJson', () => {
         const filePath = join(directory, 'state.json');
         writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: 999999999, processStart: '1', createdAt: new Date().toISOString(), nonce: randomUUID() }));
         expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
-        expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
+        expect(existsSync(`${filePath}.mutation.lock`)).toBe(false);
     });
-    it('preserves legacy unlocked behavior without flock even when a lock artifact exists', () => {
+    it('rejects a live lock artifact without an unlocked fallback', () => {
         const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-live-'));
         directories.push(directory);
         process.env.NODE_ENV = 'test';
         process.env.OMC_TEST_FLOCK_AVAILABLE = '0';
         const filePath = join(directory, 'state.json');
-        const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-        const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+        const processStart = getProcessStartIdentitySync(process.pid);
+        if (processStart === null)
+            throw new Error('current process identity unavailable');
         writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
-        expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: true, value: 'written' });
+        expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: false, value: undefined });
         expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
     });
 });

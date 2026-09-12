@@ -516,15 +516,16 @@ describe('Contract 10: installer manages stale OMC-created agents and skills', (
         }
     });
 });
-describe('OMC setup Ralph Ruby dependency guidance (issue #2969)', () => {
-    it('checks Ruby during setup with product-facing Ralph remediation', () => {
+describe('OMC setup Ralph runtime prerequisites guidance (issue #3996)', () => {
+    it('checks Node and a writable config dir instead of the retired Ruby probe', () => {
         const phasePath = join(REPO_ROOT, 'skills', 'omc-setup', 'phases', '02-configure.md');
         const content = readFileSync(phasePath, 'utf-8');
-        expect(content).toContain('Step 2.0: Check Ralph Ruby Dependency');
-        expect(content).toContain('command -v ruby');
-        expect(content).toContain('Ralph workflows require Ruby');
-        expect(content).toContain('sudo apt update && sudo apt install ruby-full');
-        expect(content).toContain('restart Claude Code');
+        expect(content).toContain('Step 2.0: Check Ralph Runtime Prerequisites');
+        expect(content).toContain('node --version');
+        // The Ruby check was a false positive (issue #3996): OMC has never used Ruby.
+        expect(content).not.toMatch(/\bruby\b/i);
+        expect(content).not.toContain('ruby-full');
+        expect(content).not.toContain('brew install ruby');
     });
 });
 // ── Contract 11: SessionEnd hooks carry async:true (issue #3240) ─────────────

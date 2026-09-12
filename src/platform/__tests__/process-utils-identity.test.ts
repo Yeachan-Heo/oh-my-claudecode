@@ -1,5 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
-import { dmtfCreationDateToTicks, terminateOwnedProcessGroup } from '../process-utils.js';
+import * as childProcess from 'node:child_process';
+import { dmtfCreationDateToTicks, getProcessStartIdentitySync, terminateOwnedProcessGroup } from '../process-utils.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:child_process')>();
+  return { ...original, spawnSync: vi.fn(original.spawnSync) };
+});
+
+it('pins the Darwin identity probe locale despite an inherited non-English locale', () => {
+  const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+  const spawn = vi.spyOn(childProcess, 'spawnSync').mockReturnValue({
+    pid: 123, status: 0, signal: null, output: [], stdout: 'Thu Sep 10 12:00:00 2026\n', stderr: '',
+  });
+  vi.stubEnv('LC_ALL', 'fr_FR.UTF-8');
+  try {
+    expect(getProcessStartIdentitySync(123)).toBe(String(new Date('Thu Sep 10 12:00:00 2026').getTime()));
+    expect(spawn).toHaveBeenCalledWith('ps', ['-p', '123', '-o', 'lstart='], expect.objectContaining({
+      env: expect.objectContaining({ LC_ALL: 'C' }),
+    }));
+  } finally {
+    spawn.mockRestore();
+    platform.mockRestore();
+    vi.unstubAllEnvs();
+  }
+});
 
 describe('Windows process start identity formats', () => {
   it('converts DMTF creation dates to ticks with full 100ns precision', () => {
@@ -22,7 +46,6 @@ describe('Windows process start identity formats', () => {
     const identity = dmtfCreationDateToTicks('20240115123045.123456+000');
     // ticks must end with fractional contribution of 1234560 (micros*10)
     expect(identity).toMatch(/^ticks:\d+$/);
-    const frac = BigInt(identity!.slice(6)) % 10000000n; // last 7 digits include us*10
     // micros 123456 * 10 = 1234560
     expect(Number(BigInt(identity!.slice(6)) % 10000000n)).toBe(1234560);
   });

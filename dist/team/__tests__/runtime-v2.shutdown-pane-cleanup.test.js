@@ -5,16 +5,18 @@ import { tmpdir } from 'node:os';
 import { isProcessAlive } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
-import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, prepareWorkerLaunchAttempt, runWorkerLaunchBootstrap } from '../worker-launch-ack.js';
-const execFileMock = vi.hoisted(() => vi.fn());
-const execMock = vi.hoisted(() => vi.fn());
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, prepareWorkerLaunchAttempt, runWorkerLaunchBootstrap, terminateWorkerLaunchProvider, withWorkerLaunchAttemptFence } from '../worker-launch-ack.js';
+const tmuxUtilsMocks = vi.hoisted(() => ({
+    tmuxExecAsync: vi.fn(),
+    tmuxCmdAsync: vi.fn(),
+}));
 const tmuxCalls = vi.hoisted(() => []);
-vi.mock('child_process', async (importOriginal) => {
+vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
     const actual = await importOriginal();
     return {
         ...actual,
-        exec: execMock,
-        execFile: execFileMock,
+        tmuxExecAsync: tmuxUtilsMocks.tmuxExecAsync,
+        tmuxCmdAsync: tmuxUtilsMocks.tmuxCmdAsync,
     };
 });
 async function writeJson(cwd, relativePath, value) {
@@ -36,8 +38,8 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
         process.env.USERPROFILE = cwd;
         delete process.env.OMC_STATE_DIR;
         tmuxCalls.length = 0;
-        execFileMock.mockReset();
-        execMock.mockReset();
+        tmuxUtilsMocks.tmuxExecAsync.mockReset();
+        tmuxUtilsMocks.tmuxCmdAsync.mockReset();
         const run = (args) => {
             tmuxCalls.push(args);
             let stdout = '';
@@ -49,39 +51,13 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
             }
             return { stdout, stderr: '' };
         };
-        const parseTmuxShellCmd = (cmd) => {
-            const match = cmd.match(/^tmux\s+(.+)$/);
-            if (!match)
-                return null;
-            const args = match[1].match(/'([^']*(?:\\.[^']*)*)'|"([^"]*)"/g);
-            if (!args)
-                return null;
-            return args.map((token) => {
-                if (token.startsWith("'"))
-                    return token.slice(1, -1).replace(/'\\''/g, "'");
-                return token.slice(1, -1);
-            });
-        };
-        execFileMock.mockImplementation((_cmd, args, cb) => {
-            const { stdout, stderr } = run(args);
-            if (cb)
-                cb(null, stdout, stderr);
-            return {};
-        });
-        execFileMock[Symbol.for('nodejs.util.promisify.custom')] =
-            async (_cmd, args) => run(args);
-        execMock.mockImplementation((cmd, cb) => {
-            const { stdout, stderr } = run(parseTmuxShellCmd(cmd) ?? []);
-            cb(null, stdout, stderr);
-            return {};
-        });
-        execMock[Symbol.for('nodejs.util.promisify.custom')] =
-            async (cmd) => run(parseTmuxShellCmd(cmd) ?? []);
+        tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args) => run(args));
+        tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args) => run(args));
     });
     afterEach(async () => {
         tmuxCalls.length = 0;
-        execFileMock.mockReset();
-        execMock.mockReset();
+        tmuxUtilsMocks.tmuxExecAsync.mockReset();
+        tmuxUtilsMocks.tmuxCmdAsync.mockReset();
         if (originalHome === undefined)
             delete process.env.HOME;
         else
@@ -136,28 +112,61 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     it('retires and terminates the exact provider while accepting a proven-dead pane', async () => {
         const teamName = 'provider-cleanup-team';
         const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
-        const attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%2',
-            provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' } });
-        const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(attempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd));
-        await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
-            .resolves.toEqual({ ok: true });
-        await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
-            .resolves.toBe(true);
-        const providerPid = JSON.parse(await readFile(attempt.startedPath, 'utf8')).pid;
-        await writeJson(cwd, `${teamRoot}/config.json`, {
-            name: teamName, task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive', worker_count: 1, max_workers: 20,
-            workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%2',
-                    worker_cli: 'claude', launch_attempt_id: attempt.attempt_id,
-                    launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: process.execPath, args: [] } }],
-            created_at: new Date().toISOString(), tmux_session: 'leader-session:0', tmux_window_owned: false,
-            next_task_id: 1, leader_pane_id: '%1', hud_pane_id: null, resize_hook_name: null, resize_hook_target: null,
-        });
-        const { shutdownTeamV2 } = await import('../runtime-v2.js');
-        await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
-        await expect(bootstrap).resolves.toMatchObject({ outcome: 'ran' });
-        expect(isProcessAlive(providerPid)).toBe(false);
-        expect(tmuxCalls.some(args => args[0] === 'kill-pane' && args[2] === '%2')).toBe(false);
-        await expect(readFile(join(teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+        let attempt;
+        let bootstrap;
+        let startedRecord;
+        try {
+            attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%2',
+                provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' } });
+            bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(attempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd));
+            await expect(awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+                .resolves.toEqual({ ok: true });
+            await expect(awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
+                .resolves.toBe(true);
+            startedRecord = JSON.parse(await readFile(attempt.startedPath, 'utf-8'));
+            const providerPid = startedRecord.pid;
+            // Publication precedes the bootstrap's final handoff checks. Wait for
+            // its fence to be released before testing shutdown of a running launch.
+            await expect(withWorkerLaunchAttemptFence(attempt, async () => isProcessAlive(providerPid)))
+                .resolves.toEqual({ ok: true, value: true });
+            await writeJson(cwd, `${teamRoot}/config.json`, {
+                name: teamName, task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive', worker_count: 1, max_workers: 20,
+                workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%2',
+                        worker_cli: 'claude', launch_attempt_id: attempt.attempt_id,
+                        launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: process.execPath, args: [] } }],
+                created_at: new Date().toISOString(), tmux_session: 'leader-session:0', tmux_window_owned: false,
+                next_task_id: 1, leader_pane_id: '%1', hud_pane_id: null, resize_hook_name: null, resize_hook_target: null,
+            });
+            const { shutdownTeamV2 } = await import('../runtime-v2.js');
+            await shutdownTeamV2(teamName, cwd, { timeoutMs: 0, force: true });
+            const bootstrapResult = await bootstrap;
+            expect(bootstrapResult, JSON.stringify(bootstrapResult)).toMatchObject({ outcome: 'ran' });
+            expect(isProcessAlive(providerPid)).toBe(false);
+            expect(tmuxCalls.some(args => args[0] === 'kill-pane' && args[2] === '%2')).toBe(false);
+            await expect(readFile(join(teamRoot, 'config.json'), 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+        }
+        finally {
+            if (attempt && !startedRecord) {
+                const started = await awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 })
+                    .then(async (present) => present ? JSON.parse(await readFile(attempt.startedPath, 'utf8')) : undefined)
+                    .catch(() => undefined);
+                if (started)
+                    startedRecord = started;
+            }
+            if (attempt)
+                await terminateWorkerLaunchProvider(attempt, 2_000).catch(() => false);
+            if (bootstrap)
+                await bootstrap.catch(() => undefined);
+            if (startedRecord) {
+                await vi.waitFor(() => {
+                    expect(isProcessAlive(startedRecord.pid)).toBe(false);
+                    if (startedRecord.process_group_id !== undefined) {
+                        expect(() => process.kill(-startedRecord.process_group_id, 0))
+                            .toThrow(expect.objectContaining({ code: 'ESRCH' }));
+                    }
+                }, { timeout: 2_000, interval: 20 });
+            }
+        }
     });
 });
 //# sourceMappingURL=runtime-v2.shutdown-pane-cleanup.test.js.map

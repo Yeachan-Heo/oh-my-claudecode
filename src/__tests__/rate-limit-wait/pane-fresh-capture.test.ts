@@ -29,7 +29,6 @@ function noStateFile(): void {
 /** Set up fs mock so state file contains the given pane positions. */
 function withStateFile(positions: Record<string, number>): void {
   vi.mocked(existsSync).mockReturnValue(true);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   vi.mocked(readFileSync as any).mockReturnValue(JSON.stringify(positions));
 }
 

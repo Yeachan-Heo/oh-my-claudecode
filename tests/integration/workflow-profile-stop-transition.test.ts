@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { getProcessStartIdentitySync } from '../../src/platform/process-utils.js';
+import { provisionStandaloneStateLockBridge } from '../../src/installer/index.js';
 import { resolveCanonicalWorkflowStagePrompt } from '../../scripts/lib/workflow-stage-prompts.mjs';
 
 
@@ -46,8 +48,8 @@ describe('canonical workflow stage prompt serialization', () => {
 });
 
 function liveLockOwner() {
-  const stat = readFileSync(`/proc/${process.pid}/stat`, 'utf8');
-  const processStart = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[19];
+  const processStart = getProcessStartIdentitySync(process.pid);
+  if (processStart === null) throw new Error('unable to determine process start identity');
   return JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() });
 }
 
@@ -75,6 +77,7 @@ function fixture(kind) {
   if (kind === 'installed-template') {
     const hooks = join(dir, 'installed-hooks');
     cpSync(join(root, 'templates', 'hooks'), hooks, { recursive: true });
+    provisionStandaloneStateLockBridge(root, join(hooks, 'lib', 'state-lock.mjs'));
     hook = join(hooks, 'persistent-mode.mjs');
   }
   return { dir, home, claudeConfigDir, project, sessionId, transcript, statePath, hook };

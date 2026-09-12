@@ -83,6 +83,14 @@ export declare function isManifestTerminal(job: SessionEndJobV1): boolean;
 export declare function readSessionEndJob(directory: string, sessionId: string): SessionEndJobV1 | null;
 /** Locked expected-revision CAS with an exact post-write reread. */
 export declare function mutateSessionEndJob(directory: string, sessionId: string, expectedRevision: number, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null;
+export interface SessionEndActionAuthority {
+    jobId: string;
+    actionName: SessionEndActionName;
+    attempt: number;
+    ownerNonce: string;
+    runnerNonce: string;
+}
+export declare function updateSessionEndActionPayload(directory: string, sessionId: string, authority: SessionEndActionAuthority, actionNames: readonly SessionEndActionName[], payload: Record<string, unknown>): SessionEndJobV1 | null;
 export declare function prepareCoreManifest(directory: string, sessionId: string, payload: Record<string, unknown>): SessionEndJobV1 | null;
 /** Foreground cleanup is idempotent local work; its durable result is the prerequisite for producer-grace sealing. */
 export declare function completeForegroundCleanup(directory: string, sessionId: string, outcome: Record<string, unknown>): SessionEndJobV1 | null;

@@ -164,6 +164,22 @@ export function mutateSessionEndJob(directory: string, sessionId: string, expect
     return result;
   } catch { return null; }
 }
+export interface SessionEndActionAuthority {
+  jobId: string;
+  actionName: SessionEndActionName;
+  attempt: number;
+  ownerNonce: string;
+  runnerNonce: string;
+}
+
+export function updateSessionEndActionPayload(directory: string, sessionId: string, authority: SessionEndActionAuthority, actionNames: readonly SessionEndActionName[], payload: Record<string, unknown>): SessionEndJobV1 | null {
+  return mutateLatest(directory, sessionId, (job) => {
+    if (job.jobId !== authority.jobId || !job.owner || job.owner.nonce !== authority.ownerNonce) throw new Error('owner-conflict');
+    const claimed = job.actions[authority.actionName];
+    if (claimed.status !== 'claimed' || claimed.attempts !== authority.attempt || claimed.claimantNonce !== authority.ownerNonce || claimed.runner?.runnerNonce !== authority.runnerNonce || claimed.runner.phase !== 'armed') throw new Error('runner-conflict');
+    for (const name of actionNames) job.actions[name].payload = { ...job.actions[name].payload, ...payload };
+  });
+}
 function mutateLatest(directory: string, sessionId: string, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null { for (let i = 0; i < 8; i++) { const current = readSessionEndJob(directory, sessionId); if (!current) return null; const result = mutateSessionEndJob(directory, sessionId, current.revision, mutate); if (result) return result; } return null; }
 
 export function prepareCoreManifest(directory: string, sessionId: string, payload: Record<string, unknown>): SessionEndJobV1 | null {

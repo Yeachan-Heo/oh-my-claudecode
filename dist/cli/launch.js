@@ -123,65 +123,12 @@ function hasLinkableCredentials(inspection) {
         : inspection.parsed;
     return typeof source.accessToken === 'string' && source.accessToken.trim().length > 0;
 }
-function inspectCredentialFile(path) {
-    let stat;
-    try {
-        stat = lstatSync(path);
-    }
-    catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error
-            ? error.code
-            : undefined;
-        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
-            return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null };
-        }
-        return { exists: false, regularFile: false, readable: false, valid: false, parsed: null, candidate: null };
-    }
-    let parsed;
-    try {
-        parsed = JSON.parse(readFileSync(path, 'utf-8'));
-    }
-    catch {
-        return {
-            exists: true,
-            regularFile: stat.isFile(),
-            readable: false,
-            valid: false,
-            parsed: null,
-            candidate: null,
-        };
-    }
-    if (!isJsonObject(parsed)) {
-        return {
-            exists: true,
-            regularFile: stat.isFile(),
-            readable: true,
-            valid: false,
-            parsed: null,
-            candidate: null,
-        };
-    }
-    return {
-        exists: true,
-        regularFile: stat.isFile(),
-        readable: true,
-        valid: true,
-        parsed,
-        candidate: extractOAuthCandidate(parsed),
-    };
-}
-function credentialExpiry(parsed) {
-    const source = isJsonObject(parsed.claudeAiOauth) ? parsed.claudeAiOauth : parsed;
-    const expiresAt = source.expiresAt;
-    return typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null;
-}
-function resolveCredentialWritePath(path) {
+function resolveCredentialTarget(path) {
     let current = resolve(path);
     const visited = new Set();
     while (true) {
-        if (visited.has(current)) {
+        if (visited.has(current))
             throw new Error('Claude credential symlink chain contains a cycle');
-        }
         visited.add(current);
         let stat;
         try {
@@ -192,7 +139,7 @@ function resolveCredentialWritePath(path) {
                 ? error.code
                 : undefined;
             if (code === 'ENOENT' || code === 'ENOTDIR')
-                return current;
+                return null;
             throw error;
         }
         if (!stat.isSymbolicLink())
@@ -200,6 +147,64 @@ function resolveCredentialWritePath(path) {
         const target = readlinkSync(current);
         current = isAbsolute(target) ? resolve(target) : resolve(dirname(current), target);
     }
+}
+function inspectCredentialFile(path) {
+    try {
+        lstatSync(path);
+    }
+    catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error
+            ? error.code
+            : undefined;
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+            return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+        }
+        return { exists: false, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    let resolvedPath;
+    try {
+        resolvedPath = resolveCredentialTarget(path);
+    }
+    catch {
+        return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    if (!resolvedPath) {
+        return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    let stat;
+    try {
+        stat = lstatSync(resolvedPath);
+    }
+    catch {
+        return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    if (!stat.isFile()) {
+        return { exists: true, regularFile: false, readable: false, valid: false, parsed: null, candidate: null, writePath: null };
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(readFileSync(resolvedPath, 'utf-8'));
+    }
+    catch {
+        return { exists: true, regularFile: true, readable: false, valid: false, parsed: null, candidate: null, writePath: resolvedPath };
+    }
+    if (!isJsonObject(parsed)) {
+        return { exists: true, regularFile: true, readable: true, valid: false, parsed: null, candidate: null, writePath: resolvedPath };
+    }
+    return {
+        exists: true,
+        regularFile: true,
+        readable: true,
+        valid: true,
+        parsed,
+        candidate: extractOAuthCandidate(parsed),
+        writePath: resolvedPath,
+    };
+}
+function credentialExpiry(parsed) {
+    const source = isJsonObject(parsed.claudeAiOauth) ? parsed.claudeAiOauth : parsed;
+    const expiresAt = source.expiresAt;
+    return typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? expiresAt : null;
 }
 /** True only when source and runtime can be proven to be the same account. */
 function accountsProvenSame(sourceClaudeJson, runtimeClaudeJson) {
@@ -399,7 +404,7 @@ function reconcileRuntimeCredentials(baseConfigDir, runtimeCredentialsPath, sour
     else {
         Object.assign(mergedBaseCredentials, runtimeCandidate.fields);
     }
-    atomicWriteJsonSync(resolveCredentialWritePath(baseCredentialsPath), mergedBaseCredentials);
+    atomicWriteJsonSync(baseInspection.writePath ?? baseCredentialsPath, mergedBaseCredentials);
 }
 function swapRuntimeConfigDir(runtimeConfigDir, nextConfigDir) {
     const previousConfigDir = `${runtimeConfigDir}.prev`;

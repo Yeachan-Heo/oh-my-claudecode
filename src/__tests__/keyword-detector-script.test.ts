@@ -1,12 +1,19 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { provisionStandaloneStateLockBridge } from '../installer/index.js';
+import { afterAll, describe, expect, it } from 'vitest';
 
-const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
-const TEMPLATE_PATH = join(process.cwd(), 'templates', 'hooks', 'keyword-detector.mjs');
+const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const NODE = process.execPath;
+const SCRIPT_PATH = join(root, 'scripts', 'keyword-detector.mjs');
+const TEMPLATE_ROOT = mkdtempSync(join(tmpdir(), 'keyword-detector-template-'));
+const TEMPLATE_PATH = join(TEMPLATE_ROOT, 'hooks', 'keyword-detector.mjs');
+cpSync(join(root, 'templates', 'hooks'), join(TEMPLATE_ROOT, 'hooks'), { recursive: true });
+provisionStandaloneStateLockBridge(root, join(TEMPLATE_ROOT, 'hooks', 'lib', 'state-lock.mjs'));
+afterAll(() => rmSync(TEMPLATE_ROOT, { recursive: true, force: true }));
 
 function runKeywordDetector(
   prompt: string,

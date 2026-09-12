@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync as rawMkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join } from 'path';
+import { teamStateRoot } from '../state-paths.js';
+function teamStatePath(cwd, relativePath) {
+    return join(teamStateRoot(cwd, 'test-team'), relativePath);
+}
 import { tmpdir } from 'os';
 /**
  * Tests for Gemini prompt-mode (headless) spawn flow.
@@ -22,6 +26,12 @@ const tmuxCalls = vi.hoisted(() => ({
     afterSplit: null,
     afterKillPane: null,
 }));
+beforeEach(() => {
+    vi.stubEnv('TMUX', 'fixture-tmux-session');
+    vi.stubEnv('CMUX_SURFACE_ID', '');
+    vi.stubEnv('CMUX_WORKSPACE_ID', '');
+});
+afterEach(() => vi.unstubAllEnvs());
 let fixtureRoot;
 let previousHome;
 let previousUserProfile;
@@ -132,7 +142,7 @@ vi.mock('child_process', async (importOriginal) => {
                 const bin = args[0] ?? 'unknown';
                 return { status: 0, stdout: `/usr/bin/${bin}\n`, stderr: '' };
             }
-            return { status: 0, stdout: '', stderr: '' };
+            return actual.spawnSync(cmd, args, { encoding: 'utf-8' });
         }),
         exec: mockExec,
         execFile: mockExecFile,
@@ -162,7 +172,7 @@ function makeRuntime(cwd, agentType) {
     };
 }
 function setupTaskDir(cwd) {
-    const tasksDir = join(cwd, '.omc/state/team/test-team/tasks');
+    const tasksDir = teamStatePath(cwd, 'tasks');
     mkdirSync(tasksDir, { recursive: true });
     writeFileSync(join(tasksDir, 'task-1.json'), JSON.stringify({
         id: '1',
@@ -171,11 +181,11 @@ function setupTaskDir(cwd) {
         status: 'pending',
         owner: null,
     }));
-    const workerDir = join(cwd, '.omc/state/team/test-team/workers/worker-1');
+    const workerDir = teamStatePath(cwd, 'workers/worker-1');
     mkdirSync(workerDir, { recursive: true });
 }
 function denyTaskReset(cwd) {
-    writeFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.lock'), JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
+    writeFileSync(teamStatePath(cwd, 'tasks/task-1.lock'), JSON.stringify({ pid: process.pid, timestamp: Date.now() }));
 }
 function resetTmuxFailureState() {
     tmuxCalls.splitPaneOutput = '%42\n';
@@ -192,6 +202,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         resetTmuxFailureState();
         delete process.env.OMC_SHELL_READY_TIMEOUT_MS;
         cwd = mkdtempSync(join(tmpdir(), 'runtime-gemini-prompt-'));
+        process.env.OMC_STATE_DIR = join(cwd, 'omc-state');
         setupTaskDir(cwd);
     });
     afterEach(() => {
@@ -222,7 +233,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         // Should contain -p flag for prompt mode
         expect(launchCmd).toContain("'-p'");
         // Should contain the inbox path reference
-        expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+        expect(launchCmd).toContain(teamStatePath(cwd, 'workers/worker-1/inbox.md'));
         expect(launchCmd).toContain('execute now');
         expect(launchCmd).toContain('concrete progress');
         rmSync(cwd, { recursive: true, force: true });
@@ -255,7 +266,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         expect(rollbackFailure.cause?.taskCleanupError).toBeInstanceOf(Error);
         expect((rollbackFailure.cause?.taskCleanupError).message)
             .toBe('worker_layout_task_reset_unconfirmed:worker-1:1');
-        const task = JSON.parse(readFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.json'), 'utf-8'));
+        const task = JSON.parse(readFileSync(teamStatePath(cwd, 'tasks/task-1.json'), 'utf-8'));
         expect(task.status).toBe('in_progress');
         expect(task.owner).toBe('worker-1');
         rmSync(cwd, { recursive: true, force: true });
@@ -275,7 +286,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         const rollbackFailure = failure;
         expect(rollbackFailure.message).toBe('worker_startup_task_reset_unconfirmed:worker-1:1');
         expect(rollbackFailure.cause?.taskCleanupError).toBeInstanceOf(Error);
-        const task = JSON.parse(readFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.json'), 'utf-8'));
+        const task = JSON.parse(readFileSync(teamStatePath(cwd, 'tasks/task-1.json'), 'utf-8'));
         expect(task.status).toBe('in_progress');
         expect(task.owner).toBe('worker-1');
         rmSync(cwd, { recursive: true, force: true });
@@ -291,7 +302,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         expect(launchCmd).not.toContain("'--print'");
         // prompt-mode flag for the file-pointer instruction, with the inbox path as its value
         expect(launchCmd).toContain("'-p'");
-        expect(launchCmd).toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+        expect(launchCmd).toContain(teamStatePath(cwd, 'workers/worker-1/inbox.md'));
         // --dangerously-skip-permissions precedes -p (flags before the -p value)
         expect(launchCmd.indexOf("'--dangerously-skip-permissions'")).toBeLessThan(launchCmd.indexOf("'-p'"));
         rmSync(cwd, { recursive: true, force: true });
@@ -321,7 +332,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
     it('gemini worker writes inbox before spawn', async () => {
         const runtime = makeRuntime(cwd, 'gemini');
         await spawnWorkerForTask(runtime, 'worker-1', 0);
-        const inboxPath = join(cwd, '.omc/state/team/test-team/workers/worker-1/inbox.md');
+        const inboxPath = teamStatePath(cwd, 'workers/worker-1/inbox.md');
         const content = readFileSync(inboxPath, 'utf-8');
         expect(content).toContain('Initial Task Assignment');
         expect(content).toContain('Test task');
@@ -338,7 +349,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         expect(launchCmd).toContain('/usr/local/bin/codex');
         expect(launchCmd).toContain('--dangerously-bypass-approvals-and-sandbox');
         expect(launchCmd).not.toContain("'exec'");
-        expect(launchCmd).not.toContain('.omc/state/team/test-team/workers/worker-1/inbox.md');
+        expect(launchCmd).not.toContain(teamStatePath(cwd, 'workers/worker-1/inbox.md'));
         expect(launchCmd).not.toContain('execute now');
         expect(launchCmd).not.toContain('concrete progress');
         rmSync(cwd, { recursive: true, force: true });
@@ -367,7 +378,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         tmuxCalls.capturePaneText = 'still booting\n';
         process.env.OMC_SHELL_READY_TIMEOUT_MS = '40';
         await expect(spawnWorkerForTask(runtime, 'worker-1', 0)).rejects.toThrow('worker_pane_not_ready:worker-1');
-        const taskPath = join(cwd, '.omc/state/team/test-team/tasks/task-1.json');
+        const taskPath = teamStatePath(cwd, 'tasks/task-1.json');
         const task = JSON.parse(readFileSync(taskPath, 'utf-8'));
         expect(task.status).toBe('pending');
         expect(task.owner).toBeNull();
@@ -392,7 +403,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         expect(rollbackFailure.cause?.paneCleanupError).toBeUndefined();
         expect((rollbackFailure.cause?.taskCleanupError).message)
             .toBe('worker_startup_task_reset_unconfirmed:worker-1:1');
-        const task = JSON.parse(readFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.json'), 'utf-8'));
+        const task = JSON.parse(readFileSync(teamStatePath(cwd, 'tasks/task-1.json'), 'utf-8'));
         expect(task.status).toBe('in_progress');
         expect(task.owner).toBe('worker-1');
         rmSync(cwd, { recursive: true, force: true });
@@ -414,7 +425,7 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
             .toBe('worker_notify_failed:worker-1:initial-inbox');
         expect(rollbackFailure.cause?.paneCleanupError).toBeInstanceOf(Error);
         expect(rollbackFailure.cause?.taskCleanupError).toBeUndefined();
-        const task = JSON.parse(readFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.json'), 'utf-8'));
+        const task = JSON.parse(readFileSync(teamStatePath(cwd, 'tasks/task-1.json'), 'utf-8'));
         expect(task.status).toBe('pending');
         expect(task.owner).toBeNull();
         rmSync(cwd, { recursive: true, force: true });
@@ -433,13 +444,13 @@ describe('spawnWorkerForTask – prompt mode and interactive worker launch', () 
         const rollbackFailure = failure;
         expect(rollbackFailure.message).toBe('tmux_send-keys_failed');
         expect(rollbackFailure.cause).toBeUndefined();
-        const task = JSON.parse(readFileSync(join(cwd, '.omc/state/team/test-team/tasks/task-1.json'), 'utf-8'));
+        const task = JSON.parse(readFileSync(teamStatePath(cwd, 'tasks/task-1.json'), 'utf-8'));
         expect(task.status).toBe('pending');
         expect(task.owner).toBeNull();
         rmSync(cwd, { recursive: true, force: true });
     });
     it('returns empty and skips spawn when task is already in_progress (claim already taken)', async () => {
-        const taskPath = join(cwd, '.omc/state/team/test-team/tasks/task-1.json');
+        const taskPath = teamStatePath(cwd, 'tasks/task-1.json');
         writeFileSync(taskPath, JSON.stringify({
             id: '1',
             subject: 'Test task',
@@ -498,7 +509,7 @@ describe('spawnWorkerForTask – model passthrough from environment variables', 
         previousStateDir = process.env.OMC_STATE_DIR;
         process.env.HOME = cwd;
         process.env.USERPROFILE = cwd;
-        delete process.env.OMC_STATE_DIR;
+        process.env.OMC_STATE_DIR = join(cwd, 'omc-state');
         setupTaskDir(cwd);
     });
     afterEach(() => {

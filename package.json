@@ -107,7 +107,7 @@
     "@types/node": "^22.19.7",
     "@typescript-eslint/eslint-plugin": "^8.18.2",
     "@typescript-eslint/parser": "^8.18.2",
-    "@vitest/ui": "^4.0.17",
+    "@vitest/ui": "^4.1.11",
     "concurrently": "^9.2.1",
     "esbuild": "^0.27.2",
     "eslint": "^9.17.0",
@@ -115,7 +115,7 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.53.0",
-    "vitest": "^4.0.17"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": "20.x || 22.x || 23.x || 24.x || 25.x || 26.x"

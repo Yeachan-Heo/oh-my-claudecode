@@ -135,7 +135,13 @@ async function runActionRunnerEntrypoint(): Promise<void> {
     const deadlineTimer = setTimeout(() => { process.exitCode = 124; process.exit(); }, Math.max(1, input.deadlineAt - Date.now()));
     deadlineTimer.unref();
     const { executeSessionEndAction } = await import('./worker.js');
-    await executeSessionEndAction(input.actionName, { directory: input.directory, sessionId: input.sessionId }, input.deadlineAt);
+    await executeSessionEndAction(input.actionName, { directory: input.directory, sessionId: input.sessionId }, input.deadlineAt, {
+      jobId: input.jobId,
+      actionName: input.actionName,
+      attempt: input.attempt,
+      ownerNonce: input.ownerNonce,
+      runnerNonce: input.runnerNonce,
+    });
     clearTimeout(deadlineTimer);
     process.exitCode = 0;
   } catch {
