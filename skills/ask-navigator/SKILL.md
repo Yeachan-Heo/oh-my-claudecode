@@ -70,6 +70,8 @@ Every ticket is **HITL** (worked with the captain, who speaks for themselves) or
 
 The answer is never part of the ticket body; it is recorded on resolution. Assets created while resolving are linked from the ticket, not pasted in.
 
+A `research` file speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
+
 ## Map body
 
 ```markdown
