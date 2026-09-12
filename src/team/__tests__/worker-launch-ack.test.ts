@@ -41,6 +41,12 @@ import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 let cwd = '';
 const disposableProviders = new Set<ReturnType<typeof spawn>>();
+
+// These waits poll for a condition produced by a spawned process, so they
+// return as soon as it holds and the bound only matters on failure. A 2s bound
+// was tight enough that a loaded CI runner could miss a legitimate
+// acknowledgement, reddening unrelated pull requests.
+const LAUNCH_WAIT_TIMEOUT_MS = 15_000;
 let fixtureEnvCaptured = false;
 let originalHome: string | undefined;
 let originalUserProfile: string | undefined;
@@ -177,7 +183,7 @@ describe('worker launch acknowledgement', () => {
 
     const bootstrap = runWorkerLaunchBootstrap(spec);
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
@@ -269,7 +275,7 @@ describe('worker launch acknowledgement', () => {
     ));
     try {
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       await vi.waitFor(async () => {
@@ -310,11 +316,11 @@ describe('worker launch acknowledgement', () => {
         { releaseAfterSpawn: true },
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toBe(true);
       await vi.waitFor(async () => {
@@ -371,11 +377,11 @@ describe('worker launch acknowledgement', () => {
           { releaseAfterSpawn: true },
         ));
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-          timeoutMs: 2_000,
+          timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
           pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-          timeoutMs: 2_000,
+          timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
           pollIntervalMs: 5,
         })).resolves.toBe(true);
         await vi.waitFor(async () => {
@@ -1061,7 +1067,7 @@ describe('worker launch acknowledgement', () => {
     );
     const first = runWorkerLaunchBootstrap(spec);
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(first).resolves.toMatchObject({ outcome: 'ran', exitCode: 0 });
@@ -1077,7 +1083,7 @@ describe('worker launch acknowledgement', () => {
     );
     const bootstrap = runWorkerLaunchBootstrap(spec);
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -1106,7 +1112,7 @@ describe('worker launch acknowledgement', () => {
       cwd,
     ));
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -1133,7 +1139,7 @@ describe('worker launch acknowledgement', () => {
       try {
         const bootstrap = runWorkerLaunchBootstrap(spec);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-          timeoutMs: 2_000,
+          timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
           pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -1203,7 +1209,7 @@ describe('worker launch acknowledgement', () => {
         cwd,
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       const result = await bootstrap;
@@ -1280,11 +1286,11 @@ describe('worker launch acknowledgement', () => {
         cwd,
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toBe(true);
       await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
@@ -1346,11 +1352,11 @@ describe('worker launch acknowledgement', () => {
           { releaseAfterSpawn: true },
         ));
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-          timeoutMs: 2_000,
+          timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
           pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-          timeoutMs: 2_000,
+          timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
           pollIntervalMs: 5,
         })).resolves.toBe(true);
         expect(emitLateGateError).toBeDefined();
@@ -1439,7 +1445,7 @@ describe('worker launch acknowledgement', () => {
         { releaseAfterSpawn: true },
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       const providerMarker = join(cwd, 'failed-release-provider.json');
@@ -1518,11 +1524,11 @@ describe('worker launch acknowledgement', () => {
         { releaseAfterSpawn: true },
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toBe(true);
       const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8')) as {
@@ -1579,11 +1585,11 @@ describe('worker launch acknowledgement', () => {
       cwd,
     ));
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: true });
     await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toBe(true);
     const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8')) as { process_group_id: number };
@@ -1618,7 +1624,7 @@ describe('worker launch acknowledgement', () => {
       cwd,
     );
     const bootstrap = runWorkerLaunchBootstrap(spec);
-    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 });
     await bootstrap;
 
     await expect(loadWorkerLaunchAttempt({
@@ -1661,7 +1667,7 @@ describe('worker launch acknowledgement', () => {
 
     await expect(revokeWorkerLaunchAttempt(launchAttempt, 'timeout')).resolves.toBe(true);
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1684,7 +1690,7 @@ describe('worker launch acknowledgement', () => {
 
     await expect(retireWorkerLaunchAttempt(launchAttempt, 'pane_cleanup')).resolves.toBe(true);
     await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1712,14 +1718,14 @@ describe('worker launch acknowledgement', () => {
         { releaseAfterSpawn: true },
       ));
       await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toEqual({ ok: true });
       await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
       const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
       expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
       await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-        timeoutMs: 2_000,
+        timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
         pollIntervalMs: 5,
       })).resolves.toBe(true);
       await vi.waitFor(async () => {
@@ -1778,7 +1784,7 @@ describe('worker launch acknowledgement', () => {
     });
 
     await expect(awaitWorkerLaunchAcknowledgement(olderAttempt, {
-      timeoutMs: 2_000,
+      timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
       pollIntervalMs: 5,
     })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
     await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1811,7 +1817,7 @@ describe('worker launch acknowledgement', () => {
     });
     const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd);
     const bootstrap = runWorkerLaunchBootstrap(spec);
-    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+    await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 });
     await expect(awaitWorkerLaunchProviderStarted(launchAttempt, { timeoutMs: 10_000, pollIntervalMs: 5 })).resolves.toBe(true);
     const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8'));
     expect(started).toMatchObject({
@@ -2026,7 +2032,7 @@ describe('worker launch acknowledgement', () => {
         { releaseAfterSpawn: true },
       );
       const bootstrap = runWorkerLaunchBootstrap(spec);
-      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+      await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 }))
         .resolves.toEqual({ ok: true });
       await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
       await expect(readFile(marker, 'utf8')).resolves.toBe(process.env.HOME);
@@ -2057,7 +2063,7 @@ describe('worker launch acknowledgement', () => {
         releaseAfterSpawn: true,
       },
     ));
-    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 }))
       .resolves.toEqual({ ok: true });
     await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
     await expect(readFile(marker, 'utf8').then(JSON.parse)).resolves.toEqual({
