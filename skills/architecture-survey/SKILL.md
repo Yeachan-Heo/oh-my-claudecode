@@ -44,6 +44,8 @@ The report may be rendered visually with the repo's diagram skill when the yard 
 
 The report is decision input, not work. Candidates feed the mission brief (launch Phase 1) or grilling material for the next effort. Survey proposes; the captain disposes.
 
+**Grill the top candidate on the spot.** When the captain wants to act on the survey immediately rather than filing it, the report's top recommendation becomes the first question of a design-tree interview in the same session — launch Phase 1's frontier protocol, run right here: what would deepening this candidate involve, what does it cost, what does it unblock. The evidence is fresh and the captain is present; a finding worked now is a decided effort, not a report waiting to go stale. The survey still makes no edits — the interview decides, and delivery goes through launch's own gates.
+
 A candidate the captain declines with a load-bearing reason is offered as an ADR — the same ADR test launch applies (hard to reverse, surprising without context, a real tradeoff) — so the next survey does not re-nominate the same reef. Declined without one, it simply sinks.
 
 ## Non-goals
