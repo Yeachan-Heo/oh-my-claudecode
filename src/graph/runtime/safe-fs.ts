@@ -303,6 +303,10 @@ export function withContainedSubdirectoryOperations<T>(
     fsConstants.O_RDONLY | fsConstants.O_DIRECTORY,
   );
   let directoryFd: number | null = null;
+  let active = true;
+  const checkActive = (): void => {
+    if (!active) throw new Error("contained operations used outside synchronous callback");
+  };
   try {
     const stats = fstatSync(runDirFd);
     if (stats.dev !== runDir.device || stats.ino !== runDir.inode) {
@@ -322,8 +326,9 @@ export function withContainedSubdirectoryOperations<T>(
       parentFd = nextFd;
       directoryFd = nextFd;
     }
-    return operation(guardedOperations(directoryFd as number));
+    return operation(guardedOperations(directoryFd as number, checkActive));
   } finally {
+    active = false;
     if (directoryFd !== null) closeSync(directoryFd);
     closeSync(runDirFd);
   }
@@ -333,9 +338,10 @@ export function withContainedSubdirectoryOperations<T>(
  * Wrap raw descriptor operations with the same name validation and
  * post-callback fail-closed guard withContainedOperations applies.
  */
-function guardedOperations(fd: number): DirectoryOperations {
+function guardedOperations(fd: number, checkActive: () => void): DirectoryOperations {
   const operations = directoryOperations(fd);
   const check = (name: string): string => {
+    checkActive();
     assertSafeContainedFileName(name);
     return name;
   };
@@ -347,5 +353,8 @@ function guardedOperations(fd: number): DirectoryOperations {
     rename: (source, destination) => operations.rename(check(source), check(destination)),
     unlink: (name) => operations.unlink(check(name)),
     link: (source, destination) => operations.link(check(source), check(destination)),
+    readDir: () => { checkActive(); return operations.readDir(); },
+    realpath: () => { checkActive(); return operations.realpath(); },
+    sync: () => { checkActive(); operations.sync(); },
   };
 }

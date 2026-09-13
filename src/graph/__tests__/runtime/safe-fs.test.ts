@@ -28,6 +28,7 @@ import {
   readContainedFileNoFollow,
   withContainedDirectory,
   withContainedOperations,
+  withContainedSubdirectoryOperations,
   readOperationFileNoFollow,
   withContainedPathForPlatform,
 } from "../../runtime/safe-fs.js";
@@ -248,6 +249,55 @@ describe("graph runtime safe filesystem", () => {
       () => retained.unlink("artifact"), () => retained.readDir(),
       () => retained.realpath(), () => retained.sync(),
     ]) expect(operation).toThrow("outside synchronous callback");
+  });
+
+  it.each([false, true])("invalidates retained nested operations before FD reuse (throws=%s)", (throws) => {
+    const { root, handle } = makeRunDir();
+    const outside = join(root, "outside");
+    mkdirSync(outside);
+    writeFileSync(join(outside, "sentinel"), "untouched");
+    let retained!: DirectoryOperations;
+    let descriptorCeiling = -1;
+    const invoke = () => withContainedSubdirectoryOperations(handle, ["approvals", "decisions"], (ops) => {
+      retained = ops;
+      expect(ops.readDir()).toEqual([]);
+      // Reserve descriptors while the nested directory is still open, then
+      // reuse the released range for the outside directory after callback exit.
+      const probes: number[] = [];
+      try {
+        for (let index = 0; index < 32; index += 1) {
+          probes.push(openSync(outside, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY));
+        }
+        descriptorCeiling = Math.max(...probes);
+      } finally {
+        for (const fd of probes) closeSync(fd);
+      }
+      if (throws) throw new Error("callback failed");
+      return ops;
+    }, { create: true });
+    if (throws) expect(invoke).toThrow("callback failed");
+    else expect(invoke()).toBe(retained);
+
+    const outsideFds: number[] = [];
+    try {
+      let fd: number;
+      do {
+        fd = openSync(outside, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+        outsideFds.push(fd);
+      } while (fd < descriptorCeiling);
+      expect(fd).toBe(descriptorCeiling);
+      for (const operation of [
+        () => { const opened = retained.open("escaped", fsConstants.O_CREAT | fsConstants.O_WRONLY); closeSync(opened); },
+        () => retained.mkdir("child"), () => retained.lstat("sentinel"),
+        () => retained.rename("sentinel", "renamed"), () => retained.link("sentinel", "linked"),
+        () => retained.unlink("sentinel"), () => retained.readDir(),
+        () => retained.realpath(), () => retained.sync(),
+      ]) expect.soft(operation).toThrow("outside synchronous callback");
+      expect(existsSync(join(outside, "escaped"))).toBe(false);
+      expect(readFileSync(join(outside, "sentinel"), "utf8")).toBe("untouched");
+    } finally {
+      for (const fd of outsideFds) closeSync(fd);
+    }
   });
 
   it.each([false, true])("anchors atomic publication and rollback through replacement (rollback=%s)", (rollback) => {
