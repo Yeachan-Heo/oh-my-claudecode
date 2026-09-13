@@ -21,6 +21,14 @@
  *  base = 05c800f40d1ad53b42a78609d2667ef4f726808b
  *  planningHead = 0a91273e61dbbd47eb0af4c02844409251e08398
  *  head = exact HEAD at generation (or ISSUE_3702_HEAD env)
+ *
+ * Squash hazard: --verify requires the committed head to be an ancestor of the
+ * current HEAD. A baseline regenerated on a feature branch records that
+ * branch tip, and a squash merge discards it — the committed anchor then
+ * becomes unreachable from dev and every later PR fails verify. When
+ * refreshing the baseline inside a PR, anchor it to a commit that already
+ * exists on the integration branch:
+ *   ISSUE_3702_HEAD=$(git merge-base HEAD origin/dev) node scripts/generate-inventory-graph.mjs --write
  */
 
 import { readdir, readFile, stat, mkdir, writeFile } from 'node:fs/promises';
