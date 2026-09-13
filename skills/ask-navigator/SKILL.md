@@ -80,6 +80,8 @@ Every ticket is **HITL** (worked with the captain, who speaks for themselves) or
 
 The answer is never part of the ticket body; it is recorded on resolution. Assets created while resolving are linked from the ticket, not pasted in.
 
+A `research` ticket whose knowledge lives in a **person** rather than a document resolves by asking that person directly: one tracker comment naming them (per the granted communication scope), carrying everything they need to answer in one read, and their reply is cited as the primary source — the same standard a document source would meet. No third party is cold-contacted; a person the evidence does not name gets no question. The resolution records who answered and where, so the map's index points at the reply, not at a paraphrase.
+
 A `research` file speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
 
 ## Map body
