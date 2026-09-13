@@ -63,6 +63,8 @@ Localize prose and human-facing labels/localizable scalar values only. Paths, sl
 
 Run the interview with the design-tree protocol: map decisions and their dependencies, then work in **frontier rounds** — batch every currently-askable question into one round, numbered, each with a recommended answer. The human answers; the tree reshapes; recompute the frontier. Facts are always self-served by sub-agents from repo evidence — the human is asked only what no amount of exploration can settle.
 
+**Comprehension reset.** Before a settled decision is presented for signature, restate it back in one short paragraph of plain technical prose, using the yard's own vocabulary — the terms as `CONTEXT.md` defines them, no borrowed jargon. A restatement the captain cannot follow sends the decision back to the frontier, not forward on a guess: signing what was understood, not what was said, is how misreads become load-bearing.
+
 Paper trail, written the moment each item settles:
 - domain vocabulary → `CONTEXT.md` at repo root (one entry per term)
 - decisions passing the ADR test (hard to reverse, surprising without context, real tradeoff) → `docs/adr/NNNN-<slug>.md`
@@ -77,6 +79,8 @@ Non-convergence here is normal work, not a failure: if the frontier will not emp
 **Loft detour.** A residual question that is precise but cannot settle in prose — it needs to be seen or clicked, not described (how the UI should look, whether a state model feels right) — is answered with an artifact, not more questions: call the Skill tool with "loft", let the captain react, and fold that reaction back into the interview. The lofted artifact is C2's input; the captain signs what they saw, not what they were told.
 
 **Harbor briefs.** A mission brief handed over by `/oh-my-claudecode:harbor` carries signed decisions with links and applicable conditions: consume them as already-made — do not re-ask unchanged business goals. If the code has moved since the evidence was gathered (new head, changed base), re-verify the affected technical evidence; new implementation scope beyond the signed brief still gets its own approval.
+
+**Settled-consensus exit.** When this invocation arrives from a conversation whose decision tree is already worked — every frontier question answered, vocabulary and decisions already settled (by a live interview, a decision questionnaire, or a handoff artifact) — Phase 1 collapses to a **consensus audit**: read what the session settled, verify each settled decision against the evidence it names, restate the whole set once (the comprehension reset above), and draft the spec directly. No questions are re-asked; the fog gate and C2 still gate the run — skipping the interview never skips a signature. Consensus quality is verified, never assumed: any settled decision that fails its restatement re-opens, and the interview resumes from there.
 
 ## Phase 2 — Spec synthesis (agent drafts → C2 approves)
 
@@ -165,6 +169,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 - Long headless runs: prefer `--output-format stream-json` (or periodic progress markers) so the orchestrator sees liveness — plain text mode emits nothing until the turn ends.
 - Phase 4 runs in fresh contexts per ticket by construction (team workers or subagents).
 - Handoffs pass pointers, never content. A handoff paper carries three things only: **pointers** (where the material and the decisions live — never copies), **the next watch** (what the next phase does, and which skills to call), and **the warning lines** (red lines already ruled out; credentials redacted). When a compact is unavoidable, pass an instruction with it, so the summary keeps what the next phase needs.
+- **Planned session handoff**: when a session must end mid-effort by design — context budget, scheduled boundary, a deliberate pause — it compresses itself into a handoff artifact beside the run's other artifacts: what settled (decisions with their pointers), what is open (frontier questions), what state the run is in, and nothing else. No raw transcript, no chat history. The next session re-orients from the artifact, never from memory — the same re-orientation rule the navigator's map follows. Handoff is the proactive twin of crash recovery below: one governs planned transfer, the other governs a session that died.
 - Session died mid-run: preserve the artifacts and stop. A later explicit invocation may continue only after the owning Team lifecycle reaches its supported terminal/cleanup boundary; Team remains authoritative for runtime state.
 
 ## Completion definition

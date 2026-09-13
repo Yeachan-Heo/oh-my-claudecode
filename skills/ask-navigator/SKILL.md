@@ -67,6 +67,16 @@ When charting reveals an effort whose frontier no number of sessions is likely t
 
 Long-lived is a property of the map, not a mode switch: the same map issue, the same child tickets, the same rules. When the fog finally clears, the exit is unchanged — collapse the decisions into the mission brief and hand off.
 
+## Large efforts — the map outlives the session
+
+When charting reveals an effort whose frontier no number of sessions is likely to clear quickly — decisions fanning out across several independent threads, a destination that keeps opening new fog — the map itself becomes **long-lived** rather than a short stop on the way to launch:
+
+- **Decisions group into vessels**: independent threads of the frontier are named as vessels in the map's Notes, each carrying its child tickets, so any session can orient to one thread without re-reading the whole space.
+- **The map issue carries a census line**: one line stating the open-ticket count per vessel and what the current frontier is, refreshed every session — a session that reads only the map knows where the effort stands.
+- **The one-ticket-per-session budget is spent on the map's frontier in priority order** across any number of sessions — the cadence never changes; only the horizon does.
+
+Long-lived is a property of the map, not a mode switch: the same map issue, the same child tickets, the same rules. When the fog finally clears, the exit is unchanged — collapse the decisions into the mission brief and hand off.
+
 ## Ticket types
 
 Every ticket is **HITL** (worked with the captain, who speaks for themselves) or **AFK** (driven by the navigator alone). A HITL ticket only resolves through live exchange; the agent never stands in for the captain's side.

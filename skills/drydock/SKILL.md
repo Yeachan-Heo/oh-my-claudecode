@@ -338,6 +338,8 @@ write "this project's specific decision discipline", not generic tutorials.
 
 **Destructive-operation guardrail preset.** On request, drydock seeds a hook preset that blocks destructive git operations — push, force-push, hard reset, clean, and branch deletion — behind explicit approval. It is installed as ordinary, inspectable repo config (a hooks file the repo can read and audit), never a hidden enforcement layer: the file lives in the Tools pillar, its rules are listed in the report, and removing it is an explicit human act. The preset protects the laid harness, not the agent — no agent session can end the repo's history by accident.
 
+**Commit-time quality gate preset.** On request, drydock also seeds a commit-time hook preset that runs the repo's own checks before a commit lands — lint, typecheck, and the test suite, each wired to whatever entrypoints the repo already has (the Tools pillar's `scripts/`, the package manager's standard commands). Same shape as the guardrail preset: ordinary, inspectable repo config, listed in the report, removable only by an explicit human act. The gates are the repo's existing checks wired to the commit boundary — drydock adds no new checker of its own, and a repo without established check commands gets the scaffold with the commands left for the humans to name.
+
 ### 4. Wire the governance loop (this is what makes it a shipyard, not a folder)
 
 Tell the user, and rely on these flows to fill the skeleton:
