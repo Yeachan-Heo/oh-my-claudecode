@@ -50,16 +50,22 @@ function workspaceIdentifier(workspaceRoot) {
   return `${basename(workspaceRoot).replace(/[^a-zA-Z0-9_-]/g, '_')}-${hash}`;
 }
 
+// git localizes its error messages; probeGitRoot() classifies "not a git
+// repository" by matching the English stderr, so every spawn forces the C
+// locale. Without it a non-English shell turns a benign non-git directory
+// into a thrown error (#4033, mirrors the src/lib/worktree-paths.ts fix).
+function gitEnv() { return { ...process.env, LC_ALL: 'C' }; }
+
 function primaryGitRoot(gitRoot) {
   try {
-    const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 }).trim();
+    const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim();
     if (basename(commonDir) === '.git' && !commonDir.includes('/.git/modules/')) return dirname(commonDir);
   } catch {}
   return gitRoot;
 }
 
 function probeGitRoot(directory) {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 5000 }).trim() || null; }
+  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || null; }
   catch (error) { if (error?.code === 'ENOENT' || (error?.status === 128 && /not a git repository/i.test(String(error?.stderr ?? '')))) return null; throw error; }
 }
 
@@ -105,7 +111,7 @@ export async function resolveOmcStateRoot(directory) {
     const primaryRoot = primaryGitRoot(gitRoot);
     let source = primaryRoot;
     try {
-      source = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 }).trim() || primaryRoot;
+      source = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || primaryRoot;
     } catch {}
     const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
     const dirName = basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, '_');
