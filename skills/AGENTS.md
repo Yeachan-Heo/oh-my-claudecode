@@ -3,7 +3,7 @@
 
 # skills
 
-41 skill directories for workflow automation and specialized behaviors.
+42 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -57,6 +57,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `harbor/SKILL.md` | harbor | Shipyard intake gate: sweeps external issues and PRs, verifies claims, hands the maintainer a signature docket |
 | `loft/SKILL.md` | loft | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions prose cannot settle |
 | `minimal-code-discipline/SKILL.md` | minimal-code-discipline | YAGNI-ladder writing-time discipline: existence-first, reuse before writing, shortest correct diff |
+| `minimal-prose-discipline/SKILL.md` | minimal-prose-discipline | Writing-time discipline for the agent's own prose: protected core, no filler, close on the action |
 | `skillify/SKILL.md` | skillify | Extract reusable skill from session |
 | `learner/SKILL.md` | learner | Deprecated compatibility alias/internal implementation history for skillify |
 | `ask/SKILL.md` | ask | Ask Claude, Codex, or Gemini via `omc ask` and capture an artifact |

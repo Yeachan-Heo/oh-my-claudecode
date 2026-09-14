@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a7d52b4abb55fa047201731464d6099c64a08527",
-    "sourceSha256": "eaba920eced81ce916c090e280d7389c1efa76c03471a8f0751485c46ab51370",
+    "head": "f52de1d7198f67237a13d7469c315d81108afa13",
+    "sourceSha256": "352ec46a57cd9b5669aa56bb4cbb3396994456a969d4670165cc9107667ba081",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a7d52b4abb55fa047201731464d6099c64a08527",
-  "sourceSha256": "eaba920eced81ce916c090e280d7389c1efa76c03471a8f0751485c46ab51370",
+  "head": "f52de1d7198f67237a13d7469c315d81108afa13",
+  "sourceSha256": "352ec46a57cd9b5669aa56bb4cbb3396994456a969d4670165cc9107667ba081",
   "counts": {
     "public": {
-      "skills": 41,
+      "skills": 42,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 90
+      "total": 91
     },
     "internal": {
       "hookFiles": 296,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 41,
+    "skills": 42,
     "commands": 21,
     "hookFiles": 296,
     "workflows": 8,
@@ -70,6 +70,7 @@
       "launch",
       "loft",
       "minimal-code-discipline",
+      "minimal-prose-discipline",
       "omc-doctor",
       "omc-setup",
       "plan",
@@ -33938,6 +33939,11 @@
         "path": "skills/minimal-code-discipline/SKILL.md"
       },
       {
+        "id": "skills/minimal-prose-discipline/SKILL.md",
+        "kind": "skill",
+        "path": "skills/minimal-prose-discipline/SKILL.md"
+      },
+      {
         "id": "skills/omc-doctor/SKILL.md",
         "kind": "skill",
         "path": "skills/omc-doctor/SKILL.md"
@@ -43761,6 +43767,11 @@
       },
       {
         "from": "skills/minimal-code-discipline/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/minimal-prose-discipline/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -79101,12 +79112,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6984,
-      "edgeCount": 7555,
+      "nodeCount": 6985,
+      "edgeCount": 7556,
       "importEdgeCount": 6232,
-      "registerEdgeCount": 62
+      "registerEdgeCount": 63
     }
   },
-  "inventorySha256": "2273948adc18eb76ea2beda974ac12d9b72d7c1d2d8146c48b69e2ed2bb94b11",
-  "manifestSha256": "6ea3b4842135167f8b1de135b8bdfd0c9ca68f4a6ea532657cadeb244df7cb55"
+  "inventorySha256": "11f2c0782b8e7b757647b3a6476f0d1ee826b7f1c6d645faf1b0174cff6d014f",
+  "manifestSha256": "439eeedc0828732c9164b4c8b82112e2ba93ad8686e54219d97f7c8c270c8eca"
 }
