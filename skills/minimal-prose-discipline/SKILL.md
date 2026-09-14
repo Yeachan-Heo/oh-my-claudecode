@@ -1,6 +1,6 @@
 ---
 name: minimal-prose-discipline
-description: "Writing-time discipline for the prose an agent emits to a human (chat replies, reports, session-close pointers) — a protected core that never gets rewritten (code, commands, paths, exact errors, negators, numbers), filler that always dies, no invented abbreviations, no tool-call narration, auto-clarity that suspends the discipline where compression would mislead. The third of the yard's writing companions: minimal-code-discipline disciplines code, agent-doc-discipline disciplines papers, this one disciplines the agent's own words. Opt-in; invoked by the agent at writing time, not by the user."
+description: "Writing-time discipline for the prose an agent speaks to a human (replies, reports, pointers): a protected core never rewritten (code, commands, paths, errors, negators, numbers), filler dies, no narration, auto-clarity where terse misleads"
 level: 3
 ---
 
