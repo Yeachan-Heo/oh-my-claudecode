@@ -185,6 +185,26 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(DISCIPLINE).not.toContain('always-on');
   });
 
+  it('minimal-prose-discipline ships as the third writing companion with the protected core and auto-clarity', () => {
+    const PROSE = readFileSync(join(ROOT, 'skills', 'minimal-prose-discipline', 'SKILL.md'), 'utf-8');
+    const frontmatter = PROSE.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? '';
+    expect(frontmatter).toContain('name: minimal-prose-discipline');
+    expect(frontmatter).toContain('level: 3');
+    expect(PROSE).toContain('**Protect the core.**');
+    expect(PROSE).toContain('byte-for-byte what the tool or user produced');
+    expect(PROSE).toContain('**Never drop the meaning-bearers.**');
+    expect(PROSE).toContain('Auto-clarity');
+    expect(PROSE).toContain('security warnings and irreversible-action confirmations');
+    expect(PROSE).toContain('writing-time discipline, not a mode');
+    expect(PROSE).toContain('**minimal-code-discipline** disciplines what the agent builds');
+    // Scope boundary: conversational output only — artifacts have their own companions.
+    expect(PROSE).toContain('## Scope');
+    expect(PROSE).toContain('A ticket body written for humans');
+    // Absorbed-out mechanisms stay out: no intensity ladder, no style persistence.
+    expect(PROSE).not.toContain('lite|full|ultra');
+    expect(PROSE).not.toContain('/caveman');
+  });
+
   it('agent-doc-discipline ships as advisory and is wired at its two mandatory call sites', () => {
     // The document-side companion of minimal-code-discipline: advisory skill,
     // never a gate; mandatory exactly at drydock seeds and launch C5 sediment.
