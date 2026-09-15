@@ -28,6 +28,12 @@ Documents written for humans only: `docs/business/` narrative, ADR decision stor
 
 **Every step ends on a completion criterion.** Done must be tellable from not-done — a vague bound invites premature completion. _Test:_ for each step, "how do I know this is finished?" has an answer in the text.
 
+**A procedure longer than two steps is numbered.** The numbers are stable references: a reader can name step 3, follow the order, and jump without re-reading. An unnumbered procedure of many steps makes the reader hold the order in their head. _Test:_ every procedure of three or more steps carries its numbers.
+
+**A list is capped at what a reader holds in one glance.** A list that outgrows the reader's grasp loses its point — nothing in it is findable. A longer enumeration becomes structure (a table, subsections) or splits. This governs the writing of documents; it never touches the machinery of a gate or a batched decision, which lives in the methodology, not the prose. _Test:_ every list in the document fits in one glance, and any longer enumeration has become structure.
+
+**Deferred and scheduled work states when.** A document that defers work to a later step, session, or release states that timing next to the work it defers — "when" is a fact the reader needs to act, and an unstated deferral reads as an unstarted one. The timing is stated in the prose only; it never rebinds a checkpoint the methodology pushes right deliberately. _Test:_ every deferral in the document carries its when.
+
 **Close on a next action a reader can start now.** A report, ticket, or session-close pointer ends not with a summary but with the one next step a reader can begin in under two minutes — the destination, the pointer, or the command. A close that only summarizes makes the reader re-derive what to do first. _Test:_ the last line answers "what do I do next?" without scrolling up.
 
 **Re-state the position each time the reader rejoins.** A document a returning reader touches mid-flight (a long spec, a run report, a map Notes section) opens the new material with where things stand — step, phase, or decision count — before adding anything new. _Test:_ a reader arriving cold can locate the current state in the first two lines of the newest section.
@@ -45,3 +51,4 @@ Before reporting a document change done, confirm:
 - meanings live in one place; pointers name their trigger branches
 - stale or redundant material found during the edit was removed, while valid unrelated content was preserved
 - closes end on a next action the reader can start now; rejoining readers find the current state stated before new material
+- procedures of three or more steps are numbered; lists fit in one glance; every deferral states its when
