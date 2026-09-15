@@ -205,6 +205,25 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(PROSE).not.toContain('/caveman');
   });
 
+  it('both companions carry the six remaining output disciplines with the gate-machinery exclusion', () => {
+    const PROSE = readFileSync(join(ROOT, 'skills', 'minimal-prose-discipline', 'SKILL.md'), 'utf-8');
+    // agent-doc-discipline: numbered steps, bounded lists, document-side stated timing.
+    expect(DISCIPLINE).toContain('**A procedure longer than two steps is numbered.**');
+    expect(DISCIPLINE).toContain('**A list is capped at what a reader holds in one glance.**');
+    expect(DISCIPLINE).toContain('**Deferred and scheduled work states when.**');
+    expect(DISCIPLINE).toContain('never touches the machinery of a gate or a batched decision');
+    expect(DISCIPLINE).toContain('it never rebinds a checkpoint the methodology pushes right deliberately');
+    // minimal-prose-discipline: thread, error tone, stated outcomes, conversational timing.
+    expect(PROSE).toContain('**The reply stays on the thread.**');
+    expect(PROSE).toContain('**Errors are reported as facts.**');
+    expect(PROSE).toContain('**What shipped is stated, not celebrated.**');
+    expect(PROSE).toContain('**A reply that defers work says when.**');
+    expect(PROSE).toContain('it never rebinds a checkpoint the methodology pushes right deliberately');
+    // Verification coverage gained in both.
+    expect(DISCIPLINE).toContain('procedures of three or more steps are numbered');
+    expect(PROSE).toContain('errors are facts; completions name what shipped');
+  });
+
   it('agent-doc-discipline ships as advisory and is wired at its two mandatory call sites', () => {
     // The document-side companion of minimal-code-discipline: advisory skill,
     // never a gate; mandatory exactly at drydock seeds and launch C5 sediment.
