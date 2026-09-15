@@ -20,6 +20,7 @@
     "./skills/agent-doc-discipline/",
     "./skills/architecture-survey/",
     "./skills/ask/",
+    "./skills/intent/",
     "./skills/ask-navigator/",
     "./skills/autopilot/",
     "./skills/autoresearch/",

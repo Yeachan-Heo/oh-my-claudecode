@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (42 Total)](#skills-42-total)
+- [Skills (43 Total)](#skills-43-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -901,7 +901,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (42 Total)
+## Skills (43 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -930,6 +930,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
 | `harbor`                  | Shipyard intake gate: verify external issues and PRs, hand a signature docket  | `/oh-my-claudecode:harbor`                  |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
+| `intent`                  | Internal requirements intake for non-engineer contributors                      | `/oh-my-claudecode:intent`                  |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
 | `minimal-code-discipline` | YAGNI-ladder writing-time discipline: reuse first, shortest correct diff        | `/oh-my-claudecode:minimal-code-discipline` |

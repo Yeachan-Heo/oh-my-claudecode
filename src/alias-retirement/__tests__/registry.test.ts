@@ -84,11 +84,13 @@ describe('alias-retirement registry', () => {
     // skill directory; this is an addition, not an alias retirement.
     // Raised 40 -> 41 canonical when diagram shipped as a real skill directory;
     // this is an addition, not an alias retirement.
+    // Raised 41 -> 42 canonical when intent shipped as a real skill
+    // directory; this is an addition, not an alias retirement.
     const all = createBuiltinSkills();
-    expect(all).toHaveLength(44);
+    expect(all).toHaveLength(45);
     const canonical = all.filter((s) => !s.aliasOf);
     const aliases = all.filter((s) => !!s.aliasOf);
-    expect(canonical).toHaveLength(42);
+    expect(canonical).toHaveLength(43);
     expect(aliases).toHaveLength(2);
     expect(aliases.map((s) => s.name).sort()).toEqual(['cancel-ralph', 'psm'].sort());
   });
