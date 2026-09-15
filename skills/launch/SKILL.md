@@ -56,7 +56,7 @@ Localize prose and human-facing labels/localizable scalar values only. Paths, sl
 - **Fog gate**: after the sharpening pass, apply the navigator's fog test — **Q1**: can the destination be stated in one sentence (the spec, decision, or change this effort is finding its way to)? **Q2**: can the first three decisions be stated precisely right now, even though none can be answered yet? Either answer no → the run never starts: state that plainly, note that no artifacts were produced, recommend `/oh-my-claudecode:ask-navigator` (the shipyard's navigator charts fog as a map of decision tickets and hands back a mission brief), and stop. Hand over the residual questions and any vocabulary already settled, so the navigator's W1 does not re-ask them.
 - **Map check**: before reading a supplied spec or entering Phase 1, look for an open `navigator:map` (tracker label, or under `.omc/wayfinder/`). One exists and this invocation supplies no new brief → recommend `/oh-my-claudecode:ask-navigator` to work the next decision on that map, and stop. One exists and a new brief is supplied → ask one question — continue the open map, or start a new effort — before proceeding.
 - Spec path supplied → read it, jump to Phase 2.
-- Mission brief → Phase 1.
+- Mission brief → Phase 1. An accepted intent (`docs/intents/<slug>/intent.md`, `status: accepted`, latest round — see `/oh-my-claudecode:intent`) is a valid mission brief: its five sections carry the objective, scope, and open questions.
 - Single-point fix → hand off to execute, exit.
 
 ## Phase 1 — Converge (human decides, agent prepares)
@@ -84,7 +84,7 @@ Non-convergence here is normal work, not a failure: if the frontier will not emp
 
 ## Phase 2 — Spec synthesis (agent drafts → C2 approves)
 
-Synthesize `.omc/specs/<feature-slug>/spec.md`:
+Synthesize `.omc/specs/<feature-slug>/spec.md`. When the mission is an accepted intent, follow the four-step contract from the intent skill: read the accepted intent (latest round), combine with the existing codebase, follow the Rules pillar (`CLAUDE.md` + `docs/standards/` + `docs/business/`), and list every doubt and rule conflict — graded into the spec's pending-confirmation section; intent open questions carry into the spec verbatim, keeping their pending status:
 
 ```
 # <Feature> Spec
@@ -96,7 +96,7 @@ Synthesize `.omc/specs/<feature-slug>/spec.md`:
 ## Out of Scope
 ```
 
-Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests. Each seam entry declares its **boundary class** — in-process, locally substitutable, owned-remote (a port with a production and a test adapter), or true-external (an injected substitute) — because the class decides how the seam is tested.
+Draft all of it, then stop at **C2**: present the acceptance criteria and the test seam list for human approval. When the mission is an accepted intent, the C2 presentation also carries the intent-flavor checklist: does the spec still solve the intent's original problem, are the carried open questions accounted for, and do high-risk items get a tech-lead consult before approval. Seams are selected by repo evidence and the deep-module discipline (public interfaces, existing test seams, depth analysis; the vocabulary is seeded in `docs/standards/architecture.md`); the human confirms or corrects the list — a seam the human has not approved gets no tests. Each seam entry declares its **boundary class** — in-process, locally substitutable, owned-remote (a port with a production and a test adapter), or true-external (an injected substitute) — because the class decides how the seam is tested.
 
 **Tender rule.** When the interface's shape is itself contested — two plausible designs, neither settleable by talk — C2 signs *between* alternatives, never on the only proposal on the table: draft the candidate shapes in parallel sub-agents, each under a different emphasis (smallest interface surface · widest future fit · smoothest default path for the most common caller · cleanest cross-boundary adapter), present them side by side compared on depth, locality, and seam placement, and let the captain pick one or fold a hybrid.
 
