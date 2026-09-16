@@ -555,4 +555,83 @@ Line 3`;
       expect(result).toBe(multilineContent);
     });
   });
+
+  // Regression coverage for issue #4040: `replaceSection` used the raw section
+  // text as a `String.prototype.replace` replacement pattern, and its boundary
+  // lookahead was not anchored to a line start.
+  describe('replaceSection integrity (issue #4040)', () => {
+    const countMatches = (content: string, pattern: RegExp): number =>
+      content.match(pattern)?.length ?? 0;
+
+    it('keeps literal $ sequences in priority context', () => {
+      setPriorityContext(testDir, "price was $1,699 and $& and $` and $' and $1");
+
+      expect(getPriorityContext(testDir)).toBe(
+        "price was $1,699 and $& and $` and $' and $1",
+      );
+    });
+
+    it('keeps literal $ sequences in working memory entries', () => {
+      addWorkingMemoryEntry(testDir, 'price was $1,699 today');
+
+      const content = readFileSync(getNotepadPath(testDir), 'utf-8');
+      expect(content).toContain('price was $1,699 today');
+      expect(countMatches(content, /## Working Memory/g)).toBe(1);
+    });
+
+    it('does not grow the file when an entry contains $-prefixed patterns', () => {
+      addWorkingMemoryEntry(testDir, 'seed entry');
+      const notepadPath = getNotepadPath(testDir);
+      const before = readFileSync(notepadPath, 'utf-8').length;
+
+      addWorkingMemoryEntry(testDir, "a$'b");
+
+      const after = readFileSync(notepadPath, 'utf-8').length;
+      // The entry plus its `### ` timestamp heading is well under 200 bytes; the
+      // pre-fix bug roughly doubled the whole file.
+      expect(after - before).toBeLessThan(200);
+    });
+
+    it('leaves no stale duplicated section after repeated writes', () => {
+      addWorkingMemoryEntry(testDir, 'plain entry one');
+      addWorkingMemoryEntry(testDir, 'plain entry two');
+      addWorkingMemoryEntry(testDir, 'plain entry three');
+
+      const content = readFileSync(getNotepadPath(testDir), 'utf-8');
+      expect(countMatches(content, /## Working Memory/g)).toBe(1);
+      expect(countMatches(content, /plain entry one/g)).toBe(1);
+      // No `### ` entry heading may be demoted to `## `.
+      expect(countMatches(content, /^## 20/gm)).toBe(0);
+    });
+
+    it('leaves no stale duplicated MANUAL section after repeated writes', () => {
+      addManualEntry(testDir, 'manual one');
+      addManualEntry(testDir, 'manual two');
+      addManualEntry(testDir, 'manual three');
+
+      const content = readFileSync(getNotepadPath(testDir), 'utf-8');
+      expect(countMatches(content, /## MANUAL/g)).toBe(1);
+      expect(countMatches(content, /manual one/g)).toBe(1);
+    });
+
+    it('keeps every section heading exactly once across mixed writes', () => {
+      setPriorityContext(testDir, 'priority one');
+      addWorkingMemoryEntry(testDir, 'working one');
+      addManualEntry(testDir, 'manual one');
+      setPriorityContext(testDir, 'priority two');
+      addWorkingMemoryEntry(testDir, 'working two');
+      addManualEntry(testDir, 'manual two');
+
+      const content = readFileSync(getNotepadPath(testDir), 'utf-8');
+      expect(countMatches(content, /^## Priority Context$/gm)).toBe(1);
+      expect(countMatches(content, /^## Working Memory$/gm)).toBe(1);
+      expect(countMatches(content, /^## MANUAL$/gm)).toBe(1);
+
+      expect(getPriorityContext(testDir)).toBe('priority two');
+      expect(getWorkingMemory(testDir)).toContain('working one');
+      expect(getWorkingMemory(testDir)).toContain('working two');
+      expect(getManualSection(testDir)).toContain('manual one');
+      expect(getManualSection(testDir)).toContain('manual two');
+    });
+  });
 });
