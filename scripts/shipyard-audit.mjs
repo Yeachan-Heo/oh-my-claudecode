@@ -18,7 +18,10 @@
 // Output: findings JSON on stdout, human summary on stderr.
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
+
+const toPosix = (value) => value.replace(/\\/g, '/');
 
 const SEVERITY = { high: 'high', medium: 'medium', low: 'low', info: 'info' };
 const TAG_PATTERN = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$/;
@@ -172,13 +175,23 @@ function triggersAreNonEmpty(frontmatterBody) {
   return false;
 }
 
-function checkProjectSkillTriggers(root) {
-  const skillsDir = join(root, '.omc', 'skills');
+async function checkProjectSkillTriggers(root) {
+  // The state-root directory name comes from the canonical resolver instead of a raw
+  // '.omc' join. The audit is scoped to the yard it was pointed at, so when the resolver
+  // escapes `root` (no workspace or git root under a bare directory, which falls back to
+  // the home state root) the same directory name is re-anchored at `root` rather than
+  // scanning skills that do not belong to the audited yard.
+  const resolvedStateRoot = await resolveOmcStateRoot(root);
+  const relResolved = relative(root, resolvedStateRoot);
+  const contained = Boolean(relResolved) && !relResolved.startsWith('..') && !isAbsolute(relResolved);
+  const stateRoot = contained ? resolvedStateRoot : join(root, basename(resolvedStateRoot));
+  const relStateRoot = relative(root, stateRoot);
+  const skillsDir = join(stateRoot, 'skills');
   if (!existsSync(skillsDir)) return [];
   const findings = [];
   for (const entry of readdirSync(skillsDir)) {
     if (!entry.endsWith('.md')) continue;
-    const rel = `.omc/skills/${entry}`;
+    const rel = `${toPosix(join(relStateRoot, 'skills'))}/${entry}`;
     const content = readFileSync(join(skillsDir, entry), 'utf-8');
     const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) {
@@ -258,12 +271,12 @@ function checkIntentStatuses(root) {
   return findings;
 }
 
-export function auditYard(root) {
+export async function auditYard(root) {
   return [
     ...checkSurfaces(root),
     ...checkDocumentLanguage(root),
     ...checkClaudeMdDeadPaths(root),
-    ...checkProjectSkillTriggers(root),
+    ...(await checkProjectSkillTriggers(root)),
     ...checkIntentStatuses(root),
   ];
 }
@@ -274,14 +287,14 @@ function summarize(findings) {
   return counts;
 }
 
-function main() {
+async function main() {
   const root = resolve(process.argv[2] ?? process.cwd());
   if (!existsSync(root) || !statSync(root).isDirectory()) {
     console.error(`shipyard-audit: not a directory: ${root}`);
     process.exit(2);
   }
 
-  const findings = auditYard(root);
+  const findings = await auditYard(root);
   const counts = summarize(findings);
   const clean = findings.every((f) => !(f.actionable && f.severity === SEVERITY.high));
 
@@ -306,4 +319,4 @@ function main() {
 }
 
 const invoked = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replace(/\\/g, '/')}`).href;
-if (invoked) main();
+if (invoked) await main();
