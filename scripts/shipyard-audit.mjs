@@ -6,6 +6,9 @@
 // share one contract. Covers only the high-confidence finding classes; the
 // heuristic classes (glossary terms unused in code, standards never
 // referenced) stay prose-layer in the skill text and are never emitted here.
+// Current classes: missing surfaces, a missing/invalid `documentLanguage`
+// tag, dead paths in `CLAUDE.md`, project-skill triggers present, and intent
+// statuses within the documented vocabulary.
 //
 // Usage: node scripts/shipyard-audit.mjs [repoRoot]
 // Exit 0 = clean (no high-confidence actionable findings)
@@ -14,7 +17,7 @@
 //
 // Output: findings JSON on stdout, human summary on stderr.
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const SEVERITY = { high: 'high', medium: 'medium', low: 'low', info: 'info' };
@@ -153,8 +156,116 @@ function checkClaudeMdDeadPaths(root) {
   return findings;
 }
 
+// A project skill is loadable only with non-empty triggers — the loader
+// validates at runtime, so the frontmatter claim is mechanically checkable
+// and a silent omission is a finding, not a style nit.
+function triggersAreNonEmpty(frontmatterBody) {
+  const lines = frontmatterBody.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^triggers:/.test(l));
+  if (start === -1) return false;
+  const inline = lines[start].slice('triggers:'.length).trim();
+  if (inline) return inline !== '[]' && inline !== '""';
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^\S/.test(lines[i])) break; // next top-level key
+    if (/^\s*-\s*\S/.test(lines[i])) return true;
+  }
+  return false;
+}
+
+function checkProjectSkillTriggers(root) {
+  const skillsDir = join(root, '.omc', 'skills');
+  if (!existsSync(skillsDir)) return [];
+  const findings = [];
+  for (const entry of readdirSync(skillsDir)) {
+    if (!entry.endsWith('.md')) continue;
+    const rel = `.omc/skills/${entry}`;
+    const content = readFileSync(join(skillsDir, entry), 'utf-8');
+    const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!fm) {
+      findings.push(
+        finding(
+          'shipyard.project-skill.missing-frontmatter',
+          `Project skill has no YAML frontmatter: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add frontmatter with id, name, description, and non-empty triggers (see the drydock skill).',
+        ),
+      );
+      continue;
+    }
+    if (!triggersAreNonEmpty(fm[1])) {
+      findings.push(
+        finding(
+          'shipyard.project-skill.missing-triggers',
+          `Project skill triggers missing or empty: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add at least one trigger — missing or empty means the skill is never loaded.',
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
+const INTENT_STATUSES = ['draft', 'in-review', 'accepted', 'rejected'];
+
+// An intent's frontmatter status mirrors the tracker review state; a status
+// outside the documented vocabulary makes the mirror unverifiable.
+function checkIntentStatuses(root) {
+  const intentsDir = join(root, 'docs', 'intents');
+  if (!existsSync(intentsDir)) return [];
+  const findings = [];
+  for (const entry of readdirSync(intentsDir)) {
+    const intentPath = join(intentsDir, entry, 'intent.md');
+    if (!existsSync(intentPath)) continue;
+    const rel = `docs/intents/${entry}/intent.md`;
+    const content = readFileSync(intentPath, 'utf-8');
+    const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const status = fm && fm[1].match(/^status:\s*(\S+)\s*$/m);
+    if (!status) {
+      findings.push(
+        finding(
+          'shipyard.intent.missing-status',
+          `Intent has no status in frontmatter: ${rel}`,
+          SEVERITY.high,
+          'high',
+          true,
+          [rel],
+          'Add `status: draft | in-review | accepted | rejected` to the frontmatter.',
+        ),
+      );
+      continue;
+    }
+    if (!INTENT_STATUSES.includes(status[1])) {
+      findings.push(
+        finding(
+          'shipyard.intent.invalid-status',
+          `Invalid intent status: ${status[1]} (${rel})`,
+          SEVERITY.high,
+          'high',
+          true,
+          [status[1]],
+          'Use one of: draft, in-review, accepted, rejected.',
+        ),
+      );
+    }
+  }
+  return findings;
+}
+
 export function auditYard(root) {
-  return [...checkSurfaces(root), ...checkDocumentLanguage(root), ...checkClaudeMdDeadPaths(root)];
+  return [
+    ...checkSurfaces(root),
+    ...checkDocumentLanguage(root),
+    ...checkClaudeMdDeadPaths(root),
+    ...checkProjectSkillTriggers(root),
+    ...checkIntentStatuses(root),
+  ];
 }
 
 function summarize(findings) {

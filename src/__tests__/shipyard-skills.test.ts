@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'child_process';
 import { readFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -734,6 +735,106 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(ref).toContain('/oh-my-claudecode:harbor [sweep\\|look at #N\\|what\'s ready?]');
     for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor', 'architecture-survey']) {
       expect(ref).toContain(`\`${name}\``);
+    }
+  });
+});
+
+describe('shipyard audit script — mechanical check classes', () => {
+  const AUDIT = join(ROOT, 'scripts', 'shipyard-audit.mjs');
+
+  function runAudit(root: string): { status: number; stdout: string } {
+    try {
+      const stdout = execFileSync('node', [AUDIT, root], { encoding: 'utf-8' });
+      return { status: 0, stdout };
+    } catch (err) {
+      const e = err as { status?: number; stdout?: string };
+      return { status: e.status ?? -1, stdout: e.stdout ?? '' };
+    }
+  }
+
+  function makeCleanRepo(): string {
+    const root = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+    writeFileSync(join(root, 'CLAUDE.md'), '# Project\n');
+    writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
+      mkdirSync(join(root, dir), { recursive: true });
+    }
+    writeFileSync(join(root, '.mcp.json'), '{"mcpServers": {}}');
+    return root;
+  }
+
+  it('a fully seeded repo audits clean', () => {
+    const root = makeCleanRepo();
+    try {
+      const { status, stdout } = runAudit(root);
+      expect(status).toBe(0);
+      expect(JSON.parse(stdout).findings).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a project skill without non-empty triggers is a high-confidence actionable finding', () => {
+    const root = makeCleanRepo();
+    try {
+      writeFileSync(
+        join(root, '.omc/skills/no-triggers.md'),
+        '---\nid: no-triggers\nname: no-triggers\ndescription: A skill that will never load\n---\n\nbody\n',
+      );
+      const { status, stdout } = runAudit(root);
+      expect(status).toBe(1);
+      const findings = JSON.parse(stdout).findings;
+      expect(findings.map((f: { id: string }) => f.id)).toContain('shipyard.project-skill.missing-triggers');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('project skills with block or inline triggers are accepted', () => {
+    const root = makeCleanRepo();
+    try {
+      writeFileSync(
+        join(root, '.omc/skills/block-triggers.md'),
+        '---\nid: block-triggers\nname: block-triggers\ndescription: Block-list triggers\ntriggers:\n  - "project release check"\n---\n\nbody\n',
+      );
+      writeFileSync(
+        join(root, '.omc/skills/inline-triggers.md'),
+        '---\nid: inline-triggers\nname: inline-triggers\ndescription: Inline triggers\ntriggers: ["project release check"]\n---\n\nbody\n',
+      );
+      const { status } = runAudit(root);
+      expect(status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('an intent with a missing or invalid status is a finding; a valid one is clean', () => {
+    const root = makeCleanRepo();
+    try {
+      mkdirSync(join(root, 'docs', 'intents', 'demo'), { recursive: true });
+      writeFileSync(
+        join(root, 'docs/intents/demo/intent.md'),
+        '---\nintent: demo\ntitle: Demo\ndate: 2026-09-16\n---\n\nbody\n',
+      );
+      const missing = runAudit(root);
+      expect(missing.status).toBe(1);
+      expect(JSON.parse(missing.stdout).findings.map((f: { id: string }) => f.id)).toContain('shipyard.intent.missing-status');
+
+      writeFileSync(
+        join(root, 'docs/intents/demo/intent.md'),
+        '---\nintent: demo\ntitle: Demo\ndate: 2026-09-16\nstatus: archived\n---\n\nbody\n',
+      );
+      const invalid = runAudit(root);
+      expect(invalid.status).toBe(1);
+      expect(JSON.parse(invalid.stdout).findings.map((f: { id: string }) => f.id)).toContain('shipyard.intent.invalid-status');
+
+      writeFileSync(
+        join(root, 'docs/intents/demo/intent.md'),
+        '---\nintent: demo\ntitle: Demo\ndate: 2026-09-16\nstatus: accepted\n---\n\nbody\n',
+      );
+      expect(runAudit(root).status).toBe(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });
