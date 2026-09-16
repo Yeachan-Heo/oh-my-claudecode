@@ -106,13 +106,18 @@ try {
 // Keep stale cache self-healing for older manifests that used sh/find-node, an
 // accidentally baked absolute node path, or the Windows-safe direct node form.
 //
-// Patterns handled:
-//  1. Current find-node.sh format – sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh ...
+// Commands are emitted with the braced "${CLAUDE_PLUGIN_ROOT}" placeholder,
+// which Claude Code substitutes itself. The bare "$CLAUDE_PLUGIN_ROOT" spelling
+// only expands where a POSIX shell runs the command, so it cannot work behind
+// the direct-node Windows prefix (#4042).
+//
+// Patterns handled (both the bare and braced spellings are accepted on input):
+//  1. find-node.sh format – sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ...
 //  2. Legacy find-node.sh format – sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" ...
 //  3. Direct run.cjs format from the Windows-safe shipped manifest
 //  4. Absolute run.cjs format from older setup patches/publish mistakes
 //
-// Fixes issues #909, #899, #892, #869, #3121.
+// Fixes issues #909, #899, #892, #869, #3121, #4042.
 try {
   const hooksJsonPath = isPublishedPluginCache ? join(__dirname, '..', 'hooks', 'hooks.json') : null;
   if (hooksJsonPath && existsSync(hooksJsonPath)) {

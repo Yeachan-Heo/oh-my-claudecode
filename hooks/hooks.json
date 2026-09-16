@@ -105,7 +105,7 @@
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PLUGIN_ROOT\"/scripts/run.cjs \"$CLAUDE_PLUGIN_ROOT\"/scripts/post-tool-directory-context-injector.mjs",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}\"/scripts/run.cjs \"${CLAUDE_PLUGIN_ROOT}\"/scripts/post-tool-directory-context-injector.mjs",
             "timeout": 3
           }
         ]

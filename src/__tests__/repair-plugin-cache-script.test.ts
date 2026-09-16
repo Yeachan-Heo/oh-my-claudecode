@@ -133,7 +133,7 @@ describe('repair-plugin-cache.mjs', () => {
     expect(result.stdout).toContain('hooks=platform');
     const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
     expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe(
-      'sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+      'sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs',
     );
   });
 
@@ -170,7 +170,7 @@ describe('repair-plugin-cache.mjs', () => {
 
     expect(commands.length).toBeGreaterThan(0);
     for (const { event, command } of commands) {
-      expect(command, event).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+      expect(command, event).toMatch(/^sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/find-node\.sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
       expect(command, event).not.toContain('/bin/sh');
     }
   });
@@ -203,7 +203,7 @@ describe('repair-plugin-cache.mjs', () => {
     expect(result.status).toBe(0);
     const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
     expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe(
-      'node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs',
+      'node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs',
     );
   });
 
