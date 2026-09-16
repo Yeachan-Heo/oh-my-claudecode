@@ -618,6 +618,17 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toMatch(/agents are language-agnostic/);
   });
 
+  it('launch reads the drydock language contract instead of inlining the resolution order', () => {
+    // one meaning, one home: the resolution-order mechanics live in the drydock
+    // contract block only; launch carries the pointer and its own requirements
+    expect(LAUNCH).toContain('shipyard-document-language-contract');
+    expect(LAUNCH).toContain('single authority');
+    expect(LAUNCH).not.toContain('Resolution order:');
+    expect(LAUNCH).not.toContain('otherwise require unanimous high-confidence inference');
+    expect(LAUNCH).not.toContain('A persisted bare or region-only Chinese tag is script-ambiguous');
+    expect(LAUNCH).not.toContain('never bypassed by inference');
+  });
+
   it('plugin.json ships both skills and every path exists on disk', () => {
     for (const name of ['launch', 'drydock', 'ask-navigator', 'loft', 'harbor', 'architecture-survey']) {
       const entry = `./skills/${name}/`;
