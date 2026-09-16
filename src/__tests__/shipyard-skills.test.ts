@@ -560,6 +560,26 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('written to their slots only after acceptance');
   });
 
+  it('launch C5 sediment slot table is pinned verbatim (lesson → slot)', () => {
+    // the slot table is the landing map for every C5 lesson; a silent rename
+    // strands lessons in no slot, so the rows are a text contract
+    for (const row of [
+      '| Lesson kind | Slot |',
+      '| terms and boundaries settled mid-run | `CONTEXT.md` glossary |',
+      '| checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |',
+      '| most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |',
+      '| hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |',
+      '| ruled-out directions (concept + why rejected) | `docs/adr/` (a rejection is a decision too; the why is the load-bearing part) |',
+      '| business rules / background | `docs/business/` |',
+      '| UI patterns / component contracts | `design-system/` |',
+      '| reusable craft | `.omc/skills/` (through the skillify gate) |',
+      '| repeatedly needed automation / integrations | `scripts/` or `.mcp.json` |',
+      '| no slot fits | decline explicitly with the reason |',
+    ]) {
+      expect(LAUNCH).toContain(row);
+    }
+  });
+
   it('launch keeps the thin entry a bounded cache (hot-entry budget with deterministic demotion)', () => {
     expect(LAUNCH).toContain('at most five hot entries');
     expect(LAUNCH).toContain('same violation at least twice in this run');
