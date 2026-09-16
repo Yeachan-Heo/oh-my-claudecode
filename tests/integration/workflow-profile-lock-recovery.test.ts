@@ -118,16 +118,29 @@ describe.each(modules)('recoverable workflow mutation lock (%s)', (modulePath) =
       const [modulePath, statePath, logPath, id] = process.argv.slice(1);
       const api = await import(modulePath);
       const lock = api.acquireStateFileLockSync(statePath, 100);
-      if (!lock) process.exit(2);
+      if (!lock) {
+        process.stderr.write(id + ': ' + (api.getStateFileLockFailureMessage() ?? api.getStateFileLockDiagnostic() ?? 'no diagnostic') + '\n');
+        process.exit(2);
+      }
       appendFileSync(logPath, id + ':start\n');
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
       appendFileSync(logPath, id + ':end\n');
       api.releaseStateFileLockSync(lock);
     `;
     const run = (id: string) => new Promise<void>((resolve, reject) => {
-      const child = spawn(process.execPath, ['--input-type=module', '-e', childScript, pathToFileURL(modulePath).href, statePath, logPath, id], { stdio: 'ignore' });
+      const child = spawn(process.execPath, ['--input-type=module', '-e', childScript, pathToFileURL(modulePath).href, statePath, logPath, id], {
+        stdio: ['ignore', 'ignore', 'pipe'],
+      });
+      let diagnostic = '';
+      child.stderr?.on('data', chunk => {
+        diagnostic += String(chunk);
+      });
       child.once('error', reject);
-      child.once('close', code => code === 0 ? resolve() : reject(new Error(`reclaimer ${id} exited ${code}`)));
+      child.once('close', code =>
+        code === 0
+          ? resolve()
+          : reject(new Error(`reclaimer ${id} exited ${code}${diagnostic ? ` — ${diagnostic.trim()}` : ''}`)),
+      );
     });
 
     await Promise.all([run('a'), run('b')]);
