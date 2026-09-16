@@ -19,6 +19,11 @@ HUD_SCRIPT=${1:-"$SCRIPT_DIR/omc-hud.mjs"}
 INPUT_TMP="$CACHE_DIR/stdin.$$.tmp"
 LOCK_STALE_SECONDS=${OMC_HUD_LOCK_STALE_SECONDS:-10}
 CACHE_TTL_SECONDS=${OMC_HUD_CACHE_TTL_SECONDS:-604800}
+# Global cleanup is a whole-directory sweep shared by every session, so it runs on an
+# interval instead of on every render. 0 forces a sweep (used by the tests).
+SWEEP_INTERVAL_SECONDS=${OMC_HUD_SWEEP_INTERVAL_SECONDS:-300}
+SWEEP_STAMP="$CACHE_DIR/sweep.stamp"
+SWEEP_LOCK="$CACHE_DIR/sweep.lock"
 
 mkdir -p "$CACHE_DIR" 2>/dev/null || {
   printf '[OMC] Starting...\n'
@@ -41,15 +46,6 @@ is_stale_path() {
   [ -n "$path_mtime" ] || return 1
   [ "$now" -gt 0 ] || return 1
   [ $((now - path_mtime)) -gt "$LOCK_STALE_SECONDS" ] || return 1
-}
-
-is_cache_stale_path() {
-  path=$1
-  now=$(date +%s 2>/dev/null || printf '0')
-  path_mtime=$(file_mtime "$path")
-  [ -n "$path_mtime" ] || return 1
-  [ "$now" -gt 0 ] || return 1
-  [ $((now - path_mtime)) -gt "$CACHE_TTL_SECONDS" ] || return 1
 }
 
 is_numeric_pid() {
@@ -164,18 +160,53 @@ cleanup_stale_render_locks() {
   done
 }
 
+# One find invocation per name pattern instead of date+stat+head per file. The session
+# caches carry no pid-aware or ownership semantics, only the TTL, so age is the whole
+# predicate and find can evaluate it without spawning anything per file.
 cleanup_stale_session_caches() {
-  for cache_path in "$CACHE_DIR"/stdin.*.json "$CACHE_DIR"/statusline.*.txt; do
-    [ -f "$cache_path" ] || continue
-    is_cache_stale_path "$cache_path" || continue
-    rm -f "$cache_path" 2>/dev/null || :
-  done
+  ttl_minutes=$((CACHE_TTL_SECONDS / 60))
+  [ "$ttl_minutes" -ge 1 ] || ttl_minutes=1
+  find "$CACHE_DIR" -maxdepth 1 -type f \
+    \( -name 'stdin.*.json' -o -name 'statusline.*.txt' \) \
+    -mmin +"$ttl_minutes" -exec rm -f {} + 2>/dev/null || :
 }
 
-cleanup_stale_temp_files
-cleanup_stale_err_files
-cleanup_stale_render_locks
-cleanup_stale_session_caches
+# True when the shared sweep stamp is younger than the interval, i.e. another session
+# already swept recently and this render must not repeat the whole-directory scan.
+sweep_is_fresh() {
+  [ "$SWEEP_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null || return 1
+  [ -f "$SWEEP_STAMP" ] || return 1
+  now=$(date +%s 2>/dev/null || printf '0')
+  [ "$now" -gt 0 ] || return 1
+  stamp_mtime=$(file_mtime "$SWEEP_STAMP")
+  [ -n "$stamp_mtime" ] || return 1
+  [ $((now - stamp_mtime)) -lt "$SWEEP_INTERVAL_SECONDS" ]
+}
+
+# Interval-gated and mutually exclusive across concurrent wrappers: overlapping renders
+# used to run the same sweep simultaneously, which is what made a dozen wrappers pile up.
+run_global_cleanup() {
+  sweep_is_fresh && return 0
+  if [ "$SWEEP_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null; then
+    acquire_lock_owned "$SWEEP_LOCK" || {
+      is_lock_stale "$SWEEP_LOCK" || return 0
+      rm -rf "$SWEEP_LOCK" 2>/dev/null || :
+      acquire_lock_owned "$SWEEP_LOCK" || return 0
+    }
+    # Stamp before sweeping so a crash mid-sweep still backs off instead of hot-looping.
+    : > "$SWEEP_STAMP" 2>/dev/null || :
+  fi
+
+  cleanup_stale_temp_files
+  cleanup_stale_err_files
+  cleanup_stale_render_locks
+  cleanup_stale_session_caches
+
+  [ "$SWEEP_INTERVAL_SECONDS" -gt 0 ] 2>/dev/null && rm -rf "$SWEEP_LOCK" 2>/dev/null
+  return 0
+}
+
+run_global_cleanup
 
 # Capture Claude's current statusLine stdin first so rendered output can be
 # scoped per session/worktree instead of leaking across concurrent sessions.
