@@ -47,7 +47,7 @@ function getHookCommands(): HookCommandEntry[] {
 describe('hooks.json command escaping', () => {
   it('uses portable hook commands without absolute /bin/sh or pre-expanded ${...} placeholders', () => {
     for (const { command } of getHookCommands()) {
-      expect(command).toMatch(/^node "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/[^\s]+/);
+      expect(command).toMatch(/^node "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/[^\s]+/);
       expect(command).not.toContain('find-node.sh');
       expect(command).not.toMatch(/^sh /);
       expect(command).not.toContain('/bin/sh');
