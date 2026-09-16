@@ -588,6 +588,14 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('not a `--check` finding');
   });
 
+  it('launch C5 completion report states the run numbers (facts, not telemetry)', () => {
+    // the loop had no measurements; C5 records the run's numbers as plain facts
+    // in the report text — disk is the primary source, no telemetry machinery
+    expect(LAUNCH).toContain('**run numbers**');
+    expect(LAUNCH).toContain('tickets completed, C4 decisions surfaced, three-strike halts, and sediment lines proposed');
+    expect(LAUNCH).toContain('no telemetry system, no state files');
+  });
+
   it('drydock governance loop names the real sediment carrier (no ghost retro)', () => {
     // regression: the sediment loop referenced a nonexistent retro skill; the
     // structured retro now genuinely lives in launch's C5, so only drydock's
