@@ -398,20 +398,24 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect(nonAncestorOverride.status).not.toBe(0);
     expect(nonAncestorOverride.stderr).toContain('ancestor of the current HEAD');
 
-    const nonAncestorBaseline = join(REPO_ROOT, `.tmp-inventory-non-ancestor-${process.pid}.json`);
-    const nonAncestorManifest = JSON.parse(JSON.stringify(manifest)) as Manifest;
-    nonAncestorManifest.head = nonAncestor;
-    nonAncestorManifest.provenance.head = nonAncestor;
-    const withoutManifestSha = { ...(nonAncestorManifest as unknown as Record<string, unknown>) };
+    // A committed baseline whose generating commit is no longer reachable is the normal
+    // outcome of squash/rebase integration: the contribution head that produced the
+    // baseline is rewritten when the PR lands. Verify must accept it as long as the
+    // content hashes still match the working tree, otherwise the integration branch
+    // goes red on every merge that regenerates the graph.
+    const rewrittenHeadBaseline = join(REPO_ROOT, `.tmp-inventory-rewritten-head-${process.pid}.json`);
+    const rewrittenHeadManifest = JSON.parse(JSON.stringify(manifest)) as Manifest;
+    rewrittenHeadManifest.head = nonAncestor;
+    rewrittenHeadManifest.provenance.head = nonAncestor;
+    const withoutManifestSha = { ...(rewrittenHeadManifest as unknown as Record<string, unknown>) };
     delete withoutManifestSha.manifestSha256;
-    nonAncestorManifest.manifestSha256 = sha256Hex(stableStringify(withoutManifestSha));
-    writeFileSync(nonAncestorBaseline, `${JSON.stringify(nonAncestorManifest, null, 2)}\n`);
+    rewrittenHeadManifest.manifestSha256 = sha256Hex(stableStringify(withoutManifestSha));
+    writeFileSync(rewrittenHeadBaseline, `${JSON.stringify(rewrittenHeadManifest, null, 2)}\n`);
     try {
-      const result = spawnSync('node', [GENERATOR, '--verify', '--out', nonAncestorBaseline], opts);
-      expect(result.status).not.toBe(0);
-      expect(result.stderr).toContain('ancestor of the current HEAD');
+      const result = spawnSync('node', [GENERATOR, '--verify', '--out', rewrittenHeadBaseline], opts);
+      expect(result.status, `stdout:\n${result.stdout}\nstderr:\n${result.stderr}`).toBe(0);
     } finally {
-      unlinkSync(nonAncestorBaseline);
+      unlinkSync(rewrittenHeadBaseline);
     }
 
     const outsideOut = resolve(REPO_ROOT, '..', `.tmp-inventory-outside-${process.pid}.json`);
