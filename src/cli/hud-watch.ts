@@ -1,3 +1,4 @@
+import { InvalidArgumentError } from 'commander';
 import { registerStandaloneShutdownHandlers } from '../mcp/standalone-shutdown.js';
 
 export interface HudMainLike {
@@ -8,6 +9,17 @@ export interface HudWatchLoopOptions {
   intervalMs: number;
   hudMain: HudMainLike;
   registerShutdownHandlers?: typeof registerStandaloneShutdownHandlers;
+}
+
+export function parseHudWatchInterval(value: string): number {
+  const normalized = value.trim();
+  const intervalMs = Number(normalized);
+
+  if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(intervalMs) || intervalMs < 1) {
+    throw new InvalidArgumentError('must be a positive integer in milliseconds');
+  }
+
+  return intervalMs;
 }
 
 /**

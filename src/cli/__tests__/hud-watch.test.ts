@@ -1,7 +1,26 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { runHudWatchLoop } from '../hud-watch.js';
+import { parseHudWatchInterval, runHudWatchLoop } from '../hud-watch.js';
 import type { RegisterStandaloneShutdownHandlersOptions } from '../../mcp/standalone-shutdown.js';
+
+describe('parseHudWatchInterval', () => {
+  it.each([
+    ['1', 1],
+    ['250', 250],
+    [' 1000 ', 1_000],
+  ])('parses %j as %i milliseconds', (raw, expected) => {
+    expect(parseHudWatchInterval(raw)).toBe(expected);
+  });
+
+  it.each(['', '0', '-1', '1.5', '100ms', 'abc', `${Number.MAX_SAFE_INTEGER}0`])(
+    'rejects invalid interval %j',
+    (raw) => {
+      expect(() => parseHudWatchInterval(raw)).toThrow(
+        'must be a positive integer in milliseconds',
+      );
+    },
+  );
+});
 
 describe('runHudWatchLoop', () => {
   afterEach(() => {
