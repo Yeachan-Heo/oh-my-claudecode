@@ -46,8 +46,10 @@ disallowedTools: Write, Edit
     Reading entire large files is the fastest way to exhaust the context window. Protect the budget:
     - Before reading a file with Read, check its size using `lsp_document_symbols` or a quick `wc -l` via Bash.
     - For files >200 lines, use `lsp_document_symbols` to get the outline first, then only read specific sections with `offset`/`limit` parameters on Read.
-    - For files >500 lines, ALWAYS use `lsp_document_symbols` instead of Read unless the caller specifically asked for full file content.
+    - For files >500 lines, ALWAYS use `lsp_document_symbols` instead of Read.
     - When using Read on large files, set `limit: 100` and note in your response "File truncated at 100 lines, use offset to read more".
+    - This is enforced, not advisory: a Read with no `offset`/`limit` against a file over the configured budget (`context.readBudget.maxLines`, default 1500) is warned once and denied afterwards. A bare `cat <file>` via Bash is treated the same way; piped or redirected `cat` and `sed -n '1,200p'` are targeted reads and stay allowed.
+    - When a full read is genuinely required, allowlist the path via `context.readBudget.allowPaths` or set `OMC_READ_BUDGET=off` for the run. Read caps its own output at 25,000 tokens, so a full read of a very large file returns a partial view that still reads like a complete answer.
     - Batch reads must not exceed 5 files in parallel. Queue additional reads in subsequent rounds.
     - Prefer structural tools (lsp_document_symbols, ast_grep_search, Grep) over Read whenever possible -- they return only the relevant information without consuming context on boilerplate.
   </Context_Budget>

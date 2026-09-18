@@ -16,6 +16,7 @@ import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
 import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
+import { evaluateReadBudget } from './lib/read-budget-preflight.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
@@ -1900,6 +1901,39 @@ async function main() {
           hookEventName: 'PreToolUse',
           permissionDecision: 'deny',
           permissionDecisionReason: delegationBlock.reason,
+        },
+      }));
+      return;
+    }
+
+    // Read budget (issue #4054): enforce the <Context_Budget> rule that has only
+    // existed as prose in agents/explore.md. A full-file Read of an oversized file
+    // is warned once and denied afterwards; targeted reads, small files,
+    // allowlisted paths, and OMC_READ_BUDGET=off pass through.
+    const readBudget = evaluateReadBudget({
+      toolName,
+      toolInput: data.toolInput || data.tool_input || {},
+      stateDir,
+      loadOmcConfig,
+      cwd: directory,
+    });
+    if (readBudget?.decision === 'block') {
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+          permissionDecisionReason: readBudget.reason,
+        },
+      }));
+      return;
+    }
+    if (readBudget?.decision === 'warn') {
+      console.log(JSON.stringify({
+        continue: true,
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          additionalContext: readBudget.reason,
         },
       }));
       return;

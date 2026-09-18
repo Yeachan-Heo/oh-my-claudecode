@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "cad8cf30d81c9515d19ae6a3bfa724b866000993",
-    "sourceSha256": "5ac18f3dc050b48c23601202ae10773b782fffc681064c4f92d077b5596a1225",
+    "head": "144b36998f47d6460f63397bc73aec8e94f665a1",
+    "sourceSha256": "e459ae36261e5b99352f415c20354281b47018933d5f0b3210548476268d6b62",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "cad8cf30d81c9515d19ae6a3bfa724b866000993",
-  "sourceSha256": "5ac18f3dc050b48c23601202ae10773b782fffc681064c4f92d077b5596a1225",
+  "head": "144b36998f47d6460f63397bc73aec8e94f665a1",
+  "sourceSha256": "e459ae36261e5b99352f415c20354281b47018933d5f0b3210548476268d6b62",
   "counts": {
     "public": {
       "skills": 43,
@@ -775,6 +775,7 @@
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
       "scripts/lib/precompact-publisher.mjs",
       "scripts/lib/precompact-restore.mjs",
+      "scripts/lib/read-budget-preflight.mjs",
       "scripts/lib/skill-entitlements.mjs",
       "scripts/lib/state-lock.mjs",
       "scripts/lib/state-root.cjs",
@@ -33480,6 +33481,11 @@
         "path": "scripts/lib/precompact-restore.mjs"
       },
       {
+        "id": "scripts/lib/read-budget-preflight.mjs",
+        "kind": "script",
+        "path": "scripts/lib/read-budget-preflight.mjs"
+      },
+      {
         "id": "scripts/lib/skill-entitlements.mjs",
         "kind": "script",
         "path": "scripts/lib/skill-entitlements.mjs"
@@ -42492,6 +42498,16 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/lib/read-budget-preflight.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/read-budget-preflight.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/lib/state-lock.mjs",
         "to": "external:better-sqlite3",
         "kind": "imports"
@@ -43019,6 +43035,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "scripts/lib/pre-tool-enforcer-preflight.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/read-budget-preflight.mjs",
         "kind": "imports"
       },
       {
@@ -79188,12 +79209,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6994,
-      "edgeCount": 7562,
-      "importEdgeCount": 6237,
+      "nodeCount": 6995,
+      "edgeCount": 7565,
+      "importEdgeCount": 6240,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "59161ce9158e453e3c5d0affa05dfa40a05fe0da977c95a0e8ada1fb5735de23",
-  "manifestSha256": "39c581fec6bbddfb0869b95bfc22ad4953ca7d593fc566fc7468b94ac623dc97"
+  "inventorySha256": "1b4990a2b61dcb59fd88700e1a31a8e4bca4447439e9904503d63d0b2acd39c4",
+  "manifestSha256": "007679164c0a1dc2bd25ef1a8bd837d32b53fe289f6ee5423b4319c7478277d0"
 }
