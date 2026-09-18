@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8b220a7837ba1727c3849b7579a8e196550c2eb2",
-    "sourceSha256": "130c5e5b1736ca44457b35d5a2a8d933e11315105a2d508a70e5757892d6a3be",
+    "head": "cad8cf30d81c9515d19ae6a3bfa724b866000993",
+    "sourceSha256": "5ac18f3dc050b48c23601202ae10773b782fffc681064c4f92d077b5596a1225",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8b220a7837ba1727c3849b7579a8e196550c2eb2",
-  "sourceSha256": "130c5e5b1736ca44457b35d5a2a8d933e11315105a2d508a70e5757892d6a3be",
+  "head": "cad8cf30d81c9515d19ae6a3bfa724b866000993",
+  "sourceSha256": "5ac18f3dc050b48c23601202ae10773b782fffc681064c4f92d077b5596a1225",
   "counts": {
     "public": {
       "skills": 43,
@@ -51653,6 +51653,11 @@
       },
       {
         "from": "src/cli/__tests__/hud-watch.test.ts",
+        "to": "src/cli/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/hud-watch.test.ts",
         "to": "src/mcp/standalone-shutdown.ts",
         "kind": "type-imports"
       },
@@ -52889,6 +52894,11 @@
       {
         "from": "src/cli/graph.ts",
         "to": "src/notifications/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/hud-watch.ts",
+        "to": "external:commander",
         "kind": "imports"
       },
       {
@@ -79179,11 +79189,11 @@
     ],
     "stats": {
       "nodeCount": 6994,
-      "edgeCount": 7560,
-      "importEdgeCount": 6235,
+      "edgeCount": 7562,
+      "importEdgeCount": 6237,
       "registerEdgeCount": 64
     }
   },
   "inventorySha256": "59161ce9158e453e3c5d0affa05dfa40a05fe0da977c95a0e8ada1fb5735de23",
-  "manifestSha256": "60e8c3df6d86a985b0e6682357f3916b346d45e73a7ac664bc608a09b5327b8e"
+  "manifestSha256": "39c581fec6bbddfb0869b95bfc22ad4953ca7d593fc566fc7468b94ac623dc97"
 }
