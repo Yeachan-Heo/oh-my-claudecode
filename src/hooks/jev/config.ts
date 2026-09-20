@@ -20,6 +20,8 @@
 
 import { join } from 'node:path';
 
+import { getOmcRoot } from '../../lib/worktree-paths.js';
+
 export const JEV_DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
 const DEFAULT_TIMEOUT_MS = 250;
@@ -56,8 +58,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
-    logDir: env.OMC_JEV_LOG_DIR
-      || (env.OMC_STATE_DIR ? join(env.OMC_STATE_DIR, 'jev') : join(process.cwd(), '.omc', 'state', 'jev')),
+    logDir: env.OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev'),
   };
 }
 
