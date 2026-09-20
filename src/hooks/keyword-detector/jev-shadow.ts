@@ -23,22 +23,28 @@ import type { JevQuestions, ResolveResult } from '../jev/index.js';
  * constants (team is excluded: its regex never matches, detection is
  * explicit-only via /team).
  */
-const SKILL_TRIGGER_CRITERIA: Record<string, string> = {
-  ...Object.fromEntries(
-    KEYWORD_PRIORITY.filter((type) => type !== 'team')
-      .slice(0, 12)
-      .map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`]),
-  ),
-  none: 'No trigger fires; handle the prompt without a mode or skill.',
-};
+function skillTriggerCriteria(): Record<string, string> {
+  const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
+  return {
+    ...Object.fromEntries(
+      priority
+        .filter((type) => type !== 'team')
+        .slice(0, 12)
+        .map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`]),
+    ),
+    none: 'No trigger fires; handle the prompt without a mode or skill.',
+  };
+}
 
-const SKILL_TRIGGER_QUESTIONS: JevQuestions = {
-  'skill-trigger': {
-    type: 'Choice',
-    instructions: 'Which skill or mode should this user prompt trigger?',
-    criteria: SKILL_TRIGGER_CRITERIA,
-  },
-};
+function skillTriggerQuestions(): JevQuestions {
+  return {
+    'skill-trigger': {
+      type: 'Choice',
+      instructions: 'Which skill or mode should this user prompt trigger?',
+      criteria: skillTriggerCriteria(),
+    },
+  };
+}
 
 /**
  * Point "skill-trigger" (ticket 04): the keyword list decides; Jev's Choice
@@ -51,7 +57,7 @@ export function recordSkillTriggerShadow(
   return resolveJudgment<KeywordType[]>({
     point: 'skill-trigger',
     state: { prompt, source: 'user-prompt-submit' },
-    questions: SKILL_TRIGGER_QUESTIONS,
+    questions: skillTriggerQuestions(),
     twin: () => getAllKeywords(prompt),
     blocking: false,
     fetchFn,
