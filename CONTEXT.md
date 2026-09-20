@@ -20,3 +20,10 @@ One entry per term: definition, boundaries, resolved ambiguity. Vocabulary here 
 - Definition: An open question that prevents spec approval until closed; non-blocking ones are tracked and may ride along into development.
 - Boundary: (graded by "can the spec still be approved without answering it", not by the asker's preference)
 - Resolved ambiguity: the drafting agent suggests a grade; the product owner has final say at spec approval.
+
+## Jev integration
+- **Jev**: TypeSafe's System One decision model: send state plus typed questions (Choice/Score/Noul), receive structured judgments with calibrated probabilities. Not a text generator; external dependency at `api.typesafe.ai`, authenticated by `TYPESAFE_API_KEY`.
+- **Judgment point**: A narrow, bounded decision inside OMC's orchestration currently made by keywords, rules, or prompt instructions. Enumerated set: mode/skill trigger, model-tier routing, loop continuation, context pruning, fact-forcing gate. Each judgment point is implemented twice: a heuristic twin and a Jev implementation.
+- **Heuristic twin**: The existing rule-based implementation of a judgment point that remains the fallback and eval baseline.
+- **Degraded mode**: The contract that a judgment point falls back to its heuristic twin whenever Jev is unconfigured, timed out, unavailable, or over budget. The workflow never blocks on Jev. _Avoid_: fail-open (implementation jargon), fallback mode.
+- **Shadow mode**: A judgment-point rollout state in which the Jev implementation and its heuristic twin both run, the Jev answer is recorded but not acted on, and promotion to active requires recorded evidence that Jev matches or beats the heuristic twin. Each judgment point is in exactly one of three states: off, shadow, active.

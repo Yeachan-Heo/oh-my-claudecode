@@ -85,9 +85,11 @@ const KEYWORD_SKIP_PREDICATES: Partial<Record<KeywordType, (text: string) => boo
 };
 
 /**
- * Priority order for keyword detection
+ * Priority order for keyword detection. Exported so the shadow judgment
+ * points (jev-shadow.ts) can derive their criteria from the same constants
+ * the detector emits.
  */
-const KEYWORD_PRIORITY: KeywordType[] = [
+export const KEYWORD_PRIORITY: KeywordType[] = [
   'cancel', 'ralph', 'autopilot', 'team',
   'ralplan', 'tdd', 'code-review', 'security-review',
   'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
