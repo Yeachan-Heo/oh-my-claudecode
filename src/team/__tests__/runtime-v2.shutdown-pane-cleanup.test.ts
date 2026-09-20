@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { isProcessAlive } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
+import { reserveTeamInstance } from '../team-instance.js';
 import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec,
   prepareWorkerLaunchAttempt, runWorkerLaunchBootstrap, terminateWorkerLaunchProvider, withWorkerLaunchAttemptFence, type WorkerLaunchAttempt } from '../worker-launch-ack.js';
 
@@ -14,6 +15,7 @@ const tmuxUtilsMocks = vi.hoisted(() => ({
 }));
 const tmuxCalls = vi.hoisted(() => [] as string[][]);
 type StartedRecord = { pid: number; process_start_identity: string; process_group_id?: number };
+const TEAM_INSTANCE_ID = '44444444-4444-4444-8444-444444444444';
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
@@ -81,10 +83,12 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
 
   it('preserves the owned pane and state when provider launch identity is missing', async () => {
     const teamName = 'pane-cleanup-team';
+    await reserveTeamInstance({ teamName, cwd, instanceId: TEAM_INSTANCE_ID });
     const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
 
     await writeJson(cwd, `${teamRoot}/config.json`, {
       name: teamName,
+      instance_id: TEAM_INSTANCE_ID,
       task: 'demo',
       agent_type: 'claude',
       worker_launch_mode: 'interactive',
@@ -119,13 +123,14 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
   });
   it('retires and terminates the exact provider while accepting a proven-dead pane', async () => {
     const teamName = 'provider-cleanup-team';
+    await reserveTeamInstance({ teamName, cwd, instanceId: TEAM_INSTANCE_ID });
     const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
     let attempt: WorkerLaunchAttempt | undefined;
     let bootstrap: Promise<unknown> | undefined;
     let startedRecord: StartedRecord | undefined;
     try {
       attempt = await prepareWorkerLaunchAttempt({ cwd, teamName, workerName: 'worker-1', paneId: '%2',
-        provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' } });
+        instanceId: TEAM_INSTANCE_ID, provider: 'claude', runtimeCliPath: resolveRuntimeCliPath(), context: { kind: 'initial' } });
       bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
         attempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd,
       ));
@@ -140,7 +145,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
       await expect(withWorkerLaunchAttemptFence(attempt, async () => isProcessAlive(providerPid)))
         .resolves.toEqual({ ok: true, value: true });
       await writeJson(cwd, `${teamRoot}/config.json`, {
-        name: teamName, task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive', worker_count: 1, max_workers: 20,
+        name: teamName, instance_id: TEAM_INSTANCE_ID, task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive', worker_count: 1, max_workers: 20,
         workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%2',
           worker_cli: 'claude', launch_attempt_id: attempt.attempt_id,
           launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: process.execPath, args: [] } }],

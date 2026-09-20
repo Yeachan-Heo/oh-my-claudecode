@@ -355,12 +355,15 @@ describe('cancel-integration', () => {
   });
 
   describe('5. Team cancel', () => {
-    it('should clear team state at both session and legacy paths', async () => {
+    it('should clear team state while preserving native runtime and HUD mission records', async () => {
       const sessionId = 'team-cancel-test';
       const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
       mkdirSync(sessionDir, { recursive: true });
       const runtimeTeamDir = join(TEST_DIR, '.omc', 'state', 'team', 'demo-team');
       mkdirSync(runtimeTeamDir, { recursive: true });
+      const runtimeConfigPath = join(runtimeTeamDir, 'config.json');
+      const runtimeConfigBytes = Buffer.from(JSON.stringify({ instance_id: 'new-demo-instance', provider: 'claude' }));
+      writeFileSync(runtimeConfigPath, runtimeConfigBytes);
 
       // Create team state at session path
       writeFileSync(
@@ -384,6 +387,8 @@ describe('cancel-integration', () => {
           ],
         })
       );
+      const missionPath = join(TEST_DIR, '.omc', 'state', 'mission-state.json');
+      const missionBytes = readFileSync(missionPath);
 
       const result = await stateClearTool.handler({
         mode: 'team',
@@ -394,17 +399,13 @@ describe('cancel-integration', () => {
       // Both files should be cleaned
       expect(existsSync(join(sessionDir, 'team-state.json'))).toBe(false);
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team-state.json'))).toBe(false);
-      expect(existsSync(runtimeTeamDir)).toBe(false);
-
-      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
-      expect(missionState.missions).toEqual([
-        { id: 'session:keep', source: 'session', name: 'keep-session' },
-      ]);
+      expect(existsSync(runtimeTeamDir)).toBe(true);
+      expect(readFileSync(runtimeConfigPath)).toEqual(runtimeConfigBytes);
+      expect(readFileSync(missionPath)).toEqual(missionBytes);
 
       expect(result.content[0].text).toContain('Successfully cleared');
       expect(result.content[0].text).toContain('ghost legacy file also removed');
-      expect(result.content[0].text).toContain('removed 1 team runtime root');
-      expect(result.content[0].text).toContain('pruned 1 HUD mission entry');
+      expect(result.content[0].text).toContain('Native team runtimes and cleanup evidence are not removed by state_clear');
     });
 
     it('should clear team state at session path while preserving unrelated legacy', async () => {
@@ -438,7 +439,7 @@ describe('cancel-integration', () => {
       expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team-state.json'))).toBe(true);
     });
 
-    it('should clear only the selected Team session and runtime', async () => {
+    it('should clear only the selected Team session while preserving same-name native runtimes', async () => {
       const sessionA = 'team-cancel-scoped-a';
       const sessionB = 'team-cancel-scoped-b';
       const teamA = 'scoped-team-a';
@@ -472,6 +473,10 @@ describe('cancel-integration', () => {
           ],
         })
       );
+      const taskABytes = readFileSync(join(runtimeRootA, 'tasks', 'task-a.json'));
+      const taskBBytes = readFileSync(join(runtimeRootB, 'tasks', 'task-b.json'));
+      const missionPath = join(TEST_DIR, '.omc', 'state', 'mission-state.json');
+      const missionBytes = readFileSync(missionPath);
 
       await stateClearTool.handler({
         mode: 'team',
@@ -480,17 +485,15 @@ describe('cancel-integration', () => {
       });
 
       expect(existsSync(join(sessionDirA, 'team-state.json'))).toBe(false);
-      expect(existsSync(join(runtimeRootA, 'tasks', 'task-a.json'))).toBe(false);
+      expect(existsSync(join(runtimeRootA, 'tasks', 'task-a.json'))).toBe(true);
+      expect(readFileSync(join(runtimeRootA, 'tasks', 'task-a.json'))).toEqual(taskABytes);
       expect(existsSync(join(sessionDirB, 'team-state.json'))).toBe(true);
       expect(existsSync(join(runtimeRootB, 'tasks', 'task-b.json'))).toBe(true);
-
-      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
-      expect(missionState.missions).toEqual([
-        { id: `team:${teamB}`, source: 'team', teamName: teamB, name: teamB },
-      ]);
+      expect(readFileSync(join(runtimeRootB, 'tasks', 'task-b.json'))).toEqual(taskBBytes);
+      expect(readFileSync(missionPath)).toEqual(missionBytes);
     });
 
-    it('should remove runtime roots for all captured Team sessions', async () => {
+    it('should clear all Team sessions while preserving all native runtime and HUD records', async () => {
       for (const teamName of ['alpha-team', 'beta-team']) {
         const sessionId = `${teamName}-session`;
         const sessionDir = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId);
@@ -499,8 +502,14 @@ describe('cancel-integration', () => {
           active: true, team_name: teamName, session_id: sessionId,
         }));
       }
-      mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'alpha-team'), { recursive: true });
-      mkdirSync(join(TEST_DIR, '.omc', 'state', 'team', 'beta-team'), { recursive: true });
+      const alphaRuntimeRoot = join(TEST_DIR, '.omc', 'state', 'team', 'alpha-team');
+      const betaRuntimeRoot = join(TEST_DIR, '.omc', 'state', 'team', 'beta-team');
+      mkdirSync(alphaRuntimeRoot, { recursive: true });
+      mkdirSync(betaRuntimeRoot, { recursive: true });
+      const alphaConfigPath = join(alphaRuntimeRoot, 'config.json');
+      const betaConfigPath = join(betaRuntimeRoot, 'config.json');
+      writeFileSync(alphaConfigPath, JSON.stringify({ instance_id: 'alpha-new-instance' }));
+      writeFileSync(betaConfigPath, JSON.stringify({ instance_id: 'beta-new-instance' }));
       writeFileSync(
         join(TEST_DIR, '.omc', 'state', 'mission-state.json'),
         JSON.stringify({
@@ -512,6 +521,10 @@ describe('cancel-integration', () => {
           ],
         })
       );
+      const alphaConfigBytes = readFileSync(alphaConfigPath);
+      const betaConfigBytes = readFileSync(betaConfigPath);
+      const missionPath = join(TEST_DIR, '.omc', 'state', 'mission-state.json');
+      const missionBytes = readFileSync(missionPath);
 
       const result = await stateClearTool.handler({
         mode: 'team',
@@ -519,18 +532,15 @@ describe('cancel-integration', () => {
       });
 
       for (const teamName of ['alpha-team', 'beta-team']) {
-        expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team', teamName))).toBe(false);
+        expect(existsSync(join(TEST_DIR, '.omc', 'state', 'team', teamName))).toBe(true);
         expect(existsSync(join(TEST_DIR, '.omc', 'state', 'sessions', `${teamName}-session`, 'team-state.json'))).toBe(false);
       }
-
-      const missionState = JSON.parse(readFileSync(join(TEST_DIR, '.omc', 'state', 'mission-state.json'), 'utf-8'));
-      expect(missionState.missions).toEqual([
-        { id: 'session:keep', source: 'session', name: 'keep-session' },
-      ]);
+      expect(readFileSync(alphaConfigPath)).toEqual(alphaConfigBytes);
+      expect(readFileSync(betaConfigPath)).toEqual(betaConfigBytes);
+      expect(readFileSync(missionPath)).toEqual(missionBytes);
 
       expect(result.isError).not.toBe(true);
-      expect(result.content[0].text).toContain('Team runtime roots removed: 2');
-      expect(result.content[0].text).toContain('HUD mission entries pruned: 2');
+      expect(result.content[0].text).toContain('Native team runtimes and cleanup evidence are not removed by state_clear');
     });
 
     it('preserves uncaptured Team runtime and HUD records during aggregate clear', async () => {

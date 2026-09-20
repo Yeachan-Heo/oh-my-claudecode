@@ -20,6 +20,13 @@ const buildConfig = {
   target: 'node18',
   format: 'cjs',
   outfile,
+  // Inject import.meta.url polyfill for CJS format
+  banner: {
+    js: 'const importMetaUrl = require("url").pathToFileURL(__filename);',
+  },
+  define: {
+    'import.meta.url': 'importMetaUrl',
+  },
   external: [
     'fs', 'fs/promises', 'path', 'os', 'util', 'stream', 'events',
     'buffer', 'crypto', 'http', 'https', 'url',

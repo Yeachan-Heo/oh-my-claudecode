@@ -3,7 +3,7 @@
  *
  * Runtime selection:
  * - Default: v2 enabled
- * - Opt-out: set OMC_RUNTIME_V2=0|false|no|off to force legacy v1
+ * - Native CLI jobs reject the legacy opt-out before startup effects.
  * NO done.json polling. Completion is detected via:
  * - CLI API lifecycle transitions (claim-task, transition-task-status)
  * - Event-driven monitor snapshots
@@ -16,7 +16,6 @@
  * assignTask, resumeTeam as discrete operations driven by the caller.
  */
 
-import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { link, lstat, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
@@ -33,11 +32,11 @@ import {
   readShutdownAck,
   writeWorkerInbox,
   saveTeamConfig,
+  commitInitialTeamConfigUnderLock,
   readRevisionedTeamConfig,
   saveTeamConfigAtRevision,
   migrateTeamConfigRevision,
   withTeamConfigMutationLock,
-  cleanupTeamState,
   readTeamManifest,
 } from './monitor.js';
 import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
@@ -50,6 +49,10 @@ import { inferPhase } from './phase-controller.js';
 import type {
   TeamConfig,
   TeamManifestV2,
+  TeamInstanceBinding,
+  TeamInstanceDisposalAuthorization,
+  TeamInstanceId,
+  TmuxServerIdentity,
   TeamTask,
   TeamTaskDelegationPlan,
   WorkerInfo,
@@ -58,7 +61,7 @@ import type {
   WorkerStatus,
   WorkerHeartbeat,
 } from './types.js';
-import { ABSOLUTE_MAX_WORKERS } from './types.js';
+import { ABSOLUTE_MAX_WORKERS, isValidTeamInstanceId, isValidTmuxServerIdentity } from './types.js';
 import type { TeamPhase } from './phase-controller.js';
 import { validateTeamName } from './team-name.js';
 import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
@@ -76,6 +79,10 @@ import {
   retryStartupInboxSubmit,
   proveWorkerPaneOwnership,
   adoptWorkerPaneOwnership,
+  getOwnedWorkerLiveness,
+  captureOwnedTeamPane,
+  workerPaneBelongsToOwnedProviderTarget,
+  observeTmuxServerIdentity,
   killOwnedWorkerPane,
   verifyTeamTargetOwnership,
   redactBoundedDiagnostic,
@@ -83,10 +90,7 @@ import {
   paneHasActiveTask,
   paneLooksReady,
   applyMainVerticalLayout,
-  getWorkerLiveness,
-  captureTeamPane,
   splitTeamWorkerPaneWithEvidence,
-  workerPaneBelongsToProviderTarget,
   type StartupPaneContext,
   type StartupPaneActivity,
   type StartupInboxResubmitOutcome,
@@ -95,6 +99,7 @@ import {
   type WorkerPaneOwnership,
   type WorkerPaneSplitEvidence,
   type TeamSessionMode,
+  TeamSessionCreationError,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -149,10 +154,16 @@ import {
 import { createHash, randomUUID } from 'node:crypto';
 import { isMatchingRecoveryFinal, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation, readRecoveryResult, writeRecoveryFinal, type RecoveryDurableOutcome } from './recovery-request-store.js';
 
-import { parseRecoveryIntent, resolveRuntimeCliPath, type RecoverDeadWorkerOwnerInput } from './runtime-owner-client.js';
+import {
+  parseRecoveryIntent,
+  resolveRuntimeCliPath,
+  teamRecoveryState,
+  type RecoverDeadWorkerOwnerInput,
+} from './runtime-owner-client.js';
 import { scaleUpFenceBlocks } from './scaling.js';
 import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
 import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
+import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import {
   teamAdoptRecoveryReservations,
   teamListTasks,
@@ -172,7 +183,6 @@ function workerInstructionStateRoot(cwd: string, teamName: string): string {
   return process.platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
 }
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity, type OwnerFence } from './team-owner-epoch.js';
-import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
 import {
@@ -180,19 +190,41 @@ import {
   isWorkerLaunchAttemptAccepted,
   loadCurrentWorkerLaunchAttempt,
   loadWorkerLaunchAttempt,
+  observeWorkerLaunchProvider,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
 } from './worker-launch-ack.js';
 import { isProcessIdentityLive } from '../platform/process-utils.js';
+import {
+  activateTeamInstanceUnderLock,
+  assertTeamInstanceUnderLock,
+  buildTeamInstancePendingConfig,
+  createTeamInstanceBinding,
+  disposeTeamInstanceUnderLock,
+  releaseFailedStartupReservationUnderLock,
+  reserveTeamInstanceUnderLock,
+  retryTeamInstanceDisposal,
+  TeamInstanceError,
+  withTeamInstanceLifecycleLock,
+} from './team-instance.js';
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
   requestId?: string;
+  /** Persistent callers provide the original team incarnation. */
+  instanceId?: TeamInstanceId;
   timeoutMs?: number;
 }
 
 export interface RuntimeOwnerRecoveryClient {
-  requestRuntimeOwnerRecovery(input: { requestId: string; cwd: string; teamName: string; workerName: string; timeoutMs?: number }): Promise<RecoverDeadWorkerV2Result>;
+  requestRuntimeOwnerRecovery(input: {
+    requestId: string;
+    cwd: string;
+    teamName: string;
+    workerName: string;
+    instanceId: TeamInstanceId;
+    timeoutMs?: number;
+  }): Promise<RecoverDeadWorkerV2Result>;
 }
 
 let runtimeOwnerRecoveryClient: RuntimeOwnerRecoveryClient | undefined;
@@ -213,7 +245,7 @@ function hasRequiredRecoveryPaneIdentities(result: RecoverDeadWorkerV2Result): b
 export async function recoverDeadWorkerV2(
   teamName: string,
   cwd: string,
-  { workerName, requestId = randomUUID(), timeoutMs = 180_000 }: RecoverDeadWorkerV2Options,
+  { workerName, requestId = randomUUID(), instanceId: expectedInstanceId, timeoutMs = 180_000 }: RecoverDeadWorkerV2Options,
 ): Promise<RecoverDeadWorkerV2Result> {
   try { validateTeamName(teamName); } catch {
     return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
@@ -223,11 +255,59 @@ export async function recoverDeadWorkerV2(
     return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
       updatedAt: new Date().toISOString(), message: 'cwd, workerName, and requestId are required; timeoutMs must be an integer from 180000 through 300000.' };
   }
+  let instanceId = expectedInstanceId;
+  try {
+    const requestReservationPath = absPath(cwd, TeamPaths.recoveryRequestPending(requestId));
+    const existing = readRecoveryRequestReservation(cwd, requestId);
+    if (!existing && existsSync(requestReservationPath)) {
+      // A request ID that already has an unreadable reservation is not a fresh
+      // by-name request. Never let the current config rebind that identity.
+      throw new Error('invalid_persisted_state');
+    }
+    if (existing) {
+      const existingInstanceId = existing.instance_id.toLowerCase();
+      if (instanceId !== undefined && instanceId.toLowerCase() !== existingInstanceId) {
+        return { outcome: 'failed', committed: false, error: 'recovery_attempt_conflict', requestId,
+          recoveryId: existing.recovery_id, teamName, workerName, updatedAt: new Date().toISOString(),
+          message: 'Request ID is already bound to a different team instance.' };
+      }
+      // Existing request IDs retain their durable incarnation even after the
+      // canonical team name has been replaced. Never resolve the current
+      // config for this replay.
+      instanceId = existingInstanceId;
+    } else if (instanceId === undefined) {
+      // A fresh by-name request may intentionally target the current team, but
+      // resolve that identity while holding the canonical lifecycle lock.
+      const resolved = await withTeamInstanceLifecycleLock(cwd, teamName, async () => {
+        const state = await teamRecoveryState(cwd, teamName);
+        if (state !== 'v2') throw new Error(state);
+        const current = await readRevisionedTeamConfig(teamName, cwd);
+        if (!current?.config.instance_id) throw new Error('team_instance_authority_missing');
+        return current.config.instance_id;
+      });
+      instanceId = resolved;
+    }
+    if (instanceId === undefined) throw new Error('team_instance_authority_missing');
+    // Validate the explicit/current binding before constructing the owner
+    // input. Admission performs the authoritative under-lock assertion.
+    createTeamInstanceBinding({ teamName, cwd, instanceId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const errorCode: RecoverDeadWorkerV2Error = message === 'team_not_found'
+      ? 'team_not_found'
+      : message === 'runtime_v2_required'
+        ? 'runtime_v2_required'
+        : 'invalid_persisted_state';
+    return { outcome: 'failed', committed: false, error: errorCode, requestId,
+      recoveryId: '', teamName, workerName, updatedAt: new Date().toISOString(),
+      message };
+  }
+  const ownerInput = { requestId, cwd, teamName, workerName, instanceId, timeoutMs };
   const client = runtimeOwnerRecoveryClient ?? {
-    requestRuntimeOwnerRecovery: (input: { requestId: string; cwd: string; teamName: string; workerName: string; timeoutMs?: number }) =>
+    requestRuntimeOwnerRecovery: (input: typeof ownerInput) =>
       import('./runtime-owner-client.js').then(module => module.requestRuntimeOwnerRecovery(input)),
   };
-  const result = await client.requestRuntimeOwnerRecovery({ requestId, cwd, teamName, workerName, timeoutMs });
+  const result = await client.requestRuntimeOwnerRecovery(ownerInput);
   if (hasRequiredRecoveryPaneIdentities(result)) return result;
   return {
     outcome: 'failed', committed: false, error: 'invalid_persisted_state',
@@ -480,6 +560,8 @@ export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamRuntimeV2 {
   teamName: string;
   sanitizedName: string;
+  /** Immutable identity for this named team incarnation. */
+  instanceId: TeamInstanceId;
   sessionName: string;
   config: TeamConfig;
   cwd: string;
@@ -497,6 +579,8 @@ export interface TeamSnapshotV2 {
     name: string;
     alive: boolean;
     liveness: WorkerPaneLiveness;
+    /** Provider execution health is observed independently of pane transport. */
+    providerLiveness: 'alive' | 'dead' | 'unknown';
     status: WorkerStatus;
     heartbeat: WorkerHeartbeat | null;
     assignedTasks: string[];
@@ -538,6 +622,8 @@ export interface ShutdownOptionsV2 {
   force?: boolean;
   ralph?: boolean;
   timeoutMs?: number;
+  /** Refuse to operate on a replacement sharing the same team name. */
+  instanceId?: TeamInstanceId;
 }
 
 export type ShutdownTeamV2Result =
@@ -644,17 +730,107 @@ function resolvePreflightBinaryPath(agentType: CliAgentType): { path: string } {
 }
 
 // ---------------------------------------------------------------------------
-// Helper: check worker liveness via tmux pane
+// Helper: retain the original pane ownership binding
 // ---------------------------------------------------------------------------
 
-async function getWorkerPaneLiveness(paneId: string | undefined): Promise<WorkerPaneLiveness> {
-  if (!paneId) return 'unknown';
-  return getWorkerLiveness(paneId);
+function tmuxServerIdentityForTarget(
+  providerTarget: string,
+  identity: TmuxServerIdentity | undefined,
+): TmuxServerIdentity | undefined {
+  if (providerTarget.startsWith('cmux:')) return undefined;
+  if (!isValidTmuxServerIdentity(identity)) return undefined;
+  return identity;
 }
 
-async function captureWorkerPane(paneId: string | undefined): Promise<string> {
-  if (!paneId) return '';
-  return captureTeamPane(paneId);
+function requireTmuxServerIdentity(
+  providerTarget: string,
+  identity: TmuxServerIdentity | undefined,
+): TmuxServerIdentity | undefined {
+  if (providerTarget.startsWith('cmux:')) return undefined;
+  if (!isValidTmuxServerIdentity(identity)) throw new Error('tmux_server_identity_missing');
+  return identity;
+}
+
+function configuredPaneOwnership(
+  config: TeamConfig,
+  worker: Pick<WorkerInfo, 'pane_id'>,
+): WorkerPaneOwnership | null {
+  const paneId = worker.pane_id;
+  const providerTarget = config.tmux_session;
+  if (!paneId || !providerTarget) return null;
+  const provider = paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const;
+  const identity = provider === 'tmux'
+    ? tmuxServerIdentityForTarget(providerTarget, config.tmux_server_identity)
+    : undefined;
+  if (provider === 'tmux' && !identity) return null;
+  return {
+    provider,
+    providerTarget,
+    paneId,
+    splitTarget: '',
+    leaderPaneId: config.leader_pane_id ?? '',
+    reservedPaneIds: config.workers
+      .filter(candidate => candidate.pane_id && candidate.pane_id !== paneId)
+      .map(candidate => candidate.pane_id as string),
+    source: 'adopted',
+    ...(identity ? { tmuxServerIdentity: identity } : {}),
+  };
+}
+
+/**
+ * Read provider execution health from the exact launch receipt.  A missing or
+ * malformed attempt is deliberately unknown; pane liveness is not a provider
+ * termination proof.
+ */
+async function getWorkerProviderLiveness(
+  teamName: string,
+  cwd: string,
+  instanceId: TeamInstanceId | undefined,
+  worker: Pick<WorkerInfo, 'name' | 'pane_id' | 'worker_cli' | 'launch_attempt_id'> & {
+    launch_descriptor?: WorkerLaunchDescriptor;
+  },
+): Promise<'alive' | 'dead' | 'unknown'> {
+  if (!instanceId || !worker.pane_id || !worker.launch_attempt_id) return 'unknown';
+  const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
+  if (!provider) return 'unknown';
+  const attempt = await loadWorkerLaunchAttempt({
+    cwd,
+    teamName,
+    instanceId,
+    workerName: worker.name,
+    paneId: worker.pane_id,
+    provider,
+    attemptId: worker.launch_attempt_id,
+    runtimeCliPath: resolveRuntimeCliPath(),
+  }).catch(() => null);
+  if (!attempt) return 'unknown';
+  return observeWorkerLaunchProvider(attempt);
+}
+
+/**
+ * Recovery only treats a positively dead provider as dead.  A live provider
+ * remains protected even when its pane has disappeared, and unknown evidence
+ * never authorizes replacement.
+ */
+async function getWorkerExecutionLiveness(
+  teamName: string,
+  cwd: string,
+  instanceId: TeamInstanceId | undefined,
+  worker: Pick<WorkerInfo, 'name' | 'pane_id' | 'worker_cli' | 'launch_attempt_id'> & {
+    launch_descriptor?: WorkerLaunchDescriptor;
+  },
+): Promise<WorkerPaneLiveness> {
+  const providerLiveness = await getWorkerProviderLiveness(teamName, cwd, instanceId, worker);
+  return providerLiveness;
+}
+
+function isTeamInstanceBoundaryError(error: unknown): boolean {
+  const code = error && typeof error === 'object' && 'code' in error
+    ? (error as { code?: unknown }).code
+    : undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  return (typeof code === 'string' && code.startsWith('team_instance_'))
+    || message.startsWith('team_instance_');
 }
 
 function isFreshTimestamp(value: string | undefined, maxAgeMs: number = MONITOR_SIGNAL_STALE_MS): boolean {
@@ -739,6 +915,8 @@ function validateStartTaskDependencies(tasks: readonly StartTeamTaskInput[]): Ma
 
 export interface StartTeamV2Config {
   teamName: string;
+  /** Caller-supplied identity (CLI/MCP); direct callers may omit it. */
+  instanceId?: TeamInstanceId;
   workerCount: number;
   agentTypes: string[];
   tasks: Array<{
@@ -845,9 +1023,11 @@ function buildV2TaskInstruction(
 
 interface SpawnV2WorkerOptions {
   sessionName: string;
+  tmuxServerIdentity?: TmuxServerIdentity;
   leaderPaneId: string;
   existingWorkerPaneIds: string[];
   teamName: string;
+  instanceId: TeamInstanceId;
   workerName: string;
   workerIndex: number;
   agentType: CliAgentType;
@@ -1117,12 +1297,15 @@ async function applyRequiredLayoutBeforeOwnedLaunch(
   workerName: string,
 ): Promise<void> {
   try {
-    await applyMainVerticalLayout(sessionName, { required: true });
+    await applyMainVerticalLayout(sessionName, {
+      required: true,
+      ...(ownership.tmuxServerIdentity ? { tmuxServerIdentity: ownership.tmuxServerIdentity } : {}),
+    });
   } catch (error) {
     let cleaned = false;
     try {
       await killOwnedWorkerPane(ownership);
-      cleaned = await getWorkerPaneLiveness(ownership.paneId) === 'dead';
+      cleaned = await getOwnedWorkerLiveness(ownership) === 'dead';
     } catch {
       // Preserve the layout failure unless pane cleanup cannot be verified.
     }
@@ -1132,6 +1315,55 @@ async function applyRequiredLayoutBeforeOwnedLaunch(
       throw cleanupError;
     }
     throw error;
+  }
+}
+
+interface UnresolvedStartupLaunch {
+  name: string;
+  paneId: string;
+  launchAttemptId?: string;
+  provider: CliAgentType;
+}
+
+type StartupLaunchError = Error & { unresolvedLaunch?: UnresolvedStartupLaunch };
+
+/**
+ * `spawnOwnedWorkerInPane` deliberately throws when its own cleanup cannot
+ * prove termination. Recover the durable current-pointer identity so startup
+ * rollback can retain that launch instead of disposing the whole instance.
+ */
+async function readUnresolvedStartupLaunch(
+  opts: SpawnV2WorkerOptions,
+  paneId: string,
+): Promise<UnresolvedStartupLaunch | null> {
+  const currentPath = absPath(opts.cwd, TeamPaths.workerLaunchCurrent(opts.teamName, opts.workerName));
+  try {
+    const record = JSON.parse(await readFile(currentPath, 'utf8')) as Record<string, unknown>;
+    if (record.instance_id !== opts.instanceId
+      || record.team_name !== opts.teamName
+      || record.worker_name !== opts.workerName
+      || record.provider !== opts.agentType
+      || record.pane_id !== paneId
+      || typeof record.attempt_id !== 'string'
+      || typeof record.pane_id !== 'string') return null;
+    const attempt = await loadWorkerLaunchAttempt({
+      cwd: opts.cwd,
+      teamName: opts.teamName,
+      instanceId: opts.instanceId,
+      workerName: opts.workerName,
+      paneId: record.pane_id,
+      provider: opts.agentType,
+      attemptId: record.attempt_id,
+      runtimeCliPath: resolveRuntimeCliPath(),
+    });
+    return attempt ? {
+      name: opts.workerName,
+      paneId: attempt.pane_id,
+      launchAttemptId: attempt.attempt_id,
+      provider: attempt.provider,
+    } : null;
+  } catch {
+    return null;
   }
 }
 
@@ -1145,24 +1377,34 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
   const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
-  if (!await workerPaneBelongsToProviderTarget({
+  const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
+  if (!await workerPaneBelongsToOwnedProviderTarget({
     provider: launchProvider,
     providerTarget: opts.sessionName,
     paneId: splitTarget,
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   })) throw new Error('worker_pane_split_target_unverified');
-  const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, opts.workerCwd ?? opts.cwd, launchProvider);
+  const split = await splitTeamWorkerPaneWithEvidence(
+    splitTarget,
+    splitDirection,
+    opts.workerCwd ?? opts.cwd,
+    launchProvider,
+    tmuxServerIdentity,
+  );
   const ownershipResult = proveWorkerPaneOwnership(split, {
     providerTarget: opts.sessionName,
     leaderPaneId: opts.leaderPaneId,
     reservedPaneIds: opts.existingWorkerPaneIds,
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   });
   if (!ownershipResult.ok) {
     return { paneId: null, startupAssigned: false, startupFailureReason: `pane_identity_${ownershipResult.reason}` };
   }
-  if (!await workerPaneBelongsToProviderTarget({
+  if (!await workerPaneBelongsToOwnedProviderTarget({
     provider: ownershipResult.ownership.provider,
     providerTarget: ownershipResult.ownership.providerTarget,
     paneId: ownershipResult.ownership.paneId,
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   })) throw new Error(`worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`);
   const ownership = ownershipResult.ownership;
   const paneId = ownership.paneId;
@@ -1221,6 +1463,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
 
   const paneConfig: WorkerPaneConfig = {
     teamName: opts.teamName,
+    instanceId: opts.instanceId,
     workerName: opts.workerName,
     envVars,
     launchBinary: launchDescriptor.binary,
@@ -1230,20 +1473,38 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     launchBootstrapPath: resolveRuntimeCliPath(),
     launchStateCwd: opts.cwd,
     launchContext: { kind: 'initial' },
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   };
-  const startupContext: StartupPaneContext = await spawnOwnedWorkerInPane(
-    opts.sessionName,
-    ownership,
-    paneConfig,
-  );
+  let startupContext: StartupPaneContext;
+  try {
+    startupContext = await spawnOwnedWorkerInPane(
+      opts.sessionName,
+      ownership,
+      paneConfig,
+    );
+  } catch (error) {
+    const unresolvedLaunch = await readUnresolvedStartupLaunch(opts, paneId);
+    if (unresolvedLaunch || (error instanceof Error && error.message.startsWith('worker_launch_cleanup_unverified'))) {
+      const enriched = error instanceof Error
+        ? error as StartupLaunchError
+        : new Error(String(error)) as StartupLaunchError;
+      enriched.unresolvedLaunch = unresolvedLaunch ?? {
+        name: opts.workerName,
+        paneId,
+        provider: opts.agentType,
+      };
+      throw enriched;
+    }
+    throw error;
+  }
   const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
     `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
   const cleanupStartedLaunch = async (reason: string): Promise<void> => {
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(startupContext.attempt, reason, async () => {
       try {
-        if (await getWorkerPaneLiveness(paneId) === 'dead') return true;
+        if (await getOwnedWorkerLiveness(ownership) === 'dead') return true;
         await killOwnedWorkerPane(ownership);
-        return await getWorkerPaneLiveness(paneId) === 'dead';
+        return await getOwnedWorkerLiveness(ownership) === 'dead';
       } catch {
         return false;
       }
@@ -1268,10 +1529,13 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const fencedDispatch = await (async () => {
     try {
       return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-    if (!await workerPaneBelongsToProviderTarget({
+    if (!await workerPaneBelongsToOwnedProviderTarget({
       provider: startupContext.ownership.provider,
       providerTarget: startupContext.ownership.providerTarget,
       paneId: startupContext.ownership.paneId,
+      ...(startupContext.ownership.tmuxServerIdentity
+        ? { tmuxServerIdentity: startupContext.ownership.tmuxServerIdentity }
+        : {}),
     })) return { ok: false as const, reason: 'worker_pane_membership_unverified' };
     return queueInboxInstruction({
     teamName: opts.teamName,
@@ -1309,7 +1573,20 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     });
       });
     } catch (error) {
-      await cleanupStartedLaunch('startup_dispatch_exception');
+      try {
+        await cleanupStartedLaunch('startup_dispatch_exception');
+      } catch (cleanupError) {
+        const enriched = cleanupError instanceof Error
+          ? cleanupError as StartupLaunchError
+          : new Error(String(cleanupError)) as StartupLaunchError;
+        enriched.unresolvedLaunch = {
+          name: opts.workerName,
+          paneId,
+          launchAttemptId: startupContext.attempt.attempt_id,
+          provider: startupContext.attempt.provider,
+        };
+        throw enriched;
+      }
       throw error;
     }
   })();
@@ -1317,7 +1594,20 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? fencedDispatch.value
     : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
-    await cleanupStartedLaunch('startup_dispatch_failed');
+    try {
+      await cleanupStartedLaunch('startup_dispatch_failed');
+    } catch (error) {
+      const enriched = error instanceof Error
+        ? error as StartupLaunchError
+        : new Error(String(error)) as StartupLaunchError;
+      enriched.unresolvedLaunch = {
+        name: opts.workerName,
+        paneId,
+        launchAttemptId: startupContext.attempt.attempt_id,
+        provider: startupContext.attempt.provider,
+      };
+      throw enriched;
+    }
     return {
       paneId,
       startupAssigned: false,
@@ -1338,6 +1628,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
 interface PendingRecoveryPane {
   ownership: WorkerPaneOwnership;
   paneAttemptId: string;
+  instanceId: TeamInstanceId;
   worker: WorkerInfo;
   agentType: CliAgentType;
   gate: RecoveryActivationGate;
@@ -1439,7 +1730,7 @@ async function cleanupRecoveryPaneAttempt(
       async () => {
         try {
           await killOwnedWorkerPane(pending.ownership);
-          return await getWorkerLiveness(pending.ownership.paneId) === 'dead';
+          return await getOwnedWorkerLiveness(pending.ownership) === 'dead';
         } catch {
           return false;
         }
@@ -1447,7 +1738,7 @@ async function cleanupRecoveryPaneAttempt(
     ).catch(() => false);
   }
   if (!providerStopped) {
-    const liveness = await getWorkerLiveness(pending.ownership.paneId).catch(() => 'unknown' as const);
+    const liveness = await getOwnedWorkerLiveness(pending.ownership).catch(() => 'unknown' as const);
     await recordRecoveryPaneRollbackFailure(
       input,
       recoveryId,
@@ -1460,7 +1751,7 @@ async function cleanupRecoveryPaneAttempt(
   let liveness: WorkerPaneLiveness = 'unknown';
   for (let attempt = 0; attempt < 2; attempt++) {
     await killOwnedWorkerPane(pending.ownership).catch(() => undefined);
-    liveness = await getWorkerLiveness(pending.ownership.paneId).catch(() => 'unknown' as const);
+    liveness = await getOwnedWorkerLiveness(pending.ownership).catch(() => 'unknown' as const);
     if (liveness === 'dead' && providerStopped) {
       pendingRecoveryPanes.delete(recoveryId);
       return true;
@@ -1483,6 +1774,7 @@ async function buildRecoveryPaneContext(
   descriptor: WorkerLaunchDescriptor,
   ownership: WorkerPaneOwnership,
   paneAttemptId: string,
+  instanceId: TeamInstanceId,
 ): Promise<PendingRecoveryPane> {
   const currentProviderPath = resolvePreflightBinaryPath(descriptor.provider).path;
   const sameProviderPath = process.platform === 'win32'
@@ -1511,6 +1803,7 @@ async function buildRecoveryPaneContext(
     const attempt = await loadWorkerLaunchAttempt({
       cwd: input.cwd,
       teamName: input.teamName,
+      instanceId,
       workerName: sagaInput.workerName,
       paneId: ownership.paneId,
       provider: agentType,
@@ -1522,6 +1815,7 @@ async function buildRecoveryPaneContext(
   return {
     ownership,
     paneAttemptId,
+    instanceId,
     worker,
     agentType,
     gate,
@@ -1856,11 +2150,13 @@ async function hasBootstrapRecoveryEvidence(
   if (!bootstrap) return true;
   const reservation = readRecoveryRequestReservation(cwd, input.requestId);
   if (!reservation || reservation.kind !== 'reservation' || reservation.recovery_id !== bootstrap.recoveryId
-    || reservation.team_name !== teamName || reservation.worker_name !== input.workerName) return false;
+    || reservation.team_name !== teamName || reservation.worker_name !== input.workerName
+    || reservation.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
   try {
     const intent = parseRecoveryIntent(await readFile(absPath(cwd, TeamPaths.recoveryIntent(teamName, bootstrap.recoveryId)), 'utf8'));
     if (intent.request_id !== input.requestId || intent.recovery_id !== bootstrap.recoveryId
-      || intent.team_name !== teamName || intent.worker_name !== input.workerName) return false;
+      || intent.team_name !== teamName || intent.worker_name !== input.workerName
+      || intent.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
     const now = waitOptions.now ?? Date.now;
     const timeoutMs = waitOptions.timeoutMs === undefined
       ? BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS
@@ -1892,6 +2188,7 @@ interface RecoveryOwnerBootstrapCandidate {
   recovery_id: string;
   team_name: string;
   worker_name: string;
+  instance_id: TeamInstanceId;
   expected_epoch: number;
   nonce: string;
   pid: number;
@@ -1915,6 +2212,7 @@ function isCanonicalBootstrapCandidate(value: unknown, expectedEpoch: number): v
     || typeof candidate.recovery_id !== 'string' || candidate.recovery_id.length === 0
     || typeof candidate.team_name !== 'string' || candidate.team_name.length === 0
     || typeof candidate.worker_name !== 'string' || candidate.worker_name.length === 0
+    || !isValidTeamInstanceId(candidate.instance_id)
     || typeof candidate.nonce !== 'string' || candidate.nonce.length === 0
     || typeof candidate.pid !== 'number' || !Number.isSafeInteger(candidate.pid) || candidate.pid < 1
     || typeof candidate.process_started_at !== 'string' || candidate.process_started_at.length === 0
@@ -1955,6 +2253,7 @@ function candidateMatchesBootstrap(
   const bootstrap = input.bootstrap;
   return !!bootstrap && candidate.request_id === input.requestId && candidate.recovery_id === bootstrap.recoveryId
     && candidate.team_name === input.teamName && candidate.worker_name === input.workerName
+    && candidate.instance_id.toLowerCase() === input.instanceId.toLowerCase()
     && candidate.expected_epoch === bootstrap.expectedEpoch && candidate.nonce === bootstrap.nonce
     && candidate.pid === bootstrap.pid && candidate.process_started_at === bootstrap.processStartedAt
     && candidate.predecessor_epoch === bootstrap.predecessorEpoch
@@ -1973,7 +2272,8 @@ async function isExactDeadOrphanBootstrapCandidate(
   const bootstrap = input.bootstrap;
   if (!bootstrap || !orphan || !isProcessIdentityDead(orphan) || orphan.epoch !== bootstrap.predecessorEpoch
     || orphan.nonce !== bootstrap.predecessorNonce || orphan.pid !== bootstrap.predecessorPid
-    || orphan.process_started_at !== bootstrap.predecessorProcessStartedAt) return false;
+    || orphan.process_started_at !== bootstrap.predecessorProcessStartedAt
+    || !config.instance_id || config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
   let expectedEpoch = bootstrap.expectedEpoch;
   let candidateNonce = bootstrap.nonce;
   let predecessor: { epoch: number; nonce: string; pid: number; process_started_at: string } = orphan;
@@ -1984,6 +2284,7 @@ async function isExactDeadOrphanBootstrapCandidate(
       if (!candidateMatchesBootstrap(candidate, input)) return false;
     } else if (candidate.request_id !== input.requestId || candidate.recovery_id !== bootstrap.recoveryId
       || candidate.team_name !== teamName || candidate.worker_name !== input.workerName
+      || candidate.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
       || candidate.nonce !== predecessor.nonce || candidate.pid !== predecessor.pid
       || candidate.process_started_at !== predecessor.process_started_at) {
       return false;
@@ -2060,6 +2361,7 @@ async function hasBootstrapActiveRecoveryEvidence(
   const bootstrap = input.bootstrap;
   const active = config.active_recovery;
   if (!bootstrap || !active) return true;
+  if (!config.instance_id || config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
   if (active.request_id !== input.requestId || active.recovery_id !== bootstrap.recoveryId
     || active.worker_name !== input.workerName) return false;
   const worker = config.workers.find(candidate => candidate.name === input.workerName);
@@ -2106,11 +2408,13 @@ async function ensureRecoveryOwner(
   teamName: string,
   cwd: string,
   input: RecoverDeadWorkerOwnerInput,
-  waitOptions?: BootstrapRecoveryEvidenceWaitOptions,
+  waitOptions: BootstrapRecoveryEvidenceWaitOptions | undefined,
+  instance: TeamInstanceBinding,
 ): Promise<{ fence: OwnerFence; config: TeamConfig; stateRevision: number }> {
   let current = await readRevisionedTeamConfig(teamName, cwd);
   if (!current) current = await migrateTeamConfigRevision(teamName, cwd);
   if (!current) throw new Error('invalid_persisted_state');
+  await assertTeamInstanceUnderLock(instance);
 
   const processStartedAt = currentProcessStartIdentity();
   if (!processStartedAt) throw new Error('process_start_identity_unavailable');
@@ -2182,6 +2486,7 @@ async function ensureRecoveryOwner(
   requireOwnerProcessIdentity(owner, process.pid, processStartedAt);
   for (let bindAttempt = 0; bindAttempt < 3 && (current.config.runtime_owner_epoch?.epoch !== owner.epoch
     || current.config.runtime_owner_epoch?.nonce !== owner.nonce); bindAttempt++) {
+    await assertTeamInstanceUnderLock(instance);
     if (current.config.runtime_owner_epoch && (current.config.runtime_owner_epoch.epoch !== owner.epoch
       || current.config.runtime_owner_epoch.nonce !== owner.nonce)
       && !(bootstrap && exactDeadOrphan && await isExactDeadOrphanBootstrapCandidate(
@@ -2228,6 +2533,7 @@ async function ensureRecoveryOwner(
       current = { config: next, stateRevision: nextRevision };
       break;
     }
+    await assertTeamInstanceUnderLock(instance);
     const retry = await readRevisionedTeamConfig(teamName, cwd);
     if (!retry) throw new Error('invalid_persisted_state');
     current = retry;
@@ -2245,7 +2551,21 @@ export async function prepareRecoveryOwnerBootstrap(
 ): Promise<void> {
   const bootstrap = input.bootstrap;
   if (!bootstrap) throw new Error('runtime_owner_bootstrap_fence_lost');
-  const owner = await ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions);
+  if (!isValidTeamInstanceId(input.instanceId)) throw new Error('team_instance_identity_missing');
+  const expectedInstanceId = input.instanceId;
+  const initial = await readRevisionedTeamConfig(input.teamName, input.cwd);
+  if (!initial?.config.instance_id) throw new Error('team_instance_authority_missing');
+  if (initial.config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
+    throw new Error('team_instance_mismatch');
+  }
+  const instance = createTeamInstanceBinding({
+    teamName: input.teamName,
+    cwd: input.cwd,
+    instanceId: expectedInstanceId,
+  });
+  const owner = await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
+    ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions, instance),
+  );
   if (owner.fence.epoch !== bootstrap.expectedEpoch
     || owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch
     || owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce) {
@@ -2267,38 +2587,65 @@ export async function executeRecoverDeadWorkerV2Owner(
   const recoveryId = reservation?.recovery_id ?? randomUUID();
   let ownerBound = false;
   try {
+    if (!isValidTeamInstanceId(input.instanceId)) {
+      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_identity_missing');
+    }
+    if (reservation && (reservation.team_name !== input.teamName
+      || reservation.worker_name !== input.workerName
+      || reservation.instance_id.toLowerCase() !== input.instanceId.toLowerCase())) {
+      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'recovery_instance_mismatch');
+    }
+    const expectedInstanceId = input.instanceId;
     const beforeOwner = await readRevisionedTeamConfig(input.teamName, input.cwd);
     if (beforeOwner?.config.active_scale_down || (beforeOwner?.config && scaleUpFenceBlocks(beforeOwner.config))) {
       return recoveryError(input, recoveryId, 'team_mutation_busy');
     }
-    let owner = await ensureRecoveryOwner(input.teamName, input.cwd, input);
+    if (!beforeOwner?.config.instance_id) {
+      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_identity_unknown');
+    }
+    if (beforeOwner.config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
+      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_mismatch');
+    }
+    const instance = createTeamInstanceBinding({
+      teamName: input.teamName,
+      cwd: input.cwd,
+      instanceId: expectedInstanceId,
+    });
+    let existingAttempt: TeamConfig['active_recovery'] | undefined;
+    const owner = await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+      await assertTeamInstanceUnderLock(instance);
+      let electedOwner = await ensureRecoveryOwner(input.teamName, input.cwd, input, undefined, instance);
+      existingAttempt = electedOwner.config.active_recovery;
+      if (!existingAttempt) {
+        const nextRevision = electedOwner.stateRevision + 1;
+        const electedConfig: TeamConfig = {
+          ...electedOwner.config,
+          state_revision: nextRevision,
+          active_recovery: {
+            request_id: input.requestId,
+            recovery_id: recoveryId,
+            worker_name: input.workerName,
+            owner_epoch: electedOwner.fence.epoch,
+            owner_nonce: electedOwner.fence.nonce,
+            phase: 'reserved',
+            state_revision: nextRevision,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        };
+        if (!await saveTeamConfigAtRevision(electedConfig, electedOwner.stateRevision, input.cwd)) {
+          throw new Error('stale_state_revision');
+        }
+        existingAttempt = electedConfig.active_recovery;
+        electedOwner = { ...electedOwner, config: electedConfig, stateRevision: nextRevision };
+      }
+      await assertTeamInstanceUnderLock(instance);
+      return electedOwner;
+    });
     ownerBound = true;
-    const existingAttempt = owner.config.active_recovery;
     if (existingAttempt && (existingAttempt.request_id !== input.requestId
       || existingAttempt.recovery_id !== recoveryId || existingAttempt.worker_name !== input.workerName)) {
       return recoveryError(input, recoveryId, 'team_mutation_busy');
-    }
-    if (!existingAttempt) {
-      const nextRevision = owner.stateRevision + 1;
-      const electedConfig: TeamConfig = {
-        ...owner.config,
-        state_revision: nextRevision,
-        active_recovery: {
-          request_id: input.requestId,
-          recovery_id: recoveryId,
-          worker_name: input.workerName,
-          owner_epoch: owner.fence.epoch,
-          owner_nonce: owner.fence.nonce,
-          phase: 'reserved',
-          state_revision: nextRevision,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      };
-      if (!await saveTeamConfigAtRevision(electedConfig, owner.stateRevision, input.cwd)) {
-        return recoveryError(input, recoveryId, 'stale_state_revision');
-      }
-      owner = { ...owner, config: electedConfig, stateRevision: nextRevision };
     }
     if (owner.config.lifecycle_state === 'shutting_down' || owner.config.lifecycle_state === 'stopped') {
       return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_shutting_down'));
@@ -2317,15 +2664,27 @@ export async function executeRecoverDeadWorkerV2Owner(
     }
     if (!owner.config.tmux_session) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
     if (owner.config.tmux_session.startsWith('cmux:')) {
-      if (!owner.config.leader_pane_id || !await workerPaneBelongsToProviderTarget({
+      if (!owner.config.leader_pane_id || !await workerPaneBelongsToOwnedProviderTarget({
         provider: 'cmux',
         providerTarget: owner.config.tmux_session,
         paneId: owner.config.leader_pane_id,
       })) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
     } else {
-      try {
-        await tmuxExecAsync(['has-session', '-t', owner.config.tmux_session.split(':')[0]]);
-      } catch {
+      const tmuxServerIdentity = owner.config.tmux_server_identity;
+      if (!isValidTmuxServerIdentity(tmuxServerIdentity)) {
+        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+      }
+      const serverState = await observeTmuxServerIdentity(tmuxServerIdentity);
+      if (serverState === 'unknown') {
+        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+      }
+      if (serverState === 'matching'
+        && (!owner.config.leader_pane_id || !await workerPaneBelongsToOwnedProviderTarget({
+          provider: 'tmux',
+          providerTarget: owner.config.tmux_session,
+          paneId: owner.config.leader_pane_id,
+          tmuxServerIdentity,
+        }))) {
         return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
       }
     }
@@ -2351,6 +2710,9 @@ export async function executeRecoverDeadWorkerV2Owner(
 
     const ensureFence = async (): Promise<TeamConfig> => {
       requireOwnerFence(input.cwd, input.teamName, owner.fence);
+      await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
+        assertTeamInstanceUnderLock(instance),
+      );
       const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
       if (!current || current.config.active_scale_down
         || scaleUpFenceBlocks(current.config)
@@ -2366,6 +2728,17 @@ export async function executeRecoverDeadWorkerV2Owner(
 
     const deps: RecoverySagaDependencies = {
       cwd: input.cwd,
+      isCommittedReplacement: async sagaInput => {
+        const current = await ensureFence();
+        const currentWorker = current.workers.find(candidate => candidate.name === sagaInput.workerName);
+        if (!currentWorker) return false;
+        return resolveCommittedRecoveryPaneAttempt(
+          current.active_recovery,
+          sagaInput.recoveryId,
+          sagaInput.replacementGeneration,
+          currentWorker,
+        ) !== null;
+      },
       getLiveness: async () => {
         const config = await ensureFence();
         const currentWorker = config.workers.find(candidate => candidate.name === input.workerName);
@@ -2378,32 +2751,73 @@ export async function executeRecoverDeadWorkerV2Owner(
             const currentLaunch = await loadCurrentWorkerLaunchAttempt({
               cwd: input.cwd,
               teamName: input.teamName,
+              instanceId: instance.instance_id,
               workerName: input.workerName,
               provider: launchDescriptor.provider,
             });
             if (!currentLaunch) return 'unknown';
             if (!config.leader_pane_id) return 'unknown';
-            const adopted = await adoptWorkerPaneOwnership({
-              provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
-              providerTarget: config.tmux_session!,
-              paneId: currentLaunch.pane_id,
-              leaderPaneId: config.leader_pane_id,
-              reservedPaneIds: config.workers
-                .filter(candidate => candidate.name !== input.workerName)
-                .map(candidate => candidate.pane_id)
-                .filter((paneId): paneId is string => Boolean(paneId)),
+            let currentPaneLiveness: WorkerPaneLiveness;
+            let adoptedOwnership: WorkerPaneOwnership | null = null;
+            if (currentLaunch.pane_id.startsWith('%')) {
+              const serverIdentity = config.tmux_server_identity;
+              if (!isValidTmuxServerIdentity(serverIdentity)) return 'unknown';
+              const serverState = await observeTmuxServerIdentity(serverIdentity);
+              if (serverState === 'unknown') return 'unknown';
+              if (serverState === 'dead') {
+                // A dead original tmux server proves its panes absent, but
+                // provider cleanup below still relies on the launch receipt.
+                currentPaneLiveness = 'dead';
+              } else {
+                const adopted = await adoptWorkerPaneOwnership({
+                  provider: 'tmux',
+                  providerTarget: config.tmux_session,
+                  paneId: currentLaunch.pane_id,
+                  leaderPaneId: config.leader_pane_id,
+                  reservedPaneIds: config.workers
+                    .filter(candidate => candidate.name !== input.workerName)
+                    .map(candidate => candidate.pane_id)
+                    .filter((paneId): paneId is string => Boolean(paneId)),
+                  tmuxServerIdentity: serverIdentity,
+                });
+                if (!adopted.ok) return 'unknown';
+                adoptedOwnership = adopted.ownership;
+                currentPaneLiveness = await getOwnedWorkerLiveness(adopted.ownership);
+              }
+            } else {
+              const adopted = await adoptWorkerPaneOwnership({
+                provider: 'cmux',
+                providerTarget: config.tmux_session,
+                paneId: currentLaunch.pane_id,
+                leaderPaneId: config.leader_pane_id,
+                reservedPaneIds: config.workers
+                  .filter(candidate => candidate.name !== input.workerName)
+                  .map(candidate => candidate.pane_id)
+                  .filter((paneId): paneId is string => Boolean(paneId)),
+              });
+              if (!adopted.ok) return 'unknown';
+              adoptedOwnership = adopted.ownership;
+              currentPaneLiveness = await getOwnedWorkerLiveness(adopted.ownership);
+            }
+            const currentLiveness = await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
+              name: input.workerName,
+              pane_id: currentLaunch.pane_id,
+              worker_cli: launchDescriptor.provider,
+              launch_attempt_id: currentLaunch.attempt_id,
+              launch_descriptor: launchDescriptor,
             });
-            if (!adopted.ok) return 'unknown';
-            const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id);
             if (currentLaunch.context?.kind === 'recovery') {
-              return currentLaunch.context.recovery_id === recoveryId
-                && currentLaunch.context.replacement_generation === attempt.replacement_generation
-                ? 'dead'
-                : 'unknown';
+              if (currentLaunch.context.recovery_id !== recoveryId
+                || currentLaunch.context.replacement_generation !== attempt.replacement_generation) return 'unknown';
+              if (currentLiveness === 'unknown') return 'unknown';
+              if (currentLiveness === 'alive' && currentPaneLiveness !== 'alive') return 'alive';
+              return 'dead';
             }
             if (currentLaunch.context?.kind !== 'initial' || currentLiveness !== 'alive' || !currentWorker) {
               return currentLiveness;
             }
+            if (currentPaneLiveness !== 'alive') return 'alive';
+            if (!adoptedOwnership) return currentLiveness;
             const reconciled = await withWorkerLaunchAttemptFence(currentLaunch, async () => {
               await ensureFence();
               const latest = await readRevisionedTeamConfig(input.teamName, input.cwd);
@@ -2433,11 +2847,31 @@ export async function executeRecoverDeadWorkerV2Owner(
             sagaInput.originalPaneId = currentLaunch.pane_id;
             return 'alive';
           }
-          return getWorkerPaneLiveness(originalPaneId);
+          if (!currentWorker?.launch_attempt_id || !currentWorker.pane_id) return 'unknown';
+          const originalLaunch = await loadWorkerLaunchAttempt({
+            cwd: input.cwd,
+            teamName: input.teamName,
+            instanceId: instance.instance_id,
+            workerName: input.workerName,
+            paneId: currentWorker.pane_id,
+            provider: launchDescriptor.provider,
+            attemptId: currentWorker.launch_attempt_id,
+            runtimeCliPath: resolveRuntimeCliPath(),
+          });
+          if (!originalLaunch) return 'unknown';
+          return getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
+            name: input.workerName,
+            pane_id: currentWorker.pane_id,
+            worker_cli: launchDescriptor.provider,
+            launch_attempt_id: currentWorker.launch_attempt_id,
+            launch_descriptor: launchDescriptor,
+          });
         }
 
-        committedReplacementLiveness = await getWorkerPaneLiveness(currentWorker?.pane_id);
-        return committedReplacementLiveness === 'unknown' ? 'unknown' : 'dead';
+        committedReplacementLiveness = currentWorker
+          ? await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, currentWorker)
+          : 'unknown';
+        return committedReplacementLiveness;
       },
       listOwnedInProgressTasks: async () => selectRecoveryReplayTasks(
         await teamListTasks(input.teamName, input.cwd), input.workerName, recoveryId, committedReplacementLiveness,
@@ -2500,7 +2934,10 @@ export async function executeRecoverDeadWorkerV2Owner(
           currentWorker,
         );
         if (committedPane) {
-          const committedPaneLiveness = await getWorkerPaneLiveness(committedPane.paneId);
+          const committedOwnership = configuredPaneOwnership(config, { pane_id: committedPane.paneId });
+          const committedPaneLiveness = committedOwnership
+            ? await getOwnedWorkerLiveness(committedOwnership)
+            : 'unknown';
           if (committedPaneLiveness === 'unknown') return { ok: false, error: 'runtime_owner_unavailable' };
           if (committedPaneLiveness === 'alive') {
             let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
@@ -2511,6 +2948,9 @@ export async function executeRecoverDeadWorkerV2Owner(
                 paneId: committedPane.paneId,
                 leaderPaneId,
                 reservedPaneIds,
+                ...(tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity)
+                  ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity) }
+                  : {}),
               });
               if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
               try {
@@ -2521,6 +2961,7 @@ export async function executeRecoverDeadWorkerV2Owner(
                   launchDescriptor,
                   adopted.ownership,
                   committedPane.paneAttemptId,
+                  instance.instance_id,
                 );
                 if (!pending.startupContext) return { ok: false, error: 'worker_activation_failed' };
                 pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
@@ -2559,11 +3000,18 @@ export async function executeRecoverDeadWorkerV2Owner(
         const currentLaunch = await loadCurrentWorkerLaunchAttempt({
           cwd: input.cwd,
           teamName: input.teamName,
+          instanceId: instance.instance_id,
           workerName: sagaInput.workerName,
           provider: launchDescriptor.provider,
         });
         if (currentLaunch) {
-          const currentLiveness = await getWorkerPaneLiveness(currentLaunch.pane_id).catch(() => 'unknown' as const);
+          const currentLiveness = await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
+            name: sagaInput.workerName,
+            pane_id: currentLaunch.pane_id,
+            worker_cli: launchDescriptor.provider,
+            launch_attempt_id: currentLaunch.attempt_id,
+            launch_descriptor: launchDescriptor,
+          });
           if (currentLiveness !== 'dead') {
             const context = currentLaunch.context;
             if (context?.kind !== 'recovery' || context.recovery_id !== sagaInput.recoveryId
@@ -2576,6 +3024,9 @@ export async function executeRecoverDeadWorkerV2Owner(
               paneId: currentLaunch.pane_id,
               leaderPaneId,
               reservedPaneIds,
+              ...(tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity)
+                ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity) }
+                : {}),
             });
             if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
             const resumed = await buildRecoveryPaneContext(
@@ -2585,6 +3036,7 @@ export async function executeRecoverDeadWorkerV2Owner(
               launchDescriptor,
               adopted.ownership,
               context.pane_attempt_id,
+              instance.instance_id,
             );
             resumed.startupContext = {
               ownership: adopted.ownership,
@@ -2617,6 +3069,7 @@ export async function executeRecoverDeadWorkerV2Owner(
             const persistedLaunch = await loadWorkerLaunchAttempt({
               cwd: input.cwd,
               teamName: input.teamName,
+              instanceId: instance.instance_id,
               workerName: sagaInput.workerName,
               paneId: currentWorker.pane_id,
               provider: launchDescriptor.provider,
@@ -2629,52 +3082,40 @@ export async function executeRecoverDeadWorkerV2Owner(
             priorLaunches.push(persistedLaunch);
           }
         } else if (currentWorker.pane_id) {
-          // Pre-upgrade workers have pane_id + launch_descriptor but no
-          // launch_attempt_id (field did not exist on base). Ownership-safe
-          // pane cleanup consistent with shutdown/scale-down: adopt exact
-          // pane, kill, verify liveness. Fail closed on unknown ownership
-          // or liveness; never raw-PID signals.
-          const coveredByCurrentLaunch = currentLaunch?.pane_id === currentWorker.pane_id;
-          if (!coveredByCurrentLaunch) {
-            if (!owner.config.tmux_session) {
-              return { ok: false, error: 'worker_cleanup_incomplete' };
-            }
-            const legacyPaneId = currentWorker.pane_id;
-            const legacyLiveness = await getWorkerPaneLiveness(legacyPaneId).catch(() => 'unknown' as const);
-            if (legacyLiveness === 'unknown') {
-              return { ok: false, error: 'worker_cleanup_incomplete' };
-            }
-            if (legacyLiveness !== 'dead') {
-              const adopted = await adoptWorkerPaneOwnership({
-                provider: legacyPaneId.startsWith('%') ? 'tmux' : 'cmux',
-                providerTarget: owner.config.tmux_session,
-                paneId: legacyPaneId,
-                leaderPaneId,
-                reservedPaneIds,
-              });
-              if (!adopted.ok) {
-                return { ok: false, error: 'worker_cleanup_incomplete' };
-              }
-              try {
-                let lastLiveness: WorkerPaneLiveness = legacyLiveness;
-                for (let attempt = 0; attempt < 2 && lastLiveness !== 'dead'; attempt++) {
-                  await killOwnedWorkerPane(adopted.ownership);
-                  lastLiveness = await getWorkerPaneLiveness(legacyPaneId).catch(() => 'unknown' as const);
-                }
-                if (lastLiveness !== 'dead') {
-                  return { ok: false, error: 'worker_cleanup_incomplete' };
-                }
-              } catch {
-                return { ok: false, error: 'worker_cleanup_incomplete' };
-              }
-            }
-          }
+          // A pane without an exact launch attempt has no provider
+          // termination authority. Never fall back to pane-only cleanup.
+          return { ok: false, error: 'worker_cleanup_incomplete' };
         }
         for (const priorLaunch of priorLaunches) {
           const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             priorLaunch,
             'recovery_replacement',
-            async () => true,
+            async () => {
+              const priorOwnership = configuredPaneOwnership(owner.config, { pane_id: priorLaunch.pane_id });
+              let paneLiveness = priorOwnership
+                ? await getOwnedWorkerLiveness(priorOwnership).catch(() => 'unknown' as const)
+                : 'unknown' as const;
+              if (paneLiveness === 'dead') return true;
+              if (paneLiveness !== 'alive' || !owner.config.tmux_session || !leaderPaneId) return false;
+              const adopted = await adoptWorkerPaneOwnership({
+                provider: priorLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+                providerTarget: owner.config.tmux_session,
+                paneId: priorLaunch.pane_id,
+                leaderPaneId,
+                reservedPaneIds,
+                ...(tmuxServerIdentityForTarget(owner.config.tmux_session, owner.config.tmux_server_identity)
+                  ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session, owner.config.tmux_server_identity) }
+                  : {}),
+              });
+              if (!adopted.ok) return false;
+              for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
+                await killOwnedWorkerPane(adopted.ownership).catch(() => undefined);
+                paneLiveness = await getOwnedWorkerLiveness(adopted.ownership).catch(() => 'unknown' as const);
+                if (paneLiveness === 'dead') return true;
+                if (paneLiveness !== 'alive') return false;
+              }
+              return false;
+            },
           );
           if (!cleaned) return { ok: false, error: 'worker_cleanup_incomplete' };
         }
@@ -2693,22 +3134,37 @@ export async function executeRecoverDeadWorkerV2Owner(
         const livePaneIds: string[] = [];
         for (const candidate of config.workers) {
           if (!candidate.pane_id || candidate.name === sagaInput.workerName) continue;
-          if (await getWorkerPaneLiveness(candidate.pane_id) === 'alive') livePaneIds.push(candidate.pane_id);
+          const candidateOwnership = configuredPaneOwnership(config, candidate);
+          if (candidateOwnership && await getOwnedWorkerLiveness(candidateOwnership) === 'alive') {
+            livePaneIds.push(candidate.pane_id);
+          }
         }
         const splitTarget = livePaneIds.at(-1) ?? leaderPaneId;
         const splitDirection = livePaneIds.length > 0 ? 'down' as const : 'right' as const;
         const workerCwd = currentWorker.working_dir ?? input.cwd;
         const recoveryProvider = owner.config.tmux_session!.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
-        if (!await workerPaneBelongsToProviderTarget({
+        const tmuxServerIdentity = requireTmuxServerIdentity(
+          owner.config.tmux_session!,
+          owner.config.tmux_server_identity,
+        );
+        if (!await workerPaneBelongsToOwnedProviderTarget({
           provider: recoveryProvider,
           providerTarget: owner.config.tmux_session!,
           paneId: splitTarget,
+          ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
         })) return { ok: false, error: 'worker_activation_failed' };
-        const split = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection, workerCwd, recoveryProvider);
+        const split = await splitTeamWorkerPaneWithEvidence(
+          splitTarget,
+          splitDirection,
+          workerCwd,
+          recoveryProvider,
+          tmuxServerIdentity,
+        );
         const ownershipResult = proveWorkerPaneOwnership(split, {
           providerTarget: owner.config.tmux_session!,
           leaderPaneId,
           reservedPaneIds,
+          ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
         });
         if (!ownershipResult.ok) {
           await recordUnaddressableRecoveryPaneFailure(
@@ -2720,10 +3176,13 @@ export async function executeRecoverDeadWorkerV2Owner(
           );
           return { ok: false, error: 'spawn_failed' };
         }
-        if (!await workerPaneBelongsToProviderTarget({
+        if (!await workerPaneBelongsToOwnedProviderTarget({
           provider: ownershipResult.ownership.provider,
           providerTarget: ownershipResult.ownership.providerTarget,
           paneId: ownershipResult.ownership.paneId,
+          ...(ownershipResult.ownership.tmuxServerIdentity
+            ? { tmuxServerIdentity: ownershipResult.ownership.tmuxServerIdentity }
+            : {}),
         })) {
           await recordUnaddressableRecoveryPaneFailure(
             input,
@@ -2759,6 +3218,7 @@ export async function executeRecoverDeadWorkerV2Owner(
             launchDescriptor,
             ownershipResult.ownership,
             paneAttemptId,
+            instance.instance_id,
           );
         } catch {
           return { ok: false, error: 'launch_descriptor_unresolvable' };
@@ -2767,6 +3227,7 @@ export async function executeRecoverDeadWorkerV2Owner(
         try {
           pending.startupContext = await spawnOwnedWorkerInPane(config.tmux_session, pending.ownership, {
             teamName: input.teamName,
+            instanceId: instance.instance_id,
             workerName: sagaInput.workerName,
             envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(pending.gate) },
             launchBinary: process.execPath,
@@ -2781,6 +3242,9 @@ export async function executeRecoverDeadWorkerV2Owner(
               replacement_generation: sagaInput.replacementGeneration,
               pane_attempt_id: paneAttemptId,
             },
+            ...(ownershipResult.ownership.tmuxServerIdentity
+              ? { tmuxServerIdentity: ownershipResult.ownership.tmuxServerIdentity }
+              : {}),
           });
           const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
             recovery_id: sagaInput.recoveryId,
@@ -2793,12 +3257,15 @@ export async function executeRecoverDeadWorkerV2Owner(
           if (!ready) throw new Error('startup_ack_timeout');
           return { ok: true, paneId: pending.ownership.paneId, paneAttemptId, committed: false };
         } catch (error) {
-          await cleanupRecoveryPaneAttempt(
-            input,
-            sagaInput.recoveryId,
-            pending,
-            error instanceof Error ? error.message : 'spawn_failed',
-          );
+          await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+            await assertTeamInstanceUnderLock(instance);
+            await cleanupRecoveryPaneAttempt(
+              input,
+              sagaInput.recoveryId,
+              pending,
+              error instanceof Error ? error.message : 'spawn_failed',
+            );
+          });
           return {
             ok: false,
             error: error instanceof Error && error.message === 'startup_ack_timeout'
@@ -3022,7 +3489,7 @@ export async function executeRecoverDeadWorkerV2Owner(
         } catch { /* malformed or stale provider-start evidence fails closed */ }
         if (!providerLive) throw new Error('worker_activation_failed');
         if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)
-          || await getWorkerPaneLiveness(pending.ownership.paneId) !== 'alive') {
+          || await getOwnedWorkerLiveness(pending.ownership) !== 'alive') {
           throw new Error('worker_activation_failed');
         }
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -3079,8 +3546,11 @@ export async function executeRecoverDeadWorkerV2Owner(
       killAttemptPane: async paneAttemptId => {
         const pending = pendingRecoveryPanes.get(recoveryId);
         if (!pending || pending.paneAttemptId !== paneAttemptId) return;
-        const cleaned = await cleanupRecoveryPaneAttempt(input, recoveryId, pending, 'recovery_saga_rollback');
-        if (!cleaned) throw new Error('worker_cleanup_incomplete');
+        await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+          await assertTeamInstanceUnderLock(instance);
+          const cleaned = await cleanupRecoveryPaneAttempt(input, recoveryId, pending, 'recovery_saga_rollback');
+          if (!cleaned) throw new Error('worker_cleanup_incomplete');
+        });
       },
     };
 
@@ -3099,6 +3569,8 @@ export async function executeRecoverDeadWorkerV2Owner(
             ? 'runtime_owner_fence_lost'
             : message === 'worker_cleanup_incomplete'
               ? 'worker_cleanup_incomplete'
+                : message.startsWith('team_instance_')
+                  ? 'invalid_persisted_state'
               : 'runtime_owner_unavailable';
     const result = recoveryError(input, recoveryId, code, message);
     return ownerBound && (code === 'team_not_found' || code === 'invalid_persisted_state')
@@ -3109,8 +3581,25 @@ export async function executeRecoverDeadWorkerV2Owner(
   }
 }
 
-async function rollbackUnpersistedNativeWorktreeStartup(teamName: string, cwd: string, cause: unknown): Promise<boolean> {
-  const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
+const TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION: TeamInstanceDisposalAuthorization = {
+  protocol: 'caller-owned-final-state-v1',
+  providers: 'disposed',
+  panes: 'disposed',
+  worktrees: 'disposed',
+};
+
+/**
+ * Roll back effects that occurred before an identity-bearing config was
+ * committed.  When an instance binding is supplied this helper is called
+ * under the shared lifecycle lock and releases the pending reservation only
+ * after the state root has been removed and verified.
+ */
+async function rollbackUnpersistedNativeWorktreeStartup(
+  teamName: string,
+  cwd: string,
+  cause: unknown,
+  instance: TeamInstanceBinding,
+): Promise<boolean> {
   const teamRoot = absPath(cwd, TeamPaths.root(teamName));
   const errorMessage = cause instanceof Error ? cause.message : String(cause);
   const recordedAt = new Date().toISOString();
@@ -3124,24 +3613,47 @@ async function rollbackUnpersistedNativeWorktreeStartup(teamName: string, cwd: s
     }, null, 2), 'utf-8');
   };
 
-  if (!safety.hasEvidence) {
+  // createTeamSession can have created a tmux/cmux resource before its
+  // identity-bound cleanup proof is available.  Do not remove the pending
+  // config/worktrees or release the external reservation in that case: the
+  // partial session and creation evidence are the only durable authority left
+  // for a later, explicitly bound cleanup attempt.
+  if (cause instanceof TeamSessionCreationError && cause.cleanupStatus !== 'verified') {
     try {
-      await writeFailureMarker();
-      return true;
+      await writeFailureMarker({
+        instance_id: instance.instance_id,
+        instance_binding: instance,
+        partial_session: cause.partialSession,
+        ...(cause.creationEvidence ? { creation_evidence: cause.creationEvidence } : {}),
+        cleanup_status: cause.cleanupStatus ?? 'unknown',
+        cleanup_incomplete: true,
+      });
     } catch {
-      return false;
+      // Preserve the reservation and pending state even if evidence
+      // publication itself fails; callers must surface cleanup uncertainty.
     }
+    return false;
   }
 
+  const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
   try {
-    const cleanup = cleanupTeamWorktrees(teamName, cwd);
-    if (cleanup.preserved.length > 0) {
-      await writeFailureMarker({ preserved: cleanup.preserved });
-      return true;
+    if (safety.hasEvidence) {
+      const cleanup = cleanupTeamWorktrees(teamName, cwd);
+      if (cleanup.preserved.length > 0) {
+        await writeFailureMarker({ preserved: cleanup.preserved });
+        return true;
+      }
     }
     await rm(teamRoot, { recursive: true, force: true });
     if (existsSync(teamRoot)) {
       await writeFailureMarker({ rollback_error: 'startup_state_removal_unverified' });
+      return false;
+    }
+    try {
+      await releaseFailedStartupReservationUnderLock(instance);
+    } catch {
+      // Keep the reservation as durable retry authority when release cannot
+      // be verified, even though the disposable state root is gone.
       return false;
     }
     return true;
@@ -3164,6 +3676,7 @@ async function writeStartedStartupRollbackEvidence(args: {
   cause: unknown;
   reason: string;
   worker?: string;
+  launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
   markerReason?: string;
 }): Promise<void> {
   const teamRoot = absPath(args.cwd, TeamPaths.root(args.teamName));
@@ -3173,6 +3686,14 @@ async function writeStartedStartupRollbackEvidence(args: {
     error: args.cause instanceof Error ? args.cause.message : String(args.cause),
     rollback_error: args.reason,
     ...(args.worker ? { worker: args.worker } : {}),
+    ...(args.launchedWorkers && args.launchedWorkers.length > 0
+      ? { launch_attempts: args.launchedWorkers.map(launch => ({
+        worker: launch.name,
+        pane_id: launch.paneId,
+        provider: launch.provider,
+        ...(launch.launchAttemptId ? { launch_attempt_id: launch.launchAttemptId } : {}),
+      })) }
+      : {}),
     cleanup_incomplete: args.markerReason === undefined,
     recorded_at: new Date().toISOString(),
   }, null, 2), 'utf-8');
@@ -3192,13 +3713,14 @@ async function rollbackStartedNativeWorktreeStartup(args: {
   leaderPaneId?: string | null;
   workerPaneIds: string[];
   sessionMode: TeamSessionMode;
+  tmuxServerIdentity?: TmuxServerIdentity;
   launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
+  instance: TeamInstanceBinding;
 }): Promise<void> {
   const worktreeCleanupRequired = inspectTeamWorktreeCleanupSafety(args.teamName, args.cwd).hasEvidence;
   const sessionCleanupRequired = (args.launchedWorkers?.length ?? 0) > 0
     || args.workerPaneIds.length > 0
     || args.sessionMode !== 'split-pane';
-  const cleanupRequired = worktreeCleanupRequired || sessionCleanupRequired;
   try {
     await writeStartedStartupRollbackEvidence({
       ...args,
@@ -3216,7 +3738,9 @@ async function rollbackStartedNativeWorktreeStartup(args: {
         throw new Error(`worker_cleanup_incomplete:${worker.name}:missing_launch_attempt_id`);
       }
       const attempt = await loadWorkerLaunchAttempt({
-        cwd: args.cwd, teamName: args.teamName, workerName: worker.name,
+        cwd: args.cwd, teamName: args.teamName,
+        instanceId: args.instance.instance_id,
+        workerName: worker.name,
         paneId: worker.paneId, provider: worker.provider as CliAgentType,
         attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
       });
@@ -3225,14 +3749,23 @@ async function rollbackStartedNativeWorktreeStartup(args: {
         throw new Error(`worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`);
       }
       const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
-        if (await getWorkerLiveness(worker.paneId) === 'dead') return true;
-        await killOwnedWorkerPane({
+        const ownership: WorkerPaneOwnership = {
           provider: worker.paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
-          providerTarget: args.sessionName, paneId: worker.paneId,
-          splitTarget: '', leaderPaneId: args.leaderPaneId ?? '',
-          reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId), source: 'adopted' as const,
+          providerTarget: args.sessionName,
+          paneId: worker.paneId,
+          splitTarget: '',
+          leaderPaneId: args.leaderPaneId ?? '',
+          reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId),
+          source: 'adopted',
+          ...(worker.paneId.startsWith('%') && args.tmuxServerIdentity
+            ? { tmuxServerIdentity: args.tmuxServerIdentity }
+            : {}),
+        };
+        if (await getOwnedWorkerLiveness(ownership) === 'dead') return true;
+        await killOwnedWorkerPane({
+          ...ownership,
         });
-        return await getWorkerLiveness(worker.paneId) === 'dead';
+        return await getOwnedWorkerLiveness(ownership) === 'dead';
       });
       if (cleaned !== true) {
         await writeStartedStartupRollbackEvidence({ ...args, reason: 'provider_cleanup_unverified', worker: worker.name });
@@ -3241,18 +3774,30 @@ async function rollbackStartedNativeWorktreeStartup(args: {
     }
     if (sessionCleanupRequired && !(args.workerPaneIds.length === 0 && args.sessionMode === 'split-pane' && (args.launchedWorkers?.length ?? 0) > 0)) {
       const sessionCleaned = await killTeamSession(
-        args.sessionName, args.workerPaneIds, args.leaderPaneId ?? undefined, { sessionMode: args.sessionMode },
+        args.sessionName, args.workerPaneIds, args.leaderPaneId ?? undefined, {
+          sessionMode: args.sessionMode,
+          ...(args.tmuxServerIdentity ? { tmuxServerIdentity: args.tmuxServerIdentity } : {}),
+        },
       );
       if (sessionCleaned === false) {
         await writeStartedStartupRollbackEvidence({ ...args, reason: 'session_cleanup_unverified' });
         throw new Error('worker_cleanup_incomplete:session_cleanup_unverified');
       }
     }
-    if (worktreeCleanupRequired && !await rollbackUnpersistedNativeWorktreeStartup(args.teamName, args.cwd, args.cause)) {
-      throw new Error('worker_cleanup_incomplete:state_cleanup_unverified');
+    if (worktreeCleanupRequired) {
+      const cleanup = cleanupTeamWorktrees(args.teamName, args.cwd);
+      if (cleanup.preserved.length > 0) {
+        throw new Error('worker_cleanup_incomplete:worktree_cleanup_unverified');
+      }
+    }
+    try {
+      await disposeTeamInstanceUnderLock(args.instance, TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION);
+    } catch (error) {
+      throw new Error(
+        `worker_cleanup_incomplete:state_cleanup_unverified:${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   } catch (error) {
-    if (!cleanupRequired) return;
     try {
       await writeStartedStartupRollbackEvidence({ ...args, reason: error instanceof Error ? error.message : String(error) });
     } catch {
@@ -3280,7 +3825,6 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     throw new Error(`Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`);
   }
   const sanitized = sanitizeTeamName(config.teamName);
-  const leaderCwd = resolve(config.cwd);
   validateTeamName(sanitized);
   if (!Array.isArray(config.tasks)) throw new Error('invalid_task_dependencies');
   const dependencyByIndex = validateStartTaskDependencies(config.tasks);
@@ -3294,6 +3838,12 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       throw new Error(`invalid_task_owner:task-${index + 1}`);
     }
   }
+  const instance = createTeamInstanceBinding({
+    teamName: sanitized,
+    cwd: resolve(config.cwd),
+    ...(config.instanceId !== undefined ? { instanceId: config.instanceId } : {}),
+  });
+  const leaderCwd = instance.cwd;
 
   // Resolve routing snapshot ONCE at team creation. The snapshot is immutable
   // for the team's lifetime (stickiness per plan AC-10): spawn/scaleUp/restart
@@ -3414,6 +3964,42 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     throw new Error(`cli_binary_preflight_failed:${missing}`);
   }
 
+  return withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
+    // Reserve the name before creating any state, worktree, pane, or provider
+    // effect.  The reservation remains external and blocks same-name startup
+    // until this incarnation is either fully activated or safely released.
+    const reservation = await reserveTeamInstanceUnderLock({
+      teamName: instance.team_name,
+      cwd: instance.cwd,
+      instanceId: instance.instance_id,
+    });
+    if (reservation.phase === 'active') {
+      throw new Error('team_instance_reservation_conflict');
+    }
+    let startupRollbackIssued = false;
+    const rollbackBeforeConfig = async (cause: unknown): Promise<boolean> => {
+      if (startupRollbackIssued) return true;
+      startupRollbackIssued = true;
+      return rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, cause, instance);
+    };
+    const rollbackAfterConfig = async (args: Omit<Parameters<typeof rollbackStartedNativeWorktreeStartup>[0], 'instance'>): Promise<void> => {
+      if (startupRollbackIssued) return;
+      startupRollbackIssued = true;
+      await rollbackStartedNativeWorktreeStartup({ ...args, instance });
+    };
+    try {
+      const pendingConfig = buildTeamInstancePendingConfig(instance);
+      const pendingConfigPath = absPath(leaderCwd, TeamPaths.config(sanitized));
+      await mkdir(join(pendingConfigPath, '..'), { recursive: true });
+      await writeFile(pendingConfigPath, JSON.stringify(pendingConfig, null, 2), 'utf-8');
+    } catch (error) {
+      if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
+      throw error;
+    }
+
+  const workerWorktrees = new Map<string, NonNullable<ReturnType<typeof ensureWorkerWorktree>>>();
+  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor; verdictAssignmentId?: string }>();
+  try {
   // Create state directories
   await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
   await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
@@ -3440,7 +4026,6 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     await writeAtomic(taskFilePath, JSON.stringify(taskRecord, null, 2));
   }
 
-  const workerWorktrees = new Map<string, NonNullable<ReturnType<typeof ensureWorkerWorktree>>>();
   try {
     if (worktreeMode !== 'disabled') {
       for (const workerName of workerNames) {
@@ -3452,10 +4037,9 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       }
     }
   } catch (error) {
-    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
+    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
-  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor; verdictAssignmentId?: string }>();
   for (let i = 0; i < workerNames.length; i++) {
     const workerName = workerNames[i]!;
     const taskIndex = startupByWorker.get(workerName);
@@ -3487,6 +4071,10 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       ...(assignment.role ? { role: assignment.role } : {}), descriptor,
       ...(verdictAssignmentId ? { verdictAssignmentId } : {}) });
   }
+  } catch (error) {
+    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
+    throw error;
+  }
 
   // Set up worker state dirs and overlays (with v2 CLI API instructions)
   try {
@@ -3513,7 +4101,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       }
     }
   } catch (error) {
-    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
+    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
 
@@ -3524,7 +4112,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       newWindow: Boolean(config.newWindow),
     });
   } catch (error) {
-    if (!await rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, error)) throw startupCleanupIncompleteError(error);
+    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
     throw error;
   }
   const sessionName = session.sessionName;
@@ -3559,6 +4147,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // Write initial v2 config
   const teamConfig: TeamConfig = {
     name: sanitized,
+    instance_id: instance.instance_id,
+    ...(session.tmuxServerIdentity ? { tmux_server_identity: session.tmuxServerIdentity } : {}),
     state_revision: 0,
     task: config.tasks.map(t => t.subject).join('; '),
     agent_type: agentTypes[0] || 'claude',
@@ -3585,6 +4175,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     external_models_defaults: externalModelsDefaults,
     workspace_mode: workspaceMode,
     worktree_mode: worktreeMode,
+    lifecycle_state: 'starting',
     service_descriptor: config.autoMerge
       ? { schema_version: 1, service_generation: 1, service_attempt_id: randomUUID(), auto_merge_enabled: true,
         workspace_root: leaderCwd, leader_branch: autoMergeLeaderBranch!, cadence_policy: 'worker-auto-commit-v1' }
@@ -3592,13 +4183,14 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
         workspace_root: leaderCwd, cadence_policy: 'disabled' },
   };
   try {
-    await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
+    await commitInitialTeamConfigUnderLock(teamConfig, leaderCwd, instance);
   } catch (error) {
-    await rollbackStartedNativeWorktreeStartup({
+    await rollbackAfterConfig({
       teamName: sanitized,
       cwd: leaderCwd,
       cause: error,
       sessionName,
+      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
@@ -3614,6 +4206,8 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     schema_version: 2,
     state_revision: 0,
     name: sanitized,
+    instance_id: instance.instance_id,
+    ...(session.tmuxServerIdentity ? { tmux_server_identity: session.tmuxServerIdentity } : {}),
     task: teamConfig.task,
     leader: {
       session_id: sessionName,
@@ -3644,12 +4238,14 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   };
   try {
     await writeFile(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), 'utf-8');
+    await activateTeamInstanceUnderLock(instance);
   } catch (error) {
-    await rollbackStartedNativeWorktreeStartup({
+    await rollbackAfterConfig({
       teamName: sanitized,
       cwd: leaderCwd,
       cause: error,
       sessionName,
+      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
@@ -3673,9 +4269,11 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     if (!workerInfo) continue;
     const workerLaunch = await spawnV2Worker({
       sessionName,
+      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
       leaderPaneId,
       existingWorkerPaneIds: workerPaneIds,
       teamName: sanitized,
+      instanceId: instance.instance_id,
       workerName: wName,
       workerIndex,
       agentType: prepared.agentType,
@@ -3722,11 +4320,34 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     }
   }
   } catch (error) {
-    await rollbackStartedNativeWorktreeStartup({
+    const unresolvedLaunch = error && typeof error === 'object' && 'unresolvedLaunch' in error
+      ? (error as StartupLaunchError).unresolvedLaunch
+      : undefined;
+    if (unresolvedLaunch && !launchedWorkers.some(candidate =>
+      candidate.launchAttemptId === unresolvedLaunch.launchAttemptId)) {
+      launchedWorkers.push(unresolvedLaunch);
+      const workerInfo = workersInfo.find(candidate => candidate.name === unresolvedLaunch.name);
+      if (workerInfo) {
+        workerInfo.pane_id = unresolvedLaunch.paneId;
+        workerInfo.launch_attempt_id = unresolvedLaunch.launchAttemptId;
+        workerInfo.worker_cli = unresolvedLaunch.provider;
+        workerInfo.operational_state = 'starting';
+        teamConfig.workers = workersInfo;
+        try {
+          await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
+        } catch {
+          // The durable launch receipt and rollback marker remain the
+          // fallback evidence; never proceed to destructive cleanup without
+          // the unresolved launch in `launchedWorkers`.
+        }
+      }
+    }
+    await rollbackAfterConfig({
       teamName: sanitized,
       cwd: leaderCwd,
       cause: error,
       sessionName,
+      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
@@ -3737,14 +4358,16 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
 
   // Persist config with pane IDs
   teamConfig.workers = workersInfo;
+  teamConfig.lifecycle_state = 'active';
   try {
     await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
   } catch (error) {
-    await rollbackStartedNativeWorktreeStartup({
+    await rollbackAfterConfig({
       teamName: sanitized,
       cwd: leaderCwd,
       cause: error,
       sessionName,
+      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
       leaderPaneId,
       workerPaneIds,
       sessionMode: session.sessionMode,
@@ -3809,14 +4432,16 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     } catch (orchErr) {
       await stopTeamCadence(sanitized);
       unregisterTeamOrchestrator(sanitized);
-      await rollbackStartedNativeWorktreeStartup({
+      await rollbackAfterConfig({
         teamName: sanitized,
         cwd: leaderCwd,
         cause: orchErr,
         sessionName,
+        ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
         leaderPaneId,
         workerPaneIds,
         sessionMode: session.sessionMode,
+        launchedWorkers,
       });
       const reason = orchErr instanceof Error ? orchErr.message : String(orchErr);
       throw new Error(`auto-merge startup failed: ${reason}`);
@@ -3826,11 +4451,13 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   return {
     teamName: sanitized,
     sanitizedName: sanitized,
+    instanceId: instance.instance_id,
     sessionName,
     config: teamConfig,
     cwd: leaderCwd,
     ownsWindow: ownsWindow,
   };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -4069,10 +4696,34 @@ async function readNonCursorVerdictBinding(path: string): Promise<NonCursorVerdi
 export async function processCliWorkerVerdicts(
   teamName: string,
   cwd: string,
+  expectedInstanceId?: TeamInstanceId,
+): Promise<CliWorkerVerdictResult[]> {
+  const sanitized = sanitizeTeamName(teamName);
+  let instanceId = expectedInstanceId;
+  if (instanceId === undefined) {
+    const current = await readTeamConfig(sanitized, cwd);
+    // Legacy/name-only state is readable for diagnosis but cannot authorize
+    // verdict task mutation.
+    if (!current?.instance_id) return [];
+    instanceId = current.instance_id;
+  }
+  const instance = createTeamInstanceBinding({ teamName: sanitized, cwd, instanceId });
+  return withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+    await assertTeamInstanceUnderLock(instance);
+    return processCliWorkerVerdictsUnderLock(teamName, cwd, instance.instance_id);
+  });
+}
+
+/** Mutating verdict body; callers must already hold the instance lifecycle lock. */
+async function processCliWorkerVerdictsUnderLock(
+  teamName: string,
+  cwd: string,
+  expectedInstanceId: TeamInstanceId,
 ): Promise<CliWorkerVerdictResult[]> {
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
   if (!config) return [];
+  if (!config.instance_id || config.instance_id.toLowerCase() !== expectedInstanceId) return [];
 
   const results: CliWorkerVerdictResult[] = [];
   const logEventFailure = createSwallowedErrorLogger(
@@ -4128,7 +4779,10 @@ export async function processCliWorkerVerdicts(
     const outputFile = worker.output_file;
     if (!outputFile) continue;
 
-    const liveness = await getWorkerPaneLiveness(worker.pane_id);
+    const paneOwnership = configuredPaneOwnership(config, worker);
+    const liveness = paneOwnership
+      ? await getOwnedWorkerLiveness(paneOwnership)
+      : 'unknown';
     const workerRole = normalizeDelegationRole(worker.role);
     const cursorReviewer = worker.worker_cli === 'cursor'
       && CONTRACT_ROLES.has(workerRole as CanonicalTeamRole);
@@ -4749,17 +5403,31 @@ export async function processCliWorkerVerdicts(
 export async function monitorTeamV2(
   teamName: string,
   cwd: string,
+  expectedInstanceId?: TeamInstanceId,
 ): Promise<TeamSnapshotV2 | null> {
   const monitorStartMs = performance.now();
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
   if (!config) return null;
+  if (!config.instance_id) {
+    if (expectedInstanceId !== undefined) throw new Error('team_instance_authority_missing');
+    return null;
+  }
+  if (expectedInstanceId !== undefined && config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
+    throw new Error('team_instance_mismatch');
+  }
+  const monitorInstance = createTeamInstanceBinding({
+    teamName: sanitized,
+    cwd,
+    instanceId: expectedInstanceId ?? config.instance_id,
+  });
 
   // AC-7: Convert CLI-worker verdict files into task transitions before counting.
   // Runs best-effort so monitor cycles never fail because of verdict handling.
   try {
-    await processCliWorkerVerdicts(sanitized, cwd);
+    await processCliWorkerVerdicts(sanitized, cwd, monitorInstance.instance_id);
   } catch (err) {
+    if (isTeamInstanceBoundaryError(err)) throw err;
     process.stderr.write(
       `[team/runtime-v2] processCliWorkerVerdicts failed: ${err instanceof Error ? err.message : String(err)}\n`,
     );
@@ -4790,19 +5458,21 @@ export async function monitorTeamV2(
   const workerScanStartMs = performance.now();
   const workerSignals = await Promise.all(
     config.workers.map(async (worker) => {
-      const liveness = await getWorkerPaneLiveness(worker.pane_id);
-      const alive = liveness === 'alive';
+      const ownership = configuredPaneOwnership(config, worker);
+      const liveness = ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown';
+      const providerLiveness = await getWorkerProviderLiveness(sanitized, cwd, config.instance_id, worker);
+      const paneAlive = liveness === 'alive';
       const [status, heartbeat, paneCapture] = await Promise.all([
         readWorkerStatus(sanitized, worker.name, cwd),
         readWorkerHeartbeat(sanitized, worker.name, cwd),
-        alive ? captureWorkerPane(worker.pane_id) : Promise.resolve(''),
+        paneAlive && ownership ? captureOwnedTeamPane(ownership) : Promise.resolve(''),
       ]);
-      return { worker, alive, liveness, status, heartbeat, paneCapture };
+      return { worker, alive: paneAlive, liveness, providerLiveness, status, heartbeat, paneCapture };
     }),
   );
   const workerScanMs = performance.now() - workerScanStartMs;
 
-  for (const { worker: w, alive, liveness, status, heartbeat, paneCapture } of workerSignals) {
+  for (const { worker: w, alive, liveness, providerLiveness, status, heartbeat, paneCapture } of workerSignals) {
     const currentTask = status.current_task_id ? taskById.get(status.current_task_id) ?? null : null;
     const outstandingTask = currentTask ?? findOutstandingWorkerTask(w, taskById, inProgressByOwner);
     const expectedTaskId = status.current_task_id ?? outstandingTask?.id ?? w.assigned_tasks[0] ?? '';
@@ -4824,6 +5494,7 @@ export async function monitorTeamV2(
       name: w.name,
       alive,
       liveness,
+      providerLiveness,
       status,
       heartbeat,
       assignedTasks: w.assigned_tasks,
@@ -4837,7 +5508,7 @@ export async function monitorTeamV2(
       turnsWithoutProgress,
     });
 
-    if (liveness === 'dead') {
+    if (providerLiveness === 'dead') {
       deadWorkers.push(w.name);
       const deadWorkerTasks = inProgressByOwner.get(w.name) || [];
       for (const t of deadWorkerTasks) {
@@ -4909,35 +5580,39 @@ export async function monitorTeamV2(
     metadata: undefined,
   })));
 
-  // Emit monitor-derived events (task completions, worker state changes)
-  await emitMonitorDerivedEvents(
-    sanitized,
-    allTasks,
-    workers.map((w) => ({ name: w.name, alive: w.alive, liveness: w.liveness, status: w.status })),
-    previousSnapshot,
-    cwd,
-  );
-
-  // Persist snapshot for next cycle
   const updatedAt = new Date().toISOString();
   const totalMs = performance.now() - monitorStartMs;
-  await teamWriteMonitorSnapshot(sanitized, {
-    taskStatusById: Object.fromEntries(allTasks.map((t) => [t.id, t.status])),
-    workerAliveByName: Object.fromEntries(workers.map((w) => [w.name, w.alive])),
-    workerLivenessByName: Object.fromEntries(workers.map((w) => [w.name, w.liveness])),
-    workerStateByName: Object.fromEntries(workers.map((w) => [w.name, w.status.state])),
-    workerTurnCountByName: Object.fromEntries(workers.map((w) => [w.name, w.heartbeat?.turn_count ?? 0])),
-    workerTaskIdByName: Object.fromEntries(workers.map((w) => [w.name, w.status.current_task_id ?? ''])),
-    mailboxNotifiedByMessageId: previousSnapshot?.mailboxNotifiedByMessageId ?? {},
-    completedEventTaskIds: previousSnapshot?.completedEventTaskIds ?? {},
-    monitorTimings: {
-      list_tasks_ms: Number(listTasksMs.toFixed(2)),
-      worker_scan_ms: Number(workerScanMs.toFixed(2)),
-      mailbox_delivery_ms: 0,
-      total_ms: Number(totalMs.toFixed(2)),
-      updated_at: updatedAt,
-    },
-  }, cwd);
+  await withTeamInstanceLifecycleLock(monitorInstance.cwd, monitorInstance.team_name, async () => {
+    // Revalidate the originally observed incarnation immediately before all
+    // monitor mutations. A cycle that scanned A must never emit/write into B.
+    await assertTeamInstanceUnderLock(monitorInstance);
+    await emitMonitorDerivedEvents(
+      sanitized,
+      allTasks,
+      workers.map((w) => ({ name: w.name, alive: w.alive, liveness: w.liveness, status: w.status })),
+      previousSnapshot,
+      cwd,
+    );
+
+    await assertTeamInstanceUnderLock(monitorInstance);
+    await teamWriteMonitorSnapshot(sanitized, {
+      taskStatusById: Object.fromEntries(allTasks.map((t) => [t.id, t.status])),
+      workerAliveByName: Object.fromEntries(workers.map((w) => [w.name, w.alive])),
+      workerLivenessByName: Object.fromEntries(workers.map((w) => [w.name, w.liveness])),
+      workerStateByName: Object.fromEntries(workers.map((w) => [w.name, w.status.state])),
+      workerTurnCountByName: Object.fromEntries(workers.map((w) => [w.name, w.heartbeat?.turn_count ?? 0])),
+      workerTaskIdByName: Object.fromEntries(workers.map((w) => [w.name, w.status.current_task_id ?? ''])),
+      mailboxNotifiedByMessageId: previousSnapshot?.mailboxNotifiedByMessageId ?? {},
+      completedEventTaskIds: previousSnapshot?.completedEventTaskIds ?? {},
+      monitorTimings: {
+        list_tasks_ms: Number(listTasksMs.toFixed(2)),
+        worker_scan_ms: Number(workerScanMs.toFixed(2)),
+        mailbox_delivery_ms: 0,
+        total_ms: Number(totalMs.toFixed(2)),
+        updated_at: updatedAt,
+      },
+    }, cwd);
+  });
 
   return {
     teamName: sanitized,
@@ -4984,8 +5659,23 @@ export async function shutdownTeamV2(
   const ralph = options.ralph === true;
   const timeoutMs = options.timeoutMs ?? 15_000;
   const sanitized = sanitizeTeamName(teamName);
-  const workspaceHash = createHash('sha256').update(cwd).digest('hex');
-  const lifecycleLock = absPath(cwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
+  if (options.instanceId !== undefined) {
+    const originalInstance = createTeamInstanceBinding({
+      teamName: sanitized,
+      cwd,
+      instanceId: options.instanceId,
+    });
+    try {
+      // A retained receipt authorizes only this original transaction, even
+      // when a replacement now occupies the canonical team name.
+      await retryTeamInstanceDisposal(originalInstance, TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION);
+      return { outcome: 'cleaned' };
+    } catch (error) {
+      if (!(error instanceof TeamInstanceError && error.code === 'team_instance_authority_missing')) {
+        return { outcome: 'failed', reason: 'state_cleanup_failed', detail: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  }
   const assertShutdownGate = async (currentConfig: TeamConfig): Promise<void> => {
     if (force) return;
     const allTasks = await teamListTasks(sanitized, cwd);
@@ -5030,9 +5720,31 @@ export async function shutdownTeamV2(
     );
   };
   let ownedShutdownNonce: string | null = null;
-  let config: TeamConfig | null = await withProcessIdentityFileLock(lifecycleLock, async () => {
+  let instance!: TeamInstanceBinding;
+  let config: TeamConfig | null = await withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
+    const observed = await readTeamConfig(sanitized, cwd);
+    if (observed && options.instanceId !== undefined
+      && (!observed.instance_id || observed.instance_id.toLowerCase() !== options.instanceId.toLowerCase())) {
+      throw new Error(observed.instance_id ? 'team_instance_mismatch' : 'team_instance_authority_missing');
+    }
     const current = await migrateTeamConfigRevision(sanitized, cwd);
     if (!current) return null;
+    if (!current.config.instance_id) throw new Error('team_instance_authority_missing');
+    if (options.instanceId !== undefined && current.config.instance_id.toLowerCase() !== options.instanceId.toLowerCase()) {
+      throw new Error('team_instance_mismatch');
+    }
+    const boundInstance = createTeamInstanceBinding({
+      teamName: sanitized,
+      cwd,
+      instanceId: current.config.instance_id,
+    });
+    instance = boundInstance;
+    await assertTeamInstanceUnderLock(boundInstance);
+    if (!current.config.tmux_session
+      || (!current.config.tmux_session.startsWith('cmux:')
+        && !isValidTmuxServerIdentity(current.config.tmux_server_identity))) {
+      throw new Error('tmux_server_identity_missing');
+    }
     if (current.config.active_recovery) throw new Error(`shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`);
     if (current.config.active_scale_down) throw new Error(`shutdown_blocked:active_scale_down:${current.config.active_scale_down.operation_id}`);
     if (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') {
@@ -5041,6 +5753,10 @@ export async function shutdownTeamV2(
     if (current.config.lifecycle_state === 'shutting_down') {
       const attempt = current.config.shutdown_attempt;
       if (!attempt || !Number.isInteger(attempt.pid) || attempt.pid <= 0 || !attempt.process_started_at) {
+        throw new Error('shutdown_fence_unowned');
+      }
+      const attemptInstanceId = attempt.instance_id;
+      if (attemptInstanceId !== boundInstance.instance_id) {
         throw new Error('shutdown_fence_unowned');
       }
       // Verify all-dead-expiry provenance: the nonce must encode the
@@ -5061,9 +5777,6 @@ export async function shutdownTeamV2(
       if (isAllDeadExpiry && !ownerIsDead && !isSameOwner) {
         throw new Error('shutdown_in_progress');
       }
-      if (!isAllDeadExpiry) {
-        throw new Error('shutdown_fence_unowned');
-      }
     } else if (current.config.lifecycle_state !== 'stopped') {
       await assertShutdownGate(current.config);
     }
@@ -5073,7 +5786,8 @@ export async function shutdownTeamV2(
     const nextRevision = current.stateRevision + 1;
     const next = { ...current.config, lifecycle_state: 'shutting_down' as const, state_revision: nextRevision,
       shutdown_attempt: { nonce: ownedShutdownNonce, pid: process.pid, process_started_at: processStartedAt,
-        state_revision: nextRevision, created_at: new Date().toISOString() },
+        state_revision: nextRevision, created_at: new Date().toISOString(),
+        instance_id: boundInstance.instance_id },
       // Clearing all_dead_recovery when adopting into a real shutdown attempt.
       all_dead_recovery: undefined,
     };
@@ -5083,23 +5797,27 @@ export async function shutdownTeamV2(
     })) throw new Error('stale_state_revision');
     return next;
   });
-  const revalidateShutdownFence = async (): Promise<TeamConfig> => withProcessIdentityFileLock(lifecycleLock, async () => {
+  const revalidateShutdownFence = async (): Promise<TeamConfig> => withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
     const attempt = current?.config.shutdown_attempt;
+    const attemptInstanceId = attempt?.instance_id;
     if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
       || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') || !attempt || attempt.nonce !== ownedShutdownNonce
-      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
+      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()
+      || !instance || attemptInstanceId !== instance.instance_id) {
       throw new Error(current?.config.active_recovery
         ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
     }
     return current.config;
   });
-  const commitStoppedFence = async (): Promise<void> => withProcessIdentityFileLock(lifecycleLock, async () => {
+  const commitStoppedFenceUnderLock = async (): Promise<void> => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
     const attempt = current?.config.shutdown_attempt;
+    const attemptInstanceId = attempt?.instance_id;
     if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
       || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') || !attempt || attempt.nonce !== ownedShutdownNonce
-      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()) {
+      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()
+      || !instance || attemptInstanceId !== instance.instance_id) {
       throw new Error(current?.config.active_recovery
         ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
     }
@@ -5108,13 +5826,15 @@ export async function shutdownTeamV2(
     if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd, undefined, {
       release: { shutdown_attempt: true },
     })) throw new Error('stale_state_revision');
-  });
-  const rollbackRejectedShutdownFence = async (expected: TeamConfig): Promise<boolean> => withProcessIdentityFileLock(lifecycleLock, async () => {
+  };
+  const rollbackRejectedShutdownFence = async (expected: TeamConfig): Promise<boolean> => withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
+    const attemptInstanceId = current?.config.shutdown_attempt?.instance_id;
     if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
       || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed')
 
-      || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce) return false;
+      || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce
+      || !instance || attemptInstanceId !== instance.instance_id) return false;
     const active = { ...current.config, lifecycle_state: 'active' as const, shutdown_attempt: undefined,
       state_revision: current.stateRevision + 1 };
     return saveTeamConfigAtRevision(active, current.stateRevision, cwd, undefined, {
@@ -5172,19 +5892,19 @@ export async function shutdownTeamV2(
   };
 
   if (!config) {
-    // No config means worker liveness cannot be proven. Worktree metadata and
-    // root AGENTS backups live under the scoped state tree, so use non-mutating
-    // inspection and preserve state whenever any worktree recovery evidence exists.
+    // Receipt-only retry was attempted before reading the canonical name.
+    // Missing config alone cannot establish provider termination or cleanup.
+    // Worktree metadata and root AGENTS backups live under the scoped state
+    // tree, so use non-mutating inspection and preserve state whenever any
+    // recovery evidence exists.
     const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
     if (cleanupSafety.hasEvidence || existsSync(absPath(cwd, TeamPaths.root(sanitized)))) {
       process.stderr.write('[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n');
       return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
     }
-    if (!await cleanupTeamState(sanitized, cwd)) {
-      return { outcome: 'failed', reason: 'state_cleanup_failed', detail: 'team state removal failed' };
-    }
-    return { outcome: 'cleaned' };
+    return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
   }
+  const shutdownInstance = instance;
 
 
   if (force) {
@@ -5262,34 +5982,11 @@ export async function shutdownTeamV2(
       providerCleanupFailures.push(worker.name);
       continue;
     }
-    // Legacy v2 workers may have pane_id but no launch_attempt_id.
-    // Attempt ownership-safe pane cleanup without provider termination.
     if (!worker.launch_attempt_id) {
-      const legacyLiveness = await getWorkerLiveness(worker.pane_id);
-      if (legacyLiveness === 'dead') continue;
-      const legacyOwnership = await adoptWorkerPaneOwnership({
-        provider: worker.pane_id.startsWith('%') ? 'tmux' : 'cmux',
-        providerTarget: config.tmux_session,
-        paneId: worker.pane_id,
-        leaderPaneId: config.leader_pane_id ?? '',
-        reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
-          .map(candidate => candidate.pane_id).filter((paneId): paneId is string => Boolean(paneId)),
-      });
-      if (!legacyOwnership.ok) {
-        paneCleanupUnknown.push(worker.name);
-        continue;
-      }
-      try {
-        let lastLegacyLiveness: WorkerPaneLiveness = await getWorkerLiveness(worker.pane_id);
-        for (let attempt = 0; attempt < 2 && lastLegacyLiveness !== 'dead'; attempt++) {
-          await killOwnedWorkerPane(legacyOwnership.ownership);
-          lastLegacyLiveness = await getWorkerLiveness(worker.pane_id);
-        }
-        if (lastLegacyLiveness === 'alive') paneCleanupAlive.push(worker.name);
-        else if (lastLegacyLiveness !== 'dead') paneCleanupUnknown.push(worker.name);
-      } catch {
-        paneCleanupUnknown.push(worker.name);
-      }
+      // Provider termination cannot be proven without its exact launch
+      // attempt. Preserve this worker rather than deriving authority from a
+      // pane alone.
+      providerCleanupFailures.push(worker.name);
       continue;
     }
     const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
@@ -5297,7 +5994,10 @@ export async function shutdownTeamV2(
       providerCleanupFailures.push(worker.name);
       continue;
     }
-    const initialPaneLiveness = await getWorkerLiveness(worker.pane_id);
+    const initialOwnership = configuredPaneOwnership(config, worker);
+    const initialPaneLiveness = initialOwnership
+      ? await getOwnedWorkerLiveness(initialOwnership)
+      : 'unknown';
     let paneOwnership: WorkerPaneOwnership | null = null;
     if (initialPaneLiveness !== 'dead') {
       const ownership = await adoptWorkerPaneOwnership({
@@ -5307,6 +6007,9 @@ export async function shutdownTeamV2(
         leaderPaneId: config.leader_pane_id ?? '',
         reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
           .map(candidate => candidate.pane_id).filter((paneId): paneId is string => Boolean(paneId)),
+        ...(config.tmux_server_identity
+          ? { tmuxServerIdentity: config.tmux_server_identity }
+          : {}),
       });
       if (!ownership.ok) {
         providerCleanupFailures.push(worker.name);
@@ -5317,6 +6020,7 @@ export async function shutdownTeamV2(
     const attempt = await loadWorkerLaunchAttempt({
       cwd,
       teamName: sanitized,
+      instanceId: shutdownInstance.instance_id,
       workerName: worker.name,
       paneId: worker.pane_id,
       provider,
@@ -5325,12 +6029,14 @@ export async function shutdownTeamV2(
     });
     if (!attempt || !await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'team_shutdown', async () => {
       try {
-        let lastLiveness: WorkerPaneLiveness = await getWorkerLiveness(worker.pane_id!);
+        let lastLiveness: WorkerPaneLiveness = paneOwnership
+          ? await getOwnedWorkerLiveness(paneOwnership)
+          : initialPaneLiveness;
         if (lastLiveness === 'dead') return true;
         if (!paneOwnership) return false;
         for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
           await killOwnedWorkerPane(paneOwnership);
-          lastLiveness = await getWorkerLiveness(worker.pane_id!);
+          lastLiveness = await getOwnedWorkerLiveness(paneOwnership);
           if (lastLiveness === 'dead') return true;
         }
         if (lastLiveness === 'alive') paneCleanupAlive.push(worker.name);
@@ -5358,10 +6064,7 @@ export async function shutdownTeamV2(
 
   try {
     const {
-      killWorkerPanes: _legacyKillWorkerPanes,
       killTeamSession: killOwnedTeamSession,
-      resolveSplitPaneWorkerPaneIds: _legacyResolveSplitPaneWorkerPaneIds,
-      getWorkerLiveness: probeWorkerLiveness,
     } = await import('./tmux-session.js');
     const ownsWindow = config.tmux_window_owned === true;
     const workerPaneIds = recordedWorkerPaneIds;
@@ -5371,26 +6074,52 @@ export async function shutdownTeamV2(
         if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
       }
-      const leaderOwnership = await verifyTeamTargetOwnership({
-        provider: config.leader_pane_id.startsWith('%') ? 'tmux' : 'cmux',
-        providerTarget: config.tmux_session,
-        recipient: 'leader-fixed', recipientRole: 'leader', paneId: config.leader_pane_id,
-      });
-      if (leaderOwnership.kind !== 'owned') {
+      const serverState = config.tmux_session.startsWith('cmux:')
+        ? 'matching' as const
+        : isValidTmuxServerIdentity(config.tmux_server_identity)
+          ? await observeTmuxServerIdentity(config.tmux_server_identity)
+          : 'unknown' as const;
+      if (serverState === 'unknown') {
         if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+      }
+      if (serverState === 'matching') {
+        const leaderOwnership = await verifyTeamTargetOwnership({
+          provider: config.leader_pane_id.startsWith('%') ? 'tmux' : 'cmux',
+          providerTarget: config.tmux_session,
+          recipient: 'leader-fixed', recipientRole: 'leader', paneId: config.leader_pane_id,
+          ...(config.tmux_server_identity
+            ? { tmuxServerIdentity: config.tmux_server_identity }
+            : {}),
+        });
+        if (leaderOwnership.kind !== 'owned') {
+          if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
+          return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+        }
       }
       const sessionMode = ownsWindow
         ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
         : 'detached-session';
-      if (!await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, { sessionMode })) {
+      if (!await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, {
+        sessionMode,
+        ...(config.tmux_server_identity
+          ? { tmuxServerIdentity: config.tmux_server_identity }
+          : {}),
+      })) {
         throw new Error('tmux cleanup unverified');
       }
     }
-    const paneById = new Map(config.workers
+    const cleanupConfig = config;
+    const paneById = new Map(cleanupConfig.workers
       .filter((w) => typeof w.pane_id === 'string' && w.pane_id.trim().length > 0)
       .map((w) => [w.pane_id as string, w.name]));
-    const liveness = await Promise.all(workerPaneIds.map(async (paneId) => [paneId, await probeWorkerLiveness(paneId)] as const));
+    const liveness = await Promise.all(workerPaneIds.map(async (paneId) => {
+      const worker = cleanupConfig.workers.find(candidate => candidate.pane_id === paneId);
+      const ownership = worker
+        ? configuredPaneOwnership(cleanupConfig, worker)
+        : configuredPaneOwnership(cleanupConfig, { pane_id: paneId });
+      return [paneId, ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown'] as const;
+    }));
     const aliveWorkers = liveness
       .filter(([, state]) => state === 'alive')
       .map(([paneId]) => paneById.get(paneId) ?? paneId);
@@ -5447,30 +6176,43 @@ export async function shutdownTeamV2(
   // exits above so auto-merge shutdown is not skipped when pane liveness is unknown.
   await finalizeAutoMerge();
 
-  await commitStoppedFence();
-  // 6. Clean up state. If worktree cleanup preserved dirty worktrees, keep the
-  // team state directory too; it contains the metadata and root AGENTS.md backups
-  // needed for a later safe cleanup attempt.
-  let preservedWorktrees = 0;
-  let worktreeCleanupFailure: string | null = null;
-  try {
-    const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
-    preservedWorktrees = worktreeCleanup.preserved.length;
-  } catch (err) {
-    preservedWorktrees = 1;
-    worktreeCleanupFailure = err instanceof Error ? err.message : String(err);
-    process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
-  }
-  if (preservedWorktrees === 0) {
-    if (!await cleanupTeamState(sanitized, cwd)) {
-      return { outcome: 'failed', reason: 'state_cleanup_failed', detail: 'team state removal failed' };
+  // 6. Worktree cleanup and final state disposal are one instance-protected
+  // transaction.  The external receipt is published before detaching the
+  // disposable state root, so a later retry never discovers authority by name.
+  return withTeamInstanceLifecycleLock<ShutdownTeamV2Result>(cwd, sanitized, async () => {
+    await assertTeamInstanceUnderLock(shutdownInstance);
+    await commitStoppedFenceUnderLock();
+    let worktreeCleanupFailure: string | null = null;
+    let preservedWorktrees = 0;
+    try {
+      const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
+      preservedWorktrees = worktreeCleanup.preserved.length;
+    } catch (err) {
+      preservedWorktrees = 1;
+      worktreeCleanupFailure = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
     }
-  } else {
-    process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
-  }
-  if (worktreeCleanupFailure) return { outcome: 'failed', reason: 'worktree_cleanup_failed', detail: worktreeCleanupFailure };
-  if (preservedWorktrees > 0) return { outcome: 'preserved', reason: 'worktrees_preserved', workers: [] };
-  return { outcome: 'cleaned' };
+    if (worktreeCleanupFailure) {
+      return { outcome: 'failed', reason: 'worktree_cleanup_failed', detail: worktreeCleanupFailure };
+    }
+    if (preservedWorktrees > 0) {
+      process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
+      return { outcome: 'preserved', reason: 'worktrees_preserved', workers: [] };
+    }
+    try {
+      await disposeTeamInstanceUnderLock(
+        shutdownInstance,
+        TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION,
+      );
+    } catch (err) {
+      return {
+        outcome: 'failed',
+        reason: 'state_cleanup_failed',
+        detail: err instanceof Error ? err.message : String(err),
+      };
+    }
+    return { outcome: 'cleaned' };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -5483,24 +6225,44 @@ export async function resumeTeamV2(
 ): Promise<TeamRuntimeV2 | null> {
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
-  if (!config) return null;
+  if (!config?.instance_id) return null;
 
   // Verify tmux session is alive
-  try {
-    const sessionName = config.tmux_session || `omc-team-${sanitized}`;
-    await tmuxExecAsync(['has-session', '-t', sessionName.split(':')[0]]);
-
+  const sessionName = config.tmux_session || `omc-team-${sanitized}`;
+  if (sessionName.startsWith('cmux:')) {
     return {
       teamName: sanitized,
       sanitizedName: sanitized,
+      instanceId: config.instance_id,
       sessionName,
       ownsWindow: config.tmux_window_owned === true,
       config,
       cwd,
     };
-  } catch {
-    return null; // Session not alive
   }
+  if (!isValidTmuxServerIdentity(config.tmux_server_identity)
+    || await observeTmuxServerIdentity(config.tmux_server_identity) !== 'matching') {
+    return null;
+  }
+  if (!config.leader_pane_id) return null;
+  const targetOwnership = await verifyTeamTargetOwnership({
+    provider: 'tmux',
+    providerTarget: sessionName,
+    recipient: 'leader-fixed',
+    recipientRole: 'leader',
+    paneId: config.leader_pane_id,
+    tmuxServerIdentity: config.tmux_server_identity,
+  });
+  if (targetOwnership.kind !== 'owned') return null;
+  return {
+    teamName: sanitized,
+    sanitizedName: sanitized,
+    instanceId: config.instance_id,
+    sessionName,
+    ownsWindow: config.tmux_window_owned === true,
+    config,
+    cwd,
+  };
 }
 
 // ---------------------------------------------------------------------------

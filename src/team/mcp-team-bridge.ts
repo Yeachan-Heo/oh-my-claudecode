@@ -35,7 +35,6 @@ import {
 } from "./inbox-outbox.js";
 import { unregisterMcpWorker } from "./team-registration.js";
 import { writeHeartbeat, deleteHeartbeat } from "./heartbeat.js";
-import { killSession } from "./tmux-session.js";
 import { logAuditEvent } from "./audit-log.js";
 import type { AuditEvent } from "./audit-log.js";
 import {
@@ -597,13 +596,6 @@ async function handleShutdown(
 
   audit(config, "bridge_shutdown");
   log(`[bridge] Shutdown complete. Goodbye.`);
-
-  // 7. Kill own tmux session (terminates this process)
-  try {
-    killSession(teamName, workerName);
-  } catch {
-    /* ignore — this kills us */
-  }
 }
 
 /** Main bridge daemon entry point */

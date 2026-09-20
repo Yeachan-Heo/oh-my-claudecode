@@ -5,8 +5,13 @@ import { createHash } from 'crypto';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { TeamPaths, absPath } from '../state-paths.js';
+import {
+  activateTeamInstanceUnderLock,
+  createTeamInstanceBinding,
+  reserveTeamInstanceUnderLock,
+  withTeamInstanceLifecycleLock,
+} from '../team-instance.js';
 
 const mocks = vi.hoisted(() => ({
   isWorkerAlive: vi.fn(async () => false),
@@ -122,7 +127,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     const root = await mkdtemp(join(tmpdir(), prefix));
     process.env.HOME = root;
     process.env.USERPROFILE = root;
-    delete process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = join(root, 'omc-state');
     return root;
   }
 
@@ -136,11 +141,10 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     staleProcessingVerdict?: 'approve' | 'revise' | 'reject';
     expiredLease?: boolean;
     delegationRequired?: boolean;
-  }): Promise<{ teamRoot: string; outputFile: string; taskPath: string }> {
+  }): Promise<{ teamRoot: string; outputFile: string; taskPath: string; instanceId: string }> {
     const teamName = 'role-routing-team';
-    const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
-    await mkdir(join(teamRoot, 'tasks'), { recursive: true });
-    await mkdir(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
+    const instance = createTeamInstanceBinding({ teamName, cwd });
+    const teamRoot = absPath(cwd, TeamPaths.root(teamName));
     const outputFile = join(teamRoot, 'workers', 'worker-1', 'verdict.json');
     const workerCli = opts.workerCli ?? 'codex';
     const launchAttemptId = 'attempt-worker-1';
@@ -150,11 +154,24 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
       mocks.getWorkerLiveness.mockResolvedValue('alive');
     }
 
+    const taskPath = join(teamRoot, 'tasks', 'task-1.json');
+    await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
+      reserveTeamInstanceUnderLock({
+        teamName,
+        cwd,
+        instanceId: instance.instance_id,
+      }),
+    );
+    await mkdir(join(teamRoot, 'tasks'), { recursive: true });
+    await mkdir(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
     await writeFile(
       join(teamRoot, 'config.json'),
       JSON.stringify(
         {
           name: teamName,
+          instance_id: instance.instance_id,
+          leader_cwd: cwd,
+          lifecycle_state: 'active',
           task: 'demo',
           agent_type: 'codex',
           worker_launch_mode: 'interactive',
@@ -188,8 +205,6 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
       ),
       'utf-8',
     );
-
-    const taskPath = join(teamRoot, 'tasks', 'task-1.json');
     await writeFile(
       taskPath,
       JSON.stringify(
@@ -249,8 +264,11 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
         }), 'utf-8');
       }
     }
+    await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
+      activateTeamInstanceUnderLock(instance),
+    );
 
-    return { teamRoot, outputFile, taskPath };
+    return { teamRoot, outputFile, taskPath, instanceId: instance.instance_id };
   }
 
   async function waitForContendedTaskLockAttempt(teamRoot: string): Promise<void> {
@@ -287,10 +305,10 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
   it('approve verdict transitions task to completed and renames verdict file', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-approve-');
-    const { outputFile, taskPath } = await bootstrap({ verdict: 'approve' });
+    const { outputFile, taskPath, instanceId } = await bootstrap({ verdict: 'approve' });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('completed');
@@ -318,10 +336,10 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
   it('revise verdict transitions task to failed with verdict metadata', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-revise-');
-    const { taskPath } = await bootstrap({ verdict: 'revise' });
+    const { taskPath, instanceId } = await bootstrap({ verdict: 'revise' });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results[0].status).toBe('failed');
     expect(results[0].verdict).toBe('revise');
@@ -773,10 +791,10 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
   it('reject verdict transitions task to failed', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-reject-');
-    const { taskPath } = await bootstrap({ verdict: 'reject' });
+    const { taskPath, instanceId } = await bootstrap({ verdict: 'reject' });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results[0].status).toBe('failed');
     expect(results[0].verdict).toBe('reject');
@@ -788,10 +806,10 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
   it('skips workers whose pane is still alive', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-alive-');
-    const { taskPath } = await bootstrap({ verdict: 'approve', paneAlive: true });
+    const { taskPath, instanceId } = await bootstrap({ verdict: 'approve', paneAlive: true });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results).toHaveLength(0);
     const task = JSON.parse(await readFile(taskPath, 'utf-8'));
@@ -799,8 +817,8 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
   });
 
   it('consumes a live Cursor reviewer verdict, persists metadata, and is idempotent', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-alive-'));
-    const { outputFile, taskPath } = await bootstrap({
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-alive-');
+    const { outputFile, taskPath, instanceId } = await bootstrap({
       verdict: 'approve',
       paneAlive: true,
       workerCli: 'cursor',
@@ -811,7 +829,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     const eventPath = absPath(cwd, TeamPaths.events('role-routing-team'));
     let eventsBefore = 0;
     try { eventsBefore = (await readFile(eventPath, 'utf8')).trim().split('\n').filter(Boolean).length; } catch { /* first event */ }
-    const first = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const first = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(first).toEqual([expect.objectContaining({
       workerName: 'worker-1',
@@ -835,7 +853,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     const snapshot = JSON.parse(await readFile(absPath(cwd, TeamPaths.monitorSnapshot('role-routing-team')), 'utf8'));
     expect(snapshot.completedEventTaskIds['1']).toBe(true);
 
-    const second = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const second = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
     expect(second).toEqual([]);
     expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({
       status: 'completed',
@@ -844,15 +862,15 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
   });
 
   it('does not consume a live Cursor verdict with an untrusted role payload', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-role-mismatch-'));
-    const { outputFile, taskPath } = await bootstrap({
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-role-mismatch-');
+    const { outputFile, taskPath, instanceId } = await bootstrap({
       verdict: 'approve',
       paneAlive: true,
       workerCli: 'cursor',
     });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results[0]).toMatchObject({ status: 'skipped', reason: 'cursor_verdict_role_mismatch' });
     expect(JSON.parse(await readFile(taskPath, 'utf-8')).status).toBe('in_progress');
@@ -860,48 +878,50 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
   });
 
   it('does not let stale processing output mask the replacement verdict', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-stale-processing-'));
-    const { taskPath } = await bootstrap({
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-stale-processing-');
+    const { taskPath, instanceId } = await bootstrap({
       verdict: 'revise', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic',
       staleProcessingVerdict: 'approve',
     });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results[0]).toMatchObject({ status: 'failed', verdict: 'revise' });
     expect(JSON.parse(await readFile(taskPath, 'utf-8')).metadata?.verdict).toBe('revise');
   });
 
   it('routes Cursor completion through lease and delegation invariants', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-invariants-'));
-    const { taskPath } = await bootstrap({
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-invariants-');
+    const { taskPath, instanceId } = await bootstrap({
       verdict: 'approve', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic',
       expiredLease: true, delegationRequired: true,
     });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results[0]).toMatchObject({ status: 'already_terminal' });
     expect(JSON.parse(await readFile(taskPath, 'utf-8')).status).toBe('in_progress');
   });
 
   it('waits for explicit alive liveness before consuming a Cursor verdict', async () => {
-    cwd = await mkdtemp(join(tmpdir(), 'omc-runtime-routing-cursor-unknown-'));
-    await bootstrap({ verdict: 'approve', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic' });
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-unknown-');
+    const { instanceId } = await bootstrap({
+      verdict: 'approve', paneAlive: true, workerCli: 'cursor', verdictRole: 'critic',
+    });
     mocks.getWorkerLiveness.mockResolvedValue('unknown');
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    expect(await processCliWorkerVerdicts('role-routing-team', cwd)).toEqual([]);
+    expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toEqual([]);
   });
 
   it('reports file_missing when verdict file does not exist', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-missing-');
-    await bootstrap({ verdict: 'approve', omitVerdictFile: true });
+    const { instanceId } = await bootstrap({ verdict: 'approve', omitVerdictFile: true });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('file_missing');
@@ -909,59 +929,106 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
   it('reports parse_failed and emits warning event for malformed verdict JSON', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-parse-');
-    await bootstrap({ verdict: 'approve', invalidVerdictJson: true });
+    const { instanceId } = await bootstrap({ verdict: 'approve', invalidVerdictJson: true });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts('role-routing-team', cwd);
+    const results = await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
 
     expect(results).toHaveLength(1);
     expect(results[0].status).toBe('parse_failed');
     expect(results[0].reason).toBeDefined();
   });
 
+  it('preserves legacy state when the identity-bearing config field is missing', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-legacy-identity-');
+    const { outputFile, taskPath, instanceId } = await bootstrap({ verdict: 'approve' });
+    const configPath = absPath(cwd, TeamPaths.config('role-routing-team'));
+    const config = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
+    delete config.instance_id;
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    const taskBefore = await readFile(taskPath, 'utf-8');
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    await expect(processCliWorkerVerdicts('role-routing-team', cwd, instanceId))
+      .rejects.toMatchObject({ code: 'team_instance_state_unknown' });
+
+    expect(await readFile(taskPath, 'utf-8')).toBe(taskBefore);
+    await expect(access(outputFile)).resolves.toBeUndefined();
+    await expect(access(outputFile + '.processed')).rejects.toThrow();
+  });
+
+  it('preserves the original task and verdict when a replacement instance rewrites config', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-replaced-identity-');
+    const { outputFile, taskPath, instanceId } = await bootstrap({ verdict: 'approve' });
+    const configPath = absPath(cwd, TeamPaths.config('role-routing-team'));
+    const config = JSON.parse(await readFile(configPath, 'utf-8')) as Record<string, unknown>;
+    config.instance_id = createTeamInstanceBinding({
+      teamName: 'role-routing-team',
+      cwd,
+    }).instance_id;
+    await writeFile(configPath, JSON.stringify(config, null, 2), 'utf-8');
+    const taskBefore = await readFile(taskPath, 'utf-8');
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    await expect(processCliWorkerVerdicts('role-routing-team', cwd, instanceId))
+      .rejects.toMatchObject({ code: 'team_instance_newer_instance' });
+
+    expect(await readFile(taskPath, 'utf-8')).toBe(taskBefore);
+    await expect(access(outputFile)).resolves.toBeUndefined();
+    await expect(access(outputFile + '.processed')).rejects.toThrow();
+  });
+
   it('returns empty when no workers have output_file (claude-only teams)', async () => {
     cwd = await mkdtempFixture('omc-runtime-routing-claude-');
     const teamName = 'claude-only';
-    const teamRoot = join(getOmcRoot(cwd), 'state', 'team', teamName);
-    await mkdir(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
-    await mkdir(join(teamRoot, 'tasks'), { recursive: true });
-    await writeFile(
-      join(teamRoot, 'config.json'),
-      JSON.stringify(
-        {
-          name: teamName,
-          task: 'demo',
-          agent_type: 'claude',
-          worker_launch_mode: 'interactive',
-          worker_count: 1,
-          max_workers: 20,
-          workers: [{
-            name: 'worker-1',
-            index: 1,
-            role: 'executor',
-            worker_cli: 'claude',
-            assigned_tasks: [],
-            pane_id: '%2',
-            working_dir: cwd,
-          }],
-          created_at: new Date().toISOString(),
-          tmux_session: 'co-session:0',
-          leader_pane_id: '%1',
-          hud_pane_id: null,
-          resize_hook_name: null,
-          resize_hook_target: null,
-          next_task_id: 1,
-          team_state_root: teamRoot,
-          workspace_mode: 'single',
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
+    const instance = createTeamInstanceBinding({ teamName, cwd });
+    const teamRoot = absPath(cwd, TeamPaths.root(teamName));
+    await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+      await reserveTeamInstanceUnderLock({ teamName, cwd, instanceId: instance.instance_id });
+      await mkdir(join(teamRoot, 'workers', 'worker-1'), { recursive: true });
+      await mkdir(join(teamRoot, 'tasks'), { recursive: true });
+      await writeFile(
+        join(teamRoot, 'config.json'),
+        JSON.stringify(
+          {
+            name: teamName,
+            instance_id: instance.instance_id,
+            leader_cwd: cwd,
+            lifecycle_state: 'active',
+            task: 'demo',
+            agent_type: 'claude',
+            worker_launch_mode: 'interactive',
+            worker_count: 1,
+            max_workers: 20,
+            workers: [{
+              name: 'worker-1',
+              index: 1,
+              role: 'executor',
+              worker_cli: 'claude',
+              assigned_tasks: [],
+              pane_id: '%2',
+              working_dir: cwd,
+            }],
+            created_at: new Date().toISOString(),
+            tmux_session: 'co-session:0',
+            leader_pane_id: '%1',
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+            next_task_id: 1,
+            team_state_root: teamRoot,
+            workspace_mode: 'single',
+          },
+          null,
+          2,
+        ),
+        'utf-8',
+      );
+      await activateTeamInstanceUnderLock(instance);
+    });
 
     const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
-    const results = await processCliWorkerVerdicts(teamName, cwd);
+    const results = await processCliWorkerVerdicts(teamName, cwd, instance.instance_id);
     expect(results).toEqual([]);
   });
 

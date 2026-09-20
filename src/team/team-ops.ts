@@ -352,6 +352,8 @@ async function withMailboxLock<T>(teamName: string, workerName: string, cwd: str
 function configFromManifest(manifest: TeamManifestV2): TeamConfig {
   return {
     name: manifest.name,
+    ...(manifest.instance_id ? { instance_id: manifest.instance_id } : {}),
+    ...(manifest.tmux_server_identity ? { tmux_server_identity: manifest.tmux_server_identity } : {}),
     task: manifest.task,
     agent_type: 'claude',
     policy: manifest.policy,
@@ -431,10 +433,6 @@ export async function teamReadManifest(teamName: string, cwd: string): Promise<T
   const manifest = await readJsonSafe<TeamManifestV2>(manifestPath);
   if (!manifest && existsSync(manifestPath)) throw new Error('invalid_persisted_state');
   return manifest ? normalizeTeamManifest(manifest) : null;
-}
-
-export async function teamCleanup(teamName: string, cwd: string): Promise<void> {
-  await rm(teamDir(teamName, cwd), { recursive: true, force: true });
 }
 
 // ---------------------------------------------------------------------------

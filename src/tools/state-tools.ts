@@ -6,7 +6,7 @@
  */
 import { z } from 'zod';
 import { createHash } from 'crypto';
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, unlinkSync, writeFileSync, constants as fsConstants } from 'fs';
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, unlinkSync, writeFileSync, constants as fsConstants } from 'fs';
 import { homedir } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import {
@@ -125,6 +125,7 @@ const STATE_WRITE_MODES: [string, ...string[]] = [
 const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active', 'ultragoal'] as const;
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const TEAM_RUNTIME_PRESERVATION_NOTE = 'Native team runtimes and cleanup evidence are not removed by state_clear; use instance-validated team shutdown/job cleanup.';
 const OWNER_SESSION_FALLBACK_MODES = new Set<StateToolMode>(['ralph']);
 const CONVERGED_STATE_PATH_MODES = new Set<StateToolMode>(['ralph', 'ultrawork']);
 const RETIRED_WORKFLOW_MODES = new Set<StateToolMode>(['ultrawork']);
@@ -455,8 +456,7 @@ type CandidateRecovery = (
 ) => { authorizeState: (state: Record<string, unknown>) => boolean } | undefined;
 
 type TeamCleanupBookkeeping = {
-  teamNames: Set<string>;
-  blockedNames: Set<string>;
+  blocked: boolean;
   clearedSessions: Set<string>;
   requesterSessionId?: string;
 };
@@ -470,14 +470,6 @@ function teamSessionIdForCandidate(
     return candidate.completedSessionId ?? candidate.ownerSessionId ?? pathSessionId ?? fallbackSessionId;
   }
   return fallbackSessionId ?? pathSessionId ?? candidate.ownerSessionId;
-}
-
-function teamNameAuthorizationSessionId(
-  candidate: StateFileDiscovery,
-  requesterSessionId?: string,
-): string | undefined {
-  return candidate.completedSessionId
-    ?? (candidate.completionEvidencePath ? candidate.ownerSessionId : requesterSessionId);
 }
 
 function clearStateCandidates(
@@ -500,12 +492,6 @@ function clearStateCandidates(
     if (result === 'cleared') {
       if (mode === 'team' && teamCleanup) {
         const ownerSessionId = teamSessionIdForCandidate(candidate, teamCleanup.requesterSessionId);
-        for (const teamName of readTeamNamesFromState(
-          candidate.state,
-          teamNameAuthorizationSessionId(candidate, teamCleanup.requesterSessionId),
-        )) {
-          teamCleanup.teamNames.add(teamName);
-        }
         if (ownerSessionId) teamCleanup.clearedSessions.add(ownerSessionId);
       }
       cleared++;
@@ -538,15 +524,6 @@ function hasActiveConvergedState(mode: StateToolMode, root: string, sessionId?: 
   return getConvergedStateCandidates(mode, root, sessionId)
     .some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
 }
-function readTeamNamesFromState(state: Record<string, unknown>, sessionId?: string): string[] {
-  if (sessionId && !canClearStateForSession(state, sessionId)) return [];
-  const teamName = typeof state.team_name === 'string'
-    ? state.team_name.trim()
-    : typeof state.teamName === 'string'
-      ? state.teamName.trim()
-      : '';
-  return teamName ? [teamName] : [];
-}
 
 function recordTeamClearFailure(
   mode: StateToolMode,
@@ -555,9 +532,9 @@ function recordTeamClearFailure(
   teamCleanup?: TeamCleanupBookkeeping,
 ): void {
   if (mode !== 'team' || !teamCleanup || result === 'cleared' || !existsSync(candidate.path)) return;
-  // A surviving foreign state must protect its runtime even though this
-  // caller has no authority to delete that state.
-  for (const teamName of readTeamNamesFromState(candidate.state)) teamCleanup.blockedNames.add(teamName);
+  // A surviving Team state must prevent broad cleanup of shared artifacts.
+  // Native team runtime records are never owned by this state tool.
+  teamCleanup.blocked = true;
 }
 
 function blockForeignTeamPrimary(
@@ -566,86 +543,15 @@ function blockForeignTeamPrimary(
   teamCleanup: TeamCleanupBookkeeping,
 ): void {
   // Candidate discovery intentionally omits a foreign canonical primary;
-  // observe it separately so legacy cleanup cannot tear down its runtime.
+  // observe it separately so shared artifact cleanup remains conservative.
   if (!requesterSessionId) return;
   const statePath = getSessionStatePath('team', root, requesterSessionId);
   const state = readJsonRecordStrict(statePath);
   if (!state) return;
   const ownerSessionId = getStateSessionOwner(state);
   if (ownerSessionId && ownerSessionId !== requesterSessionId) {
-    for (const teamName of readTeamNamesFromState(state)) teamCleanup.blockedNames.add(teamName);
+    teamCleanup.blocked = true;
   }
-}
-
-function pruneMissionBoardTeams(root: string, teamNames?: string[]): number {
-  const missionStatePath = join(getOmcRoot(root), 'state', 'mission-state.json');
-  if (!existsSync(missionStatePath)) return 0;
-
-  try {
-    const parsed = JSON.parse(readFileSync(missionStatePath, 'utf-8')) as {
-      updatedAt?: string;
-      missions?: Array<Record<string, unknown>>;
-    };
-    if (!Array.isArray(parsed.missions)) return 0;
-
-    const shouldRemoveAll = teamNames == null;
-    const teamNameSet = new Set(teamNames ?? []);
-    const remainingMissions = parsed.missions.filter((mission) => {
-      if (mission.source !== 'team') return true;
-      if (shouldRemoveAll) return false;
-      const missionTeamName = typeof mission.teamName === 'string'
-        ? mission.teamName.trim()
-        : typeof mission.name === 'string'
-          ? mission.name.trim()
-          : '';
-      return !missionTeamName || !teamNameSet.has(missionTeamName);
-    });
-
-    const removed = parsed.missions.length - remainingMissions.length;
-    if (removed > 0) {
-      writeFileSync(missionStatePath, JSON.stringify({
-        ...parsed,
-        updatedAt: new Date().toISOString(),
-        missions: remainingMissions,
-      }, null, 2));
-    }
-
-    return removed;
-  } catch {
-    return 0;
-  }
-}
-
-function cleanupTeamRuntimeState(root: string, teamNames?: string[]): number {
-  const teamStateRoot = join(getOmcRoot(root), 'state', 'team');
-  if (!existsSync(teamStateRoot)) return 0;
-
-  const shouldRemoveAll = teamNames == null;
-  let removed = 0;
-
-  if (shouldRemoveAll) {
-    try {
-      rmSync(teamStateRoot, { recursive: true, force: true });
-      return 1;
-    } catch {
-      return 0;
-    }
-  }
-
-  for (const teamName of teamNames ?? []) {
-    if (!teamName || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(teamName)) continue;
-    try {
-      const teamPath = resolve(teamStateRoot, teamName);
-      const withinRoot = relative(resolve(teamStateRoot), teamPath);
-      if (withinRoot.startsWith(`..${sep}`) || withinRoot === '..' || isAbsolute(withinRoot)) continue;
-      rmSync(teamPath, { recursive: true, force: true });
-      removed += 1;
-    } catch {
-      // best effort
-    }
-  }
-
-  return removed;
 }
 
 function formatStateClearCleanupNote(
@@ -667,22 +573,6 @@ function formatStateClearCleanupNote(
     ownerSessionId ? `cleared owning session: ${ownerSessionId}` : '',
   ].filter(Boolean);
   return parts.length > 0 ? ` (${parts.join(', ')})` : '';
-}
-
-function cleanupTeamRuntimeNote(
-  mode: StateToolMode,
-  root: string,
-  teamCleanup: TeamCleanupBookkeeping,
-): string {
-  if (mode !== 'team') return '';
-  const teamNames = [...teamCleanup.teamNames].filter((teamName) => !teamCleanup.blockedNames.has(teamName));
-  const removedRoots = cleanupTeamRuntimeState(root, teamNames);
-  const prunedMissions = pruneMissionBoardTeams(root, teamNames);
-  const details = [
-    removedRoots > 0 ? `removed ${removedRoots} team runtime root(s)` : '',
-    prunedMissions > 0 ? `pruned ${prunedMissions} HUD mission entry(ies)` : '',
-  ].filter(Boolean);
-  return details.length > 0 ? ` (${details.join(', ')})` : '';
 }
 
 /**
@@ -991,6 +881,8 @@ function clearTeamRuntimeArtifacts(
   captured: Map<string, RuntimeArtifactSnapshot>,
   includeLegacy = false,
 ): { cleared: number; hadFailure: boolean } {
+  // These are session marker artifacts (stop breakers/steer locks), not the
+  // native Team state tree or provider cleanup evidence.
   return clearRuntimeArtifactPaths(
     getModeRuntimeArtifactPaths('team', root, sessionIds, includeLegacy),
     captured,
@@ -1642,7 +1534,7 @@ export const stateClearTool: ToolDefinition<{
   session_id: z.ZodOptional<z.ZodString>;
 }> = {
   name: 'state_clear',
-  description: 'Clear/delete state for a specific mode. Removes the state file and any associated marker files. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
+  description: 'Clear/delete orchestration state for a specific mode. Removes the state file and any associated marker files, but does not remove native Team runtimes or cleanup evidence. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   schema: {
     mode: z.enum(STATE_TOOL_MODES).describe('The mode to clear state for'),
@@ -1706,8 +1598,7 @@ export const stateClearTool: ToolDefinition<{
       }
       if (mode === 'autopilot') recoverAutopilotEmergencyTransactions(root, sessionId);
       const teamCleanup: TeamCleanupBookkeeping = {
-        teamNames: new Set(),
-        blockedNames: new Set(),
+        blocked: false,
         clearedSessions: new Set(),
         requesterSessionId: sessionId,
       };
@@ -1816,10 +1707,7 @@ export const stateClearTool: ToolDefinition<{
           primarySuccess = clearModePrimaryWithTeamLock(mode, directStatePath, clearPrimary, directCaptured);
           if (directCaptured && primarySuccess && !existsSync(directStatePath)) {
             directCleared = 1;
-            if (mode === 'team' && directCandidate) {
-              for (const teamName of readTeamNamesFromState(directCandidate.state, sessionId)) teamCleanup.teamNames.add(teamName);
-              teamCleanup.clearedSessions.add(sessionId);
-            }
+            if (mode === 'team' && directCandidate) teamCleanup.clearedSessions.add(sessionId);
           } else if (mode === 'team' && directCaptured && directCandidate) {
             recordTeamClearFailure(mode, directCandidate, primarySuccess ? 'skipped' : 'failed', teamCleanup);
           }
@@ -1873,7 +1761,7 @@ export const stateClearTool: ToolDefinition<{
         }
 
         // Re-check after candidate clears so a canonical replacement cannot
-        // authorize cleanup of a foreign Team runtime.
+        // authorize cleanup of foreign Team state.
         if (mode === 'team') blockForeignTeamPrimary(root, sessionId, teamCleanup);
         const ghostNote = formatStateClearCleanupNote(
           legacyCleanup.cleared,
@@ -1884,7 +1772,6 @@ export const stateClearTool: ToolDefinition<{
           runtimeCleanup.cleared,
           ownerSessionId,
         );
-        const runtimeCleanupNote = cleanupTeamRuntimeNote(mode, root, teamCleanup);
         const clearedStateOrArtifacts = directCleared + completedSessionCleanup.cleared +
           sessionCleanup.cleared +
           legacyCleanup.cleared +
@@ -1923,7 +1810,7 @@ export const stateClearTool: ToolDefinition<{
         return {
           content: [{
             type: 'text' as const,
-            text: `${hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${runtimeCleanupNote}`
+            text: `${hadFailure ? 'Warning: Some files could not be removed' : 'Successfully cleared state'} for mode: ${mode} in session: ${sessionId}${ghostNote}${mode === 'team' ? ` (${TEAM_RUNTIME_PRESERVATION_NOTE})` : ''}`
           }],
           ...(hadFailure ? { isError: true } : {}),
         };
@@ -2011,7 +1898,6 @@ export const stateClearTool: ToolDefinition<{
               teamLegacyCleared = true;
               const ownerSessionId = teamSessionIdForCandidate(primaryCandidate);
               if (ownerSessionId) teamCleanup.clearedSessions.add(ownerSessionId);
-              for (const teamName of readTeamNamesFromState(primaryCandidate.state)) teamCleanup.teamNames.add(teamName);
             }
           } else if (existsSync(primaryCandidate.path)) {
             if (mode === 'team') {
@@ -2070,7 +1956,6 @@ export const stateClearTool: ToolDefinition<{
           if (mode === 'team') {
             const ownerSessionId = teamSessionIdForCandidate(candidate);
             if (ownerSessionId) teamCleanup.clearedSessions.add(ownerSessionId);
-            for (const teamName of readTeamNamesFromState(candidate.state)) teamCleanup.teamNames.add(teamName);
           }
         } else if (result === 'failed' || existsSync(candidate.path)) {
           recordTeamClearFailure(mode, candidate, result, teamCleanup);
@@ -2094,7 +1979,7 @@ export const stateClearTool: ToolDefinition<{
         runtimeCleanup.cleared += teamRuntimeCleanup.cleared;
         runtimeCleanup.hadFailure ||= teamRuntimeCleanup.hadFailure;
         if ((teamLegacyCleared || broadCapturedCandidates.length > 0) &&
-          teamCleanup.blockedNames.size === 0 && errors.length === 0 && !capturedCleanupIncomplete) {
+          !teamCleanup.blocked && errors.length === 0 && !capturedCleanupIncomplete) {
           const sharedRuntimeCleanup = clearTeamRuntimeArtifacts(root, [], teamRuntimeSnapshots, true);
           runtimeCleanup.cleared += sharedRuntimeCleanup.cleared;
           runtimeCleanup.hadFailure ||= sharedRuntimeCleanup.hadFailure;
@@ -2110,16 +1995,7 @@ export const stateClearTool: ToolDefinition<{
       }
       clearedCount = broadCapturedCandidates.filter((candidate) => !existsSync(candidate.path)).length + runtimeCleanup.cleared;
 
-      let removedTeamRoots = 0;
-      let prunedMissionEntries = 0;
-      if (mode === 'team') {
-        const teamNames = [...teamCleanup.teamNames].filter((teamName) => !teamCleanup.blockedNames.has(teamName));
-        const removeSelector = teamNames;
-        removedTeamRoots = cleanupTeamRuntimeState(root, removeSelector);
-        prunedMissionEntries = pruneMissionBoardTeams(root, removeSelector);
-      }
-
-      if (clearedCount === 0 && errors.length === 0 && removedTeamRoots === 0 && prunedMissionEntries === 0) {
+      if (clearedCount === 0 && errors.length === 0) {
         return {
           content: [{
             type: 'text' as const,
@@ -2133,12 +2009,7 @@ export const stateClearTool: ToolDefinition<{
         message += `\n- Errors: ${errors.join(', ')}`;
       }
       if (mode === 'team') {
-        if (removedTeamRoots > 0) {
-          message += `\n- Team runtime roots removed: ${removedTeamRoots}`;
-        }
-        if (prunedMissionEntries > 0) {
-          message += `\n- HUD mission entries pruned: ${prunedMissionEntries}`;
-        }
+        message += `\n- ${TEAM_RUNTIME_PRESERVATION_NOTE}`;
       }
       message += '\nWARNING: No session_id provided. Cleared legacy plus all session-scoped state; this is a broad operation that may affect other sessions.';
 

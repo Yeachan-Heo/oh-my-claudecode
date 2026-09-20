@@ -18,7 +18,8 @@ let cwd: string;
 let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
 let previousOmcStateDir: string | undefined;
-const payload = { operation: 'recover-worker' as const, workspaceHash: 'a'.repeat(64), teamName: 'team-a', workerName: 'worker-a' };
+const INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
+const payload = { operation: 'recover-worker' as const, workspaceHash: 'a'.repeat(64), teamName: 'team-a', workerName: 'worker-a', instanceId: INSTANCE_ID };
 const pending = (phase: 'reserved' | 'active') => ({ schema_version: 1 as const, kind: 'phase' as const, request_id: 'request-a', recovery_id: 'recovery-a', team_name: 'team-a', worker_name: 'worker-a', phase, continuation: 'reserved' as const, adoption: 'pending' as const, services: 'pending' as const, manifest: 'repair_required' as const, updated_at: new Date().toISOString() });
 const successResult = (requestId: string, recoveryId: string) => ({ outcome: 'already_running' as const, committed: true as const,
   oldPaneId: '%1', newPaneId: '%1', requeuedTaskIds: [], continuationSequenceByTask: {}, stateRevision: 1,
@@ -29,7 +30,7 @@ const failureResult = (requestId: string, recoveryId: string) => ({ outcome: 'fa
   updatedAt: new Date().toISOString() });
 const reserveForFinal = (requestId: string, recoveryId: string, teamName = 'deleted-team') =>
   reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-    teamName, workerName: 'worker-a' }, recoveryId);
+    teamName, workerName: 'worker-a', instanceId: INSTANCE_ID }, recoveryId);
 const writeRawFinal = (requestId: string, value: unknown) => {
   const path = absPath(cwd, TeamPaths.recoveryRequestResult(requestId));
   mkdirSync(join(path, '..'), { recursive: true });
@@ -68,12 +69,20 @@ describe('global recovery request store', () => {
     expect(first).toMatchObject({ kind: 'created', reservation: { recovery_id: 'recovery-a' } });
     expect(reserveRecoveryRequest(cwd, 'request-a', payload, 'recovery-b')).toMatchObject({ kind: 'joined', reservation: { recovery_id: 'recovery-a' } });
     expect(reserveRecoveryRequest(cwd, 'request-a', { ...payload, teamName: 'team-b' }, 'recovery-b')).toMatchObject({ kind: 'conflict', reservation: { team_name: 'team-a' } });
+    expect(reserveRecoveryRequest(cwd, 'request-a', {
+      ...payload,
+      instanceId: '44444444-4444-4444-8444-444444444444',
+    }, 'recovery-c')).toMatchObject({ kind: 'conflict', reservation: { instance_id: INSTANCE_ID } });
   });
 
   it('publishes a deterministic alias to an active compatible recovery and refuses a hash/team mismatch', () => {
     const active = reserveRecoveryRequest(cwd, 'request-a', payload, 'recovery-a').reservation;
     expect(aliasActiveRecoveryRequest(cwd, 'request-b', payload, active)).toMatchObject({ kind: 'aliased', reservation: { kind: 'alias', recovery_id: 'recovery-a', alias_of_request_id: 'request-a' } });
     expect(aliasActiveRecoveryRequest(cwd, 'request-c', { ...payload, workspaceHash: 'other' }, active)).toMatchObject({ kind: 'conflict' });
+    expect(aliasActiveRecoveryRequest(cwd, 'request-d', {
+      ...payload,
+      instanceId: '44444444-4444-4444-8444-444444444444',
+    }, active)).toMatchObject({ kind: 'conflict' });
   });
 
   it('resolves a disconnected alias to its canonical phase before a final is published', () => {

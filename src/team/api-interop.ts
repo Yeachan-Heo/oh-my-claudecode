@@ -35,7 +35,6 @@ import {
   teamWriteWorkerIdentity,
   teamAppendEvent,
   teamGetSummary,
-  teamCleanup,
   teamWriteShutdownRequest,
   teamReadShutdownAck,
   teamReadMonitorSnapshot,
@@ -61,11 +60,11 @@ import {
 } from './mailbox-notification-guard.js';
 import { listDispatchRequests, markDispatchRequestDelivered, markDispatchRequestNotified } from './dispatch-queue.js';
 import { generateMailboxTriggerMessage } from './worker-bootstrap.js';
-import { shutdownTeam } from './runtime.js';
 import { shutdownTeamV2, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome } from './runtime-v2.js';
 import { isSafeRecoveryRequestId } from './recovery-request-store.js';
 import { inspectTeamWorktreeCleanupSafety } from './git-worktree.js';
 import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
+import { isValidTeamInstanceId } from './types.js';
 import type { RecoverDeadWorkerV2Result, TeamTaskDelegationPlan } from './types.js';
 
 const TEAM_UPDATE_TASK_MUTABLE_FIELDS = new Set(['subject', 'description', 'blocked_by', 'requires_code_change', 'delegation']);
@@ -321,7 +320,11 @@ function assertNoNativeWorktreeCleanupEvidence(teamName: string, cwd: string): v
   throw new Error(`cleanup_blocked:worktree_cleanup_evidence_present:${details}`);
 }
 
-async function executeTeamCleanupViaRuntime(teamName: string, cwd: string): Promise<void> {
+async function executeTeamCleanupViaRuntime(
+  teamName: string,
+  cwd: string,
+  options: { force?: boolean; timeoutMs?: number } = {},
+): Promise<void> {
   let config: unknown;
   try {
     config = await teamReadConfig(teamName, cwd) as unknown;
@@ -332,32 +335,28 @@ async function executeTeamCleanupViaRuntime(teamName: string, cwd: string): Prom
 
   if (!config) {
     assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
-    await teamCleanup(teamName, cwd);
-    return;
+    throw new Error('team_shutdown_preserved:config_missing_cleanup_evidence');
   }
 
-  // Legacy first: agentTypes provenance must not be shadowed by empty workers[].
-  if (isLegacyRuntimeConfig(config)) {
-    const legacyConfig = config as { tmuxSession?: string; leaderPaneId?: string | null; tmuxOwnsWindow?: boolean };
-    const sessionName = typeof legacyConfig.tmuxSession === 'string' && legacyConfig.tmuxSession.trim() !== ''
-      ? legacyConfig.tmuxSession.trim()
-      : `omc-team-${teamName}`;
-    const leaderPaneId = typeof legacyConfig.leaderPaneId === 'string' && legacyConfig.leaderPaneId.trim() !== ''
-      ? legacyConfig.leaderPaneId.trim()
-      : undefined;
-    const cleaned = await shutdownTeam(teamName, sessionName, cwd, 30_000, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true);
-    if (!cleaned) throw new Error(`team_shutdown_failed:legacy_cleanup_unverified`);
-    return;
+  // Legacy configs and unknown state are diagnostic evidence only. Cleanup
+  // requires a V2 config with an immutable instance identity so the runtime
+  // can prove provider, ownership, and active-operation fences.
+  if (isLegacyRuntimeConfig(config) || !isRuntimeV2Config(config)) {
+    assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
+    throw new Error('team_shutdown_preserved:config_cleanup_unsupported');
   }
 
-  if (isRuntimeV2Config(config)) {
-    const shutdown = await shutdownTeamV2(teamName, cwd);
-    if (shutdown.outcome !== 'cleaned') throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
-    return;
+  const instanceId = (config as { instance_id?: unknown }).instance_id;
+  if (!isValidTeamInstanceId(instanceId)) {
+    assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
+    throw new Error('team_shutdown_preserved:instance_identity_missing');
   }
 
-  assertNoNativeWorktreeCleanupEvidence(teamName, cwd);
-  await teamCleanup(teamName, cwd);
+  const shutdown = await shutdownTeamV2(teamName, cwd, {
+    ...options,
+    instanceId,
+  });
+  if (shutdown.outcome !== 'cleaned') throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
 }
 
 function readTeamStateRootFromFile(path: string): string | null {
@@ -1163,9 +1162,9 @@ export async function executeTeamApiOperation(
         return { ok: true, operation, data: { team_name: teamName } };
       }
       case 'orphan-cleanup': {
-        // Destructive escape hatch: calls teamCleanup directly, bypassing shutdown orchestration.
-        // Native worktree recovery metadata/root AGENTS backups are protected unless callers
-        // explicitly acknowledge that this force path may delete those recovery records.
+        // Explicit force cleanup still runs through the instance-bound V2
+        // shutdown protocol. The acknowledgement only covers worktree
+        // recovery evidence; it cannot authorize raw state deletion.
         const teamName = String(args.team_name || '').trim();
         if (!teamName) return { ok: false, operation, error: { code: 'invalid_input', message: 'team_name is required' } };
         const safety = inspectTeamWorktreeCleanupSafety(teamName, cwd);
@@ -1179,7 +1178,7 @@ export async function executeTeamApiOperation(
             },
           };
         }
-        await teamCleanup(teamName, cwd);
+        await executeTeamCleanupViaRuntime(teamName, cwd, { force: true, timeoutMs: 0 });
         return { ok: true, operation, data: { team_name: teamName } };
       }
       case 'write-shutdown-request': {

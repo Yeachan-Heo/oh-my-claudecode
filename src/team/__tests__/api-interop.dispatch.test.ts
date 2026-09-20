@@ -4,10 +4,19 @@ import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
+
+const tmuxServerSocket = '/tmp/dispatch-session.sock';
+// This suite cannot inject the native process probe through the public API.
+// Keep tmux authority absent on unsupported platforms instead of inventing it.
+const tmuxServerProcessStartedAt = process.platform === 'darwin' || process.platform === 'linux'
+  ? currentStrictProcessStartIdentity()
+  : null;
+const supportsStrictTmuxFixture = tmuxServerProcessStartedAt !== null;
 
 const tmuxUtilsMocks = vi.hoisted(() => ({
   tmuxExecAsync: vi.fn(async (_args: string[]) => ({ stdout: '', stderr: '' })),
-  tmuxCmdAsync: vi.fn(async (_args: string[]) => ({ stdout: '0\n', stderr: '' })),
+  tmuxCmdAsync: vi.fn(async (_args: string[]) => ({ stdout: '', stderr: '' })),
 }));
 
 vi.mock('../../cli/tmux-utils.js', async (importOriginal) => ({
@@ -22,10 +31,15 @@ import { listDispatchRequests } from '../dispatch-queue.js';
 
 function mockOwnedTmuxPanes(...paneIds: string[]): void {
   tmuxUtilsMocks.tmuxExecAsync.mockImplementation(async (args: string[]) => {
-    if (args[0] === 'list-panes') return { stdout: `${paneIds.join('\n')}\n`, stderr: '' };
-    if (args[0] === 'display-message') return { stdout: '0\n', stderr: '' };
-    if (args[0] === 'capture-pane') return { stdout: '❯\n', stderr: '' };
+    if (args.includes('list-panes')) return { stdout: `${paneIds.join('\n')}\n`, stderr: '' };
+    if (args.includes('display-message')) return { stdout: '0\n', stderr: '' };
+    if (args.includes('capture-pane')) return { stdout: '❯\n', stderr: '' };
     return { stdout: '', stderr: '' };
+  });
+  tmuxUtilsMocks.tmuxCmdAsync.mockImplementation(async (args: string[]) => {
+    const marker = args.join(' ').match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+    if (marker) return { stdout: `${marker}\n`, stderr: '' };
+    return { stdout: `${process.pid}\n`, stderr: '' };
   });
 }
 
@@ -42,7 +56,7 @@ describe('team api dispatch-aware messaging', () => {
 
   beforeEach(async () => {
     tmuxUtilsMocks.tmuxExecAsync.mockReset().mockResolvedValue({ stdout: '', stderr: '' });
-    tmuxUtilsMocks.tmuxCmdAsync.mockReset().mockResolvedValue({ stdout: '0\n', stderr: '' });
+    tmuxUtilsMocks.tmuxCmdAsync.mockReset().mockResolvedValue({ stdout: `${process.pid}\n`, stderr: '' });
     cwd = await mkdtemp(join(tmpdir(), 'omc-team-api-dispatch-'));
     previousHome = process.env.HOME;
     previousUserProfile = process.env.USERPROFILE;
@@ -56,12 +70,20 @@ describe('team api dispatch-aware messaging', () => {
     await mkdir(join(base, 'mailbox'), { recursive: true });
     await mkdir(join(base, 'events'), { recursive: true });
     await writeFile(join(base, 'config.json'), JSON.stringify({
+      instance_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       name: teamName,
       task: 'dispatch',
       agent_type: 'executor',
       worker_count: 1,
       max_workers: 20,
       tmux_session: 'dispatch-session',
+      ...(tmuxServerProcessStartedAt ? {
+        tmux_server_identity: {
+          socket_path: tmuxServerSocket,
+          server_pid: process.pid,
+          process_started_at: tmuxServerProcessStartedAt,
+        },
+      } : {}),
       workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] }],
       created_at: '2026-03-06T00:00:00.000Z',
       next_task_id: 2,
@@ -207,6 +229,14 @@ describe('team api dispatch-aware messaging', () => {
     await writeFile(join(base, 'manifest.json'), JSON.stringify({
       schema_version: 2,
       name: teamName,
+      instance_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      ...(tmuxServerProcessStartedAt ? {
+        tmux_server_identity: {
+          socket_path: tmuxServerSocket,
+          server_pid: process.pid,
+          process_started_at: tmuxServerProcessStartedAt,
+        },
+      } : {}),
       task: 'dispatch',
       worker_count: 0,
       workers: [],
@@ -231,7 +261,7 @@ describe('team api dispatch-aware messaging', () => {
     expect(requests[0]?.message_id).toBe(messageId);
   });
 
-  it('notifies an exactly owned worker pane and commits both replay markers', async () => {
+  it.skipIf(!supportsStrictTmuxFixture)('notifies an exactly owned worker pane and commits both replay markers', async () => {
     const configPath = teamStatePath(cwd, teamName, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
     await writeFile(configPath, JSON.stringify({
@@ -260,10 +290,12 @@ describe('team api dispatch-aware messaging', () => {
     const requests = await listDispatchRequests(teamName, cwd, { kind: 'mailbox', to_worker: 'worker-1' });
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({ request_id: outcome.request_id, message_id: outcome.message_id, status: 'notified' });
-    expect(tmuxUtilsMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'send-keys')).toBe(true);
+    expect(tmuxUtilsMocks.tmuxCmdAsync.mock.calls.some(([args]) =>
+      args.some(arg => arg.includes('send-keys')),
+    )).toBe(true);
   });
 
-  it('notifies an exactly owned leader pane and commits both replay markers', async () => {
+  it.skipIf(!supportsStrictTmuxFixture)('notifies an exactly owned leader pane and commits both replay markers', async () => {
     const configPath = teamStatePath(cwd, teamName, 'config.json');
     const config = JSON.parse(await readFile(configPath, 'utf8')) as Record<string, unknown>;
     await writeFile(configPath, JSON.stringify({ ...config, leader_pane_id: '%0' }, null, 2));
@@ -293,12 +325,20 @@ describe('team api dispatch-aware messaging', () => {
   it('uses the canonical worker pane when duplicate worker records exist', async () => {
     const configPath = teamStatePath(cwd, teamName, 'config.json');
     await writeFile(configPath, JSON.stringify({
+      instance_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       name: teamName,
       task: 'dispatch',
       agent_type: 'executor',
       worker_count: 2,
       max_workers: 20,
       tmux_session: 'dispatch-session',
+      ...(tmuxServerProcessStartedAt ? {
+        tmux_server_identity: {
+          socket_path: tmuxServerSocket,
+          server_pid: process.pid,
+          process_started_at: tmuxServerProcessStartedAt,
+        },
+      } : {}),
       workers: [
         { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
         { name: 'worker-1', index: 0, role: 'executor', assigned_tasks: [], pane_id: '%9' },
@@ -324,9 +364,14 @@ describe('team api dispatch-aware messaging', () => {
     expect(requests[0]?.message_id).toBe(messageId);
     expect(requests[0]?.pane_id).toBe('%9');
     expect(['pending', 'notified']).toContain(requests[0]?.status);
-    expect(tmuxUtilsMocks.tmuxExecAsync).toHaveBeenCalledWith([
-      'list-panes', '-t', 'dispatch-session', '-F', '#{pane_id}',
-    ]);
-    expect(tmuxUtilsMocks.tmuxExecAsync.mock.calls.some(([args]) => args[0] === 'send-keys')).toBe(false);
+    if (supportsStrictTmuxFixture) {
+      expect(tmuxUtilsMocks.tmuxExecAsync).toHaveBeenCalledWith([
+        '-S', tmuxServerSocket,
+        'list-panes', '-s', '-t', '=dispatch-session:', '-F', '#{pane_id}',
+      ]);
+    } else {
+      expect(tmuxUtilsMocks.tmuxExecAsync).not.toHaveBeenCalled();
+    }
+    expect(tmuxUtilsMocks.tmuxExecAsync.mock.calls.some(([args]) => args.includes('send-keys'))).toBe(false);
   });
 });

@@ -11,6 +11,55 @@ import type { TeamPhase } from './phase-controller.js';
 import type { TeamLeaderNextAction } from './leader-nudge-guidance.js';
 import type { CanonicalTeamRole, ExternalModelsDefaults, RoleAssignment } from '../shared/types.js';
 
+/**
+ * Immutable identity of the tmux server incarnation selected for a team.
+ *
+ * The socket path is captured from tmux itself rather than reconstructed from
+ * ambient environment state.  `process_started_at` is a strict native
+ * process-creation token (not a coarse wall-clock timestamp).
+ */
+export interface TmuxServerIdentity {
+  socket_path: string;
+  server_pid: number;
+  process_started_at: string;
+}
+
+function isAbsoluteTmuxSocketPath(value: string): boolean {
+  // Tmux sockets are absolute on POSIX; retain the Windows drive/UNC forms so
+  // persisted records can still be structurally validated across platforms.
+  return value.startsWith('/')
+    || /^[A-Za-z]:[\\/]/.test(value)
+    || value.startsWith('\\\\');
+}
+
+/** Structural validation for persisted or caller-supplied tmux identities. */
+export function isValidTmuxServerIdentity(value: unknown): value is TmuxServerIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.socket_path === 'string'
+    && candidate.socket_path.length > 0
+    && candidate.socket_path === candidate.socket_path.trim()
+    && !/[\u0000-\u001f\u007f]/.test(candidate.socket_path)
+    && isAbsoluteTmuxSocketPath(candidate.socket_path)
+    && typeof candidate.server_pid === 'number'
+    && Number.isSafeInteger(candidate.server_pid)
+    && candidate.server_pid > 0
+    && typeof candidate.process_started_at === 'string'
+    && candidate.process_started_at.length > 0
+    && candidate.process_started_at.length <= 1024
+    && !/[\u0000-\u001f\u007f]/.test(candidate.process_started_at);
+}
+
+/** Immutable UUID identifying one incarnation of a named team. */
+export type TeamInstanceId = string;
+
+export const TEAM_INSTANCE_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isValidTeamInstanceId(value: unknown): value is TeamInstanceId {
+  return typeof value === 'string' && TEAM_INSTANCE_ID_PATTERN.test(value);
+}
+
 /** Bridge daemon configuration — passed via --config file to bridge-entry.ts */
 export interface BridgeConfig {
   teamName: string;
@@ -353,6 +402,8 @@ export interface TeamRuntimeOwnerEpoch {
 
 /** Durable lifecycle fence for a scale-up operation. */
 export interface TeamScaleUpAttempt {
+  /** Missing on older records, which cannot authorize instance-bound effects. */
+  instance_id?: TeamInstanceId;
   operation_id: string;
   phase: 'reserved' | 'effects' | 'committed' | 'failed';
   pid: number;
@@ -437,6 +488,10 @@ export interface TeamManifestV2 {
   schema_version: 2;
   state_revision?: number;
   name: string;
+  /** Immutable team incarnation. Legacy manifests may omit this for reads only. */
+  instance_id?: TeamInstanceId;
+  /** Immutable tmux server incarnation; absent for CMUX and legacy evidence. */
+  tmux_server_identity?: TmuxServerIdentity;
   task: string;
   leader: TeamLeader;
   policy: TeamTransportPolicy;
@@ -494,11 +549,21 @@ export interface WorkerInfo {
 }
 
 export interface TeamScaleDownAttempt {
+  /** Missing on older records, which cannot authorize instance-bound effects. */
+  instance_id?: TeamInstanceId;
   operation_id: string;
   phase: 'draining' | 'effects' | 'failed';
   pid: number;
   process_started_at: string;
-  workers: Array<{ name: string; pane_id?: string; worktree_path?: string; worktree_created?: boolean }>;
+  workers: Array<{
+    name: string;
+    pane_id?: string;
+    worktree_path?: string;
+    worktree_created?: boolean;
+    launch_attempt_id?: string;
+    provider?: WorkerInfo['worker_cli'];
+    launch_descriptor?: WorkerLaunchDescriptor;
+  }>;
   state_revision: number;
   created_at: string;
   updated_at: string;
@@ -506,6 +571,8 @@ export interface TeamScaleDownAttempt {
 }
 
 export interface TeamShutdownAttempt {
+  /** Required by instance-bound shutdown; older records are read-only evidence. */
+  instance_id?: TeamInstanceId;
   nonce: string;
   pid: number;
   process_started_at: string;
@@ -516,6 +583,10 @@ export interface TeamShutdownAttempt {
 /** Team configuration (V1 compat) */
 export interface TeamConfig {
   name: string;
+  /** Immutable team incarnation. Legacy configs may omit this for reads only. */
+  instance_id?: TeamInstanceId;
+  /** Immutable tmux server incarnation; absent for CMUX and legacy evidence. */
+  tmux_server_identity?: TmuxServerIdentity;
   task: string;
   agent_type: string;
   worker_launch_mode: 'interactive' | 'prompt';
@@ -556,8 +627,113 @@ export interface TeamConfig {
   last_recovery?: TeamRecoveryAttempt;
   all_dead_recovery?: { detected_at: string; deadline_at: string; state_revision: number };
   service_descriptor?: TeamServiceDescriptor;
-  lifecycle_state?: 'active' | 'shutting_down' | 'stopped';
+  lifecycle_state?: 'starting' | 'active' | 'shutting_down' | 'stopped';
   shutdown_attempt?: TeamShutdownAttempt;
+}
+
+// ---------------------------------------------------------------------------
+// Team-instance ownership and destruction contract
+// ---------------------------------------------------------------------------
+
+/** Caller input for creating or addressing one team incarnation. */
+export interface TeamInstanceRequest {
+  teamName: string;
+  cwd: string;
+  /** CLI/MCP callers provide this before spawning; direct callers may omit it. */
+  instanceId?: TeamInstanceId;
+}
+
+/** Canonical immutable binding shared by every producer and destructive consumer. */
+export interface TeamInstanceBinding {
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+}
+
+export interface TeamInstanceProcessIdentity {
+  pid: number;
+  process_started_at: string;
+  nonce: string;
+}
+
+export type TeamInstanceReservationPhase = 'pending' | 'active';
+
+/** Durable external startup reservation (kept outside the disposable state root). */
+export interface TeamInstanceReservation {
+  schema_version: 1;
+  kind: 'team-instance-reservation';
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+  phase: TeamInstanceReservationPhase;
+  owner: TeamInstanceProcessIdentity;
+  reservation_path: string;
+  lifecycle_lock_path: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Minimal config projection that may be persisted while effects are pending. */
+export type TeamInstancePendingConfig = Pick<
+  TeamConfig,
+  'name' | 'instance_id' | 'leader_cwd' | 'team_state_root' | 'lifecycle_state'
+> & {
+  name: string;
+  instance_id: TeamInstanceId;
+  leader_cwd: string;
+  team_state_root: string;
+  lifecycle_state: 'starting';
+};
+
+/**
+ * Explicit caller-owned proof that provider/pane/worktree teardown has already
+ * completed. The instance module never infers provider death from a pane.
+ */
+export interface TeamInstanceDisposalAuthorization {
+  protocol: 'caller-owned-final-state-v1';
+  providers: 'disposed';
+  panes: 'disposed';
+  worktrees: 'disposed';
+}
+
+export type TeamInstanceCleanupPhase = 'prepared' | 'detached' | 'removing' | 'failed' | 'completed';
+
+/** Durable external cleanup authority for one immutable team instance. */
+export interface TeamInstanceCleanupRecord {
+  schema_version: 1;
+  kind: 'team-instance-cleanup';
+  instance_id: TeamInstanceId;
+  team_name: string;
+  cwd: string;
+  workspace_hash: string;
+  state_root: string;
+  detached_root: string;
+  receipt_path: string;
+  phase: TeamInstanceCleanupPhase;
+  /** Set only after the original state root has been durably renamed. */
+  detached_at?: string;
+  authorization: TeamInstanceDisposalAuthorization;
+  created_at: string;
+  updated_at: string;
+  failure_reason?: string;
+}
+
+export type TeamInstanceObservedState = 'missing' | 'empty' | 'bound';
+
+export interface TeamInstanceAssertion {
+  binding: TeamInstanceBinding;
+  reservation: TeamInstanceReservation;
+  observed_state: TeamInstanceObservedState;
+}
+
+export interface TeamInstanceCleanupResult {
+  outcome: 'cleaned' | 'already_cleaned';
+  binding: TeamInstanceBinding;
+  receipt: TeamInstanceCleanupRecord;
 }
 
 /** Dispatch request kinds */

@@ -1,19 +1,25 @@
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { readFile, rm } from 'fs/promises';
-import { dirname, join } from 'path';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
+import { readFile } from 'fs/promises';
+import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { executeTeamApiOperation as executeCanonicalTeamApiOperation, resolveTeamApiOperation } from '../team/api-interop.js';
-import { cleanupTeamWorktrees } from '../team/git-worktree.js';
-import { killWorkerPanes, killTeamSession, getWorkerLiveness } from '../team/tmux-session.js';
 import { validateTeamName } from '../team/team-name.js';
-import { monitorTeam, resumeTeam, shutdownTeam } from '../team/runtime.js';
+import { monitorTeam, resumeTeam } from '../team/runtime.js';
 import { readTeamConfig } from '../team/monitor.js';
 import { isProcessAlive } from '../platform/index.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
 import { readApprovedExecutionLaunchHintOutcome } from '../planning/artifacts.js';
-import { getOmcRoot } from '../lib/worktree-paths.js';
+import { isValidTeamInstanceId } from '../team/types.js';
+import { withProcessIdentityFileLockSync } from '../team/process-identity-lock.js';
 
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity']);
@@ -105,12 +111,14 @@ export interface TeamStartInput {
 
 export interface TeamStartResult {
   jobId: string;
+  instanceId: string;
   status: 'running';
   pid?: number;
 }
 
 export interface TeamJobStatus {
   jobId: string;
+  instanceId?: string;
   status: 'running' | 'completed' | 'failed';
   elapsedSeconds: string;
   result?: unknown;
@@ -136,6 +144,7 @@ interface TeamJobRecord {
   startedAt: number;
   teamName: string;
   cwd: string;
+  instanceId: string;
   pid?: number;
   result?: string;
   stderr?: string;
@@ -145,10 +154,16 @@ interface TeamJobRecord {
 }
 
 interface TeamPanesFile {
+  instanceId: string;
   paneIds: string[];
   leaderPaneId: string;
   sessionName?: string;
   ownsWindow?: boolean;
+  workers: Array<{
+    workerName: string;
+    paneId: string;
+    launchAttemptId: string;
+  }>;
 }
 
 function getTeamWorkerIdentityFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
@@ -224,10 +239,6 @@ function panesArtifactPath(jobsDir: string, jobId: string): string {
   return join(jobsDir, `${jobId}-panes.json`);
 }
 
-function teamStateRoot(cwd: string, teamName: string): string {
-  return join(getOmcRoot(cwd), 'state', 'team', teamName);
-}
-
 function validateJobId(jobId: string): void {
   if (!JOB_ID_PATTERN.test(jobId)) {
     throw new Error(`Invalid job id: ${jobId}`);
@@ -242,55 +253,313 @@ function parseJsonSafe<T>(content: string): T | null {
   }
 }
 
+type JobReadResult =
+  | { kind: 'missing' }
+  | { kind: 'valid'; job: TeamJobRecord }
+  | { kind: 'malformed'; reason: 'invalid_json' }
+  | { kind: 'invalid_schema'; reason: 'invalid_schema' }
+  | { kind: 'unreadable'; reason: string };
 
-async function resolveCleanupPaneEvidence(job: TeamJobRecord, jobsDir: string, jobId: string): Promise<{
-  paneArtifact: TeamPanesFile | null;
-  livenessUnknownReason?: string;
-}> {
-  const paneArtifact = await readFile(panesArtifactPath(jobsDir, jobId), 'utf-8')
-    .then((content) => parseJsonSafe<TeamPanesFile>(content))
-    .catch(() => null);
-  if (paneArtifact?.paneIds?.length) return { paneArtifact };
-
-  const config = await readTeamConfig(job.teamName, job.cwd).catch(() => null);
-  if (!config) {
-    return { paneArtifact, livenessUnknownReason: 'worker_liveness_unknown:no_config_or_panes' };
+function isValidTeamJobRecord(value: unknown): value is TeamJobRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (
+    (record.status !== 'running' && record.status !== 'completed' && record.status !== 'failed')
+    || typeof record.startedAt !== 'number'
+    || !Number.isFinite(record.startedAt)
+    || typeof record.teamName !== 'string'
+    || record.teamName.trim().length === 0
+    || typeof record.cwd !== 'string'
+    || record.cwd.trim().length === 0
+    || !isValidTeamInstanceId(record.instanceId)
+  ) return false;
+  try {
+    validateTeamName(record.teamName);
+  } catch {
+    return false;
   }
-
-  const configPaneIds = (config.workers ?? [])
-    .map((worker) => worker.pane_id)
-    .filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().length > 0);
-  if (configPaneIds.length > 0) {
-    return {
-      paneArtifact: {
-        paneIds: configPaneIds,
-        leaderPaneId: config.leader_pane_id ?? paneArtifact?.leaderPaneId ?? '',
-        sessionName: config.tmux_session || paneArtifact?.sessionName,
-        ownsWindow: config.tmux_window_owned ?? paneArtifact?.ownsWindow,
-      },
-    };
-  }
-
-  const hasConfiguredWorkers = (config.workers ?? []).length > 0 || config.worker_count > 0;
-  if (hasConfiguredWorkers) {
-    return { paneArtifact, livenessUnknownReason: 'worker_liveness_unknown:no_worker_pane_ids' };
-  }
-
-  return { paneArtifact };
+  if (record.pid !== undefined && (typeof record.pid !== 'number' || !Number.isSafeInteger(record.pid) || record.pid <= 0)) return false;
+  if (record.result !== undefined && typeof record.result !== 'string') return false;
+  if (record.stderr !== undefined && typeof record.stderr !== 'string') return false;
+  if (record.cleanedUpAt !== undefined && typeof record.cleanedUpAt !== 'string') return false;
+  if (record.cleanupBlockedAt !== undefined && typeof record.cleanupBlockedAt !== 'string') return false;
+  if (record.cleanupBlockedReason !== undefined && typeof record.cleanupBlockedReason !== 'string') return false;
+  return true;
 }
 
-function readJobFromDisk(jobId: string, jobsDir: string): TeamJobRecord | null {
+function isValidPaneArtifact(value: unknown, instanceId: string): value is TeamPanesFile {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  if (
+    record.instanceId !== instanceId
+    || !isValidTeamInstanceId(record.instanceId)
+    || !Array.isArray(record.paneIds)
+    || !record.paneIds.every((paneId) => typeof paneId === 'string' && paneId.trim().length > 0)
+    || new Set(record.paneIds as string[]).size !== (record.paneIds as string[]).length
+    || typeof record.leaderPaneId !== 'string'
+    || record.leaderPaneId.trim().length === 0
+    || (record.sessionName !== undefined && (typeof record.sessionName !== 'string' || record.sessionName.trim().length === 0))
+    || (record.ownsWindow !== undefined && typeof record.ownsWindow !== 'boolean')
+    || !Array.isArray(record.workers)
+  ) return false;
+  const paneIds = new Set(record.paneIds as string[]);
+  const workerNames = new Set<string>();
+  const workerPaneIds = new Set<string>();
+  for (const worker of record.workers) {
+    if (!worker || typeof worker !== 'object' || Array.isArray(worker)) return false;
+    const entry = worker as Record<string, unknown>;
+    if (
+      typeof entry.workerName !== 'string'
+      || entry.workerName.trim().length === 0
+      || workerNames.has(entry.workerName)
+      || typeof entry.paneId !== 'string'
+      || !paneIds.has(entry.paneId)
+      || workerPaneIds.has(entry.paneId)
+      || typeof entry.launchAttemptId !== 'string'
+      || entry.launchAttemptId.trim().length === 0
+    ) return false;
+    workerNames.add(entry.workerName);
+    workerPaneIds.add(entry.paneId);
+  }
+  return workerPaneIds.size === paneIds.size;
+}
+
+async function readPaneArtifact(
+  jobsDir: string,
+  jobId: string,
+  instanceId: string,
+): Promise<{ kind: 'missing' } | { kind: 'invalid'; reason: string } | { kind: 'valid'; artifact: TeamPanesFile }> {
+  let raw: string;
   try {
-    const content = readFileSync(jobPath(jobsDir, jobId), 'utf-8');
-    return parseJsonSafe<TeamJobRecord>(content);
-  } catch {
-    return null;
+    raw = await readFile(panesArtifactPath(jobsDir, jobId), 'utf-8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'missing' };
+    return { kind: 'invalid', reason: `cleanup_panes_evidence_unreadable:${error instanceof Error ? error.message : String(error)}` };
+  }
+  const parsed = parseJsonSafe<unknown>(raw);
+  if (!isValidPaneArtifact(parsed, instanceId)) {
+    return { kind: 'invalid', reason: 'cleanup_panes_evidence_corrupt' };
+  }
+  return { kind: 'valid', artifact: parsed };
+}
+
+function resultArtifactIdentityError(
+  jobsDir: string,
+  jobId: string,
+  instanceId: string,
+): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(resultArtifactPath(jobsDir, jobId), 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    return `cleanup_result_evidence_unreadable:${error instanceof Error ? error.message : String(error)}`;
+  }
+  const parsed = parseJsonSafe<Record<string, unknown>>(raw);
+  if (
+    !parsed
+    || (parsed.status !== 'completed' && parsed.status !== 'failed')
+    || parsed.instanceId !== instanceId
+  ) {
+    return 'cleanup_result_evidence_corrupt';
+  }
+  return null;
+}
+
+function readJobFromDisk(jobId: string, jobsDir: string): JobReadResult {
+  let content: string;
+  try {
+    content = readFileSync(jobPath(jobsDir, jobId), 'utf-8');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { kind: 'missing' };
+    return { kind: 'unreadable', reason: error instanceof Error ? error.message : String(error) };
+  }
+  const parsed = parseJsonSafe<unknown>(content);
+  if (parsed === null) return { kind: 'malformed', reason: 'invalid_json' };
+  if (!isValidTeamJobRecord(parsed)) return { kind: 'invalid_schema', reason: 'invalid_schema' };
+  return { kind: 'valid', job: parsed };
+}
+
+function formatJobReadError(jobId: string, result: Exclude<JobReadResult, { kind: 'valid' }>): Error {
+  switch (result.kind) {
+    case 'missing':
+      return new Error(`No job found: ${jobId}`);
+    case 'malformed':
+      return new Error(`Corrupt job file: ${jobId} (invalid JSON)`);
+    case 'invalid_schema':
+      return new Error(`Corrupt job file: ${jobId} (invalid schema)`);
+    case 'unreadable':
+      return new Error(`Unreadable job file: ${jobId} (${result.reason})`);
+  }
+}
+
+function jobLockPath(jobsDir: string, jobId: string): string {
+  return join(jobsDir, `.${jobId}.lock`);
+}
+
+function writeJobToDiskUnlocked(jobId: string, job: TeamJobRecord, jobsDir: string): void {
+  ensureJobsDir(jobsDir);
+  const targetPath = jobPath(jobsDir, jobId);
+  const tempPath = `${targetPath}.tmp.${process.pid}.${randomUUID()}`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(job), { encoding: 'utf-8', mode: 0o600 });
+    renameSync(tempPath, targetPath);
+  } finally {
+    try { unlinkSync(tempPath); } catch { /* renamed or never created */ }
   }
 }
 
 function writeJobToDisk(jobId: string, job: TeamJobRecord, jobsDir: string): void {
   ensureJobsDir(jobsDir);
-  writeFileSync(jobPath(jobsDir, jobId), JSON.stringify(job), 'utf-8');
+  withProcessIdentityFileLockSync(jobLockPath(jobsDir, jobId), () =>
+    writeJobToDiskUnlocked(jobId, job, jobsDir));
+}
+
+type CleanupJobPublication =
+  | { kind: 'updated'; job: TeamJobRecord }
+  | { kind: 'already_cleaned'; job: TeamJobRecord }
+  | { kind: 'superseded'; reason: string }
+  | { kind: 'blocked'; reason: string };
+
+interface CleanupFieldSnapshot {
+  cleanedUpAt?: string;
+  cleanupBlockedAt?: string;
+  cleanupBlockedReason?: string;
+}
+
+function mergeCleanupFields(
+  jobId: string,
+  jobsDir: string,
+  expectedInstanceId: string,
+  initial: CleanupFieldSnapshot,
+  fields: {
+    cleanedUpAt?: string;
+    cleanupBlockedAt?: string;
+    cleanupBlockedReason?: string;
+    clearBlocked?: boolean;
+  },
+): CleanupJobPublication {
+  try {
+    return withProcessIdentityFileLockSync(jobLockPath(jobsDir, jobId), () => {
+      const current = readJobFromDisk(jobId, jobsDir);
+      if (current.kind !== 'valid') {
+        return {
+          kind: 'blocked',
+          reason: current.kind === 'missing'
+            ? 'cleanup_job_missing'
+            : `cleanup_job_${current.kind}`,
+        };
+      }
+      if (current.job.instanceId !== expectedInstanceId) {
+        return {
+          kind: 'blocked',
+          reason: `cleanup_instance_mismatch:expected=${expectedInstanceId}:actual=${current.job.instanceId}`,
+        };
+      }
+      if (current.job.cleanedUpAt) return { kind: 'already_cleaned', job: current.job };
+      if (
+        current.job.cleanupBlockedAt !== initial.cleanupBlockedAt
+        || current.job.cleanupBlockedReason !== initial.cleanupBlockedReason
+        || current.job.cleanedUpAt !== initial.cleanedUpAt
+      ) {
+        return {
+          kind: 'superseded',
+          reason: current.job.cleanupBlockedReason ?? 'cleanup_state_changed',
+        };
+      }
+      const next: TeamJobRecord = { ...current.job };
+      if (fields.cleanedUpAt !== undefined) next.cleanedUpAt = fields.cleanedUpAt;
+      if (fields.cleanupBlockedAt !== undefined) next.cleanupBlockedAt = fields.cleanupBlockedAt;
+      if (fields.cleanupBlockedReason !== undefined) next.cleanupBlockedReason = fields.cleanupBlockedReason;
+      if (fields.clearBlocked) {
+        delete next.cleanupBlockedAt;
+        delete next.cleanupBlockedReason;
+      }
+      writeJobToDiskUnlocked(jobId, next, jobsDir);
+      return { kind: 'updated', job: next };
+    });
+  } catch (error) {
+    return {
+      kind: 'blocked',
+      reason: `cleanup_job_lock_failed:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function updateJobFailureIfRunning(
+  jobId: string,
+  jobsDir: string,
+  expectedInstanceId: string,
+  reason: string,
+  result?: string,
+): void {
+  withProcessIdentityFileLockSync(jobLockPath(jobsDir, jobId), () => {
+    const current = readJobFromDisk(jobId, jobsDir);
+    if (
+      current.kind !== 'valid'
+      || current.job.instanceId !== expectedInstanceId
+      || current.job.cleanedUpAt
+      || current.job.status !== 'running'
+    ) return;
+    writeJobToDiskUnlocked(jobId, {
+      ...current.job,
+      status: 'failed',
+      stderr: current.job.stderr ?? reason,
+      ...(result !== undefined ? { result: current.job.result ?? result } : {}),
+    }, jobsDir);
+  });
+}
+
+function readConvergedJob(jobId: string, jobsDir: string): TeamJobRecord {
+  return withProcessIdentityFileLockSync(jobLockPath(jobsDir, jobId), () => {
+    const current = readJobFromDisk(jobId, jobsDir);
+    if (current.kind !== 'valid') throw formatJobReadError(jobId, current);
+    const converged = convergeWithResultArtifact(jobId, current.job, jobsDir);
+    if (JSON.stringify(converged) !== JSON.stringify(current.job)) {
+      // Artifact convergence is an authoritative status operation. It is
+      // intentionally allowed to repair a terminal record; only child-close
+      // callbacks freeze terminal records against late output.
+      writeJobToDiskUnlocked(jobId, converged, jobsDir);
+    }
+    return converged;
+  });
+}
+
+function blockCleanupPublication(
+  jobId: string,
+  jobsDir: string,
+  instanceId: string,
+  initial: CleanupFieldSnapshot,
+  reason: string,
+): TeamCleanupResult {
+  const publication = mergeCleanupFields(jobId, jobsDir, instanceId, initial, {
+    cleanupBlockedAt: new Date().toISOString(),
+    cleanupBlockedReason: reason,
+  });
+  if (publication.kind === 'already_cleaned') {
+    return {
+      jobId,
+      message: `Already cleaned up job ${jobId}; preserved any current team state`,
+    };
+  }
+  if (publication.kind === 'blocked') {
+    return {
+      jobId,
+      message: `Preserved team state because cleanup publication was blocked (${publication.reason})`,
+    };
+  }
+  if (publication.kind === 'superseded') {
+    return {
+      jobId,
+      message: `Preserved team state because a newer cleanup state superseded this attempt (${publication.reason}; attempted ${reason})`,
+    };
+  }
+  return {
+    jobId,
+    message: `Preserved team state because cleanup evidence was unavailable (${reason})`,
+  };
 }
 
 function parseJobResult(raw?: string): unknown {
@@ -302,6 +571,7 @@ function parseJobResult(raw?: string): unknown {
 function buildStatus(jobId: string, job: TeamJobRecord): TeamJobStatus {
   return {
     jobId,
+    instanceId: job.instanceId,
     status: job.status,
     elapsedSeconds: ((Date.now() - job.startedAt) / 1000).toFixed(1),
     result: parseJobResult(job.result),
@@ -316,16 +586,32 @@ export function generateJobId(now = Date.now()): string {
 function convergeWithResultArtifact(jobId: string, job: TeamJobRecord, jobsDir: string): TeamJobRecord {
   try {
     const artifactRaw = readFileSync(resultArtifactPath(jobsDir, jobId), 'utf-8');
-    const artifactParsed = parseJsonSafe<{ status?: string }>(artifactRaw);
-    if (artifactParsed?.status === 'completed' || artifactParsed?.status === 'failed') {
+    const artifactParsed = parseJsonSafe<Record<string, unknown>>(artifactRaw);
+    if (!artifactParsed) throw new Error('result_artifact_parse_failed');
+    if (artifactParsed.status !== 'completed' && artifactParsed.status !== 'failed') {
+      return job;
+    }
+    if (artifactParsed.instanceId !== job.instanceId) {
+      throw new Error('result_artifact_identity_mismatch');
+    }
+    return {
+      ...job,
+      status: artifactParsed.status as 'completed' | 'failed',
+      result: artifactRaw,
+    };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      // no artifact yet
+    } else {
+      // A malformed or foreign result artifact is not lifecycle authority.
+      // Preserve the job and surface a terminal diagnostic to status callers.
       return {
         ...job,
-        status: artifactParsed.status,
-        result: artifactRaw,
+        status: 'failed',
+        stderr: `Corrupt result artifact for ${jobId}: ${error instanceof Error ? error.message : String(error)}`,
+        result: job.result ?? JSON.stringify({ error: 'result_artifact_identity_mismatch' }),
       };
     }
-  } catch {
-    // no artifact yet
   }
 
   if (job.status === 'running' && job.pid != null && !isProcessAlive(job.pid)) {
@@ -383,42 +669,89 @@ function parseJsonInput(inputRaw: string | undefined): Record<string, unknown> {
 }
 
 export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResult> {
-  await assertTeamSpawnAllowed(input.cwd);
   validateTeamName(input.teamName);
+  if (typeof input.cwd !== 'string' || input.cwd.trim().length === 0) {
+    throw new Error('cwd must be a non-empty path');
+  }
+  const cwd = resolve(input.cwd);
+  await assertTeamSpawnAllowed(cwd);
   if (!Array.isArray(input.agentTypes) || input.agentTypes.length === 0) {
     throw new Error('agentTypes must be a non-empty array');
   }
   if (!Array.isArray(input.tasks) || input.tasks.length === 0) {
     throw new Error('tasks must be a non-empty array');
   }
+  const runtimeV2 = await import('../team/runtime-v2.js');
+  if (!runtimeV2.isRuntimeV2Enabled()) {
+    throw new Error(
+      'team_start_unsafe_runtime_v1: instance-bound provider cleanup requires runtime v2; set OMC_RUNTIME_V2=1',
+    );
+  }
 
   const jobsDir = resolveJobsDir();
   const runtimeCliPath = resolveRuntimeCliPath();
   const jobId = generateJobId();
+  const instanceId = randomUUID();
 
   const job: TeamJobRecord = {
     status: 'running',
     startedAt: Date.now(),
     teamName: input.teamName,
-    cwd: input.cwd,
+    cwd,
+    instanceId,
+  };
+  // Publish the immutable job identity before the runtime child can create
+  // any team effects. Cleanup must never need to infer it from a team name.
+  writeJobToDisk(jobId, job, jobsDir);
+
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn(process.execPath, [runtimeCliPath], {
+      env: {
+        ...process.env,
+        OMC_JOB_ID: jobId,
+        OMC_JOBS_DIR: jobsDir,
+      },
+      detached: true,
+      stdio: ['pipe', 'ignore', 'ignore'],
+    });
+  } catch (error) {
+    try {
+      updateJobFailureIfRunning(
+        jobId,
+        jobsDir,
+        instanceId,
+        `spawn error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } catch {
+      // Preserve the initial identity-bound record when its failure update
+      // cannot be acquired; never overwrite a concurrent job publication.
+    }
+    throw error;
+  }
+
+  const persistBoundFailure = (reason: string): void => {
+    try {
+      updateJobFailureIfRunning(jobId, jobsDir, instanceId, reason);
+    } catch {
+      // A failed diagnostic write must not replace or weaken the original
+      // identity-bound job record.
+    }
   };
 
-  const child = spawn(process.execPath, [runtimeCliPath], {
-    env: {
-      ...process.env,
-      OMC_JOB_ID: jobId,
-      OMC_JOBS_DIR: jobsDir,
-    },
-    detached: true,
-    stdio: ['pipe', 'ignore', 'ignore'],
-  });
+  if (typeof child.on === 'function') {
+    child.on('error', (error: Error) => {
+      persistBoundFailure(`spawn error: ${error.message}`);
+    });
+  }
 
   const payload = {
     teamName: input.teamName,
+    instanceId,
     workerCount: input.workerCount,
     agentTypes: input.agentTypes,
     tasks: input.tasks,
-    cwd: input.cwd,
+    cwd,
     newWindow: input.newWindow,
     pollIntervalMs: input.pollIntervalMs,
     sentinelGateTimeoutMs: input.sentinelGateTimeoutMs,
@@ -426,20 +759,50 @@ export async function startTeamJob(input: TeamStartInput): Promise<TeamStartResu
     autoMerge: input.autoMerge,
   };
 
-  if (child.stdin && typeof child.stdin.on === 'function') {
-    child.stdin.on('error', () => {});
+  if (!child.stdin || typeof child.stdin.write !== 'function' || typeof child.stdin.end !== 'function') {
+    persistBoundFailure('runtime_cli_stdin_unavailable');
+    if (typeof child.kill === 'function') child.kill();
+    throw new Error('runtime_cli_stdin_unavailable');
   }
-  child.stdin?.write(JSON.stringify(payload));
-  child.stdin?.end();
-  child.unref();
+  if (typeof child.stdin.on === 'function') {
+    child.stdin.on('error', (error: Error) => {
+      persistBoundFailure(`runtime_cli_stdin_error:${error.message}`);
+      try { child.kill(); } catch { /* child may have exited already */ }
+    });
+  }
+  try {
+    child.stdin.write(JSON.stringify(payload));
+    child.stdin.end();
+  } catch (error) {
+    persistBoundFailure(`runtime_cli_stdin_error:${error instanceof Error ? error.message : String(error)}`);
+    if (typeof child.kill === 'function') child.kill();
+    throw error;
+  }
+  try {
+    child.unref();
+  } catch (error) {
+    persistBoundFailure(`runtime_cli_detach_error:${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
 
-  if (child.pid != null) {
-    job.pid = child.pid;
-  }
-  writeJobToDisk(jobId, job, jobsDir);
+  withProcessIdentityFileLockSync(jobLockPath(jobsDir, jobId), () => {
+    const current = readJobFromDisk(jobId, jobsDir);
+    if (
+      current.kind !== 'valid'
+      || current.job.instanceId !== instanceId
+      || current.job.cleanedUpAt
+      || current.job.status !== 'running'
+    ) return;
+    if (child.pid != null) job.pid = child.pid;
+    writeJobToDiskUnlocked(jobId, {
+      ...current.job,
+      ...(job.pid != null ? { pid: job.pid } : {}),
+    }, jobsDir);
+  });
 
   return {
     jobId,
+    instanceId,
     status: 'running',
     pid: child.pid,
   };
@@ -449,17 +812,8 @@ export async function getTeamJobStatus(jobId: string): Promise<TeamJobStatus> {
   validateJobId(jobId);
 
   const jobsDir = resolveJobsDir();
-  const job = readJobFromDisk(jobId, jobsDir);
-  if (!job) {
-    throw new Error(`No job found: ${jobId}`);
-  }
-
-  const converged = convergeWithResultArtifact(jobId, job, jobsDir);
-  if (JSON.stringify(converged) !== JSON.stringify(job)) {
-    writeJobToDisk(jobId, converged, jobsDir);
-  }
-
-  return buildStatus(jobId, converged);
+  const job = readConvergedJob(jobId, jobsDir);
+  return buildStatus(jobId, job);
 }
 
 export async function waitForTeamJob(jobId: string, options: TeamWaitOptions = {}): Promise<TeamWaitResult> {
@@ -489,104 +843,80 @@ export async function cleanupTeamJob(jobId: string, graceMs = 10_000): Promise<T
   validateJobId(jobId);
 
   const jobsDir = resolveJobsDir();
-  const job = readJobFromDisk(jobId, jobsDir);
-  if (!job) {
-    throw new Error(`No job found: ${jobId}`);
-  }
+  const readResult = readJobFromDisk(jobId, jobsDir);
+  if (readResult.kind !== 'valid') throw formatJobReadError(jobId, readResult);
+  const job = readResult.job;
+  const initialCleanupFields: CleanupFieldSnapshot = {
+    cleanedUpAt: job.cleanedUpAt,
+    cleanupBlockedAt: job.cleanupBlockedAt,
+    cleanupBlockedReason: job.cleanupBlockedReason,
+  };
 
-  const { paneArtifact, livenessUnknownReason } = await resolveCleanupPaneEvidence(job, jobsDir, jobId);
-  if (livenessUnknownReason) {
-    writeJobToDisk(jobId, {
-      ...job,
-      cleanupBlockedAt: new Date().toISOString(),
-      cleanupBlockedReason: livenessUnknownReason,
-    }, jobsDir);
+  // A completed cleanup is terminal for this job. Never re-read current
+  // same-name state on a retry: it may belong to a newer incarnation.
+  if (job.cleanedUpAt) {
     return {
       jobId,
-      message: `Preserved team state because worker liveness could not be proven (${livenessUnknownReason})`,
+      message: `Already cleaned up job ${jobId}; preserved any current team state`,
     };
   }
 
-  if (paneArtifact?.sessionName && (paneArtifact.ownsWindow === true || !paneArtifact.sessionName.includes(':'))) {
-    const sessionMode = paneArtifact.ownsWindow === true
-      ? (paneArtifact.sessionName.includes(':') ? 'dedicated-window' : 'detached-session')
-      : 'detached-session';
-    await killTeamSession(
-      paneArtifact.sessionName,
-      paneArtifact.paneIds,
-      paneArtifact.leaderPaneId,
-      { sessionMode },
-    );
-  } else if (paneArtifact?.paneIds?.length) {
-    await killWorkerPanes({
-      paneIds: paneArtifact.paneIds,
-      leaderPaneId: paneArtifact.leaderPaneId,
-      teamName: job.teamName,
-      cwd: job.cwd,
-      graceMs,
-    });
+  const resultEvidenceError = resultArtifactIdentityError(jobsDir, jobId, job.instanceId);
+  if (resultEvidenceError) {
+    return blockCleanupPublication(jobId, jobsDir, job.instanceId, initialCleanupFields, resultEvidenceError);
   }
 
-  if (paneArtifact?.paneIds?.length) {
-    const liveness = await Promise.all(paneArtifact.paneIds.map(async (paneId) => [paneId, await getWorkerLiveness(paneId)] as const));
-    const alivePaneIds = liveness.filter(([, state]) => state === 'alive').map(([paneId]) => paneId);
-    const unknownPaneIds = liveness.filter(([, state]) => state === 'unknown').map(([paneId]) => paneId);
-    if (alivePaneIds.length > 0 || unknownPaneIds.length > 0) {
-      const reason = alivePaneIds.length > 0
-        ? `worker_panes_still_alive:${alivePaneIds.join(',')}`
-        : `worker_liveness_unknown:${unknownPaneIds.join(',')}`;
-      writeJobToDisk(jobId, {
-        ...job,
-        cleanupBlockedAt: new Date().toISOString(),
-        cleanupBlockedReason: reason,
-      }, jobsDir);
-      return {
-        jobId,
-        message: alivePaneIds.length > 0
-          ? `Preserved team state because worker pane(s) are still alive: ${alivePaneIds.join(', ')}`
-          : `Preserved team state because worker pane liveness is unknown: ${unknownPaneIds.join(', ')}`,
-      };
-    }
+  const paneEvidence = await readPaneArtifact(jobsDir, jobId, job.instanceId);
+  if (paneEvidence.kind !== 'valid') {
+    const reason = paneEvidence.kind === 'missing'
+      ? 'cleanup_panes_evidence_missing'
+      : paneEvidence.reason;
+    return blockCleanupPublication(jobId, jobsDir, job.instanceId, initialCleanupFields, reason);
   }
 
-  let preservedWorktrees = 0;
+  const runtimeV2 = await import('../team/runtime-v2.js');
   try {
-    const cleanupResult = cleanupTeamWorktrees(job.teamName, job.cwd);
-    preservedWorktrees = cleanupResult.preserved.length;
-  } catch {
-    // best-effort for dormant team-owned worktree infrastructure; preserve state
-    // when cleanup could not prove worktree metadata/backups are disposable.
-    preservedWorktrees = 1;
+    const shutdown = await runtimeV2.shutdownTeamV2(job.teamName, job.cwd, {
+      instanceId: job.instanceId,
+      force: true,
+      timeoutMs: Math.max(0, graceMs),
+    });
+    if (shutdown.outcome !== 'cleaned') {
+      const reason = shutdown.outcome === 'preserved'
+        ? `${shutdown.reason}:${shutdown.workers.join(',')}`
+        : `${shutdown.reason}:${shutdown.detail}`;
+      return blockCleanupPublication(jobId, jobsDir, job.instanceId, initialCleanupFields, reason);
+    }
+  } catch (error) {
+    const reason = `team_shutdown_failed:${error instanceof Error ? error.message : String(error)}`;
+    return blockCleanupPublication(jobId, jobsDir, job.instanceId, initialCleanupFields, reason);
   }
-  if (preservedWorktrees > 0) {
-    writeJobToDisk(jobId, {
-      ...job,
-      cleanupBlockedAt: new Date().toISOString(),
-      cleanupBlockedReason: `worktrees_preserved:${preservedWorktrees}`,
-    }, jobsDir);
+
+  const publication = mergeCleanupFields(jobId, jobsDir, job.instanceId, initialCleanupFields, {
+    cleanedUpAt: new Date().toISOString(),
+    clearBlocked: true,
+  });
+  if (publication.kind === 'already_cleaned') {
     return {
       jobId,
-      message: `Preserved team state because ${preservedWorktrees} worktree(s) require follow-up cleanup`,
+      message: `Already cleaned up job ${jobId}; preserved any current team state`,
     };
   }
-
-  await rm(teamStateRoot(job.cwd, job.teamName), {
-    recursive: true,
-    force: true,
-  }).catch(() => undefined);
-
-  writeJobToDisk(jobId, {
-    ...job,
-    cleanedUpAt: new Date().toISOString(),
-  }, jobsDir);
-
+  if (publication.kind === 'blocked') {
+    return {
+      jobId,
+      message: `Preserved team state because cleanup publication was blocked (${publication.reason})`,
+    };
+  }
+  if (publication.kind === 'superseded') {
+    return {
+      jobId,
+      message: `Preserved team state because newer cleanup state superseded this attempt (${publication.reason})`,
+    };
+  }
   return {
     jobId,
-    message: paneArtifact?.ownsWindow
-      ? 'Cleaned up team tmux window'
-      : paneArtifact?.paneIds?.length
-        ? `Cleaned up ${paneArtifact.paneIds.length} worker pane(s)`
-        : 'No worker pane ids found for this job',
+    message: `Cleaned up team instance ${job.instanceId}`,
   };
 }
 
@@ -608,6 +938,7 @@ export async function teamStatusByTeamName(teamName: string, cwd = process.cwd()
     return {
       teamName,
       running: true,
+      instanceId: config?.instance_id,
       sessionName: config?.tmux_session,
       leaderPaneId: config?.leader_pane_id,
       workspace_mode: config?.workspace_mode,
@@ -645,6 +976,7 @@ export async function teamStatusByTeamName(teamName: string, cwd = process.cwd()
   return {
     teamName,
     running: true,
+    instanceId: runtime.config.instance_id,
     sessionName: runtime.sessionName,
     leaderPaneId: runtime.leaderPaneId,
     workerPaneIds: runtime.workerPaneIds,
@@ -666,6 +998,7 @@ export async function teamResumeByName(teamName: string, cwd = process.cwd()): P
   return {
     teamName,
     resumed: true,
+    instanceId: runtime.config.instance_id,
     sessionName: runtime.sessionName,
     leaderPaneId: runtime.leaderPaneId,
     workerPaneIds: runtime.workerPaneIds,
@@ -678,50 +1011,27 @@ export async function teamShutdownByName(teamName: string, options: { cwd?: stri
   const cwd = options.cwd ?? process.cwd();
 
   const runtimeV2 = await import('../team/runtime-v2.js');
-  if (runtimeV2.isRuntimeV2Enabled()) {
-    const config = await readTeamConfig(teamName, cwd);
-    const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, { force: Boolean(options.force) });
-    if (shutdown.outcome !== 'cleaned') throw new Error(`Team shutdown ${shutdown.outcome}: ${shutdown.reason}`);
-    return {
-      teamName,
-      shutdown: true,
-      forced: Boolean(options.force),
-      sessionFound: Boolean(config),
-    };
+  const config = await readTeamConfig(teamName, cwd);
+  const instanceId = config?.instance_id;
+  if (!instanceId || !isValidTeamInstanceId(instanceId)) {
+    throw new Error('team_shutdown_instance_identity_missing');
   }
-
-  const runtime = await resumeTeam(teamName, cwd);
-
-  if (!runtime) {
-    if (options.force) {
-      await rm(teamStateRoot(cwd, teamName), { recursive: true, force: true }).catch(() => undefined);
-      return {
-        teamName,
-        shutdown: true,
-        forced: true,
-        sessionFound: false,
-      };
-    }
-
-    throw new Error(`Team ${teamName} is not running. Use --force to clear stale state.`);
+  const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, {
+    instanceId,
+    force: Boolean(options.force),
+    timeoutMs: options.force ? 0 : 30_000,
+  });
+  if (shutdown.outcome !== 'cleaned') {
+    const reason = shutdown.outcome === 'preserved'
+      ? `${shutdown.reason}:${shutdown.workers.join(',')}`
+      : `${shutdown.reason}:${shutdown.detail}`;
+    throw new Error(`Team shutdown ${shutdown.outcome}: ${reason}`);
   }
-
-  const cleaned = await shutdownTeam(
-    runtime.teamName,
-    runtime.sessionName,
-    runtime.cwd,
-    options.force ? 0 : 30_000,
-    runtime.workerPaneIds,
-    runtime.leaderPaneId,
-    runtime.ownsWindow,
-  );
-
   return {
     teamName,
-    shutdown: cleaned,
+    shutdown: true,
     forced: Boolean(options.force),
-    sessionFound: true,
-    ...(cleaned ? {} : { error: 'team_shutdown_failed:cleanup_unverified' }),
+    sessionFound: Boolean(config),
   };
 }
 

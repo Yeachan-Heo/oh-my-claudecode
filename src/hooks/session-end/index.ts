@@ -13,6 +13,7 @@ import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepar
 import { spawnSessionEndWorker } from './worker.js';
 import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
 import { getSessionEndStalePrdWarning } from '../ralph/stale-prd.js';
+import { isValidTeamInstanceId } from '../../team/types.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -613,7 +614,7 @@ export function cleanupMissionState(directory: string, sessionId?: string): numb
 
     const before = parsed.missions.length;
     parsed.missions = parsed.missions.filter((mission) => {
-      // Keep non-session missions (e.g., team missions handled by state_clear)
+      // Keep non-session missions.
       if (mission.source !== 'session') return true;
 
       // If sessionId provided, only remove missions for this session
@@ -658,6 +659,14 @@ function cleanupSessionStartedMarker(directory: string, sessionId: string): void
 function extractTeamNameFromState(state: Record<string, unknown> | null): string | null {
   if (!state || typeof state !== 'object') return null;
   return normalizeSessionEndTeamName(state.team_name ?? state.teamName);
+}
+
+function extractManifestOwnerSessionId(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const leader = (value as { leader?: unknown }).leader;
+  if (!leader || typeof leader !== 'object' || Array.isArray(leader)) return null;
+  const sessionId = (leader as { session_id?: unknown }).session_id;
+  return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
 }
 
 export async function findSessionOwnedTeams(directory: string, sessionId: string): Promise<string[]> {
@@ -719,9 +728,8 @@ export async function cleanupSessionOwnedTeams(
     return { attempted, cleaned, failed };
   }
 
-  const { teamReadConfig } = await import('../../team/team-ops.js');
+  const { teamReadConfig, teamReadManifest } = await import('../../team/team-ops.js');
   const { shutdownTeamV2 } = await import('../../team/runtime-v2.js');
-  const { shutdownTeam } = await import('../../team/runtime.js');
 
   await Promise.all(teamNames.map(async (teamName) => {
     attempted.push(teamName);
@@ -732,43 +740,65 @@ export async function cleanupSessionOwnedTeams(
         return;
       }
 
-      // Classify raw provenance: agentTypes => legacy V1, even if workers:[] was injected.
-      const hasAgentTypes = Array.isArray((config as { agentTypes?: unknown[] }).agentTypes);
-      const workers = (config as { workers?: unknown[] }).workers;
-      // V2 when workers array present and not legacy agentTypes provenance.
-      const hasV2Workers = !hasAgentTypes && Array.isArray(workers);
-
-      if (hasAgentTypes) {
-        const legacyConfig = config as {
-          tmuxSession?: string;
-          leaderPaneId?: string | null;
-          tmuxOwnsWindow?: boolean;
-        };
-        const sessionName = typeof legacyConfig.tmuxSession === 'string' && legacyConfig.tmuxSession.trim() !== ''
-          ? legacyConfig.tmuxSession.trim()
-          : `omc-team-${teamName}`;
-        const leaderPaneId = typeof legacyConfig.leaderPaneId === 'string' && legacyConfig.leaderPaneId.trim() !== ''
-          ? legacyConfig.leaderPaneId.trim()
-          : undefined;
-        if (await shutdownTeam(teamName, sessionName, directory, 0, undefined, leaderPaneId, legacyConfig.tmuxOwnsWindow === true)) {
-          cleaned.push(teamName);
-        } else {
-          failed.push({ teamName, error: 'team-shutdown-failed:legacy_cleanup_unverified' });
-        }
+      // Legacy configs and unclassified state are readable evidence only. A
+      // session-end name hint never authorizes destructive cleanup by itself.
+      if (Array.isArray((config as { agentTypes?: unknown[] }).agentTypes)
+        || !Array.isArray((config as { workers?: unknown[] }).workers)) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:config_cleanup_unsupported' });
         return;
       }
 
-      if (hasV2Workers) {
-        const shutdown = await shutdownTeamV2(teamName, directory, { force: true, timeoutMs: 0 });
-        if (shutdown.outcome === 'cleaned') {
-          cleaned.push(teamName);
-        } else {
-          failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
-        }
+      let manifest: unknown = null;
+      try {
+        manifest = await teamReadManifest(teamName, directory);
+      } catch (error) {
+        failed.push({
+          teamName,
+          error: `team-shutdown-preserved:ownership_recheck_failed:${error instanceof Error ? error.message : String(error)}`,
+        });
         return;
       }
 
-      failed.push({ teamName, error: 'team-shutdown-preserved:config_cleanup_unsupported' });
+      // The runtime producer records the leader ownership only in the
+      // manifest (`leader.session_id`). Config has no Claude-session owner;
+      // a name hint or a tmux session name cannot authorize this cleanup.
+      const manifestLeaderSessionId = extractManifestOwnerSessionId(manifest);
+      if (manifestLeaderSessionId === null) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:session_owner_missing' });
+        return;
+      }
+      if (manifestLeaderSessionId !== sessionId) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:session_owner_mismatch' });
+        return;
+      }
+
+      const instanceId = (config as { instance_id?: unknown }).instance_id;
+      if (!isValidTeamInstanceId(instanceId)) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:instance_identity_missing' });
+        return;
+      }
+      const manifestInstanceId = manifest && typeof manifest === 'object' && !Array.isArray(manifest)
+        ? (manifest as { instance_id?: unknown }).instance_id
+        : undefined;
+      if (!isValidTeamInstanceId(manifestInstanceId)) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:instance_identity_missing' });
+        return;
+      }
+      if (manifestInstanceId.toLowerCase() !== instanceId.toLowerCase()) {
+        failed.push({ teamName, error: 'team-shutdown-preserved:instance_identity_mismatch' });
+        return;
+      }
+
+      const shutdown = await shutdownTeamV2(teamName, directory, {
+        instanceId,
+        force: true,
+        timeoutMs: 0,
+      });
+      if (shutdown.outcome === 'cleaned') {
+        cleaned.push(teamName);
+      } else {
+        failed.push({ teamName, error: `team-shutdown-${shutdown.outcome}:${shutdown.reason}` });
+      }
     } catch (error) {
       failed.push({
         teamName,

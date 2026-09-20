@@ -45,7 +45,7 @@ Config, manifest, worker identity, and status surfaces should expose the same lo
 - Dirty worker worktrees must be preserved and surfaced as warnings/events. Cleanup must not force-remove dirty worker edits.
 - Branch/path mismatches should fail instead of reusing the wrong workspace.
 - Rollback may remove newly created clean worktrees and runtime-created branches when safe; reused worktrees are preserved.
-- `orphan-cleanup` is a destructive escape hatch that may delete worktree recovery metadata and root `AGENTS.md` backups. When that evidence exists, callers must pass `acknowledge_lost_worktree_recovery: true` only after manually preserving or intentionally discarding the affected worker worktrees/backups.
+- `orphan-cleanup` requires the same instance, provider, pane, and worktree cleanup evidence as normal shutdown. Neither force nor `acknowledge_lost_worktree_recovery` permits deleting unknown ownership records or worktree recovery backups.
 
 ## CLI and status expectations
 

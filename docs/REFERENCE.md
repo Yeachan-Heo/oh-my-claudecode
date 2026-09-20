@@ -579,6 +579,17 @@ omc team api claim-task --input '{"team_name":"auth-review","task_id":"1","worke
 
 Supported entrypoints: direct start (`omc team [N:agent] "<task>"`), `status`, `shutdown`, and `api`.
 
+Startup reserves the team name for an immutable instance. Shutdown and job cleanup
+require matching instance and worker-launch evidence; `--force` skips graceful
+waits but does not bypass ownership checks. Missing or corrupt evidence preserves
+resources, and an old job cannot clean up a newer same-name team. Keep external
+cleanup receipts when retrying a partial state removal. See
+[Team Instance Ownership](MIGRATION.md#unreleased-team-instance-ownership).
+API `cleanup` and `orphan-cleanup` follow the same evidence rules. SessionEnd
+also validates session ownership before delegating instance-bound shutdown.
+Tmux effects require the original socket and precise server process identity;
+reused pane IDs after a server restart do not grant ownership.
+
 Native team worker worktrees are an opt-in/config-gated runtime-v2 rollout. See [Native Team Worktree Mode](TEAM-WORKTREE-MODE.md) for the worktree path contract, canonical `OMC_TEAM_STATE_ROOT` behavior, status fields, and dirty-worktree cleanup policy.
 
 Topology behavior:

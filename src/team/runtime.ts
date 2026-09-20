@@ -1,29 +1,21 @@
-import { mkdir, readFile, rm, rename, writeFile } from 'fs/promises';
+import { readFile } from 'fs/promises';
 import { join } from 'path';
-import { existsSync } from 'fs';
 import { tmuxExecAsync } from '../cli/tmux-utils.js';
 import type { CliAgentType } from './model-contract.js';
-import { buildWorkerArgv, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveDefaultWorkerModel, assertHeadlessSupported } from './model-contract.js';
 import { validateTeamName } from './team-name.js';
 import {
-  createTeamSession, spawnWorkerInPane, sendToWorker,
-  isWorkerAlive, killTeamSession, resolveSplitPaneWorkerPaneIds, waitForPaneReady, applyMainVerticalLayout, killTeamPane, splitTeamWorkerPane,
-  type TeamSession, type WorkerPaneConfig,
+  adoptWorkerPaneOwnership,
+  observeTmuxServerIdentity,
+  isWorkerAlive,
+  verifyTeamTargetOwnership,
+  type WorkerPaneOwnership,
 } from './tmux-session.js';
-import {
-  composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage,
-} from './worker-bootstrap.js';
-import { cleanupTeamWorktrees } from './git-worktree.js';
-import { atomicWriteJson } from '../lib/atomic-write.js';
-import {
-  withTaskLock,
-  writeTaskFailure,
-  DEFAULT_MAX_TASK_RETRIES,
-} from './task-file-ops.js';
 import { normalizeTaskFileStem, teamStateRoot } from './state-paths.js';
+import { isValidTeamInstanceId, isValidTmuxServerIdentity, type TeamInstanceId, type TmuxServerIdentity } from './types.js';
 
 export interface TeamConfig {
   teamName: string;
+  instance_id?: TeamInstanceId;
   workerCount: number;
   agentTypes: CliAgentType[];
   tasks: Array<{ subject: string; description: string; }>;
@@ -32,6 +24,10 @@ export interface TeamConfig {
   tmuxSession?: string;
   leaderPaneId?: string;
   tmuxOwnsWindow?: boolean;
+  tmuxServerIdentity?: TmuxServerIdentity;
+  workerNames?: string[];
+  workerPaneIds?: string[];
+  workerPaneByName?: Record<string, string>;
 }
 
 export interface ActiveWorkerState {
@@ -50,9 +46,10 @@ export interface TeamRuntime {
   workerPaneIds: string[];
   activeWorkers: Map<string, ActiveWorkerState>;
   cwd: string;
-  /** Preflight-validated absolute binary paths, keyed by agent type */
-  resolvedBinaryPaths?: Partial<Record<CliAgentType, string>>;
-  stopWatchdog?: () => Promise<void>;
+  instanceId?: TeamInstanceId;
+  tmuxServerIdentity?: TmuxServerIdentity;
+  workerPaneOwnership?: Map<string, WorkerPaneOwnership>;
+  workerPaneByName?: Map<string, string>;
 }
 
 export interface WorkerStatus {
@@ -77,20 +74,6 @@ export interface TeamSnapshot {
   };
 }
 
-export interface WatchdogCompletionEvent {
-  workerName: string;
-  taskId: string;
-  status: 'completed' | 'failed';
-  summary: string;
-}
-
-interface DoneSignal {
-  taskId: string;
-  status: 'completed' | 'failed';
-  summary: string;
-  completedAt: string;
-}
-
 interface TeamTaskRecord {
   id: string;
   subject: string;
@@ -105,360 +88,39 @@ interface TeamTaskRecord {
   failedAt?: string;
 }
 
-interface DeadPaneTransition {
-  action: 'requeued' | 'failed' | 'skipped';
-  retryCount?: number;
-}
-
-function workerName(index: number): string {
-  return `worker-${index + 1}`;
-}
-
 function stateRoot(cwd: string, teamName: string): string {
   validateTeamName(teamName);
   return teamStateRoot(cwd, teamName);
 }
 
-async function writeJson(filePath: string, data: unknown): Promise<void> {
-  await atomicWriteJson(filePath, data);
-}
-
 async function readJsonSafe<T>(filePath: string): Promise<T | null> {
-  const isDoneSignalPath = filePath.endsWith('done.json');
-  const maxAttempts = isDoneSignalPath ? 4 : 1;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const content = await readFile(filePath, 'utf-8');
-      try {
-        return JSON.parse(content) as T;
-      } catch {
-        if (!isDoneSignalPath || attempt === maxAttempts) {
-          return null;
-        }
-      }
-    } catch (error: unknown) {
-      const isMissingDoneSignal =
-        isDoneSignalPath
-        && typeof error === 'object'
-        && error !== null
-        && 'code' in error
-        && error.code === 'ENOENT';
-
-      if (isMissingDoneSignal) {
-        return null;
-      }
-
-      if (!isDoneSignalPath || attempt === maxAttempts) {
-        return null;
-      }
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 25));
+  try {
+    return JSON.parse(await readFile(filePath, 'utf-8')) as T;
+  } catch {
+    return null;
   }
-
-  return null;
 }
 
-
-function parseWorkerIndex(workerNameValue: string): number {
-  const match = workerNameValue.match(/^worker-(\d+)$/);
-  if (!match) return 0;
-  const parsed = Number.parseInt(match[1], 10) - 1;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-}
 
 function taskPath(root: string, taskId: string): string {
   return join(root, 'tasks', `${normalizeTaskFileStem(taskId)}.json`);
-}
-
-async function writePanesTrackingFileIfPresent(runtime: TeamRuntime): Promise<void> {
-  const jobId = process.env.OMC_JOB_ID;
-  const omcJobsDir = process.env.OMC_JOBS_DIR;
-  if (!jobId || !omcJobsDir) return;
-
-  const panesPath = join(omcJobsDir, `${jobId}-panes.json`);
-  const tempPath = `${panesPath}.tmp`;
-  await writeFile(
-    tempPath,
-    JSON.stringify({
-      paneIds: [...runtime.workerPaneIds],
-      leaderPaneId: runtime.leaderPaneId,
-      sessionName: runtime.sessionName,
-      ownsWindow: Boolean(runtime.ownsWindow),
-    }),
-    'utf-8'
-  );
-  await rename(tempPath, panesPath);
 }
 
 async function readTask(root: string, taskId: string): Promise<TeamTaskRecord | null> {
   return readJsonSafe<TeamTaskRecord>(taskPath(root, taskId));
 }
 
-async function writeTask(root: string, task: TeamTaskRecord): Promise<void> {
-  await writeJson(taskPath(root, task.id), task);
-}
-
-async function markTaskInProgress(root: string, taskId: string, owner: string, teamName: string, cwd: string): Promise<boolean> {
-  const result = await withTaskLock(teamName, taskId, async () => {
-    const task = await readTask(root, taskId);
-    if (!task || task.status !== 'pending') return false;
-    task.status = 'in_progress';
-    task.owner = owner;
-    task.assignedAt = new Date().toISOString();
-    await writeTask(root, task);
-    return true;
-  }, { cwd });
-  // withTaskLock returns null if the lock could not be acquired — treat as not claimed
-  return result ?? false;
-}
-
-async function resetTaskToPending(root: string, taskId: string, teamName: string, cwd: string): Promise<boolean> {
-  const result = await withTaskLock(teamName, taskId, async () => {
-    const task = await readTask(root, taskId);
-    if (!task) return false;
-    task.status = 'pending';
-    task.owner = null;
-    task.assignedAt = undefined;
-    await writeTask(root, task);
-    return true;
-  }, { cwd });
-  return result ?? false;
-}
-
-async function markTaskFromDone(
-  root: string,
-  teamName: string,
-  cwd: string,
-  taskId: string,
-  status: 'completed' | 'failed',
-  summary: string
-): Promise<void> {
-  await withTaskLock(teamName, taskId, async () => {
-    const task = await readTask(root, taskId);
-    if (!task) return;
-    task.status = status;
-    task.result = summary;
-    task.summary = summary;
-    if (status === 'completed') {
-      task.completedAt = new Date().toISOString();
-    } else {
-      task.failedAt = new Date().toISOString();
-    }
-    await writeTask(root, task);
-  }, { cwd });
-}
-
-
-async function applyDeadPaneTransition(
-  runtime: TeamRuntime,
-  workerNameValue: string,
-  taskId: string,
-): Promise<DeadPaneTransition> {
-  const root = stateRoot(runtime.cwd, runtime.teamName);
-
-  const transition = await withTaskLock(runtime.teamName, taskId, async () => {
-    const task = await readTask(root, taskId);
-    if (!task) return { action: 'skipped' } as DeadPaneTransition;
-    if (task.status === 'completed' || task.status === 'failed') {
-      return { action: 'skipped' } as DeadPaneTransition;
-    }
-    if (task.status !== 'in_progress' || task.owner !== workerNameValue) {
-      return { action: 'skipped' } as DeadPaneTransition;
-    }
-
-    const failure = await writeTaskFailure(
-      runtime.teamName,
-      taskId,
-      `Worker pane died before done.json was written (${workerNameValue})`,
-      { cwd: runtime.cwd }
-    );
-    const retryCount = failure.retryCount;
-    if (retryCount >= DEFAULT_MAX_TASK_RETRIES) {
-      task.status = 'failed';
-      task.owner = workerNameValue;
-      task.summary = `Worker pane died before done.json was written (${workerNameValue})`;
-      task.result = task.summary;
-      task.failedAt = new Date().toISOString();
-      await writeTask(root, task);
-      return { action: 'failed', retryCount } as DeadPaneTransition;
-    }
-
-    task.status = 'pending';
-    task.owner = null;
-    task.assignedAt = undefined;
-    await writeTask(root, task);
-    return { action: 'requeued', retryCount } as DeadPaneTransition;
-  }, { cwd: runtime.cwd });
-
-  return transition ?? { action: 'skipped' };
-}
-
-async function nextPendingTaskIndex(runtime: TeamRuntime): Promise<number | null> {
-  const root = stateRoot(runtime.cwd, runtime.teamName);
-  const transientReadRetryAttempts = 3;
-  const transientReadRetryDelayMs = 15;
-
-  for (let i = 0; i < runtime.config.tasks.length; i++) {
-    const taskId = String(i + 1);
-    let task = await readTask(root, taskId);
-    if (!task) {
-      for (let attempt = 1; attempt < transientReadRetryAttempts; attempt++) {
-        await new Promise(resolve => setTimeout(resolve, transientReadRetryDelayMs));
-        task = await readTask(root, taskId);
-        if (task) break;
-      }
-    }
-    if (task?.status === 'pending') return i;
-  }
-  return null;
-}
-
-async function notifyPaneWithRetry(
-  sessionName: string,
-  paneId: string,
-  message: string,
-  maxAttempts = 6,
-  retryDelayMs = 350
-): Promise<boolean> {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    if (await sendToWorker(sessionName, paneId, message)) {
-      return true;
-    }
-    if (attempt < maxAttempts) {
-      await new Promise(r => setTimeout(r, retryDelayMs));
-    }
-  }
-  return false;
-}
-
-export async function allTasksTerminal(runtime: TeamRuntime): Promise<boolean> {
-  const root = stateRoot(runtime.cwd, runtime.teamName);
-  for (let i = 0; i < runtime.config.tasks.length; i++) {
-    const task = await readTask(root, String(i + 1));
-    if (!task) return false;
-    if (task.status !== 'completed' && task.status !== 'failed') return false;
-  }
-  return true;
-}
-
 /**
- * Build the initial task instruction written to a worker's inbox.
- * Includes task ID, subject, full description, and done-signal path.
+ * Reject unsupported legacy startup before any effects.
  */
-function buildInitialTaskInstruction(
-  teamName: string,
-  workerName: string,
-  task: { subject: string; description: string },
-  taskId: string,
-  teamStateRoot: string,
-): string {
-  const donePath = join(teamStateRoot, 'workers', workerName, 'done.json');
-  return [
-    `## Initial Task Assignment`,
-    `Task ID: ${taskId}`,
-    `Worker: ${workerName}`,
-    `Subject: ${task.subject}`,
-    ``,
-    task.description,
-    ``,
-    `When complete, write done signal to ${donePath}:`,
-    `{"taskId":"${taskId}","status":"completed","summary":"<brief summary>","completedAt":"<ISO timestamp>"}`,
-    ``,
-    `IMPORTANT: Execute ONLY the task assigned to you in this inbox. After writing done.json, exit immediately. Do not read from the task directory or claim other tasks.`,
-  ].join('\n');
-}
-
-/**
- * Start a new team: create tmux session, spawn workers, wait for ready.
- */
-export async function startTeam(config: TeamConfig): Promise<TeamRuntime> {
-  const { teamName, agentTypes, tasks, cwd } = config;
-  validateTeamName(teamName);
-
-  // Validate CLIs once and pin absolute binary paths for consistent spawn behavior.
-  // Reject headless-unsupported providers (e.g. antigravity on Windows) here in
-  // preflight — BEFORE writing any team state or creating the tmux session — so an
-  // unsupported provider can never leave stale `.omc/state/team` files or a leader
-  // session behind. (spawnWorkerForTask keeps its own guard for the watchdog path.)
-  const resolvedBinaryPaths: Partial<Record<CliAgentType, string>> = {};
-  for (const agentType of [...new Set(agentTypes)]) {
-    assertHeadlessSupported(agentType);
-    resolvedBinaryPaths[agentType] = resolveValidatedBinaryPath(agentType);
-  }
-
-  const root = stateRoot(cwd, teamName);
-  await mkdir(join(root, 'tasks'), { recursive: true });
-  await mkdir(join(root, 'mailbox'), { recursive: true });
-
-  // Write initial config before tmux topology is created.
-  await writeJson(join(root, 'config.json'), config);
-
-  // Create task files
-  for (let i = 0; i < tasks.length; i++) {
-    const taskId = String(i + 1);
-    await writeJson(taskPath(root, taskId), {
-      id: taskId,
-      subject: tasks[i].subject,
-      description: tasks[i].description,
-      status: 'pending',
-      owner: null,
-      result: null,
-      createdAt: new Date().toISOString(),
-    });
-  }
-
-  // Set up worker state dirs and overlays for all potential workers up front
-  // (overlays are cheap; workers are spawned on-demand later)
-  const workerNames: string[] = [];
-  for (let i = 0; i < tasks.length; i++) {
-    const wName = workerName(i);
-    workerNames.push(wName);
-    const agentType = agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude';
-    await ensureWorkerStateDir(teamName, wName, cwd);
-    await writeWorkerOverlay({
-      teamName, workerName: wName, agentType,
-      tasks: tasks.map((t, idx) => ({ id: String(idx + 1), subject: t.subject, description: t.description })),
-      cwd,
-      instructionStateRoot: root,
-    });
-  }
-
-  // Create tmux session with ZERO worker panes (leader only).
-  // Workers are spawned on-demand by the orchestrator.
-  const session: TeamSession = await createTeamSession(teamName, 0, cwd, {
-    newWindow: Boolean(config.newWindow),
-  });
-  const runtime: TeamRuntime = {
-    teamName,
-    sessionName: session.sessionName,
-    leaderPaneId: session.leaderPaneId,
-    config: {
-      ...config,
-      tmuxSession: session.sessionName,
-      leaderPaneId: session.leaderPaneId,
-      tmuxOwnsWindow: session.sessionMode !== 'split-pane',
-    },
-    workerNames,
-    workerPaneIds: session.workerPaneIds, // initially empty []
-    activeWorkers: new Map(),
-    cwd,
-    resolvedBinaryPaths,
-    ownsWindow: session.sessionMode !== 'split-pane',
-  };
-
-  await writeJson(join(root, 'config.json'), runtime.config);
-
-  const maxConcurrentWorkers = agentTypes.length;
-  for (let i = 0; i < maxConcurrentWorkers; i++) {
-    const taskIndex = await nextPendingTaskIndex(runtime);
-    if (taskIndex == null) break;
-    await spawnWorkerForTask(runtime, workerName(i), taskIndex);
-  }
-
-  runtime.stopWatchdog = watchdogCliWorkers(runtime, 1000);
-  return runtime;
+export async function startTeam(_config: TeamConfig): Promise<TeamRuntime> {
+  // The legacy runtime cannot publish the immutable instance/launch receipts
+  // required by safe destruction. Public startup is v2-only; reject before
+  // touching state, panes, providers, or worktrees rather than retaining an
+  // alternate unsafe creation route.
+  throw new Error(
+    'team_start_unsafe_runtime_v1: instance-bound provider cleanup requires runtime v2; set OMC_RUNTIME_V2=1',
+  );
 }
 
 /**
@@ -543,445 +205,15 @@ export async function monitorTeam(teamName: string, cwd: string, workerPaneIds: 
   };
 }
 
-/**
- * Runtime-owned worker watchdog/orchestrator loop.
- * Handles done.json completion, dead pane failures, and next-task spawning.
- */
-export function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => Promise<void> {
-  let activeTick: Promise<void> | null = null;
-  let stopped = false;
-  let consecutiveFailures = 0;
-  const MAX_CONSECUTIVE_FAILURES = 3;
-  // Track consecutive unresponsive ticks per worker
-  const unresponsiveCounts = new Map<string, number>();
-  const UNRESPONSIVE_KILL_THRESHOLD = 3;
 
-  const tick = async () => {
-    try {
-      const workers = [...runtime.activeWorkers.entries()];
-      if (workers.length === 0) return;
-
-      const root = stateRoot(runtime.cwd, runtime.teamName);
-
-      // Collect done signals and alive checks in parallel to avoid O(N×300ms) sequential tmux calls.
-      const [doneSignals, aliveResults] = await Promise.all([
-        Promise.all(workers.map(([wName]) => {
-          const donePath = join(root, 'workers', wName, 'done.json');
-          return readJsonSafe<DoneSignal>(donePath);
-        })),
-        Promise.all(workers.map(([, active]) => isWorkerAlive(active.paneId))),
-      ]);
-
-      for (let i = 0; i < workers.length; i++) {
-        const [wName, active] = workers[i];
-        const donePath = join(root, 'workers', wName, 'done.json');
-        const signal = doneSignals[i];
-
-        // Process done.json first if present
-        if (signal) {
-          unresponsiveCounts.delete(wName);
-          await markTaskFromDone(root, runtime.teamName, runtime.cwd, signal.taskId || active.taskId, signal.status, signal.summary);
-          try {
-            const { unlink } = await import('fs/promises');
-            await unlink(donePath);
-          } catch {
-            // no-op
-          }
-          await killWorkerPane(runtime, wName, active.paneId);
-          if (!(await allTasksTerminal(runtime))) {
-            const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
-            if (nextTaskIndexValue != null) {
-              await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-            }
-          }
-          continue;
-        }
-
-        // Dead pane without done.json => retry as transient failure when possible
-        const alive = aliveResults[i];
-        if (!alive) {
-          unresponsiveCounts.delete(wName);
-          const transition = await applyDeadPaneTransition(runtime, wName, active.taskId);
-          if (transition.action === 'requeued') {
-            const retryCount = transition.retryCount ?? 1;
-            console.warn(`[watchdog] worker ${wName} dead pane — requeuing task ${active.taskId} (retry ${retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
-          }
-          await killWorkerPane(runtime, wName, active.paneId);
-          if (!(await allTasksTerminal(runtime))) {
-            const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
-            if (nextTaskIndexValue != null) {
-              await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-            }
-          }
-          continue;
-        }
-
-        // Pane is alive but no done.json — check heartbeat for stall detection
-        const heartbeatPath = join(root, 'workers', wName, 'heartbeat.json');
-        const heartbeat = await readJsonSafe<{ updatedAt: string }>(heartbeatPath);
-        const isStalled = heartbeat?.updatedAt
-          ? Date.now() - new Date(heartbeat.updatedAt).getTime() > 60_000
-          : false;
-
-        if (isStalled) {
-          const count = (unresponsiveCounts.get(wName) ?? 0) + 1;
-          unresponsiveCounts.set(wName, count);
-          if (count < UNRESPONSIVE_KILL_THRESHOLD) {
-            console.warn(`[watchdog] worker ${wName} unresponsive (${count}/${UNRESPONSIVE_KILL_THRESHOLD}), task ${active.taskId}`);
-          } else {
-            console.warn(`[watchdog] worker ${wName} unresponsive ${count} consecutive ticks — killing and reassigning task ${active.taskId}`);
-            unresponsiveCounts.delete(wName);
-            const transition = await applyDeadPaneTransition(runtime, wName, active.taskId);
-            if (transition.action === 'requeued') {
-              console.warn(`[watchdog] worker ${wName} stall-killed — requeuing task ${active.taskId} (retry ${transition.retryCount}/${DEFAULT_MAX_TASK_RETRIES})`);
-            }
-            await killWorkerPane(runtime, wName, active.paneId);
-            if (!(await allTasksTerminal(runtime))) {
-              const nextTaskIndexValue = await nextPendingTaskIndex(runtime);
-              if (nextTaskIndexValue != null) {
-                await spawnWorkerForTask(runtime, wName, nextTaskIndexValue);
-              }
-            }
-          }
-        } else {
-          // Worker is responsive — reset counter
-          unresponsiveCounts.delete(wName);
-        }
-      }
-      // Reset failure counter on a successful tick
-      consecutiveFailures = 0;
-    } catch (err) {
-      consecutiveFailures++;
-      console.warn('[watchdog] tick error:', err);
-      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-        console.warn(`[watchdog] ${consecutiveFailures} consecutive failures — marking team as failed`);
-        try {
-          const root = stateRoot(runtime.cwd, runtime.teamName);
-          await writeJson(join(root, 'watchdog-failed.json'), {
-            failedAt: new Date().toISOString(),
-            consecutiveFailures,
-            lastError: err instanceof Error ? err.message : String(err),
-          });
-        } catch {
-          // best-effort
-        }
-        clearInterval(intervalId);
-      }
-    }
-  };
-
-  const startTick = () => {
-    if (stopped || activeTick) return;
-    const tickPromise = tick();
-    activeTick = tickPromise;
-    void tickPromise.finally(() => {
-      if (activeTick === tickPromise) activeTick = null;
-    });
-  };
-  const intervalId = setInterval(startTick, intervalMs);
-
-  return async () => {
-    stopped = true;
-    clearInterval(intervalId);
-    await activeTick;
-  };
-}
-
-/**
- * Spawn a worker pane for an explicit task assignment.
- */
-export async function spawnWorkerForTask(
-  runtime: TeamRuntime,
-  workerNameValue: string,
-  taskIndex: number
-): Promise<string> {
-  const root = stateRoot(runtime.cwd, runtime.teamName);
-  const taskId = String(taskIndex + 1);
-  const task = runtime.config.tasks[taskIndex];
-  if (!task) return '';
-
-  const workerIndex = parseWorkerIndex(workerNameValue);
-  const agentType = runtime.config.agentTypes[workerIndex % runtime.config.agentTypes.length]
-    ?? runtime.config.agentTypes[0]
-    ?? 'claude';
-  // Guard headless-unsupported providers (e.g. antigravity on Windows) BEFORE any
-  // task-state mutation or pane split, so legacy v1 startup rejects cleanly instead
-  // of leaving a task stuck `in_progress` with a stray pane (parity with v2/scale-up).
-  assertHeadlessSupported(agentType);
-
-  const marked = await markTaskInProgress(root, taskId, workerNameValue, runtime.teamName, runtime.cwd);
-  if (!marked) return '';
-
-  const splitTarget = runtime.workerPaneIds.length === 0
-    ? runtime.leaderPaneId
-    : runtime.workerPaneIds[runtime.workerPaneIds.length - 1];
-  const splitDirection = runtime.workerPaneIds.length === 0 ? 'right' : 'down';
-  const resetTaskAfterSplitFailure = async (startupError?: unknown): Promise<void> => {
-    let taskCleanupError: unknown;
-    try {
-      if (!await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd)) {
-        taskCleanupError = new Error(`worker_startup_task_reset_unconfirmed:${workerNameValue}:${taskId}`);
-      }
-    } catch (cleanupError) {
-      taskCleanupError = cleanupError;
-    }
-    if (taskCleanupError) {
-      const rollbackError = new Error(`worker_startup_task_reset_unconfirmed:${workerNameValue}:${taskId}`);
-      (rollbackError as Error & { cause?: unknown }).cause = {
-        ...(startupError !== undefined ? { startupError } : {}),
-        taskCleanupError,
-      };
-      throw rollbackError;
-    }
-    if (startupError !== undefined) {
-      if (startupError instanceof Error) throw startupError;
-      throw new Error(String(startupError));
-    }
-  };
-
-  let paneId: string | null;
-  try {
-    paneId = await splitTeamWorkerPane(splitTarget, splitDirection, runtime.cwd);
-  } catch (error) {
-    await resetTaskAfterSplitFailure(error);
-    return '';
-  }
-  if (!paneId) {
-    await resetTaskAfterSplitFailure();
-    return '';
-  }
-
-  const rollbackStartupFailure = async (
-    startupError: unknown,
-    rollbackMessage: string,
-    taskResetMarker: string,
-    causeKey: 'startupError' | 'layoutError',
-  ): Promise<never> => {
-    let paneCleanupError: unknown;
-    try {
-      await killWorkerPane(runtime, workerNameValue, paneId, { strict: true });
-    } catch (cleanupError) {
-      paneCleanupError = cleanupError;
-    }
-    let taskCleanupError: unknown;
-    try {
-      if (!await resetTaskToPending(root, taskId, runtime.teamName, runtime.cwd)) {
-        taskCleanupError = new Error(taskResetMarker);
-      }
-    } catch (cleanupError) {
-      taskCleanupError = cleanupError;
-    }
-    if (paneCleanupError || taskCleanupError) {
-      const rollbackError = new Error(rollbackMessage);
-      (rollbackError as Error & { cause?: unknown }).cause = {
-        [causeKey]: startupError,
-        paneCleanupError,
-        taskCleanupError,
-      };
-      throw rollbackError;
-    }
-    throw startupError instanceof Error ? startupError : new Error(String(startupError));
-  };
-
-  let rollbackMessage = `worker_startup_rollback_unverified:${workerNameValue}:${paneId}`;
-  let taskResetMarker = `worker_startup_task_reset_unconfirmed:${workerNameValue}:${taskId}`;
-  let rollbackCauseKey: 'startupError' | 'layoutError' = 'startupError';
-  try {
-    const usePromptMode = isPromptModeAgent(agentType);
-
-    // Build the initial task instruction and write inbox before spawn.
-    // For prompt-mode agents the instruction is passed via CLI flag;
-    // for interactive agents it is sent via tmux send-keys after startup.
-    const instruction = buildInitialTaskInstruction(runtime.teamName, workerNameValue, task, taskId, root);
-    await composeInitialInbox(runtime.teamName, workerNameValue, instruction, runtime.cwd);
-
-    const envVars = {
-      ...getModelWorkerEnv(runtime.teamName, workerNameValue, agentType),
-      OMC_TEAM_STATE_ROOT: root,
-      OMC_TEAM_LEADER_CWD: runtime.cwd,
-    };
-    const resolvedBinaryPath = runtime.resolvedBinaryPaths?.[agentType] ?? resolveValidatedBinaryPath(agentType);
-    if (!runtime.resolvedBinaryPaths) {
-      runtime.resolvedBinaryPaths = {};
-    }
-    runtime.resolvedBinaryPaths[agentType] = resolvedBinaryPath;
-
-    // Resolve model from environment variables based on agent type.
-    // For Claude agents on Bedrock/Vertex, resolve the provider-specific model
-    // so workers don't fall back to invalid Anthropic API model names. (#1695)
-    const modelForAgent = resolveDefaultWorkerModel(agentType, process.env);
-
-    const [launchBinary, ...launchArgs] = buildWorkerArgv(agentType, {
-      teamName: runtime.teamName,
-      workerName: workerNameValue,
-      cwd: runtime.cwd,
-      resolvedBinaryPath,
-      model: modelForAgent,
-    });
-
-    // For prompt-mode agents (e.g. Gemini Ink TUI, Antigravity --print), pass
-    // instruction via CLI flag so tmux send-keys never needs to interact with
-    // the TUI input widget.
-    // Codex and Claude team workers are persistent interactive panes and are
-    // nudged through the inbox transport instead of `codex exec`/print modes.
-    if (usePromptMode) {
-      const promptArgs = getPromptModeArgs(agentType, generateTriggerMessage(runtime.teamName, workerNameValue, root));
-      launchArgs.push(...promptArgs);
-    }
-
-    const paneConfig: WorkerPaneConfig = {
-      teamName: runtime.teamName,
-      workerName: workerNameValue,
-      envVars,
-      launchBinary,
-      launchArgs,
-      cwd: runtime.cwd,
-    };
-
-    try {
-      await applyMainVerticalLayout(runtime.sessionName, { required: true });
-    } catch (error) {
-      rollbackMessage = `worker_layout_rollback_unverified:${workerNameValue}:${paneId}`;
-      taskResetMarker = `worker_layout_task_reset_unconfirmed:${workerNameValue}:${taskId}`;
-      rollbackCauseKey = 'layoutError';
-      throw error;
-    }
-    await spawnWorkerInPane(runtime.sessionName, paneId, paneConfig);
-
-    runtime.workerPaneIds.push(paneId);
-    runtime.activeWorkers.set(workerNameValue, { paneId, taskId, spawnedAt: Date.now() });
-
-    try {
-      await writePanesTrackingFileIfPresent(runtime);
-    } catch {
-      // panes tracking is best-effort
-    }
-
-    if (!usePromptMode) {
-      // Interactive mode: wait for pane readiness, handle trust-confirm, then
-      // send instruction via tmux send-keys.
-      const paneReady = await waitForPaneReady(paneId, { provider: agentType });
-      if (!paneReady) {
-        throw new Error(`worker_pane_not_ready:${workerNameValue}`);
-      }
-
-      if (agentType === 'gemini') {
-        const confirmed = await notifyPaneWithRetry(runtime.sessionName, paneId, '1');
-        if (!confirmed) {
-          throw new Error(`worker_notify_failed:${workerNameValue}:trust-confirm`);
-        }
-        await new Promise(r => setTimeout(r, 800));
-      }
-
-      const notified = await notifyPaneWithRetry(
-        runtime.sessionName,
-        paneId,
-        generateTriggerMessage(runtime.teamName, workerNameValue, root),
-        1
-      );
-      if (!notified) {
-        throw new Error(`worker_notify_failed:${workerNameValue}:initial-inbox`);
-      }
-    }
-    // Prompt-mode agents: instruction already passed via CLI flag at spawn.
-    // No trust-confirm or tmux send-keys interaction needed.
-
-    return paneId;
-  } catch (error) {
-    return await rollbackStartupFailure(error, rollbackMessage, taskResetMarker, rollbackCauseKey);
-  }
-}
-
-/**
- * Kill a single worker pane and update runtime state.
- */
-export async function killWorkerPane(
-  runtime: TeamRuntime,
-  workerNameValue: string,
-  paneId: string,
-  options: { strict?: boolean } = {},
-): Promise<void> {
-  try {
-    await killTeamPane(paneId);
-  } catch (error) {
-    // Watchdog recovery is idempotent: a pane can disappear between the
-    // liveness probe and cleanup. Rollback callers opt into strict cleanup so
-    // an actual kill failure still fails closed instead of hiding an orphan.
-    if (options.strict) throw error;
-  }
-
-  const paneIndex = runtime.workerPaneIds.indexOf(paneId);
-  if (paneIndex >= 0) {
-    runtime.workerPaneIds.splice(paneIndex, 1);
-  }
-  runtime.activeWorkers.delete(workerNameValue);
-
-  try {
-    await writePanesTrackingFileIfPresent(runtime);
-  } catch {
-    // panes tracking is best-effort
-  }
-}
-
-/**
- * Assign a task to a specific worker via inbox + tmux trigger.
- */
-export async function assignTask(
-  teamName: string,
-  taskId: string,
-  targetWorkerName: string,
-  paneId: string,
-  sessionName: string,
-  cwd: string
-): Promise<void> {
-  const root = stateRoot(cwd, teamName);
-  const taskFilePath = taskPath(root, taskId);
-
-  // Update task ownership under an exclusive lock to prevent concurrent double-claims
-  type TaskSnapshot = { status: string; owner: string | null; assignedAt: string | undefined };
-  let previousTaskState: TaskSnapshot | null = null;
-  await withTaskLock(teamName, taskId, async () => {
-    const t = await readJsonSafe<TeamTaskRecord>(taskFilePath);
-    previousTaskState = t ? {
-      status: t.status,
-      owner: t.owner,
-      assignedAt: t.assignedAt,
-    } : null;
-    if (t) {
-      t.owner = targetWorkerName;
-      t.status = 'in_progress';
-      t.assignedAt = new Date().toISOString();
-      await writeJson(taskFilePath, t);
-    }
-  }, { cwd });
-
-  // Write to worker inbox
-  const inboxPath = join(root, 'workers', targetWorkerName, 'inbox.md');
-  await mkdir(join(inboxPath, '..'), { recursive: true });
-  const msg = `\n\n---\n## New Task Assignment\nTask ID: ${taskId}\nClaim and execute task from: ${taskFilePath}\n`;
-  const { appendFile } = await import('fs/promises');
-  await appendFile(inboxPath, msg, 'utf-8');
-
-  // Send tmux trigger
-  const notified = await notifyPaneWithRetry(sessionName, paneId, `new-task:${taskId}`);
-  if (!notified) {
-    if (previousTaskState) {
-      await withTaskLock(teamName, taskId, async () => {
-        const t = await readJsonSafe<TeamTaskRecord>(taskFilePath);
-        if (t) {
-          t.status = (previousTaskState as TaskSnapshot).status as TeamTaskRecord['status'];
-          t.owner = (previousTaskState as TaskSnapshot).owner;
-          t.assignedAt = (previousTaskState as TaskSnapshot).assignedAt;
-          await writeJson(taskFilePath, t);
-        }
-      }, { cwd });
-    }
-    throw new Error(`worker_notify_failed:${targetWorkerName}:new-task:${taskId}`);
-  }
-}
 
 /**
  * Gracefully shut down all workers and clean up.
+ *
+ * The legacy runtime is intentionally destructive only when the caller
+ * supplies an instance identity backed by the durable reservation protocol.
+ * Omitting the identity preserves state rather than falling back to names or
+ * pane IDs.
  */
 export async function shutdownTeam(
   teamName: string,
@@ -991,71 +223,21 @@ export async function shutdownTeam(
   workerPaneIds?: string[],
   leaderPaneId?: string,
   ownsWindow?: boolean,
+  instanceId?: TeamInstanceId,
 ): Promise<boolean> {
-  const root = stateRoot(cwd, teamName);
-
-  // Write shutdown request
-  await writeJson(join(root, 'shutdown.json'), {
-    requestedAt: new Date().toISOString(),
-    teamName,
-  });
-
-  const configData = await readJsonSafe<TeamConfig>(join(root, 'config.json'));
-
-  // CLI workers (claude/codex/gemini/grok/cursor tmux pane processes) never write shutdown-ack.json.
-  // Polling for ACK files on CLI worker teams wastes the full timeoutMs on every shutdown.
-  // Detect CLI worker teams by checking if all agent types are known CLI types, and skip
-  // ACK polling — the tmux kill below handles process cleanup instead.
-  const CLI_AGENT_TYPES = new Set<string>(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
-  const agentTypes: string[] = configData?.agentTypes ?? [];
-  const isCliWorkerTeam = agentTypes.length > 0 && agentTypes.every(t => CLI_AGENT_TYPES.has(t));
-
-  if (!isCliWorkerTeam) {
-    // Bridge daemon workers do write shutdown-ack.json — poll for them.
-    const deadline = Date.now() + timeoutMs;
-    const workerCount = configData?.workerCount ?? 0;
-    const expectedAcks = Array.from({ length: workerCount }, (_, i) => `worker-${i + 1}`);
-
-    while (Date.now() < deadline && expectedAcks.length > 0) {
-      for (const wName of [...expectedAcks]) {
-        const ackPath = join(root, 'workers', wName, 'shutdown-ack.json');
-        if (existsSync(ackPath)) {
-          expectedAcks.splice(expectedAcks.indexOf(wName), 1);
-        }
-      }
-      if (expectedAcks.length > 0) {
-        await new Promise(r => setTimeout(r, 500));
-      }
-    }
-  }
-  // CLI worker teams: skip ACK polling — process exit is handled by tmux kill below.
-
-  // Kill tmux session (or just worker panes in split-pane mode)
-  const sessionMode = (ownsWindow ?? Boolean(configData?.tmuxOwnsWindow))
-    ? (sessionName.includes(':') ? 'dedicated-window' : 'detached-session')
-    : 'split-pane';
-  const effectiveWorkerPaneIds = sessionMode === 'split-pane'
-    ? await resolveSplitPaneWorkerPaneIds(sessionName, workerPaneIds, leaderPaneId)
-    : workerPaneIds;
-  // Fail closed: split-pane teams with workers but no identity-bound pane evidence
-  // must not report successful cleanup and delete state.
-  if (sessionMode === 'split-pane') {
-    const expectedWorkers = Number(configData?.workerCount ?? 0);
-    if (expectedWorkers > 0 && (!effectiveWorkerPaneIds || effectiveWorkerPaneIds.length === 0)) {
-      return false;
-    }
-  }
-  if (!await killTeamSession(sessionName, effectiveWorkerPaneIds, leaderPaneId, { sessionMode })) return false;
-
-  // Clean up state
+  // V1 has no immutable launch receipts or instance reservation, so it cannot
+  // safely authorize provider/process destruction. Delegate identity-bearing
+  // callers to the real v2 provider cleanup protocol; all legacy/name-only
+  // callers fail closed without touching panes, worktrees, or state.
+  if (!instanceId) return false;
   try {
-    if (cleanupTeamWorktrees(teamName, cwd).preserved.length > 0) return false;
-  } catch {
-    return false;
-  }
-  try {
-    await rm(root, { recursive: true, force: true });
-    return true;
+    const { shutdownTeamV2 } = await import('./runtime-v2.js');
+    const result = await shutdownTeamV2(teamName, cwd, {
+      instanceId,
+      force: timeoutMs === 0,
+      timeoutMs,
+    });
+    return result.outcome === 'cleaned';
   } catch {
     return false;
   }
@@ -1064,36 +246,87 @@ export async function shutdownTeam(
 /**
  * Resume an existing team from persisted state.
  * Reconstructs activeWorkers by scanning task files for in_progress tasks
- * so the watchdog loop can continue processing without stalling.
+ * for read-only status consumers. No legacy mutation loop is resumed.
  */
 export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRuntime | null> {
   const root = stateRoot(cwd, teamName);
   const configData = await readJsonSafe<TeamConfig>(join(root, 'config.json'));
-  if (!configData) return null;
+  if (!configData || !isValidTeamInstanceId(configData.instance_id)) return null;
 
-  // Check if session is alive
-  const sName = configData.tmuxSession || `omc-team-${teamName}`;
-
-  try {
-    await tmuxExecAsync(['has-session', '-t', sName.split(':')[0]]);
-  } catch {
-    return null; // Session not alive
+  const sName = configData.tmuxSession;
+  const leaderPaneId = configData.leaderPaneId;
+  const workerNames = configData.workerNames;
+  const workerPaneByName = configData.workerPaneByName;
+  if (!sName || !leaderPaneId || !leaderPaneId.trim()
+    || !Array.isArray(workerNames)
+    || new Set(workerNames).size !== workerNames.length
+    || workerNames.some(name => typeof name !== 'string' || name.trim().length === 0)
+    || !workerPaneByName
+    || typeof workerPaneByName !== 'object'
+    || Array.isArray(workerPaneByName)) {
+    return null;
+  }
+  const workerPaneEntries = Object.entries(workerPaneByName);
+  if (workerPaneEntries.some(([name, paneId]) => (
+    !workerNames.includes(name)
+    || typeof paneId !== 'string'
+    || paneId.trim().length === 0
+  ))) return null;
+  const workerPaneIds = workerPaneEntries.map(([, paneId]) => paneId);
+  if (new Set(workerPaneIds).size !== workerPaneIds.length) return null;
+  if (Array.isArray(configData.workerPaneIds)) {
+    if (new Set(configData.workerPaneIds).size !== configData.workerPaneIds.length
+      || configData.workerPaneIds.length !== workerPaneIds.length
+      || configData.workerPaneIds.some(paneId => !workerPaneIds.includes(paneId))) return null;
   }
 
-  const paneTarget = sName.includes(':') ? sName : sName.split(':')[0];
-  const panesResult = await tmuxExecAsync([
-    'list-panes', '-t', paneTarget, '-F', '#{pane_id}'
-  ]);
-  const allPanes = panesResult.stdout.trim().split('\n').filter(Boolean);
-  // First pane is leader, rest are workers
-  const workerPaneIds = allPanes.slice(1);
-  const workerNames = workerPaneIds.map((_, i) => `worker-${i + 1}`);
+  const provider = sName.startsWith('cmux:') ? 'cmux' : 'tmux';
+  const tmuxServerIdentity = provider === 'tmux'
+    ? configData.tmuxServerIdentity
+    : undefined;
+  if (provider === 'tmux') {
+    if (!isValidTmuxServerIdentity(tmuxServerIdentity)) return null;
+    if (await observeTmuxServerIdentity(tmuxServerIdentity) !== 'matching') return null;
+    try {
+      await tmuxExecAsync([
+        '-S', tmuxServerIdentity.socket_path,
+        'has-session',
+        '-t', sName.split(':')[0]!,
+      ]);
+    } catch {
+      return null;
+    }
+  }
+
+  const leaderOwnership = await verifyTeamTargetOwnership({
+    provider,
+    providerTarget: sName,
+    recipient: 'leader-fixed',
+    recipientRole: 'leader',
+    paneId: leaderPaneId,
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+  });
+  if (leaderOwnership.kind !== 'owned') return null;
+
+  const workerPaneOwnership = new Map<string, WorkerPaneOwnership>();
+  for (let i = 0; i < workerPaneIds.length; i++) {
+    const paneId = workerPaneIds[i]!;
+    const ownership = await adoptWorkerPaneOwnership({
+      provider,
+      providerTarget: sName,
+      paneId,
+      leaderPaneId,
+      reservedPaneIds: workerPaneIds.filter((candidate, index) => index !== i),
+      ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    });
+    if (!ownership.ok) return null;
+    workerPaneOwnership.set(paneId, ownership.ownership);
+  }
 
   // Reconstruct activeWorkers by scanning task files for in_progress tasks.
-  // Build a paneId lookup: worker-N maps to workerPaneIds[N-1].
-  const paneByWorker = new Map<string, string>(
-    workerNames.map((wName, i) => [wName, workerPaneIds[i] ?? ''])
-  );
+  // Build a paneId lookup from the persisted creation mapping. Never use the
+  // current pane order as a substitute for missing ownership evidence.
+  const paneByWorker = new Map<string, string>(workerPaneEntries);
 
   const activeWorkers = new Map<string, ActiveWorkerState>();
   for (let i = 0; i < configData.tasks.length; i++) {
@@ -1101,6 +334,7 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
     const task = await readTask(root, taskId);
     if (task?.status === 'in_progress' && task.owner) {
       const paneId = paneByWorker.get(task.owner) ?? '';
+      if (!paneId || !workerPaneOwnership.has(paneId)) return null;
       activeWorkers.set(task.owner, {
         paneId,
         taskId,
@@ -1112,12 +346,16 @@ export async function resumeTeam(teamName: string, cwd: string): Promise<TeamRun
   return {
     teamName,
     sessionName: sName,
-    leaderPaneId: configData.leaderPaneId ?? allPanes[0] ?? '',
+    leaderPaneId,
     config: configData,
     workerNames,
     workerPaneIds,
     activeWorkers,
     cwd,
+    instanceId: configData.instance_id,
+    tmuxServerIdentity,
+    workerPaneOwnership,
+    workerPaneByName: new Map(workerPaneEntries),
     ownsWindow: Boolean(configData.tmuxOwnsWindow),
   };
 }

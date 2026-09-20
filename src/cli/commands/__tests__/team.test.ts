@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { existsSync } from 'fs';
 import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -210,6 +211,32 @@ describe('teamCommand api operations', () => {
     } finally {
       console.error = originalError;
       process.env.OMC_TEAM_WORKER = previousWorker;
+      process.exitCode = 0;
+    }
+  });
+
+  it('rejects the legacy runtime before creating native team state', async () => {
+    wd = await mkdtemp(join(tmpdir(), 'omc-team-cli-v1-rejected-'));
+    isolateFixtureHome(wd);
+    previousCwd = process.cwd();
+    process.chdir(wd);
+    const previousRuntimeFlag = process.env.OMC_RUNTIME_V2;
+    const errors: string[] = [];
+    const originalError = console.error;
+    try {
+      process.env.OMC_RUNTIME_V2 = '0';
+      console.error = (...args: unknown[]) => errors.push(args.map(String).join(' '));
+
+      await teamCommand(['1:codex', 'do work']);
+
+      expect(errors.join('\n')).toContain('team_start_unsafe_runtime_v1');
+      expect(errors.join('\n')).toContain('OMC_RUNTIME_V2=1');
+      expect(existsSync(join(wd, '.omc', 'state', 'team'))).toBe(false);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      console.error = originalError;
+      if (previousRuntimeFlag === undefined) delete process.env.OMC_RUNTIME_V2;
+      else process.env.OMC_RUNTIME_V2 = previousRuntimeFlag;
       process.exitCode = 0;
     }
   });

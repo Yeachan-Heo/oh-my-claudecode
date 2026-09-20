@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, renameSync,
 import { dirname, join } from 'path';
 
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Success } from './types.js';
+import { isValidTeamInstanceId } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { withProcessIdentityFileLockSync } from './process-identity-lock.js';
 
@@ -22,6 +23,8 @@ export interface RecoveryRequestPayload {
   workspaceHash: string;
   teamName: string;
   workerName: string;
+  /** Immutable team incarnation; never resolve this from mutable config. */
+  instanceId: string;
 }
 
 export interface RecoveryRequestReservation {
@@ -33,6 +36,8 @@ export interface RecoveryRequestReservation {
   workspace_hash: string;
   team_name: string;
   worker_name: string;
+  /** Immutable team incarnation captured at admission. */
+  instance_id: string;
   recovery_id: string;
   created_at: string;
   expires_at: string;
@@ -152,7 +157,9 @@ function replaceDerivedIndex<T>(target: string, value: T): T {
 }
 
 export function canonicalRecoveryPayloadHash(payload: RecoveryRequestPayload): string {
-  return sha256({ operation: payload.operation, workspace_hash: payload.workspaceHash, team_name: payload.teamName, worker_name: payload.workerName });
+  if (!isValidTeamInstanceId(payload.instanceId)) throw new Error('invalid_recovery_instance_id');
+  return sha256({ operation: payload.operation, workspace_hash: payload.workspaceHash, team_name: payload.teamName,
+    worker_name: payload.workerName, instance_id: payload.instanceId.toLowerCase() });
 }
 
 export function reserveRecoveryRequest(cwd: string, requestId: string, payload: RecoveryRequestPayload, recoveryId: string = randomUUID()): RequestReservationResult {
@@ -169,6 +176,7 @@ export function reserveRecoveryRequest(cwd: string, requestId: string, payload: 
     workspace_hash: payload.workspaceHash,
     team_name: payload.teamName,
     worker_name: payload.workerName,
+    instance_id: payload.instanceId.toLowerCase(),
     recovery_id: recoveryId,
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + RETENTION_MS).toISOString(),
@@ -182,6 +190,7 @@ export function reserveRecoveryRequest(cwd: string, requestId: string, payload: 
     return existing.operation === payload.operation && existing.payload_hash === payloadHash
       && existing.workspace_hash === payload.workspaceHash && existing.team_name === payload.teamName
       && existing.worker_name === payload.workerName
+      && existing.instance_id === payload.instanceId.toLowerCase()
       ? { kind: 'joined', reservation: existing } : { kind: 'conflict', reservation: existing };
   }
 }
@@ -193,7 +202,8 @@ export function aliasActiveRecoveryRequest(cwd: string, requestId: string, paylo
   assertSafeRecoveryRequestId(active.recovery_id);
   const payloadHash = canonicalRecoveryPayloadHash(payload);
   if (active.operation !== payload.operation || active.payload_hash !== payloadHash || active.team_name !== payload.teamName
-    || active.worker_name !== payload.workerName || active.workspace_hash !== payload.workspaceHash) return { kind: 'conflict', reservation: active };
+    || active.worker_name !== payload.workerName || active.workspace_hash !== payload.workspaceHash
+    || active.instance_id !== payload.instanceId.toLowerCase()) return { kind: 'conflict', reservation: active };
   const now = new Date();
   const alias: RecoveryRequestReservation = {
     schema_version: 1,
@@ -204,6 +214,7 @@ export function aliasActiveRecoveryRequest(cwd: string, requestId: string, paylo
     workspace_hash: payload.workspaceHash,
     team_name: payload.teamName,
     worker_name: payload.workerName,
+    instance_id: payload.instanceId.toLowerCase(),
     recovery_id: active.recovery_id,
     created_at: now.toISOString(),
     expires_at: new Date(now.getTime() + RETENTION_MS).toISOString(),
@@ -217,7 +228,8 @@ export function aliasActiveRecoveryRequest(cwd: string, requestId: string, paylo
     if (!existing) throw new Error('malformed_recovery_request_reservation');
     return existing.operation === payload.operation && existing.payload_hash === payloadHash
       && existing.workspace_hash === payload.workspaceHash && existing.team_name === payload.teamName
-      && existing.worker_name === payload.workerName && existing.recovery_id === active.recovery_id
+      && existing.worker_name === payload.workerName && existing.instance_id === payload.instanceId.toLowerCase()
+      && existing.recovery_id === active.recovery_id
       ? { kind: 'joined', reservation: existing } : { kind: 'conflict', reservation: existing };
   }
 }
@@ -230,8 +242,10 @@ export function readRecoveryRequestReservation(cwd: string, requestId: string): 
     || typeof reservation.workspace_hash !== 'string' || !/^[a-f0-9]{64}$/.test(reservation.workspace_hash)
     || typeof reservation.team_name !== 'string' || reservation.team_name.length === 0
     || typeof reservation.worker_name !== 'string' || reservation.worker_name.length === 0
+    || !isValidTeamInstanceId(reservation.instance_id)
     || reservation.payload_hash !== canonicalRecoveryPayloadHash({ operation: reservation.operation,
-      workspaceHash: reservation.workspace_hash, teamName: reservation.team_name, workerName: reservation.worker_name })
+      workspaceHash: reservation.workspace_hash, teamName: reservation.team_name, workerName: reservation.worker_name,
+      instanceId: reservation.instance_id })
     || typeof reservation.recovery_id !== 'string' || !isSafeRecoveryRequestId(reservation.recovery_id)
     || typeof reservation.created_at !== 'string' || !Number.isFinite(Date.parse(reservation.created_at))
     || typeof reservation.expires_at !== 'string' || !Number.isFinite(Date.parse(reservation.expires_at))
@@ -248,6 +262,7 @@ function hasMatchingReservationTuple(left: RecoveryRequestReservation, right: Re
     && left.workspace_hash === right.workspace_hash
     && left.team_name === right.team_name
     && left.worker_name === right.worker_name
+    && left.instance_id.toLowerCase() === right.instance_id.toLowerCase()
     && left.recovery_id === right.recovery_id;
 }
 

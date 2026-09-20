@@ -19,6 +19,13 @@ export interface RecoverySagaInput {
 export interface RecoverySagaDependencies {
   cwd: string;
   getLiveness: (teamName: string, workerName: string) => Promise<'dead' | 'alive' | 'unknown'>;
+  /**
+   * A committed replacement is already the recovery target.  Its execution
+   * liveness must not take the original-worker `already_running` shortcut:
+   * activation, continuation adoption, service repair, and writeRun still
+   * need to reconcile.
+   */
+  isCommittedReplacement?: (input: RecoverySagaInput) => Promise<boolean>;
   listOwnedInProgressTasks: (teamName: string, workerName: string) => Promise<TeamTask[]>;
   /** Must validate every checkpoint before any transition is made. */
   validateCheckpoint: (teamName: string, task: TeamTask) => Promise<{ ok: true; sequence: number } | { ok: false; error: RecoverDeadWorkerV2Error }>;
@@ -50,8 +57,11 @@ export async function runRecoverySaga(input: RecoverySagaInput, deps: RecoverySa
   const finalize = (result: RecoverDeadWorkerV2Result, _continuation: 'none' | 'selected' | 'reserved' | 'adopted', _adoption: 'not_started' | 'pending' | 'adopted', _services: 'synced' | 'repair_required' | 'terminal_degraded' = 'terminal_degraded'): RecoverDeadWorkerV2Result => result;
 
   const liveness = await deps.getLiveness(input.teamName, input.workerName);
+  const committedReplacement = liveness === 'alive'
+    ? await deps.isCommittedReplacement?.(input) ?? false
+    : false;
   if (liveness === 'unknown') return finalize(failure(input, 'worker_liveness_unknown'), 'none', 'not_started');
-  if (liveness === 'alive') {
+  if (liveness === 'alive' && !committedReplacement) {
     if (!input.originalPaneId?.trim()) return finalize(failure(input, 'worker_liveness_unknown'), 'none', 'not_started');
     return finalize({ outcome: 'already_running', committed: true, oldPaneId: null, newPaneId: input.originalPaneId, requeuedTaskIds: [], continuationSequenceByTask: {}, stateRevision: 0, activation: 'active', manifestSync: 'synced', servicesSync: 'synced', warnings: [], requestId: input.requestId, recoveryId: input.recoveryId, teamName: input.teamName, workerName: input.workerName, updatedAt: new Date().toISOString() }, 'none', 'not_started', 'synced');
   }

@@ -83,4 +83,18 @@ describe.runIf(process.platform === "darwin")("real Darwin directory-relative ba
       expect(api.readDir(fd)).toEqual([]);
     } finally { closeSync(fd); }
   });
+
+  it("returns a precise process birth time and rejects non-integral or overflowing pids", () => {
+    const api = getNativeContainedFs();
+    const started = api.processStartTime(process.pid);
+    expect(started).not.toBeNull();
+    expect(Number.isSafeInteger(started?.seconds)).toBe(true);
+    expect(started?.seconds).toBeGreaterThan(0);
+    expect(Number.isSafeInteger(started?.microseconds)).toBe(true);
+    expect(started?.microseconds).toBeGreaterThanOrEqual(0);
+    expect(started?.microseconds).toBeLessThan(1_000_000);
+    expect(api.processStartTime(2_147_483_647)).toBeNull();
+    expect(() => api.processStartTime(1.5)).toThrow();
+    expect(() => api.processStartTime(Number.MAX_SAFE_INTEGER)).toThrow();
+  });
 });

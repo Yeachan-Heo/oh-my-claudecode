@@ -20,6 +20,8 @@ export interface NativeContainedFs {
   readDir(directoryFd: number): string[];
   /** For containment checks only. Never use this path for a mutation. */
   realpathFd(fd: number): string;
+  /** Read the kernel process birth time; null means unavailable or not found. */
+  processStartTime(pid: number): { seconds: number; microseconds: number } | null;
 }
 
 let loaded: NativeContainedFs | undefined;

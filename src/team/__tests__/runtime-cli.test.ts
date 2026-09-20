@@ -4,15 +4,14 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { createHash } from 'node:crypto';
 import {
-  assertAutoMergeRuntimeSupported,
   buildCliOutput,
   buildTerminalCliResult,
+  captureTerminalCliResult,
   handleRecoverDeadWorkerV2Owner,
   fenceAllDeadRecoveryExpiry,
   hasPendingRecoveryAdmissionBeforeDeadline,
   hasPendingRecoveryIntentBeforeDeadline,
   updateAllDeadRecoveryGrace,
-  checkWatchdogFailedMarker,
   getTerminalStatus,
   isTerseFinalSummary,
   processPendingRecoveryIntents,
@@ -29,11 +28,14 @@ import {
 } from '../runtime-cli.js';
 import { aliasActiveRecoveryRequest, canonicalRecoveryPayloadHash, readRecoveryOutcome, reserveRecoveryRequest, writeRecoveryFinal } from '../recovery-request-store.js';
 import { absPath, TeamPaths } from '../state-paths.js';
+import { reserveTeamInstance } from '../team-instance.js';
 
 let fixtureRoot: string | undefined;
 let previousHome: string | undefined;
 let previousUserProfile: string | undefined;
 let previousStateDir: string | undefined;
+const INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
+const OTHER_INSTANCE_ID = '44444444-4444-4444-8444-444444444444';
 
 function mkdtempSync(prefix: string): string {
   const root = rawMkdtempSync(prefix);
@@ -63,30 +65,32 @@ afterEach(() => {
   previousStateDir = undefined;
 });
 
-describe('runtime-cli legacy watchdog shutdown', () => {
-  it('quiesces v1 before snapshotting, shutdown, and publication', async () => {
+describe('runtime-cli v2 shutdown publication', () => {
+  it('captures an instance-bound snapshot before shutdown and publishes it afterward', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-shutdown-order-'));
     try {
       const teamName = 'shutdown-order';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
       const tasksDir = join(stateRoot, 'tasks');
       mkdirSync(tasksDir, { recursive: true });
+      writeFileSync(join(stateRoot, 'manifest.json'), JSON.stringify({
+        schema_version: 2,
+        name: teamName,
+        instance_id: INSTANCE_ID,
+      }), 'utf-8');
       writeFileSync(join(tasksDir, '1.json'), JSON.stringify({
         id: '1',
         status: 'completed',
         result: 'pre-shutdown task result',
       }), 'utf-8');
 
-      let releaseStop!: () => void;
-      const stopPending = new Promise<void>(resolve => { releaseStop = resolve; });
       const phases: string[] = [];
-      let published: { taskResults: Array<{ taskId: string; status: string; summary: string }> } | undefined;
+      let published: { instanceId?: string; taskResults: Array<{ taskId: string; status: string; summary: string }> } | undefined;
       const completing = finalizeRuntimeShutdown(
-        { stopWatchdog: () => stopPending },
-        false,
         async () => {
           phases.push('collect');
-          return buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+          return buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000, INSTANCE_ID);
         },
         async () => {
           phases.push('shutdown');
@@ -96,11 +100,8 @@ describe('runtime-cli legacy watchdog shutdown', () => {
           phases.push('publish');
           published = output;
         },
+        { teamName, cwd, instanceId: INSTANCE_ID },
       );
-
-      await Promise.resolve();
-      expect(phases).toEqual([]);
-      releaseStop();
 
       const output = await completing;
       expect(phases).toEqual(['collect', 'shutdown', 'publish']);
@@ -108,23 +109,52 @@ describe('runtime-cli legacy watchdog shutdown', () => {
       expect(output.taskResults).toEqual([
         { taskId: '1', status: 'completed', summary: 'pre-shutdown task result' },
       ]);
+      expect(output.instanceId).toBe(INSTANCE_ID);
+      expect(published?.instanceId).toBe(INSTANCE_ID);
       expect(published?.taskResults).toEqual(output.taskResults);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
 
-  it('does not stop the v1 watchdog seam for runtime v2', async () => {
-    const stopWatchdog = vi.fn(async () => undefined);
-    await finalizeRuntimeShutdown(
-      { stopWatchdog },
-      true,
-      async () => undefined,
-      async () => undefined,
-      async () => undefined,
-    );
-    expect(stopWatchdog).not.toHaveBeenCalled();
+  it('captures terminal output only under the reserved instance authority', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-terminal-snapshot-'));
+    try {
+      const teamName = 'terminal-snapshot';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
+      const stateRoot = join(cwd, '.omc', 'state', 'team', teamName);
+      mkdirSync(join(stateRoot, 'tasks'), { recursive: true });
+      writeFileSync(join(stateRoot, 'manifest.json'), JSON.stringify({
+        schema_version: 2,
+        name: teamName,
+        instance_id: INSTANCE_ID,
+      }), 'utf-8');
+      writeFileSync(join(stateRoot, 'tasks', '1.json'), JSON.stringify({
+        id: '1',
+        status: 'completed',
+        result: 'snapshot result',
+      }), 'utf-8');
+
+      const result = await captureTerminalCliResult(
+        cwd,
+        stateRoot,
+        teamName,
+        'complete',
+        1,
+        Date.now() - 1_000,
+        INSTANCE_ID,
+      );
+
+      expect(result.output.instanceId).toBe(INSTANCE_ID);
+      expect(result.output.taskResults).toEqual([
+        { taskId: '1', status: 'completed', summary: 'snapshot result' },
+      ]);
+      expect(result.exitCode).toBe(0);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
+
   it('holds signal-triggered shutdown until startup ownership settles', async () => {
     const barrier = createRuntimeStartupShutdownBarrier();
     barrier.requestShutdown();
@@ -139,29 +169,24 @@ describe('runtime-cli legacy watchdog shutdown', () => {
   });
 
   it('does not publish a terminal result when shutdown cleanup fails', async () => {
-    const phases: string[] = [];
-    await expect(finalizeRuntimeShutdown(
-      null,
-      true,
-      async () => { phases.push('collect'); return { status: 'failed' }; },
-      async () => { phases.push('shutdown'); throw new Error('team_shutdown_provider_cleanup_unverified:worker-1'); },
-      async () => { phases.push('publish'); },
-    )).rejects.toThrow('team_shutdown_provider_cleanup_unverified:worker-1');
-    expect(phases).toEqual(['collect', 'shutdown']);
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-shutdown-failure-'));
+    try {
+      const teamName = 'shutdown-failure';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
+      const phases: string[] = [];
+      await expect(finalizeRuntimeShutdown(
+        async () => { phases.push('collect'); return { status: 'failed' }; },
+        async () => { phases.push('shutdown'); throw new Error('team_shutdown_provider_cleanup_unverified:worker-1'); },
+        async () => { phases.push('publish'); },
+        { teamName, cwd, instanceId: INSTANCE_ID },
+      )).rejects.toThrow('team_shutdown_provider_cleanup_unverified:worker-1');
+      expect(phases).toEqual(['collect', 'shutdown']);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
 });
-
-describe('runtime-cli auto-merge compatibility', () => {
-  it('rejects explicit auto-merge when runtime v2 is disabled', () => {
-    expect(() => assertAutoMergeRuntimeSupported(false, true)).toThrow(/requires runtime v2/);
-  });
-
-  it('allows v1 runtime when auto-merge is not requested', () => {
-    expect(() => assertAutoMergeRuntimeSupported(false, false)).not.toThrow();
-  });
-});
-
 describe('runtime-cli worker launch bootstrap', () => {
   it('rejects malformed launch JSON without echoing its secret payload', async () => {
     process.env.OMC_WORKER_LAUNCH_SPEC = '{"provider_argv":["codex","--token","SUPERSECRET"],';
@@ -227,101 +252,6 @@ describe('runtime-cli terminal status helper', () => {
   });
 });
 
-describe('runtime-cli watchdog marker helper', () => {
-  it('continues when marker file does not exist', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-none-'));
-    try {
-      const result = await checkWatchdogFailedMarker(stateRoot, Date.now());
-      expect(result.failed).toBe(false);
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('fails fast when marker timestamp is current/fresh', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-fresh-'));
-    try {
-      const startTime = Date.now();
-      writeFileSync(
-        join(stateRoot, 'watchdog-failed.json'),
-        JSON.stringify({ failedAt: startTime + 1_000 }),
-        'utf-8',
-      );
-
-      const result = await checkWatchdogFailedMarker(stateRoot, startTime);
-      expect(result.failed).toBe(true);
-      expect(result.reason).toContain('Watchdog marked team failed');
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('treats stale marker as non-fatal and unlinks it best-effort', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-stale-'));
-    const markerPath = join(stateRoot, 'watchdog-failed.json');
-    try {
-      const startTime = Date.now();
-      writeFileSync(
-        markerPath,
-        JSON.stringify({ failedAt: new Date(startTime - 10_000).toISOString() }),
-        'utf-8',
-      );
-
-      const result = await checkWatchdogFailedMarker(stateRoot, startTime);
-      expect(result.failed).toBe(false);
-      expect(existsSync(markerPath)).toBe(false);
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('fails fast when marker is invalid JSON', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-badjson-'));
-    try {
-      writeFileSync(join(stateRoot, 'watchdog-failed.json'), '{bad-json', 'utf-8');
-      const result = await checkWatchdogFailedMarker(stateRoot, Date.now());
-      expect(result.failed).toBe(true);
-      expect(result.reason).toContain('Failed to parse watchdog marker');
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('fails fast when marker failedAt is not parseable', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-invalid-failedat-'));
-    try {
-      writeFileSync(
-        join(stateRoot, 'watchdog-failed.json'),
-        JSON.stringify({ failedAt: { nested: true } }),
-        'utf-8',
-      );
-      const result = await checkWatchdogFailedMarker(stateRoot, Date.now());
-      expect(result.failed).toBe(true);
-      expect(result.reason).toContain('Invalid watchdog marker');
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('accepts numeric-string failedAt markers', async () => {
-    const stateRoot = mkdtempSync(join(tmpdir(), 'runtime-cli-watchdog-numeric-string-'));
-    try {
-      const startTime = Date.now();
-      writeFileSync(
-        join(stateRoot, 'watchdog-failed.json'),
-        JSON.stringify({ failedAt: String(startTime + 5_000) }),
-        'utf-8',
-      );
-
-      const result = await checkWatchdogFailedMarker(stateRoot, startTime);
-      expect(result.failed).toBe(true);
-      expect(result.reason).toContain('Watchdog marked team failed');
-    } finally {
-      rmSync(stateRoot, { recursive: true, force: true });
-    }
-  });
-});
-
 describe('runtime-cli result artifact writer', () => {
   it('writes result artifact via tmp+rename with required fields', async () => {
     const jobsDir = mkdtempSync(join(tmpdir(), 'runtime-cli-artifact-'));
@@ -332,6 +262,7 @@ describe('runtime-cli result artifact writer', () => {
         {
           status: 'completed',
           teamName: 'team-a',
+          instanceId: INSTANCE_ID,
           taskResults: [{ taskId: '1', status: 'completed', summary: 'ok' }],
           duration: 1.25,
           workerCount: 2,
@@ -350,6 +281,7 @@ describe('runtime-cli result artifact writer', () => {
       const payload = JSON.parse(readFileSync(resultPath, 'utf-8')) as Record<string, unknown>;
       expect(payload.status).toBe('completed');
       expect(payload.teamName).toBe('team-a');
+      expect(payload.instanceId).toBe(INSTANCE_ID);
       expect(payload.duration).toBe(1.25);
       expect(payload.workerCount).toBe(2);
       expect(payload.finishedAt).toBe(finishedAt);
@@ -366,6 +298,7 @@ describe('runtime-cli result artifact writer', () => {
         {
           status: 'failed',
           teamName: 'team-b',
+          instanceId: INSTANCE_ID,
           taskResults: [],
           duration: 0.1,
           workerCount: 1,
@@ -383,11 +316,14 @@ describe('runtime-cli result artifact writer', () => {
 
   it('no-ops when jobs dir is missing even if job id is provided', async () => {
     const jobsDir = mkdtempSync(join(tmpdir(), 'runtime-cli-artifact-missing-dir-'));
+    const previousJobsDir = process.env.OMC_JOBS_DIR;
+    delete process.env.OMC_JOBS_DIR;
     try {
       await writeResultArtifact(
         {
           status: 'completed',
           teamName: 'team-c',
+          instanceId: INSTANCE_ID,
           taskResults: [{ taskId: '1', status: 'completed', summary: 'ok' }],
           duration: 0.2,
           workerCount: 1,
@@ -397,6 +333,30 @@ describe('runtime-cli result artifact writer', () => {
         undefined,
       );
 
+      expect(readdirSync(jobsDir)).toEqual([]);
+    } finally {
+      if (previousJobsDir === undefined) delete process.env.OMC_JOBS_DIR;
+      else process.env.OMC_JOBS_DIR = previousJobsDir;
+      rmSync(jobsDir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects result publication without a valid instance identity', async () => {
+    const jobsDir = mkdtempSync(join(tmpdir(), 'runtime-cli-artifact-invalid-identity-'));
+    try {
+      await expect(writeResultArtifact(
+        {
+          status: 'completed',
+          teamName: 'team-invalid',
+          instanceId: 'not-a-uuid',
+          taskResults: [],
+          duration: 0,
+          workerCount: 0,
+        },
+        '2026-03-02T12:00:00.000Z',
+        'omc-invalid',
+        jobsDir,
+      )).rejects.toThrow('result_artifact_instance_identity_missing');
       expect(readdirSync(jobsDir)).toEqual([]);
     } finally {
       rmSync(jobsDir, { recursive: true, force: true });
@@ -422,12 +382,13 @@ describe('runtime-cli terminal preservation helper', () => {
         'utf-8',
       );
 
-      const result = buildTerminalCliResult(stateRoot, teamName, 'complete', 1, Date.now() - 1_000);
+      const result = buildTerminalCliResult(stateRoot, teamName, 'complete', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(existsSync(stateRoot)).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.output.status).toBe('completed');
       expect(result.output.teamName).toBe(teamName);
+      expect(result.output.instanceId).toBe(INSTANCE_ID);
       expect(result.output.taskResults).toEqual([
         {
           taskId: '1',
@@ -459,12 +420,13 @@ describe('runtime-cli terminal preservation helper', () => {
         'utf-8',
       );
 
-      const result = buildTerminalCliResult(stateRoot, teamName, 'cancelled', 1, Date.now() - 1_000);
+      const result = buildTerminalCliResult(stateRoot, teamName, 'cancelled', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(existsSync(stateRoot)).toBe(true);
       expect(result.exitCode).toBe(1);
       expect(result.output.status).toBe('failed');
       expect(result.output.teamName).toBe(teamName);
+      expect(result.output.instanceId).toBe(INSTANCE_ID);
       expect(result.output.taskResults).toEqual([
         {
           taskId: '1',
@@ -559,7 +521,7 @@ describe('runtime-cli terse-final output fallback', () => {
       const stateRoot = seedTask(cwd, teamName, { id: '1', status: 'completed', result: '' });
       writeOutputFile(cwd, teamName, '1', 'Implemented the parser fix and added regression coverage.');
 
-      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(output.taskResults).toEqual([
         {
@@ -580,7 +542,7 @@ describe('runtime-cli terse-final output fallback', () => {
       const stateRoot = seedTask(cwd, teamName, { id: '2', status: 'completed', result: 'Done.' });
       writeOutputFile(cwd, teamName, '2', 'Detailed worker report with real findings.');
 
-      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(output.taskResults[0]?.summary).toBe('Detailed worker report with real findings.');
     } finally {
@@ -599,7 +561,7 @@ describe('runtime-cli terse-final output fallback', () => {
       });
       writeOutputFile(cwd, teamName, '3', 'Some other longer output that must NOT override the final.');
 
-      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(output.taskResults[0]?.summary).toBe('PASS: complete without shutdown');
     } finally {
@@ -613,7 +575,7 @@ describe('runtime-cli terse-final output fallback', () => {
       const teamName = 'fallback-missing';
       const stateRoot = seedTask(cwd, teamName, { id: '4', status: 'completed', result: 'Done.' });
 
-      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000);
+      const output = buildCliOutput(stateRoot, teamName, 'completed', 1, Date.now() - 1_000, INSTANCE_ID);
 
       expect(output.taskResults[0]?.summary).toBe('Done.');
     } finally {
@@ -627,12 +589,14 @@ describe('runtime-cli recovery pane refresh', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-pane-refresh-'));
     try {
       const teamName = 'replacement-team';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
       writeFileSync(configPath, JSON.stringify({
         name: teamName,
+        instance_id: INSTANCE_ID,
         worker_count: 1,
-        workers: [{ name: 'worker-1', index: 1, pane_id: '%replacement' }],
+        workers: [{ name: 'worker-1', index: 1, pane_id: '%replacement', launch_attempt_id: 'attempt-replacement' }],
         agent_type: 'claude',
         created_at: new Date().toISOString(),
         tmux_session: `${teamName}:0`,
@@ -640,12 +604,41 @@ describe('runtime-cli recovery pane refresh', () => {
       }));
       const runtime = { workerPaneIds: ['%startup'] };
 
-      const refresh = await refreshRuntimeWorkerPaneIds(runtime, teamName, cwd);
+      const refresh = await refreshRuntimeWorkerPaneIds(runtime, teamName, cwd, INSTANCE_ID);
 
       expect(refresh).toEqual({ authoritativePaneIds: ['%replacement'], allWorkerPaneIdsKnown: true });
       expect(runtime.workerPaneIds).toEqual(['%startup', '%replacement']);
       expect(areAllAuthoritativeWorkersDead(refresh!, [{ liveness: 'alive' }] as never)).toBe(false);
       expect(areAllAuthoritativeWorkersDead(refresh!, [{ liveness: 'unknown' }] as never)).toBe(false);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects authoritative pane refresh from a replacement instance', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-pane-mismatch-'));
+    try {
+      const teamName = 'replacement-mismatch';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
+      const configPath = absPath(cwd, TeamPaths.config(teamName));
+      mkdirSync(join(configPath, '..'), { recursive: true });
+      writeFileSync(configPath, JSON.stringify({
+        name: teamName,
+        instance_id: OTHER_INSTANCE_ID,
+        worker_count: 1,
+        workers: [{ name: 'worker-1', index: 1, pane_id: '%replacement', launch_attempt_id: 'attempt-replacement' }],
+        agent_type: 'claude',
+        created_at: new Date().toISOString(),
+        tmux_session: `${teamName}:0`,
+        state_revision: 2,
+      }));
+
+      await expect(refreshRuntimeWorkerPaneIds(
+        { workerPaneIds: [] },
+        teamName,
+        cwd,
+        INSTANCE_ID,
+      )).rejects.toThrow('team_instance_identity_mismatch');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -674,23 +667,47 @@ describe('runtime-cli recovery intent cleanup', () => {
     });
   }
 
-  function seedIntent(cwd: string, requestId: string, recoveryId: string): string {
+  async function seedIntent(cwd: string, requestId: string, recoveryId: string): Promise<string> {
+    const stateRoot = join(cwd, '.omc', 'state', 'team', 'intent-team');
+    if (!existsSync(stateRoot)) {
+      await reserveTeamInstance({ teamName: 'intent-team', cwd, instanceId: INSTANCE_ID });
+    }
+    const configPath = join(stateRoot, 'config.json');
+    if (!existsSync(configPath)) {
+      mkdirSync(stateRoot, { recursive: true });
+      writeFileSync(configPath, JSON.stringify({
+        name: 'intent-team',
+        instance_id: INSTANCE_ID,
+      }), 'utf-8');
+    }
     const workspaceHash = createHash('sha256').update(cwd).digest('hex');
-    const payload = { operation: 'recover-worker' as const, workspaceHash, teamName: 'intent-team', workerName: 'worker-1' };
+    const payload = {
+      operation: 'recover-worker' as const,
+      workspaceHash,
+      teamName: 'intent-team',
+      workerName: 'worker-1',
+      instanceId: INSTANCE_ID,
+    };
     reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
     const path = absPath(cwd, TeamPaths.recoveryIntent('intent-team', recoveryId));
     mkdirSync(join(path, '..'), { recursive: true });
     writeFileSync(path, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
       recovery_id: recoveryId, operation: payload.operation, workspace_hash: workspaceHash,
       payload_hash: canonicalRecoveryPayloadHash(payload), team_name: 'intent-team', worker_name: 'worker-1',
+      instance_id: INSTANCE_ID,
       created_at: new Date().toISOString() }));
     return path;
   }
 
-  function seedExpiredAllDeadGrace(cwd: string, deadline: number): string {
+  async function seedExpiredAllDeadGrace(
+    cwd: string,
+    deadline: number,
+    instanceId: string = INSTANCE_ID,
+  ): Promise<string> {
+    await reserveTeamInstance({ teamName: 'intent-team', cwd, instanceId });
     const configPath = absPath(cwd, TeamPaths.config('intent-team'));
     mkdirSync(join(configPath, '..'), { recursive: true });
-    writeFileSync(configPath, JSON.stringify({ name: 'intent-team', worker_count: 0, workers: [], agent_type: 'claude',
+    writeFileSync(configPath, JSON.stringify({ name: 'intent-team', instance_id: instanceId, worker_count: 0, workers: [], agent_type: 'claude',
       created_at: new Date().toISOString(), tmux_session: 'intent-team:0', lifecycle_state: 'active', state_revision: 4,
       all_dead_recovery: { detected_at: new Date(deadline - 300_000).toISOString(), deadline_at: new Date(deadline).toISOString(), state_revision: 4 } }));
     return configPath;
@@ -698,19 +715,42 @@ describe('runtime-cli recovery intent cleanup', () => {
 
   function seedPredeadlineReservation(cwd: string, requestId: string, recoveryId: string, deadline: number): { path: string; repairedBytes: string } {
     reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker',
-      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team', workerName: 'worker-1' }, recoveryId);
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team',
+      workerName: 'worker-1', instanceId: INSTANCE_ID }, recoveryId);
     const path = absPath(cwd, TeamPaths.recoveryRequestPending(requestId));
     const repairedBytes = readFileSync(path, 'utf8').replace(/"created_at":"[^"]+"/,
       `"created_at":"${new Date(deadline - 1_000).toISOString()}"`);
     return { path, repairedBytes };
   }
 
+  function seedPendingAdmission(
+    cwd: string,
+    requestId: string,
+    recoveryId: string,
+    teamName: string,
+    instanceId: string,
+    deadline: number,
+  ): { path: string; bytes: string } {
+    reserveRecoveryRequest(cwd, requestId, {
+      operation: 'recover-worker',
+      workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+      teamName,
+      workerName: 'worker-1',
+      instanceId,
+    }, recoveryId);
+    const path = absPath(cwd, TeamPaths.recoveryRequestPending(requestId));
+    const bytes = readFileSync(path, 'utf8').replace(/"created_at":"[^"]+"/,
+      `"created_at":"${new Date(deadline - 1_000).toISOString()}"`);
+    writeFileSync(path, bytes);
+    return { path, bytes };
+  }
+
   it('removes an intent only after a matching final recovery id exists', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-match-'));
     try {
-      const path = seedIntent(cwd, 'request-a', 'recovery-a');
+      const path = await seedIntent(cwd, 'request-a', 'recovery-a');
       seedFinal(cwd, 'request-a', 'recovery-a');
-      await processPendingRecoveryIntents('intent-team', cwd);
+      await processPendingRecoveryIntents('intent-team', cwd, undefined, INSTANCE_ID);
       expect(existsSync(path)).toBe(false);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -720,14 +760,14 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent when the durable final belongs to another recovery id', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-mismatch-'));
     try {
-      const path = seedIntent(cwd, 'request-a', 'recovery-a');
+      const path = await seedIntent(cwd, 'request-a', 'recovery-a');
       seedFinal(cwd, 'request-a', 'recovery-a');
       const finalPath = absPath(cwd, TeamPaths.recoveryRequestResult('request-a'));
       const mismatched = JSON.parse(readFileSync(finalPath, 'utf8')) as { recovery_id: string; result: { recoveryId: string } };
       mismatched.recovery_id = 'recovery-b';
       mismatched.result.recoveryId = 'recovery-b';
       writeFileSync(finalPath, JSON.stringify(mismatched));
-      await processPendingRecoveryIntents('intent-team', cwd);
+      await processPendingRecoveryIntents('intent-team', cwd, undefined, INSTANCE_ID);
       expect(existsSync(path)).toBe(true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -737,11 +777,14 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains the intent when another recovery currently owns team mutation', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-busy-'));
     try {
-      const path = seedIntent(cwd, 'request-busy', 'recovery-busy');
-      await processPendingRecoveryIntents('intent-team', cwd, async () => ({
-        outcome: 'failed', committed: false, error: 'team_mutation_busy', requestId: 'request-busy',
-        recoveryId: 'recovery-busy', teamName: 'intent-team', workerName: 'worker-1', updatedAt: new Date().toISOString(),
-      }));
+      const path = await seedIntent(cwd, 'request-busy', 'recovery-busy');
+      await processPendingRecoveryIntents('intent-team', cwd, async input => {
+        expect(input.instanceId).toBe(INSTANCE_ID);
+        return {
+          outcome: 'failed', committed: false, error: 'team_mutation_busy', requestId: 'request-busy',
+          recoveryId: 'recovery-busy', teamName: 'intent-team', workerName: 'worker-1', updatedAt: new Date().toISOString(),
+        };
+      }, INSTANCE_ID);
       expect(existsSync(path)).toBe(true);
       expect(readRecoveryOutcome(cwd, 'request-busy')).toBeNull();
     } finally {
@@ -752,12 +795,12 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent whose filename recovery id disagrees with its record', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-path-mismatch-'));
     try {
-      const path = seedIntent(cwd, 'request-path', 'recovery-path');
+      const path = await seedIntent(cwd, 'request-path', 'recovery-path');
       const record = JSON.parse(readFileSync(path, 'utf8'));
       record.recovery_id = 'other-recovery';
       writeFileSync(path, JSON.stringify(record));
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally {
@@ -768,12 +811,12 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent whose worker tuple disagrees with its canonical reservation', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-worker-mismatch-'));
     try {
-      const path = seedIntent(cwd, 'request-worker', 'recovery-worker');
+      const path = await seedIntent(cwd, 'request-worker', 'recovery-worker');
       const record = JSON.parse(readFileSync(path, 'utf8'));
       record.worker_name = 'worker-2';
       writeFileSync(path, JSON.stringify(record));
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally {
@@ -785,12 +828,12 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent whose request tuple disagrees with its canonical reservation', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-recovery-intent-request-mismatch-'));
     try {
-      const path = seedIntent(cwd, 'request-canonical', 'recovery-request');
+      const path = await seedIntent(cwd, 'request-canonical', 'recovery-request');
       const record = JSON.parse(readFileSync(path, 'utf8'));
       record.request_id = 'request-other';
       writeFileSync(path, JSON.stringify(record));
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally {
@@ -808,7 +851,7 @@ describe('runtime-cli recovery intent cleanup', () => {
       mkdirSync(join(path, '..'), { recursive: true });
       writeFileSync(path, bytes);
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally {
@@ -822,7 +865,7 @@ describe('runtime-cli recovery intent cleanup', () => {
       try {
         const requestId = `request-${corruption.replaceAll(' ', '-')}`;
         const recoveryId = `recovery-${corruption.replaceAll(' ', '-')}`;
-        const path = seedIntent(cwd, requestId, recoveryId);
+        const path = await seedIntent(cwd, requestId, recoveryId);
         seedFinal(cwd, requestId, recoveryId);
         const reservationPath = absPath(cwd, TeamPaths.recoveryRequestPending(requestId));
         if (corruption === 'missing reservation') {
@@ -835,7 +878,7 @@ describe('runtime-cli recovery intent cleanup', () => {
           writeFileSync(reservationPath, JSON.stringify(reservation));
         }
         const execute = vi.fn();
-        await processPendingRecoveryIntents('intent-team', cwd, execute);
+        await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
         expect(execute).not.toHaveBeenCalled();
         expect(existsSync(path)).toBe(true);
       } finally {
@@ -850,7 +893,7 @@ describe('runtime-cli recovery intent cleanup', () => {
       try {
         const requestId = `request-direct-${corruption.replaceAll(' ', '-')}`;
         const recoveryId = `recovery-direct-${corruption.replaceAll(' ', '-')}`;
-        const path = seedIntent(cwd, requestId, recoveryId);
+        const path = await seedIntent(cwd, requestId, recoveryId);
         if (corruption === 'malformed intent') {
           writeFileSync(path, '{"schema_version":1');
         } else if (corruption === 'path mismatch') {
@@ -865,7 +908,9 @@ describe('runtime-cli recovery intent cleanup', () => {
           writeFileSync(reservationPath, JSON.stringify(reservation));
         }
         const execute = vi.fn();
-        await expect(handleRecoverDeadWorkerV2Owner({ teamName: 'intent-team', cwd, workerName: 'worker-1', requestId }, execute))
+        await expect(handleRecoverDeadWorkerV2Owner({
+          teamName: 'intent-team', cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID,
+        }, execute))
           .rejects.toThrow('invalid_persisted_state');
         expect(execute).not.toHaveBeenCalled();
         expect(existsSync(path)).toBe(true);
@@ -879,7 +924,7 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent and skips execution for a tuple-matching but incomplete final', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-incomplete-final-'));
     try {
-      const path = seedIntent(cwd, 'request-incomplete-final', 'recovery-incomplete-final');
+      const path = await seedIntent(cwd, 'request-incomplete-final', 'recovery-incomplete-final');
       const finalPath = absPath(cwd, TeamPaths.recoveryRequestResult('request-incomplete-final'));
       writeFileSync(finalPath, JSON.stringify({ schema_version: 1, kind: 'final', request_id: 'request-incomplete-final',
         recovery_id: 'recovery-incomplete-final', team_name: 'intent-team', worker_name: 'worker-1', outcome: 'failed',
@@ -889,7 +934,7 @@ describe('runtime-cli recovery intent cleanup', () => {
         services: 'terminal_degraded', manifest: 'repair_required', completed_at: new Date().toISOString(),
         expires_at: '2099-01-01T00:00:00.000Z' }));
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally {
@@ -900,7 +945,7 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('retains an intent when a complete final has contradictory embedded error metadata', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-cross-field-final-'));
     try {
-      const path = seedIntent(cwd, 'request-cross-field', 'recovery-cross-field');
+      const path = await seedIntent(cwd, 'request-cross-field', 'recovery-cross-field');
       const finalPath = absPath(cwd, TeamPaths.recoveryRequestResult('request-cross-field'));
       writeFileSync(finalPath, JSON.stringify({ schema_version: 1, kind: 'final', request_id: 'request-cross-field',
         recovery_id: 'recovery-cross-field', team_name: 'intent-team', worker_name: 'worker-1', outcome: 'failed',
@@ -911,7 +956,7 @@ describe('runtime-cli recovery intent cleanup', () => {
         adoption: 'not_started', services: 'terminal_degraded', manifest: 'repair_required',
         completed_at: new Date().toISOString(), expires_at: '2099-01-01T00:00:00.000Z' }));
       const execute = vi.fn();
-      await processPendingRecoveryIntents('intent-team', cwd, execute);
+      await processPendingRecoveryIntents('intent-team', cwd, execute, INSTANCE_ID);
       expect(execute).not.toHaveBeenCalled();
       expect(existsSync(path)).toBe(true);
     } finally { rmSync(cwd, { recursive: true, force: true }); }
@@ -919,18 +964,19 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('persists one all-dead grace deadline across successor-style reloads and clears it on recovery', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-durable-all-dead-grace-'));
     try {
+      await reserveTeamInstance({ teamName: 'intent-team', cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config('intent-team'));
       mkdirSync(join(configPath, '..'), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({ name: 'intent-team', worker_count: 1,
+      writeFileSync(configPath, JSON.stringify({ name: 'intent-team', instance_id: INSTANCE_ID, worker_count: 1,
         workers: [{ name: 'worker-1', index: 1 }], agent_type: 'claude', created_at: new Date().toISOString(),
         tmux_session: 'intent-team:0', state_revision: 4 }));
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 200_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 200_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 301_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 301_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: true });
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 302_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 302_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: null, expired: false });
       expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery).toBeUndefined();
     } finally {
@@ -940,20 +986,21 @@ describe('runtime-cli recovery intent cleanup', () => {
   it('preserves all-dead grace for unknown evidence but clears it for all-alive or mixed alive/unknown evidence', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-all-dead-evidence-'));
     try {
+      await reserveTeamInstance({ teamName: 'intent-team', cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config('intent-team'));
       mkdirSync(join(configPath, '..'), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({ name: 'intent-team', worker_count: 1,
+      writeFileSync(configPath, JSON.stringify({ name: 'intent-team', instance_id: INSTANCE_ID, worker_count: 1,
         workers: [{ name: 'worker-1', index: 1, pane_id: '%worker-1' }], agent_type: 'claude',
         created_at: new Date().toISOString(), tmux_session: 'intent-team:0', state_revision: 4 }));
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'all_dead', 1_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
       expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: ['%worker-1'], allWorkerPaneIdsKnown: true },
         [{ liveness: 'unknown' }] as never, true)).toBe('unknown');
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 350_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 350_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
       expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: [], allWorkerPaneIdsKnown: false },
         [{ liveness: 'dead' }] as never, true)).toBe('unknown');
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 400_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'unknown', 400_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: 301_000, expired: false });
       expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery.deadline_at)
         .toBe(new Date(301_000).toISOString());
@@ -961,7 +1008,7 @@ describe('runtime-cli recovery intent cleanup', () => {
         [{ liveness: 'alive' }, { liveness: 'unknown' }] as never, true)).toBe('alive');
       expect(classifyAllDeadRecoveryEvidence({ authoritativePaneIds: ['%worker-1'], allWorkerPaneIdsKnown: true },
         [{ liveness: 'alive' }] as never, true)).toBe('alive');
-      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 400_000))
+      await expect(updateAllDeadRecoveryGrace('intent-team', cwd, 'alive', 400_000, INSTANCE_ID))
         .resolves.toEqual({ deadlineAt: null, expired: false });
       expect(JSON.parse(readFileSync(configPath, 'utf8')).all_dead_recovery).toBeUndefined();
     } finally {
@@ -969,14 +1016,14 @@ describe('runtime-cli recovery intent cleanup', () => {
     }
   });
 
-  it('suspends expired all-dead terminalization for a valid predeadline recovery intent', () => {
+  it('suspends expired all-dead terminalization for a valid predeadline recovery intent', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-pending-intent-'));
     try {
-      seedIntent(cwd, 'request-grace', 'recovery-grace');
+      await seedIntent(cwd, 'request-grace', 'recovery-grace');
       const deadline = Date.now() + 60_000;
-      expect(hasPendingRecoveryIntentBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
+      expect(hasPendingRecoveryIntentBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
       seedFinal(cwd, 'request-grace', 'recovery-grace');
-      expect(hasPendingRecoveryIntentBeforeDeadline('intent-team', cwd, deadline)).toBe(false);
+      expect(hasPendingRecoveryIntentBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -987,32 +1034,108 @@ describe('runtime-cli recovery intent cleanup', () => {
     try {
       const teamName = 'intent-team';
       const deadline = Date.now() - 1_000;
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({ name: teamName, worker_count: 0, workers: [], agent_type: 'claude',
+      writeFileSync(configPath, JSON.stringify({ name: teamName, instance_id: INSTANCE_ID, worker_count: 0, workers: [], agent_type: 'claude',
         created_at: new Date().toISOString(), tmux_session: 'intent-team:0', lifecycle_state: 'active', state_revision: 4,
         all_dead_recovery: { detected_at: new Date(deadline - 300_000).toISOString(), deadline_at: new Date(deadline).toISOString(), state_revision: 4 } }));
       reserveRecoveryRequest(cwd, 'request-reserved', { operation: 'recover-worker',
-        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' }, 'recovery-reserved');
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1',
+        instanceId: INSTANCE_ID }, 'recovery-reserved');
       const reservationPath = absPath(cwd, TeamPaths.recoveryRequestPending('request-reserved'));
       const reservation = JSON.parse(readFileSync(reservationPath, 'utf8')) as { created_at: string };
       reservation.created_at = new Date(deadline - 1_000).toISOString();
       writeFileSync(reservationPath, JSON.stringify(reservation));
 
-      expect(hasPendingRecoveryAdmissionBeforeDeadline(teamName, cwd, deadline)).toBe(true);
-      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline)).resolves.toBe(false);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline(teamName, cwd, deadline, INSTANCE_ID)).toBe(true);
+      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline, INSTANCE_ID)).resolves.toBe(false);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
   });
+
+  it('expires instance B while retaining a valid predeadline admission owned by instance A', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-foreign-instance-'));
+    try {
+      const deadline = Date.now() - 1_000;
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline, OTHER_INSTANCE_ID);
+      const { path, bytes } = seedPendingAdmission(
+        cwd,
+        'request-foreign-instance',
+        'recovery-foreign-instance',
+        'intent-team',
+        INSTANCE_ID,
+        deadline,
+      );
+
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).resolves.toBe(true);
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
+      expect(readFileSync(path, 'utf8')).toBe(bytes);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps expiry fenced by a valid predeadline admission owned by the current instance', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-matching-instance-'));
+    try {
+      const deadline = Date.now() - 1_000;
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline, OTHER_INSTANCE_ID);
+      const { path, bytes } = seedPendingAdmission(
+        cwd,
+        'request-matching-instance',
+        'recovery-matching-instance',
+        'intent-team',
+        OTHER_INSTANCE_ID,
+        deadline,
+      );
+
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).toBe(true);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).resolves.toBe(false);
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
+      expect(readFileSync(path, 'utf8')).toBe(bytes);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps expiry fenced by unidentifiable predeadline admission evidence', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-corrupt-admission-'));
+    try {
+      const deadline = Date.now() - 1_000;
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline, OTHER_INSTANCE_ID);
+      const { path } = seedPendingAdmission(
+        cwd,
+        'request-corrupt-admission',
+        'recovery-corrupt-admission',
+        'intent-team',
+        INSTANCE_ID,
+        deadline,
+      );
+      const corruptBytes = '{"schema_version":1';
+      writeFileSync(path, corruptBytes, 'utf-8');
+      utimesSync(path, new Date(deadline - 1_000), new Date(deadline - 1_000));
+
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).toBe(true);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, OTHER_INSTANCE_ID)).resolves.toBe(false);
+      expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
+      expect(readFileSync(path, 'utf8')).toBe(corruptBytes);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
   it('allows all-dead cleanup when a predeadline alias resolves to its canonical final', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-terminal-alias-'));
     try {
       const deadline = Date.now() - 60_000;
-      const configPath = seedExpiredAllDeadGrace(cwd, deadline);
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline);
       const payload = { operation: 'recover-worker' as const,
-        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team', workerName: 'worker-1' };
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team',
+        workerName: 'worker-1', instanceId: INSTANCE_ID };
       const canonical = reserveRecoveryRequest(cwd, 'request-alias-canonical', payload, 'recovery-alias').reservation;
       const canonicalPath = absPath(cwd, TeamPaths.recoveryRequestPending('request-alias-canonical'));
       writeFileSync(canonicalPath, readFileSync(canonicalPath, 'utf8').replace(/"created_at":"[^"]+"/,
@@ -1023,8 +1146,8 @@ describe('runtime-cli recovery intent cleanup', () => {
         `"created_at":"${new Date(deadline - 1_000).toISOString()}"`));
       seedFinal(cwd, 'request-alias-canonical', 'recovery-alias');
 
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1038,7 +1161,8 @@ describe('runtime-cli recovery intent cleanup', () => {
         const deadline = Date.now() + 60_000;
         const slug = kind.replaceAll(' ', '-');
         const payload = { operation: 'recover-worker' as const,
-          workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team', workerName: 'worker-1' };
+          workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'intent-team',
+          workerName: 'worker-1', instanceId: INSTANCE_ID };
         const canonical = reserveRecoveryRequest(cwd, `request-alias-${slug}`, payload, `recovery-alias-${slug}`).reservation;
         aliasActiveRecoveryRequest(cwd, `request-alias-target-${slug}`, payload, canonical);
         const aliasPath = absPath(cwd, TeamPaths.recoveryRequestPending(`request-alias-target-${slug}`));
@@ -1047,7 +1171,7 @@ describe('runtime-cli recovery intent cleanup', () => {
         else alias.recovery_id = `recovery-other-${slug}`;
         writeFileSync(aliasPath, JSON.stringify(alias));
 
-        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
+        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }
@@ -1064,7 +1188,7 @@ describe('runtime-cli recovery intent cleanup', () => {
       reservation.payload_hash = '0'.repeat(64);
       writeFileSync(path, JSON.stringify(reservation));
 
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
     } finally {
       rmSync(cwd, { recursive: true, force: true });
     }
@@ -1080,7 +1204,7 @@ describe('runtime-cli recovery intent cleanup', () => {
         reservation[field] = field === 'team_name' ? 'foreign-team' : '0'.repeat(64);
         writeFileSync(path, JSON.stringify(reservation));
 
-        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
+        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
       } finally {
         rmSync(cwd, { recursive: true, force: true });
       }
@@ -1093,7 +1217,7 @@ describe('runtime-cli recovery intent cleanup', () => {
       const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-malformed-admission-'));
       try {
         const deadline = Date.now() - 60_000;
-        const configPath = seedExpiredAllDeadGrace(cwd, deadline);
+        const configPath = await seedExpiredAllDeadGrace(cwd, deadline);
         const { path, repairedBytes } = seedPredeadlineReservation(cwd, `request-${corruption}`, `recovery-${corruption}`, deadline);
         writeFileSync(path, corruption === 'truncated'
           ? '{"schema_version":1'
@@ -1102,8 +1226,8 @@ describe('runtime-cli recovery intent cleanup', () => {
             : repairedBytes.replace(/"payload_hash":"[a-f0-9]{64}"/, `"payload_hash":"${'0'.repeat(64)}"`));
         utimesSync(path, new Date(deadline - 1_000), new Date(deadline - 1_000));
 
-        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
-        await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline)).resolves.toBe(false);
+        expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
+        await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(false);
         expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
       } finally {
         rmSync(cwd, { recursive: true, force: true });
@@ -1115,16 +1239,16 @@ describe('runtime-cli recovery intent cleanup', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-repaired-admission-'));
     try {
       const deadline = Date.now() - 60_000;
-      const configPath = seedExpiredAllDeadGrace(cwd, deadline);
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline);
       const { path, repairedBytes } = seedPredeadlineReservation(cwd, 'request-repaired', 'recovery-repaired', deadline);
       writeFileSync(path, '{"schema_version":1');
       utimesSync(path, new Date(deadline - 1_000), new Date(deadline - 1_000));
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(true);
 
       writeFileSync(path, repairedBytes);
       seedFinal(cwd, 'request-repaired', 'recovery-repaired');
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1135,13 +1259,13 @@ describe('runtime-cli recovery intent cleanup', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-new-malformed-admission-'));
     try {
       const deadline = Date.now() - 60_000;
-      const configPath = seedExpiredAllDeadGrace(cwd, deadline);
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline);
       const path = absPath(cwd, TeamPaths.recoveryRequestPending('request-new-malformed'));
       mkdirSync(join(path, '..'), { recursive: true });
       writeFileSync(path, '{"schema_version":1');
 
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1152,20 +1276,21 @@ describe('runtime-cli recovery intent cleanup', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-noncanonical-admission-'));
     try {
       const deadline = Date.now() - 60_000;
-      const configPath = seedExpiredAllDeadGrace(cwd, deadline);
+      const configPath = await seedExpiredAllDeadGrace(cwd, deadline);
       const path = join(absPath(cwd, TeamPaths.recoveryRequestsRoot()), 'foreign!.pending.json');
       mkdirSync(join(path, '..'), { recursive: true });
       writeFileSync(path, '{"schema_version":1');
       utimesSync(path, new Date(deadline - 1_000), new Date(deadline - 1_000));
       reserveRecoveryRequest(cwd, 'request-foreign', { operation: 'recover-worker',
-        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'foreign-team', workerName: 'worker-1' }, 'recovery-foreign');
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'foreign-team',
+        workerName: 'worker-1', instanceId: INSTANCE_ID }, 'recovery-foreign');
       const foreignPath = absPath(cwd, TeamPaths.recoveryRequestPending('request-foreign'));
       const foreignReservation = JSON.parse(readFileSync(foreignPath, 'utf8')) as { created_at: string };
       foreignReservation.created_at = new Date(deadline - 1_000).toISOString();
       writeFileSync(foreignPath, JSON.stringify(foreignReservation));
 
-      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1177,23 +1302,24 @@ describe('runtime-cli recovery intent cleanup', () => {
       const teamName = 'intent-team';
       const deadline = Date.now() - 60_000;
       const configPath = absPath(cwd, TeamPaths.config(teamName));
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       mkdirSync(join(configPath, '..'), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({ name: teamName, worker_count: 0, workers: [], agent_type: 'claude',
+      writeFileSync(configPath, JSON.stringify({ name: teamName, instance_id: INSTANCE_ID, worker_count: 0, workers: [], agent_type: 'claude',
         created_at: new Date().toISOString(), tmux_session: 'intent-team:0', lifecycle_state: 'active', state_revision: 4,
         all_dead_recovery: { detected_at: new Date(deadline - 300_000).toISOString(), deadline_at: new Date(deadline).toISOString(), state_revision: 4 } }));
-      const path = seedIntent(cwd, 'request-malformed-grace', 'recovery-malformed-grace');
+      const path = await seedIntent(cwd, 'request-malformed-grace', 'recovery-malformed-grace');
       const intent = JSON.parse(readFileSync(path, 'utf8')) as { payload_hash: string };
       intent.payload_hash = '0'.repeat(64);
       writeFileSync(path, JSON.stringify(intent));
       utimesSync(path, new Date(deadline - 1_000), new Date(deadline - 1_000));
 
-      expect(hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadline)).toBe(true);
-      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline)).resolves.toBe(false);
+      expect(hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadline, INSTANCE_ID)).toBe(true);
+      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline, INSTANCE_ID)).resolves.toBe(false);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
 
       seedFinal(cwd, 'request-malformed-grace', 'recovery-malformed-grace');
-      expect(hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1206,17 +1332,18 @@ describe('runtime-cli recovery intent cleanup', () => {
       const teamName = 'intent-team';
       const deadline = Date.now() - 60_000;
       const configPath = absPath(cwd, TeamPaths.config(teamName));
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       mkdirSync(join(configPath, '..'), { recursive: true });
-      writeFileSync(configPath, JSON.stringify({ name: teamName, worker_count: 0, workers: [], agent_type: 'claude',
+      writeFileSync(configPath, JSON.stringify({ name: teamName, instance_id: INSTANCE_ID, worker_count: 0, workers: [], agent_type: 'claude',
         created_at: new Date().toISOString(), tmux_session: 'intent-team:0', lifecycle_state: 'active', state_revision: 4,
         all_dead_recovery: { detected_at: new Date(deadline - 300_000).toISOString(), deadline_at: new Date(deadline).toISOString(), state_revision: 4 } }));
-      const path = seedIntent(cwd, 'request-new-malformed', 'recovery-new-malformed');
+      const path = await seedIntent(cwd, 'request-new-malformed', 'recovery-new-malformed');
       const intent = JSON.parse(readFileSync(path, 'utf8')) as { payload_hash: string };
       intent.payload_hash = '0'.repeat(64);
       writeFileSync(path, JSON.stringify(intent));
 
-      expect(hasPendingRecoveryIntentBeforeDeadline(teamName, cwd, deadline)).toBe(false);
-      await expect(fenceAllDeadRecoveryExpiry(teamName, cwd, deadline)).resolves.toBe(true);
+      expect(hasPendingRecoveryAdmissionBeforeDeadline('intent-team', cwd, deadline, INSTANCE_ID)).toBe(false);
+      await expect(fenceAllDeadRecoveryExpiry('intent-team', cwd, deadline, INSTANCE_ID)).resolves.toBe(true);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('shutting_down');
     } finally {
       rmSync(cwd, { recursive: true, force: true });
@@ -1226,7 +1353,7 @@ describe('runtime-cli recovery intent cleanup', () => {
 describe('detached persistent recovery owner', () => {
   function ownerLoopConfig(teamName: string, overrides: Record<string, unknown>): Record<string, unknown> {
     return {
-      name: teamName, task: 'recovery owner test', agent_type: 'claude', worker_launch_mode: 'interactive',
+      name: teamName, instance_id: INSTANCE_ID, task: 'recovery owner test', agent_type: 'claude', worker_launch_mode: 'interactive',
       worker_count: 0, max_workers: 20, workers: [], created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`, next_task_id: 1, lifecycle_state: 'active', ...overrides,
     };
@@ -1235,6 +1362,7 @@ describe('detached persistent recovery owner', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-persistent-owner-'));
     try {
       const teamName = 'persistent-team';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
       const owner = { epoch: 2, nonce: 'successor', pid: process.pid,
@@ -1247,7 +1375,7 @@ describe('detached persistent recovery owner', () => {
       const services = vi.fn(async () => 'synced' as const);
       let drainedBootstrap = false;
       let laterIntentProcessed = false;
-      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'bootstrap-intent', bootstrap: {
+      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'bootstrap-intent', instanceId: INSTANCE_ID, bootstrap: {
         expectedEpoch: 2, predecessorEpoch: 1, predecessorNonce: 'dead-owner', predecessorPid: 99,
         predecessorProcessStartedAt: 'linux:99', pid: process.pid, processStartedAt: 'linux:1',
         nonce: 'successor', recoveryId: 'bootstrap-recovery',
@@ -1287,6 +1415,7 @@ describe('detached persistent recovery owner', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-bootstrap-config-fence-'));
     try {
       const teamName = 'persistent-team';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
       writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 2,
@@ -1297,7 +1426,7 @@ describe('detached persistent recovery owner', () => {
           created_at: new Date().toISOString(), updated_at: new Date().toISOString() } })));
       const execute = vi.fn();
       const services = vi.fn();
-      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'request-1', bootstrap: {
+      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'request-1', instanceId: INSTANCE_ID, bootstrap: {
         expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
         predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: 'linux:999', nonce: 'owner', recoveryId: 'recovery-1',
       } }, {
@@ -1318,6 +1447,7 @@ describe('detached persistent recovery owner', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-bootstrap-fence-'));
     try {
       const teamName = 'persistent-team';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
       writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 1,
@@ -1326,7 +1456,9 @@ describe('detached persistent recovery owner', () => {
       const execute = vi.fn();
       const services = vi.fn();
       const intents = vi.fn();
-      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'request-1' }, {
+      await runPersistentRecoveryOwnerLoop({
+        teamName, cwd, workerName: 'worker-1', requestId: 'request-1', instanceId: INSTANCE_ID,
+      }, {
         expectedEpoch,
         execute,
         reconcileServices: services,
@@ -1345,6 +1477,7 @@ describe('detached persistent recovery owner', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-persistent-owner-shutdown-'));
     try {
       const teamName = 'persistent-team';
+      await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
       const configPath = absPath(cwd, TeamPaths.config(teamName));
       mkdirSync(join(configPath, '..'), { recursive: true });
       const owner = { epoch: 2, nonce: 'successor', pid: process.pid, state_revision: 2,
@@ -1359,20 +1492,24 @@ describe('detached persistent recovery owner', () => {
         writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 4,
           lifecycle_state: 'stopped', runtime_owner_epoch: { ...owner, state_revision: 2 } })));
       });
-      await runPersistentRecoveryOwnerLoop({ teamName, cwd, workerName: 'worker-1', requestId: 'request-1' }, {
+      const monitor = vi.fn(async () => ({ workers: [{ liveness: 'dead' }],
+        tasks: { pending: 1, in_progress: 0 } } as never));
+      await runPersistentRecoveryOwnerLoop({
+        teamName, cwd, workerName: 'worker-1', requestId: 'request-1', instanceId: INSTANCE_ID,
+      }, {
         expectedEpoch: 2,
         execute: vi.fn(),
         processIntents: vi.fn(),
         reconcileServices: vi.fn(async () => 'synced' as const),
-        monitor: vi.fn(async () => ({ workers: [{ liveness: 'dead' }],
-          tasks: { pending: 1, in_progress: 0 } } as never)),
+        monitor,
         shutdown,
         verifyFence: (_input, fence) => fence.epoch === 2 && fence.nonce === 'successor',
         shouldContinue: iteration => iteration < 3,
         sleep: async () => undefined,
       });
       expect(shutdown).toHaveBeenCalledTimes(1);
-      expect(shutdown).toHaveBeenCalledWith(teamName, cwd, { force: true });
+      expect(shutdown).toHaveBeenCalledWith(teamName, cwd, { force: true, instanceId: INSTANCE_ID });
+      expect(monitor).toHaveBeenCalledWith(teamName, cwd, INSTANCE_ID);
       expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('stopped');
     } finally {
       rmSync(cwd, { recursive: true, force: true });

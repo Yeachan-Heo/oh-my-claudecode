@@ -1,28 +1,32 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const mocks = vi.hoisted(() => ({
-  isWorkerAlive: vi.fn(),
-}));
+import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { findNextTask } from '../task-file-ops.js';
+import type { TaskFile } from '../types.js';
 
-vi.mock('../tmux-session.js', async () => {
-  const actual = await vi.importActual<typeof import('../tmux-session.js')>('../tmux-session.js');
-  return {
-    ...actual,
-    isWorkerAlive: mocks.isWorkerAlive,
-  };
-});
+/**
+ * The old done.json polling protocol is intentionally retired. Completion and
+ * recovery now cross the durable task primitive boundary, so these tests only
+ * protect terminal-task and transferred-task ownership invariants.
+ */
 
-import { watchdogCliWorkers, type TeamRuntime } from '../runtime.js';
-
-describe('watchdog done.json parsing recovery', () => {
+describe('task completion and recovery ownership boundary', () => {
+  let cwd: string;
   let previousHome: string | undefined;
   let previousUserProfile: string | undefined;
+  let previousStateDir: string | undefined;
 
   beforeEach(() => {
-    mocks.isWorkerAlive.mockReset();
+    cwd = mkdtempSync(join(tmpdir(), 'runtime-task-recovery-boundary-'));
+    previousHome = process.env.HOME;
+    previousUserProfile = process.env.USERPROFILE;
+    previousStateDir = process.env.OMC_STATE_DIR;
+    process.env.HOME = cwd;
+    process.env.USERPROFILE = cwd;
+    delete process.env.OMC_STATE_DIR;
   });
 
   afterEach(() => {
@@ -30,81 +34,56 @@ describe('watchdog done.json parsing recovery', () => {
     else process.env.HOME = previousHome;
     if (previousUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = previousUserProfile;
-  });
-
-  it('marks task completed when done.json is briefly malformed before pane-dead check', async () => {
-    const cwd = mkdtempSync(join(tmpdir(), 'team-runtime-done-recovery-'));
-    previousHome = process.env.HOME;
-    previousUserProfile = process.env.USERPROFILE;
-    process.env.HOME = cwd;
-    process.env.USERPROFILE = cwd;
-    const teamName = 'done-recovery-team';
-    const root = join(cwd, '.omc', 'state', 'team', teamName);
-    const tasksDir = join(root, 'tasks');
-    const workerDir = join(root, 'workers', 'worker-1');
-    const donePath = join(workerDir, 'done.json');
-
-    mkdirSync(tasksDir, { recursive: true });
-    mkdirSync(workerDir, { recursive: true });
-
-    writeFileSync(join(tasksDir, 'task-1.json'), JSON.stringify({
-      id: '1',
-      subject: 'Task 1',
-      description: 'desc',
-      status: 'in_progress',
-      owner: 'worker-1',
-      createdAt: new Date().toISOString(),
-      assignedAt: new Date().toISOString(),
-    }), 'utf-8');
-
-    writeFileSync(donePath, '{"taskId":"1","status":"completed","summary":"ok"', 'utf-8');
-
-    // Simulate worker pane already exited. Recovery must come from done.json re-parse.
-    mocks.isWorkerAlive.mockResolvedValue(false);
-
-    const runtime: TeamRuntime = {
-      teamName,
-      sessionName: 'omc-team-test',
-      leaderPaneId: '%0',
-      ownsWindow: false,
-      config: {
-        teamName,
-        workerCount: 1,
-        agentTypes: ['codex'],
-        tasks: [{ subject: 'Task 1', description: 'desc' }],
-        cwd,
-      },
-      workerNames: ['worker-1'],
-      workerPaneIds: ['%1'],
-      activeWorkers: new Map([
-        ['worker-1', { paneId: '%1', taskId: '1', spawnedAt: Date.now() }],
-      ]),
-      cwd,
-    };
-
-    const stop = watchdogCliWorkers(runtime, 20);
-
-    setTimeout(() => {
-      writeFileSync(donePath, JSON.stringify({
-        taskId: '1',
-        status: 'completed',
-        summary: 'done',
-        completedAt: new Date().toISOString(),
-      }), 'utf-8');
-    }, 40);
-
-    await new Promise(resolve => setTimeout(resolve, 220));
-    stop();
-
-    const task = JSON.parse(readFileSync(join(tasksDir, 'task-1.json'), 'utf-8')) as {
-      status: string;
-      summary?: string;
-    };
-
-    expect(task.status).toBe('completed');
-    expect(task.summary).toBe('done');
-    expect(existsSync(donePath)).toBe(false);
-
+    if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = previousStateDir;
     rmSync(cwd, { recursive: true, force: true });
   });
+
+  it('does not select or rewrite an already-terminal task', async () => {
+    const teamName = 'terminal-task-preservation';
+    const taskPath = writeTask(cwd, teamName, {
+      status: 'completed',
+      owner: 'worker-1',
+      metadata: { summary: 'completed by the original worker' },
+    });
+    const original = readFileSync(taskPath, 'utf8');
+
+    expect(await findNextTask(teamName, 'replacement-worker', { cwd })).toBeNull();
+    expect(readFileSync(taskPath, 'utf8')).toBe(original);
+  });
+
+  it('does not steal a pending task transferred to another worker', async () => {
+    const teamName = 'transferred-task-preservation';
+    const taskPath = writeTask(cwd, teamName, {
+      status: 'pending',
+      owner: 'worker-2',
+      metadata: { transferredFrom: 'worker-1' },
+    });
+    const original = readFileSync(taskPath, 'utf8');
+
+    expect(await findNextTask(teamName, 'replacement-worker', { cwd })).toBeNull();
+    expect(readFileSync(taskPath, 'utf8')).toBe(original);
+
+    const claimed = await findNextTask(teamName, 'worker-2', { cwd });
+    expect(claimed).toMatchObject({ id: '1', owner: 'worker-2', status: 'in_progress' });
+    expect(readFileSync(taskPath, 'utf8')).not.toBe(original);
+  });
 });
+
+function writeTask(cwd: string, teamName: string, overrides: Partial<TaskFile>): string {
+  const tasksDir = join(getOmcRoot(cwd), 'state', 'team', teamName, 'tasks');
+  mkdirSync(tasksDir, { recursive: true });
+  const task: TaskFile = {
+    id: '1',
+    subject: 'Task 1',
+    description: 'Continue the task safely',
+    status: 'pending',
+    owner: 'worker-1',
+    blocks: [],
+    blockedBy: [],
+    ...overrides,
+  };
+  const taskPath = join(tasksDir, 'task-1.json');
+  writeFileSync(taskPath, JSON.stringify(task, null, 2), 'utf8');
+  return taskPath;
+}

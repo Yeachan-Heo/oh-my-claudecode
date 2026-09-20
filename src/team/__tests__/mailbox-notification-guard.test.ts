@@ -8,7 +8,7 @@ import {
   teamReadCanonicalMailboxMessageStrict,
   type StrictCanonicalMailboxMessageReadResult,
 } from '../team-ops.js';
-import type { TeamConfig, TeamDispatchRequest, TeamMailboxMessage } from '../types.js';
+import type { TeamConfig, TeamDispatchRequest, TeamMailboxMessage, TmuxServerIdentity } from '../types.js';
 import type { StrictDispatchReadResult } from '../dispatch-queue.js';
 import {
   evaluateMailboxNotificationGuard,
@@ -16,6 +16,7 @@ import {
   readCurrentMailboxNotificationGuard,
   type MailboxNotificationGuardInput,
   type MailboxNotificationGuardState,
+  type MailboxNotificationTarget,
   type MailboxTargetOwnership,
 } from '../mailbox-notification-guard.js';
 
@@ -38,6 +39,32 @@ function isolateFixtureRoot(root: string): () => void {
 
 const teamName = 'dispatch-team';
 const timestamp = '2026-07-13T00:00:00.000Z';
+const instanceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const supportsStrictTmuxFixture = process.platform === 'darwin' || process.platform === 'linux';
+const tmuxServerIdentity: TmuxServerIdentity | undefined = supportsStrictTmuxFixture ? {
+  socket_path: '/tmp/dispatch-session.sock',
+  server_pid: 4242,
+  process_started_at: process.platform === 'linux'
+    ? 'linux:fixture:4242'
+    : 'darwin:4242:123456',
+} : undefined;
+// Deliberately malformed evidence for fail-closed cases; never used as
+// positive authority (including on unsupported platforms).
+const malformedServerPidIdentity = {
+  socket_path: '/tmp/dispatch-session.sock',
+  server_pid: 0,
+  process_started_at: 'darwin:4242:123456',
+} as unknown as TmuxServerIdentity;
+const malformedServerStartIdentity = {
+  socket_path: '/tmp/dispatch-session.sock',
+  server_pid: 4242,
+  process_started_at: 'malformed',
+} as unknown as TmuxServerIdentity;
+
+function strictTmuxIdentity(): TmuxServerIdentity {
+  if (!tmuxServerIdentity) throw new Error('strict tmux fixture unsupported on this platform');
+  return tmuxServerIdentity;
+}
 const input: MailboxNotificationGuardInput = {
   teamName,
   recipient: 'worker-1',
@@ -78,8 +105,14 @@ function message(overrides: Partial<TeamMailboxMessage> = {}): TeamMailboxMessag
 }
 
 function config(overrides: Partial<TeamConfig> = {}): TeamConfig {
+  const configuredSession = overrides.tmux_session;
+  const defaultServerIdentity = configuredSession?.startsWith('cmux:')
+    ? undefined
+    : tmuxServerIdentity;
   return {
     name: teamName,
+    instance_id: instanceId,
+    ...(defaultServerIdentity ? { tmux_server_identity: defaultServerIdentity } : {}),
     task: 'dispatch',
     agent_type: 'claude',
     worker_launch_mode: 'interactive',
@@ -106,11 +139,13 @@ function strictMailbox(value: TeamMailboxMessage = message()): StrictCanonicalMa
 }
 
 function owned(): MailboxTargetOwnership {
+  if (!tmuxServerIdentity) return { kind: 'unavailable' };
   return {
     kind: 'owned',
     provider: 'tmux',
     providerTarget: 'dispatch-session:0',
     paneId: '%9',
+    tmuxServerIdentity,
   };
 }
 
@@ -225,7 +260,7 @@ describe('teamReadCanonicalMailboxMessageStrict', () => {
 });
 
 describe('mailbox notification guard', () => {
-  it('allows the deterministic canonical duplicate-worker target only when strict metadata agrees', () => {
+  it.skipIf(!supportsStrictTmuxFixture)('allows the deterministic canonical duplicate-worker target only when strict metadata agrees', () => {
     const duplicateConfig = config({
       workers: [
         { name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [] },
@@ -270,15 +305,130 @@ describe('mailbox notification guard', () => {
     expect(evaluateMailboxNotificationGuard(input, validState({
       mailbox: { kind: 'replay_suppressed', message: message({ notified_at: timestamp }), marker: 'notified_at' },
     }))).toMatchObject({ kind: 'suppress', reason: 'mailbox_replay_suppressed' });
-    expect(evaluateMailboxNotificationGuard(input, validState({ ownership: { kind: 'foreign' } }))).toMatchObject({
+    const foreignState = supportsStrictTmuxFixture
+      ? validState({ ownership: { kind: 'foreign' } })
+      : validState({
+          config: config({
+            tmux_session: 'cmux:workspace-1',
+            workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'surface-worker-1' }],
+          }),
+          dispatch: strictDispatch(request({ pane_id: 'surface-worker-1' })),
+          ownership: { kind: 'foreign' },
+        });
+    expect(evaluateMailboxNotificationGuard(input, foreignState)).toMatchObject({
       kind: 'suppress', reason: 'mailbox_target_foreign',
     });
     expect(evaluateMailboxNotificationGuard(input, validState({ ownership: { kind: 'unavailable' } }))).toMatchObject({
       kind: 'suppress', reason: 'mailbox_membership_unresolvable',
     });
+    const mismatchedOwnershipState = supportsStrictTmuxFixture
+      ? validState({
+          ownership: {
+            kind: 'owned',
+            provider: 'tmux',
+            providerTarget: 'dispatch-session:0',
+            paneId: '%9',
+            tmuxServerIdentity: { ...strictTmuxIdentity(), server_pid: 4343 },
+          },
+        })
+      : validState({
+          config: config({
+            tmux_session: 'cmux:workspace-1',
+            workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'surface-worker-1' }],
+          }),
+          dispatch: strictDispatch(request({ pane_id: 'surface-worker-1' })),
+          ownership: {
+            kind: 'owned',
+            provider: 'cmux',
+            providerTarget: 'cmux:workspace-1',
+            paneId: 'surface-worker-1',
+            tmuxServerIdentity: undefined,
+          } as unknown as MailboxTargetOwnership,
+        });
+    expect(evaluateMailboxNotificationGuard(input, mismatchedOwnershipState)).toMatchObject({
+      kind: 'suppress', reason: 'mailbox_provider_mismatch',
+    });
   });
 
-  it('compares named security fields while ignoring diagnostic-only dispatch changes', () => {
+  it('defers tmux effects when immutable instance or server proof is absent or malformed', () => {
+    for (const override of [
+      { instance_id: undefined },
+      { instance_id: 'not-an-instance-id' },
+      { tmux_server_identity: undefined },
+      { tmux_server_identity: malformedServerPidIdentity },
+      { tmux_server_identity: malformedServerStartIdentity },
+    ]) {
+      const result = evaluateMailboxNotificationGuard(input, validState({
+        config: config(override),
+      }));
+      expect(result).toMatchObject({
+        kind: 'suppress',
+        reason: 'mailbox_membership_unresolvable',
+        safePendingRequest: request(),
+      });
+    }
+  });
+
+  it('requires an instance UUID for CMUX while never attaching a fake tmux identity', () => {
+    const cmuxTarget = {
+      kind: 'owned' as const,
+      provider: 'cmux' as const,
+      providerTarget: 'cmux:workspace-1',
+      paneId: 'surface-worker-1',
+    };
+    const result = evaluateMailboxNotificationGuard(input, validState({
+      config: config({
+        tmux_session: 'cmux:workspace-1',
+        workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'surface-worker-1' }],
+      }),
+      dispatch: strictDispatch(request({ pane_id: 'surface-worker-1' })),
+      ownership: cmuxTarget,
+    }));
+    expect(result).toMatchObject({
+      kind: 'allow',
+      target: {
+        provider: 'cmux',
+        providerTarget: 'cmux:workspace-1',
+        paneId: 'surface-worker-1',
+      },
+    });
+    if (result.kind !== 'allow') return;
+    expect(result.target.tmuxServerIdentity).toBeUndefined();
+    expect(result.securityTuple.configTmuxServerSocketPath).toBeUndefined();
+    expect(result.securityTuple.configTmuxServerPid).toBeUndefined();
+    expect(result.securityTuple.configTmuxServerProcessStartedAt).toBeUndefined();
+
+    expect(evaluateMailboxNotificationGuard(input, validState({
+      config: config({
+        tmux_session: 'cmux:workspace-1',
+        instance_id: undefined,
+        workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'surface-worker-1' }],
+      }),
+      dispatch: strictDispatch(request({ pane_id: 'surface-worker-1' })),
+      ownership: cmuxTarget,
+    }))).toMatchObject({
+      kind: 'suppress',
+      reason: 'mailbox_membership_unresolvable',
+    });
+
+    expect(evaluateMailboxNotificationGuard(input, validState({
+      config: config({
+        tmux_session: 'cmux:workspace-1',
+        workers: [{ name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: 'surface-worker-1' }],
+      }),
+      dispatch: strictDispatch(request({ pane_id: 'surface-worker-1' })),
+      ownership: {
+        ...cmuxTarget,
+        tmuxServerIdentity,
+      } as unknown as MailboxTargetOwnership,
+    }))).toMatchObject({
+      kind: 'suppress',
+      reason: 'mailbox_provider_mismatch',
+    });
+  });
+
+  it.skipIf(!supportsStrictTmuxFixture)('compares named security fields while ignoring diagnostic-only dispatch changes', () => {
+    const identity = strictTmuxIdentity();
     const first = evaluateMailboxNotificationGuard(input, validState());
     const diagnosticsOnly = evaluateMailboxNotificationGuard(input, validState({
       dispatch: strictDispatch(request({
@@ -295,24 +445,52 @@ describe('mailbox notification guard', () => {
       ...first.securityTuple,
       requestTriggerMessage: 'Different trigger.',
     })).toBe(false);
+    expect(mailboxNotificationSecurityTupleEquals(first.securityTuple, {
+      ...first.securityTuple,
+      configInstanceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    })).toBe(false);
+    expect(mailboxNotificationSecurityTupleEquals(first.securityTuple, {
+      ...first.securityTuple,
+      configTmuxServerSocketPath: '/tmp/other.sock',
+    })).toBe(false);
+    expect(mailboxNotificationSecurityTupleEquals(first.securityTuple, {
+      ...first.securityTuple,
+      configTmuxServerPid: 4243,
+    })).toBe(false);
+    expect(mailboxNotificationSecurityTupleEquals(first.securityTuple, {
+      ...first.securityTuple,
+      configTmuxServerProcessStartedAt: process.platform === 'linux'
+        ? 'linux:fixture:4243'
+        : 'darwin:4242:123457',
+    })).toBe(false);
 
     const changedSecurity = evaluateMailboxNotificationGuard(input, validState({
       config: config({ tmux_session: 'other-session:0' }),
-      ownership: { kind: 'owned', provider: 'tmux', providerTarget: 'other-session:0', paneId: '%9' },
+      ownership: {
+        kind: 'owned',
+        provider: 'tmux',
+        providerTarget: 'other-session:0',
+        paneId: '%9',
+        tmuxServerIdentity: identity,
+      },
     }));
     expect(changedSecurity.kind).toBe('allow');
     if (changedSecurity.kind !== 'allow') return;
     expect(mailboxNotificationSecurityTupleEquals(first.securityTuple, changedSecurity.securityTuple)).toBe(false);
   });
 
-  it('performs strict current reads and an injected ownership check with zero marker or pane effects', async () => {
+  it.skipIf(!supportsStrictTmuxFixture)('performs strict current reads and an injected ownership check with zero marker or pane effects', async () => {
+    const identity = strictTmuxIdentity();
     const markMailbox = vi.fn();
     const markDispatch = vi.fn();
     const paneEffect = vi.fn();
     const readConfig = vi.fn(async () => config());
     const readStrictDispatchRequest = vi.fn(async () => strictDispatch());
     const readStrictMailboxMessage = vi.fn(async () => strictMailbox());
-    const verifyProviderOwnership = vi.fn(async () => owned());
+    const verifyProviderOwnership = vi.fn(async (target: MailboxNotificationTarget) => {
+      expect(target.tmuxServerIdentity).toEqual(identity);
+      return owned();
+    });
 
     const result = await readCurrentMailboxNotificationGuard(input, '/unused', {
       readConfig,
@@ -328,5 +506,48 @@ describe('mailbox notification guard', () => {
     expect(markMailbox).not.toHaveBeenCalled();
     expect(markDispatch).not.toHaveBeenCalled();
     expect(paneEffect).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(!supportsStrictTmuxFixture)('keeps the persisted target snapshot stable when ownership probing mutates its argument', async () => {
+    const identity = strictTmuxIdentity();
+    const readConfig = vi.fn(async () => config());
+    const readStrictDispatchRequest = vi.fn(async () => strictDispatch());
+    const readStrictMailboxMessage = vi.fn(async () => strictMailbox());
+    const verifyProviderOwnership = vi.fn(async (target: MailboxNotificationTarget) => {
+      target.tmuxServerIdentity!.server_pid = 9001;
+      return owned();
+    });
+
+    const result = await readCurrentMailboxNotificationGuard(input, '/unused', {
+      readConfig,
+      readStrictDispatchRequest,
+      readStrictMailboxMessage,
+      verifyProviderOwnership,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'allow',
+      target: { tmuxServerIdentity: identity },
+      securityTuple: {
+        configTmuxServerPid: identity.server_pid,
+      },
+    });
+    expect(readConfig).toHaveBeenCalledOnce();
+  });
+
+  it('does not invoke an ownership probe that could fill missing historical proof', async () => {
+    const verifyProviderOwnership = vi.fn(async () => owned());
+    const result = await readCurrentMailboxNotificationGuard(input, '/unused', {
+      readConfig: vi.fn(async () => config({ tmux_server_identity: undefined })),
+      readStrictDispatchRequest: vi.fn(async () => strictDispatch()),
+      readStrictMailboxMessage: vi.fn(async () => strictMailbox()),
+      verifyProviderOwnership,
+    });
+
+    expect(result).toMatchObject({
+      kind: 'suppress',
+      reason: 'mailbox_membership_unresolvable',
+    });
+    expect(verifyProviderOwnership).not.toHaveBeenCalled();
   });
 });

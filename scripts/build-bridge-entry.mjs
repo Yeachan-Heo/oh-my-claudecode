@@ -16,6 +16,8 @@ await mkdir('bridge', { recursive: true });
 // Preamble: resolve global npm modules so externalized native packages
 // (like @ast-grep/napi) can be found when running from plugin cache
 const banner = `
+const importMetaUrl = require("url").pathToFileURL(__filename);
+
 // Resolve global npm modules for native package imports
 try {
   var _cp = require('child_process');
@@ -40,6 +42,9 @@ const buildConfig = {
   format: 'cjs',
   outfile,
   banner: { js: banner },
+  define: {
+    'import.meta.url': 'importMetaUrl',
+  },
   // Externalize Node.js built-ins and native modules
   external: [
     'fs', 'path', 'os', 'util', 'stream', 'events',

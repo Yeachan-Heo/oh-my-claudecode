@@ -16,6 +16,7 @@ import {
 import { emergencyMutateStateFileIf } from '../../lib/mode-state-io.js';
 import { getOmcRoot, resolveSessionStatePaths } from '../../lib/worktree-paths.js';
 import { withProcessIdentityFileLock } from '../../team/process-identity-lock.js';
+import { absPath, teamWorkspaceHash, TeamPaths } from '../../team/state-paths.js';
 
 let TEST_DIR: string;
 
@@ -790,6 +791,88 @@ describe('state-tools', () => {
       });
     });
 
+    it.each([
+      ['scoped same-name replacement', 'replacement', true],
+      ['aggregate same-name replacement', 'replacement', false],
+      ['scoped missing cleanup receipt', 'missing', true],
+      ['aggregate missing cleanup receipt', 'missing', false],
+      ['scoped corrupt cleanup receipt', 'corrupt', true],
+      ['aggregate corrupt cleanup receipt', 'corrupt', false],
+    ] as const)('clears Team state without touching native records when %s evidence is present', async (_label, evidence, scoped) => {
+      const sessionId = `team-native-boundary-${evidence}`;
+      const teamName = 'team-native-boundary';
+
+      await withIsolatedStateDir(async () => {
+        await publishTeamState(sessionId, teamName);
+        const omcRoot = getOmcRoot(TEST_DIR);
+        const runtimeRoot = join(omcRoot, 'state', 'team', teamName);
+        const configPath = join(runtimeRoot, 'config.json');
+        const taskPath = join(runtimeRoot, 'tasks', 'task-1.json');
+        const workerReceiptPath = join(runtimeRoot, 'workers', 'worker-1', 'launch-attempts', 'attempt-1', 'ack.json');
+        const configBytes = Buffer.from(JSON.stringify({
+          name: teamName,
+          instance_id: '11111111-1111-4111-8111-111111111111',
+        }));
+        const taskBytes = Buffer.from(JSON.stringify({ id: 'task-1', status: 'in_progress', owner: 'worker-1' }));
+        const workerReceiptBytes = Buffer.from(JSON.stringify({ attempt_id: 'attempt-1', status: 'started' }));
+        mkdirSync(dirname(configPath), { recursive: true });
+        mkdirSync(dirname(taskPath), { recursive: true });
+        mkdirSync(dirname(workerReceiptPath), { recursive: true });
+        writeFileSync(configPath, configBytes);
+        writeFileSync(taskPath, taskBytes);
+        writeFileSync(workerReceiptPath, workerReceiptBytes);
+
+        const workspaceHash = teamWorkspaceHash(TEST_DIR, teamName);
+        const authorityPath = absPath(TEST_DIR, TeamPaths.teamInstanceReservation(workspaceHash, teamName));
+        const authorityBytes = Buffer.from(JSON.stringify({
+          team_name: teamName,
+          instance_id: '11111111-1111-4111-8111-111111111111',
+          phase: 'active',
+        }));
+        mkdirSync(dirname(authorityPath), { recursive: true });
+        writeFileSync(authorityPath, authorityBytes);
+
+        const cleanupReceiptPath = absPath(TEST_DIR, TeamPaths.teamInstanceCleanupReceipt(
+          workspaceHash,
+          teamName,
+          '11111111-1111-4111-8111-111111111111',
+        ));
+        if (evidence === 'replacement') {
+          mkdirSync(dirname(cleanupReceiptPath), { recursive: true });
+          writeFileSync(cleanupReceiptPath, JSON.stringify({
+            instance_id: '11111111-1111-4111-8111-111111111111',
+            phase: 'prepared',
+          }));
+        } else if (evidence === 'corrupt') {
+          mkdirSync(dirname(cleanupReceiptPath), { recursive: true });
+          writeFileSync(cleanupReceiptPath, '{"phase":');
+        }
+        const cleanupReceiptBytes = evidence === 'missing' ? undefined : readFileSync(cleanupReceiptPath);
+
+        const missionPath = join(omcRoot, 'state', 'mission-state.json');
+        const missionBytes = Buffer.from(JSON.stringify({
+          missions: [{ source: 'team', teamName, instance_id: '11111111-1111-4111-8111-111111111111' }],
+        }));
+        writeFileSync(missionPath, missionBytes);
+
+        const result = await stateClearTool.handler({
+          mode: 'team',
+          ...(scoped ? { session_id: sessionId } : {}),
+          workingDirectory: TEST_DIR,
+        });
+
+        expect(result.isError).not.toBe(true);
+        expect(existsSync(resolveSessionStatePaths('team', sessionId, TEST_DIR).sessionScoped)).toBe(false);
+        expect(readFileSync(configPath)).toEqual(configBytes);
+        expect(readFileSync(taskPath)).toEqual(taskBytes);
+        expect(readFileSync(workerReceiptPath)).toEqual(workerReceiptBytes);
+        expect(readFileSync(authorityPath)).toEqual(authorityBytes);
+        expect(readFileSync(missionPath)).toEqual(missionBytes);
+        if (cleanupReceiptBytes) expect(readFileSync(cleanupReceiptPath)).toEqual(cleanupReceiptBytes);
+        else expect(existsSync(cleanupReceiptPath)).toBe(false);
+      });
+    });
+
     it('preserves a foreign canonical Team primary and shared runtime when owned legacy clears', async () => {
       const requesterSessionId = 'team-canonical-foreign-requester';
       const ownerSessionId = 'team-canonical-foreign-owner';
@@ -852,8 +935,10 @@ describe('state-tools', () => {
           const cleared = await stateClearTool.handler({ mode: 'team', workingDirectory: TEST_DIR });
           expect(cleared.isError).not.toBe(true);
           expect(existsSync(paths.sessionScoped)).toBe(false);
-          expect(existsSync(runtime.root)).toBe(false);
-          expect(JSON.parse(readFileSync(runtime.missionPath, 'utf8')).missions).toEqual([]);
+          expect(existsSync(runtime.root)).toBe(true);
+          expect(readFileSync(runtime.taskPath)).toEqual(runtime.taskBytes);
+          expect(readFileSync(runtime.missionPath)).toEqual(missionBytes);
+          expect(cleared.content[0].text).toContain('Native team runtimes and cleanup evidence are not removed by state_clear');
         });
       });
     });
@@ -887,7 +972,8 @@ describe('state-tools', () => {
           });
           expect(cleared.isError).not.toBe(true);
           expect(existsSync(paths.sessionScoped)).toBe(false);
-          expect(existsSync(runtime.root)).toBe(false);
+          expect(existsSync(runtime.root)).toBe(true);
+          expect(readFileSync(runtime.taskPath)).toEqual(runtime.taskBytes);
         });
       });
     });
@@ -895,7 +981,7 @@ describe('state-tools', () => {
     it.each([
       ['scoped session', true],
       ['aggregate legacy', false],
-    ])('cleans completed-orphan Team runtime records when the %s primary lock is busy', async (_scope, scoped) => {
+    ])('preserves completed-orphan Team runtime records when the %s primary lock is busy', async (_scope, scoped) => {
       const primarySessionId = 'team-scoped-primary-locked';
       const orphanSessionId = 'team-scoped-completed-orphan';
       const primaryTeamName = 'scoped-primary-locked-team';
@@ -919,6 +1005,7 @@ describe('state-tools', () => {
         const primaryRuntime = writeTeamRuntime(omcRoot, primaryTeamName, [primaryTeamName, orphanTeamName]);
         const orphanRuntime = writeTeamRuntime(omcRoot, orphanTeamName, [primaryTeamName, orphanTeamName]);
         const primaryBytes = readFileSync(primaryStatePath);
+        const missionBytes = readFileSync(primaryRuntime.missionPath);
 
         await withTeamLockHolder(`${primaryStatePath}.team-state.lock`, `primary-${scoped ? 'scoped' : 'legacy'}`, async () => {
           const blocked = await stateClearTool.handler({
@@ -930,11 +1017,10 @@ describe('state-tools', () => {
           expect(readFileSync(primaryStatePath)).toEqual(primaryBytes);
           expect(readFileSync(primaryRuntime.taskPath)).toEqual(primaryRuntime.taskBytes);
           expect(existsSync(orphanPaths.sessionScoped)).toBe(false);
-          expect(existsSync(orphanRuntime.taskPath)).toBe(false);
-          expect(existsSync(orphanRuntime.root)).toBe(false);
-          expect(JSON.parse(readFileSync(primaryRuntime.missionPath, 'utf8')).missions).toEqual([
-            { source: 'team', teamName: primaryTeamName, status: 'running' },
-          ]);
+          expect(existsSync(orphanRuntime.taskPath)).toBe(true);
+          expect(readFileSync(orphanRuntime.taskPath)).toEqual(orphanRuntime.taskBytes);
+          expect(existsSync(orphanRuntime.root)).toBe(true);
+          expect(readFileSync(primaryRuntime.missionPath)).toEqual(missionBytes);
         });
       });
     });

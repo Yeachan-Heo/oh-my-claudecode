@@ -3,6 +3,7 @@ import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, unlinkSync,
 import { dirname, join } from 'path';
 import { execFileSync } from 'node:child_process';
 
+import { getNativeContainedFs } from '../graph/runtime/native-contained-fs.js';
 import type { TeamConfig, TeamRecoveryAttempt, TeamRuntimeOwnerEpoch } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 
@@ -71,41 +72,99 @@ export function processStartIdentityForPlatform(
   platform: NodeJS.Platform = process.platform,
   exec: typeof execFileSync = execFileSync,
 ): string | null {
-  if (!Number.isSafeInteger(pid) || pid < 1) return null;
+  return probeProcessStartIdentityForPlatform(pid, platform, exec, readFileSync, false).identity;
+}
+
+interface ProcessStartIdentityProbe {
+  identity: string | null;
+  precise: boolean;
+}
+
+function darwinProcessStartIdentityFromNative(pid: number): string | null {
+  try {
+    const native = getNativeContainedFs();
+    if (typeof native.processStartTime !== 'function') return null;
+    const started = native.processStartTime(pid);
+    if (!started || typeof started !== 'object' || Array.isArray(started)
+      || !Number.isSafeInteger(started.seconds) || started.seconds < 946684800
+      || started.seconds > Math.floor(Date.now() / 1000) + 86400
+      || !Number.isSafeInteger(started.microseconds) || started.microseconds < 1
+      || started.microseconds >= 1_000_000) return null;
+    return `darwin:${started.seconds}:${started.microseconds}`;
+  } catch {
+    // A missing addon, old addon, or failed kernel probe is unknown.
+    return null;
+  }
+}
+
+/**
+ * Shared process-creation probes used by both the historical owner-election
+ * format and the strict resource-ownership format.  The owner-election
+ * format intentionally retains its Darwin `ps` fallback for compatibility;
+ * destructive resource matching calls this same probe in strict mode, where
+ * that fallback is reported as unavailable instead.
+ */
+function probeProcessStartIdentityForPlatform(
+  pid: number,
+  platform: NodeJS.Platform,
+  exec: typeof execFileSync,
+  read: typeof readFileSync,
+  strict: boolean,
+): ProcessStartIdentityProbe {
+  if (!Number.isSafeInteger(pid) || pid < 1) return { identity: null, precise: false };
   try {
     if (platform === 'linux') {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const stat = read(`/proc/${pid}/stat`, 'utf8');
       const close = stat.lastIndexOf(')');
       const fields = stat.slice(close + 2).trim().split(/\s+/);
       const ticks = fields[19];
-      return ticks ? `linux:${ticks}` : null;
+      if (!ticks) return { identity: null, precise: false };
+      if (!strict) return { identity: `linux:${ticks}`, precise: false };
+      if (!/^[1-9]\d*$/.test(ticks)) return { identity: null, precise: false };
+      const bootId = String(read('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(bootId)) {
+        return { identity: null, precise: false };
+      }
+      return { identity: `linux:${bootId}:${ticks}`, precise: true };
     }
     if (platform === 'win32') {
+      if (strict) return { identity: null, precise: false };
       const command = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`;
       const ticks = exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command],
         { encoding: 'utf8', windowsHide: true }).trim();
-      return /^\d+$/.test(ticks) ? `win32:${ticks}` : null;
+      return /^\d+$/.test(ticks)
+        ? { identity: `win32:${ticks}`, precise: true }
+        : { identity: null, precise: false };
     }
     if (platform === 'darwin') {
+      if (strict) {
+        const identity = darwinProcessStartIdentityFromNative(pid);
+        return identity ? { identity, precise: true } : { identity: null, precise: false };
+      }
       try {
         const raw = exec('/usr/sbin/sysctl', ['-b', `kern.proc.pid.${pid}`], {
           encoding: null, maxBuffer: 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
         });
         const birth = darwinProcessStartFromKinfo(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
-        if (birth) return `darwin:${birth}`;
+        if (birth) return { identity: `darwin:${birth}`, precise: true };
       } catch {
-        // Fall through to the portable process listing when the native kinfo layout is unavailable.
+        // Fall through to the historical portable process listing.
       }
       const started = exec('ps', ['-o', 'lstart=', '-p', String(pid)], {
         encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
       }).trim();
       const startedAtMs = Date.parse(started);
-      return started && Number.isFinite(startedAtMs) ? `darwin:${Math.floor(startedAtMs / 1000)}:0` : null;
+      return started && Number.isFinite(startedAtMs)
+        ? { identity: `darwin:${Math.floor(startedAtMs / 1000)}:0`, precise: false }
+        : { identity: null, precise: false };
     }
+    if (strict) return { identity: null, precise: false };
     const started = exec('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }).trim();
-    return started ? `${platform}:${started}` : null;
+    return started
+      ? { identity: `${platform}:${started}`, precise: false }
+      : { identity: null, precise: false };
   } catch {
-    return null;
+    return { identity: null, precise: false };
   }
 }
 
@@ -122,9 +181,76 @@ export function isValidProcessStartIdentity(value: unknown, platform: NodeJS.Pla
     && value.slice(separator + 1).length > 0 && !/[\u0000-\u001f\u007f]/.test(value.slice(separator + 1));
 }
 
+/**
+ * Return a process creation token suitable for destructive resource
+ * ownership.  Unlike `processStartIdentityForPlatform`, this never uses the
+ * Darwin second-resolution `ps` fallback and includes Linux boot identity so
+ * PID/start-tick reuse after reboot cannot match.
+ */
+export function strictProcessStartIdentityForPlatform(
+  pid: number,
+  platform: NodeJS.Platform = process.platform,
+  exec: typeof execFileSync = execFileSync,
+  read: typeof readFileSync = readFileSync,
+): string | null {
+  if (!Number.isSafeInteger(pid) || pid < 1 || pid > 2_147_483_647) return null;
+  const result = probeProcessStartIdentityForPlatform(pid, platform, exec, read, true);
+  return result.precise ? result.identity : null;
+}
+
+/** Alias describing the strict token in creation-identity terminology. */
+export const processCreationIdentityForPlatform = strictProcessStartIdentityForPlatform;
+
+export function isValidStrictProcessStartIdentity(
+  value: unknown,
+  platform: NodeJS.Platform = process.platform,
+): value is string {
+  if (typeof value !== 'string' || value.length > 1024) return false;
+  if (platform === 'linux') {
+    return /^linux:[A-Za-z0-9][A-Za-z0-9._-]*:[1-9]\d*$/.test(value);
+  }
+  if (platform === 'darwin') {
+    const match = /^darwin:([1-9]\d*):(\d+)$/.exec(value);
+    // A zero-microsecond Darwin token is indistinguishable from the legacy
+    // second-resolution fallback and is not destructive evidence.
+    return match !== null && Number(match[2]) > 0 && Number(match[2]) < 1_000_000;
+  }
+  return false;
+}
+
 export function currentProcessStartIdentity(pid: number = process.pid): string | null {
   return processStartIdentityForPlatform(pid);
 }
+
+export function currentStrictProcessStartIdentity(pid: number = process.pid): string | null {
+  return strictProcessStartIdentityForPlatform(pid);
+}
+
+/** Alias used by tmux resource ownership callers. */
+export const currentProcessCreationIdentity = currentStrictProcessStartIdentity;
+
+export type ProcessIdentityObservation = 'matching' | 'dead' | 'unknown';
+
+/**
+ * Observe one strict process incarnation.  `unknown` is deliberately
+ * distinct from `dead`: an unavailable or coarse probe never authorizes
+ * destructive cleanup.
+ */
+export function observeProcessIdentity(
+  record: Pick<TeamRuntimeOwnerEpoch, 'pid' | 'process_started_at'>,
+): ProcessIdentityObservation {
+  if (!Number.isSafeInteger(record.pid) || record.pid < 1
+    || !isValidStrictProcessStartIdentity(record.process_started_at)) return 'unknown';
+  try {
+    process.kill(record.pid, 0);
+  } catch (error: unknown) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH' ? 'dead' : 'unknown';
+  }
+  const observed = currentStrictProcessStartIdentity(record.pid);
+  if (!observed || !isValidStrictProcessStartIdentity(observed)) return 'unknown';
+  return observed === record.process_started_at ? 'matching' : 'dead';
+}
+
 function processStartIdentitiesMayMatch(recorded: string, observed: string): boolean {
   if (recorded === observed) return true;
   const recordedDarwin = /^darwin:([1-9]\d*):(\d+)$/.exec(recorded);

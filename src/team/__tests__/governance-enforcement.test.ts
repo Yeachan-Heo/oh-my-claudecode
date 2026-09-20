@@ -6,6 +6,7 @@ import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 import { shutdownTeamV2 } from '../runtime-v2.js';
 import { teamClaimTask } from '../team-ops.js';
+import { activateTeamInstanceUnderLock, createTeamInstanceBinding, reserveTeamInstance, withTeamInstanceLifecycleLock } from '../team-instance.js';
 
 describe('team governance enforcement', () => {
   let cwd: string;
@@ -142,8 +143,15 @@ describe('team governance enforcement', () => {
 
   it('allows shutdown cleanup override when governance disables inactive-worker requirement', async () => {
     const teamName = 'cleanup-team';
+    const binding = createTeamInstanceBinding({ teamName, cwd });
+    await reserveTeamInstance({ teamName, cwd, instanceId: binding.instance_id });
     await writeJson(teamStatePath(teamName, 'config.json'), {
       name: teamName,
+      instance_id: binding.instance_id,
+      leader_cwd: binding.cwd,
+      team_state_root: binding.state_root,
+      state_revision: 0,
+      lifecycle_state: 'active',
       task: 'test',
       agent_type: 'claude',
       worker_launch_mode: 'interactive',
@@ -173,6 +181,7 @@ describe('team governance enforcement', () => {
       created_at: new Date().toISOString(),
     });
 
-    await expect(shutdownTeamV2(teamName, cwd)).resolves.toEqual({ outcome: 'cleaned' });
+    await withTeamInstanceLifecycleLock(cwd, teamName, () => activateTeamInstanceUnderLock(binding));
+    await expect(shutdownTeamV2(teamName, cwd, { instanceId: binding.instance_id })).resolves.toEqual({ outcome: 'cleaned' });
   });
 });

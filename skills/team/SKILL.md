@@ -861,7 +861,11 @@ By default, the team runtime uses an event-driven architecture instead of the le
 - **Worker status files**: Workers write status to `.omc/state/team/{teamName}/workers/{name}/status.json`
 - **Preserved**: Sentinel gate (blocks premature completion), circuit breaker (dead worker detection), failure sidecars
 
-Set `OMC_RUNTIME_V2=0`, `false`, `no`, or `off` to opt out and use the legacy v1 runtime for that session.
+Native CLI team jobs require the instance-bound v2 runtime. Unset a disabling
+`OMC_RUNTIME_V2` value (`0`, `false`, `no`, or `off`) before starting them; there is
+no pane-only legacy cleanup fallback. Shutdown requires matching instance and
+worker-launch evidence even with `--force`. Session `state_clear` does not remove
+native runtime trees or substitute for native team shutdown.
 
 ## Dynamic Scaling
 

@@ -11,8 +11,8 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'child_process';
-import { join } from 'path';
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 const __ownDir: string = (() => {
   // CJS bundle: __dirname is reliable and takes precedence
@@ -20,22 +20,40 @@ const __ownDir: string = (() => {
   // ESM: derive from import.meta.url
   try { return fileURLToPath(new URL('.', import.meta.url)); } catch { return process.cwd(); }
 })();
-import { writeFileSync, readFileSync, mkdirSync, existsSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { killWorkerPanes, killTeamSession, getWorkerLiveness } from '../team/tmux-session.js';
-import { validateTeamName } from '../team/team-name.js';
-import { readTeamConfig } from '../team/monitor.js';
-import { NudgeTracker } from '../team/idle-nudge.js';
 import {
-  clearScopedTeamState,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  existsSync,
+  renameSync,
+  unlinkSync,
+} from 'fs';
+import { readFile } from 'fs/promises';
+import { validateTeamName } from '../team/team-name.js';
+import { isRuntimeV2Enabled, shutdownTeamV2 } from '../team/runtime-v2.js';
+import { withProcessIdentityFileLockSync } from '../team/process-identity-lock.js';
+import { NudgeTracker, type NudgeAuthority } from '../team/idle-nudge.js';
+import {
   convergeJobWithResultArtifact,
+  isValidOmcTeamJob,
+  isValidTeamPaneArtifact,
   isJobTerminal,
+  readMatchingTerminalArtifact,
+  resultArtifactIdentityError,
 } from './team-job-convergence.js';
 import { isProcessAlive } from '../platform/index.js';
-import type { OmcTeamJob } from './team-job-convergence.js';
+import type { OmcTeamJob, TeamPaneArtifact } from './team-job-convergence.js';
+import { isValidTeamInstanceId, isValidTmuxServerIdentity, type TeamConfig } from '../team/types.js';
+import { sendToWorker, type WorkerPaneOwnership } from '../team/tmux-session.js';
+import { readTeamConfig } from '../team/monitor.js';
+import {
+  assertTeamInstanceUnderLock,
+  createTeamInstanceBinding,
+  withTeamInstanceLifecycleLock,
+} from '../team/team-instance.js';
+import { canonicalTeamCwd } from '../team/state-paths.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
 
-const omcTeamJobs = new Map<string, OmcTeamJob>();
 const OMC_JOBS_DIR = process.env.OMC_JOBS_DIR || getGlobalOmcStatePath('team-jobs');
 const DEPRECATION_CODE = 'deprecated_cli_only' as const;
 
@@ -165,62 +183,259 @@ export function createDeprecatedCliOnlyEnvelopeWithArgs(
 
 function persistJob(jobId: string, job: OmcTeamJob): void {
   try {
-    if (!existsSync(OMC_JOBS_DIR)) mkdirSync(OMC_JOBS_DIR, { recursive: true });
-    writeFileSync(join(OMC_JOBS_DIR, `${jobId}.json`), JSON.stringify(job), 'utf-8');
-  } catch { /* best-effort */ }
+    withProcessIdentityFileLockSync(jobLockPath(jobId), () => persistJobUnlocked(jobId, job));
+  } catch (error) {
+    throw new Error(`team_job_persist_failed:${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function loadJobFromDisk(jobId: string): OmcTeamJob | undefined {
+  const path = join(OMC_JOBS_DIR, `${jobId}.json`);
+  let content: string;
   try {
-    return JSON.parse(readFileSync(join(OMC_JOBS_DIR, `${jobId}.json`), 'utf-8')) as OmcTeamJob;
+    content = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new Error(`Unreadable job file: ${jobId} (${error instanceof Error ? error.message : String(error)})`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
   } catch {
-    return undefined;
+    throw new Error(`Corrupt job file: ${jobId} (invalid JSON)`);
   }
+  if (!isValidOmcTeamJob(parsed)) {
+    throw new Error(`Corrupt job file: ${jobId} (invalid schema)`);
+  }
+  return parsed;
 }
 
-async function loadPaneIds(jobId: string): Promise<{ paneIds: string[]; leaderPaneId: string; sessionName?: string; ownsWindow?: boolean } | null> {
+function getJob(jobId: string): OmcTeamJob | undefined {
+  return loadJobFromDisk(jobId);
+}
+
+async function loadPaneIds(jobId: string, instanceId: string): Promise<TeamPaneArtifact | null> {
   const p = join(OMC_JOBS_DIR, `${jobId}-panes.json`);
-  try { return JSON.parse(await readFile(p, 'utf-8')); }
-  catch { return null; }
+  try {
+    const parsed = JSON.parse(await readFile(p, 'utf-8')) as unknown;
+    if (!isValidTeamPaneArtifact(parsed, instanceId)) return null;
+    return parsed;
+  } catch { return null; }
 }
 
+interface NudgeJobIdentity {
+  instanceId: string;
+  teamName: string;
+  cwd: string;
+}
 
-async function resolveCleanupPaneEvidence(job: OmcTeamJob, jobId: string): Promise<{
-  panes: { paneIds: string[]; leaderPaneId: string; sessionName?: string; ownsWindow?: boolean } | null;
-  livenessUnknownReason?: string;
-}> {
-  const panes = await loadPaneIds(jobId);
-  if (panes?.paneIds?.length) return { panes };
+function sameNudgeJobIdentity(job: OmcTeamJob, expected: NudgeJobIdentity): boolean {
+  if (!job.cwd) return false;
+  return job.instanceId === expected.instanceId
+    && job.teamName === expected.teamName
+    && canonicalTeamCwd(job.cwd) === canonicalTeamCwd(expected.cwd)
+    && job.status === 'running'
+    && job.cleanedUpAt === undefined;
+}
 
-  if (!job.teamName || !job.cwd) {
-    return { panes, livenessUnknownReason: 'worker_liveness_unknown:missing_job_team_or_cwd' };
+function readLockedNudgeJob(jobId: string, expected: NudgeJobIdentity): OmcTeamJob | null {
+  try {
+    return withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+      const current = loadJobFromDisk(jobId);
+      return current && sameNudgeJobIdentity(current, expected) ? current : null;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function stablePaneArtifact(artifact: TeamPaneArtifact): string {
+  return JSON.stringify({
+    instanceId: artifact.instanceId,
+    paneIds: [...artifact.paneIds].sort(),
+    leaderPaneId: artifact.leaderPaneId,
+    sessionName: artifact.sessionName,
+    ownsWindow: artifact.ownsWindow,
+    workers: [...artifact.workers]
+      .sort((left, right) => left.workerName.localeCompare(right.workerName))
+      .map(worker => ({
+        workerName: worker.workerName,
+        paneId: worker.paneId,
+        launchAttemptId: worker.launchAttemptId,
+      })),
+  });
+}
+
+function samePaneArtifact(left: TeamPaneArtifact, right: TeamPaneArtifact): boolean {
+  return stablePaneArtifact(left) === stablePaneArtifact(right);
+}
+
+function sameNudgeAuthority(left: NudgeAuthority, right: NudgeAuthority): boolean {
+  if (left.instanceId !== right.instanceId
+    || left.sessionName !== right.sessionName
+    || left.provider !== right.provider) return false;
+  const leftIdentity = left.tmuxServerIdentity;
+  const rightIdentity = right.tmuxServerIdentity;
+  if (leftIdentity === undefined || rightIdentity === undefined) {
+    return leftIdentity === rightIdentity;
+  }
+  return leftIdentity.socket_path === rightIdentity.socket_path
+    && leftIdentity.server_pid === rightIdentity.server_pid
+    && leftIdentity.process_started_at === rightIdentity.process_started_at;
+}
+
+function sameTmuxIdentity(
+  left: WorkerPaneOwnership['tmuxServerIdentity'],
+  right: WorkerPaneOwnership['tmuxServerIdentity'],
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.socket_path === right.socket_path
+    && left.server_pid === right.server_pid
+    && left.process_started_at === right.process_started_at;
+}
+
+/**
+ * Resolve nudge authority only from the original locked job, its matching
+ * config/reservation, and the validated pane artifact. This deliberately
+ * avoids discovering a replacement same-name team after an async boundary.
+ */
+async function resolveNudgeAuthorityUnderLock(
+  jobId: string,
+  expected: NudgeJobIdentity,
+  panes: TeamPaneArtifact,
+): Promise<NudgeAuthority | null> {
+  if (!isValidTeamInstanceId(expected.instanceId)) return null;
+  if (!readLockedNudgeJob(jobId, expected)) return null;
+  const currentPanes = await loadPaneIds(jobId, expected.instanceId);
+  if (!currentPanes || !samePaneArtifact(currentPanes, panes)) return null;
+  const binding = createTeamInstanceBinding({
+    teamName: expected.teamName,
+    cwd: expected.cwd,
+    instanceId: expected.instanceId,
+  });
+  const assertion = await assertTeamInstanceUnderLock(binding);
+  if (assertion.reservation.phase !== 'active' || assertion.observed_state !== 'bound') return null;
+  const config = await readTeamConfig(expected.teamName, expected.cwd);
+  if (!config || config.name !== expected.teamName || config.instance_id !== expected.instanceId) return null;
+  if (config.leader_cwd !== undefined && canonicalTeamCwd(config.leader_cwd) !== canonicalTeamCwd(expected.cwd)) return null;
+  const leaderPaneId = config.leader_pane_id;
+  if (typeof leaderPaneId !== 'string' || leaderPaneId !== panes.leaderPaneId) return null;
+  if (!Array.isArray(config.workers)) return null;
+  if (panes.sessionName !== undefined && panes.sessionName !== config.tmux_session) return null;
+  if (typeof config.tmux_session !== 'string' || config.tmux_session.trim() !== config.tmux_session
+    || config.tmux_session.length === 0) return null;
+
+  const provider = config.tmux_session.startsWith('cmux:') ? 'cmux' : 'tmux';
+  let tmuxServerIdentity: TeamConfig['tmux_server_identity'];
+  if (provider === 'tmux') {
+    if (!isValidTmuxServerIdentity(config.tmux_server_identity)) return null;
+    tmuxServerIdentity = config.tmux_server_identity;
+  } else if (config.tmux_server_identity !== undefined) {
+    return null;
   }
 
-  const config = await readTeamConfig(job.teamName, job.cwd).catch(() => null);
-  if (!config) {
-    return { panes, livenessUnknownReason: 'worker_liveness_unknown:no_config_or_panes' };
+  const ownershipByPane = new Map<string, WorkerPaneOwnership>();
+  const artifactWorkerNames = new Set<string>();
+  for (const pane of panes.workers) {
+    const worker = config.workers.find(candidate => candidate.name === pane.workerName);
+    if (!worker || worker.pane_id !== pane.paneId || worker.launch_attempt_id !== pane.launchAttemptId) return null;
+    if (artifactWorkerNames.has(pane.workerName)) return null;
+    artifactWorkerNames.add(pane.workerName);
+    ownershipByPane.set(pane.paneId, {
+      provider,
+      providerTarget: config.tmux_session,
+      paneId: pane.paneId,
+      splitTarget: leaderPaneId,
+      leaderPaneId,
+      reservedPaneIds: panes.paneIds.filter(candidate => candidate !== pane.paneId),
+      source: 'adopted',
+      ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    });
   }
 
-  const configPaneIds = (config.workers ?? [])
-    .map((worker) => worker.pane_id)
-    .filter((paneId): paneId is string => typeof paneId === 'string' && paneId.trim().length > 0);
-  if (configPaneIds.length > 0) {
-    return {
-      panes: {
-        paneIds: configPaneIds,
-        leaderPaneId: config.leader_pane_id ?? panes?.leaderPaneId ?? '',
-        sessionName: config.tmux_session || panes?.sessionName,
-        ownsWindow: config.tmux_window_owned ?? panes?.ownsWindow,
+  const configuredWorkers = config.workers.filter(worker => worker.pane_id !== undefined);
+  if (configuredWorkers.length !== panes.workers.length
+    || configuredWorkers.some(worker => !artifactWorkerNames.has(worker.name))) {
+    return null;
+  }
+  return {
+    instanceId: expected.instanceId,
+    sessionName: config.tmux_session,
+    provider,
+    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    getPaneOwnership: (paneId: string) => ownershipByPane.get(paneId),
+    // The live caller replaces this placeholder with the lifecycle-locked
+    // final validation + transport operation.
+    executeNudge: async () => false,
+  };
+}
+
+async function loadNudgeAuthority(
+  jobId: string,
+  expected: NudgeJobIdentity,
+  panes: TeamPaneArtifact,
+): Promise<NudgeAuthority | null> {
+  try {
+    const binding = createTeamInstanceBinding({
+      teamName: expected.teamName,
+      cwd: expected.cwd,
+      instanceId: expected.instanceId,
+    });
+    return await withTeamInstanceLifecycleLock(
+      binding.cwd,
+      binding.team_name,
+      () => resolveNudgeAuthorityUnderLock(jobId, expected, panes),
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function executeLockedNudge(
+  jobId: string,
+  expected: NudgeJobIdentity,
+  expectedPanes: TeamPaneArtifact,
+  authority: NudgeAuthority,
+  paneId: string,
+  message: string,
+): Promise<boolean> {
+  try {
+    const binding = createTeamInstanceBinding({
+      teamName: expected.teamName,
+      cwd: expected.cwd,
+      instanceId: expected.instanceId,
+    });
+    return await withTeamInstanceLifecycleLock(
+      binding.cwd,
+      binding.team_name,
+      async () => {
+        const current = await resolveNudgeAuthorityUnderLock(jobId, expected, expectedPanes);
+        if (!current || !sameNudgeAuthority(current, authority)) return false;
+        const ownership = current.getPaneOwnership(paneId);
+        if (!ownership) return false;
+        // Config, reservation, and pane evidence above all cross async
+        // boundaries. Re-read the original durable job synchronously under its
+        // own lock immediately before input so terminalization, removal, or a
+        // same-job replacement cannot turn stale authority into delivery.
+        if (!readLockedNudgeJob(jobId, expected)) return false;
+        const sent = current.provider === 'tmux'
+          ? await sendToWorker(current.sessionName, paneId, message, current.tmuxServerIdentity)
+          : await sendToWorker(current.sessionName, paneId, message);
+        if (!sent) return false;
+
+        // The lifecycle lock remains held while confirming that the original
+        // job/config/artifact still own this exact target after transport.
+        const after = await resolveNudgeAuthorityUnderLock(jobId, expected, expectedPanes);
+        if (!after || !sameNudgeAuthority(after, authority)) return false;
+        const afterOwnership = after.getPaneOwnership(paneId);
+        return afterOwnership !== undefined
+          && afterOwnership.providerTarget === ownership.providerTarget
+          && sameTmuxIdentity(afterOwnership.tmuxServerIdentity, ownership.tmuxServerIdentity);
       },
-    };
+    );
+  } catch {
+    return false;
   }
-
-  const hasConfiguredWorkers = (config.workers ?? []).length > 0 || config.worker_count > 0;
-  if (hasConfiguredWorkers) {
-    return { panes, livenessUnknownReason: 'worker_liveness_unknown:no_worker_pane_ids' };
-  }
-
-  return { panes };
 }
 
 function validateJobId(job_id: string): void {
@@ -229,17 +444,143 @@ function validateJobId(job_id: string): void {
   }
 }
 
-function saveJobState(jobId: string, job: OmcTeamJob): OmcTeamJob {
-  omcTeamJobs.set(jobId, job);
-  persistJob(jobId, job);
-  return job;
+function jobLockPath(jobId: string): string {
+  return join(OMC_JOBS_DIR, `.${jobId}.lock`);
 }
 
-function makeJobResponse(jobId: string, job: OmcTeamJob, extra: Record<string, unknown> = {}): { content: Array<{ type: 'text'; text: string }> } {
+function persistJobUnlocked(jobId: string, job: OmcTeamJob): void {
+  if (!existsSync(OMC_JOBS_DIR)) mkdirSync(OMC_JOBS_DIR, { recursive: true });
+  const targetPath = join(OMC_JOBS_DIR, `${jobId}.json`);
+  const tempPath = `${targetPath}.tmp.${process.pid}.${randomUUID()}`;
+  try {
+    writeFileSync(tempPath, JSON.stringify(job), { encoding: 'utf-8', mode: 0o600 });
+    renameSync(tempPath, targetPath);
+  } finally {
+    try { unlinkSync(tempPath); } catch { /* renamed or never created */ }
+  }
+}
+
+function updateJobFailureIfRunning(
+  jobId: string,
+  expectedInstanceId: string,
+  reason: string,
+  result?: string,
+): void {
+  withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+    const current = loadJobFromDisk(jobId);
+    if (
+      !current
+      || current.instanceId !== expectedInstanceId
+      || current.cleanedUpAt
+      || current.status !== 'running'
+    ) return;
+    persistJobUnlocked(jobId, {
+      ...current,
+      status: 'failed',
+      stderr: current.stderr ?? reason,
+      ...(result !== undefined ? { result: current.result ?? result } : {}),
+    });
+  });
+}
+
+function readConvergedJob(jobId: string): OmcTeamJob | undefined {
+  return withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+    const current = loadJobFromDisk(jobId);
+    if (!current) return undefined;
+    const convergence = convergeJobWithResultArtifact(current, jobId, OMC_JOBS_DIR);
+    let job = convergence.job;
+    if (!job.cleanedUpAt && job.status === 'running' && job.pid != null && !isProcessAlive(job.pid)) {
+      const reason = 'Process no longer alive (MCP restart?)';
+      job = {
+        ...job,
+        status: 'failed',
+        stderr: job.stderr ?? reason,
+        result: job.result ?? JSON.stringify({ error: reason }),
+      };
+    }
+    if (convergence.changed || job !== convergence.job) {
+      // Status/wait convergence recomputes from the current identity-validated
+      // record under the lock. Terminal freezing is reserved for child close.
+      persistJobUnlocked(jobId, job);
+    }
+    return job;
+  });
+}
+
+type CleanupJobPublication =
+  | { kind: 'updated'; job: OmcTeamJob }
+  | { kind: 'already_cleaned'; job: OmcTeamJob }
+  | { kind: 'superseded'; reason: string }
+  | { kind: 'blocked'; reason: string };
+
+interface CleanupFieldSnapshot {
+  cleanedUpAt?: string;
+  cleanupBlockedAt?: string;
+  cleanupBlockedReason?: string;
+}
+
+function mergeCleanupFields(
+  jobId: string,
+  expectedInstanceId: string,
+  initial: CleanupFieldSnapshot,
+  fields: {
+    cleanedUpAt?: string;
+    cleanupBlockedAt?: string;
+    cleanupBlockedReason?: string;
+    clearBlocked?: boolean;
+  },
+): CleanupJobPublication {
+  try {
+    return withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+      const current = loadJobFromDisk(jobId);
+      if (!current) return { kind: 'blocked', reason: 'cleanup_job_missing' };
+      if (current.instanceId !== expectedInstanceId) {
+        return {
+          kind: 'blocked',
+          reason: `cleanup_instance_mismatch:expected=${expectedInstanceId}:actual=${current.instanceId}`,
+        };
+      }
+      if (current.cleanedUpAt) return { kind: 'already_cleaned', job: current };
+      if (
+        current.cleanupBlockedAt !== initial.cleanupBlockedAt
+        || current.cleanupBlockedReason !== initial.cleanupBlockedReason
+        || current.cleanedUpAt !== initial.cleanedUpAt
+      ) {
+        return {
+          kind: 'superseded',
+          reason: current.cleanupBlockedReason ?? 'cleanup_state_changed',
+        };
+      }
+      const next: OmcTeamJob = { ...current };
+      if (fields.cleanedUpAt !== undefined) next.cleanedUpAt = fields.cleanedUpAt;
+      if (fields.cleanupBlockedAt !== undefined) next.cleanupBlockedAt = fields.cleanupBlockedAt;
+      if (fields.cleanupBlockedReason !== undefined) next.cleanupBlockedReason = fields.cleanupBlockedReason;
+      if (fields.clearBlocked) {
+        delete next.cleanupBlockedAt;
+        delete next.cleanupBlockedReason;
+      }
+      persistJobUnlocked(jobId, next);
+      return { kind: 'updated', job: next };
+    });
+  } catch (error) {
+    return {
+      kind: 'blocked',
+      reason: `cleanup_job_lock_failed:${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
+function makeJobResponse(jobId: string, job: OmcTeamJob, nudges?: ReturnType<NudgeTracker['getSummary']>): { content: Array<{ type: 'text'; text: string }> } {
   const elapsed = ((Date.now() - job.startedAt) / 1000).toFixed(1);
-  const out: Record<string, unknown> = { jobId, status: job.status, elapsedSeconds: elapsed, ...extra };
+  const out: Record<string, unknown> = {
+    jobId,
+    instanceId: job.instanceId,
+    status: job.status,
+    elapsedSeconds: elapsed,
+  };
   if (job.result) { try { out.result = JSON.parse(job.result) as unknown; } catch { out.result = job.result; } }
   if (job.stderr) out.stderr = job.stderr;
+  if (nudges) out.nudges = nudges;
   return { content: [{ type: 'text', text: JSON.stringify(out) }] };
 }
 
@@ -250,7 +591,7 @@ const startSchema = z.object({
     subject: z.string().describe('Brief task title'),
     description: z.string().describe('Full task description'),
   })).describe('Tasks to distribute to workers'),
-  cwd: z.string().describe('Working directory (absolute path)'),
+  cwd: z.string().min(1).describe('Working directory (absolute path)'),
   newWindow: z.boolean().optional().describe('Spawn workers in a dedicated tmux window instead of splitting the current window'),
 });
 
@@ -271,7 +612,12 @@ const cleanupSchema = z.object({
   grace_ms: z.number().optional().describe('Grace period in ms before force-killing panes (default: 10000)'),
 });
 
-async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+type TeamToolResponse = {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+};
+
+async function handleStart(args: unknown): Promise<TeamToolResponse> {
   if (
     typeof args === 'object'
     && args !== null
@@ -284,21 +630,94 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
 
   const input = startSchema.parse(args);
   validateTeamName(input.teamName);
+  if (!isRuntimeV2Enabled()) {
+    throw new Error(
+      'team_start_unsafe_runtime_v1: instance-bound provider cleanup requires runtime v2; set OMC_RUNTIME_V2=1',
+    );
+  }
+  const cwd = resolve(input.cwd);
   const jobId = `omc-${Date.now().toString(36)}${randomUUID().slice(0, 8)}`;
+  const instanceId = randomUUID();
   const runtimeCliPath = join(__ownDir, 'runtime-cli.cjs');
 
-  const job: OmcTeamJob = { status: 'running', startedAt: Date.now(), teamName: input.teamName, cwd: input.cwd };
-  omcTeamJobs.set(jobId, job);
-
-  const child = spawn(process.execPath, [runtimeCliPath], {
-    env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  job.pid = child.pid;
+  const job: OmcTeamJob = {
+    status: 'running',
+    startedAt: Date.now(),
+    teamName: input.teamName,
+    cwd,
+    instanceId,
+  };
+  // Persist identity before spawning a child that may create state. A cleanup
+  // request must never reconstruct authority from a same-name team.
   persistJob(jobId, job);
 
-  child.stdin.write(JSON.stringify(input));
-  child.stdin.end();
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawn(process.execPath, [runtimeCliPath], {
+      env: { ...process.env, OMC_JOB_ID: jobId, OMC_JOBS_DIR },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    try {
+      updateJobFailureIfRunning(
+        jobId,
+        instanceId,
+        `spawn error: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    } catch {
+      // Preserve the initially published identity record when its failure
+      // updater cannot acquire the lock; never overwrite a concurrent update.
+    }
+    throw error;
+  }
+
+  const persistBoundFailure = (reason: string): void => {
+    try {
+      updateJobFailureIfRunning(jobId, instanceId, reason);
+    } catch {
+      // Never replace a job with an unbound diagnostic after a publication
+      // failure; the original identity remains the only cleanup authority.
+    }
+  };
+  if (typeof child.on === 'function') {
+    child.on('error', (error: Error) => {
+      persistBoundFailure(`spawn error: ${error.message}`);
+    });
+  }
+
+  if (!child.stdin || typeof child.stdin.write !== 'function' || typeof child.stdin.end !== 'function') {
+    persistBoundFailure('runtime_cli_stdin_unavailable');
+    if (typeof child.kill === 'function') child.kill();
+    throw new Error('runtime_cli_stdin_unavailable');
+  }
+  if (typeof child.stdin.on === 'function') {
+    child.stdin.on('error', (error: Error) => {
+      persistBoundFailure(`runtime_cli_stdin_error:${error.message}`);
+      try { child.kill(); } catch { /* child may have exited already */ }
+    });
+  }
+  try {
+    child.stdin.write(JSON.stringify({ ...input, cwd, instanceId }));
+    child.stdin.end();
+  } catch (error) {
+    persistBoundFailure(`runtime_cli_stdin_error:${error instanceof Error ? error.message : String(error)}`);
+    if (typeof child.kill === 'function') child.kill();
+    throw error;
+  }
+  withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+    const currentJob = loadJobFromDisk(jobId);
+    if (
+      !currentJob
+      || currentJob.instanceId !== instanceId
+      || currentJob.cleanedUpAt
+      || isJobTerminal(currentJob)
+    ) return;
+    const withPid = { ...currentJob, ...(child.pid != null ? { pid: child.pid } : {}) };
+    persistJobUnlocked(jobId, withPid);
+    job.pid = withPid.pid;
+    job.status = withPid.status;
+    job.stderr = withPid.stderr;
+  });
 
   const outChunks: Buffer[] = [];
   const errChunks: Buffer[] = [];
@@ -306,36 +725,67 @@ async function handleStart(args: unknown): Promise<{ content: Array<{ type: 'tex
   child.stderr.on('data', (c: Buffer) => errChunks.push(c));
 
   child.on('close', (code) => {
-    const stdout = Buffer.concat(outChunks).toString('utf-8').trim();
-    const stderr = Buffer.concat(errChunks).toString('utf-8').trim();
-    if (stdout) {
-      try {
-        const parsed = JSON.parse(stdout) as { status?: string };
-        const s = parsed.status;
-        if (job.status === 'running') {
-          job.status = (s === 'completed' || s === 'failed') ? s : 'failed';
+    try {
+      withProcessIdentityFileLockSync(jobLockPath(jobId), () => {
+        let current: OmcTeamJob | undefined;
+        try {
+          current = loadJobFromDisk(jobId);
+        } catch {
+          return;
         }
-      } catch {
-        if (job.status === 'running') job.status = 'failed';
-      }
-      job.result = stdout;
+        // A terminal or cleaned record may have been published by artifact
+        // convergence/cleanup while the child was exiting. Preserve it in its
+        // entirety; late child output is not authoritative.
+        if (!current || current.instanceId !== instanceId || current.cleanedUpAt || isJobTerminal(current)) return;
+        const stdout = Buffer.concat(outChunks).toString('utf-8').trim();
+        const stderr = Buffer.concat(errChunks).toString('utf-8').trim();
+        const terminalArtifact = readMatchingTerminalArtifact(current, jobId, OMC_JOBS_DIR);
+        if (terminalArtifact) {
+          current.status = terminalArtifact.status;
+          current.result = terminalArtifact.raw;
+        } else if (stdout) {
+          let parsed: { status?: unknown; instanceId?: unknown } | null = null;
+          try { parsed = JSON.parse(stdout) as { status?: unknown; instanceId?: unknown }; } catch { /* invalid envelope */ }
+          if (
+            parsed
+            && (parsed.status === 'completed' || parsed.status === 'failed')
+            && parsed.instanceId === current.instanceId
+            && isValidTeamInstanceId(parsed.instanceId)
+          ) {
+            current.status = parsed.status;
+            current.result = stdout;
+          } else {
+            current.status = 'failed';
+            current.stderr = current.stderr ?? 'terminal_result_evidence_invalid';
+            current.result = JSON.stringify({ error: 'terminal_result_evidence_invalid' });
+          }
+        } else if (code === 0) {
+          const artifact = readMatchingTerminalArtifact(current, jobId, OMC_JOBS_DIR);
+          if (artifact) {
+            current.status = artifact.status;
+            current.result = artifact.raw;
+          } else {
+            current.status = 'failed';
+            current.stderr = current.stderr ?? 'terminal_result_evidence_missing';
+            current.result = JSON.stringify({ error: 'terminal_result_evidence_missing' });
+          }
+        } else {
+          current.status = 'failed';
+          current.result = current.result ?? JSON.stringify({ error: `Process exited with code ${code ?? 'unknown'}` });
+        }
+        if (stderr) current.stderr = current.stderr ?? stderr;
+        persistJobUnlocked(jobId, current);
+      });
+    } catch {
+      // Keep the already-persisted identity and cleanup status authoritative.
     }
-    if (job.status === 'running') {
-      if (code === 0) job.status = 'completed';
-      else job.status = 'failed';
-    }
-    if (stderr) job.stderr = stderr;
-    persistJob(jobId, job);
-  });
-
-  child.on('error', (err: Error) => {
-    job.status = 'failed';
-    job.stderr = `spawn error: ${err.message}`;
-    persistJob(jobId, job);
   });
 
   return {
-    content: [{ type: 'text', text: JSON.stringify({ jobId, pid: job.pid, message: 'Team started. Poll with omc_run_team_status.' }) }],
+    content: [{
+      type: 'text',
+      text: JSON.stringify({ jobId, instanceId, pid: job.pid, message: 'Team started. Poll with omc_run_team_status.' }),
+    }],
   };
 }
 
@@ -343,28 +793,9 @@ export async function handleStatus(args: unknown): Promise<{ content: Array<{ ty
   const { job_id } = statusSchema.parse(args);
   validateJobId(job_id);
 
-  let job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+  const job = readConvergedJob(job_id);
   if (!job) {
     return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
-  }
-
-  // Precedence: artifact terminal > job.status/result > pid liveness.
-  const artifactConvergence = convergeJobWithResultArtifact(job, job_id, OMC_JOBS_DIR);
-  if (artifactConvergence.changed) {
-    job = saveJobState(job_id, artifactConvergence.job);
-    return makeJobResponse(job_id, job);
-  }
-
-  if (isJobTerminal(job)) {
-    return makeJobResponse(job_id, job);
-  }
-
-  if (job.pid != null && !isProcessAlive(job.pid)) {
-    job = saveJobState(job_id, {
-      ...job,
-      status: 'failed',
-      result: job.result ?? JSON.stringify({ error: 'Process no longer alive (MCP restart?)' }),
-    });
   }
 
   return makeJobResponse(job_id, job);
@@ -376,6 +807,18 @@ export async function handleWait(args: unknown): Promise<{ content: Array<{ type
 
   const deadline = Date.now() + Math.min(timeout_ms, 3_600_000);
   let pollDelay = 500;
+  const initialJob = readConvergedJob(job_id);
+  if (!initialJob) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
+  }
+  if (!initialJob.teamName || !initialJob.cwd) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: 'team_job_authority_missing' }) }] };
+  }
+  const originalNudgeJob: NudgeJobIdentity = {
+    instanceId: initialJob.instanceId,
+    teamName: initialJob.teamName,
+    cwd: initialJob.cwd,
+  };
 
   const nudgeTracker = new NudgeTracker({
     ...(nudge_delay_ms != null ? { delayMs: nudge_delay_ms } : {}),
@@ -384,69 +827,55 @@ export async function handleWait(args: unknown): Promise<{ content: Array<{ type
   });
 
   while (Date.now() < deadline) {
-    let job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
+    const job = readConvergedJob(job_id);
     if (!job) {
       return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
     }
 
-    // Precedence: artifact terminal > job.status/result > pid liveness > timeout.
-    const artifactConvergence = convergeJobWithResultArtifact(job, job_id, OMC_JOBS_DIR);
-    if (artifactConvergence.changed) {
-      job = saveJobState(job_id, artifactConvergence.job);
-      const out = makeJobResponse(job_id, job);
-      if (nudgeTracker.totalNudges > 0) {
-        const payload = JSON.parse(out.content[0].text) as Record<string, unknown>;
-        payload.nudges = nudgeTracker.getSummary();
-        out.content[0].text = JSON.stringify(payload);
-      }
-      return out;
-    }
-
     if (isJobTerminal(job)) {
-      const out = makeJobResponse(job_id, job);
-      if (nudgeTracker.totalNudges > 0) {
-        const payload = JSON.parse(out.content[0].text) as Record<string, unknown>;
-        payload.nudges = nudgeTracker.getSummary();
-        out.content[0].text = JSON.stringify(payload);
-      }
-      return out;
-    }
-
-    if (job.pid != null && !isProcessAlive(job.pid)) {
-      job = saveJobState(job_id, {
-        ...job,
-        status: 'failed',
-        result: job.result ?? JSON.stringify({ error: 'Process no longer alive (MCP restart?)' }),
-      });
-      const out = makeJobResponse(job_id, job, { error: 'Process no longer alive (MCP restart?)' });
-      if (nudgeTracker.totalNudges > 0) {
-        const payload = JSON.parse(out.content[0].text) as Record<string, unknown>;
-        payload.nudges = nudgeTracker.getSummary();
-        out.content[0].text = JSON.stringify(payload);
-      }
-      return out;
+      return makeJobResponse(job_id, job, nudgeTracker.totalNudges > 0 ? nudgeTracker.getSummary() : undefined);
     }
 
     await new Promise<void>(r => setTimeout(r, pollDelay));
     pollDelay = Math.min(Math.floor(pollDelay * 1.5), 2000);
 
     try {
-      const panes = await loadPaneIds(job_id);
-      if (panes?.paneIds?.length) {
+      const panes = await loadPaneIds(job_id, originalNudgeJob.instanceId);
+      const authority = panes
+        ? await loadNudgeAuthority(job_id, originalNudgeJob, panes)
+        : null;
+      if (panes?.paneIds?.length && authority) {
         await nudgeTracker.checkAndNudge(
           panes.paneIds,
           panes.leaderPaneId,
-          job.teamName ?? '',
+          {
+            ...authority,
+            executeNudge: (paneId: string, message: string) => executeLockedNudge(
+              job_id,
+              originalNudgeJob,
+              panes,
+              authority,
+              paneId,
+              message,
+            ),
+          },
         );
       }
     } catch { /* best-effort */ }
   }
 
-  const startedAt = omcTeamJobs.get(job_id)?.startedAt ?? Date.now();
-  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+  const timeoutJob = readConvergedJob(job_id);
+  if (!timeoutJob) {
+    return { content: [{ type: 'text', text: JSON.stringify({ error: `No job found: ${job_id}` }) }] };
+  }
+  if (isJobTerminal(timeoutJob)) {
+    return makeJobResponse(job_id, timeoutJob, nudgeTracker.totalNudges > 0 ? nudgeTracker.getSummary() : undefined);
+  }
+  const elapsed = ((Date.now() - timeoutJob.startedAt) / 1000).toFixed(1);
   const timeoutOut: Record<string, unknown> = {
     error: `Timed out waiting for job ${job_id} after ${(timeout_ms / 1000).toFixed(0)}s — workers are still running; call omc_run_team_wait again to keep waiting or omc_run_team_cleanup to stop them`,
     jobId: job_id,
+    instanceId: timeoutJob.instanceId,
     status: 'running',
     elapsedSeconds: elapsed,
   };
@@ -454,94 +883,130 @@ export async function handleWait(args: unknown): Promise<{ content: Array<{ type
   return { content: [{ type: 'text', text: JSON.stringify(timeoutOut) }] };
 }
 
-export async function handleCleanup(args: unknown): Promise<{ content: Array<{ type: 'text'; text: string }> }> {
+export async function handleCleanup(args: unknown): Promise<TeamToolResponse> {
   const { job_id, grace_ms } = cleanupSchema.parse(args);
   validateJobId(job_id);
 
-  const job = omcTeamJobs.get(job_id) ?? loadJobFromDisk(job_id);
-  if (!job) return { content: [{ type: 'text', text: `Job ${job_id} not found` }] };
+  const job = getJob(job_id);
+  if (!job) {
+    return {
+      content: [{ type: 'text', text: `Job ${job_id} not found` }],
+      isError: true,
+    };
+  }
 
-  const blockCleanup = (paneCleanupMessage: string, reason: string): { content: Array<{ type: 'text'; text: string }> } => {
-    job.cleanupBlockedAt = new Date().toISOString();
-    job.cleanupBlockedReason = reason;
-    delete job.cleanedUpAt;
-    persistJob(job_id, job);
+  if (job.cleanedUpAt) {
     return {
       content: [{
         type: 'text',
-        text: `${paneCleanupMessage} Team state/worktree cleanup preserved because ${reason}.`,
+        text: `Already cleaned up job ${job_id}; preserved any current team state`,
       }],
+    };
+  }
+  const initialCleanupFields: CleanupFieldSnapshot = {
+    cleanedUpAt: job.cleanedUpAt,
+    cleanupBlockedAt: job.cleanupBlockedAt,
+    cleanupBlockedReason: job.cleanupBlockedReason,
+  };
+
+  const blockCleanup = (reason: string): TeamToolResponse => {
+    const publication = mergeCleanupFields(job_id, job.instanceId, initialCleanupFields, {
+      cleanupBlockedAt: new Date().toISOString(),
+      cleanupBlockedReason: reason,
+    });
+    if (publication.kind === 'already_cleaned') {
+      return {
+        content: [{
+          type: 'text',
+          text: `Already cleaned up job ${job_id}; preserved any current team state`,
+        }],
+      };
+    }
+    if (publication.kind === 'blocked') {
+      return {
+        content: [{
+          type: 'text',
+          text: `Team state/worktree cleanup preserved because cleanup publication was blocked (${publication.reason}).`,
+        }],
+        isError: true,
+      };
+    }
+    if (publication.kind === 'superseded') {
+      return {
+        content: [{
+          type: 'text',
+          text: `Team state/worktree cleanup preserved because newer cleanup state superseded this attempt (${publication.reason}; attempted ${reason}).`,
+        }],
+        isError: true,
+      };
+    }
+    return {
+      content: [{
+        type: 'text',
+        text: `Team state/worktree cleanup preserved because ${reason}.`,
+      }],
+      isError: true,
     };
   };
 
-  const { panes, livenessUnknownReason } = await resolveCleanupPaneEvidence(job, job_id);
-  if (livenessUnknownReason) return blockCleanup('Worker pane liveness could not be proven.', livenessUnknownReason);
+  const resultEvidenceError = resultArtifactIdentityError(job, job_id, OMC_JOBS_DIR);
+  if (resultEvidenceError) return blockCleanup(resultEvidenceError);
 
-  let paneCleanupMessage = 'No pane IDs recorded for this job — pane cleanup skipped.';
-  if (panes?.sessionName && (panes.ownsWindow === true || !panes.sessionName.includes(':'))) {
-    const sessionMode = panes.ownsWindow === true
-      ? (panes.sessionName.includes(':') ? 'dedicated-window' : 'detached-session')
-      : 'detached-session';
-    try {
-      await killTeamSession(
-        panes.sessionName,
-        panes.paneIds,
-        panes.leaderPaneId,
-        { sessionMode },
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return blockCleanup('Team tmux cleanup did not complete.', `tmux_cleanup_failed:${message}`);
-    }
-    paneCleanupMessage = panes.ownsWindow
-      ? 'Cleaned up team tmux window.'
-      : `Cleaned up ${panes.paneIds.length} worker pane(s).`;
-  } else if (panes?.paneIds?.length) {
-    try {
-      await killWorkerPanes({
-        paneIds: panes.paneIds,
-        leaderPaneId: panes.leaderPaneId,
-        teamName: job.teamName ?? '',
-        cwd: job.cwd ?? '',
-        graceMs: grace_ms ?? 10_000,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return blockCleanup('Worker pane cleanup did not complete.', `tmux_cleanup_failed:${message}`);
-    }
-    paneCleanupMessage = `Cleaned up ${panes.paneIds.length} worker pane(s).`;
+  const panes = await loadPaneIds(job_id, job.instanceId);
+  if (!panes) {
+    const reason = existsSync(join(OMC_JOBS_DIR, `${job_id}-panes.json`))
+      ? 'cleanup_panes_evidence_corrupt'
+      : 'cleanup_panes_evidence_missing';
+    return blockCleanup(reason);
   }
 
-  if (panes?.paneIds?.length) {
-    const liveness = await Promise.all(panes.paneIds.map(async (paneId) => ({
-      paneId,
-      state: await getWorkerLiveness(paneId),
-    })));
-    const alivePaneIds = liveness.filter((check) => check.state === 'alive').map((check) => check.paneId);
-    if (alivePaneIds.length > 0) {
-      return blockCleanup(paneCleanupMessage, `worker_panes_still_alive:${alivePaneIds.join(',')}`);
+  try {
+    const shutdown = await shutdownTeamV2(job.teamName!, job.cwd!, {
+      instanceId: job.instanceId,
+      force: true,
+      timeoutMs: Math.max(0, grace_ms ?? 10_000),
+    });
+    if (shutdown.outcome !== 'cleaned') {
+      const reason = shutdown.outcome === 'preserved'
+        ? `${shutdown.reason}:${shutdown.workers.join(',')}`
+        : `${shutdown.reason}:${shutdown.detail}`;
+      return blockCleanup(`team_shutdown_${reason}`);
     }
-    const unknownPaneIds = liveness.filter((check) => check.state === 'unknown').map((check) => check.paneId);
-    if (unknownPaneIds.length > 0) {
-      return blockCleanup(paneCleanupMessage, `worker_liveness_unknown:${unknownPaneIds.join(',')}`);
-    }
+  } catch (error) {
+    return blockCleanup(`team_shutdown_failed:${error instanceof Error ? error.message : String(error)}`);
   }
 
-  const cleanupOutcome = clearScopedTeamState(job);
-  if (!cleanupOutcome.ok) {
-    job.cleanupBlockedAt = new Date().toISOString();
-    job.cleanupBlockedReason = cleanupOutcome.reason ?? 'team_state_cleanup_blocked';
-    delete job.cleanedUpAt;
-    persistJob(job_id, job);
-    return { content: [{ type: 'text', text: `${paneCleanupMessage} ${cleanupOutcome.message}` }] };
+  const publication = mergeCleanupFields(job_id, job.instanceId, initialCleanupFields, {
+    cleanedUpAt: new Date().toISOString(),
+    clearBlocked: true,
+  });
+  if (publication.kind === 'already_cleaned') {
+    return {
+      content: [{
+        type: 'text',
+        text: `Already cleaned up job ${job_id}; preserved any current team state`,
+      }],
+    };
   }
-
-  job.cleanedUpAt = new Date().toISOString();
-  delete job.cleanupBlockedAt;
-  delete job.cleanupBlockedReason;
-  persistJob(job_id, job);
-
-  return { content: [{ type: 'text', text: `${paneCleanupMessage} ${cleanupOutcome.message}` }] };
+  if (publication.kind === 'blocked') {
+    return {
+      content: [{
+        type: 'text',
+        text: `Team state/worktree cleanup preserved because cleanup publication was blocked (${publication.reason}).`,
+      }],
+      isError: true,
+    };
+  }
+  if (publication.kind === 'superseded') {
+    return {
+      content: [{
+        type: 'text',
+        text: `Team state/worktree cleanup preserved because newer cleanup state superseded this attempt (${publication.reason}).`,
+      }],
+      isError: true,
+    };
+  }
+  return { content: [{ type: 'text', text: `Cleaned up team instance ${job.instanceId}.` }] };
 }
 
 const TOOLS = [

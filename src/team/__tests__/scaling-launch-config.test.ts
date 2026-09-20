@@ -1,15 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'fs/promises';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
 import type { CliAgentType } from '../model-contract.js';
-import type { TeamConfig } from '../types.js';
+import type { TeamConfig, TmuxServerIdentity } from '../types.js';
+import { absPath, teamStateRoot, TeamPaths } from '../state-paths.js';
+import {
+  activateTeamInstanceUnderLock,
+  createTeamInstanceBinding,
+  reserveTeamInstanceUnderLock,
+  withTeamInstanceLifecycleLock,
+} from '../team-instance.js';
 
-const tmuxUtilsMocks = vi.hoisted(() => ({
-  tmuxExec: vi.fn(),
-  tmuxSpawn: vi.fn(),
-}));
+const TEAM_INSTANCE_ID = '22222222-2222-4222-8222-222222222222';
+type WorkerLivenessInput = Parameters<typeof import('../tmux-session.js').getWorkerLiveness>[0];
+type WorkerLiveness = Awaited<ReturnType<typeof import('../tmux-session.js').getWorkerLiveness>>;
+type OwnedWorkerLivenessInput = Parameters<typeof import('../tmux-session.js').getOwnedWorkerLiveness>[0];
+type WorkerPaneMembershipInput = Parameters<typeof import('../tmux-session.js').workerPaneBelongsToOwnedProviderTarget>[0];
+
+async function activateFixtureInstance(teamName: string, cwd: string, instanceId = TEAM_INSTANCE_ID): Promise<void> {
+  const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+  await withTeamInstanceLifecycleLock(binding.cwd, binding.team_name, async () => {
+    await reserveTeamInstanceUnderLock({ teamName, cwd, instanceId });
+    await mkdir(binding.state_root, { recursive: true });
+    await writeFile(absPath(binding.cwd, TeamPaths.config(teamName)), JSON.stringify({
+      name: teamName,
+      instance_id: instanceId,
+      tmux_session: 'demo-session:0',
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
+      leader_cwd: binding.cwd,
+      team_state_root: binding.state_root,
+    }));
+    await activateTeamInstanceUnderLock(binding);
+  });
+}
 
 const modelContractMocks = vi.hoisted(() => ({
   buildWorkerArgv: vi.fn(),
@@ -37,24 +62,73 @@ const monitorMocks = vi.hoisted(() => ({
   currentConfig: null as TeamConfig | null,
 }));
 
-const tmuxSessionMocks = vi.hoisted(() => ({
-  sanitizeName: vi.fn((name: string) => name),
-  isWorkerAlive: vi.fn(),
-  getWorkerLiveness: vi.fn(),
-  killWorkerPanes: vi.fn(),
-  adoptWorkerPaneOwnership: vi.fn(async (input: { paneId: string; providerTarget: string; leaderPaneId: string }) => ({
-    ok: true as const,
-    ownership: { provider: 'tmux' as const, providerTarget: input.providerTarget, paneId: input.paneId,
-      splitTarget: '', leaderPaneId: input.leaderPaneId, reservedPaneIds: [], source: 'adopted' as const },
-  })),
-  spawnOwnedWorkerInPane: vi.fn(async (_session: string, ownership: { paneId: string }, cfg: { provider: string }) => ({
-    ownership,
-    provider: cfg.provider,
-    attempt: { attempt_id: `attempt-${ownership.paneId}`, currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' },
-  })),
-  killOwnedWorkerPane: vi.fn(),
-  waitForPaneReady: vi.fn(),
-}));
+const tmuxSessionMocks = vi.hoisted(() => {
+  const tmuxServerIdentity: TmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  const getWorkerLiveness = vi.fn(async (_paneId: WorkerLivenessInput): Promise<WorkerLiveness> => 'dead');
+  return {
+    tmuxServerIdentity,
+    sanitizeName: vi.fn((name: string) => name),
+    isWorkerAlive: vi.fn(),
+    getWorkerLiveness,
+    getOwnedWorkerLiveness: vi.fn(async (ownership: OwnedWorkerLivenessInput): Promise<WorkerLiveness> => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown';
+      return getWorkerLiveness(ownership.paneId);
+    }),
+    killWorkerPanes: vi.fn(),
+    workerPaneBelongsToOwnedProviderTarget: vi.fn(async (input: WorkerPaneMembershipInput): Promise<boolean> =>
+      input.provider !== 'tmux' || Boolean(input.tmuxServerIdentity)),
+    splitTeamWorkerPaneWithEvidence: vi.fn(async (
+      splitTarget: string,
+      direction: 'right' | 'down',
+      _cwd: string,
+      provider: 'tmux' | 'cmux',
+      identity?: TmuxServerIdentity,
+    ) => ({
+      commandSucceeded: true as const,
+      provider,
+      splitTarget,
+      direction,
+      rawOutput: provider === 'tmux' ? '%12\n' : 'cmux-worker-1\n',
+      stderr: '',
+      paneId: provider === 'tmux' ? '%12' : 'cmux-worker-1',
+      ...(provider === 'tmux' ? { tmuxServerIdentity: identity ?? tmuxServerIdentity } : {}),
+    })),
+    adoptWorkerPaneOwnership: vi.fn(async (input: {
+      paneId: string;
+      providerTarget: string;
+      leaderPaneId: string;
+      provider?: 'tmux' | 'cmux';
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => ({
+      ok: true as const,
+      ownership: {
+        provider: input.provider ?? 'tmux',
+        providerTarget: input.providerTarget,
+        paneId: input.paneId,
+        splitTarget: '',
+        leaderPaneId: input.leaderPaneId,
+        reservedPaneIds: [],
+        source: 'adopted' as const,
+        ...(input.provider !== 'cmux'
+          ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxServerIdentity }
+          : {}),
+      },
+    })),
+    spawnOwnedWorkerInPane: vi.fn(async (_session: string, ownership: { paneId: string }, cfg: { provider: string; instanceId?: string }) => ({
+      ownership,
+      provider: cfg.provider,
+      attempt: { attempt_id: `attempt-${ownership.paneId}`, instance_id: cfg.instanceId, currentPath: '/tmp/current', decisionPath: '/tmp/decision', startedPath: '/tmp/started' },
+    })),
+    killOwnedWorkerPane: vi.fn(),
+    waitForPaneReady: vi.fn(),
+  };
+});
 
 const gitWorktreeMocks = vi.hoisted(() => ({
   ensureWorkerWorktree: vi.fn(),
@@ -71,11 +145,6 @@ const workerLaunchMocks = vi.hoisted(() => ({
   retireWorkerLaunchAttempt: vi.fn(async () => true),
   terminateWorkerLaunchProvider: vi.fn(async () => true),
   retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup()),
-}));
-
-vi.mock('../../cli/tmux-utils.js', () => ({
-  tmuxExec: tmuxUtilsMocks.tmuxExec,
-  tmuxSpawn: tmuxUtilsMocks.tmuxSpawn,
 }));
 
 vi.mock('../model-contract.js', () => ({
@@ -109,7 +178,10 @@ vi.mock('../tmux-session.js', () => ({
   sanitizeName: tmuxSessionMocks.sanitizeName,
   isWorkerAlive: tmuxSessionMocks.isWorkerAlive,
   getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
+  getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,
   killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
+  workerPaneBelongsToOwnedProviderTarget: tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget,
+  splitTeamWorkerPaneWithEvidence: tmuxSessionMocks.splitTeamWorkerPaneWithEvidence,
   adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
   spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
   killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
@@ -133,6 +205,7 @@ import { scaleDown, scaleUp } from '../scaling.js';
 describe('scaleUp launch config', () => {
   let cwd: string;
   let config: TeamConfig;
+  let previousStateDir: string | undefined;
   const launchMetadata = {
     worker_cli: 'codex' as const,
     launch_attempt_id: 'attempt-1',
@@ -143,6 +216,8 @@ describe('scaleUp launch config', () => {
   function makeConfig(overrides: Partial<TeamConfig> = {}): TeamConfig {
     const base: TeamConfig = {
       name: 'demo-team',
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       task: 'demo',
       agent_type: 'claude',
       worker_launch_mode: 'interactive',
@@ -157,17 +232,67 @@ describe('scaleUp launch config', () => {
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
     };
     return { ...base, ...overrides };
   }
 
   beforeEach(async () => {
     cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-launch-config-'));
+    previousStateDir = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = join(await realpath(cwd), '.omc-state');
 
     vi.clearAllMocks();
     workerLaunchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (_attempt: unknown, _reason: string, cleanup: () => Promise<boolean>) => cleanup());
     monitorMocks.currentConfig = null;
+    tmuxSessionMocks.getWorkerLiveness.mockReset();
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockClear();
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async (ownership: OwnedWorkerLivenessInput): Promise<WorkerLiveness> => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown';
+      return tmuxSessionMocks.getWorkerLiveness(ownership.paneId);
+    });
+    tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockReset();
+    tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockResolvedValue(true);
+    tmuxSessionMocks.splitTeamWorkerPaneWithEvidence.mockReset();
+    tmuxSessionMocks.splitTeamWorkerPaneWithEvidence.mockImplementation(async (
+      splitTarget: string,
+      direction: 'right' | 'down',
+      _cwd: string,
+      provider: 'tmux' | 'cmux',
+      identity?: TmuxServerIdentity,
+    ) => ({
+      commandSucceeded: true as const,
+      provider,
+      splitTarget,
+      direction,
+      rawOutput: provider === 'tmux' ? '%12\n' : 'cmux-worker-1\n',
+      stderr: '',
+      paneId: provider === 'tmux' ? '%12' : 'cmux-worker-1',
+      ...(provider === 'tmux' ? { tmuxServerIdentity: identity ?? tmuxSessionMocks.tmuxServerIdentity } : {}),
+    }));
+    tmuxSessionMocks.adoptWorkerPaneOwnership.mockReset();
+    tmuxSessionMocks.adoptWorkerPaneOwnership.mockImplementation(async (input: {
+      paneId: string;
+      providerTarget: string;
+      leaderPaneId: string;
+      provider?: 'tmux' | 'cmux';
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => ({
+      ok: true as const,
+      ownership: {
+        provider: input.provider ?? 'tmux',
+        providerTarget: input.providerTarget,
+        paneId: input.paneId,
+        splitTarget: '',
+        leaderPaneId: input.leaderPaneId,
+        reservedPaneIds: [],
+        source: 'adopted' as const,
+        ...(input.provider !== 'cmux'
+          ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxSessionMocks.tmuxServerIdentity }
+          : {}),
+      },
+    }));
 
     monitorMocks.withScalingLock.mockImplementation(async (
       _teamName: string,
@@ -193,18 +318,6 @@ describe('scaleUp launch config', () => {
       OMC_TEAM_NAME: teamName,
       OMC_WORKER_AGENT_TYPE: agentType,
     }));
-    tmuxUtilsMocks.tmuxSpawn.mockImplementation((args: string[]) => {
-      if (args[0] === 'split-window') {
-        return { status: 0, stdout: '%12\n', stderr: '' };
-      }
-      if (args[0] === 'display-message' && args.includes('#{session_name}:#{window_index}')) {
-        return { status: 0, stdout: 'demo-session:0\n', stderr: '' };
-      }
-      if (args[0] === 'display-message' && args.includes('#{pane_pid}')) {
-        return { status: 0, stdout: '4321\n', stderr: '' };
-      }
-      return { status: 0, stdout: '', stderr: '' };
-    });
     tmuxSessionMocks.waitForPaneReady.mockResolvedValue(undefined);
     gitWorktreeMocks.ensureWorkerWorktree.mockReset();
     gitWorktreeMocks.installWorktreeRootAgents.mockReset();
@@ -214,12 +327,15 @@ describe('scaleUp launch config', () => {
     gitWorktreeMocks.restoreWorktreeRootAgents.mockReturnValue({ restored: true });
     gitWorktreeMocks.checkWorkerWorktreeRemovalSafety.mockReset();
     gitWorktreeMocks.prepareWorkerWorktreeForRemoval.mockReset();
+    await activateFixtureInstance('demo-team', cwd);
   });
 
   afterEach(async () => {
     if (cwd) {
       await rm(cwd, { recursive: true, force: true });
     }
+    if (previousStateDir === undefined) delete process.env.OMC_STATE_DIR;
+    else process.env.OMC_STATE_DIR = previousStateDir;
   });
 
   it.each([
@@ -253,6 +369,7 @@ describe('scaleUp launch config', () => {
       expect.objectContaining({
         teamName: 'demo-team',
         workerName: 'worker-1',
+        instanceId: TEAM_INSTANCE_ID,
         launchBinary: workerArgv[0],
         launchArgs: workerArgv.slice(1),
         provider: agentType,
@@ -260,7 +377,7 @@ describe('scaleUp launch config', () => {
           OMC_TEAM_WORKER: 'demo-team/worker-1',
           OMC_TEAM_NAME: 'demo-team',
           OMC_WORKER_AGENT_TYPE: agentType,
-          OMC_TEAM_STATE_ROOT: `${resolve(cwd)}/.omc/state/team/demo-team`,
+          OMC_TEAM_STATE_ROOT: teamStateRoot(cwd, 'demo-team'),
           OMC_TEAM_LEADER_CWD: resolve(cwd),
         }),
       }),
@@ -273,12 +390,12 @@ describe('scaleUp launch config', () => {
     expect(reservation!.workers[0]).toMatchObject({ worker_cli: agentType, operational_state: 'starting',
       launch_descriptor: { schema_version: 1, provider: agentType, model: null,
         binary: workerArgv[0], args: workerArgv.slice(1) } });
-    const splitIndex = tmuxUtilsMocks.tmuxSpawn.mock.calls.findIndex(([args]) => args[0] === 'split-window');
+    const splitIndex = tmuxSessionMocks.splitTeamWorkerPaneWithEvidence.mock.invocationCallOrder[0] ?? -1;
     expect(splitIndex).toBeGreaterThanOrEqual(0);
     expect(monitorMocks.saveTeamConfigAtRevision.mock.invocationCallOrder.find((_, index) => {
       const candidate = monitorMocks.saveTeamConfigAtRevision.mock.calls[index]?.[0] as TeamConfig;
       return candidate.workers.some(worker => worker.name === 'worker-1' && worker.operational_state === 'starting');
-    })!).toBeLessThan(tmuxUtilsMocks.tmuxSpawn.mock.invocationCallOrder[splitIndex]!);
+    })!).toBeLessThan(splitIndex);
   });
 
   it('passes the immutable team defaults to scale-up resolution', async () => {
@@ -483,7 +600,7 @@ describe('scaleUp launch config', () => {
     const result = await scaleUp('demo-team', 1, 'codex', [{ subject: 'demo', description: 'demo task' }], cwd,
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
     expect(result).toEqual({ ok: false, error: `Failed strict provider preflight for worker-1 (codex): ${reason}` });
-    expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    expect(tmuxSessionMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
     expect(gitWorktreeMocks.ensureWorkerWorktree).not.toHaveBeenCalled();
     expect(teamOpsMocks.teamWriteWorkerIdentity).not.toHaveBeenCalled();
     expect(existsSync(join(resolve(cwd), '.omc', 'state', 'team', 'demo-team', 'workers', 'worker-1'))).toBe(false);
@@ -496,7 +613,7 @@ describe('scaleUp launch config', () => {
     const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd,
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
     expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
-    expect(tmuxUtilsMocks.tmuxSpawn.mock.calls.some(([args]) => args[0] === 'split-window')).toBe(false);
+    expect(tmuxSessionMocks.splitTeamWorkerPaneWithEvidence).not.toHaveBeenCalled();
   });
 
   it('rejects scale-down while an unverifiable scale-up reservation is active', async () => {
@@ -505,8 +622,10 @@ describe('scaleUp launch config', () => {
         { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
         { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
       ],
-      active_scale_up: { operation_id: 'scale-up-1', phase: 'effects', pid: 999_999,
-        process_started_at: 'malformed', state_revision: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      active_scale_up: {
+        operation_id: 'scale-up-1', phase: 'effects', pid: 999_999, instance_id: TEAM_INSTANCE_ID,
+        process_started_at: 'malformed', state_revision: 4, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      },
     });
     const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'] },
       { OMC_TEAM_SCALING_ENABLED: '1' } as NodeJS.ProcessEnv);
@@ -518,7 +637,7 @@ describe('scaleUp launch config', () => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/codex']);
     config = makeConfig({
       agent_type: 'codex',
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
       worktree_mode: 'named',
     });
     gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({
@@ -534,6 +653,7 @@ describe('scaleUp launch config', () => {
       reused: false,
     });
     tmuxSessionMocks.spawnOwnedWorkerInPane.mockRejectedValueOnce(new Error('boom'));
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
 
     const result = await scaleUp(
       'demo-team',
@@ -552,7 +672,7 @@ describe('scaleUp launch config', () => {
     modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/codex']);
     config = makeConfig({
       agent_type: 'codex',
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
       worktree_mode: 'named',
     });
     gitWorktreeMocks.ensureWorkerWorktree.mockReturnValue({
@@ -588,6 +708,8 @@ describe('scaleUp launch config', () => {
   it('restores managed overlays for reused worktrees during scale-down without deleting them', async () => {
     const config = {
       name: 'demo-team',
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       task: 'demo',
       agent_type: 'codex',
       worker_launch_mode: 'interactive',
@@ -605,7 +727,7 @@ describe('scaleUp launch config', () => {
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
     };
     teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
@@ -657,6 +779,8 @@ describe('scaleUp launch config', () => {
   it('keeps reused worktree worker tracked if post-drain cleanup safety fails', async () => {
     const config = {
       name: 'demo-team',
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       task: 'demo',
       agent_type: 'codex',
       worker_launch_mode: 'interactive',
@@ -674,7 +798,7 @@ describe('scaleUp launch config', () => {
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
     };
     teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });
@@ -698,6 +822,8 @@ describe('scaleUp launch config', () => {
   it('preserves worktree and config when target pane remains alive after kill request', async () => {
     const config = {
       name: 'demo-team',
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       task: 'demo',
       agent_type: 'codex',
       worker_launch_mode: 'interactive',
@@ -715,7 +841,7 @@ describe('scaleUp launch config', () => {
       hud_pane_id: null,
       resize_hook_name: null,
       resize_hook_target: null,
-      team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+      team_state_root: teamStateRoot(cwd, 'demo-team'),
     };
     teamOpsMocks.teamReadConfig.mockResolvedValue(config);
     teamOpsMocks.teamReadWorkerStatus.mockResolvedValue({ state: 'idle', updated_at: new Date().toISOString() });

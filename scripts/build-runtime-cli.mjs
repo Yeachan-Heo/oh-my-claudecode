@@ -15,6 +15,13 @@ const buildConfig = {
   target: 'node18',
   format: 'cjs',
   outfile,
+  // Inject import.meta.url polyfill for CJS format
+  banner: {
+    js: 'const importMetaUrl = require("url").pathToFileURL(__filename);',
+  },
+  define: {
+    'import.meta.url': 'importMetaUrl',
+  },
   // Note: platform:'node' auto-externalizes all Node built-in subpaths (fs/promises, etc.)
   external: [
     'fs', 'fs/promises', 'path', 'os', 'util', 'stream', 'events',

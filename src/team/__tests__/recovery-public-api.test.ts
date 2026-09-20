@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync as createTempDir, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +10,12 @@ import { readRecoveryOutcome, reserveRecoveryRequest, writeRecoveryFinal } from 
 import { readRecoverDeadWorkerV2Result as readRootRecoverDeadWorkerV2Result } from '../../index.js';
 import { finalizeRecoveryOwnerResult, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome, readRecoverDeadWorkerV2Result, setRuntimeOwnerRecoveryClient } from '../runtime-v2.js';
 import { absPath, TeamPaths } from '../state-paths.js';
+import {
+  activateTeamInstanceUnderLock,
+  createTeamInstanceBinding,
+  reserveTeamInstanceUnderLock,
+  withTeamInstanceLifecycleLock,
+} from '../team-instance.js';
 
 import type { RecoverDeadWorkerV2Result } from '../types.js';
 
@@ -47,6 +54,51 @@ function mkdtempSync(prefix: string): string {
   process.env.USERPROFILE = root;
   delete process.env.OMC_STATE_DIR;
   return root;
+}
+
+async function seedTeamInstance(cwd: string, teamName = 'recovery-team'): Promise<{
+  teamRoot: string;
+  instanceId: string;
+}> {
+  const instance = createTeamInstanceBinding({ teamName, cwd });
+  const teamRoot = instance.state_root;
+  await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+    await reserveTeamInstanceUnderLock({ teamName, cwd, instanceId: instance.instance_id });
+    mkdirSync(teamRoot, { recursive: true });
+    writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+      name: teamName,
+      instance_id: instance.instance_id,
+      leader_cwd: cwd,
+      team_state_root: teamRoot,
+      lifecycle_state: 'active',
+      task: 'recovery test',
+      agent_type: 'claude',
+      worker_launch_mode: 'interactive',
+      worker_count: 1,
+      max_workers: 20,
+      workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [] }],
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      next_task_id: 1,
+      state_revision: 0,
+      leader_pane_id: null,
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+    }, null, 2));
+    await activateTeamInstanceUnderLock(instance);
+  });
+  return { teamRoot, instanceId: instance.instance_id };
+}
+
+function recoveryPayload(cwd: string, teamName: string, instanceId: string) {
+  return {
+    operation: 'recover-worker' as const,
+    workspaceHash: createHash('sha256').update(cwd).digest('hex'),
+    teamName,
+    workerName: 'worker-1',
+    instanceId,
+  };
 }
 
 afterEach(() => {
@@ -105,19 +157,23 @@ describe('public dead-worker recovery facade', () => {
   it('preserves the exact package argument boundary and typed result', async () => {
     const requestRuntimeOwnerRecovery = vi.fn(async () => recovered);
     setRuntimeOwnerRecoveryClient({ requestRuntimeOwnerRecovery });
+    const cwd = mkdtempSync(join(tmpdir(), 'recovery-public-boundary-'));
+    const { instanceId } = await seedTeamInstance(cwd);
 
-    await expect(recoverDeadWorkerV2('recovery-team', '/workspace', {
+    await expect(recoverDeadWorkerV2('recovery-team', cwd, {
       workerName: 'worker-1',
       requestId: 'request-a',
       timeoutMs: 180_000,
     })).resolves.toEqual(recovered);
     expect(requestRuntimeOwnerRecovery).toHaveBeenCalledWith({
       teamName: 'recovery-team',
-      cwd: '/workspace',
+      cwd,
       workerName: 'worker-1',
       requestId: 'request-a',
+      instanceId,
       timeoutMs: 180_000,
     });
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('returns the exact typed invalid_input result and matching API envelopes for an invalid timeout', async () => {
@@ -158,19 +214,22 @@ describe('public dead-worker recovery facade', () => {
 
   it('maps canonical snake_case CLI fields to the package facade and returns the canonical envelope', async () => {
     setRuntimeOwnerRecoveryClient({ requestRuntimeOwnerRecovery: vi.fn(async () => recovered) });
+    const cwd = mkdtempSync(join(tmpdir(), 'recovery-public-envelope-'));
+    await seedTeamInstance(cwd);
 
     await expect(executeTeamApiOperation('recover-worker', {
       team_name: 'recovery-team',
       worker: 'worker-1',
       request_id: 'request-a',
       timeout_ms: 180_000,
-    }, '/workspace')).resolves.toEqual({ ok: true, operation: 'recover-worker', data: { result: recovered } });
+    }, cwd)).resolves.toEqual({ ok: true, operation: 'recover-worker', data: { result: recovered } });
     await expect(executeSecondaryTeamApiOperation('recover-worker', {
       teamName: 'recovery-team',
       workerName: 'worker-1',
       requestId: 'request-a',
       timeoutMs: 180_000,
-    }, '/workspace')).resolves.toEqual({ ok: true, operation: 'recover-worker', data: { result: recovered } });
+    }, cwd)).resolves.toEqual({ ok: true, operation: 'recover-worker', data: { result: recovered } });
+    rmSync(cwd, { recursive: true, force: true });
   });
 
   it('preserves the legacy unsupported-operation envelope outside the recovery operation', async () => {
@@ -184,8 +243,8 @@ describe('public dead-worker recovery facade', () => {
   it('retrieves a durable final result by request id after the initiating call has returned', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'recovery-public-result-'));
     try {
-      reserveRecoveryRequest(cwd, 'request-a', { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-a');
+      const { instanceId } = await seedTeamInstance(cwd);
+      reserveRecoveryRequest(cwd, 'request-a', recoveryPayload(cwd, 'recovery-team', instanceId), 'recovery-a');
       writeRecoveryFinal(cwd, {
         schema_version: 1,
         kind: 'final',
@@ -231,8 +290,8 @@ describe('public dead-worker recovery facade', () => {
   it('exports an async request-first terminal-result reader that preserves canonical durable pane identities', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'recovery-public-terminal-reader-'));
     try {
-      reserveRecoveryRequest(cwd, 'request-a', { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-a');
+      const { instanceId } = await seedTeamInstance(cwd);
+      reserveRecoveryRequest(cwd, 'request-a', recoveryPayload(cwd, 'recovery-team', instanceId), 'recovery-a');
       writeRecoveryFinal(cwd, {
         schema_version: 1, kind: 'final', request_id: 'request-a', recovery_id: 'recovery-a',
         team_name: 'recovery-team', worker_name: 'worker-1', outcome: 'succeeded', result: recovered,
@@ -261,8 +320,8 @@ describe('public dead-worker recovery facade', () => {
       continuationSequenceByTask: {},
     };
     try {
-      reserveRecoveryRequest(cwd, 'request-a', { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-a');
+      const { instanceId } = await seedTeamInstance(cwd);
+      reserveRecoveryRequest(cwd, 'request-a', recoveryPayload(cwd, 'recovery-team', instanceId), 'recovery-a');
       writeRecoveryFinal(cwd, {
         schema_version: 1, kind: 'final', request_id: 'request-a', recovery_id: 'recovery-a',
         team_name: 'recovery-team', worker_name: 'worker-1', outcome: 'succeeded', result: alreadyRunning,
@@ -279,8 +338,8 @@ describe('public dead-worker recovery facade', () => {
   it('fails closed when a durable success result omits its required actual pane identity', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'recovery-public-missing-pane-'));
     try {
-      reserveRecoveryRequest(cwd, 'request-a', { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-a');
+      const { instanceId } = await seedTeamInstance(cwd);
+      reserveRecoveryRequest(cwd, 'request-a', recoveryPayload(cwd, 'recovery-team', instanceId), 'recovery-a');
       expect(() => writeRecoveryFinal(cwd, {
         schema_version: 1, kind: 'final', request_id: 'request-a', recovery_id: 'recovery-a',
         team_name: 'recovery-team', worker_name: 'worker-1', outcome: 'succeeded',
@@ -300,9 +359,15 @@ describe('public dead-worker recovery facade', () => {
     const publishFinal = vi.fn();
     const saveConfigAtRevision = vi.fn();
     try {
-      reserveRecoveryRequest(cwd, 'request-a', { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-a');
-      const result = await finalizeRecoveryOwnerResult({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-a' },
+      const { instanceId } = await seedTeamInstance(cwd);
+      reserveRecoveryRequest(cwd, 'request-a', recoveryPayload(cwd, 'recovery-team', instanceId), 'recovery-a');
+      const result = await finalizeRecoveryOwnerResult({
+        teamName: 'recovery-team',
+        cwd,
+        workerName: 'worker-1',
+        requestId: 'request-a',
+        instanceId,
+      },
         'recovery-a', { ...recovered, newPaneId: ' ' }, {
           readRevisionedConfig: vi.fn(), saveConfigAtRevision, publishFinal,
         });

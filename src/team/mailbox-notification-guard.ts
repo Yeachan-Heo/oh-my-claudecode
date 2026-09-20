@@ -8,7 +8,14 @@ import {
   teamReadConfig,
   type StrictCanonicalMailboxMessageReadResult,
 } from './team-ops.js';
-import type { TeamConfig, TeamMailboxMessage } from './types.js';
+import {
+  isValidTeamInstanceId,
+  isValidTmuxServerIdentity,
+  type TeamConfig,
+  type TeamMailboxMessage,
+  type TmuxServerIdentity,
+} from './types.js';
+import { isValidStrictProcessStartIdentity } from './team-owner-epoch.js';
 import { canonicalizeWorkers } from './worker-canonicalization.js';
 
 export interface MailboxNotificationGuardInput {
@@ -28,12 +35,21 @@ export interface MailboxNotificationTarget {
   recipientRole: 'leader' | 'worker';
   paneId: string;
   workerIndex?: number;
+  /** Present only for tmux targets and copied from the persisted config binding. */
+  tmuxServerIdentity?: TmuxServerIdentity;
 }
 
 export type MailboxTargetOwnership =
   | {
       kind: 'owned';
-      provider: MailboxNotificationProvider;
+      provider: 'tmux';
+      providerTarget: string;
+      paneId: string;
+      tmuxServerIdentity: TmuxServerIdentity;
+    }
+  | {
+      kind: 'owned';
+      provider: 'cmux';
       providerTarget: string;
       paneId: string;
     }
@@ -44,7 +60,11 @@ export type MailboxTargetOwnership =
 /** Fields that must remain identical between the guard's pre-effect re-reads. */
 export interface MailboxNotificationSecurityTuple {
   configName: string;
+  configInstanceId: string;
   configProviderTarget: string;
+  configTmuxServerSocketPath?: string;
+  configTmuxServerPid?: number;
+  configTmuxServerProcessStartedAt?: string;
   recipient: string;
   recipientRole: 'leader' | 'worker';
   canonicalPaneId: string;
@@ -130,6 +150,33 @@ function providerForTarget(providerTarget: string): MailboxNotificationProvider 
   return providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
 }
 
+function validTmuxServerIdentity(value: unknown): value is TmuxServerIdentity {
+  return isValidTmuxServerIdentity(value)
+    && isValidStrictProcessStartIdentity(value.process_started_at);
+}
+
+function persistedTargetServerIdentity(config: TeamConfig): TmuxServerIdentity | undefined {
+  if (!validTmuxServerIdentity(config.tmux_server_identity)) return undefined;
+  const identity = config.tmux_server_identity;
+  return {
+    socket_path: identity.socket_path,
+    server_pid: identity.server_pid,
+    process_started_at: identity.process_started_at,
+  };
+}
+
+function targetHasPersistedAuthority(
+  config: TeamConfig,
+  target: MailboxNotificationTarget,
+): boolean {
+  if (!isValidTeamInstanceId(config.instance_id)) return false;
+  if (target.provider === 'cmux') return target.tmuxServerIdentity === undefined;
+  return validTmuxServerIdentity(target.tmuxServerIdentity)
+    && target.tmuxServerIdentity.socket_path === config.tmux_server_identity?.socket_path
+    && target.tmuxServerIdentity.server_pid === config.tmux_server_identity?.server_pid
+    && target.tmuxServerIdentity.process_started_at === config.tmux_server_identity?.process_started_at;
+}
+
 function dispatchFailureReason(read: Exclude<StrictDispatchReadResult, { kind: 'valid' }>): MailboxNotificationGuardReason {
   switch (read.kind) {
     case 'store_missing':
@@ -179,6 +226,7 @@ function resolveCanonicalTarget(
 
   const providerTarget = config.tmux_session;
   const provider = providerForTarget(providerTarget);
+  const tmuxServerIdentity = provider === 'tmux' ? persistedTargetServerIdentity(config) : undefined;
   if (recipient === 'leader-fixed') {
     if (!hasExactText(config.leader_pane_id)) return { reason: 'leader_pane_missing_deferred' };
     return {
@@ -188,6 +236,7 @@ function resolveCanonicalTarget(
         recipient,
         recipientRole: 'leader',
         paneId: config.leader_pane_id,
+        ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
       },
     };
   }
@@ -202,6 +251,7 @@ function resolveCanonicalTarget(
       recipient,
       recipientRole: 'worker',
       paneId: worker.pane_id,
+      ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
       ...(typeof worker.index === 'number' && Number.isFinite(worker.index) ? { workerIndex: worker.index } : {}),
     },
   };
@@ -277,6 +327,14 @@ export function evaluateMailboxNotificationGuard(
     return { kind: 'suppress', reason: 'mailbox_recipient_mismatch', safePendingRequest, target };
   }
 
+  if (!targetHasPersistedAuthority(state.config, target)) {
+    return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
+  }
+  const configInstanceId = state.config.instance_id;
+  if (!isValidTeamInstanceId(configInstanceId)) {
+    return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
+  }
+
   const ownership = state.ownership;
   if (!ownership) return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
   if (ownership.kind !== 'owned') {
@@ -294,6 +352,21 @@ export function evaluateMailboxNotificationGuard(
   ) {
     return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
   }
+  if (target.provider === 'tmux') {
+    if (ownership.provider !== 'tmux') {
+      return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+    }
+    const ownershipIdentity = ownership.tmuxServerIdentity;
+    const targetIdentity = target.tmuxServerIdentity;
+    if (!validTmuxServerIdentity(ownershipIdentity) || !targetIdentity
+      || ownershipIdentity.socket_path !== targetIdentity.socket_path
+      || ownershipIdentity.server_pid !== targetIdentity.server_pid
+      || ownershipIdentity.process_started_at !== targetIdentity.process_started_at) {
+      return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+    }
+  } else if ('tmuxServerIdentity' in ownership) {
+    return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+  }
 
   return {
     kind: 'allow',
@@ -302,7 +375,15 @@ export function evaluateMailboxNotificationGuard(
     message: { ...message },
     securityTuple: {
       configName: state.config.name,
+      configInstanceId,
       configProviderTarget: state.config.tmux_session,
+      ...(target.tmuxServerIdentity
+        ? {
+            configTmuxServerSocketPath: target.tmuxServerIdentity.socket_path,
+            configTmuxServerPid: target.tmuxServerIdentity.server_pid,
+            configTmuxServerProcessStartedAt: target.tmuxServerIdentity.process_started_at,
+          }
+        : {}),
       recipient: input.recipient,
       recipientRole: target.recipientRole,
       canonicalPaneId: target.paneId,
@@ -334,7 +415,11 @@ export function mailboxNotificationSecurityTupleEquals(
   right: MailboxNotificationSecurityTuple,
 ): boolean {
   return left.configName === right.configName
+    && left.configInstanceId === right.configInstanceId
     && left.configProviderTarget === right.configProviderTarget
+    && left.configTmuxServerSocketPath === right.configTmuxServerSocketPath
+    && left.configTmuxServerPid === right.configTmuxServerPid
+    && left.configTmuxServerProcessStartedAt === right.configTmuxServerProcessStartedAt
     && left.recipient === right.recipient
     && left.recipientRole === right.recipientRole
     && left.canonicalPaneId === right.canonicalPaneId
@@ -383,9 +468,15 @@ export async function readCurrentMailboxNotificationGuard(
   if (initial.kind !== 'suppress' || initial.reason !== 'mailbox_membership_unresolvable' || !initial.target) {
     return initial;
   }
+  if (!config || !targetHasPersistedAuthority(config, initial.target)) return initial;
 
   const ownership = dependencies.verifyProviderOwnership
-    ? await dependencies.verifyProviderOwnership(initial.target).catch(() => ({ kind: 'unavailable' } as const))
+    ? await dependencies.verifyProviderOwnership({
+        ...initial.target,
+        ...(initial.target.tmuxServerIdentity
+          ? { tmuxServerIdentity: { ...initial.target.tmuxServerIdentity } }
+          : {}),
+      }).catch(() => ({ kind: 'unavailable' } as const))
     : { kind: 'unavailable' } as const;
   return evaluateMailboxNotificationGuard(input, { ...state, ownership });
 }

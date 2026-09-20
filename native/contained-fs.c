@@ -3,6 +3,7 @@
 #define _GNU_SOURCE
 #define NAPI_VERSION 8
 #include <node_api.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
@@ -12,6 +13,10 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#endif
 
 static int napi_checked(napi_env env, napi_status status) {
   if (status == napi_ok) return 1;
@@ -91,6 +96,57 @@ static napi_value undefined(napi_env env) {
   napi_value result;
   CHECK(napi_get_undefined(env, &result));
   return result;
+}
+
+static napi_value null_value(napi_env env) {
+  napi_value result;
+  CHECK(napi_get_null(env, &result));
+  return result;
+}
+
+/*
+ * Validate the JavaScript PID before converting it to pid_t.  A conversion
+ * before these checks could turn a fractional or out-of-range Number into a
+ * different process identifier.
+ */
+static int process_pid(napi_env env, napi_value value, pid_t *result) {
+  double number;
+  if (napi_get_value_double(env, value, &number) != napi_ok ||
+      !isfinite(number) || number < 1 || number > (double)INT_MAX ||
+      floor(number) != number) {
+    napi_throw_type_error(env, NULL, "Expected a positive integer process pid");
+    return 0;
+  }
+  *result = (pid_t)number;
+  return 1;
+}
+
+static napi_value process_start_time(napi_env env, napi_callback_info info) {
+  napi_value args[1], result, value;
+  pid_t pid;
+  if (!arguments(env, info, 1, args) || !process_pid(env, args[0], &pid)) return NULL;
+#ifdef __APPLE__
+  int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_PID, (int)pid };
+  struct kinfo_proc process;
+  size_t size = sizeof(process);
+  memset(&process, 0, sizeof(process));
+  if (sysctl(mib, 4, &process, &size, NULL, 0) < 0 || size != sizeof(process)) {
+    return null_value(env);
+  }
+  const struct timeval started = process.kp_proc.p_starttime;
+  if (started.tv_sec <= 0 || started.tv_usec < 0 || started.tv_usec >= 1000000) {
+    return null_value(env);
+  }
+  CHECK(napi_create_object(env, &result));
+  CHECK(napi_create_double(env, (double)started.tv_sec, &value));
+  CHECK(napi_set_named_property(env, result, "seconds", value));
+  CHECK(napi_create_double(env, (double)started.tv_usec, &value));
+  CHECK(napi_set_named_property(env, result, "microseconds", value));
+  return result;
+#else
+  (void)pid;
+  return null_value(env);
+#endif
 }
 
 static napi_value open_at(napi_env env, napi_callback_info info) {
@@ -227,6 +283,7 @@ static napi_value initialize(napi_env env, napi_value exports) {
     {"linkAt", NULL, link_at, NULL, NULL, NULL, napi_default, NULL},
     {"readDir", NULL, read_dir, NULL, NULL, NULL, napi_default, NULL},
     {"realpathFd", NULL, realpath_fd, NULL, NULL, NULL, napi_default, NULL},
+    {"processStartTime", NULL, process_start_time, NULL, NULL, NULL, napi_default, NULL},
   };
   CHECK(napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods));
   return exports;

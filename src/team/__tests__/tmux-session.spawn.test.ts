@@ -1,4 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { currentStrictProcessStartIdentity } from '../team-owner-epoch.js';
+import type { TmuxServerIdentity } from '../types.js';
+
+const fixtureProcessStartIdentity = currentStrictProcessStartIdentity();
+const supportsStrictTmuxFixture = fixtureProcessStartIdentity !== null
+  && (process.platform === 'darwin' || process.platform === 'linux');
+const fixtureTmuxServerIdentity: TmuxServerIdentity | undefined = supportsStrictTmuxFixture
+  ? {
+      socket_path: '/tmp/omc-tmux-session-spawn.sock',
+      server_pid: process.pid,
+      process_started_at: fixtureProcessStartIdentity!,
+    }
+  : undefined;
+
+function strictTmuxIdentity(): TmuxServerIdentity {
+  if (!fixtureTmuxServerIdentity) throw new Error('strict tmux fixture unsupported on this platform');
+  return fixtureTmuxServerIdentity;
+}
+
+function guardedShellWords(command: string): string[] {
+  return [...command.matchAll(/'((?:[^']|'"'"')*)'/g)].map(match =>
+    match[1]!.replace(/'"'"'/g, "'"));
+}
+
+function isTmuxCommand(args: readonly string[], command: string): boolean {
+  return args[0] === command || (args[0] === '-S' && args[2] === command);
+}
+
+const strictTmuxIt = supportsStrictTmuxFixture ? it : it.skip;
 
 const mockedCalls = vi.hoisted(() => ({
   tmuxArgs: [] as string[][],
@@ -71,7 +100,10 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
     }),
     tmuxExecAsync: vi.fn(async (args: string[]) => {
       mockedCalls.tmuxArgs.push(args);
-      if (args[0] === 'capture-pane') {
+      const commandIndex = args[0] === '-S' ? 2 : 0;
+      const command = args[commandIndex];
+      if (command === 'capture-pane') {
+        if (commandIndex === 2) mockedCalls.tmuxArgs.push(args.slice(commandIndex));
         if (mockedCalls.delayedSubmitCapturesRemaining !== null) {
           if (mockedCalls.delayedSubmitCapturesRemaining <= 0) {
             mockedCalls.paneCapture = mockedCalls.delayedSubmitReplacement;
@@ -86,13 +118,13 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
           : mockedCalls.paneCapture;
         return { stdout, stderr: '' };
       }
-      if (args[0] === 'send-keys' && args.includes('-l') && mockedCalls.echoOnLiteralSend) {
+      if (command === 'send-keys' && args.includes('-l') && mockedCalls.echoOnLiteralSend) {
         const literal = args[args.length - 1] ?? '';
         mockedCalls.paneCapture = mockedCalls.wrapLiteralCapture
           ? `${literal.slice(0, 80)}\n${literal.slice(80)}`
           : literal;
       }
-      if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.enterSubmitsCommand) {
+      if (command === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.enterSubmitsCommand) {
         const replacement = mockedCalls.paneCapture.includes('cursor-agent')
           ? 'cursor-agent ready\n'
           : '';
@@ -103,22 +135,58 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
           mockedCalls.paneCapture = replacement;
         }
       }
-      if (args[0] === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.paneStatusAfterEnter !== null) {
+      if (command === 'send-keys' && args.at(-1) === 'Enter' && mockedCalls.paneStatusAfterEnter !== null) {
         mockedCalls.paneStatus = mockedCalls.paneStatusAfterEnter;
       }
       return { stdout: '', stderr: '' };
     }),
     tmuxCmdAsync: vi.fn(async (args: string[]) => {
       mockedCalls.tmuxArgs.push(args);
-      if (args[0] === 'display-message' && args.includes('#{pane_dead} #{pane_current_command}')) {
+      const commandIndex = args[0] === '-S' ? 2 : 0;
+      const command = args[commandIndex];
+      if (command === 'display-message' && args.includes('#{pid}')) {
+        return { stdout: `${process.pid}\n`, stderr: '' };
+      }
+      if (command === 'display-message' && args.includes('#{pane_dead} #{pane_current_command}')) {
         return { stdout: mockedCalls.paneStatus, stderr: '' };
+      }
+      if (command === 'if-shell') {
+        const success = args[commandIndex + 2] ?? '';
+        const words = guardedShellWords(success);
+        const nativeCommand = words[0];
+        const syntheticArgs = words.slice(0, words.indexOf('display-message'));
+        if (nativeCommand === 'send-keys') {
+          mockedCalls.tmuxArgs.push(syntheticArgs);
+          if (syntheticArgs.includes('-l') && mockedCalls.echoOnLiteralSend) {
+            const literal = syntheticArgs[syntheticArgs.indexOf('-l') + 1] ?? '';
+            mockedCalls.paneCapture = mockedCalls.wrapLiteralCapture
+              ? `${literal.slice(0, 80)}\n${literal.slice(80)}`
+              : literal;
+          }
+          if (syntheticArgs.at(-1) === 'Enter' && mockedCalls.enterSubmitsCommand) {
+            const replacement = mockedCalls.paneCapture.includes('cursor-agent')
+              ? 'cursor-agent ready\n'
+              : '';
+            if (mockedCalls.submitClearsAfterCaptures > 0) {
+              mockedCalls.delayedSubmitCapturesRemaining = mockedCalls.submitClearsAfterCaptures;
+              mockedCalls.delayedSubmitReplacement = replacement;
+            } else {
+              mockedCalls.paneCapture = replacement;
+            }
+          }
+          if (syntheticArgs.at(-1) === 'Enter' && mockedCalls.paneStatusAfterEnter !== null) {
+            mockedCalls.paneStatus = mockedCalls.paneStatusAfterEnter;
+          }
+        }
+        const marker = success.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        return { stdout: marker ? `${marker}\n` : '', stderr: '' };
       }
       return { stdout: '', stderr: '' };
     }),
   };
 });
 
-import { sendTeamPaneKey, spawnBridgeInSession, spawnWorkerInPane } from '../tmux-session.js';
+import { sendTeamPaneKey, spawnWorkerInPane } from '../tmux-session.js';
 
 describe('spawnWorkerInPane', () => {
   beforeEach(() => {
@@ -140,10 +208,11 @@ describe('spawnWorkerInPane', () => {
     mockedCalls.paneStatusAfterEnter = null;
   });
 
-  it('uses argv-style launch with literal tmux send-keys', async () => {
+  strictTmuxIt('uses argv-style launch with literal tmux send-keys', async () => {
     await spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -154,7 +223,7 @@ describe('spawnWorkerInPane', () => {
     });
 
     const literalSend = mockedCalls.tmuxArgs.find(
-      (args) => args[0] === 'send-keys' && args.includes('-l')
+      (args) => isTmuxCommand(args, 'send-keys') && args.includes('-l')
     );
     expect(literalSend).toBeDefined();
     const launchLine = literalSend?.[literalSend.length - 1] ?? '';
@@ -162,6 +231,13 @@ describe('spawnWorkerInPane', () => {
     expect(launchLine).toContain("'--'");
     expect(launchLine).toContain("'gpt-5;touch /tmp/pwn'");
     expect(launchLine).not.toContain('exec codex --full-auto');
+    const guardedSend = mockedCalls.tmuxArgs.find(
+      (args) => args[0] === '-S' && args[2] === 'if-shell' && args[4]?.includes("'send-keys'"),
+    );
+    expect(guardedSend).toBeDefined();
+    expect(mockedCalls.tmuxArgs).toContainEqual([
+      '-S', strictTmuxIdentity().socket_path, 'display-message', '-p', '#{pid}',
+    ]);
   });
 
   it('sends cmux worker command text to the target surface and submits with send-key-surface', async () => {
@@ -331,26 +407,14 @@ describe('spawnWorkerInPane', () => {
     }).rejects.toThrow(/cmux command failed for both current and legacy forms/);
   });
 
-  it('uses current JS runtime when launching bridge-entry helpers', () => {
-    spawnBridgeInSession('session:0', '/tmp/bridge-entry.js', '/tmp/bridge-config.json');
-
-    const sendKeys = mockedCalls.tmuxArgs.find((args) => args[0] === 'send-keys');
-    expect(sendKeys).toBeDefined();
-    const launchLine = sendKeys?.[3] ?? '';
-    expect(launchLine).toContain(process.execPath);
-    expect(launchLine).toContain('/tmp/bridge-entry.js');
-    expect(launchLine).toContain('--config');
-    expect(launchLine).not.toMatch(/^node\s/);
-  });
-
-
-  it('fails before Enter when tmux does not echo the delivered start command', async () => {
+  strictTmuxIt('fails before Enter when tmux does not echo the delivered start command', async () => {
     mockedCalls.paneCapture = '';
     mockedCalls.echoOnLiteralSend = false;
     await expect(
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: strictTmuxIdentity(),
         envVars: {
           OMC_TEAM_NAME: 'safe-team',
           OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -365,12 +429,13 @@ describe('spawnWorkerInPane', () => {
     expect(enterSend).toBeUndefined();
   });
 
-  it('verifies wrapped worker start commands with joined tmux capture before Enter', async () => {
+  strictTmuxIt('verifies wrapped worker start commands with joined tmux capture before Enter', async () => {
     mockedCalls.wrapLiteralCapture = true;
 
     await spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -386,13 +451,14 @@ describe('spawnWorkerInPane', () => {
     expect(enterSend).toBeDefined();
   });
 
-  it('tolerates psmux capture-pane join spaces inserted at wrap boundaries before Enter', async () => {
+  strictTmuxIt('tolerates psmux capture-pane join spaces inserted at wrap boundaries before Enter', async () => {
     mockedCalls.wrapLiteralCapture = true;
     mockedCalls.insertWrapSpaces = true;
 
     await spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -408,10 +474,11 @@ describe('spawnWorkerInPane', () => {
     expect(enterSend).toBeDefined();
   });
 
-  it('verifies a single Cursor worker start command submits after Enter', async () => {
+  strictTmuxIt('verifies a single Cursor worker start command submits after Enter', async () => {
     await spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -425,13 +492,14 @@ describe('spawnWorkerInPane', () => {
     expect(mockedCalls.paneCapture).toBe('cursor-agent ready\n');
   });
 
-  it('waits for slow tmux alt-screen repaint before treating worker start submit as failed', async () => {
+  strictTmuxIt('waits for slow tmux alt-screen repaint before treating worker start submit as failed', async () => {
     vi.useFakeTimers();
     mockedCalls.submitClearsAfterCaptures = 6;
 
     const start = spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -440,6 +508,7 @@ describe('spawnWorkerInPane', () => {
       launchArgs: ['--dangerously-skip-permissions'],
       cwd: '/tmp',
     });
+    void start.catch(() => undefined);
 
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(start).resolves.toBeUndefined();
@@ -451,13 +520,14 @@ describe('spawnWorkerInPane', () => {
     vi.useRealTimers();
   });
 
-  it('accepts inline TUI worker submission when process leaves the ready shell but command remains in scrollback', async () => {
+  strictTmuxIt('accepts inline TUI worker submission when process leaves the ready shell but command remains in scrollback', async () => {
     mockedCalls.enterSubmitsCommand = false;
     mockedCalls.paneStatusAfterEnter = '0 codex\n';
 
     await expect(spawnWorkerInPane('session:0', '%2', {
       teamName: 'safe-team',
       workerName: 'worker-1',
+      tmuxServerIdentity: strictTmuxIdentity(),
       envVars: {
         OMC_TEAM_NAME: 'safe-team',
         OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -468,7 +538,7 @@ describe('spawnWorkerInPane', () => {
     })).resolves.toBeUndefined();
   });
 
-  it('does not accept inline TUI worker submission when the pane is dead', async () => {
+  strictTmuxIt('does not accept inline TUI worker submission when the pane is dead', async () => {
     mockedCalls.enterSubmitsCommand = false;
     mockedCalls.paneStatusAfterEnter = '1 codex\n';
     vi.stubEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', '200');
@@ -477,6 +547,7 @@ describe('spawnWorkerInPane', () => {
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: strictTmuxIdentity(),
         envVars: {
           OMC_TEAM_NAME: 'safe-team',
           OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -488,7 +559,7 @@ describe('spawnWorkerInPane', () => {
     ).rejects.toThrow(/worker_start_submit_unverified:worker-1:%2:/);
   });
 
-  it('fails loudly when a single Cursor worker start command remains unsubmitted after Enter', async () => {
+  strictTmuxIt('fails loudly when a single Cursor worker start command remains unsubmitted after Enter', async () => {
     mockedCalls.enterSubmitsCommand = false;
     vi.stubEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', '200');
 
@@ -496,6 +567,7 @@ describe('spawnWorkerInPane', () => {
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: strictTmuxIdentity(),
         envVars: {
           OMC_TEAM_NAME: 'safe-team',
           OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -506,12 +578,13 @@ describe('spawnWorkerInPane', () => {
     ).rejects.toThrow(/worker_start_submit_unverified:worker-1:%2:/);
   });
 
-  it('fails before send-keys when the target pane shell never becomes ready', async () => {
+  strictTmuxIt('fails before send-keys when the target pane shell never becomes ready', async () => {
     mockedCalls.paneStatus = '1 zsh\n';
     await expect(
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: strictTmuxIdentity(),
         envVars: {
           OMC_TEAM_NAME: 'safe-team',
           OMC_TEAM_WORKER: 'safe-team/worker-1',
@@ -525,11 +598,12 @@ describe('spawnWorkerInPane', () => {
     expect(mockedCalls.tmuxArgs.some((args) => args[0] === 'send-keys' && args.includes('-l'))).toBe(false);
   });
 
-  it('rejects invalid team names before command construction', async () => {
+  strictTmuxIt('rejects invalid team names before command construction', async () => {
     await expect(
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'Bad-Team',
         workerName: 'worker-1',
+        tmuxServerIdentity: fixtureTmuxServerIdentity,
         envVars: { OMC_TEAM_NAME: 'Bad-Team' },
         launchBinary: 'codex',
         launchArgs: ['--full-auto'],
@@ -538,11 +612,12 @@ describe('spawnWorkerInPane', () => {
     ).rejects.toThrow('Invalid team name');
   });
 
-  it('rejects invalid environment keys', async () => {
+  strictTmuxIt('rejects invalid environment keys', async () => {
     await expect(
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: fixtureTmuxServerIdentity,
         envVars: { 'BAD-KEY': 'x' },
         launchBinary: 'codex',
         cwd: '/tmp',
@@ -550,15 +625,27 @@ describe('spawnWorkerInPane', () => {
     ).rejects.toThrow('Invalid environment key');
   });
 
-  it('rejects unsafe launchBinary values', async () => {
+  strictTmuxIt('rejects unsafe launchBinary values', async () => {
     await expect(
       spawnWorkerInPane('session:0', '%2', {
         teamName: 'safe-team',
         workerName: 'worker-1',
+        tmuxServerIdentity: fixtureTmuxServerIdentity,
         envVars: { OMC_TEAM_NAME: 'safe-team' },
         launchBinary: 'codex;touch /tmp/pwn',
         cwd: '/tmp',
       })
     ).rejects.toThrow('Invalid launchBinary');
+  });
+
+  it.runIf(!supportsStrictTmuxFixture)('rejects unsupported native tmux launch without mutating the pane', async () => {
+    await expect(spawnWorkerInPane('session:0', '%2', {
+      teamName: 'safe-team',
+      workerName: 'worker-1',
+      envVars: { OMC_TEAM_NAME: 'safe-team' },
+      launchBinary: 'codex',
+      cwd: '/tmp',
+    })).rejects.toThrow('worker_start_tmux_server_identity_missing');
+    expect(mockedCalls.tmuxArgs).toEqual([]);
   });
 });
