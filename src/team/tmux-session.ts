@@ -3861,6 +3861,65 @@ export async function resolveSplitPaneWorkerPaneIds(
   return dedupeWorkerPaneIds(recordedPaneIds ?? [], leaderPaneId);
 }
 
+export type TeamSessionTargetPresence =
+  | { kind: 'owned' }
+  | { kind: 'absent' }
+  | { kind: 'present_unowned' }
+  | { kind: 'unknown' };
+
+/**
+ * Observe whether the recorded team session/window still belongs to this
+ * incarnation. Absence is a positive cleanup proof; a still-present target
+ * without the recorded leader pane is not.
+ */
+export async function observeTeamSessionTargetPresence(args: {
+  sessionName: string;
+  sessionMode: Exclude<TeamSessionMode, 'split-pane'>;
+  leaderPaneId: string;
+  tmuxServerIdentity?: TmuxServerIdentity;
+}): Promise<TeamSessionTargetPresence> {
+  const provider = args.sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+  if (provider === 'tmux') {
+    if (!isValidTmuxServerIdentity(args.tmuxServerIdentity)) return { kind: 'unknown' };
+    const serverState = await observeTmuxServerIdentity(args.tmuxServerIdentity);
+    if (serverState === 'dead') return { kind: 'absent' };
+    if (serverState !== 'matching') return { kind: 'unknown' };
+  }
+
+  const ownership = await verifyTeamTargetOwnership({
+    provider,
+    providerTarget: args.sessionName,
+    recipient: 'leader-fixed',
+    recipientRole: 'leader',
+    paneId: args.leaderPaneId,
+    ...(provider === 'tmux' ? { tmuxServerIdentity: args.tmuxServerIdentity } : {}),
+  } as MailboxNotificationTarget);
+  if (ownership.kind === 'owned') return { kind: 'owned' };
+  if (provider !== 'tmux' || !isValidTmuxServerIdentity(args.tmuxServerIdentity)) {
+    return { kind: 'unknown' };
+  }
+
+  if (args.sessionMode === 'dedicated-window') {
+    const target = parseDedicatedWindowTarget(args.sessionName);
+    if (!target) return { kind: 'unknown' };
+    const windows = await listTmuxWindowsForCleanup(args.tmuxServerIdentity);
+    if (!windows) return { kind: 'unknown' };
+    const matches = windows.filter(window =>
+      window.sessionName === target.sessionName && window.index === target.windowIndex,
+    );
+    if (matches.length > 1) return { kind: 'unknown' };
+    return matches.length === 0 ? { kind: 'absent' } : { kind: 'present_unowned' };
+  }
+
+  const sessionTarget = normalizeDetachedSessionTarget(args.sessionName);
+  if (!sessionTarget) return { kind: 'unknown' };
+  const sessions = await listTmuxSessionsForCleanup(args.tmuxServerIdentity);
+  if (!sessions) return { kind: 'unknown' };
+  const matches = sessions.filter(session => session.name === sessionTarget);
+  if (matches.length > 1) return { kind: 'unknown' };
+  return matches.length === 0 ? { kind: 'absent' } : { kind: 'present_unowned' };
+}
+
 /**
  * Kill the team tmux session or just the worker panes, depending on how the
  * team was created.

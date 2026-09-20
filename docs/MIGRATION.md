@@ -40,8 +40,10 @@ bypass a blocked cleanup.
 
 This also applies to API `cleanup` and `orphan-cleanup`: neither is a raw state
 deletion escape hatch. The unsafe low-level `teamCleanup` deletion API is removed.
-SessionEnd cleanup checks the ending session's ownership and passes the captured
-instance ID; stale team-name hints cannot authorize cleanup of another session's team.
+SessionEnd cleanup checks the ending Claude session's ownership via config
+`leader_session_id` (not the tmux target projected into `leader.session_id`)
+and passes the captured instance ID; stale team-name hints cannot authorize
+cleanup of another session's team.
 
 Provider execution and pane liveness are observed separately. An exited provider
 can be recovered even when its pane shell remains, but recovery does not treat

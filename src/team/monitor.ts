@@ -41,7 +41,7 @@ import type { TeamPhase } from './phase-controller.js';
 import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
 import { assertTeamInstanceUnderLock, createTeamInstanceBinding, disposeTeamInstanceUnderLock } from './team-instance.js';
-import { isValidTeamInstanceId, isValidTmuxServerIdentity } from './types.js';
+import { isValidLeaderSessionId, isValidTeamInstanceId, isValidTmuxServerIdentity } from './types.js';
 
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
@@ -250,6 +250,7 @@ function isTeamConfig(value: unknown, requireRevision: boolean, expectedTeamName
     || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
     || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
     || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
+    || (value.leader_session_id !== undefined && !isValidLeaderSessionId(value.leader_session_id))
     || (value.next_task_id !== undefined && !isSafeCounter(value.next_task_id))
     || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance)
     || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value)
@@ -425,6 +426,18 @@ export function assertTeamInstanceConfigImmutable(
   }
   if (!sameTmuxServerIdentity(currentServerIdentity, proposedServerIdentity)) {
     throw new Error('tmux_server_identity_immutable');
+  }
+}
+
+function assertLeaderSessionIdImmutable(
+  current: Pick<TeamConfig, 'leader_session_id'>,
+  proposed: Pick<TeamConfig, 'leader_session_id'>,
+): void {
+  const currentId = current.leader_session_id;
+  const proposedId = proposed.leader_session_id;
+  if (currentId === undefined && proposedId === undefined) return;
+  if (currentId === undefined || proposedId === undefined || currentId !== proposedId) {
+    throw new Error('leader_session_id_immutable');
   }
 }
 
@@ -756,6 +769,7 @@ export async function saveTeamConfigAtRevision(
 
     // Trust boundary: compare ownership/phase against authoritative fences BEFORE rebasing.
     assertTeamInstanceConfigImmutable(current.config, config);
+    assertLeaderSessionIdImmutable(current.config, config);
     assertActiveFenceOwnershipTransition(current.config, config, options);
 
     const locked = alignActiveFenceRevisions(config, config.state_revision!);
@@ -1010,6 +1024,12 @@ async function saveTeamConfigUnlocked(config: TeamConfig, cwd: string): Promise<
       tmux_session: config.tmux_session,
       next_task_id: config.next_task_id,
       created_at: config.created_at,
+      leader: {
+        ...(existingManifest.leader ?? { worker_id: 'leader', role: 'leader' }),
+        session_id: config.leader_session_id
+          ?? existingManifest.leader?.session_id
+          ?? config.tmux_session,
+      },
       leader_cwd: config.leader_cwd,
       team_state_root: config.team_state_root,
       workspace_mode: config.workspace_mode,
@@ -1103,7 +1123,10 @@ export async function saveTeamConfig(config: TeamConfig, cwd: string, expectedRe
     const current = currentState.kind === 'value' ? currentState.value : null;
     if (current && Object.hasOwn(current, 'state_revision') && !validateRevisionedTeamConfig(current, config.name)) throw new Error('invalid_persisted_state');
     if (current && !Object.hasOwn(current, 'state_revision') && !validateLegacyTeamConfig(current, config.name)) throw new Error('invalid_persisted_state');
-    if (current) assertTeamInstanceConfigImmutable(current, config);
+    if (current) {
+      assertTeamInstanceConfigImmutable(current, config);
+      assertLeaderSessionIdImmutable(current, config);
+    }
     if (!current && config.tmux_server_identity !== undefined) {
       throw new Error('tmux_server_identity_immutable');
     }

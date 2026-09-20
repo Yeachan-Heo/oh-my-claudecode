@@ -116,6 +116,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
 
     teamCleanupMocks.teamReadConfig.mockResolvedValue({
       instance_id: INSTANCE_A,
+      leader_session_id: sessionId,
       workers: [{ name: 'worker-1', pane_id: '%1' }],
     } as never);
     teamCleanupMocks.teamReadManifest.mockResolvedValue({
@@ -140,6 +141,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       JSON.stringify({ active: true, session_id: sessionId, team_name: 'preserved-team' }), 'utf-8');
     teamCleanupMocks.teamReadConfig.mockResolvedValue({
       instance_id: INSTANCE_A,
+      leader_session_id: sessionId,
       workers: [{ name: 'worker-1', pane_id: '%1' }],
     } as never);
     teamCleanupMocks.teamReadManifest.mockResolvedValue({
@@ -166,6 +168,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     }), 'utf-8');
     teamCleanupMocks.teamReadConfig.mockResolvedValue({
       instance_id: INSTANCE_B,
+      leader_session_id: foreignSessionId,
       workers: [],
     } as never);
     teamCleanupMocks.teamReadManifest.mockResolvedValue({
@@ -189,6 +192,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       active: true, session_id: sessionId, team_name: 'missing-instance-team', current_phase: 'team-exec',
     }), 'utf-8');
     teamCleanupMocks.teamReadConfig.mockResolvedValue({
+      leader_session_id: sessionId,
       workers: [],
     } as never);
     teamCleanupMocks.teamReadManifest.mockResolvedValue({
@@ -215,6 +219,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     }), 'utf-8');
     teamCleanupMocks.teamReadConfig.mockResolvedValue({
       instance_id: INSTANCE_A,
+      leader_session_id: sessionId,
       workers: [],
     } as never);
     teamCleanupMocks.teamReadManifest.mockResolvedValue({
@@ -354,6 +359,7 @@ describe('processSessionEnd team cleanup (#1632)', () => {
     }) as never);
     teamCleanupMocks.teamReadConfig.mockImplementation((async (teamName: string) => ({
       instance_id: teamName === 'owned-team' ? INSTANCE_A : INSTANCE_B,
+      leader_session_id: teamName === 'owned-team' ? sessionId : otherSessionId,
       workers: [{ name: `${teamName}-worker`, pane_id: '%1' }],
     })) as never);
 
@@ -365,5 +371,68 @@ describe('processSessionEnd team cleanup (#1632)', () => {
       tmpDir,
       { instanceId: INSTANCE_A, force: true, timeoutMs: 0 },
     );
+  });
+
+  it('authorizes cleanup from config.leader_session_id even when the manifest still stores a tmux target', async () => {
+    const sessionId = 'pid-1632-claude-owner';
+    const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(teamSessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(teamSessionDir, 'team-state.json'),
+      JSON.stringify({ active: true, session_id: sessionId, team_name: 'tmux-projected-team', current_phase: 'team-exec' }),
+      'utf-8',
+    );
+
+    teamCleanupMocks.teamReadConfig.mockResolvedValue({
+      instance_id: INSTANCE_A,
+      leader_session_id: sessionId,
+      tmux_session: 'tmux-projected-team:0',
+      workers: [{ name: 'worker-1', pane_id: '%1' }],
+    } as never);
+    teamCleanupMocks.teamReadManifest.mockResolvedValue({
+      instance_id: INSTANCE_A,
+      tmux_session: 'tmux-projected-team:0',
+      leader: { session_id: 'tmux-projected-team:0' },
+    } as never);
+
+    await expect(cleanupSessionOwnedTeams(tmpDir, sessionId)).resolves.toEqual({
+      attempted: ['tmux-projected-team'],
+      cleaned: ['tmux-projected-team'],
+      failed: [],
+    });
+    expect(teamCleanupMocks.shutdownTeamV2).toHaveBeenCalledWith(
+      'tmux-projected-team',
+      tmpDir,
+      { instanceId: INSTANCE_A, force: true, timeoutMs: 0 },
+    );
+  });
+
+  it('does not treat a tmux session name as Claude-session ownership', async () => {
+    const sessionId = 'pid-1632-tmux-is-not-owner';
+    const teamSessionDir = path.join(tmpDir, '.omc', 'state', 'sessions', sessionId);
+    fs.mkdirSync(teamSessionDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(teamSessionDir, 'team-state.json'),
+      JSON.stringify({ active: true, session_id: sessionId, team_name: 'tmux-named-team', current_phase: 'team-exec' }),
+      'utf-8',
+    );
+
+    teamCleanupMocks.teamReadConfig.mockResolvedValue({
+      instance_id: INSTANCE_A,
+      tmux_session: sessionId,
+      workers: [{ name: 'worker-1', pane_id: '%1' }],
+    } as never);
+    teamCleanupMocks.teamReadManifest.mockResolvedValue({
+      instance_id: INSTANCE_A,
+      tmux_session: sessionId,
+      leader: { session_id: sessionId },
+    } as never);
+
+    await expect(cleanupSessionOwnedTeams(tmpDir, sessionId)).resolves.toEqual({
+      attempted: ['tmux-named-team'],
+      cleaned: [],
+      failed: [{ teamName: 'tmux-named-team', error: 'team-shutdown-preserved:session_owner_missing' }],
+    });
+    expect(teamCleanupMocks.shutdownTeamV2).not.toHaveBeenCalled();
   });
 });

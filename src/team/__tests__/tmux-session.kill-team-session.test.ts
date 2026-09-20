@@ -140,7 +140,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 
-import { killTeamSession, resolveSplitPaneWorkerPaneIds } from '../tmux-session.js';
+import { killTeamSession, observeTeamSessionTargetPresence, resolveSplitPaneWorkerPaneIds } from '../tmux-session.js';
 
 describe('killTeamSession safeguards', () => {
   afterEach(() => {
@@ -242,6 +242,39 @@ describe('killTeamSession safeguards', () => {
     })).resolves.toBe(true);
     expect(mocked.execCalls.some((args) => args.includes('list-windows'))).toBe(true);
     expect(mocked.execCalls.some((args) => args.some(arg => arg.includes('kill-window')))).toBe(false);
+  });
+
+  it.skipIf(!supportsStrictTmuxFixture)('observes dedicated-window absence when inventory has no matching window', async () => {
+    mocked.listedPanes = '';
+    mocked.listedWindows = '@5\t$1\tleader-session\t0\n@6\t$1\tleader-session\t1\n';
+    await expect(observeTeamSessionTargetPresence({
+      sessionName: 'leader-session:3',
+      sessionMode: 'dedicated-window',
+      leaderPaneId: '%10',
+      tmuxServerIdentity: strictTmuxIdentity(),
+    })).resolves.toEqual({ kind: 'absent' });
+  });
+
+  it.skipIf(!supportsStrictTmuxFixture)('observes dedicated-window ownership when the leader pane remains', async () => {
+    mocked.listedPanes = '%10\n%11\n';
+    mocked.listedWindows = '@3\t$1\tleader-session\t3\n';
+    await expect(observeTeamSessionTargetPresence({
+      sessionName: 'leader-session:3',
+      sessionMode: 'dedicated-window',
+      leaderPaneId: '%10',
+      tmuxServerIdentity: strictTmuxIdentity(),
+    })).resolves.toEqual({ kind: 'owned' });
+  });
+
+  it.skipIf(!supportsStrictTmuxFixture)('observes a remaining dedicated window without the leader pane as present and unowned', async () => {
+    mocked.listedPanes = '%11\n';
+    mocked.listedWindows = '@3\t$1\tleader-session\t3\n';
+    await expect(observeTeamSessionTargetPresence({
+      sessionName: 'leader-session:3',
+      sessionMode: 'dedicated-window',
+      leaderPaneId: '%10',
+      tmuxServerIdentity: strictTmuxIdentity(),
+    })).resolves.toEqual({ kind: 'present_unowned' });
   });
 
   it.skipIf(!supportsStrictTmuxFixture)('rejects dedicated window cleanup when window is still present after kill fails', async () => {

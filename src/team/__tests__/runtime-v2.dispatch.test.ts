@@ -141,6 +141,7 @@ const mocks = vi.hoisted(() => {
       return captureTeamPane(ownership.paneId);
     }),
     observeTmuxServerIdentity: vi.fn(async () => 'matching' as const),
+    observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' as const })),
     execFile: vi.fn(),
     spawnSync: vi.fn((..._args: Parameters<typeof import('node:child_process').spawnSync>): Pick<ReturnType<typeof import('node:child_process').spawnSync>, 'status'> => ({ status: 0 })),
     tmuxExecAsync: vi.fn(),
@@ -329,6 +330,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     captureTeamPane: mocks.captureTeamPane,
     captureOwnedTeamPane: mocks.captureOwnedTeamPane,
     observeTmuxServerIdentity: mocks.observeTmuxServerIdentity,
+    observeTeamSessionTargetPresence: mocks.observeTeamSessionTargetPresence,
     workerPaneBelongsToProviderTarget: mocks.workerPaneBelongsToProviderTarget,
     workerPaneBelongsToOwnedProviderTarget: mocks.workerPaneBelongsToOwnedProviderTarget,
     killWorkerPanes: mocks.killWorkerPanes,

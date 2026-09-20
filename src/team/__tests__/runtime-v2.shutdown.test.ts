@@ -74,7 +74,8 @@ const tmuxMocks = vi.hoisted(() => {
       },
     })),
     killOwnedWorkerPane: vi.fn(async () => undefined),
-    verifyTeamTargetOwnership: vi.fn(async () => ({ kind: 'owned' as const })),
+    verifyTeamTargetOwnership: vi.fn(async (): Promise<{ kind: 'owned' | 'unavailable' | 'foreign' | 'provider_mismatch' }> => ({ kind: 'owned' })),
+    observeTeamSessionTargetPresence: vi.fn(async (): Promise<{ kind: 'owned' | 'absent' | 'present_unowned' | 'unknown' }> => ({ kind: 'owned' })),
   };
 });
 
@@ -92,6 +93,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     adoptWorkerPaneOwnership: tmuxMocks.adoptWorkerPaneOwnership,
     killOwnedWorkerPane: tmuxMocks.killOwnedWorkerPane,
     verifyTeamTargetOwnership: tmuxMocks.verifyTeamTargetOwnership,
+    observeTeamSessionTargetPresence: tmuxMocks.observeTeamSessionTargetPresence,
   };
 
 
@@ -171,6 +173,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     }));
     tmuxMocks.killOwnedWorkerPane.mockResolvedValue(undefined);
     tmuxMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'owned' });
+    tmuxMocks.observeTeamSessionTargetPresence.mockReset();
+    tmuxMocks.observeTeamSessionTargetPresence.mockResolvedValue({ kind: 'owned' });
     repoDir = mkdtempSync(join(tmpdir(), 'omc-runtime-v2-shutdown-'));
     execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
     execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoDir, stdio: 'pipe' });
@@ -524,6 +528,94 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     });
     expect(existsSync(worktree.path)).toBe(true);
     expect(existsSync(teamRoot)).toBe(true);
+  });
+
+  it('retries dedicated-window shutdown after the original window is already gone', async () => {
+    const teamName = 'shutdown-window-absent-retry';
+    await reserveFixtureInstance(teamName, repoDir);
+    const teamRoot = fixtureTeamRoot(repoDir, teamName);
+    mkdirSync(teamRoot, { recursive: true });
+    writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+      name: teamName,
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxMocks.tmuxServerIdentity,
+      task: 'demo',
+      agent_type: 'claude',
+      worker_launch_mode: 'interactive',
+      worker_count: 0,
+      max_workers: 20,
+      workers: [],
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      leader_pane_id: '%1',
+      tmux_window_owned: true,
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+      next_task_id: 1,
+    }, null, 2), 'utf-8');
+    tmuxMocks.observeTeamSessionTargetPresence.mockResolvedValue({ kind: 'absent' });
+    tmuxMocks.verifyTeamTargetOwnership.mockResolvedValue({ kind: 'unavailable' });
+
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
+    await expect(shutdownTeamV2(teamName, repoDir, {
+      timeoutMs: 0,
+      force: true,
+      instanceId: TEAM_INSTANCE_ID,
+    })).resolves.toEqual({ outcome: 'cleaned' });
+
+    expect(tmuxMocks.observeTeamSessionTargetPresence).toHaveBeenCalledWith({
+      sessionName: `${teamName}:0`,
+      sessionMode: 'dedicated-window',
+      leaderPaneId: '%1',
+      tmuxServerIdentity: tmuxMocks.tmuxServerIdentity,
+    });
+    expect(tmuxMocks.killTeamSession).toHaveBeenCalledWith(`${teamName}:0`, [], '%1', {
+      sessionMode: 'dedicated-window',
+      tmuxServerIdentity: tmuxMocks.tmuxServerIdentity,
+    });
+    expect(existsSync(join(teamRoot, 'config.json'))).toBe(false);
+  });
+
+  it('preserves dedicated-window shutdown when the window remains without the leader pane', async () => {
+    const teamName = 'shutdown-window-unowned';
+    await reserveFixtureInstance(teamName, repoDir);
+    const teamRoot = fixtureTeamRoot(repoDir, teamName);
+    mkdirSync(teamRoot, { recursive: true });
+    writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+      name: teamName,
+      instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxMocks.tmuxServerIdentity,
+      task: 'demo',
+      agent_type: 'claude',
+      worker_launch_mode: 'interactive',
+      worker_count: 0,
+      max_workers: 20,
+      workers: [],
+      created_at: new Date().toISOString(),
+      tmux_session: `${teamName}:0`,
+      leader_pane_id: '%1',
+      tmux_window_owned: true,
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+      next_task_id: 1,
+    }, null, 2), 'utf-8');
+    tmuxMocks.observeTeamSessionTargetPresence.mockResolvedValue({ kind: 'present_unowned' });
+
+    const { shutdownTeamV2 } = await import('../runtime-v2.js');
+    await expect(shutdownTeamV2(teamName, repoDir, {
+      timeoutMs: 0,
+      force: true,
+      instanceId: TEAM_INSTANCE_ID,
+    })).resolves.toEqual({
+      outcome: 'preserved',
+      reason: 'provider_cleanup_unverified',
+      workers: ['leader-fixed'],
+    });
+
+    expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
+    expect(existsSync(join(teamRoot, 'config.json'))).toBe(true);
   });
 
 

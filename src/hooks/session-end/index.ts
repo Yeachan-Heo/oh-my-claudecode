@@ -13,7 +13,7 @@ import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepar
 import { spawnSessionEndWorker } from './worker.js';
 import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
 import { getSessionEndStalePrdWarning } from '../ralph/stale-prd.js';
-import { isValidTeamInstanceId } from '../../team/types.js';
+import { isValidTeamInstanceId, isValidLeaderSessionId } from '../../team/types.js';
 
 export interface SessionEndInput {
   session_id: string;
@@ -661,12 +661,18 @@ function extractTeamNameFromState(state: Record<string, unknown> | null): string
   return normalizeSessionEndTeamName(state.team_name ?? state.teamName);
 }
 
+function extractConfigOwnerSessionId(value: unknown): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const sessionId = (value as { leader_session_id?: unknown }).leader_session_id;
+  return isValidLeaderSessionId(sessionId) ? sessionId : null;
+}
+
 function extractManifestOwnerSessionId(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const leader = (value as { leader?: unknown }).leader;
   if (!leader || typeof leader !== 'object' || Array.isArray(leader)) return null;
   const sessionId = (leader as { session_id?: unknown }).session_id;
-  return typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : null;
+  return isValidLeaderSessionId(sessionId) ? sessionId : null;
 }
 
 export async function findSessionOwnedTeams(directory: string, sessionId: string): Promise<string[]> {
@@ -684,7 +690,7 @@ export async function findSessionOwnedTeams(directory: string, sessionId: string
     return [...teamNames];
   }
 
-  const { teamReadManifest } = await import('../../team/team-ops.js');
+  const { teamReadManifest, teamReadConfig } = await import('../../team/team-ops.js');
 
   try {
     const entries = fs.readdirSync(teamRoot, { withFileTypes: true });
@@ -692,8 +698,17 @@ export async function findSessionOwnedTeams(directory: string, sessionId: string
       if (!entry.isDirectory()) continue;
       const teamName = entry.name;
       try {
+        const config = await teamReadConfig(teamName, directory);
+        if (extractConfigOwnerSessionId(config) === sessionId) {
+          teamNames.add(teamName);
+          continue;
+        }
+      } catch {
+        // Continue with manifest scan when config is unreadable.
+      }
+      try {
         const manifest = await teamReadManifest(teamName, directory);
-        if (manifest?.leader.session_id === sessionId) {
+        if (extractManifestOwnerSessionId(manifest) === sessionId) {
           teamNames.add(teamName);
         }
       } catch {
@@ -759,15 +774,15 @@ export async function cleanupSessionOwnedTeams(
         return;
       }
 
-      // The runtime producer records the leader ownership only in the
-      // manifest (`leader.session_id`). Config has no Claude-session owner;
-      // a name hint or a tmux session name cannot authorize this cleanup.
-      const manifestLeaderSessionId = extractManifestOwnerSessionId(manifest);
-      if (manifestLeaderSessionId === null) {
+      // Authoritative Claude-session owner lives on config (`leader_session_id`).
+      // Manifest `leader.session_id` is a projection and may still contain a
+      // tmux target on older records; it cannot authorize this cleanup.
+      const configLeaderSessionId = extractConfigOwnerSessionId(config);
+      if (configLeaderSessionId === null) {
         failed.push({ teamName, error: 'team-shutdown-preserved:session_owner_missing' });
         return;
       }
-      if (manifestLeaderSessionId !== sessionId) {
+      if (configLeaderSessionId !== sessionId) {
         failed.push({ teamName, error: 'team-shutdown-preserved:session_owner_mismatch' });
         return;
       }

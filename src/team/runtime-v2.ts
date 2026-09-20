@@ -21,7 +21,7 @@ import { existsSync } from 'fs';
 import { link, lstat, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
 import { performance } from 'perf_hooks';
 import { TeamPaths, absPath, teamStateRoot } from './state-paths.js';
-import { getOmcRoot } from '../lib/worktree-paths.js';
+import { getOmcRoot, validateSessionId } from '../lib/worktree-paths.js';
 import { allocateTasksToWorkers } from './allocation-policy.js';
 import type { TaskAllocationInput, WorkerAllocationInput } from './allocation-policy.js';
 import {
@@ -85,6 +85,7 @@ import {
   observeTmuxServerIdentity,
   killOwnedWorkerPane,
   verifyTeamTargetOwnership,
+  observeTeamSessionTargetPresence,
   redactBoundedDiagnostic,
   killTeamSession,
   paneHasActiveTask,
@@ -3811,6 +3812,20 @@ async function rollbackStartedNativeWorktreeStartup(args: {
 // startTeamV2 — direct tmux creation, CLI API inbox, NO watchdog
 // ---------------------------------------------------------------------------
 
+function resolveLeaderClaudeSessionId(): string | undefined {
+  for (const raw of [process.env.CLAUDE_SESSION_ID, process.env.OMC_SESSION_ID]) {
+    const candidate = typeof raw === 'string' ? raw.trim() : '';
+    if (!candidate) continue;
+    try {
+      validateSessionId(candidate);
+      return candidate;
+    } catch {
+      // Invalid ids cannot authorize SessionEnd cleanup.
+    }
+  }
+  return undefined;
+}
+
 /**
  * Start a team with the v2 event-driven runtime.
  * Creates state directories, writes config + task files, spawns workers via
@@ -4119,6 +4134,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   const leaderPaneId = session.leaderPaneId;
   const ownsWindow = session.sessionMode !== 'split-pane';
   const workerPaneIds: string[] = [];
+  const leaderSessionId = resolveLeaderClaudeSessionId();
 
   // Build workers info for config
   const workersInfo: WorkerInfo[] = workerNames.map((wName, i) => {
@@ -4162,6 +4178,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     tmux_session: sessionName,
     tmux_window_owned: ownsWindow,
     next_task_id: config.tasks.length + 1,
+    ...(leaderSessionId ? { leader_session_id: leaderSessionId } : {}),
     leader_cwd: leaderCwd,
     team_state_root: teamStateRoot(leaderCwd, sanitized),
     leader_pane_id: leaderPaneId,
@@ -4210,7 +4227,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     ...(session.tmuxServerIdentity ? { tmux_server_identity: session.tmuxServerIdentity } : {}),
     task: teamConfig.task,
     leader: {
-      session_id: sessionName,
+      session_id: leaderSessionId ?? sessionName,
       worker_id: 'leader-fixed',
       role: 'leader',
     },
@@ -6083,23 +6100,23 @@ export async function shutdownTeamV2(
         if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
       }
+      const sessionMode = ownsWindow
+        ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
+        : 'detached-session';
       if (serverState === 'matching') {
-        const leaderOwnership = await verifyTeamTargetOwnership({
-          provider: config.leader_pane_id.startsWith('%') ? 'tmux' : 'cmux',
-          providerTarget: config.tmux_session,
-          recipient: 'leader-fixed', recipientRole: 'leader', paneId: config.leader_pane_id,
+        const leaderPresence = await observeTeamSessionTargetPresence({
+          sessionName: config.tmux_session,
+          sessionMode,
+          leaderPaneId: config.leader_pane_id,
           ...(config.tmux_server_identity
             ? { tmuxServerIdentity: config.tmux_server_identity }
             : {}),
         });
-        if (leaderOwnership.kind !== 'owned') {
+        if (leaderPresence.kind !== 'owned' && leaderPresence.kind !== 'absent') {
           if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
           return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
         }
       }
-      const sessionMode = ownsWindow
-        ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
-        : 'detached-session';
       if (!await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, {
         sessionMode,
         ...(config.tmux_server_identity

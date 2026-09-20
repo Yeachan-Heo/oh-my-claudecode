@@ -586,7 +586,8 @@ resources, and an old job cannot clean up a newer same-name team. Keep external
 cleanup receipts when retrying a partial state removal. See
 [Team Instance Ownership](MIGRATION.md#unreleased-team-instance-ownership).
 API `cleanup` and `orphan-cleanup` follow the same evidence rules. SessionEnd
-also validates session ownership before delegating instance-bound shutdown.
+validates Claude-session ownership from config `leader_session_id` before
+delegating instance-bound shutdown.
 Tmux effects require the original socket and precise server process identity;
 reused pane IDs after a server restart do not grant ownership.
 

@@ -60,6 +60,13 @@ export function isValidTeamInstanceId(value: unknown): value is TeamInstanceId {
   return typeof value === 'string' && TEAM_INSTANCE_ID_PATTERN.test(value);
 }
 
+/** Claude/OMC session id stored as team ownership, never a tmux target. */
+export const LEADER_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+
+export function isValidLeaderSessionId(value: unknown): value is string {
+  return typeof value === 'string' && LEADER_SESSION_ID_PATTERN.test(value);
+}
+
 /** Bridge daemon configuration — passed via --config file to bridge-entry.ts */
 export interface BridgeConfig {
   teamName: string;
@@ -599,6 +606,11 @@ export interface TeamConfig {
   tmux_session: string;
   tmux_window_owned?: boolean;
   next_task_id: number;
+  /**
+   * Claude/OMC session that started this team. Distinct from `tmux_session`.
+   * SessionEnd cleanup authorizes against this field, not the tmux target.
+   */
+  leader_session_id?: string;
   leader_cwd?: string;
   team_state_root?: string;
   workspace_mode?: 'single' | 'worktree';

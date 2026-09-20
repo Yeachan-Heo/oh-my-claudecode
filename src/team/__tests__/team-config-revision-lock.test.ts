@@ -205,6 +205,28 @@ describe('team config revision transaction', () => {
       .toBeUndefined();
   });
 
+  it('rejects ordinary leader_session_id mutation', async () => {
+    const current = { ...initialConfig(), instance_id: instanceA, leader_session_id: 'pid-owner-a' };
+    writeConfig(current);
+    const proposed = { ...current, leader_session_id: 'pid-owner-b', state_revision: 2 };
+
+    await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+      .rejects.toThrow('leader_session_id_immutable');
+    expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).leader_session_id)
+      .toBe('pid-owner-a');
+  });
+
+  it('rejects ordinary leader_session_id addition to a historical config', async () => {
+    const current = { ...initialConfig(), instance_id: instanceA };
+    writeConfig(current);
+    const proposed = { ...current, leader_session_id: 'pid-owner-a', state_revision: 2 };
+
+    await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+      .rejects.toThrow('leader_session_id_immutable');
+    expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).leader_session_id)
+      .toBeUndefined();
+  });
+
   it('rejects identity initialization by an ordinary writer with no config', async () => {
     unlinkSync(absPath(cwd, TeamPaths.config(teamName)));
     const proposed = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
