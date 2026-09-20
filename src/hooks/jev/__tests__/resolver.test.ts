@@ -31,6 +31,9 @@ beforeEach(async () => {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
+  // Strict opt-in (owner review of #4058): a key alone enables nothing;
+  // tests that need a point opt in explicitly. Default here = all five.
+  process.env.OMC_JEV = 'intent,skill-trigger,loop-continuation,model-routing,context-pruning';
   process.env.OMC_JEV_LOG_DIR = logDir;
 });
 
@@ -133,7 +136,18 @@ describe('resolveJudgment', () => {
     await expect(readLog()).rejects.toThrow();
   });
 
-  it('OMC_JEV=<points> grayscale enables only listed points', async () => {
+  it('strict opt-in: a key with OMC_JEV unset sends nothing anywhere', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    // OMC_JEV deliberately unset (beforeEach default removed).
+    delete process.env.OMC_JEV;
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));
+    const result = await call({ point: 'model-routing', fetchFn });
+    expect(result).toEqual({ answer: TWIN, source: 'twin', mode: 'off' });
+    expect(calls).toHaveLength(0);
+    await expect(readLog()).rejects.toThrow();
+  });
+
+  it('OMC_JEV=<points> opt-in enables only listed points', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     process.env.OMC_JEV = 'intent';
     const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'x' }));

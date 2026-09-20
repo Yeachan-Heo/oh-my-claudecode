@@ -65,7 +65,7 @@ configure anything see zero behavior change.
 - **Config contract (env, following existing OMC kill-switch conventions)**:
   - `TYPESAFE_API_KEY` — presence enables Jev globally
   - `OMC_JEV=off` — master switch overriding key presence
-  - `OMC_JEV=<point[,point...]>` — enable only these points (grayscale; unset = all points)
+  - `OMC_JEV=<point[,point...]>` — explicit per-point opt-in; unset = no points enabled (a key alone sends nothing anywhere, per owner review of #4058)
   - `OMC_JEV_TIMEOUT_MS` — per-call timeout, default `250`
   - `OMC_JEV_MAX_REQUESTS` — per-session request cap; exceeded → degraded mode for the rest of the session
   - `OMC_JEV_EXCERPT_CHARS` — max excerpt length sent in state, default `200`

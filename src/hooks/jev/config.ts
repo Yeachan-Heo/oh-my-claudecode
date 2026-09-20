@@ -1,13 +1,15 @@
 /**
  * Jev config: env contract per issue-3669 "Implementation Decisions".
  *
- * - TYPESAFE_API_KEY: presence enables Jev globally
- * - OMC_JEV=off: master switch overriding key presence
- * - OMC_JEV=<point[,point...]>: grayscale, only these points enabled
+ * - TYPESAFE_API_KEY: authenticates Jev calls (necessary but not sufficient)
+ * - OMC_JEV=off: master switch, disables every point even with a key
+ * - OMC_JEV=<point[,point...]>: explicit per-point opt-in; only these points
+ *   run. Unset = no points enabled — a key alone sends nothing anywhere
+ *   (zero egress by default, per the owner's data-egress review of #4058)
  * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 250
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
- * - OMC_JEV_ENDPOINT: base URL override (stub servers / tests)
+ * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  *
  * There is no active-by-env syntax. Per-point activation defaults to shadow;
@@ -29,8 +31,8 @@ export const ACTIVATED_POINTS: ReadonlySet<string> = new Set<string>();
 export interface JevConfig {
   apiKey: string | null;
   masterOff: boolean;
-  /** Grayscale allowlist; null = all points. */
-  points: Set<string> | null;
+  /** Explicit per-point opt-in; empty = no points enabled. */
+  points: ReadonlySet<string>;
   timeoutMs: number;
   /** 0 = unlimited. */
   maxRequests: number;
@@ -42,7 +44,7 @@ export interface JevConfig {
 export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig {
   const raw = env.OMC_JEV?.trim();
   const masterOff = raw === 'off';
-  let points: Set<string> | null = null;
+  let points: ReadonlySet<string> = new Set<string>();
   if (raw && raw !== 'off') {
     points = new Set(raw.split(',').map((p) => p.trim()).filter(Boolean));
   }
@@ -66,8 +68,8 @@ export function isJevEnabled(config: JevConfig): boolean {
 
 /**
  * Tri-state for one point: off | shadow | active.
- * Config gates first (key presence, master off, grayscale); an enabled point
- * is active only when code-activated, otherwise shadow.
+ * Config gates first (key presence, master off, per-point opt-in); an enabled
+ * point is active only when code-activated, otherwise shadow.
  */
 export function pointState(
   point: string,
@@ -75,7 +77,7 @@ export function pointState(
   activated: ReadonlySet<string> = ACTIVATED_POINTS,
 ): 'off' | 'shadow' | 'active' {
   if (!isJevEnabled(config)) return 'off';
-  if (config.points && !config.points.has(point)) return 'off';
+  if (!config.points.has(point)) return 'off';
   return activated.has(point) ? 'active' : 'shadow';
 }
 

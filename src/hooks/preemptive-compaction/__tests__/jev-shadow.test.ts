@@ -186,6 +186,7 @@ describe('hook wiring: createPreemptiveCompactionHook + context-pruning shadow',
 
   it('warning message is byte-identical with and without the key, and the shadow line is logged with the key', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'context-pruning';
     const { fetchFn } = captureFetch(4);
 
     const withKey = postToolUseOnce(fetchFn, 'jev-wiring-with-key');
