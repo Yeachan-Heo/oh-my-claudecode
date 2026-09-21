@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f09a7c939c28bef51a53a760944313e6c96bfd06",
-    "sourceSha256": "4f073a119190427068ec034605a97ae3530bbc97c1b0e634cdb12153b4ae45b9",
+    "head": "a5e0b1832b5165fc78f23bd788d93639f1312c0a",
+    "sourceSha256": "9685ee7f9866c106882d3c9784936c27ac1f5b5212104c77a88428e46398f24c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f09a7c939c28bef51a53a760944313e6c96bfd06",
-  "sourceSha256": "4f073a119190427068ec034605a97ae3530bbc97c1b0e634cdb12153b4ae45b9",
+  "head": "a5e0b1832b5165fc78f23bd788d93639f1312c0a",
+  "sourceSha256": "9685ee7f9866c106882d3c9784936c27ac1f5b5212104c77a88428e46398f24c",
   "counts": {
     "public": {
       "skills": 43,
@@ -23,13 +23,13 @@
       "total": 92
     },
     "internal": {
-      "hookFiles": 296,
-      "featureFiles": 80,
+      "hookFiles": 309,
+      "featureFiles": 82,
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1355,
-      "total": 1377
+      "srcFiles": 1371,
+      "total": 1393
     },
     "generated": {
       "distFiles": 5032,
@@ -41,7 +41,7 @@
     },
     "skills": 43,
     "commands": 21,
-    "hookFiles": 296,
+    "hookFiles": 309,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -241,8 +241,17 @@
       "src/hooks/factcheck/sentinel.ts",
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
+      "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/client.ts",
+      "src/hooks/jev/config.ts",
+      "src/hooks/jev/index.ts",
+      "src/hooks/jev/resolver.ts",
+      "src/hooks/jev/types.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
+      "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
+      "src/hooks/keyword-detector/jev-shadow.ts",
       "src/hooks/learner/auto-invoke.ts",
       "src/hooks/learner/auto-learner.ts",
       "src/hooks/learner/bridge.ts",
@@ -287,6 +296,7 @@
       "src/hooks/persistent-mode/__tests__/error-handling.test.ts",
       "src/hooks/persistent-mode/__tests__/idle-cooldown.test.ts",
       "src/hooks/persistent-mode/__tests__/idle-repo-state.test.ts",
+      "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
       "src/hooks/persistent-mode/__tests__/oversize-tool-result-redirect.test.ts",
       "src/hooks/persistent-mode/__tests__/prompt-truncation.test.ts",
       "src/hooks/persistent-mode/__tests__/ralph-hard-max.test.ts",
@@ -303,14 +313,17 @@
       "src/hooks/persistent-mode/idle-cooldown.test.ts",
       "src/hooks/persistent-mode/idle-repo-state.ts",
       "src/hooks/persistent-mode/index.ts",
+      "src/hooks/persistent-mode/jev-shadow.ts",
       "src/hooks/persistent-mode/session-isolation.test.ts",
       "src/hooks/persistent-mode/stop-hook-blocking.test.ts",
       "src/hooks/plugin-patterns/__tests__/index.test.ts",
       "src/hooks/plugin-patterns/index.ts",
       "src/hooks/pre-compact/index.ts",
       "src/hooks/pre-compact/restore.ts",
+      "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
       "src/hooks/preemptive-compaction/constants.ts",
       "src/hooks/preemptive-compaction/index.ts",
+      "src/hooks/preemptive-compaction/jev-shadow.ts",
       "src/hooks/preemptive-compaction/types.ts",
       "src/hooks/project-memory/__tests__/detector.test.ts",
       "src/hooks/project-memory/__tests__/formatter.test.ts",
@@ -450,6 +463,7 @@
     "featureFiles": [
       "src/features/AGENTS.md",
       "src/features/__tests__/checkpoint.test.ts",
+      "src/features/__tests__/jev-model-routing.test.ts",
       "src/features/__tests__/magic-keywords.test.ts",
       "src/features/agent-addressability/__tests__/addressability.test.ts",
       "src/features/agent-addressability/index.ts",
@@ -485,6 +499,7 @@
       "src/features/delegation-routing/resolver.ts",
       "src/features/delegation-routing/types.ts",
       "src/features/index.ts",
+      "src/features/jev-model-routing.ts",
       "src/features/lookout/__tests__/lookout-workspace.test.ts",
       "src/features/lookout/__tests__/lookout.test.ts",
       "src/features/lookout/command-parser.ts",
@@ -5976,8 +5991,17 @@
       "src/hooks/factcheck/sentinel.ts",
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
+      "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/resolver.test.ts",
+      "src/hooks/jev/client.ts",
+      "src/hooks/jev/config.ts",
+      "src/hooks/jev/index.ts",
+      "src/hooks/jev/resolver.ts",
+      "src/hooks/jev/types.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
+      "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
       "src/hooks/keyword-detector/index.ts",
+      "src/hooks/keyword-detector/jev-shadow.ts",
       "src/hooks/learner/auto-invoke.ts",
       "src/hooks/learner/auto-learner.ts",
       "src/hooks/learner/bridge.ts",
@@ -6022,6 +6046,7 @@
       "src/hooks/persistent-mode/__tests__/error-handling.test.ts",
       "src/hooks/persistent-mode/__tests__/idle-cooldown.test.ts",
       "src/hooks/persistent-mode/__tests__/idle-repo-state.test.ts",
+      "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
       "src/hooks/persistent-mode/__tests__/oversize-tool-result-redirect.test.ts",
       "src/hooks/persistent-mode/__tests__/prompt-truncation.test.ts",
       "src/hooks/persistent-mode/__tests__/ralph-hard-max.test.ts",
@@ -6038,14 +6063,17 @@
       "src/hooks/persistent-mode/idle-cooldown.test.ts",
       "src/hooks/persistent-mode/idle-repo-state.ts",
       "src/hooks/persistent-mode/index.ts",
+      "src/hooks/persistent-mode/jev-shadow.ts",
       "src/hooks/persistent-mode/session-isolation.test.ts",
       "src/hooks/persistent-mode/stop-hook-blocking.test.ts",
       "src/hooks/plugin-patterns/__tests__/index.test.ts",
       "src/hooks/plugin-patterns/index.ts",
       "src/hooks/pre-compact/index.ts",
       "src/hooks/pre-compact/restore.ts",
+      "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
       "src/hooks/preemptive-compaction/constants.ts",
       "src/hooks/preemptive-compaction/index.ts",
+      "src/hooks/preemptive-compaction/jev-shadow.ts",
       "src/hooks/preemptive-compaction/types.ts",
       "src/hooks/project-memory/__tests__/detector.test.ts",
       "src/hooks/project-memory/__tests__/formatter.test.ts",
@@ -6258,6 +6286,7 @@
     "featureFiles": [
       "src/features/AGENTS.md",
       "src/features/__tests__/checkpoint.test.ts",
+      "src/features/__tests__/jev-model-routing.test.ts",
       "src/features/__tests__/magic-keywords.test.ts",
       "src/features/agent-addressability/__tests__/addressability.test.ts",
       "src/features/agent-addressability/index.ts",
@@ -6293,6 +6322,7 @@
       "src/features/delegation-routing/resolver.ts",
       "src/features/delegation-routing/types.ts",
       "src/features/index.ts",
+      "src/features/jev-model-routing.ts",
       "src/features/lookout/__tests__/lookout-workspace.test.ts",
       "src/features/lookout/__tests__/lookout.test.ts",
       "src/features/lookout/command-parser.ts",
@@ -32569,6 +32599,11 @@
         "path": "docs/adr/03664-ralph-prd-criterion-amendment.md"
       },
       {
+        "id": "docs/adr/03665-jev-degradation-contract.md",
+        "kind": "other",
+        "path": "docs/adr/03665-jev-degradation-contract.md"
+      },
+      {
         "id": "docs/agent-templates/README.md",
         "kind": "other",
         "path": "docs/agent-templates/README.md"
@@ -32677,6 +32712,11 @@
         "id": "docs/issues/issue-3668-ralph-namespace.md",
         "kind": "other",
         "path": "docs/issues/issue-3668-ralph-namespace.md"
+      },
+      {
+        "id": "docs/issues/issue-3669-jev-judgment-points.md",
+        "kind": "other",
+        "path": "docs/issues/issue-3669-jev-judgment-points.md"
       },
       {
         "id": "docs/issues/windows-hud-missing.png",
@@ -34804,6 +34844,11 @@
         "path": "src/__tests__/hud/update-hint.test.ts"
       },
       {
+        "id": "src/__tests__/hud/usage-api-header-fallback.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/hud/usage-api-header-fallback.test.ts"
+      },
+      {
         "id": "src/__tests__/hud/usage-api-lock.test.ts",
         "kind": "src",
         "path": "src/__tests__/hud/usage-api-lock.test.ts"
@@ -36294,6 +36339,11 @@
         "path": "src/features/__tests__/checkpoint.test.ts"
       },
       {
+        "id": "src/features/__tests__/jev-model-routing.test.ts",
+        "kind": "feature",
+        "path": "src/features/__tests__/jev-model-routing.test.ts"
+      },
+      {
         "id": "src/features/__tests__/magic-keywords.test.ts",
         "kind": "feature",
         "path": "src/features/__tests__/magic-keywords.test.ts"
@@ -36467,6 +36517,11 @@
         "id": "src/features/index.ts",
         "kind": "feature",
         "path": "src/features/index.ts"
+      },
+      {
+        "id": "src/features/jev-model-routing.ts",
+        "kind": "feature",
+        "path": "src/features/jev-model-routing.ts"
       },
       {
         "id": "src/features/lookout/__tests__/lookout-workspace.test.ts",
@@ -37359,14 +37414,59 @@
         "path": "src/hooks/index.ts"
       },
       {
+        "id": "src/hooks/jev/__tests__/client.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/client.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/resolver.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/resolver.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/client.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/client.ts"
+      },
+      {
+        "id": "src/hooks/jev/config.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/config.ts"
+      },
+      {
+        "id": "src/hooks/jev/index.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/index.ts"
+      },
+      {
+        "id": "src/hooks/jev/resolver.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/resolver.ts"
+      },
+      {
+        "id": "src/hooks/jev/types.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/types.ts"
+      },
+      {
         "id": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "kind": "hook",
         "path": "src/hooks/keyword-detector/__tests__/index.test.ts"
       },
       {
+        "id": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts"
+      },
+      {
         "id": "src/hooks/keyword-detector/index.ts",
         "kind": "hook",
         "path": "src/hooks/keyword-detector/index.ts"
+      },
+      {
+        "id": "src/hooks/keyword-detector/jev-shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/keyword-detector/jev-shadow.ts"
       },
       {
         "id": "src/hooks/learner/auto-invoke.ts",
@@ -37589,6 +37689,11 @@
         "path": "src/hooks/persistent-mode/__tests__/idle-repo-state.test.ts"
       },
       {
+        "id": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts"
+      },
+      {
         "id": "src/hooks/persistent-mode/__tests__/oversize-tool-result-redirect.test.ts",
         "kind": "hook",
         "path": "src/hooks/persistent-mode/__tests__/oversize-tool-result-redirect.test.ts"
@@ -37669,6 +37774,11 @@
         "path": "src/hooks/persistent-mode/index.ts"
       },
       {
+        "id": "src/hooks/persistent-mode/jev-shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/persistent-mode/jev-shadow.ts"
+      },
+      {
         "id": "src/hooks/persistent-mode/session-isolation.test.ts",
         "kind": "hook",
         "path": "src/hooks/persistent-mode/session-isolation.test.ts"
@@ -37699,6 +37809,11 @@
         "path": "src/hooks/pre-compact/restore.ts"
       },
       {
+        "id": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts"
+      },
+      {
         "id": "src/hooks/preemptive-compaction/constants.ts",
         "kind": "hook",
         "path": "src/hooks/preemptive-compaction/constants.ts"
@@ -37707,6 +37822,11 @@
         "id": "src/hooks/preemptive-compaction/index.ts",
         "kind": "hook",
         "path": "src/hooks/preemptive-compaction/index.ts"
+      },
+      {
+        "id": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "kind": "hook",
+        "path": "src/hooks/preemptive-compaction/jev-shadow.ts"
       },
       {
         "id": "src/hooks/preemptive-compaction/types.ts",
@@ -46261,6 +46381,16 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/__tests__/hud/usage-api-header-fallback.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/usage-api-header-fallback.test.ts",
+        "to": "src/hud/usage-api.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/hud/usage-api-lock.test.ts",
         "to": "external:events",
         "kind": "imports"
@@ -53506,6 +53636,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "src/features/delegation-enforcer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "src/features/delegation-enforcer.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "src/features/jev-model-routing.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/__tests__/jev-model-routing.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/features/__tests__/magic-keywords.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -53907,6 +54077,11 @@
       },
       {
         "from": "src/features/delegation-enforcer.ts",
+        "to": "src/features/jev-model-routing.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/delegation-enforcer.ts",
         "to": "src/shared/types.ts",
         "kind": "type-imports"
       },
@@ -54124,6 +54299,21 @@
         "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
         "kind": "type-exports"
+      },
+      {
+        "from": "src/features/jev-model-routing.ts",
+        "to": "src/features/delegation-enforcer.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/jev-model-routing.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/jev-model-routing.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/features/lookout/__tests__/lookout-workspace.test.ts",
@@ -57772,6 +57962,11 @@
       },
       {
         "from": "src/hooks/bridge.ts",
+        "to": "src/hooks/keyword-detector/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/bridge.ts",
         "to": "src/hooks/omc-orchestrator/index.ts",
         "kind": "imports"
       },
@@ -58666,6 +58861,111 @@
         "kind": "type-exports"
       },
       {
+        "from": "src/hooks/jev/__tests__/client.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/client.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/client.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/resolver.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/client.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/config.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/config.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/index.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/index.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/index.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/index.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/resolver.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/keyword-detector/__tests__/index.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -58681,6 +58981,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/keyword-detector/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/keyword-detector/index.ts",
         "to": "src/hooks/task-size-detector/index.ts",
         "kind": "imports"
@@ -58688,6 +59028,26 @@
       {
         "from": "src/hooks/keyword-detector/index.ts",
         "to": "src/hooks/task-size-detector/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/jev-shadow.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/keyword-detector/jev-shadow.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
         "kind": "type-imports"
       },
       {
@@ -59621,6 +59981,41 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "src/hooks/persistent-mode/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.ts",
+        "to": "src/hooks/persistent-mode/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/persistent-mode/__tests__/oversize-tool-result-redirect.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -60122,6 +60517,11 @@
       },
       {
         "from": "src/hooks/persistent-mode/index.ts",
+        "to": "src/hooks/persistent-mode/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/index.ts",
         "to": "src/hooks/ralph/index.ts",
         "kind": "imports"
       },
@@ -60199,6 +60599,21 @@
         "from": "src/hooks/persistent-mode/index.ts",
         "to": "src/utils/paths.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/jev-shadow.ts",
+        "to": "src/hooks/persistent-mode/index.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/persistent-mode/session-isolation.test.ts",
@@ -60386,6 +60801,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/preemptive-compaction/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/__tests__/jev-shadow.test.ts",
+        "to": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/preemptive-compaction/index.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -60412,12 +60867,32 @@
       },
       {
         "from": "src/hooks/preemptive-compaction/index.ts",
+        "to": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/index.ts",
+        "to": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/index.ts",
         "to": "src/hooks/preemptive-compaction/types.ts",
         "kind": "type-exports"
       },
       {
         "from": "src/hooks/preemptive-compaction/index.ts",
         "to": "src/hooks/preemptive-compaction/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/preemptive-compaction/jev-shadow.ts",
+        "to": "src/hooks/jev/index.ts",
         "kind": "type-imports"
       },
       {
@@ -79717,12 +80192,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 6995,
-      "edgeCount": 7667,
-      "importEdgeCount": 6311,
+      "nodeCount": 7013,
+      "edgeCount": 7738,
+      "importEdgeCount": 6362,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "4dce44883eca13e5091320a255d26a09f8bf958bd7a5199c0be03f12adda9ef5",
-  "manifestSha256": "9fed978505635f9b109ae5bd5646cf12b6a9ef47b5ad1b08d00463f17ced91bf"
+  "inventorySha256": "9cb294b9920707adfb18cf7f5d47819d1b88e3ae34754cdf1a4bf04a567b59e8",
+  "manifestSha256": "6badcd4cefde34e2313c8a422751476dd3626481308476cc3b57e9bd3e1bb52a"
 }
