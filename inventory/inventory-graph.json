@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "77905af66a5ed0ff85105a95744938e7940d9339",
-    "sourceSha256": "89c7a937357b85dabe94ea17835f22ae2de9bda0d46340dbebf5cc4ca3b17d5b",
+    "head": "f4cf090c4285b19833c30a2f0fb349e53ef7406d",
+    "sourceSha256": "3f6d52d503fa74605f43199b04000bd446f620729b27d7f8493b4302716dd105",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "77905af66a5ed0ff85105a95744938e7940d9339",
-  "sourceSha256": "89c7a937357b85dabe94ea17835f22ae2de9bda0d46340dbebf5cc4ca3b17d5b",
+  "head": "f4cf090c4285b19833c30a2f0fb349e53ef7406d",
+  "sourceSha256": "3f6d52d503fa74605f43199b04000bd446f620729b27d7f8493b4302716dd105",
   "counts": {
     "public": {
       "skills": 43,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1371,
-      "total": 1393
+      "srcFiles": 1372,
+      "total": 1394
     },
     "generated": {
       "distFiles": 5032,
@@ -35344,6 +35344,11 @@
         "path": "src/__tests__/rate-limit-wait/tmux-detector.test.ts"
       },
       {
+        "id": "src/__tests__/read-budget-preflight.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/read-budget-preflight.test.ts"
+      },
+      {
         "id": "src/__tests__/release-boundary.test.ts",
         "kind": "src",
         "path": "src/__tests__/release-boundary.test.ts"
@@ -48704,6 +48709,31 @@
         "from": "src/__tests__/rate-limit-wait/tmux-detector.test.ts",
         "to": "src/features/rate-limit-wait/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/read-budget-preflight.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/read-budget-preflight.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/read-budget-preflight.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/read-budget-preflight.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/read-budget-preflight.test.ts",
+        "to": "scripts/lib/read-budget-preflight.mjs",
+        "kind": "imports"
       },
       {
         "from": "src/__tests__/release-boundary.test.ts",
@@ -80192,12 +80222,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7013,
-      "edgeCount": 7738,
-      "importEdgeCount": 6362,
+      "nodeCount": 7014,
+      "edgeCount": 7743,
+      "importEdgeCount": 6367,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "9cb294b9920707adfb18cf7f5d47819d1b88e3ae34754cdf1a4bf04a567b59e8",
-  "manifestSha256": "7f778d781a4024f76b5ad9059c6242a4a733de3c09fdfd9bb0a98158f4880a2e"
+  "inventorySha256": "e6d055ebce3127485497a142266cd121c8c8f94fe688599e303734092d50e469",
+  "manifestSha256": "38b93d9daf3be7553eb64e23c96657813dd542dee28e97788fca47607feaddfa"
 }
