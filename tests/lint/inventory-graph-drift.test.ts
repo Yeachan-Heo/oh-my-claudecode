@@ -354,7 +354,11 @@ describe('inventory-graph drift enforcement (#3702)', () => {
     expect((r.stdout as unknown as string)).toContain('verify ok');
   });
 
-  it('verify mode rejects tampered hashes and head provenance', { timeout: 60_000 }, () => {
+  // Six full generator spawns over a ~7k-node graph. On a loaded CI runner the
+  // suite has crossed 60s three times (PRs #4064, #4070, #4071) while every
+  // assertion still passed locally, so the budget — not the contract — was the
+  // failure. Keep the spawn count; give it room.
+  it('verify mode rejects tampered hashes and head provenance', { timeout: 240_000 }, () => {
     const opts = { cwd: REPO_ROOT, encoding: 'utf8' as const, maxBuffer: 20 * 1024 * 1024 };
     for (const mutate of [
       (m: Manifest) => { m.inventorySha256 = '0'.repeat(64); },
