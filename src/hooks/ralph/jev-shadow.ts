@@ -9,21 +9,12 @@
  * answer is recorded only. Degrade paths (timeout, HTTP error, invalid
  * response) are handled inside the resolver and can never alter the verdict;
  * the twin returns a captured value, so twin errors cannot occur.
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 
-import { resolveJudgment } from '../jev/index.js';
-import type { JevQuestions } from '../jev/index.js';
-
-const VERDICT_QUESTIONS: JevQuestions = {
-  completion_criteria_met: {
-    type: 'Noul',
-    instructions: 'Does the completion claim satisfy the PRD acceptance criteria for this mode?',
-    criteria: {
-      true: 'All acceptance criteria are demonstrably satisfied by the evidence',
-      false: 'At least one criterion is unmet or evidence is missing',
-    },
-  },
-};
+import { recordJudgment } from '../jev/index.js';
 
 export interface RalphVerdictShadowArgs {
   /** The existing verification verdict: true = approved, false = rejected. */
@@ -46,17 +37,14 @@ export interface RalphVerdictShadowArgs {
  */
 export async function applyRalphVerdictShadow(args: RalphVerdictShadowArgs): Promise<boolean> {
   const { verdict } = args;
-  await resolveJudgment<boolean>({
-    point: 'ralph-verdict',
+  await recordJudgment<boolean>('ralph-verdict', {
     state: {
       verdict,
       prd_criteria: args.prdContext,
       claim: args.claim,
       critic_mode: args.criticMode ?? null,
     },
-    questions: VERDICT_QUESTIONS,
     twin: () => verdict,
-    blocking: true,
     fetchFn: args.fetchFn,
   });
   return verdict;

@@ -7,26 +7,14 @@
  * shadow. Detector-type point (blocking:false) — this is a high-frequency
  * pre-tool path, so the pinned tier returns immediately and the Jev call
  * settles in the background (issue-3669 latency policy).
+ *
+ * The point declaration (questions, blocking flag) lives in the jev registry
+ * (hooks/jev/points.ts); this module keeps the twin and the call-specific
+ * state construction.
  */
 
-import { resolveJudgment, type JevQuestions, type ResolveResult } from '../hooks/jev/index.js';
+import { recordJudgment, type ResolveResult } from '../hooks/jev/index.js';
 import type { EnforcementResult } from './delegation-enforcer.js';
-
-/**
- * Tier guidance from CLAUDE.md <model_routing> and docs/DELEGATION-ENFORCER.md:
- * haiku for quick lookups, sonnet for standard work, opus for architecture.
- */
-const MODEL_ROUTING_QUESTIONS: JevQuestions = {
-  'model-tier': {
-    type: 'Choice',
-    instructions: 'Which model tier should this delegated task use?',
-    criteria: {
-      haiku: 'Quick lookups and lightweight, mechanical work',
-      sonnet: 'Standard coding and orchestration work',
-      opus: 'Complex architecture and deep analysis',
-    },
-  },
-};
 
 /**
  * Record the shadow comparison for one delegated Task/Agent call.
@@ -43,16 +31,13 @@ export function recordModelRoutingShadow(
   pinned: EnforcementResult,
   fetchFn?: typeof fetch,
 ): Promise<ResolveResult<EnforcementResult>> {
-  return resolveJudgment<EnforcementResult>({
-    point: 'model-routing',
+  return recordJudgment<EnforcementResult>('model-routing', {
     state: {
       tool_name: toolName,
       subagent_type: pinned.originalInput.subagent_type,
       task: pinned.originalInput.prompt,
     },
-    questions: MODEL_ROUTING_QUESTIONS,
     twin: () => pinned,
-    blocking: false,
     fetchFn,
   });
 }
