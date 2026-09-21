@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2d468f5c26b07d5d1f0c0b22b2e0261d584d1f54",
-    "sourceSha256": "a41621441da0c7d157525c31d5f29536089546c5091fd86dcba17cbb247a26f1",
+    "head": "25a094958a1059b63e775c969b299dbbc8feffc1",
+    "sourceSha256": "348d68f12d831adce11686dcc5b8625ef4c0ef51c5d4a7d3e817d38887b87958",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2d468f5c26b07d5d1f0c0b22b2e0261d584d1f54",
-  "sourceSha256": "a41621441da0c7d157525c31d5f29536089546c5091fd86dcba17cbb247a26f1",
+  "head": "25a094958a1059b63e775c969b299dbbc8feffc1",
+  "sourceSha256": "348d68f12d831adce11686dcc5b8625ef4c0ef51c5d4a7d3e817d38887b87958",
   "counts": {
     "public": {
       "skills": 43,
@@ -23,13 +23,13 @@
       "total": 92
     },
     "internal": {
-      "hookFiles": 313,
+      "hookFiles": 314,
       "featureFiles": 82,
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1376,
-      "total": 1398
+      "srcFiles": 1378,
+      "total": 1400
     },
     "generated": {
       "distFiles": 5032,
@@ -41,7 +41,7 @@
     },
     "skills": 43,
     "commands": 21,
-    "hookFiles": 313,
+    "hookFiles": 314,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -246,6 +246,7 @@
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
+      "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
@@ -774,6 +775,7 @@
       "scripts/generate-skill-entitlements.mjs",
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
+      "scripts/jev-eval.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
       "scripts/lib/atomic-write.mjs",
@@ -6000,6 +6002,7 @@
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
       "src/hooks/jev/index.ts",
+      "src/hooks/jev/points.ts",
       "src/hooks/jev/resolver.ts",
       "src/hooks/jev/types.ts",
       "src/hooks/keyword-detector/__tests__/index.test.ts",
@@ -33432,6 +33435,11 @@
         "path": "scripts/inventory-issue-3698.mjs"
       },
       {
+        "id": "scripts/jev-eval.mjs",
+        "kind": "script",
+        "path": "scripts/jev-eval.mjs"
+      },
+      {
         "id": "scripts/keyword-detector.mjs",
         "kind": "script",
         "path": "scripts/keyword-detector.mjs"
@@ -34935,6 +34943,11 @@
         "id": "src/__tests__/issue-3867-legacy-l-update.test.ts",
         "kind": "src",
         "path": "src/__tests__/issue-3867-legacy-l-update.test.ts"
+      },
+      {
+        "id": "src/__tests__/jev-eval-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-eval-script.test.mjs"
       },
       {
         "id": "src/__tests__/job-management-sqlite.test.ts",
@@ -37450,6 +37463,11 @@
         "id": "src/hooks/jev/index.ts",
         "kind": "hook",
         "path": "src/hooks/jev/index.ts"
+      },
+      {
+        "id": "src/hooks/jev/points.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/points.ts"
       },
       {
         "id": "src/hooks/jev/resolver.ts",
@@ -42429,6 +42447,31 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/jev-eval.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-eval.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-eval.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-eval.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-eval.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/keyword-detector.mjs",
         "to": "dist/hooks/subagent-tracker/flow-tracer.js",
         "kind": "imports"
@@ -46822,6 +46865,41 @@
         "from": "src/__tests__/issue-3867-legacy-l-update.test.ts",
         "to": "src/hud/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-eval-script.test.mjs",
+        "to": "scripts/jev-eval.mjs",
+        "kind": "imports"
       },
       {
         "from": "src/__tests__/job-management-sqlite.test.ts",
@@ -58995,6 +59073,11 @@
       },
       {
         "from": "src/hooks/jev/index.ts",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/index.ts",
         "to": "src/hooks/jev/resolver.ts",
         "kind": "exports"
       },
@@ -59002,6 +59085,21 @@
         "from": "src/hooks/jev/index.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "exports"
+      },
+      {
+        "from": "src/hooks/jev/points.ts",
+        "to": "src/hooks/jev/resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/points.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/points.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/jev/resolver.ts",
@@ -60680,11 +60778,6 @@
       },
       {
         "from": "src/hooks/persistent-mode/jev-shadow.ts",
-        "to": "src/hooks/jev/index.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/persistent-mode/jev-shadow.ts",
         "to": "src/hooks/persistent-mode/index.ts",
         "kind": "type-imports"
       },
@@ -61557,11 +61650,6 @@
         "from": "src/hooks/ralph/jev-shadow.ts",
         "to": "src/hooks/jev/index.ts",
         "kind": "imports"
-      },
-      {
-        "from": "src/hooks/ralph/jev-shadow.ts",
-        "to": "src/hooks/jev/index.ts",
-        "kind": "type-imports"
       },
       {
         "from": "src/hooks/ralph/loop.ts",
@@ -80365,12 +80453,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7018,
-      "edgeCount": 7766,
-      "importEdgeCount": 6385,
+      "nodeCount": 7021,
+      "edgeCount": 7780,
+      "importEdgeCount": 6399,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "89925dc9ede73d4b3650c4687ef4a14d2a2d9a970db4d142391ecf78f448b704",
-  "manifestSha256": "b5e3c90c22d0e629d68aece80e9a0f9b54912bce8f0f0597c638a9eb387e8118"
+  "inventorySha256": "bdbe305a88d797a14873c674b736577569807ac1bd10f76220a4381ae9f0cf99",
+  "manifestSha256": "7df1fd0a400157d506cee4a83b32ef4f633f3322d65dd9c23d668ff2ef4f5312"
 }
