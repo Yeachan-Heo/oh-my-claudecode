@@ -1,3 +1,4 @@
+/* global process */
 /**
  * Tests for scripts/jev-eval.mjs (Jev shadow-log eval tool, ticket 10).
  *
