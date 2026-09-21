@@ -67,6 +67,7 @@ import { readTeamPipelineState } from '../team-pipeline/state.js';
 import type { TeamPipelinePhase } from '../team-pipeline/types.js';
 import { getActiveAgentSnapshot } from '../subagent-tracker/index.js';
 import type { IdleNotificationRepoState } from './idle-repo-state.js';
+import { applyLoopContinuationShadow } from './jev-shadow.js';
 import { truncatePromptForEcho } from '../../lib/truncate-prompt.js';
 import { isModeActive } from '../mode-registry/index.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowState } from '../autopilot/named-workflow-resume-validator.js';
@@ -2245,12 +2246,15 @@ export async function checkPersistentModes(
   stopContext?: StopContext  // NEW: from todo-continuation types
 ): Promise<PersistentModeResult> {
   const result = await resolvePersistentModeBlock(sessionId, directory, stopContext);
-  return applyThinkingOnlyStreakGuard(
+  const guarded = applyThinkingOnlyStreakGuard(
     result,
     resolveToWorktreeRoot(directory),
     sessionId,
     stopContext,
   );
+  // Jev loop-continuation shadow point: the guarded decision is the twin;
+  // the returned decision is byte-identical with and without a Jev key.
+  return applyLoopContinuationShadow({ result: guarded, sessionId });
 }
 
 /**
