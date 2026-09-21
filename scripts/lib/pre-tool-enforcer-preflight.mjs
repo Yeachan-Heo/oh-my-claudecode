@@ -4,9 +4,16 @@ const AGENT_HEAVY_TOOLS = new Set(['Task', 'TaskCreate', 'TaskUpdate']);
 const DEFAULT_PREFLIGHT_CONTEXT_THRESHOLD = 72;
 
 export function getPreflightContextThreshold(env = process.env) {
-  const parsed = Number.parseInt(env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD || '72', 10);
-  if (Number.isNaN(parsed)) return DEFAULT_PREFLIGHT_CONTEXT_THRESHOLD;
-  return Math.max(1, Math.min(100, parsed));
+  const value = env.OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD;
+  if (!value) return DEFAULT_PREFLIGHT_CONTEXT_THRESHOLD;
+
+  const normalized = String(value).trim();
+  if (!/^\d+$/.test(normalized)) return DEFAULT_PREFLIGHT_CONTEXT_THRESHOLD;
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (parsed < 1 || parsed > 100) return DEFAULT_PREFLIGHT_CONTEXT_THRESHOLD;
+
+  return parsed;
 }
 
 export function estimateContextPercent(transcriptPath) {
