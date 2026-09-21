@@ -136,6 +136,11 @@ This tells Claude Code to ignore the repo's `.mcp.json` entry and use the plugin
 /autopilot "your task here"
 ```
 
+**Quick verification**: if Claude Code starts without OMC agents or the bridge MCP, run
+`omc doctor conflicts` first. A missing `disabledMcpjsonServers` entry usually shows up as a duplicate
+`"t"` MCP server, while a stale checkout setup is fixed by re-running `omc setup --plugin-dir-mode`
+from the repository root.
+
 **Rebuilding**: After code changes:
 ```bash
 npm run build
