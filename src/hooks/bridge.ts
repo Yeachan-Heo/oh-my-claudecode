@@ -58,6 +58,7 @@ import {
   recordIntentShadow,
   recordSkillTriggerShadow,
 } from "./keyword-detector/jev-shadow.js";
+import { recordTaskSizeShadow } from "./task-size-detector/jev-shadow.js";
 import {
   processOrchestratorPreTool,
   processOrchestratorPostTool,
@@ -1628,10 +1629,12 @@ async function processKeywordDetector(input: HookInput): Promise<HookOutput> {
     }
   }
 
-  // Jev shadow points (issue #3669): record skill-trigger and intent
-  // comparisons for later eval. Fire-and-forget; never changes emissions.
+  // Jev shadow points (issue #3669): record skill-trigger, intent, and
+  // task-size comparisons for later eval. Fire-and-forget; never changes
+  // emissions.
   void recordSkillTriggerShadow(cleanedText).catch(() => {});
   void recordIntentShadow(cleanedText).catch(() => {});
+  void recordTaskSizeShadow(cleanedText).catch(() => {});
 
   const promptPrerequisiteParse = parsePromptPrerequisiteSections(promptText, promptPrerequisiteConfig);
   const executionKeywords = fullKeywords.filter((keywordType) =>

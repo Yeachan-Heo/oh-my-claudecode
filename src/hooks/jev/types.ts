@@ -11,7 +11,9 @@ export type JudgmentPointName =
   | 'loop-continuation'
   | 'skill-trigger'
   | 'model-routing'
-  | 'context-pruning';
+  | 'context-pruning'
+  | 'task-size'
+  | 'ralph-verdict';
 
 /** TypeSafe question shapes. */
 export type JevQuestionType = 'Choice' | 'Score' | 'Noul';
