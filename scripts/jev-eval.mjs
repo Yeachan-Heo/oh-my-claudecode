@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const MODES = ['shadow', 'active', 'degraded', 'off', 'cap', 'circuit-open'];
 const MAX_EXAMPLES = 5;
@@ -29,15 +30,16 @@ const BOUND_CHARS = 200;
 /**
  * Mirror of the log-dir resolution in src/hooks/jev/config.ts:
  *   OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev')
- * ponytail: projectId skips .omc-workspace marker ids and worktree
- * common-dir resolution; pass an explicit logPath or set OMC_JEV_LOG_DIR
- * if a workspace-managed state root matters.
+ * Path resolution is delegated to resolveOmcStateRoot so workspace markers,
+ * OMC_STATE_DIR branding and worktree common-dir resolution stay in one place.
  */
-export function defaultLogPath(env = process.env, cwd = process.cwd()) {
+export async function defaultLogPath(env = process.env, cwd = process.cwd()) {
   if (env.OMC_JEV_LOG_DIR) return join(env.OMC_JEV_LOG_DIR, 'shadow.jsonl');
-  const root = gitTopLevel(cwd) || cwd;
-  if (env.OMC_STATE_DIR) return join(env.OMC_STATE_DIR, projectId(root), 'state', 'jev', 'shadow.jsonl');
-  return join(root, '.omc', 'state', 'jev', 'shadow.jsonl');
+  // resolveOmcStateRoot owns workspace markers, OMC_STATE_DIR branding and
+  // worktree common-dir resolution; deriving `.omc` here would fork that
+  // contract (and trips scripts/ci/check-multirepo-paths.mjs).
+  const omcRoot = await resolveOmcStateRoot(gitTopLevel(cwd) || cwd);
+  return join(omcRoot, 'state', 'jev', 'shadow.jsonl');
 }
 
 function gitTopLevel(cwd) {
@@ -50,19 +52,6 @@ function gitTopLevel(cwd) {
   }
 }
 
-function projectId(root) {
-  let remote = '';
-  try {
-    remote = execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: root, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, timeout: 5000,
-    }).trim();
-  } catch {
-    // local-only repo — fall through to path identity
-  }
-  const source = remote || root;
-  const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
-  return `${basename(remote ? root : source).replace(/[^a-zA-Z0-9_-]/g, '_')}-${hash}`;
-}
 
 /**
  * Compare one twin answer against one Jev answer.
@@ -227,7 +216,7 @@ function usage() {
   return 'usage: node scripts/jev-eval.mjs [logPath] [--json]';
 }
 
-function main(argv, env = process.env, cwd = process.cwd()) {
+async function main(argv, env = process.env, cwd = process.cwd()) {
   let json = false;
   let logPath = null;
   for (const arg of argv) {
@@ -244,7 +233,7 @@ function main(argv, env = process.env, cwd = process.cwd()) {
     }
   }
 
-  const path = logPath ?? defaultLogPath(env, cwd);
+  const path = logPath ?? await defaultLogPath(env, cwd);
   if (!existsSync(path)) {
     console.log(`no shadow log at ${path} — nothing to evaluate (exit 0)`);
     return 0;
@@ -265,4 +254,4 @@ function main(argv, env = process.env, cwd = process.cwd()) {
 }
 
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) process.exit(await main(process.argv.slice(2)));

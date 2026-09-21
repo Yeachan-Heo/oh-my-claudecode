@@ -160,16 +160,25 @@ describe('CLI surface', () => {
 });
 
 describe('defaultLogPath resolution', () => {
-  it('honors OMC_JEV_LOG_DIR', () => {
-    expect(defaultLogPath({ OMC_JEV_LOG_DIR: '/tmp/jevdir' })).toContain(join('/tmp/jevdir', 'shadow.jsonl'));
+  it('honors OMC_JEV_LOG_DIR', async () => {
+    expect(await defaultLogPath({ OMC_JEV_LOG_DIR: '/tmp/jevdir' })).toContain(join('/tmp/jevdir', 'shadow.jsonl'));
   });
-  it('honors OMC_STATE_DIR with a project-id segment', () => {
-    const p = defaultLogPath({ OMC_STATE_DIR: '/tmp/omc-state' }, root);
-    expect(p).toContain(join('/tmp/omc-state'));
-    expect(p).toContain(join('state', 'jev', 'shadow.jsonl'));
+  // Branding is resolved by resolveOmcStateRoot, which reads process.env for
+  // OMC_STATE_DIR so every hook and script agrees on one state root.
+  it('honors OMC_STATE_DIR with a project-id segment', async () => {
+    const previous = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = '/tmp/omc-state';
+    try {
+      const p = await defaultLogPath({}, root);
+      expect(p).toContain(join('/tmp/omc-state'));
+      expect(p).toContain(join('state', 'jev', 'shadow.jsonl'));
+    } finally {
+      if (previous === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = previous;
+    }
   });
-  it('falls back to the worktree .omc state root', () => {
-    const p = defaultLogPath({}, root);
+  it('falls back to the worktree .omc state root', async () => {
+    const p = await defaultLogPath({}, root);
     expect(p).toContain(join(root, '.omc', 'state', 'jev', 'shadow.jsonl'));
   });
 });
