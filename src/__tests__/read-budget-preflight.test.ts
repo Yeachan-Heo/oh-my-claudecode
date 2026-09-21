@@ -125,6 +125,54 @@ describe('read budget preflight: binaries, pages, remedy order, byte budget (iss
     expect(result?.trigger).toBe('bytes');
   });
 
+  it('honours OMC_READ_BUDGET_MAX_LINES for one-off runs', () => {
+    const file = writeLines('env-lines-valid.ts', 100);
+
+    const result = evaluateReadBudget({
+      toolName: 'Read',
+      toolInput: { file_path: file },
+      stateDir,
+      env: { OMC_READ_BUDGET_MAX_LINES: '50' },
+      loadOmcConfig: () => ({ context: { readBudget: { mode: 'deny', maxBytes: 10_000_000 } } }),
+      cwd,
+    }) as Evaluation;
+
+    expect(result?.decision).toBe('block');
+    expect(result?.trigger).toBe('lines');
+  });
+
+  it('falls back when OMC_READ_BUDGET_MAX_BYTES has a malformed suffix', () => {
+    const file = writeLines('env-bytes.ts', 100);
+
+    const result = evaluateReadBudget({
+      toolName: 'Read',
+      toolInput: { file_path: file },
+      stateDir,
+      env: { OMC_READ_BUDGET_MAX_BYTES: '10kb' },
+      loadOmcConfig: () => ({ context: { readBudget: { mode: 'deny', maxBytes: 10_000_000 } } }),
+      cwd,
+    }) as Evaluation;
+
+    expect(result).toBeNull();
+  });
+
+  it('falls back when OMC_READ_BUDGET_MAX_LINES has a malformed suffix', () => {
+    const file = writeLines('env-lines.ts', 100);
+
+    const result = evaluateReadBudget({
+      toolName: 'Read',
+      toolInput: { file_path: file },
+      stateDir,
+      env: { OMC_READ_BUDGET_MAX_LINES: '50junk' },
+      loadOmcConfig: () => ({
+        context: { readBudget: { mode: 'deny', maxLines: 1_000, maxBytes: 10_000_000 } },
+      }),
+      cwd,
+    }) as Evaluation;
+
+    expect(result).toBeNull();
+  });
+
   it('leads the remedy with a bounded re-read and demotes the structural tools', () => {
     const big = writeLines('ordered.ts', 4000);
 
