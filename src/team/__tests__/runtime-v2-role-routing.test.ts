@@ -21,7 +21,7 @@ const mocks = vi.hoisted(() => {
       ? 'darwin:1700000000:123456'
       : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
   };
-  const getWorkerLiveness = vi.fn(async () => 'dead' as const);
+  const getWorkerLiveness = vi.fn(async (_paneId?: string): Promise<'alive' | 'dead' | 'unknown'> => 'dead');
   return {
     tmuxServerIdentity,
     isWorkerAlive: vi.fn(async () => false),

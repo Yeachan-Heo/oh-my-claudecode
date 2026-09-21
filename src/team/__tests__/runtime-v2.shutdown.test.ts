@@ -932,9 +932,13 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         nonce: 'ordinary-interrupted',
         instance_id: TEAM_INSTANCE_ID,
         pid: 999999,
+        // Must be a platform-shaped identity: isProcessIdentityDead() refuses to
+        // treat a malformed identity as positive proof of death, so the tmux
+        // server identity shape (`linux:<bootId>:<pid>`) would keep this
+        // interrupted attempt "live" and block adoption.
         process_started_at: process.platform === 'darwin'
           ? 'darwin:1700000000:123456'
-          : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+          : 'linux:424242',
         state_revision: 1,
         created_at: new Date().toISOString(),
       },

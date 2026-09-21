@@ -68,10 +68,13 @@ describe('package dir resolution regression (#1322, #1324)', () => {
 
     expect(snippet).toContain('typeof __dirname !== "undefined"');
     expect(snippet).toContain('currentDirName === "bridge"');
-    expect(snippet).toContain('fileURLToPath)(import_meta.url)');
-    expect(snippet.indexOf('typeof __dirname !== "undefined"')).toBeLessThan(
-      snippet.indexOf('fileURLToPath)(import_meta.url)'),
-    );
+    // esbuild spells the import.meta shim either inline (`import_meta.url`) or
+    // through a hoisted binding (`importMetaUrl`) depending on how the bundle
+    // groups the surrounding modules. Accept both so the ordering invariant
+    // survives unrelated bundling shifts.
+    const importMetaIndex = snippet.search(/fileURLToPath\)\((?:import_meta\.url|importMetaUrl)\)/);
+    expect(importMetaIndex).toBeGreaterThan(-1);
+    expect(snippet.indexOf('typeof __dirname !== "undefined"')).toBeLessThan(importMetaIndex);
   });
 
   it('bridge/cli.cjs keeps builtin skills package-dir resolution bridge-aware', () => {
