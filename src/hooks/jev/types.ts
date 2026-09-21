@@ -13,7 +13,10 @@ export type JudgmentPointName =
   | 'model-routing'
   | 'context-pruning'
   | 'task-size'
-  | 'ralph-verdict';
+  | 'ralph-verdict'
+  | 'learner-extraction'
+  | 'slop-warning'
+  | 'simplifier-trigger';
 
 /** TypeSafe question shapes. */
 export type JevQuestionType = 'Choice' | 'Score' | 'Noul';

@@ -144,6 +144,47 @@ const TASK_SIZE_QUESTIONS: JevQuestions = {
   },
 };
 
+/**
+ * Advisory points (ticket 12) — off/shadow only. Answers are context-only
+ * and never gate behavior.
+ */
+
+/** Point "learner-extraction" (ticket 12): Noul over one assistant message. */
+const LEARNER_EXTRACTION_QUESTIONS: JevQuestions = {
+  extractable_moment: {
+    type: 'Noul',
+    instructions: 'Does this assistant message contain an extractable memory-worthy moment?',
+    criteria: {
+      true: 'Contains a reusable pattern, decision, or correction worth persisting',
+      false: 'Routine work with nothing worth extracting',
+    },
+  },
+};
+
+/** Point "slop-warning" (ticket 12): Noul over one tool input. */
+const SLOP_WARNING_QUESTIONS: JevQuestions = {
+  slop_advisory: {
+    type: 'Noul',
+    instructions: 'Does this tool input contain fallback/workaround language worth an advisory warning?',
+    criteria: {
+      true: 'Contains fallback/workaround phrasing outside doc or self-referential context',
+      false: 'No advisory-worthy language',
+    },
+  },
+};
+
+/** Point "simplifier-trigger" (ticket 12): Noul over one change. */
+const SIMPLIFIER_TRIGGER_QUESTIONS: JevQuestions = {
+  simplification_worthy: {
+    type: 'Noul',
+    instructions: 'Is this change simplification-worthy enough to inject the simplifier delegation?',
+    criteria: {
+      true: 'The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)',
+      false: 'Change is already minimal or not code',
+    },
+  },
+};
+
 export interface JudgmentPointDefinition {
   /** Resolver key (the `point` argument) - also the registry key. */
   name: string;
@@ -184,6 +225,17 @@ export const JUDGMENT_POINTS: Readonly<Record<JudgmentPointName, JudgmentPointDe
   'context-pruning': defineJudgmentPoint({ name: 'context-pruning', questions: STALENESS_QUESTIONS, blocking: false }),
   'ralph-verdict': defineJudgmentPoint({ name: 'ralph-verdict', questions: VERDICT_QUESTIONS, blocking: true }),
   'task-size': defineJudgmentPoint({ name: 'task-size', questions: TASK_SIZE_QUESTIONS, blocking: false }),
+  'learner-extraction': defineJudgmentPoint({
+    name: 'learner-extraction',
+    questions: LEARNER_EXTRACTION_QUESTIONS,
+    blocking: false,
+  }),
+  'slop-warning': defineJudgmentPoint({ name: 'slop-warning', questions: SLOP_WARNING_QUESTIONS, blocking: false }),
+  'simplifier-trigger': defineJudgmentPoint({
+    name: 'simplifier-trigger',
+    questions: SIMPLIFIER_TRIGGER_QUESTIONS,
+    blocking: false,
+  }),
 };
 
 /** Look up a declared judgment point. */

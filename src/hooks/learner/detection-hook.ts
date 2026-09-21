@@ -6,6 +6,7 @@
 
 import { detectExtractableMoment, shouldPromptExtraction, generateExtractionPrompt } from './detector.js';
 import { isLearnerEnabled } from './index.js';
+import { recordLearnerExtractionShadow } from './jev-shadow.js';
 import type { DetectionResult } from './detector.js';
 
 /**
@@ -78,6 +79,11 @@ export function processResponseForDetection(
   // Detect extractable moment
   const detection = detectExtractableMoment(assistantMessage, userMessage);
   state.lastDetection = detection;
+
+  // Jev advisory point "learner-extraction" (ticket 12): record the heuristic
+  // detection vs Jev's Noul in shadow mode. Fire-and-forget and twin-decided —
+  // the returned prompt below is unchanged with or without a Jev key.
+  void recordLearnerExtractionShadow(assistantMessage, userMessage).catch(() => {});
 
   // Check if we should prompt
   if (shouldPromptExtraction(detection, mergedConfig.promptThreshold)) {
