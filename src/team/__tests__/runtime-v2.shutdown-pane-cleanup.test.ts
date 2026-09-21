@@ -13,9 +13,24 @@ const tmuxUtilsMocks = vi.hoisted(() => ({
   tmuxExecAsync: vi.fn(),
   tmuxCmdAsync: vi.fn(),
 }));
+const tmuxSessionMocks = vi.hoisted(() => ({
+  observeTmuxServerIdentity: vi.fn(async () => 'matching' as const),
+  getOwnedWorkerLiveness: vi.fn(async () => 'dead' as const),
+  observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' as const })),
+  workerPaneBelongsToOwnedProviderTarget: vi.fn(async () => true),
+  killOwnedWorkerPane: vi.fn(async () => undefined),
+  killTeamSession: vi.fn(async () => true),
+}));
 const tmuxCalls = vi.hoisted(() => [] as string[][]);
 type StartedRecord = { pid: number; process_start_identity: string; process_group_id?: number };
 const TEAM_INSTANCE_ID = '44444444-4444-4444-8444-444444444444';
+const FIXTURE_TMUX_SERVER_IDENTITY = {
+  socket_path: '/tmp/omc-test-tmux.sock',
+  server_pid: 4242,
+  process_started_at: process.platform === 'darwin'
+    ? 'darwin:1700000000:123456'
+    : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+};
 
 vi.mock('../../cli/tmux-utils.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../../cli/tmux-utils.js')>();
@@ -23,6 +38,19 @@ vi.mock('../../cli/tmux-utils.js', async importOriginal => {
     ...actual,
     tmuxExecAsync: tmuxUtilsMocks.tmuxExecAsync,
     tmuxCmdAsync: tmuxUtilsMocks.tmuxCmdAsync,
+  };
+});
+
+vi.mock('../tmux-session.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../tmux-session.js')>();
+  return {
+    ...actual,
+    observeTmuxServerIdentity: tmuxSessionMocks.observeTmuxServerIdentity,
+    getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,
+    observeTeamSessionTargetPresence: tmuxSessionMocks.observeTeamSessionTargetPresence,
+    workerPaneBelongsToOwnedProviderTarget: tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget,
+    killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
+    killTeamSession: tmuxSessionMocks.killTeamSession,
   };
 });
 
@@ -49,6 +77,18 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
     tmuxCalls.length = 0;
     tmuxUtilsMocks.tmuxExecAsync.mockReset();
     tmuxUtilsMocks.tmuxCmdAsync.mockReset();
+    tmuxSessionMocks.observeTmuxServerIdentity.mockReset();
+    tmuxSessionMocks.observeTmuxServerIdentity.mockResolvedValue('matching');
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockReset();
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockResolvedValue('dead');
+    tmuxSessionMocks.observeTeamSessionTargetPresence.mockReset();
+    tmuxSessionMocks.observeTeamSessionTargetPresence.mockResolvedValue({ kind: 'owned' });
+    tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockReset();
+    tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockResolvedValue(true);
+    tmuxSessionMocks.killOwnedWorkerPane.mockReset();
+    tmuxSessionMocks.killOwnedWorkerPane.mockImplementation(async () => undefined);
+    tmuxSessionMocks.killTeamSession.mockReset();
+    tmuxSessionMocks.killTeamSession.mockResolvedValue(true);
 
     const run = (args: string[]) => {
       tmuxCalls.push(args);
@@ -100,6 +140,7 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
       ],
       created_at: new Date().toISOString(),
       tmux_session: 'leader-session:0',
+      tmux_server_identity: FIXTURE_TMUX_SERVER_IDENTITY,
       tmux_window_owned: false,
       next_task_id: 1,
       leader_pane_id: '%1',
@@ -149,7 +190,8 @@ describe('shutdownTeamV2 split-pane pane cleanup', () => {
         workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%2',
           worker_cli: 'claude', launch_attempt_id: attempt.attempt_id,
           launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: process.execPath, args: [] } }],
-        created_at: new Date().toISOString(), tmux_session: 'leader-session:0', tmux_window_owned: false,
+        created_at: new Date().toISOString(), tmux_session: 'leader-session:0',
+        tmux_server_identity: FIXTURE_TMUX_SERVER_IDENTITY, tmux_window_owned: false,
         next_task_id: 1, leader_pane_id: '%1', hud_pane_id: null, resize_hook_name: null, resize_hook_target: null,
       });
 

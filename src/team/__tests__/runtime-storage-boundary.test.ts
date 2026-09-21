@@ -20,18 +20,32 @@ const environmentIsolation = await vi.hoisted(async () => {
   return { previous, root };
 });
 
-const mocks = vi.hoisted(() => ({
-  createTeamSession: vi.fn(),
-  splitTeamWorkerPaneWithEvidence: vi.fn(),
-  workerPaneBelongsToProviderTarget: vi.fn(),
-  spawnOwnedWorkerInPane: vi.fn(),
-  deliverStartupInbox: vi.fn(),
-  retryStartupInboxSubmit: vi.fn(),
-  probeStartupPaneActivity: vi.fn(),
-  applyMainVerticalLayout: vi.fn(),
-  killOwnedWorkerPane: vi.fn(),
-  getWorkerLiveness: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const tmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  return {
+    tmuxServerIdentity,
+    createTeamSession: vi.fn(),
+    splitTeamWorkerPaneWithEvidence: vi.fn(),
+    workerPaneBelongsToProviderTarget: vi.fn(),
+    workerPaneBelongsToOwnedProviderTarget: vi.fn(),
+    observeTmuxServerIdentity: vi.fn(async () => 'matching' as const),
+    adoptWorkerPaneOwnership: vi.fn(),
+    spawnOwnedWorkerInPane: vi.fn(),
+    deliverStartupInbox: vi.fn(),
+    retryStartupInboxSubmit: vi.fn(),
+    probeStartupPaneActivity: vi.fn(),
+    applyMainVerticalLayout: vi.fn(),
+    killOwnedWorkerPane: vi.fn(),
+    getWorkerLiveness: vi.fn(),
+    getOwnedWorkerLiveness: vi.fn(),
+  };
+});
 
 const launchMocks = vi.hoisted(() => ({
   withWorkerLaunchAttemptFence: vi.fn(),
@@ -54,6 +68,9 @@ vi.mock('../tmux-session.js', async importOriginal => ({
   createTeamSession: mocks.createTeamSession,
   splitTeamWorkerPaneWithEvidence: mocks.splitTeamWorkerPaneWithEvidence,
   workerPaneBelongsToProviderTarget: mocks.workerPaneBelongsToProviderTarget,
+  workerPaneBelongsToOwnedProviderTarget: mocks.workerPaneBelongsToOwnedProviderTarget,
+  observeTmuxServerIdentity: mocks.observeTmuxServerIdentity,
+  adoptWorkerPaneOwnership: mocks.adoptWorkerPaneOwnership,
   spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
   deliverStartupInbox: mocks.deliverStartupInbox,
   retryStartupInboxSubmit: mocks.retryStartupInboxSubmit,
@@ -61,6 +78,7 @@ vi.mock('../tmux-session.js', async importOriginal => ({
   applyMainVerticalLayout: mocks.applyMainVerticalLayout,
   killOwnedWorkerPane: mocks.killOwnedWorkerPane,
   getWorkerLiveness: mocks.getWorkerLiveness,
+  getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
 }));
 
 vi.mock('../worker-launch-ack.js', async importOriginal => ({
@@ -189,6 +207,7 @@ describe('runtime storage boundaries', () => {
       leaderPaneId: '%1',
       workerPaneIds: [],
       sessionMode: 'split-pane',
+      tmuxServerIdentity: mocks.tmuxServerIdentity,
     });
     mocks.splitTeamWorkerPaneWithEvidence.mockReset();
     mocks.splitTeamWorkerPaneWithEvidence.mockResolvedValue({
@@ -199,9 +218,36 @@ describe('runtime storage boundaries', () => {
       rawOutput: '%2\n',
       stderr: '',
       paneId: '%2',
+      tmuxServerIdentity: mocks.tmuxServerIdentity,
     });
     mocks.workerPaneBelongsToProviderTarget.mockReset();
     mocks.workerPaneBelongsToProviderTarget.mockResolvedValue(true);
+    mocks.workerPaneBelongsToOwnedProviderTarget.mockReset();
+    mocks.workerPaneBelongsToOwnedProviderTarget.mockResolvedValue(true);
+    mocks.observeTmuxServerIdentity.mockReset();
+    mocks.observeTmuxServerIdentity.mockResolvedValue('matching');
+    mocks.adoptWorkerPaneOwnership.mockReset();
+    mocks.adoptWorkerPaneOwnership.mockImplementation(async (input: {
+      paneId: string;
+      providerTarget: string;
+      leaderPaneId: string;
+      provider?: 'tmux' | 'cmux';
+      tmuxServerIdentity?: typeof mocks.tmuxServerIdentity;
+    }) => ({
+      ok: true as const,
+      ownership: {
+        provider: input.provider ?? 'tmux',
+        providerTarget: input.providerTarget,
+        paneId: input.paneId,
+        splitTarget: '',
+        leaderPaneId: input.leaderPaneId,
+        reservedPaneIds: [],
+        source: 'adopted' as const,
+        ...(input.provider !== 'cmux'
+          ? { tmuxServerIdentity: input.tmuxServerIdentity ?? mocks.tmuxServerIdentity }
+          : {}),
+      },
+    }));
     mocks.spawnOwnedWorkerInPane.mockReset();
     mocks.spawnOwnedWorkerInPane.mockImplementation(async (
       _sessionName: string,
@@ -246,6 +292,8 @@ describe('runtime storage boundaries', () => {
     mocks.killOwnedWorkerPane.mockResolvedValue(undefined);
     mocks.getWorkerLiveness.mockReset();
     mocks.getWorkerLiveness.mockResolvedValue('alive');
+    mocks.getOwnedWorkerLiveness.mockReset();
+    mocks.getOwnedWorkerLiveness.mockResolvedValue('alive');
 
     launchMocks.withWorkerLaunchAttemptFence.mockReset();
     launchMocks.withWorkerLaunchAttemptFence.mockImplementation(async (_attempt: unknown, fn: () => Promise<unknown>) => ({

@@ -1,8 +1,40 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import { dirname, join } from 'path';
 import { tmpdir } from 'os';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+
+const tmuxMocks = vi.hoisted(() => {
+  const tmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  return {
+    tmuxServerIdentity,
+    observeTmuxServerIdentity: vi.fn(async () => 'matching' as const),
+    getOwnedWorkerLiveness: vi.fn(async () => 'dead' as const),
+    observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' as const })),
+    workerPaneBelongsToOwnedProviderTarget: vi.fn(async () => true),
+    killOwnedWorkerPane: vi.fn(async () => undefined),
+    killTeamSession: vi.fn(async () => true),
+  };
+});
+
+vi.mock('../tmux-session.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../tmux-session.js')>();
+  return {
+    ...actual,
+    observeTmuxServerIdentity: tmuxMocks.observeTmuxServerIdentity,
+    getOwnedWorkerLiveness: tmuxMocks.getOwnedWorkerLiveness,
+    observeTeamSessionTargetPresence: tmuxMocks.observeTeamSessionTargetPresence,
+    workerPaneBelongsToOwnedProviderTarget: tmuxMocks.workerPaneBelongsToOwnedProviderTarget,
+    killOwnedWorkerPane: tmuxMocks.killOwnedWorkerPane,
+    killTeamSession: tmuxMocks.killTeamSession,
+  };
+});
 
 import { shutdownTeamV2 } from '../runtime-v2.js';
 import { teamClaimTask } from '../team-ops.js';
@@ -167,6 +199,7 @@ describe('team governance enforcement', () => {
       workers: [],
       created_at: new Date().toISOString(),
       tmux_session: `${teamName}:0`,
+      tmux_server_identity: tmuxMocks.tmuxServerIdentity,
       next_task_id: 2,
       leader_pane_id: null,
       hud_pane_id: null,

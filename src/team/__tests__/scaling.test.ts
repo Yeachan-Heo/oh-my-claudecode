@@ -10,6 +10,7 @@ import {
   withTeamInstanceLifecycleLock,
 } from '../team-instance.js';
 import { absPath, teamStateRoot, TeamPaths } from '../state-paths.js';
+import type { TmuxServerIdentity } from '../types.js';
 
 const tmuxUtilsMocks = vi.hoisted(() => ({
   tmuxExec: vi.fn(),
@@ -60,26 +61,107 @@ vi.mock('../team-owner-epoch.js', () => ({
   isValidProcessStartIdentity: (value: unknown) => typeof value === 'string' && /^(linux|darwin|win32):/.test(value),
 }));
 
-const tmuxSessionMocks = vi.hoisted(() => ({
-  sanitizeName: vi.fn((name: string) => name),
-  getWorkerLiveness: vi.fn(),
-  killWorkerPanes: vi.fn(),
-  adoptWorkerPaneOwnership: vi.fn(async (input: { paneId: string; providerTarget: string; leaderPaneId: string }) => ({
-    ok: true as const,
-    ownership: { provider: 'tmux' as const, providerTarget: input.providerTarget, paneId: input.paneId,
-      splitTarget: '', leaderPaneId: input.leaderPaneId, reservedPaneIds: [], source: 'adopted' as const },
-  })),
-  spawnOwnedWorkerInPane: vi.fn(async (_session: string, ownership: { paneId: string }, config: { provider: string; instanceId?: string; teamName: string; workerName: string; launchStateCwd?: string }) => ({
-    ownership,
-    provider: config.provider,
-    attempt: { attempt_id: `attempt-${ownership.paneId}`, instance_id: config.instanceId, currentPath: '/tmp/current', decisionPath: '/tmp/decision',
-      startedPath: '/tmp/started' },
-  })),
-  killOwnedWorkerPane: vi.fn(async (ownership: { paneId: string }) => {
-    tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
-  }),
-  waitForPaneReady: vi.fn(),
-}));
+const tmuxSessionMocks = vi.hoisted(() => {
+  const tmuxServerIdentity: TmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  const getWorkerLiveness = vi.fn(async () => 'dead' as const);
+  return {
+    tmuxServerIdentity,
+    sanitizeName: vi.fn((name: string) => name),
+    getWorkerLiveness,
+    getOwnedWorkerLiveness: vi.fn(async (ownership: { provider: string; tmuxServerIdentity?: TmuxServerIdentity; paneId: string }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown' as const;
+      return getWorkerLiveness(ownership.paneId);
+    }),
+    killWorkerPanes: vi.fn(),
+    workerPaneBelongsToOwnedProviderTarget: vi.fn(async (input: {
+      provider: 'tmux' | 'cmux';
+      providerTarget: string;
+      paneId: string;
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => {
+      if (input.provider === 'tmux' && !input.tmuxServerIdentity) return false;
+      const format = input.providerTarget.includes(':')
+        ? '#{session_name}:#{window_index}'
+        : '#{session_name}';
+      const probed = tmuxUtilsMocks.tmuxSpawn(['display-message', '-t', input.paneId, '-p', format]);
+      return probed.status === 0 && probed.stdout.trim() === input.providerTarget;
+    }),
+    splitTeamWorkerPaneWithEvidence: vi.fn(async (
+      splitTarget: string,
+      direction: 'right' | 'down',
+      cwd: string,
+      provider: 'tmux' | 'cmux',
+      identity?: TmuxServerIdentity,
+    ) => {
+      if (provider === 'tmux' && !identity) {
+        return {
+          commandSucceeded: false as const,
+          provider,
+          splitTarget,
+          direction,
+          rawOutput: '',
+          stderr: 'tmux_server_identity_unknown',
+          paneId: null,
+        };
+      }
+      const spawned = tmuxUtilsMocks.tmuxSpawn([
+        'split-window',
+        direction === 'right' ? '-h' : '-v',
+        '-t', splitTarget,
+        '-d', '-P', '-F', '#{pane_id}',
+        '-c', cwd,
+      ]);
+      const paneId = spawned.stdout.trim();
+      return {
+        commandSucceeded: true as const,
+        provider,
+        splitTarget,
+        direction,
+        rawOutput: spawned.stdout,
+        stderr: spawned.stderr ?? '',
+        paneId: paneId.length > 0 ? paneId : null,
+        ...(provider === 'tmux' && identity ? { tmuxServerIdentity: identity } : {}),
+      };
+    }),
+    adoptWorkerPaneOwnership: vi.fn(async (input: {
+      paneId: string;
+      providerTarget: string;
+      leaderPaneId: string;
+      provider?: 'tmux' | 'cmux';
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => ({
+      ok: true as const,
+      ownership: {
+        provider: input.provider ?? 'tmux' as const,
+        providerTarget: input.providerTarget,
+        paneId: input.paneId,
+        splitTarget: '',
+        leaderPaneId: input.leaderPaneId,
+        reservedPaneIds: [],
+        source: 'adopted' as const,
+        ...(input.provider !== 'cmux'
+          ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxServerIdentity }
+          : {}),
+      },
+    })),
+    spawnOwnedWorkerInPane: vi.fn(async (_session: string, ownership: { paneId: string }, config: { provider: string; instanceId?: string; teamName: string; workerName: string; launchStateCwd?: string }) => ({
+      ownership,
+      provider: config.provider,
+      attempt: { attempt_id: `attempt-${ownership.paneId}`, instance_id: config.instanceId, currentPath: '/tmp/current', decisionPath: '/tmp/decision',
+        startedPath: '/tmp/started' },
+    })),
+    killOwnedWorkerPane: vi.fn(async (ownership: { paneId: string }) => {
+      tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
+    }),
+    waitForPaneReady: vi.fn(),
+  };
+});
 
 const gitWorktreeMocks = vi.hoisted(() => ({
   ensureWorkerWorktree: vi.fn(),
@@ -134,7 +216,10 @@ vi.mock('../monitor.js', () => ({
 vi.mock('../tmux-session.js', () => ({
   sanitizeName: tmuxSessionMocks.sanitizeName,
   getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
+  getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,
   killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
+  workerPaneBelongsToOwnedProviderTarget: tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget,
+  splitTeamWorkerPaneWithEvidence: tmuxSessionMocks.splitTeamWorkerPaneWithEvidence,
   adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
   spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
   killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
@@ -157,6 +242,13 @@ import { scaleDown, scaleUp } from '../scaling.js';
 import type { TeamConfig, TeamScaleUpAttempt } from '../types.js';
 
 const TEAM_INSTANCE_ID = '11111111-1111-4111-8111-111111111111';
+const FIXTURE_LAUNCH_DESCRIPTOR = {
+  schema_version: 1 as const,
+  provider: 'claude' as const,
+  model: null,
+  binary: '/usr/bin/claude',
+  args: [] as string[],
+};
 
 async function activateFixtureInstance(teamName: string, cwd: string, instanceId = TEAM_INSTANCE_ID): Promise<void> {
   const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
@@ -166,6 +258,8 @@ async function activateFixtureInstance(teamName: string, cwd: string, instanceId
     await writeFile(absPath(binding.cwd, TeamPaths.config(teamName)), JSON.stringify({
       name: teamName,
       instance_id: instanceId,
+      tmux_session: 'demo-session:0',
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       leader_cwd: binding.cwd,
       team_state_root: binding.state_root,
     }));
@@ -182,12 +276,22 @@ describe('scaleUp duplicate worker guard', () => {
     const base: TeamConfig = {
       name: 'demo-team',
       instance_id: TEAM_INSTANCE_ID,
+      tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
       task: 'demo',
       agent_type: 'claude',
       worker_launch_mode: 'interactive',
       worker_count: 1,
       max_workers: 20,
-      workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' }],
+      workers: [{
+        name: 'worker-1',
+        index: 1,
+        role: 'claude',
+        assigned_tasks: [],
+        pane_id: '%1',
+        worker_cli: 'claude',
+        launch_attempt_id: 'attempt-worker-1',
+        launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR,
+      }],
       created_at: new Date().toISOString(),
       tmux_session: 'demo-session:0',
       next_task_id: 2,
@@ -251,6 +355,9 @@ describe('scaleUp duplicate worker guard', () => {
       if (args[0] === 'display-message' && args.includes('#{session_name}:#{window_index}')) {
         return { status: 0, stdout: 'demo-session:0\n', stderr: '' };
       }
+      if (args[0] === 'display-message' && args.includes('#{session_name}')) {
+        return { status: 0, stdout: 'demo-session\n', stderr: '' };
+      }
       if (args[0] === 'split-window') {
         return { status: 0, stdout: '%12\n', stderr: '' };
       }
@@ -259,6 +366,86 @@ describe('scaleUp duplicate worker guard', () => {
       }
       return { status: 0, stdout: '', stderr: '' };
     });
+    tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+    tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async (ownership: {
+      provider: string;
+      tmuxServerIdentity?: TmuxServerIdentity;
+      paneId: string;
+    }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown';
+      return tmuxSessionMocks.getWorkerLiveness(ownership.paneId);
+    });
+    tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockImplementation(async (input: {
+      provider: 'tmux' | 'cmux';
+      providerTarget: string;
+      paneId: string;
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => {
+      if (input.provider === 'tmux' && !input.tmuxServerIdentity) return false;
+      const format = input.providerTarget.includes(':')
+        ? '#{session_name}:#{window_index}'
+        : '#{session_name}';
+      const probed = tmuxUtilsMocks.tmuxSpawn(['display-message', '-t', input.paneId, '-p', format]);
+      return probed.status === 0 && probed.stdout.trim() === input.providerTarget;
+    });
+    tmuxSessionMocks.splitTeamWorkerPaneWithEvidence.mockImplementation(async (
+      splitTarget: string,
+      direction: 'right' | 'down',
+      cwd: string,
+      provider: 'tmux' | 'cmux',
+      identity?: TmuxServerIdentity,
+    ) => {
+      if (provider === 'tmux' && !identity) {
+        return {
+          commandSucceeded: false as const,
+          provider,
+          splitTarget,
+          direction,
+          rawOutput: '',
+          stderr: 'tmux_server_identity_unknown',
+          paneId: null,
+        };
+      }
+      const spawned = tmuxUtilsMocks.tmuxSpawn([
+        'split-window',
+        direction === 'right' ? '-h' : '-v',
+        '-t', splitTarget,
+        '-d', '-P', '-F', '#{pane_id}',
+        '-c', cwd,
+      ]);
+      const paneId = spawned.stdout.trim();
+      return {
+        commandSucceeded: true as const,
+        provider,
+        splitTarget,
+        direction,
+        rawOutput: spawned.stdout,
+        stderr: spawned.stderr ?? '',
+        paneId: paneId.length > 0 ? paneId : null,
+        ...(provider === 'tmux' && identity ? { tmuxServerIdentity: identity } : {}),
+      };
+    });
+    tmuxSessionMocks.adoptWorkerPaneOwnership.mockImplementation(async (input: {
+      paneId: string;
+      providerTarget: string;
+      leaderPaneId: string;
+      provider?: 'tmux' | 'cmux';
+      tmuxServerIdentity?: TmuxServerIdentity;
+    }) => ({
+      ok: true as const,
+      ownership: {
+        provider: input.provider ?? 'tmux' as const,
+        providerTarget: input.providerTarget,
+        paneId: input.paneId,
+        splitTarget: '',
+        leaderPaneId: input.leaderPaneId,
+        reservedPaneIds: [],
+        source: 'adopted' as const,
+        ...(input.provider !== 'cmux'
+          ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxSessionMocks.tmuxServerIdentity }
+          : {}),
+      },
+    }));
     tmuxSessionMocks.waitForPaneReady.mockResolvedValue(undefined);
     config = makeConfig();
     await activateFixtureInstance('demo-team', cwd);
@@ -761,8 +948,8 @@ describe('scaleUp duplicate worker guard', () => {
     expect(result).toMatchObject({ ok: false });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('Refusing to split tmux pane %999');
-      expect(result.error).toContain('expected demo-session');
+      expect(result.error).toContain('Refusing to split pane %999');
+      expect(result.error).toContain('demo-session:0');
     }
     expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
   });
@@ -797,8 +984,8 @@ describe('scaleUp duplicate worker guard', () => {
     expect(result).toMatchObject({ ok: false });
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('Refusing to split tmux pane %998');
-      expect(result.error).toContain('expected demo-session:0');
+      expect(result.error).toContain('Refusing to split pane %998');
+      expect(result.error).toContain('demo-session:0');
     }
     expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
   });

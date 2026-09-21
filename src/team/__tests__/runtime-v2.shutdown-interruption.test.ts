@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -48,6 +48,7 @@ const REPLACEMENT_INSTANCE_ID = '22222222-2222-4222-8222-222222222222';
 const INCARNATION_A_INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
 const INCARNATION_B_INSTANCE_ID = '44444444-4444-4444-8444-444444444444';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const RUNTIME_CLI_PATH = join(REPO_ROOT, 'bridge', 'runtime-cli.cjs');
 const HAS_POSIX_TMUX = process.platform !== 'win32' && isTmuxAvailable();
 
 type StartedRecord = {
@@ -267,6 +268,18 @@ async function waitForTmuxServerDead(
   throw new Error(`private_tmux_server_death_not_observed:${identity.server_pid}`);
 }
 
+async function waitForTmuxServerMatching(
+  identity: TmuxServerIdentity,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await observeTmuxServerIdentity(identity) === 'matching') return;
+    await sleep(25);
+  }
+  throw new Error(`private_tmux_server_matching_not_observed:${identity.server_pid}`);
+}
+
 function fixtureManifest(config: Record<string, unknown>): Record<string, unknown> {
   return {
     schema_version: 2,
@@ -323,6 +336,19 @@ async function persistFixtureConfigAndManifest(
 }
 
 describe.skipIf(!HAS_POSIX_TMUX)('runtime v2 ordinary shutdown interruption', () => {
+  beforeAll(() => {
+    // kill-pane runs through the bundled identity guard. CI does not build
+    // bridge/ before tests, so materialize runtime-cli.cjs next to the
+    // package root where the native start-time addon can still be resolved.
+    execFileSync(process.execPath, [join(REPO_ROOT, 'scripts', 'build-runtime-cli.mjs')], {
+      cwd: REPO_ROOT,
+      stdio: 'pipe',
+    });
+    if (!existsSync(RUNTIME_CLI_PATH)) {
+      throw new Error(`runtime_cli_bundle_missing:${RUNTIME_CLI_PATH}`);
+    }
+  });
+
   let fixtureRoot = '';
   let cwd = '';
   let home = '';
@@ -363,7 +389,7 @@ describe.skipIf(!HAS_POSIX_TMUX)('runtime v2 ordinary shutdown interruption', ()
     process.env.XDG_DATA_HOME = join(home, 'data');
     process.env.CLAUDE_CONFIG_DIR = join(home, '.claude');
     process.env.OMC_STATE_DIR = stateDir;
-    process.env.OMC_RUNTIME_CLI_PATH = join(REPO_ROOT, 'bridge', 'runtime-cli.cjs');
+    process.env.OMC_RUNTIME_CLI_PATH = RUNTIME_CLI_PATH;
     process.env.TMUX_TMPDIR = tmuxTmpDir;
     const privateTmpDir = join(fixtureRoot, 'tmp');
     process.env.TMPDIR = privateTmpDir;
@@ -606,6 +632,7 @@ describe.skipIf(!HAS_POSIX_TMUX)('runtime v2 ordinary shutdown interruption', ()
     expect(existsSync(childResultPath)).toBe(false);
     expect(await observeWorkerLaunchProvider(attempt!)).toBe('alive');
     await expect(waitForPaneLiveness(panes.serverIdentity.socket_path, panes.workerPaneId, 'alive', 2_000)).resolves.toBe(true);
+    await expect(waitForTmuxServerMatching(panes.serverIdentity, 2_000)).resolves.toBeUndefined();
 
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
     await expect(shutdownTeamV2(teamName, cwd, {

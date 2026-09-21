@@ -13,14 +13,29 @@ import {
   withTeamInstanceLifecycleLock,
 } from '../team-instance.js';
 
-const mocks = vi.hoisted(() => ({
-  isWorkerAlive: vi.fn(async () => false),
-  isWorkerPaneAlive: vi.fn(async () => false),
-  getWorkerLiveness: vi.fn(async () => 'dead'),
-  execFile: vi.fn(),
-  tmuxExecAsync: vi.fn(),
-  afterEventAppend: undefined as (() => Promise<void>) | undefined,
-}));
+const mocks = vi.hoisted(() => {
+  const tmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  const getWorkerLiveness = vi.fn(async () => 'dead' as const);
+  return {
+    tmuxServerIdentity,
+    isWorkerAlive: vi.fn(async () => false),
+    isWorkerPaneAlive: vi.fn(async () => false),
+    getWorkerLiveness,
+    getOwnedWorkerLiveness: vi.fn(async (ownership: { provider: string; tmuxServerIdentity?: typeof tmuxServerIdentity }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown' as const;
+      return getWorkerLiveness();
+    }),
+    execFile: vi.fn(),
+    tmuxExecAsync: vi.fn(),
+    afterEventAppend: undefined as (() => Promise<void>) | undefined,
+  };
+});
 
 const renameFault = vi.hoisted(() => ({
   destination: undefined as string | undefined,
@@ -80,6 +95,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     isWorkerAlive: mocks.isWorkerAlive,
     isWorkerPaneAlive: mocks.isWorkerPaneAlive,
     getWorkerLiveness: mocks.getWorkerLiveness,
+    getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
   };
 });
 
@@ -100,11 +116,19 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
     mocks.isWorkerAlive.mockReset();
     mocks.isWorkerPaneAlive.mockReset();
     mocks.getWorkerLiveness.mockReset();
+    mocks.getOwnedWorkerLiveness.mockReset();
     mocks.execFile.mockReset();
     mocks.tmuxExecAsync.mockReset();
     mocks.isWorkerAlive.mockResolvedValue(false);
     mocks.isWorkerPaneAlive.mockResolvedValue(false);
     mocks.getWorkerLiveness.mockResolvedValue('dead');
+    mocks.getOwnedWorkerLiveness.mockImplementation(async (ownership: {
+      provider: string;
+      tmuxServerIdentity?: typeof mocks.tmuxServerIdentity;
+    }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown';
+      return mocks.getWorkerLiveness();
+    });
     mocks.execFile.mockImplementation(
       (_cmd: string, _args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
         cb(null, '', '');
@@ -192,6 +216,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
           ],
           created_at: new Date().toISOString(),
           tmux_session: 'rr-session:0',
+          tmux_server_identity: mocks.tmuxServerIdentity,
           leader_pane_id: '%1',
           hud_pane_id: null,
           resize_hook_name: null,
@@ -1011,6 +1036,7 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
             }],
             created_at: new Date().toISOString(),
             tmux_session: 'co-session:0',
+            tmux_server_identity: mocks.tmuxServerIdentity,
             leader_pane_id: '%1',
             hud_pane_id: null,
             resize_hook_name: null,

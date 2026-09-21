@@ -23,11 +23,27 @@ function fixtureProcessStartIdentity(): string {
   return `${process.platform}:fixture`;
 }
 
-const mocks = vi.hoisted(() => ({
-  getWorkerLiveness: vi.fn(async () => 'alive'),
-  execFile: vi.fn(),
-  tmuxExecAsync: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const tmuxServerIdentity = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+      ? 'darwin:1700000000:123456'
+      : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+  };
+  const getWorkerLiveness = vi.fn(async () => 'alive' as const);
+  return {
+    tmuxServerIdentity,
+    getWorkerLiveness,
+    getOwnedWorkerLiveness: vi.fn(async (ownership: { provider: string; tmuxServerIdentity?: typeof tmuxServerIdentity }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown' as const;
+      return getWorkerLiveness();
+    }),
+    captureOwnedTeamPane: vi.fn(async () => '> \n'),
+    execFile: vi.fn(),
+    tmuxExecAsync: vi.fn(),
+  };
+});
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -50,6 +66,8 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
   return {
     ...actual,
     getWorkerLiveness: mocks.getWorkerLiveness,
+    getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
+    captureOwnedTeamPane: mocks.captureOwnedTeamPane,
   };
 });
 
@@ -77,9 +95,22 @@ describe('monitorTeamV2 pane-based stall inference', () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.getWorkerLiveness.mockReset();
+    mocks.getOwnedWorkerLiveness.mockReset();
+    mocks.captureOwnedTeamPane.mockReset();
     mocks.execFile.mockReset();
     mocks.tmuxExecAsync.mockReset();
     mocks.getWorkerLiveness.mockResolvedValue('alive');
+    mocks.getOwnedWorkerLiveness.mockImplementation(async (ownership: {
+      provider: string;
+      tmuxServerIdentity?: typeof mocks.tmuxServerIdentity;
+    }) => {
+      if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity) return 'unknown';
+      return mocks.getWorkerLiveness();
+    });
+    mocks.captureOwnedTeamPane.mockImplementation(async () => {
+      const captured = await mocks.tmuxExecAsync(['capture-pane']);
+      return typeof captured?.stdout === 'string' ? captured.stdout : '';
+    });
     mocks.execFile.mockImplementation((_cmd: string, args: string[], cb: (err: Error | null, stdout: string, stderr: string) => void) => {
       if (args[0] === 'capture-pane') {
         cb(null, '> \n', '');
@@ -128,6 +159,7 @@ describe('monitorTeamV2 pane-based stall inference', () => {
       }],
       created_at: new Date().toISOString(),
       tmux_session: 'demo-session:0',
+      tmux_server_identity: mocks.tmuxServerIdentity,
       leader_pane_id: '%1',
       hud_pane_id: null,
       resize_hook_name: null,
@@ -285,6 +317,7 @@ describe('monitorTeamV2 pane-based stall inference', () => {
       ],
       created_at: new Date().toISOString(),
       tmux_session: 'demo-session:0',
+      tmux_server_identity: mocks.tmuxServerIdentity,
       leader_pane_id: '%1',
       hud_pane_id: null,
       resize_hook_name: null,

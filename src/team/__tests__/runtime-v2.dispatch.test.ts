@@ -6,44 +6,66 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { createHash } from 'node:crypto';
 
-const atomicWriteControl = vi.hoisted(() => ({
-  failCanonicalPath: undefined as string | undefined,
-  triggerReadPath: undefined as string | undefined,
-  corruptSiblingPath: undefined as string | undefined,
-  readTriggered: false,
-}));
-
-vi.mock('node:fs/promises', async importOriginal => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>();
-  return {
-    ...actual,
-    writeFile: async (
-      path: string | URL,
-      data: string | Uint8Array,
-      options?: Parameters<typeof actual.writeFile>[2],
-    ) => {
-      const target = atomicWriteControl.failCanonicalPath;
-      if (target && String(path).startsWith(`${target}.`)) {
-        throw new Error('injected_task_publication_interruption');
-      }
-      return actual.writeFile(path, data, options);
+const { atomicWriteControl, mockFsPromises } = vi.hoisted(() => {
+  const atomicWriteControl = {
+    failCanonicalPath: undefined as string | undefined,
+    triggerReadPath: undefined as string | undefined,
+    corruptSiblingPath: undefined as string | undefined,
+    readTriggered: false,
+    requestedPath(path: string | URL): string {
+      if (typeof path === 'string') return path;
+      if (path instanceof URL) return decodeURIComponent(path.pathname);
+      return String(path);
     },
-    readFile: async (
-      path: string | URL,
-      options?: Parameters<typeof actual.readFile>[1],
-    ) => {
-      if (atomicWriteControl.triggerReadPath
-        && String(path) === atomicWriteControl.triggerReadPath
-        && !atomicWriteControl.readTriggered) {
-        atomicWriteControl.readTriggered = true;
-        if (atomicWriteControl.corruptSiblingPath) {
-          await actual.writeFile(atomicWriteControl.corruptSiblingPath, '{corrupt sibling', 'utf8');
-        }
-      }
-      return actual.readFile(path, options);
+    samePath(left: string, right: string): boolean {
+      if (left === right) return true;
+      const normalize = (value: string) => value.replace(/^\/private\/var\//, '/var/');
+      if (normalize(left) === normalize(right)) return true;
+      const tail = normalize(right).split('/').slice(-4).join('/');
+      return tail.length > 0 && normalize(left).endsWith(`/${tail}`);
     },
   };
+
+  async function mockFsPromises(
+    importOriginal: () => Promise<typeof import('node:fs/promises')>,
+  ) {
+    const actual = await importOriginal();
+    return {
+      ...actual,
+      writeFile: async (
+        path: string | URL,
+        data: string | Uint8Array,
+        options?: Parameters<typeof actual.writeFile>[2],
+      ) => {
+        const target = atomicWriteControl.failCanonicalPath;
+        if (target && atomicWriteControl.requestedPath(path).startsWith(`${target}.`)) {
+          throw new Error('injected_task_publication_interruption');
+        }
+        return actual.writeFile(path, data, options);
+      },
+      readFile: async (
+        path: string | URL,
+        options?: Parameters<typeof actual.readFile>[1],
+      ) => {
+        const requested = atomicWriteControl.requestedPath(path);
+        if (atomicWriteControl.triggerReadPath
+          && atomicWriteControl.samePath(requested, atomicWriteControl.triggerReadPath)
+          && !atomicWriteControl.readTriggered) {
+          atomicWriteControl.readTriggered = true;
+          if (atomicWriteControl.corruptSiblingPath) {
+            await actual.writeFile(atomicWriteControl.corruptSiblingPath, '{corrupt sibling', 'utf8');
+          }
+        }
+        return actual.readFile(path, options);
+      },
+    };
+  }
+
+  return { atomicWriteControl, mockFsPromises };
 });
+
+vi.mock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
+vi.mock('fs/promises', importOriginal => mockFsPromises(importOriginal));
 
 import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
 import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
@@ -818,6 +840,7 @@ describe('runtime v2 startup inbox dispatch', () => {
   }): Promise<Map<string, string>> {
     const tasksRoot = absPath(cwd, TeamPaths.tasks(fixture.teamName));
     await mkdir(tasksRoot, { recursive: true });
+    const createdAt = '2026-01-01T00:00:00.000Z';
     const tasks = [
       {
         id: '1',
@@ -826,6 +849,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         status: 'in_progress',
         owner: 'worker-1',
         version: 1,
+        created_at: createdAt,
         claim: {
           owner: 'worker-1',
           token: 'owner-recovery-token',
@@ -839,6 +863,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         status: 'pending',
         owner: null,
         version: 1,
+        created_at: createdAt,
       },
       {
         id: '3',
@@ -848,6 +873,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         owner: 'worker-2',
         result: 'done elsewhere',
         version: 2,
+        created_at: createdAt,
       },
       {
         id: '4',
@@ -856,6 +882,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         status: 'in_progress',
         owner: 'worker-2',
         version: 2,
+        created_at: createdAt,
         claim: {
           owner: 'worker-2',
           token: 'transferred-task-token',
@@ -891,6 +918,10 @@ describe('runtime v2 startup inbox dispatch', () => {
   });
   beforeEach(async () => {
     vi.resetModules();
+    // resetModules drops the file-level fs mocks after enough iterations.
+    // Re-install so later recovery tests still see the exact-read intercept.
+    vi.doMock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
+    vi.doMock('fs/promises', importOriginal => mockFsPromises(importOriginal));
     atomicWriteControl.failCanonicalPath = undefined;
     atomicWriteControl.triggerReadPath = undefined;
     atomicWriteControl.corruptSiblingPath = undefined;
@@ -1618,8 +1649,9 @@ describe('runtime v2 startup inbox dispatch', () => {
     const task = JSON.parse(await readFile(
       absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')),
       'utf8',
-    )) as { status: string; owner: string | null };
-    expect(task).toMatchObject({ status: 'pending', owner: null });
+    )) as { status: string; owner?: string | null };
+    expect(task).toMatchObject({ status: 'pending' });
+    expect(task.owner ?? null).toBeNull();
   });
 
   it.each(['identified', 'unparseable'] as const)(
@@ -2805,8 +2837,9 @@ describe('runtime v2 startup inbox dispatch', () => {
     const task = JSON.parse(await readFile(
       absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')),
       'utf8',
-    )) as { status: string; owner: string | null };
-    expect(task).toMatchObject({ status: 'pending', owner: null });
+    )) as { status: string; owner?: string | null };
+    expect(task).toMatchObject({ status: 'pending' });
+    expect(task.owner ?? null).toBeNull();
 
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests).toHaveLength(1);
