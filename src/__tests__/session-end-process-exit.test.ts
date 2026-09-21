@@ -137,7 +137,7 @@ async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
   }
-  let manifest: { phase?: string; owner?: unknown; actions?: Record<string, { status?: string; error?: string }> } | null = null;
+  let manifest: { phase?: string; owner?: unknown; recoverableFailure?: { reason?: string }; actions?: Record<string, { status?: string; error?: string }> } | null = null;
   try {
     if (existsSync(manifestPath)) {
       manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
@@ -146,7 +146,9 @@ async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<
     manifest = null;
   }
   const callback = manifest?.actions?.callback;
-  throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} file=${existsSync(callbackPath)}`);
+  // recoverableFailure.reason is the only record of why a non-terminal release
+  // happened, so a CI-only failure must print it (issue #4076).
+  throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} release=${manifest?.recoverableFailure?.reason ?? 'unrecorded'} file=${existsSync(callbackPath)}`);
 }
 
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {

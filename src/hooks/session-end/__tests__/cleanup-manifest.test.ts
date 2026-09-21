@@ -191,9 +191,32 @@ describe('durable SessionEnd cleanup manifest', () => {
     expect(markSessionEndActionRunner(directory, sessionId, 'crashed-owner', 'python-cleanup', runner.runnerNonce, 'armed')).not.toBeNull();
     expect(finishSessionEndAction(directory, sessionId, 'crashed-owner', 'python-cleanup', runner.runnerNonce, false, 'simulated-crash')).not.toBeNull();
     expect(readSessionEndJob(directory, sessionId)?.actions['python-cleanup']).toMatchObject({ status: 'retryable', lastOutcomeCode: 'simulated-crash', runner: { phase: 'terminal' } });
-    expect(releaseSessionEndJob(directory, sessionId, 'crashed-owner', owner.owner!.leaseGeneration)).not.toBeNull();
+    expect(releaseSessionEndJob(directory, sessionId, 'crashed-owner', owner.owner!.leaseGeneration, 'lease-lost-during-python-cleanup')).not.toBeNull();
     expect(readSessionEndJob(directory, sessionId)).toMatchObject({ owner: null, phase: 'recoverable-failure' });
     expect(takeSessionEndDiscoveryPage(directory, 1)).toEqual([sessionId]);
+  });
+
+  it('records why a release left the job in recoverable-failure (#4076)', () => {
+    const directory = project();
+    const sessionId = preparedAndSealed(directory, 'release-reason');
+    const owner = claimSessionEndJob(directory, sessionId, 'owner', 'identity', Date.now() + 5_000)!;
+
+    expect(releaseSessionEndJob(directory, sessionId, 'owner', owner.owner!.leaseGeneration, 'run-deadline-reached')).toMatchObject({
+      phase: 'recoverable-failure',
+      recoverableFailure: { reason: 'run-deadline-reached', ownerNonce: 'owner' },
+    });
+    // The reason must survive on disk: the CI artifact is the only evidence a
+    // non-reproducing failure leaves behind.
+    const persisted = readSessionEndJob(directory, sessionId)!;
+    expect(persisted.recoverableFailure?.reason).toBe('run-deadline-reached');
+    expect(Number.isFinite(Date.parse(persisted.recoverableFailure!.releasedAt))).toBe(true);
+
+    // Default reason still names the release path when a caller passes nothing.
+    const reclaimed = claimSessionEndJob(directory, sessionId, 'next-owner', 'identity', Date.now() + 5_000)!;
+    expect(releaseSessionEndJob(directory, sessionId, 'next-owner', reclaimed.owner!.leaseGeneration)?.recoverableFailure).toMatchObject({
+      reason: 'worker-released',
+      ownerNonce: 'next-owner',
+    });
   });
 
   it('bounds required failures and never retries a failed remote delivery attempt', () => {
