@@ -269,6 +269,15 @@ export function deepMerge<T extends object>(target: T, source: Partial<T>): T {
   return result as T;
 }
 
+const MIN_BACKGROUND_TASKS = 1;
+const MAX_BACKGROUND_TASKS = 50;
+
+function parseBackgroundTaskLimit(value: string | undefined): number | null {
+  if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= MAX_BACKGROUND_TASKS ? parsed : null;
+}
+
 /**
  * Load configuration from environment variables
  */
@@ -298,14 +307,14 @@ export function loadEnvConfig(): Partial<PluginConfig> {
     };
   }
 
-  if (process.env.OMC_MAX_BACKGROUND_TASKS) {
-    const maxTasks = parseInt(process.env.OMC_MAX_BACKGROUND_TASKS, 10);
-    if (!isNaN(maxTasks)) {
-      config.permissions = {
-        ...config.permissions,
-        maxBackgroundTasks: maxTasks,
-      };
-    }
+  const maxBackgroundTasks = parseBackgroundTaskLimit(
+    process.env.OMC_MAX_BACKGROUND_TASKS,
+  );
+  if (maxBackgroundTasks !== null) {
+    config.permissions = {
+      ...config.permissions,
+      maxBackgroundTasks,
+    };
   }
 
   // Routing configuration from environment
@@ -1134,8 +1143,8 @@ export function generateConfigSchema(): object {
           maxBackgroundTasks: {
             type: "integer",
             default: 5,
-            minimum: 1,
-            maximum: 50,
+            minimum: MIN_BACKGROUND_TASKS,
+            maximum: MAX_BACKGROUND_TASKS,
           },
         },
       },
