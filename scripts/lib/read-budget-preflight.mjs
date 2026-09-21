@@ -89,16 +89,23 @@ function readBudgetConfig(loadOmcConfig) {
   }
 }
 
+function parsePositiveIntegerOverride(value) {
+  const raw = typeof value === 'string' ? value.trim() : '';
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
 function resolveMaxLines(cfg, env) {
-  const fromEnv = Number.parseInt(env.OMC_READ_BUDGET_MAX_LINES || '', 10);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  const fromEnv = parsePositiveIntegerOverride(env.OMC_READ_BUDGET_MAX_LINES);
+  if (fromEnv !== null) return fromEnv;
   if (Number.isFinite(cfg?.maxLines) && cfg.maxLines > 0) return cfg.maxLines;
   return DEFAULT_MAX_LINES;
 }
 
 function resolveMaxBytes(cfg, env) {
-  const fromEnv = Number.parseInt(env.OMC_READ_BUDGET_MAX_BYTES || '', 10);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  const fromEnv = parsePositiveIntegerOverride(env.OMC_READ_BUDGET_MAX_BYTES);
+  if (fromEnv !== null) return fromEnv;
   if (Number.isFinite(cfg?.maxBytes) && cfg.maxBytes > 0) return cfg.maxBytes;
   return DEFAULT_MAX_BYTES;
 }

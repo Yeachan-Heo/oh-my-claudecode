@@ -125,6 +125,58 @@ describe('read budget preflight: binaries, pages, remedy order, byte budget (iss
     expect(result?.trigger).toBe('bytes');
   });
 
+  it('falls back to configured budgets for malformed integer env overrides', () => {
+    const file = writeLines('malformed-env.ts', 100);
+
+    for (const env of [
+      { OMC_READ_BUDGET_MAX_BYTES: '45kb' },
+      { OMC_READ_BUDGET_MAX_BYTES: '1.5' },
+      { OMC_READ_BUDGET_MAX_LINES: '50lines' },
+      { OMC_READ_BUDGET_MAX_LINES: '1.5' },
+    ]) {
+      const result = evaluateReadBudget({
+        toolName: 'Read',
+        toolInput: { file_path: file },
+        stateDir,
+        env,
+        loadOmcConfig: () => ({
+          context: { readBudget: { mode: 'deny', maxBytes: 1_000_000, maxLines: 1_000 } },
+        }),
+        cwd,
+      }) as Evaluation;
+
+      expect(result).toBeNull();
+    }
+  });
+
+  it('parses exponent-form integer overrides without truncating them', () => {
+    const file = writeLines('exponent-env.ts', 100);
+
+    const byteOverride = evaluateReadBudget({
+      toolName: 'Read',
+      toolInput: { file_path: file },
+      stateDir,
+      env: { OMC_READ_BUDGET_MAX_BYTES: '1e6' },
+      loadOmcConfig: () => ({
+        context: { readBudget: { mode: 'deny', maxBytes: 10, maxLines: 1_000 } },
+      }),
+      cwd,
+    }) as Evaluation;
+    expect(byteOverride).toBeNull();
+
+    const lineOverride = evaluateReadBudget({
+      toolName: 'Read',
+      toolInput: { file_path: file },
+      stateDir,
+      env: { OMC_READ_BUDGET_MAX_LINES: '1e3' },
+      loadOmcConfig: () => ({
+        context: { readBudget: { mode: 'deny', maxBytes: 1_000_000, maxLines: 1 } },
+      }),
+      cwd,
+    }) as Evaluation;
+    expect(lineOverride).toBeNull();
+  });
+
   it('leads the remedy with a bounded re-read and demotes the structural tools', () => {
     const big = writeLines('ordered.ts', 4000);
 
