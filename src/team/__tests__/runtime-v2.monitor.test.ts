@@ -186,7 +186,6 @@ describe('monitorTeamV2 pane-based stall inference', () => {
     const { monitorTeamV2 } = await import('../runtime-v2.js');
     const snapshot = await monitorTeamV2('demo-team', cwd);
 
-    expect(snapshot?.instanceId).toBe(TEAM_INSTANCE_ID);
     expect(snapshot?.nonReportingWorkers).toContain('worker-1');
     expect(snapshot?.recommendations).toContain(
       'Investigate worker-1: assigned work but no work-start evidence; pane is idle at prompt',

@@ -713,36 +713,23 @@ function parseTeamApiArgs(args: string[]): {
 // Team start (spawns tmux workers)
 // ---------------------------------------------------------------------------
 
-function collectStartRolePromptOptions(
-  parsed: ParsedTeamArgs,
-  loadAgentPrompt: (role: string) => string,
-): {
+async function collectStartRolePromptOptions(parsed: ParsedTeamArgs): Promise<{
   roleName?: string;
   rolePrompt?: string;
   rolePromptByRole?: Record<string, string>;
-} {
+}> {
   const rolePromptByRole: Record<string, string> = {};
-  for (const spec of parsed.workerSpecs) {
-    if (!spec.role || Object.hasOwn(rolePromptByRole, spec.role)) continue;
-    rolePromptByRole[spec.role] = loadAgentPrompt(spec.role);
+  const roles = parsed.workerSpecs.flatMap((spec) => spec.role ? [spec.role] : []);
+  if (roles.length === 0) return {};
+  const { loadAgentPrompt } = await import('../../agents/utils.js');
+  for (const role of roles) {
+    if (Object.hasOwn(rolePromptByRole, role)) continue;
+    rolePromptByRole[role] = loadAgentPrompt(role);
   }
-  if (parsed.role && !Object.hasOwn(rolePromptByRole, parsed.role)) {
-    rolePromptByRole[parsed.role] = loadAgentPrompt(parsed.role);
-  }
-
-  const options: {
-    roleName?: string;
-    rolePrompt?: string;
-    rolePromptByRole?: Record<string, string>;
-  } = {};
-  if (parsed.role) {
-    options.roleName = parsed.role;
-    options.rolePrompt = rolePromptByRole[parsed.role];
-  }
-  if (Object.keys(rolePromptByRole).length > 0) {
-    options.rolePromptByRole = rolePromptByRole;
-  }
-  return options;
+  return {
+    ...(parsed.role ? { roleName: parsed.role, rolePrompt: rolePromptByRole[parsed.role] } : {}),
+    rolePromptByRole,
+  };
 }
 
 async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<void> {
@@ -767,11 +754,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
   const tasks = buildTeamLaunchTasks(parsed, decomposition, effectiveWorkerCount);
   const launchTeamName = resolveAvailableTeamName(parsed.teamName, cwd);
 
-  const needsRolePrompts = Boolean(parsed.role)
-    || parsed.workerSpecs.some((spec) => Boolean(spec.role));
-  const rolePromptOptions = needsRolePrompts
-    ? collectStartRolePromptOptions(parsed, (await import('../../agents/utils.js')).loadAgentPrompt)
-    : {};
+  const rolePromptOptions = await collectStartRolePromptOptions(parsed);
 
   const runtime = await startTeamV2({
     teamName: launchTeamName,
@@ -860,7 +843,7 @@ async function handleTeamStatus(teamName: string, cwd: string): Promise<void> {
     const latestLeaderNudge = (await readTeamEventsByType(teamName, 'team_leader_nudge', cwd)).at(-1);
     const { readTeamConfig } = await import('../../team/monitor.js');
     const config = await readTeamConfig(teamName, cwd);
-    console.log(`team=${snapshot.teamName} instance_id=${snapshot.instanceId} phase=${snapshot.phase}`);
+    console.log(`team=${snapshot.teamName} instance_id=${config?.instance_id ?? 'n/a'} phase=${snapshot.phase}`);
     console.log(`workspace_mode=${config?.workspace_mode ?? 'single'} worktree_mode=${config?.worktree_mode ?? 'disabled'} team_state_root=${config?.team_state_root ?? 'n/a'}`);
     console.log(`workers: total=${snapshot.workers.length}`);
     for (const worker of config?.workers ?? []) {

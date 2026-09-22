@@ -1133,13 +1133,6 @@ async function main(): Promise<void> {
       newWindow,
       autoMerge,
     });
-    if (v2Runtime.startupFailures.length > 0) {
-      process.stderr.write(
-        `[runtime-cli] worker startup failures: ${v2Runtime.startupFailures
-          .map((failure) => `${failure.worker}:${failure.reason}`)
-          .join(',')}\n`,
-      );
-    }
     if (v2Runtime.instanceId !== instanceId) {
       throw new Error('team_instance_identity_mismatch');
     }

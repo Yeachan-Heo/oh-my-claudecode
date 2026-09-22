@@ -11,6 +11,12 @@ const agentUtilsMocks = vi.hoisted(() => ({
   loadAgentPrompt: vi.fn((role: string) => `prompt:${role}`),
 }));
 
+const monitorMocks = vi.hoisted(() => ({
+  readTeamConfig: vi.fn(async () => ({
+    instance_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  })),
+}));
+
 vi.mock('../../../team/runtime-v2.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../team/runtime-v2.js')>();
   return {
@@ -25,6 +31,14 @@ vi.mock('../../../team/runtime-v2.js', async (importOriginal) => {
 vi.mock('../../../agents/utils.js', () => ({
   loadAgentPrompt: agentUtilsMocks.loadAgentPrompt,
 }));
+
+vi.mock('../../../team/monitor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../team/monitor.js')>();
+  return {
+    ...actual,
+    readTeamConfig: monitorMocks.readTeamConfig,
+  };
+});
 
 describe('teamCommand role-only shorthand', () => {
   const originalCwd = process.cwd();
@@ -43,7 +57,6 @@ describe('teamCommand role-only shorthand', () => {
     });
     runtimeV2Mocks.monitorTeamV2.mockResolvedValue({
       teamName: 'fix-the-bug',
-      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       phase: 'team-exec',
       workers: [],
       nonReportingWorkers: [],

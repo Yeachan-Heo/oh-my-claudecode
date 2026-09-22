@@ -572,8 +572,8 @@ export interface TeamRuntimeV2 {
   config: TeamConfig;
   cwd: string;
   ownsWindow: boolean;
-  /** Workers that launched without startup evidence. Empty on a clean start. */
-  startupFailures: TeamStartupFailure[];
+  /** Workers that launched without startup evidence. Set by startTeamV2. */
+  startupFailures?: TeamStartupFailure[];
 }
 
 // ---------------------------------------------------------------------------
@@ -582,8 +582,6 @@ export interface TeamRuntimeV2 {
 
 export interface TeamSnapshotV2 {
   teamName: string;
-  /** Observed incarnation id. Name-only status uses this; it is not extra authority. */
-  instanceId: TeamInstanceId;
   phase: TeamPhase;
   workers: Array<{
     name: string;
@@ -5662,7 +5660,6 @@ export async function monitorTeamV2(
 
   return {
     teamName: sanitized,
-    instanceId: monitorInstance.instance_id,
     phase,
     workers,
     tasks: {
@@ -6285,7 +6282,6 @@ export async function resumeTeamV2(
       ownsWindow: config.tmux_window_owned === true,
       config,
       cwd,
-      startupFailures: [],
     };
   }
   if (!isValidTmuxServerIdentity(config.tmux_server_identity)
@@ -6310,7 +6306,6 @@ export async function resumeTeamV2(
     ownsWindow: config.tmux_window_owned === true,
     config,
     cwd,
-    startupFailures: [],
   };
 }
 
