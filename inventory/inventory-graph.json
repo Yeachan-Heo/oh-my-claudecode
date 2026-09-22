@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "06ca339ec553d58698706a169bf5870feedca137",
-    "sourceSha256": "9b336dc833ac148a952a173001061a27981455dbb6867cf645bc994cc7fec9d6",
+    "head": "b823a21b4907bffe0389d0a19b57a34905771dd9",
+    "sourceSha256": "b892398322bb4c046e6d0f16a5ccb2408b652bafaa81c903526bdeabe406d83a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "06ca339ec553d58698706a169bf5870feedca137",
-  "sourceSha256": "9b336dc833ac148a952a173001061a27981455dbb6867cf645bc994cc7fec9d6",
+  "head": "b823a21b4907bffe0389d0a19b57a34905771dd9",
+  "sourceSha256": "b892398322bb4c046e6d0f16a5ccb2408b652bafaa81c903526bdeabe406d83a",
   "counts": {
     "public": {
       "skills": 43,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1384,
-      "total": 1406
+      "srcFiles": 1385,
+      "total": 1407
     },
     "generated": {
       "distFiles": 5066,
@@ -35657,6 +35657,11 @@
         "path": "src/__tests__/run-cjs-windows-stdio-contract.test.ts"
       },
       {
+        "id": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/run-cjs-worker-skip-guard.test.ts"
+      },
+      {
         "id": "src/__tests__/runtime-guidance-plan-ralph.test.ts",
         "kind": "src",
         "path": "src/__tests__/runtime-guidance-plan-ralph.test.ts"
@@ -49451,6 +49456,26 @@
       {
         "from": "src/__tests__/run-cjs-windows-stdio-contract.test.ts",
         "to": "scripts/run.cjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -80885,12 +80910,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7063,
-      "edgeCount": 7815,
-      "importEdgeCount": 6430,
+      "nodeCount": 7064,
+      "edgeCount": 7819,
+      "importEdgeCount": 6434,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "71947a21e024d853dfa5c8c677e9b84cba8dcdf468aaacee2e4fe82b66404d7c",
-  "manifestSha256": "a0c9251c98dfe0d1cc5022a7590d494b7d97ee84e9b61991f84c8150f9de0aa3"
+  "inventorySha256": "87e7baecec3709ebbab3d8ecc3fa703568c8973a5cedd9d1a00669e27c244597",
+  "manifestSha256": "93184d8a1569a447232e24a8d5efde741f5c21ce64d91a77de619d0683c0f4da"
 }
