@@ -558,6 +558,11 @@ export { isRuntimeV2Enabled } from './runtime-flags.js';
 // Runtime state (returned by startTeam, consumed by monitorTeam/shutdownTeam)
 // ---------------------------------------------------------------------------
 
+export interface TeamStartupFailure {
+  worker: string;
+  reason: string;
+}
+
 export interface TeamRuntimeV2 {
   teamName: string;
   sanitizedName: string;
@@ -567,6 +572,8 @@ export interface TeamRuntimeV2 {
   config: TeamConfig;
   cwd: string;
   ownsWindow: boolean;
+  /** Workers that launched without startup evidence. Set by startTeamV2. */
+  startupFailures?: TeamStartupFailure[];
 }
 
 // ---------------------------------------------------------------------------
@@ -934,6 +941,8 @@ export interface StartTeamV2Config {
   workerRoles?: string[];
   roleName?: string;
   rolePrompt?: string;
+  /** Per-role overlay prompts. Mixed-role launches look up by worker role. */
+  rolePromptByRole?: Record<string, string>;
   /**
    * Optional pre-loaded plugin config. When omitted, `loadConfig()` is called
    * at startup. Exposed so callers (tests, bridges) can inject a config.
@@ -3826,6 +3835,20 @@ function resolveLeaderClaudeSessionId(): string | undefined {
   return undefined;
 }
 
+function resolveWorkerBootstrapInstructions(
+  config: Pick<StartTeamV2Config, 'rolePrompt' | 'rolePromptByRole' | 'workerRoles'>,
+  workerIndex: number,
+  preparedRole?: CanonicalTeamRole,
+): string | undefined {
+  const roles = [preparedRole, config.workerRoles?.[workerIndex]];
+  for (const role of roles) {
+    if (typeof role !== 'string' || role.length === 0) continue;
+    const prompt = config.rolePromptByRole?.[role];
+    if (typeof prompt === 'string' && prompt.length > 0) return prompt;
+  }
+  return config.rolePrompt;
+}
+
 /**
  * Start a team with the v2 event-driven runtime.
  * Creates state directories, writes config + task files, spawns workers via
@@ -4098,13 +4121,14 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       const prepared = preparedLaunches.get(wName);
       if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
       await ensureWorkerStateDir(sanitized, wName, leaderCwd);
+      const bootstrapInstructions = resolveWorkerBootstrapInstructions(config, i, prepared.role);
       const overlayPath = await writeWorkerOverlay({
         teamName: sanitized, workerName: wName, agentType: prepared.agentType,
         tasks: config.tasks.map((t, idx) => ({
           id: String(idx + 1), subject: t.subject, description: t.description,
         })),
         cwd: leaderCwd,
-        ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
+        ...(bootstrapInstructions ? { bootstrapInstructions } : {}),
         instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
         ...(prepared.role && shouldInjectContract(prepared.role, prepared.agentType)
           ? { reviewerRole: true } : {}),
@@ -4271,6 +4295,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
 
   const launchedWorkers: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }> = [];
+  const startupFailures: TeamStartupFailure[] = [];
   try {
     // Reuse the same first-per-worker selection used by assignment and
     // preflight; no second dedupe policy may diverge from startupByWorker.
@@ -4326,6 +4351,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     }
 
     if (workerLaunch.startupFailureReason) {
+      startupFailures.push({ worker: wName, reason: workerLaunch.startupFailureReason });
       const logEventFailure = createSwallowedErrorLogger(
         'team.runtime-v2.startTeamV2 appendTeamEvent failed',
       );
@@ -4473,6 +4499,7 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     config: teamConfig,
     cwd: leaderCwd,
     ownsWindow: ownsWindow,
+    startupFailures,
   };
   });
 }

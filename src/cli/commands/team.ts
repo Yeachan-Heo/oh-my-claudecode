@@ -713,6 +713,25 @@ function parseTeamApiArgs(args: string[]): {
 // Team start (spawns tmux workers)
 // ---------------------------------------------------------------------------
 
+async function collectStartRolePromptOptions(parsed: ParsedTeamArgs): Promise<{
+  roleName?: string;
+  rolePrompt?: string;
+  rolePromptByRole?: Record<string, string>;
+}> {
+  const rolePromptByRole: Record<string, string> = {};
+  const roles = parsed.workerSpecs.flatMap((spec) => spec.role ? [spec.role] : []);
+  if (roles.length === 0) return {};
+  const { loadAgentPrompt } = await import('../../agents/utils.js');
+  for (const role of roles) {
+    if (Object.hasOwn(rolePromptByRole, role)) continue;
+    rolePromptByRole[role] = loadAgentPrompt(role);
+  }
+  return {
+    ...(parsed.role ? { roleName: parsed.role, rolePrompt: rolePromptByRole[parsed.role] } : {}),
+    rolePromptByRole,
+  };
+}
+
 async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<void> {
   const { isRuntimeV2Enabled, startTeamV2, monitorTeamV2 } = await import('../../team/runtime-v2.js');
   if (!isRuntimeV2Enabled()) {
@@ -735,12 +754,7 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
   const tasks = buildTeamLaunchTasks(parsed, decomposition, effectiveWorkerCount);
   const launchTeamName = resolveAvailableTeamName(parsed.teamName, cwd);
 
-  // Load role prompt if a role was specified (e.g., 3:codex:architect)
-  let rolePrompt: string | undefined;
-  if (parsed.role) {
-    const { loadAgentPrompt } = await import('../../agents/utils.js');
-    rolePrompt = loadAgentPrompt(parsed.role);
-  }
+  const rolePromptOptions = await collectStartRolePromptOptions(parsed);
 
   const runtime = await startTeamV2({
     teamName: launchTeamName,
@@ -750,14 +764,17 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
     cwd,
     newWindow: parsed.newWindow,
     workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
-    ...(rolePrompt ? { roleName: parsed.role, rolePrompt } : {}),
+    ...rolePromptOptions,
     ...(parsed.autoMerge ? { autoMerge: true } : {}),
   });
 
   const uniqueTypes = [...new Set(parsed.agentTypes)].join(',');
+  const startupFailures = runtime.startupFailures ?? [];
+  const ok = startupFailures.length === 0;
+  if (!ok) process.exitCode = 1;
+  const snapshot = await monitorTeamV2(runtime.teamName, cwd, runtime.instanceId);
 
   if (parsed.json) {
-    const snapshot = await monitorTeamV2(runtime.teamName, cwd, runtime.instanceId);
     console.log(JSON.stringify({
       teamName: runtime.teamName,
       sessionName: runtime.sessionName,
@@ -765,7 +782,21 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
       workerCount: runtime.config.worker_count,
       agentType: uniqueTypes,
       tasks: snapshot ? snapshot.tasks : null,
+      ok,
+      startupFailures,
     }));
+    return;
+  }
+
+  if (!ok) {
+    console.error(`Team start incomplete: ${runtime.teamName}`);
+    console.error(`tmux session: ${runtime.sessionName}`);
+    console.error(`instance id: ${runtime.instanceId}`);
+    console.error(`workers: ${runtime.config.worker_count}`);
+    console.error(`agent_type: ${uniqueTypes}`);
+    for (const failure of startupFailures) {
+      console.error(`startup_failure worker=${failure.worker} reason=${failure.reason}`);
+    }
     return;
   }
 
@@ -774,8 +805,6 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
   console.log(`instance id: ${runtime.instanceId}`);
   console.log(`workers: ${runtime.config.worker_count}`);
   console.log(`agent_type: ${uniqueTypes}`);
-
-  const snapshot = await monitorTeamV2(runtime.teamName, cwd, runtime.instanceId);
   if (snapshot) {
     console.log(`tasks: total=${snapshot.tasks.total} pending=${snapshot.tasks.pending} in_progress=${snapshot.tasks.in_progress} completed=${snapshot.tasks.completed} failed=${snapshot.tasks.failed}`);
   }
@@ -814,7 +843,7 @@ async function handleTeamStatus(teamName: string, cwd: string): Promise<void> {
     const latestLeaderNudge = (await readTeamEventsByType(teamName, 'team_leader_nudge', cwd)).at(-1);
     const { readTeamConfig } = await import('../../team/monitor.js');
     const config = await readTeamConfig(teamName, cwd);
-    console.log(`team=${snapshot.teamName} phase=${snapshot.phase}`);
+    console.log(`team=${snapshot.teamName} instance_id=${config?.instance_id ?? 'n/a'} phase=${snapshot.phase}`);
     console.log(`workspace_mode=${config?.workspace_mode ?? 'single'} worktree_mode=${config?.worktree_mode ?? 'disabled'} team_state_root=${config?.team_state_root ?? 'n/a'}`);
     console.log(`workers: total=${snapshot.workers.length}`);
     for (const worker of config?.workers ?? []) {
