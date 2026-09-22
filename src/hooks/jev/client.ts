@@ -6,7 +6,7 @@
  * Throws JevClientError on any failure; the resolver catches and degrades.
  */
 
-import type { JevQuestions, JevResponse } from './types.js';
+import type { JevQuestionDef, JevQuestions, JevResponse } from './types.js';
 
 export class JevClientError extends Error {
   constructor(message: string) {
@@ -44,7 +44,7 @@ export async function queryJev(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${options.apiKey}`,
       },
-      body: JSON.stringify({ state, questions, model: JEV_MODEL }),
+      body: JSON.stringify({ state, questions: serializeQuestions(questions), model: JEV_MODEL }),
       signal: controller.signal,
     }), timeoutPromise]);
     if (!response.ok) {
@@ -63,6 +63,26 @@ export async function queryJev(
 }
 
 export const JEV_MODEL = 'jev-latest';
+
+/** A question as the API accepts it: `score` carries an ordered criteria list. */
+type WireQuestion = Omit<JevQuestionDef, 'criteria'> & { criteria: Record<string, string> | string[] };
+
+/**
+ * Map authored questions onto the wire schema. Criteria are authored as a
+ * named map for readability, but `score` questions are rejected with HTTP 422
+ * (`Input should be a valid list`) unless the criteria are an ordered list of
+ * descriptions from low to high; the answer legend then comes back keyed by
+ * index. `choice` and `noul` take the map unchanged.
+ */
+export function serializeQuestions(questions: JevQuestions): Record<string, WireQuestion> {
+  const out: Record<string, WireQuestion> = {};
+  for (const [name, question] of Object.entries(questions)) {
+    out[name] = question.type === 'score'
+      ? { ...question, criteria: Object.values(question.criteria) }
+      : question;
+  }
+  return out;
+}
 
 /**
  * Minimal response validation: object with a non-empty `answers` dict whose

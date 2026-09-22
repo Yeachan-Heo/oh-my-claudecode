@@ -66,7 +66,7 @@ configure anything see zero behavior change.
   - `TYPESAFE_API_KEY` — presence enables Jev globally
   - `OMC_JEV=off` — master switch overriding key presence
   - `OMC_JEV=<point[,point...]>` — explicit per-point opt-in; unset = no points enabled (a key alone sends nothing anywhere, per owner review of #4058)
-  - `OMC_JEV_TIMEOUT_MS` — per-call timeout, default `250`
+  - `OMC_JEV_TIMEOUT_MS` — per-call timeout, default `2000` (measured single-question round-trips are 465-605 ms)
   - `OMC_JEV_MAX_REQUESTS` — per-session request cap; exceeded → degraded mode for the rest of the session
   - `OMC_JEV_EXCERPT_CHARS` — max excerpt length sent in state, default `200`
 - **Five judgment points, in delivery order**:
