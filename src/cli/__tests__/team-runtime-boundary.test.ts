@@ -45,6 +45,8 @@ describe('team cli runtime boundary', () => {
     expect(startSection).toContain('team_start_unsafe_runtime_v1');
     expect(startSection).toContain('if (!isRuntimeV2Enabled())');
     expect(startSection).toContain('startTeamV2({');
+    expect(startSection).toContain('startupFailures');
+    expect(startSection).toContain('Team start incomplete');
     expect(startSection).not.toContain('startTeam({');
     expect(startSection).not.toContain('from \'../../team/runtime.js\'');
 

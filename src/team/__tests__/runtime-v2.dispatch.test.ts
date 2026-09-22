@@ -2556,6 +2556,36 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(persisted.workers.map((worker: { role: string }) => worker.role)).toEqual(['architect', 'writer']);
   });
 
+  it('writes per-worker role prompts into mixed-role overlays', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-mixed-role-overlay-');
+    const { startTeamV2 } = await import('../runtime-v2.js');
+
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 2,
+      agentTypes: ['codex', 'gemini'],
+      workerRoles: ['architect', 'writer'],
+      rolePromptByRole: {
+        architect: 'ARCHITECT_ROLE_PROMPT_UNIQUE',
+        writer: 'WRITER_ROLE_PROMPT_UNIQUE',
+      },
+      tasks: [
+        { subject: 'Worker 1 (architect): draft launch plan', description: 'draft launch plan', owner: 'worker-1', role: 'architect' },
+        { subject: 'Worker 2 (writer): draft launch plan', description: 'draft launch plan', owner: 'worker-2', role: 'writer' },
+      ],
+      cwd,
+    });
+
+    expect(runtime.startupFailures).toEqual([]);
+
+    const overlay1 = await readFile(absPath(cwd, TeamPaths.overlay('dispatch-team', 'worker-1')), 'utf-8');
+    const overlay2 = await readFile(absPath(cwd, TeamPaths.overlay('dispatch-team', 'worker-2')), 'utf-8');
+    expect(overlay1).toContain('ARCHITECT_ROLE_PROMPT_UNIQUE');
+    expect(overlay1).not.toContain('WRITER_ROLE_PROMPT_UNIQUE');
+    expect(overlay2).toContain('WRITER_ROLE_PROMPT_UNIQUE');
+    expect(overlay2).not.toContain('ARCHITECT_ROLE_PROMPT_UNIQUE');
+  });
+
   it('routes inferred review work through alias-keyed resolved snapshot entries', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-alias-routing-');
     await mkdir(join(cwd, '.claude'), { recursive: true });
@@ -3024,6 +3054,9 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(runtime.config.workers[0]?.pane_id).toBe('%2');
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+    expect(runtime.startupFailures).toEqual([
+      { worker: 'worker-1', reason: 'worker_startup_evidence_missing' },
+    ]);
     expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
 
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
