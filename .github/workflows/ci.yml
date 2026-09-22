@@ -569,7 +569,11 @@ jobs:
           npm publish "$FINAL_TARBALL" --ignore-scripts --access public --provenance 2>&1 | tee npm-publish.log
           VERIFICATION_PREFIX="$RUNNER_TEMP/npm-provenance-verification"
           AUDIT_JSON="$VERIFICATION_PREFIX/audit-signatures.json"
-          MAX_PROPAGATION_ATTEMPTS=12
+          # The archive is already on the registry at this point: everything below
+          # only waits for it to become visible. The budget must outlast real
+          # propagation (#4083 saw the version land 1.7s after a 12-attempt
+          # window gave up), so keep ~28 minutes of polling.
+          MAX_PROPAGATION_ATTEMPTS=30
           ATTEMPT=1
           BACKOFF_SECONDS=10
           while [ "$ATTEMPT" -le "$MAX_PROPAGATION_ATTEMPTS" ]; do
@@ -578,7 +582,8 @@ jobs:
               break
             fi
             if [ "$ATTEMPT" -eq "$MAX_PROPAGATION_ATTEMPTS" ]; then
-              echo "npm registry propagation did not complete after $MAX_PROPAGATION_ATTEMPTS attempts" >&2
+              echo "oh-my-claude-sisyphus@$VERSION was PUBLISHED to the registry; it did not become visible after $MAX_PROPAGATION_ATTEMPTS attempts" >&2
+              echo "do not republish: recover the GitHub Release with the Release Recovery workflow (tag=$GITHUB_REF_NAME sha=$GITHUB_SHA)" >&2
               exit 1
             fi
             ATTEMPT=$((ATTEMPT + 1))
