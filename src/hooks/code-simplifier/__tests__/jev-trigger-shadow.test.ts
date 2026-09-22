@@ -75,7 +75,7 @@ function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ body: string }> } 
       status: 200,
       json: async () => ({
         answers: {
-          simplification_worthy: { type: 'Noul', noul: true, confidence: 0.8 },
+          simplification_worthy: { type: 'noul', noul: true, confidence: 0.8 },
         },
       }),
     } as unknown as Response;
@@ -124,7 +124,7 @@ describe('simplifier-trigger shadow judgment point', () => {
     expect(entry.point).toBe('simplifier-trigger');
     expect(entry.mode).toBe('shadow');
     expect(entry.heuristic).toBe(true);
-    expect(entry.jev?.type).toBe('Noul');
+    expect(entry.jev?.type).toBe('noul');
     expect(entry.state).toMatchObject({ cwd: repoDir, files, source: 'code-simplifier-stop' });
     expect(calls).toHaveLength(1);
   });

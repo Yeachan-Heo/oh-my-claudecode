@@ -44,7 +44,7 @@ afterEach(async () => {
 function stubFetch(answer: Partial<JevAnswer>): { fetchFn: typeof fetch; calls: unknown[] } {
   const calls: unknown[] = [];
   const body = JSON.stringify({
-    answers: { answer: { type: answer.noul !== undefined ? 'Noul' : 'Choice', ...answer } },
+    answers: { answer: { type: answer.noul !== undefined ? 'noul' : 'choice', ...answer } },
   } satisfies JevResponse);
   const fetchFn = (async (_url: unknown, init?: unknown) => {
     calls.push(init);
@@ -89,13 +89,13 @@ describe('keyword-detector shadow judgment points', () => {
       mode: 'shadow',
       state: { prompt: PROMPT, source: 'user-prompt-submit' },
       heuristic: ['ralph'],
-      jev: { type: 'Choice', choice: 'autopilot', confidence: 0.8 },
+      jev: { type: 'choice', choice: 'autopilot', confidence: 0.8 },
     });
     expect(byPoint.get('intent')).toMatchObject({
       mode: 'shadow',
       state: { prompt: INTENT_PROMPT, mode_name: 'intent' },
       heuristic: true,
-      jev: { type: 'Noul', noul: false, confidence: 0.7 },
+      jev: { type: 'noul', noul: false, confidence: 0.7 },
     });
   });
 
