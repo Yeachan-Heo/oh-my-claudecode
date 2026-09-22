@@ -638,6 +638,31 @@ describe('agent output summarization / truncation (issue #1373)', () => {
     expect(out.hookSpecificOutput?.additionalContext).toContain('TaskOutput clipped');
     expect(out).not.toHaveProperty('suppressOutput');
   });
+
+  it.each(['abc', '300junk', '1.5', '1e2', '0', '-1', ' 300 ', '01'])(
+    'falls back to safe defaults for malformed agent output limits (%s)',
+    malformedLimit => {
+      const output = `important-result:${'x'.repeat(320)}`;
+      const out = runPostToolVerifier(
+        {
+          tool_name: 'TaskOutput',
+          tool_response: output,
+          session_id: 'malformed-agent-output-limit',
+          cwd: process.cwd(),
+        },
+        {
+          OMC_AGENT_OUTPUT_ANALYSIS_LIMIT: malformedLimit,
+          OMC_AGENT_OUTPUT_SUMMARY_LIMIT: malformedLimit,
+        },
+      );
+
+      expect(out.hookSpecificOutput?.additionalContext).toContain(
+        `TaskOutput summary: ${output}`,
+      );
+      expect(out.hookSpecificOutput?.additionalContext).not.toContain('TaskOutput clipped');
+      expect(out.hookSpecificOutput?.additionalContext).not.toContain('[truncated]');
+    },
+  );
 });
 
 describe('post-tool hook regression coverage (issue #2615)', () => {
