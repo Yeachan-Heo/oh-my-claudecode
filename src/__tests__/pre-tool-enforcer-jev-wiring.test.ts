@@ -124,6 +124,11 @@ describe('pre-tool-enforcer slop-warning judgment wiring (ticket 16)', () => {
       if (!line) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }
     expect(line).not.toBe('');
-    expect(JSON.parse(line)).toMatchObject({ point: 'slop-warning' });
+    // The request reaches the child through the temp file, not argv: the state
+    // it logs must still carry the tool input the enforcer inspected.
+    expect(JSON.parse(line)).toMatchObject({
+      point: 'slop-warning',
+      state: { toolName: 'Task', toolInput: { subagent_type: 'oh-my-claudecode:executor' } },
+    });
   });
 });

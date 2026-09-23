@@ -6,10 +6,10 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
@@ -591,7 +591,12 @@ function recordSlopWarningShadow(toolName, toolInput, warned) {
       questions: SLOP_WARNING_QUESTIONS,
       heuristic: warned,
     });
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./jev-resolve.mjs', import.meta.url)), request], {
+    // The request carries raw tool input, so it goes through a 0600 temp file,
+    // never argv: /proc/<pid>/cmdline is readable by every local user. The
+    // child deletes the file after reading it.
+    const requestFile = join(mkdtempSync(join(tmpdir(), 'omc-jev-')), 'request.json');
+    writeFileSync(requestFile, request, { encoding: 'utf8', mode: 0o600 });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./jev-resolve.mjs', import.meta.url)), '--request-file', requestFile], {
       stdio: ['ignore', 'ignore', 'ignore'],
       env: process.env,
     });
