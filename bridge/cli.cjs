@@ -46234,6 +46234,19 @@ function syncBundledSkillDefinitions(log3, options) {
     seenTargetDirs.add(dedupeKey);
     const relativePath = (0, import_path62.join)(targetDirName, "SKILL.md");
     const targetDir = (0, import_path62.join)(SKILLS_DIR, targetDirName);
+    let targetStat = null;
+    try {
+      targetStat = (0, import_fs48.lstatSync)(targetDir);
+    } catch (error2) {
+      if (error2.code !== "ENOENT") {
+        log3(`  Warning: Could not safely inspect ${targetDir}; treating it as a user-managed entry, so the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+        continue;
+      }
+    }
+    if (targetStat && (targetStat.isSymbolicLink() || !targetStat.isDirectory())) {
+      log3(`  Warning: ${targetDir} is a user-managed entry; the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+      continue;
+    }
     (0, import_fs48.cpSync)(sourceDir, targetDir, { recursive: true, force: true });
     markSkillAsOmcManaged(targetDir);
     installedSkills.push(relativePath.replace(/\\/g, "/"));
@@ -49020,14 +49033,33 @@ var init_types7 = __esm({
 function parseJevConfig(env2 = process.env) {
   const raw = env2.OMC_JEV?.trim();
   const masterOff = raw === "off";
-  let points = /* @__PURE__ */ new Set();
+  const points = /* @__PURE__ */ new Set();
+  const activatedPoints = /* @__PURE__ */ new Set();
+  let allPoints = false;
+  let activateAll = false;
   if (raw && raw !== "off") {
-    points = new Set(raw.split(",").map((p) => p.trim()).filter(Boolean));
+    for (const entry2 of raw.split(",")) {
+      const token = entry2.trim();
+      if (!token) continue;
+      const colon = token.lastIndexOf(":");
+      const name = colon === -1 ? token : token.slice(0, colon);
+      const isActive = colon !== -1 && token.slice(colon + 1) === "active";
+      if (name === "all") {
+        allPoints = true;
+        if (isActive) activateAll = true;
+      } else {
+        points.add(name);
+        if (isActive) activatedPoints.add(name);
+      }
+    }
   }
   return {
     apiKey: env2.TYPESAFE_API_KEY || null,
     masterOff,
     points,
+    allPoints,
+    activatedPoints,
+    activateAll,
     timeoutMs: positiveInt(env2.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
     maxRequests: positiveInt(env2.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env2.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
@@ -49040,8 +49072,8 @@ function isJevEnabled(config2) {
 }
 function pointState(point, config2, activated = ACTIVATED_POINTS) {
   if (!isJevEnabled(config2)) return "off";
-  if (!config2.points.has(point)) return "off";
-  return activated.has(point) ? "active" : "shadow";
+  if (!config2.allPoints && !config2.points.has(point)) return "off";
+  return activated.has(point) || config2.activateAll || config2.activatedPoints.has(point) ? "active" : "shadow";
 }
 function boundExcerpts(value, max) {
   if (typeof value === "string") {
@@ -49070,7 +49102,7 @@ var init_config = __esm({
     import_node_path7 = require("node:path");
     init_worktree_paths();
     JEV_DEFAULT_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
-    DEFAULT_TIMEOUT_MS = 250;
+    DEFAULT_TIMEOUT_MS = 2e3;
     DEFAULT_EXCERPT_CHARS = 200;
     ACTIVATED_POINTS = /* @__PURE__ */ new Set();
   }
@@ -49094,7 +49126,7 @@ async function queryJev(state, questions, options) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${options.apiKey}`
       },
-      body: JSON.stringify({ state, questions, model: JEV_MODEL }),
+      body: JSON.stringify({ state, questions: serializeQuestions(questions), model: JEV_MODEL }),
       signal: controller.signal
     }), timeoutPromise]);
     if (!response.ok) {
@@ -49110,6 +49142,13 @@ async function queryJev(state, questions, options) {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+function serializeQuestions(questions) {
+  const out = {};
+  for (const [name, question] of Object.entries(questions)) {
+    out[name] = question.type === "score" ? { ...question, criteria: Object.values(question.criteria) } : question;
+  }
+  return out;
 }
 function validateJevResponse(body) {
   if (body === null || typeof body !== "object") {
@@ -49166,10 +49205,15 @@ function recordFailure(point) {
     console.error("[jev] " + point + ": circuit open after " + count + " consecutive failures");
   }
 }
-async function resolveJudgment(args) {
+async function resolveJudgment(resolveJudgmentArgs) {
+  const args = resolveJudgmentArgs;
   const config2 = parseJevConfig();
   let mode = pointState(args.point, config2);
   if (args.mode && mode !== "off") mode = args.mode;
+  if (mode === "active" && !args.mode && !ACTIVATED_POINTS.has(args.point) && (config2.activateAll || config2.activatedPoints.has(args.point)) && !runtime.envWarned.has(args.point)) {
+    runtime.envWarned.add(args.point);
+    console.error("[jev] " + args.point + ": ACTIVE via env \u2014 Jev decides");
+  }
   const twinAnswer = () => args.twin();
   if (mode === "off") {
     return { answer: twinAnswer(), source: "twin", mode };
@@ -49252,7 +49296,8 @@ var init_resolver2 = __esm({
     runtime = {
       requestCount: 0,
       consecutiveFailures: /* @__PURE__ */ new Map(),
-      openCircuits: /* @__PURE__ */ new Set()
+      openCircuits: /* @__PURE__ */ new Set(),
+      envWarned: /* @__PURE__ */ new Set()
     };
   }
 });
@@ -49270,7 +49315,7 @@ function skillTriggerCriteria() {
 function skillTriggerQuestions() {
   return {
     "skill-trigger": {
-      type: "Choice",
+      type: "choice",
       instructions: "Which skill or mode should this user prompt trigger?",
       criteria: skillTriggerCriteria()
     }
@@ -49312,7 +49357,7 @@ var init_points = __esm({
     init_resolver2();
     INTENT_QUESTIONS = {
       intent: {
-        type: "Noul",
+        type: "noul",
         instructions: "Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?",
         criteria: {
           true: "The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake \u2014 a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.",
@@ -49322,14 +49367,14 @@ var init_points = __esm({
     };
     NOUL_QUESTIONS = {
       task_complete: {
-        type: "Noul",
+        type: "noul",
         instructions: "Is the task complete \u2014 is there no substantive work left for this mode?",
         criteria: {}
       }
     };
     SCORE_QUESTIONS = {
       iteration_progress: {
-        type: "Score",
+        type: "score",
         instructions: "How much substantive progress did the current iteration make?",
         criteria: {
           no_progress: "No progress",
@@ -49341,7 +49386,7 @@ var init_points = __esm({
     };
     MODEL_ROUTING_QUESTIONS = {
       "model-tier": {
-        type: "Choice",
+        type: "choice",
         instructions: "Which model tier should this delegated task use?",
         criteria: {
           haiku: "Quick lookups and lightweight, mechanical work",
@@ -49352,7 +49397,7 @@ var init_points = __esm({
     };
     STALENESS_QUESTIONS = {
       staleness: {
-        type: "Score",
+        type: "score",
         instructions: "How stale is this context candidate?",
         criteria: {
           fresh: "Fresh \u2014 keep",
@@ -49364,7 +49409,7 @@ var init_points = __esm({
     };
     VERDICT_QUESTIONS = {
       completion_criteria_met: {
-        type: "Noul",
+        type: "noul",
         instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
         criteria: {
           true: "All acceptance criteria are demonstrably satisfied by the evidence",
@@ -49374,7 +49419,7 @@ var init_points = __esm({
     };
     TASK_SIZE_QUESTIONS = {
       "task-size": {
-        type: "Choice",
+        type: "choice",
         instructions: "What size is this task \u2014 how much orchestration does it warrant?",
         criteria: {
           small: "Single-file or few-line change; run directly without heavy modes",
@@ -49385,7 +49430,7 @@ var init_points = __esm({
     };
     LEARNER_EXTRACTION_QUESTIONS = {
       extractable_moment: {
-        type: "Noul",
+        type: "noul",
         instructions: "Does this assistant message contain an extractable memory-worthy moment?",
         criteria: {
           true: "Contains a reusable pattern, decision, or correction worth persisting",
@@ -49395,7 +49440,7 @@ var init_points = __esm({
     };
     SLOP_WARNING_QUESTIONS = {
       slop_advisory: {
-        type: "Noul",
+        type: "noul",
         instructions: "Does this tool input contain fallback/workaround language worth an advisory warning?",
         criteria: {
           true: "Contains fallback/workaround phrasing outside doc or self-referential context",
@@ -49405,7 +49450,7 @@ var init_points = __esm({
     };
     SIMPLIFIER_TRIGGER_QUESTIONS = {
       simplification_worthy: {
-        type: "Noul",
+        type: "noul",
         instructions: "Is this change simplification-worthy enough to inject the simplifier delegation?",
         criteria: {
           true: "The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)",
@@ -72281,6 +72326,16 @@ function renderRecoveryContinuationInstruction(instruction) {
     `Before a risky boundary and before yielding, publish the next authenticated checkpoint: \`${checkpoint}\`.`
   ].join("\n");
 }
+function renderWorkerExitContract(agentType, reviewerRole = false) {
+  const transitionTaskStatusCommand = formatOmcCliInvocation("team api transition-task-status");
+  if (agentType === "cursor" && reviewerRole) {
+    return "Write the trusted structured verdict, ACK the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written.";
+  }
+  if (agentType === "cursor") {
+    return `Run \`${transitionTaskStatusCommand}\` when the assigned task is done, then keep waiting for the next mailbox message. Exit only when the leader sends an explicit shutdown.`;
+  }
+  return `You MUST call \`${transitionTaskStatusCommand}\` to mark your task as "completed" or "failed" before exiting.`;
+}
 function renderCursorWorkerGuidance(reviewerRole = false) {
   const claimTaskCommand = formatOmcCliInvocation("team api claim-task");
   const transitionTaskStatusCommand = formatOmcCliInvocation("team api transition-task-status");
@@ -72372,6 +72427,7 @@ function generateWorkerOverlay(params) {
   Description: ${t.description}
   Status: pending`).join("\n") : "- No tasks assigned yet. Check your inbox for assignments.";
   const cursorReviewer = agentType === "cursor" && reviewerRole === true;
+  const persistentCursor = agentType === "cursor" && !cursorReviewer;
   const mandatoryWorkflow = cursorReviewer ? [
     "You MUST complete the reviewer steps below. Do NOT skip any step.",
     "",
@@ -72384,7 +72440,7 @@ function generateWorkerOverlay(params) {
     "4. **Write the structured verdict** required by the trusted reviewer contract.",
     "5. **Keep the Cursor session alive** after writing the verdict; the leader consumes it and transitions the task."
   ].join("\n") : [
-    "You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.",
+    persistentCursor ? "You MUST complete ALL of these steps. Transitioning the task does not end the session." : "You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.",
     "",
     "1. **Claim** your task (run this command first):",
     `   \`${claimTaskCommand}\``,
@@ -72392,10 +72448,10 @@ function generateWorkerOverlay(params) {
     "2. **Do the work** described in your task assignment below.",
     "3. **Send ACK** to the leader:",
     `   \`${sendAckCommand}\``,
-    "4. **Transition** the task status (REQUIRED before exit):",
+    persistentCursor ? "4. **Transition** the task status when that task is done:" : "4. **Transition** the task status (REQUIRED before exit):",
     `   - On success: \`${completeTaskCommand}\``,
     `   - On failure: \`${failTaskCommand}\``,
-    "5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit."
+    persistentCursor ? `5. **Stay in the session**: ${renderWorkerExitContract(agentType, false)}` : "5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit."
   ].join("\n");
   return `# Team Worker Protocol
 
@@ -72488,8 +72544,10 @@ When you see a shutdown request in your inbox:
 
 ${agentTypeGuidance(agentType, reviewerRole)}
 
-${cursorReviewer ? "## BEFORE YOU YIELD THE REVIEW TURN\nWrite the trusted structured verdict, ACK the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written." : `## BEFORE YOU EXIT
-You MUST call \`${formatOmcCliInvocation("team api transition-task-status")}\` to mark your task as "completed" or "failed" before exiting.
+${cursorReviewer ? `## BEFORE YOU YIELD THE REVIEW TURN
+${renderWorkerExitContract(agentType, true)}` : persistentCursor ? `## BEFORE YOU YIELD
+${renderWorkerExitContract(agentType, false)}` : `## BEFORE YOU EXIT
+${renderWorkerExitContract(agentType, false)}
 If you skip this step, the leader cannot track your work and the task will appear stuck.`}
 
 ${bootstrapInstructions ? `## Role Context
@@ -76416,17 +76474,18 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, c
   const failTaskCommand = formatOmcCliInvocation(
     `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: "in_progress", to: "failed", claim_token: "<claim_token>" })}' --json`
   );
-  const cursorReviewer = agentType === "cursor" && Boolean(cliOutputContract);
+  const persistentCursor = agentType === "cursor";
+  const cursorReviewer = persistentCursor && Boolean(cliOutputContract);
   const lifecycleInstructions = cursorReviewer ? [
     `3. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
-    `4. ACK/progress replies are not a stop signal. Keep the Cursor session alive for further mailbox instructions; the leader transitions this task after consuming the verdict.`
+    `4. ${renderWorkerExitContract(agentType, true)}`
   ] : [
     `3. On completion (use claim_token from step 1):`,
     `   ${completeTaskCommand}`,
     `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
     `4. On failure (use claim_token from step 1):`,
     `   ${failTaskCommand}`,
-    `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`
+    persistentCursor ? `5. ${renderWorkerExitContract(agentType, false)}` : `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`
   ];
   return [
     `## REQUIRED: Task Lifecycle Commands`,
@@ -76445,7 +76504,7 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, c
     ``,
     task.description,
     ``,
-    cursorReviewer ? `REMINDER: Write the verdict before yielding the review turn. Do NOT run transition-task-status or write done.json; the leader owns the terminal transition.` : `REMINDER: You MUST run transition-task-status before exiting. Do NOT write done.json or edit task files directly.`,
+    cursorReviewer ? `REMINDER: ${renderWorkerExitContract(agentType, true)} Do NOT write done.json; the leader owns the terminal transition.` : `REMINDER: ${renderWorkerExitContract(agentType, false)} Do NOT write done.json or edit task files directly.`,
     ...agentType === "cursor" ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))] : [],
     ...cliOutputContract ? [cliOutputContract] : []
   ].join("\n");
@@ -76552,7 +76611,11 @@ async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit, p
   if (!settled) {
     settled = await waitForCurrentEvidence(engagedPane ? policy.engagedPaneRecheckBudgetMs : policy.finalRecheckBudgetMs);
   }
-  return settled;
+  return { settled, paneBusy: engagedPane };
+}
+function startupEvidenceMissingReason(paneBusy, agentType) {
+  const base = agentType ? `${agentType}_startup_evidence_missing` : "worker_startup_evidence_missing";
+  return paneBusy ? `${base}_pane_busy` : base;
 }
 function promptModeRecoveryRequiresProgressEvidence(promptMode, continuationCount) {
   return promptMode && continuationCount > 0;
@@ -76773,17 +76836,17 @@ async function spawnV2Worker(opts) {
           inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
           notify: async (_target, triggerMessage) => {
             if (usePromptMode) {
-              const settled2 = await waitForBoundedStartupEvidence();
-              return settled2 ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: `${opts.agentType}_startup_evidence_missing` };
+              const settlement2 = await waitForBoundedStartupEvidence();
+              return settlement2.settled ? { ok: true, transport: "prompt_stdin", reason: "prompt_mode_worker_confirmed" } : { ok: false, transport: "prompt_stdin", reason: startupEvidenceMissingReason(settlement2.paneBusy, opts.agentType) };
             }
             const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
             if (!attempted.ok) {
               return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
             }
-            const settled = await waitForBoundedStartupEvidence(
+            const settlement = await waitForBoundedStartupEvidence(
               opts.agentType === "cursor" || opts.agentType === "codex" ? void 0 : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })
             );
-            return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
+            return settlement.settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: startupEvidenceMissingReason(settlement.paneBusy) };
           },
           deps: { writeWorkerInbox }
         });
@@ -78344,7 +78407,8 @@ ${recoveryContract}` : ""}`;
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
-            if (!await waitForBoundedStartupEvidence()) return { ok: false, error: `${pending.agentType}_startup_evidence_missing` };
+            const settlement = await waitForBoundedStartupEvidence();
+            if (!settlement.settled) return { ok: false, error: startupEvidenceMissingReason(settlement.paneBusy, pending.agentType) };
           } else if (pending.promptMode) {
           } else {
             const recoveryTriggerMessage = `${generateTriggerMessage(
@@ -78368,10 +78432,10 @@ ${recoveryContract}` : ""}`;
                 if (!attempted.ok) {
                   return { ok: false, transport: "tmux_send_keys", reason: `worker_notify_failed:${attempted.reason}` };
                 }
-                const settled = await waitForBoundedStartupEvidence(
+                const settlement = await waitForBoundedStartupEvidence(
                   pending.agentType === "cursor" || pending.agentType === "codex" ? void 0 : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true })
                 );
-                return settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: "worker_startup_evidence_missing" };
+                return settlement.settled ? { ok: true, transport: "tmux_send_keys", reason: "worker_startup_confirmed" } : { ok: false, transport: "tmux_send_keys", reason: startupEvidenceMissingReason(settlement.paneBusy) };
               },
               deps: { writeWorkerInbox }
             });
@@ -78583,6 +78647,15 @@ function resolveLeaderClaudeSessionId() {
     }
   }
   return void 0;
+}
+function resolveWorkerBootstrapInstructions(config2, workerIndex2, preparedRole) {
+  const roles = [preparedRole, config2.workerRoles?.[workerIndex2]];
+  for (const role of roles) {
+    if (typeof role !== "string" || role.length === 0) continue;
+    const prompt = config2.rolePromptByRole?.[role];
+    if (typeof prompt === "string" && prompt.length > 0) return prompt;
+  }
+  return config2.rolePrompt;
 }
 async function startTeamV2(config2) {
   if (!Array.isArray(config2.agentTypes) || config2.agentTypes.length === 0) {
@@ -78815,6 +78888,7 @@ async function startTeamV2(config2) {
         const prepared = preparedLaunches.get(wName);
         if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
         await ensureWorkerStateDir(sanitized, wName, leaderCwd);
+        const bootstrapInstructions = resolveWorkerBootstrapInstructions(config2, i, prepared.role);
         const overlayPath = await writeWorkerOverlay({
           teamName: sanitized,
           workerName: wName,
@@ -78825,7 +78899,7 @@ async function startTeamV2(config2) {
             description: t.description
           })),
           cwd: leaderCwd,
-          ...config2.rolePrompt ? { bootstrapInstructions: config2.rolePrompt } : {},
+          ...bootstrapInstructions ? { bootstrapInstructions } : {},
           instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
           ...prepared.role && shouldInjectContract(prepared.role, prepared.agentType) ? { reviewerRole: true } : {}
         });
@@ -78991,6 +79065,7 @@ async function startTeamV2(config2) {
       throw error2;
     }
     const launchedWorkers = [];
+    const startupFailures = [];
     try {
       for (const [wName, taskIndex] of startupByWorker) {
         const workerIndex2 = Number.parseInt(wName.replace("worker-", ""), 10) - 1;
@@ -79042,6 +79117,7 @@ async function startTeamV2(config2) {
           }
         }
         if (workerLaunch.startupFailureReason) {
+          startupFailures.push({ worker: wName, reason: workerLaunch.startupFailureReason });
           const logEventFailure2 = createSwallowedErrorLogger(
             "team.runtime-v2.startTeamV2 appendTeamEvent failed"
           );
@@ -79167,7 +79243,8 @@ async function startTeamV2(config2) {
       sessionName: sessionName2,
       config: teamConfig,
       cwd: leaderCwd,
-      ownsWindow
+      ownsWindow,
+      startupFailures
     };
   });
 }
@@ -80370,7 +80447,7 @@ Then exit your session.
   }
   if (paneCleanupUnknown.length > 0) {
     if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-    return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: paneCleanupUnknown };
+    return { outcome: "preserved", reason: "worker_process_reaped_pane_unconfirmed", workers: paneCleanupUnknown };
   }
   if (providerCleanupFailures.length > 0) {
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}
@@ -80431,10 +80508,10 @@ Then exit your session.
     }
     const unknownWorkers = liveness.filter(([, state]) => state === "unknown").map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (unknownWorkers.length > 0) {
-      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(", ")}
+      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker process reaping is verified but pane liveness is unconfirmed: ${unknownWorkers.join(", ")}
 `);
       if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-      return { outcome: "preserved", reason: "worker_pane_liveness_unknown", workers: unknownWorkers };
+      return { outcome: "preserved", reason: "worker_process_reaped_pane_unconfirmed", workers: unknownWorkers };
     }
   } catch (err) {
     process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}
@@ -98825,16 +98902,38 @@ function extractSessionIdFromPath(transcriptPath) {
   const match = transcriptPath.match(/([0-9a-f-]{36})(?:\.jsonl)?$/i);
   return match ? match[1] : null;
 }
+function pickFresherPercent(stdinPercent, stdinResetsAt, apiPercent, apiResetsAt) {
+  if (stdinPercent == null || apiPercent == null || !stdinResetsAt || !apiResetsAt) {
+    return stdinPercent;
+  }
+  const isSameWindow = Math.abs(stdinResetsAt.getTime() - apiResetsAt.getTime()) <= SAME_WINDOW_TOLERANCE_MS;
+  return isSameWindow ? Math.max(stdinPercent, apiPercent) : stdinPercent;
+}
 function mergeStdinRateLimits(stdinRateLimits, usageResult) {
   if (!stdinRateLimits) {
     return usageResult;
   }
+  const apiRateLimits = usageResult?.rateLimits ?? {};
+  const merged = { ...apiRateLimits, ...stdinRateLimits };
+  if (stdinRateLimits.fiveHourPercent != null) {
+    merged.fiveHourPercent = pickFresherPercent(
+      stdinRateLimits.fiveHourPercent,
+      stdinRateLimits.fiveHourResetsAt,
+      apiRateLimits.fiveHourPercent,
+      apiRateLimits.fiveHourResetsAt
+    );
+  }
+  if (stdinRateLimits.weeklyPercent != null) {
+    merged.weeklyPercent = pickFresherPercent(
+      stdinRateLimits.weeklyPercent,
+      stdinRateLimits.weeklyResetsAt,
+      apiRateLimits.weeklyPercent,
+      apiRateLimits.weeklyResetsAt
+    );
+  }
   return {
     ...usageResult ?? {},
-    rateLimits: {
-      ...usageResult?.rateLimits ?? {},
-      ...stdinRateLimits
-    }
+    rateLimits: merged
   };
 }
 function readSessionSummary(stateDir, sessionId) {
@@ -99167,7 +99266,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
 function main2(watchMode = false, skipInit = false) {
   return withWorktreePathRenderScope(() => mainImpl(watchMode, skipInit));
 }
-var import_fs138, import_promises33, import_path161, import_child_process46, import_url21, lastSummarySpawnTimestamp, summaryProcessPid;
+var import_fs138, import_promises33, import_path161, import_child_process46, import_url21, SAME_WINDOW_TOLERANCE_MS, lastSummarySpawnTimestamp, summaryProcessPid;
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
@@ -99192,6 +99291,7 @@ var init_hud = __esm({
     import_url21 = require("url");
     init_worktree_paths();
     init_config_dir();
+    SAME_WINDOW_TOLERANCE_MS = 60 * 1e3;
     lastSummarySpawnTimestamp = 0;
     summaryProcessPid = null;
     main2();
@@ -122216,6 +122316,8 @@ Auto-merge (v2-only):
 Runtime safety:
   Instance-bound team startup and shutdown require runtime v2. Setting
   OMC_RUNTIME_V2=0|false|no|off is rejected before any native effects.
+  This command reports only the tmux runtime-v2 outcome. An implicit team
+  finishing does not make it succeed, and it does not finish an implicit team.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist
@@ -122704,6 +122806,20 @@ Supported operations: ${TEAM_API_OPERATIONS.join(", ")}`);
   }
   return { operation, input, json };
 }
+async function collectStartRolePromptOptions(parsed) {
+  const rolePromptByRole = {};
+  const roles = parsed.workerSpecs.flatMap((spec) => spec.role ? [spec.role] : []);
+  if (roles.length === 0) return {};
+  const { loadAgentPrompt: loadAgentPrompt2 } = await Promise.resolve().then(() => (init_utils(), utils_exports));
+  for (const role of roles) {
+    if (Object.hasOwn(rolePromptByRole, role)) continue;
+    rolePromptByRole[role] = loadAgentPrompt2(role);
+  }
+  return {
+    ...parsed.role ? { roleName: parsed.role, rolePrompt: rolePromptByRole[parsed.role] } : {},
+    rolePromptByRole
+  };
+}
 async function handleTeamStart(parsed, cwd2) {
   const { isRuntimeV2Enabled: isRuntimeV2Enabled2, startTeamV2: startTeamV22, monitorTeamV2: monitorTeamV22 } = await Promise.resolve().then(() => (init_runtime_v2(), runtime_v2_exports));
   if (!isRuntimeV2Enabled2()) {
@@ -122722,11 +122838,7 @@ async function handleTeamStart(parsed, cwd2) {
   );
   const tasks = buildTeamLaunchTasks(parsed, decomposition, effectiveWorkerCount);
   const launchTeamName = resolveAvailableTeamName(parsed.teamName, cwd2);
-  let rolePrompt;
-  if (parsed.role) {
-    const { loadAgentPrompt: loadAgentPrompt2 } = await Promise.resolve().then(() => (init_utils(), utils_exports));
-    rolePrompt = loadAgentPrompt2(parsed.role);
-  }
+  const rolePromptOptions = await collectStartRolePromptOptions(parsed);
   const runtime2 = await startTeamV22({
     teamName: launchTeamName,
     workerCount: effectiveWorkerCount,
@@ -122735,20 +122847,36 @@ async function handleTeamStart(parsed, cwd2) {
     cwd: cwd2,
     newWindow: parsed.newWindow,
     workerRoles: parsed.workerSpecs.map((spec) => spec.role ?? spec.agentType),
-    ...rolePrompt ? { roleName: parsed.role, rolePrompt } : {},
+    ...rolePromptOptions,
     ...parsed.autoMerge ? { autoMerge: true } : {}
   });
   const uniqueTypes = [...new Set(parsed.agentTypes)].join(",");
+  const startupFailures = runtime2.startupFailures ?? [];
+  const ok = startupFailures.length === 0;
+  if (!ok) process.exitCode = 1;
+  const snapshot = await monitorTeamV22(runtime2.teamName, cwd2, runtime2.instanceId);
   if (parsed.json) {
-    const snapshot2 = await monitorTeamV22(runtime2.teamName, cwd2, runtime2.instanceId);
     console.log(JSON.stringify({
       teamName: runtime2.teamName,
       sessionName: runtime2.sessionName,
       instanceId: runtime2.instanceId,
       workerCount: runtime2.config.worker_count,
       agentType: uniqueTypes,
-      tasks: snapshot2 ? snapshot2.tasks : null
+      tasks: snapshot ? snapshot.tasks : null,
+      ok,
+      startupFailures
     }));
+    return;
+  }
+  if (!ok) {
+    console.error(`Team start incomplete: ${runtime2.teamName}`);
+    console.error(`tmux session: ${runtime2.sessionName}`);
+    console.error(`instance id: ${runtime2.instanceId}`);
+    console.error(`workers: ${runtime2.config.worker_count}`);
+    console.error(`agent_type: ${uniqueTypes}`);
+    for (const failure3 of startupFailures) {
+      console.error(`startup_failure worker=${failure3.worker} reason=${failure3.reason}`);
+    }
     return;
   }
   console.log(`Team started: ${runtime2.teamName}`);
@@ -122756,7 +122884,6 @@ async function handleTeamStart(parsed, cwd2) {
   console.log(`instance id: ${runtime2.instanceId}`);
   console.log(`workers: ${runtime2.config.worker_count}`);
   console.log(`agent_type: ${uniqueTypes}`);
-  const snapshot = await monitorTeamV22(runtime2.teamName, cwd2, runtime2.instanceId);
   if (snapshot) {
     console.log(`tasks: total=${snapshot.tasks.total} pending=${snapshot.tasks.pending} in_progress=${snapshot.tasks.in_progress} completed=${snapshot.tasks.completed} failed=${snapshot.tasks.failed}`);
   }
@@ -122790,7 +122917,7 @@ async function handleTeamStatus(teamName, cwd2) {
     const latestLeaderNudge = (await readTeamEventsByType2(teamName, "team_leader_nudge", cwd2)).at(-1);
     const { readTeamConfig: readTeamConfig2 } = await Promise.resolve().then(() => (init_monitor(), monitor_exports));
     const config2 = await readTeamConfig2(teamName, cwd2);
-    console.log(`team=${snapshot2.teamName} phase=${snapshot2.phase}`);
+    console.log(`team=${snapshot2.teamName} instance_id=${config2?.instance_id ?? "n/a"} phase=${snapshot2.phase}`);
     console.log(`workspace_mode=${config2?.workspace_mode ?? "single"} worktree_mode=${config2?.worktree_mode ?? "disabled"} team_state_root=${config2?.team_state_root ?? "n/a"}`);
     console.log(`workers: total=${snapshot2.workers.length}`);
     for (const worker of config2?.workers ?? []) {
@@ -126682,7 +126809,7 @@ function buildTmuxClaudeLaunch(args, options) {
   try {
     const rawClaudeCmd = nativeWindows ? buildTmuxShellCommandWithEnv("claude", args, withoutSensitiveEnv(forwardedEnv)) : buildTmuxShellCommand("claude", args);
     const envPrefix = forwardedEnvNames.length === 0 ? "" : nativeWindows ? transport.prefix : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
-    const missingBinaryGuard = nativeWindows ? "where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1) && " : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
+    const missingBinaryGuard = nativeWindows ? "(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && " : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
     const command = wrapWithLoginShell(
       `${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? "exec " : ""}${rawClaudeCmd}`
     );
