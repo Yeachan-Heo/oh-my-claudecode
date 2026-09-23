@@ -284,6 +284,35 @@ describe('HUD watch mode initialization', () => {
     }), expect.anything());
   });
 
+  it('prefers the higher usage API percentage when both sources describe the same window', async () => {
+    const hud = await importHudModule({
+      config: makeConfig(true),
+      stdin: makeStdin(true),
+      getUsageResult: {
+        rateLimits: {
+          fiveHourPercent: 41,
+          weeklyPercent: 1,
+          // API rounds resets slightly differently from stdin; still the same window.
+          fiveHourResetsAt: new Date(1776348000 * 1000 - 76),
+          weeklyResetsAt: new Date(1776916800 * 1000),
+        },
+      },
+    });
+
+    await hud.main(true, false);
+
+    expect(render).toHaveBeenCalledWith(expect.objectContaining({
+      rateLimitsResult: {
+        rateLimits: {
+          fiveHourPercent: 41,
+          weeklyPercent: 2,
+          fiveHourResetsAt: new Date(1776348000 * 1000),
+          weeklyResetsAt: new Date(1776916800 * 1000),
+        },
+      },
+    }), expect.anything());
+  });
+
   it('falls back to the usage API when stdin omits rate limits', async () => {
     const hud = await importHudModule({
       config: makeConfig(true),
