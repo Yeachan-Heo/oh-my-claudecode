@@ -11,14 +11,14 @@
  */
 
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { parseJevEnv, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { parseJevEnv, readRequestFile, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -89,6 +89,15 @@ describe('wire shape parity with the TS client (#4091)', () => {
       fetchFn,
     );
     expect(body.questions.staleness.criteria).toEqual(['Fresh', 'Stale']);
+  });
+});
+
+describe('readRequestFile', () => {
+  it('reads the request and deletes the file so tool input never lingers', () => {
+    const path = join(tmp, 'request.json');
+    writeFileSync(path, JSON.stringify({ point: 'slop-warning', heuristic: true }), 'utf8');
+    expect(readRequestFile(path)).toEqual({ point: 'slop-warning', heuristic: true });
+    expect(existsSync(path)).toBe(false);
   });
 });
 

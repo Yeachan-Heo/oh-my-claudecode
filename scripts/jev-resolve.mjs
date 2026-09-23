@@ -24,6 +24,7 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
+import { readFileSync, unlinkSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -202,10 +203,28 @@ export async function readStdinJson() {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+/**
+ * Read one JSON request from a file and delete it. Used by fire-and-record
+ * callers that exit immediately after spawning, where a stdin pipe would race
+ * the parent's exit. The request carries raw tool input, so it must never be
+ * passed on argv: /proc/<pid>/cmdline is world-readable.
+ */
+export function readRequestFile(path) {
+  const raw = readFileSync(path, 'utf8');
+  try {
+    unlinkSync(path);
+  } catch {
+    // Best effort: the caller's temp dir is cleaned up independently.
+  }
+  return JSON.parse(raw);
+}
+
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   try {
-    const request = await readStdinJson();
+    const requestFileFlag = process.argv.indexOf('--request-file');
+    const requestFile = requestFileFlag === -1 ? undefined : process.argv[requestFileFlag + 1];
+    const request = requestFile ? readRequestFile(requestFile) : await readStdinJson();
     const result = await resolveRequest(request);
     console.log(JSON.stringify(result));
   } catch (error) {
