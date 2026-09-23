@@ -205,7 +205,9 @@ export async function readStdinJson() {
 const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   try {
-    const request = await readStdinJson();
+    // Request may arrive as argv[2] (no pipe lifetime race when the caller
+    // exits immediately after spawning) or as one JSON line on stdin.
+    const request = process.argv[2] ? JSON.parse(process.argv[2]) : await readStdinJson();
     const result = await resolveRequest(request);
     console.log(JSON.stringify(result));
   } catch (error) {

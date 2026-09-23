@@ -10,7 +10,7 @@ import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readF
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
 import { homedir } from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
@@ -553,6 +553,55 @@ function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
   return hasSlopFallbackActionShape(inspectedText);
 }
 
+// --- Jev slop-warning shadow point (ticket 16) ---
+// The channel is scripts/jev-resolve.mjs (ADR 03671, script-side judgment
+// channel). Inline env precheck mirrors the config contract's opt-in
+// semantics (all wildcard, :active suffix); no spawn without key + opt-in.
+
+const SLOP_WARNING_QUESTIONS = {
+  slop_advisory: {
+    type: 'noul',
+    instructions: 'Does this tool input contain fallback/workaround language worth an advisory warning?',
+    criteria: {
+      'true': 'Contains fallback/workaround phrasing outside doc or self-referential context',
+      'false': 'No advisory-worthy language',
+    },
+  },
+};
+
+function jevSlopWarningOptedIn() {
+  const raw = (process.env.OMC_JEV || '').trim();
+  if (!process.env.TYPESAFE_API_KEY || raw === 'off') return false;
+  for (const entry of raw.split(',')) {
+    const token = entry.trim();
+    if (!token) continue;
+    const colon = token.lastIndexOf(':');
+    const name = colon === -1 ? token : token.slice(0, colon);
+    if (name === 'all' || name === 'slop-warning') return true;
+  }
+  return false;
+}
+
+function recordSlopWarningShadow(toolName, toolInput, warned) {
+  if (!jevSlopWarningOptedIn()) return;
+  try {
+    const request = JSON.stringify({
+      point: 'slop-warning',
+      state: { toolName, toolInput },
+      questions: SLOP_WARNING_QUESTIONS,
+      heuristic: warned,
+    });
+    const child = spawn(process.execPath, [fileURLToPath(new URL('./jev-resolve.mjs', import.meta.url)), request], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+      env: process.env,
+    });
+    child.on('error', () => {});
+    child.unref();
+  } catch {
+    // Fire-and-record: any spawn failure must never affect the tool path.
+  }
+}
+
 function generateSlopWarning(data, toolName) {
   const toolInput = data.toolInput || data.tool_input || {};
   const promptLikeFields = {
@@ -564,7 +613,9 @@ function generateSlopWarning(data, toolName) {
   const inspectedText = collectStringValues(toolInput)
     .concat(collectStringValues(promptLikeFields))
     .join('\n');
-  if (!shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText)) return '';
+  const warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
+  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned);
+  if (!warned) return '';
 
   return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
     'Do not make potential slop: avoid ad-hoc fallback layers, workaround shims, or environment-specific patches unless explicitly justified. ' +
