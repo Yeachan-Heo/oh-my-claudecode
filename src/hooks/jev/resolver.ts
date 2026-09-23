@@ -16,7 +16,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
-import { boundExcerpts, parseJevConfig, pointState } from './config.js';
+import { ACTIVATED_POINTS, boundExcerpts, parseJevConfig, pointState } from './config.js';
 import type { JevAnswer, JevQuestions, JevResponse, ResolveMode, ResolveResult } from './types.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -25,19 +25,23 @@ interface ResolverRuntime {
   requestCount: number;
   consecutiveFailures: Map<string, number>;
   openCircuits: Set<string>;
+  /** env-activated points already warned about (warn once per point per process). */
+  envWarned: Set<string>;
 }
 
 const runtime: ResolverRuntime = {
   requestCount: 0,
   consecutiveFailures: new Map(),
   openCircuits: new Set(),
+  envWarned: new Set<string>(),
 };
 
-/** Reset in-process resolver state (request cap, circuit breaker). Test hook. */
+/** Reset in-process resolver state (request cap, circuit breaker, warnings). Test hook. */
 export function resetJevResolverState(): void {
   runtime.requestCount = 0;
   runtime.consecutiveFailures.clear();
   runtime.openCircuits.clear();
+  runtime.envWarned.clear();
 }
 
 export interface ResolveJudgmentArgs<T> {
@@ -107,10 +111,24 @@ function recordFailure(point: string): void {
   }
 }
 
-export async function resolveJudgment<T>(args: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>> {
+export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>> {
+  const args = resolveJudgmentArgs;
   const config = parseJevConfig();
   let mode: ResolveMode = pointState(args.point, config);
   if (args.mode && mode !== 'off') mode = args.mode;
+
+  // One stderr line when env activation makes Jev decide (warn once per
+  // point per process; code-activated and caller-forced stay silent).
+  if (
+    mode === 'active' &&
+    !args.mode &&
+    !ACTIVATED_POINTS.has(args.point) &&
+    (config.activateAll || config.activatedPoints.has(args.point)) &&
+    !runtime.envWarned.has(args.point)
+  ) {
+    runtime.envWarned.add(args.point);
+    console.error('[jev] ' + args.point + ': ACTIVE via env — Jev decides');
+  }
 
   const twinAnswer = (): T => args.twin();
 
