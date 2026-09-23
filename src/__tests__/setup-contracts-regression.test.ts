@@ -570,10 +570,17 @@ describe('Contract 10: installer manages stale OMC-created agents and skills', (
   });
 
   it('syncBundledSkillDefinitions overwrites existing OMC skills (force copy)', () => {
-    // The installer uses cpSync with { force: true } which overwrites stale versions
-    // Verify this by checking the source code pattern
+    // Existing real directories keep force-copy behavior, while unsafe collisions
+    // are rejected before the copy and marker write.
     const installerSource = readFileSync(join(REPO_ROOT, 'src', 'installer', 'index.ts'), 'utf-8');
-    expect(installerSource).toContain('cpSync(sourceDir, targetDir, { recursive: true, force: true })');
+    const targetCheck = installerSource.indexOf('targetStat = lstatSync(targetDir)');
+    const collisionGuard = installerSource.indexOf('targetStat.isSymbolicLink() || !targetStat.isDirectory()');
+    const forceCopy = installerSource.indexOf('cpSync(sourceDir, targetDir, { recursive: true, force: true })');
+    const markerWrite = installerSource.indexOf('markSkillAsOmcManaged(targetDir)');
+    expect(targetCheck).toBeGreaterThanOrEqual(0);
+    expect(collisionGuard).toBeGreaterThan(targetCheck);
+    expect(forceCopy).toBeGreaterThan(collisionGuard);
+    expect(markerWrite).toBeGreaterThan(collisionGuard);
   });
 
   it('install() overwrites existing agent files when force option is used', () => {
