@@ -1,22 +1,45 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 
-function makeStdin(withRateLimits = false) {
+function makeStdin(
+  withRateLimits = false,
+  rateLimitOverrides: Partial<{
+    fiveHourPercent: number | null;
+    weeklyPercent: number | null;
+    fiveHourResetAt: number | null;
+    weeklyResetAt: number | null;
+  }> = {},
+) {
+  const fiveHourPercent = 'fiveHourPercent' in rateLimitOverrides ? rateLimitOverrides.fiveHourPercent : 11;
+  const weeklyPercent = 'weeklyPercent' in rateLimitOverrides ? rateLimitOverrides.weeklyPercent : 2;
+  const fiveHourResetAt = 'fiveHourResetAt' in rateLimitOverrides ? rateLimitOverrides.fiveHourResetAt : 1776348000;
+  const weeklyResetAt = 'weeklyResetAt' in rateLimitOverrides ? rateLimitOverrides.weeklyResetAt : 1776916800;
+
   return {
     cwd: '/tmp/worktree',
     transcript_path: '/tmp/worktree/transcript.jsonl',
     model: { id: 'claude-test' },
     context_window: {
       used_percentage: 12,
-      current_usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      current_usage: {
+        input_tokens: 10,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
       context_window_size: 100,
     },
     ...(withRateLimits
       ? {
-        rate_limits: {
-          five_hour: { used_percentage: 11, resets_at: 1776348000 },
-          seven_day: { used_percentage: 2, resets_at: 1776916800 },
-        },
-      }
+          rate_limits: {
+            five_hour: {
+              used_percentage: fiveHourPercent,
+              resets_at: fiveHourResetAt,
+            },
+            seven_day: {
+              used_percentage: weeklyPercent,
+              resets_at: weeklyResetAt,
+            },
+          },
+        }
       : {}),
   };
 }
@@ -56,11 +79,13 @@ describe('HUD watch mode initialization', () => {
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
 
-  async function importHudModule(overrides: {
-    config?: ReturnType<typeof makeConfig>;
-    stdin?: ReturnType<typeof makeStdin>;
-    getUsageResult?: unknown;
-  } = {}) {
+  async function importHudModule(
+    overrides: {
+      config?: ReturnType<typeof makeConfig>;
+      stdin?: ReturnType<typeof makeStdin>;
+      getUsageResult?: unknown;
+    } = {},
+  ) {
     vi.resetModules();
     const stdin = overrides.stdin ?? makeStdin();
     const config = overrides.config ?? makeConfig();
@@ -81,15 +106,23 @@ describe('HUD watch mode initialization', () => {
       getRateLimitsFromStdin: vi.fn((value) => {
         const fiveHour = value.rate_limits?.five_hour?.used_percentage;
         const sevenDay = value.rate_limits?.seven_day?.used_percentage;
-        if (fiveHour == null && sevenDay == null) {
-          return null;
+        const rateLimits: {
+          fiveHourPercent?: number;
+          weeklyPercent?: number;
+          fiveHourResetsAt?: Date | null;
+          weeklyResetsAt?: Date | null;
+        } = {};
+        if (fiveHour != null) {
+          rateLimits.fiveHourPercent = fiveHour;
+          const resetsAt = value.rate_limits?.five_hour?.resets_at;
+          rateLimits.fiveHourResetsAt = resetsAt == null ? null : new Date(resetsAt * 1000);
         }
-        return {
-          fiveHourPercent: fiveHour ?? 0,
-          weeklyPercent: sevenDay,
-          fiveHourResetsAt: fiveHour == null ? null : new Date(1776348000 * 1000),
-          weeklyResetsAt: sevenDay == null ? null : new Date(1776916800 * 1000),
-        };
+        if (sevenDay != null) {
+          rateLimits.weeklyPercent = sevenDay;
+          const resetsAt = value.rate_limits?.seven_day?.resets_at;
+          rateLimits.weeklyResetsAt = resetsAt == null ? null : new Date(resetsAt * 1000);
+        }
+        return Object.keys(rateLimits).length > 0 ? rateLimits : null;
       }),
       stabilizeContextPercent: vi.fn((value) => value),
     }));
@@ -124,15 +157,30 @@ describe('HUD watch mode initialization', () => {
 
     vi.doMock('../../hud/usage-api.js', () => ({
       getUsage,
-      getSubscriptionInfo: vi.fn(() => ({ subscriptionType: null, rateLimitTier: null })),
+      getSubscriptionInfo: vi.fn(() => ({
+        subscriptionType: null,
+        rateLimitTier: null,
+      })),
     }));
-    vi.doMock('../../hud/custom-rate-provider.js', () => ({ executeCustomProvider: vi.fn(async () => null) }));
+    vi.doMock('../../hud/custom-rate-provider.js', () => ({
+      executeCustomProvider: vi.fn(async () => null),
+    }));
     vi.doMock('../../hud/render.js', () => ({ render }));
-    vi.doMock('../../hud/elements/api-key-source.js', () => ({ detectApiKeySource: vi.fn(() => null) }));
-    vi.doMock('../../hud/mission-board.js', () => ({ refreshMissionBoardState: vi.fn(async () => null) }));
-    vi.doMock('../../hud/sanitize.js', () => ({ sanitizeOutput: vi.fn((value: string) => value) }));
-    vi.doMock('../../lib/version.js', () => ({ getRuntimePackageVersion: vi.fn(() => '4.7.9') }));
-    vi.doMock('../../features/auto-update.js', () => ({ compareVersions: vi.fn(() => 0) }));
+    vi.doMock('../../hud/elements/api-key-source.js', () => ({
+      detectApiKeySource: vi.fn(() => null),
+    }));
+    vi.doMock('../../hud/mission-board.js', () => ({
+      refreshMissionBoardState: vi.fn(async () => null),
+    }));
+    vi.doMock('../../hud/sanitize.js', () => ({
+      sanitizeOutput: vi.fn((value: string) => value),
+    }));
+    vi.doMock('../../lib/version.js', () => ({
+      getRuntimePackageVersion: vi.fn(() => '4.7.9'),
+    }));
+    vi.doMock('../../features/auto-update.js', () => ({
+      compareVersions: vi.fn(() => 0),
+    }));
     vi.doMock('../../lib/worktree-paths.js', () => ({
       resolveToWorktreeRoot: vi.fn((cwd?: string) => cwd ?? '/tmp/worktree'),
       resolveTranscriptPath: vi.fn((transcriptPath?: string) => transcriptPath),
@@ -222,8 +270,8 @@ describe('HUD watch mode initialization', () => {
         rateLimits: {
           fiveHourPercent: 55,
           weeklyPercent: 10,
-          fiveHourResetsAt: new Date(1777000000 * 1000),
-          weeklyResetsAt: new Date(1777100000 * 1000),
+          fiveHourResetsAt: new Date((1776348000 - 5 * 60 * 60) * 1000),
+          weeklyResetsAt: new Date((1776916800 - 7 * 24 * 60 * 60) * 1000),
           sonnetWeeklyPercent: 44,
           sonnetWeeklyResetsAt: new Date(1777200000 * 1000),
           opusWeeklyPercent: 7,
@@ -240,25 +288,28 @@ describe('HUD watch mode initialization', () => {
     await hud.main(true, false);
 
     expect(getUsage).toHaveBeenCalledTimes(1);
-    expect(render).toHaveBeenCalledWith(expect.objectContaining({
-      rateLimitsResult: {
-        rateLimits: {
-          fiveHourPercent: 11,
-          weeklyPercent: 2,
-          fiveHourResetsAt: new Date(1776348000 * 1000),
-          weeklyResetsAt: new Date(1776916800 * 1000),
-          sonnetWeeklyPercent: 44,
-          sonnetWeeklyResetsAt: new Date(1777200000 * 1000),
-          opusWeeklyPercent: 7,
-          opusWeeklyResetsAt: new Date(1777300000 * 1000),
-          extraUsagePercent: 3,
-          extraUsageSpentUsd: 1.25,
-          extraUsageLimitUsd: 10,
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 11,
+            weeklyPercent: 2,
+            fiveHourResetsAt: new Date(1776348000 * 1000),
+            weeklyResetsAt: new Date(1776916800 * 1000),
+            sonnetWeeklyPercent: 44,
+            sonnetWeeklyResetsAt: new Date(1777200000 * 1000),
+            opusWeeklyPercent: 7,
+            opusWeeklyResetsAt: new Date(1777300000 * 1000),
+            extraUsagePercent: 3,
+            extraUsageSpentUsd: 1.25,
+            extraUsageLimitUsd: 10,
+          },
+          error: 'network',
+          stale: true,
         },
-        error: 'network',
-        stale: true,
-      },
-    }), expect.anything());
+      }),
+      expect.anything(),
+    );
   });
 
   it('falls back to stdin rate limits when usage API returns no rate limits', async () => {
@@ -271,23 +322,172 @@ describe('HUD watch mode initialization', () => {
     await hud.main(true, false);
 
     expect(getUsage).toHaveBeenCalledTimes(1);
-    expect(render).toHaveBeenCalledWith(expect.objectContaining({
-      rateLimitsResult: {
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 11,
+            weeklyPercent: 2,
+            fiveHourResetsAt: new Date(1776348000 * 1000),
+            weeklyResetsAt: new Date(1776916800 * 1000),
+          },
+          error: 'no_credentials',
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it.each([-60_000, 60_000])(
+    'uses the higher usage API percentage at the exact %s ms window boundary for stale results',
+    async (resetDeltaMs) => {
+      const hud = await importHudModule({
+        config: makeConfig(true),
+        stdin: makeStdin(true),
+        getUsageResult: {
+          rateLimits: {
+            fiveHourPercent: 41,
+            weeklyPercent: 1,
+            // Exactly 60 seconds remains inside the same-window tolerance.
+            fiveHourResetsAt: new Date(1776348000 * 1000 + resetDeltaMs),
+            weeklyResetsAt: new Date(1776916800 * 1000),
+          },
+          error: 'network',
+          stale: true,
+        },
+      });
+
+      await hud.main(true, false);
+
+      expect(render).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rateLimitsResult: {
+            rateLimits: {
+              fiveHourPercent: 41,
+              weeklyPercent: 2,
+              fiveHourResetsAt: new Date(1776348000 * 1000),
+              weeklyResetsAt: new Date(1776916800 * 1000),
+            },
+            error: 'network',
+            stale: true,
+          },
+        }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it('keeps stdin values when the usage API is still on the previous window', async () => {
+    const hud = await importHudModule({
+      config: makeConfig(true),
+      stdin: makeStdin(true),
+      getUsageResult: {
         rateLimits: {
-          fiveHourPercent: 11,
-          weeklyPercent: 2,
+          fiveHourPercent: 90,
+          weeklyPercent: 85,
+          fiveHourResetsAt: new Date((1776348000 - 5 * 60 * 60) * 1000),
+          weeklyResetsAt: new Date((1776916800 - 7 * 24 * 60 * 60) * 1000),
+        },
+      },
+    });
+
+    await hud.main(true, false);
+
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 11,
+            weeklyPercent: 2,
+            fiveHourResetsAt: new Date(1776348000 * 1000),
+            weeklyResetsAt: new Date(1776916800 * 1000),
+          },
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('keeps stdin values when its reset timestamps are older than the API window', async () => {
+    const hud = await importHudModule({
+      config: makeConfig(true),
+      stdin: makeStdin(true, {
+        fiveHourResetAt: 1776348000 - 5 * 60 * 60,
+        weeklyResetAt: 1776916800 - 7 * 24 * 60 * 60,
+      }),
+      getUsageResult: {
+        rateLimits: {
+          fiveHourPercent: 3,
+          weeklyPercent: 1,
           fiveHourResetsAt: new Date(1776348000 * 1000),
           weeklyResetsAt: new Date(1776916800 * 1000),
         },
-        error: 'no_credentials',
       },
-    }), expect.anything());
+    });
+
+    await hud.main(true, false);
+
+    expect(render).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rateLimitsResult: {
+          rateLimits: {
+            fiveHourPercent: 11,
+            weeklyPercent: 2,
+            fiveHourResetsAt: new Date((1776348000 - 5 * 60 * 60) * 1000),
+            weeklyResetsAt: new Date((1776916800 - 7 * 24 * 60 * 60) * 1000),
+          },
+        },
+      }),
+      expect.anything(),
+    );
   });
+
+  it.each([undefined, null])(
+    'preserves API buckets when stdin percentage is %s and falls back when API reset is null',
+    async (fiveHourPercent) => {
+      const hud = await importHudModule({
+        config: makeConfig(true),
+        stdin: makeStdin(true, { fiveHourPercent }),
+        getUsageResult: {
+          rateLimits: {
+            fiveHourPercent: 88,
+            fiveHourResetsAt: new Date(1776348000 * 1000),
+            weeklyPercent: 99,
+            weeklyResetsAt: null,
+            sonnetWeeklyPercent: 44,
+            opusWeeklyPercent: 7,
+            extraUsagePercent: 3,
+          },
+        },
+      });
+
+      await hud.main(true, false);
+
+      expect(render).toHaveBeenCalledWith(
+        expect.objectContaining({
+          rateLimitsResult: {
+            rateLimits: {
+              fiveHourPercent: 88,
+              fiveHourResetsAt: new Date(1776348000 * 1000),
+              weeklyPercent: 2,
+              weeklyResetsAt: new Date(1776916800 * 1000),
+              sonnetWeeklyPercent: 44,
+              opusWeeklyPercent: 7,
+              extraUsagePercent: 3,
+            },
+          },
+        }),
+        expect.anything(),
+      );
+    },
+  );
 
   it('falls back to the usage API when stdin omits rate limits', async () => {
     const hud = await importHudModule({
       config: makeConfig(true),
-      getUsageResult: { rateLimits: { fiveHourPercent: 55, weeklyPercent: 10 } },
+      getUsageResult: {
+        rateLimits: { fiveHourPercent: 55, weeklyPercent: 10 },
+      },
     });
 
     await hud.main(true, false);
