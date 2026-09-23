@@ -3805,7 +3805,9 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]).toMatchObject({
         status: 'failed',
-        last_reason: 'worker_startup_evidence_missing',
+        last_reason: mode === 'probe-throw'
+          ? 'worker_startup_evidence_missing'
+          : 'worker_startup_evidence_missing_pane_busy',
       });
       const persistedConfig = JSON.parse(await readFile(
         absPath(cwd, TeamPaths.config(fixture.teamName)),
@@ -3929,7 +3931,7 @@ describe('runtime v2 startup inbox dispatch', () => {
           committed: false,
           error: 'runtime_owner_unavailable',
         });
-        expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
         expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
           kind: 'final',
           outcome: 'succeeded',
