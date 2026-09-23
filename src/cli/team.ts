@@ -1151,6 +1151,10 @@ Auto-merge (v2-only):
                         Requires OMC_RUNTIME_V2=1. Leader branch must not be 'main' or 'master'.
                         Equivalent to OMC_TEAMS_AUTO_MERGE=1.
 
+Runtime safety:
+  This command reports only the tmux runtime-v2 outcome. An implicit team
+  finishing does not make it succeed, and it does not finish an implicit team.
+
 Examples:
   omc team start --agent codex --count 2 --task "review auth flow" --new-window
   omc team status omc-abc123

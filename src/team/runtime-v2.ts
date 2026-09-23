@@ -110,6 +110,7 @@ import {
   generatePromptModeStartupPrompt,
   renderRecoveryContinuationInstruction,
   renderCursorWorkerGuidance,
+  renderWorkerExitContract,
 } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import {
@@ -636,7 +637,7 @@ export interface ShutdownOptionsV2 {
 
 export type ShutdownTeamV2Result =
   | { outcome: 'cleaned' }
-  | { outcome: 'preserved'; reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worktrees_preserved'; workers: string[] }
+  | { outcome: 'preserved'; reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worker_process_reaped_pane_unconfirmed' | 'worktrees_preserved'; workers: string[] }
   | { outcome: 'failed'; reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed' | 'state_cleanup_failed'; detail: string };
 
 interface ShutdownGateCounts {
@@ -986,11 +987,12 @@ function buildV2TaskInstruction(
   const failTaskCommand = formatOmcCliInvocation(
     `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'failed', claim_token: '<claim_token>' })}' --json`,
   );
-  const cursorReviewer = agentType === 'cursor' && Boolean(cliOutputContract);
+  const persistentCursor = agentType === 'cursor';
+  const cursorReviewer = persistentCursor && Boolean(cliOutputContract);
   const lifecycleInstructions = cursorReviewer
     ? [
       `3. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
-      `4. ACK/progress replies are not a stop signal. Keep the Cursor session alive for further mailbox instructions; the leader transitions this task after consuming the verdict.`,
+      `4. ${renderWorkerExitContract(agentType, true)}`,
     ]
     : [
       `3. On completion (use claim_token from step 1):`,
@@ -998,7 +1000,9 @@ function buildV2TaskInstruction(
       `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
       `4. On failure (use claim_token from step 1):`,
       `   ${failTaskCommand}`,
-      `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
+      persistentCursor
+        ? `5. ${renderWorkerExitContract(agentType, false)}`
+        : `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
     ];
   return [
     `## REQUIRED: Task Lifecycle Commands`,
@@ -1018,8 +1022,8 @@ function buildV2TaskInstruction(
     task.description,
     ``,
     cursorReviewer
-      ? `REMINDER: Write the verdict before yielding the review turn. Do NOT run transition-task-status or write done.json; the leader owns the terminal transition.`
-      : `REMINDER: You MUST run transition-task-status before exiting. Do NOT write done.json or edit task files directly.`,
+      ? `REMINDER: ${renderWorkerExitContract(agentType, true)} Do NOT write done.json; the leader owns the terminal transition.`
+      : `REMINDER: ${renderWorkerExitContract(agentType, false)} Do NOT write done.json or edit task files directly.`,
     ...(agentType === 'cursor' ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))] : []),
     ...(cliOutputContract ? [cliOutputContract] : []),
   ].join('\n');
@@ -6097,8 +6101,9 @@ export async function shutdownTeamV2(
     return { outcome: 'preserved', reason: 'worker_panes_alive', workers: paneCleanupAlive };
   }
   if (paneCleanupUnknown.length > 0) {
+    // Identity-bound process reaping already succeeded. Unknown pane liveness still preserves state, including under --force.
     if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-    return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: paneCleanupUnknown };
+    return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: paneCleanupUnknown };
   }
   if (providerCleanupFailures.length > 0) {
     process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
@@ -6177,10 +6182,10 @@ export async function shutdownTeamV2(
       .filter(([, state]) => state === 'unknown')
       .map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (unknownWorkers.length > 0) {
-      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(', ')}
+      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker process reaping is verified but pane liveness is unconfirmed: ${unknownWorkers.join(', ')}
 `);
       if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-      return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: unknownWorkers };
+      return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: unknownWorkers };
     }
   } catch (err) {
     process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}\n`);
