@@ -61,6 +61,8 @@ Auto-merge (v2-only):
 Runtime safety:
   Instance-bound team startup and shutdown require runtime v2. Setting
   OMC_RUNTIME_V2=0|false|no|off is rejected before any native effects.
+  This command reports only the tmux runtime-v2 outcome. An implicit team
+  finishing does not make it succeed, and it does not finish an implicit team.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist

@@ -8,7 +8,7 @@ level: 4
 
 # Team Skill
 
-Spawn N coordinated agents working on a shared task list using Claude Code's implicit agent team. Claude Code 2.1.178+ removed native `TeamCreate`/`TeamDelete`; with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, each session has one implicit team and teammates are spawned directly with the Agent/Task tool using distinct `name` values. This skill still preserves OMC's legacy tmux/CLI worker orchestration where documented (`omc team` / `/omc-teams`).
+Spawn N coordinated agents working on a shared task list using Claude Code's implicit agent team. Claude Code 2.1.178+ removed native `TeamCreate`/`TeamDelete`; with `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, each session has one implicit team and teammates are spawned directly with the Agent/Task tool using distinct `name` values. This skill still preserves OMC's legacy tmux/CLI worker orchestration where documented (`omc team` / `/omc-teams`). The implicit team and `omc team` do not share a result: one finishing does not make the other succeed.
 
 The `swarm` compatibility alias was removed in #1131.
 
@@ -113,7 +113,7 @@ Each pipeline stage uses **specialized agents** -- not just executors. The lead 
 **Routing rules:**
 
 1. **The lead picks agents per stage, not the user.** The user's `N:agent-type` parameter only overrides the `team-exec` stage worker type. All other stages use stage-appropriate specialists.
-2. **Specialist agents complement executor agents.** Route analysis/review to architect/critic Claude agents and UI work to designer agents. Tmux CLI workers are one-shot and don't participate in team communication.
+2. **Specialist agents complement executor agents.** Route analysis/review to architect/critic Claude agents and UI work to designer agents. Tmux CLI workers do not participate in Claude's native team messaging.
 3. **Cost mode affects model tier.** In downgrade: `opus` agents to `sonnet`, `sonnet` to `haiku` where quality permits. `team-verify` always uses at least `sonnet`.
 4. **Risk level escalates review.** Security-sensitive or >20 file changes must include `security-reviewer` + `code-reviewer` (opus) in `team-verify`.
 
@@ -627,7 +627,8 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 
 - CLI workers operate via tmux, not Claude Code's tool system
 - They cannot use Claude Code's native task-list or team messaging surfaces
-- They run as one-shot autonomous jobs, not persistent teammates
+- Codex, Gemini, Grok, Antigravity, and Claude CLI workers record the assigned task's terminal state and exit
+- Cursor workers stay in the interactive session, wait for mailbox messages, and exit only on an explicit shutdown. Cursor reviewer task transitions stay with the leader
 - The lead manages their lifecycle (spawn, monitor, collect results)
 
 ### Cursor/Codex startup evidence timeout
@@ -1040,7 +1041,7 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 
 10. **Broadcast is expensive** -- Each broadcast sends a separate message to every teammate. Use `message` (DM) by default. Only broadcast for truly team-wide critical alerts.
 
-11. **CLI workers are one-shot, not persistent** -- Tmux CLI workers have full filesystem access and CAN make code changes. However, they run as autonomous one-shot jobs -- they cannot use Claude Code's native task-list or team messaging surfaces. The lead must manage their lifecycle: write prompt_file, spawn CLI worker, read output_file, mark task complete. They don't participate in team communication like Claude teammates do.
+11. **CLI worker lifetime follows the provider** -- See How CLI Workers Operate. Tmux CLI workers do not use Claude Code's native task-list or team messaging surfaces.
 
 ## Parallel session caveats
 

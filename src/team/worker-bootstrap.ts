@@ -103,6 +103,18 @@ export function renderRecoveryContinuationInstruction(instruction: RecoveryConti
   ].join('\n');
 }
 
+/** Exit sentence shared by the worker overlay and the initial task inbox. */
+export function renderWorkerExitContract(agentType: CliAgentType, reviewerRole = false): string {
+  const transitionTaskStatusCommand = formatOmcCliInvocation('team api transition-task-status');
+  if (agentType === 'cursor' && reviewerRole) {
+    return 'Write the trusted structured verdict, ACK the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written.';
+  }
+  if (agentType === 'cursor') {
+    return `Run \`${transitionTaskStatusCommand}\` when the assigned task is done, then keep waiting for the next mailbox message. Exit only when the leader sends an explicit shutdown.`;
+  }
+  return `You MUST call \`${transitionTaskStatusCommand}\` to mark your task as "completed" or "failed" before exiting.`;
+}
+
 export function renderCursorWorkerGuidance(reviewerRole = false): string {
   const claimTaskCommand = formatOmcCliInvocation('team api claim-task');
   const transitionTaskStatusCommand = formatOmcCliInvocation('team api transition-task-status');
@@ -206,6 +218,7 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
     ? sanitizedTasks.map(t => `- **Task ${t.id}**: ${t.subject}\n  Description: ${t.description}\n  Status: pending`).join('\n')
     : '- No tasks assigned yet. Check your inbox for assignments.';
   const cursorReviewer = agentType === 'cursor' && reviewerRole === true;
+  const persistentCursor = agentType === 'cursor' && !cursorReviewer;
   const mandatoryWorkflow = cursorReviewer
     ? [
       'You MUST complete the reviewer steps below. Do NOT skip any step.',
@@ -220,7 +233,9 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
       '5. **Keep the Cursor session alive** after writing the verdict; the leader consumes it and transitions the task.',
     ].join('\n')
     : [
-      'You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.',
+      persistentCursor
+        ? 'You MUST complete ALL of these steps. Transitioning the task does not end the session.'
+        : 'You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.',
       '',
       '1. **Claim** your task (run this command first):',
       `   \`${claimTaskCommand}\``,
@@ -228,10 +243,14 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
       '2. **Do the work** described in your task assignment below.',
       '3. **Send ACK** to the leader:',
       `   \`${sendAckCommand}\``,
-      '4. **Transition** the task status (REQUIRED before exit):',
+      persistentCursor
+        ? '4. **Transition** the task status when that task is done:'
+        : '4. **Transition** the task status (REQUIRED before exit):',
       `   - On success: \`${completeTaskCommand}\``,
       `   - On failure: \`${failTaskCommand}\``,
-      '5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.',
+      persistentCursor
+        ? `5. **Stay in the session**: ${renderWorkerExitContract(agentType, false)}`
+        : '5. **Keep going after replies**: ACK/progress messages are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.',
     ].join('\n');
 
   return `# Team Worker Protocol
@@ -327,8 +346,10 @@ When you see a shutdown request in your inbox:
 ${agentTypeGuidance(agentType, reviewerRole)}
 
 ${cursorReviewer
-    ? '## BEFORE YOU YIELD THE REVIEW TURN\nWrite the trusted structured verdict, ACK the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written.'
-    : `## BEFORE YOU EXIT\nYou MUST call \`${formatOmcCliInvocation('team api transition-task-status')}\` to mark your task as "completed" or "failed" before exiting.\nIf you skip this step, the leader cannot track your work and the task will appear stuck.`}
+    ? `## BEFORE YOU YIELD THE REVIEW TURN\n${renderWorkerExitContract(agentType, true)}`
+    : persistentCursor
+    ? `## BEFORE YOU YIELD\n${renderWorkerExitContract(agentType, false)}`
+    : `## BEFORE YOU EXIT\n${renderWorkerExitContract(agentType, false)}\nIf you skip this step, the leader cannot track your work and the task will appear stuck.`}
 
 ${bootstrapInstructions ? `## Role Context\n${bootstrapInstructions}\n` : ''}`;
 }

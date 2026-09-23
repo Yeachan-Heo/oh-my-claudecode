@@ -5,6 +5,7 @@ import {
   generateTriggerMessage,
   generateWorkerOverlay,
   renderRecoveryContinuationInstruction,
+  renderWorkerExitContract,
   getWorkerEnv,
 } from '../worker-bootstrap.js';
 
@@ -152,6 +153,7 @@ describe('worker-bootstrap', () => {
       const overlay = generateWorkerOverlay(baseParams);
       expect(overlay).toContain('ACK/progress messages are not a stop signal');
       expect(overlay).toContain('next feasible work');
+      expect(overlay).toContain('transition and exit');
       expect(overlay).not.toContain('Exit** immediately after transitioning');
     });
 
@@ -159,6 +161,13 @@ describe('worker-bootstrap', () => {
       const geminiOverlay = generateWorkerOverlay({ ...baseParams, agentType: 'gemini' });
       expect(geminiOverlay).toContain('Agent-Type Guidance (gemini)');
       expect(geminiOverlay).toContain('milestone');
+    });
+    it('keeps a cursor executor in session after the task transition', () => {
+      const overlay = generateWorkerOverlay({ ...baseParams, agentType: 'cursor' });
+      expect(overlay).toContain(renderWorkerExitContract('cursor', false));
+      expect(overlay).toContain('## BEFORE YOU YIELD');
+      expect(overlay).not.toContain('transition and exit');
+      expect(overlay).not.toContain('## BEFORE YOU EXIT');
     });
     it('tells cursor workers how to handle a reviewer-role verdict contract (issue #3880)', () => {
       const overlay = generateWorkerOverlay({ ...baseParams, agentType: 'cursor', reviewerRole: true });
