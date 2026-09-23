@@ -633,7 +633,7 @@ Tmux CLI workers run in dedicated tmux panes with filesystem access. They are **
 
 ### Cursor/Codex startup evidence timeout
 
-The v2 runtime waits up to 30 seconds for current-attempt task/status evidence. If that is absent, a read-only pane activity probe can grant a busy Cursor/Codex worker one additional 30-second evidence window. An idle, dead, or unverified pane gets only the normal 1-second final recheck. The trigger is never resent, and pane activity alone never counts as successful startup.
+The v2 runtime waits up to 30 seconds for current-attempt task/status evidence. If that is absent, a read-only pane activity probe can grant a busy Cursor/Codex worker one additional 30-second evidence window. An idle, dead, or unverified pane gets only the normal 1-second final recheck. The trigger is never resent, and pane activity alone never counts as successful startup. A busy pane that still has no current-attempt evidence fails as `worker_startup_evidence_missing_pane_busy`; every other miss stays `worker_startup_evidence_missing`.
 
 The default busy-worker evidence budget is therefore 60 seconds, plus probe and evidence-read overhead (roughly a minute, not a hard 61-second wall-clock limit). Pane creation, readiness, and cleanup add separate time. Startup is serial, so these waits can accumulate per worker. `OMC_TEAM_ENGAGED_PANE_RECHECK_MS` overrides the additional window in milliseconds; positive values are capped at 120000, while invalid or non-positive values retain the default.
 

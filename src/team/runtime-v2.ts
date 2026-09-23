@@ -1262,15 +1262,16 @@ async function waitForWorkerStatusTransition(
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
  * the caller's fail-closed teardown. Interactive providers may also supply a
- * read-only activity probe when resubmission is disabled. Panes that are idle,
- * wrong, or dead never earn that recheck and keep the existing fast failure path.
+ * read-only activity probe when resubmission is disabled. `paneBusy` records
+ * that observation and is not startup success. Panes that are idle, wrong, or
+ * dead never earn that recheck and keep the existing fast failure path.
  */
 export async function settleStartupEvidence(
   policy: WorkerStartupEvidencePolicy,
   waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>,
   resubmit?: () => Promise<StartupInboxResubmitOutcome>,
   probeActivity?: () => Promise<StartupPaneActivity>,
-): Promise<boolean> {
+): Promise<{ settled: boolean; paneBusy: boolean }> {
   let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
   let engagedPane = false;
   for (let attempt = 1; !settled && resubmit && attempt <= policy.resubmitAttempts; attempt++) {
@@ -1295,7 +1296,12 @@ export async function settleStartupEvidence(
       ? policy.engagedPaneRecheckBudgetMs
       : policy.finalRecheckBudgetMs);
   }
-  return settled;
+  return { settled, paneBusy: engagedPane };
+}
+
+function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentType): string {
+  const base = agentType ? `${agentType}_startup_evidence_missing` : 'worker_startup_evidence_missing';
+  return paneBusy ? `${base}_pane_busy` : base;
 }
 
 export function promptModeRecoveryRequiresProgressEvidence(
@@ -1564,24 +1570,24 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
     notify: async (_target, triggerMessage) => {
       if (usePromptMode) {
-        const settled = await waitForBoundedStartupEvidence();
-        return settled
+        const settlement = await waitForBoundedStartupEvidence();
+        return settlement.settled
           ? { ok: true, transport: 'prompt_stdin' as const, reason: 'prompt_mode_worker_confirmed' }
-          : { ok: false, transport: 'prompt_stdin' as const, reason: `${opts.agentType}_startup_evidence_missing` };
+          : { ok: false, transport: 'prompt_stdin' as const, reason: startupEvidenceMissingReason(settlement.paneBusy, opts.agentType) };
       }
 
       const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
       if (!attempted.ok) {
         return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
       }
-      const settled = await waitForBoundedStartupEvidence(
+      const settlement = await waitForBoundedStartupEvidence(
         opts.agentType === 'cursor' || opts.agentType === 'codex'
           ? undefined
           : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
       );
-      return settled
+      return settlement.settled
         ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-        : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
+        : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
     },
     deps: { writeWorkerInbox },
     });
@@ -3509,7 +3515,8 @@ export async function executeRecoverDeadWorkerV2Owner(
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
-            if (!await waitForBoundedStartupEvidence()) return { ok: false as const, error: `${pending.agentType}_startup_evidence_missing` };
+            const settlement = await waitForBoundedStartupEvidence();
+            if (!settlement.settled) return { ok: false as const, error: startupEvidenceMissingReason(settlement.paneBusy, pending.agentType) };
           } else if (pending.promptMode) {
             // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
             // intentionally have no task/status progress to prove. At this point
@@ -3538,14 +3545,14 @@ export async function executeRecoverDeadWorkerV2Owner(
               if (!attempted.ok) {
                 return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
               }
-              const settled = await waitForBoundedStartupEvidence(
+              const settlement = await waitForBoundedStartupEvidence(
                 pending.agentType === 'cursor' || pending.agentType === 'codex'
                   ? undefined
                   : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
               );
-              return settled
+              return settlement.settled
                 ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-                : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
+                : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
             },
             deps: { writeWorkerInbox },
           });
