@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "aa6ceec7bf1eb9cb9e0e14b748ff2c2cb214e584",
-    "sourceSha256": "3d42b73b13be4f2e279690f1002e0795068d99fd7751ab26ae428bcff417fdcd",
+    "head": "fc44636361d1ac04e81e89b65ebb857b2ea83729",
+    "sourceSha256": "fd2a1ef2a912d9c8d66e9ecbee9c3b0737813bfedeb1ca2ec5da5d94b3ce6489",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "aa6ceec7bf1eb9cb9e0e14b748ff2c2cb214e584",
-  "sourceSha256": "3d42b73b13be4f2e279690f1002e0795068d99fd7751ab26ae428bcff417fdcd",
+  "head": "fc44636361d1ac04e81e89b65ebb857b2ea83729",
+  "sourceSha256": "fd2a1ef2a912d9c8d66e9ecbee9c3b0737813bfedeb1ca2ec5da5d94b3ce6489",
   "counts": {
     "public": {
       "skills": 43,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1386,
-      "total": 1408
+      "srcFiles": 1387,
+      "total": 1409
     },
     "generated": {
       "distFiles": 5066,
@@ -784,6 +784,7 @@
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
+      "scripts/jev-resolve.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
       "scripts/lib/atomic-write.mjs",
@@ -32839,6 +32840,11 @@
         "path": "docs/adr/03671-script-side-judgment-channel.md"
       },
       {
+        "id": "docs/adr/03672-env-activated-active-mode.md",
+        "kind": "other",
+        "path": "docs/adr/03672-env-activated-active-mode.md"
+      },
+      {
         "id": "docs/agent-templates/README.md",
         "kind": "other",
         "path": "docs/agent-templates/README.md"
@@ -33667,6 +33673,11 @@
         "id": "scripts/jev-eval.mjs",
         "kind": "script",
         "path": "scripts/jev-eval.mjs"
+      },
+      {
+        "id": "scripts/jev-resolve.mjs",
+        "kind": "script",
+        "path": "scripts/jev-resolve.mjs"
       },
       {
         "id": "scripts/keyword-detector.mjs",
@@ -35177,6 +35188,11 @@
         "id": "src/__tests__/jev-eval-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-eval-script.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-resolve-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
         "id": "src/__tests__/job-management-sqlite.test.ts",
@@ -42756,6 +42772,26 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/keyword-detector.mjs",
         "to": "dist/hooks/subagent-tracker/flow-tracer.js",
         "kind": "imports"
@@ -47183,6 +47219,46 @@
       {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "scripts/jev-eval.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
         "kind": "imports"
       },
       {
@@ -80947,12 +81023,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7065,
-      "edgeCount": 7825,
-      "importEdgeCount": 6439,
+      "nodeCount": 7068,
+      "edgeCount": 7837,
+      "importEdgeCount": 6451,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "a3c348dc0d6b027bf489953cdf1c170141aba3047680b0d6f6795ed0208ef1dc",
-  "manifestSha256": "69bad8f621af975112edee74becc39ae9667d0b97c6d9563bc20272782b46268"
+  "inventorySha256": "60e87d6ece335768792f47d35c5014a917fbf2126e6cdb8d61ee7534fdbbfcdd",
+  "manifestSha256": "c595a537e6ed5ac9fa7b1007bbec60602ff07dd36c5f738dd3571921e09ece5b"
 }
