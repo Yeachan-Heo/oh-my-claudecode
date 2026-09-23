@@ -3154,7 +3154,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(true);
+    await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: true });
     expect(Date.now() - startedAt).toBe(20_250);
     expect(policy.engagedPaneRecheckBudgetMs).toBe(30_000);
   });
@@ -3186,7 +3186,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(true);
+    await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: true });
     expect(Date.now() - startedAt).toBe(31_500);
     expect(probeCalls).toBe(1);
     expect(retryCalls).toBe(0);
@@ -3222,7 +3222,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(false);
+    await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
     expect(Date.now() - startedAt).toBe(60_000);
     expect(probeCalls).toBe(1);
     expect(retryCalls).toBe(0);
@@ -3246,7 +3246,7 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect(settled).toBe(false);
 
       await vi.advanceTimersByTimeAsync(1);
-      await expect(evidencePromise).resolves.toBe(false);
+      await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
     },
   );
 
@@ -3266,7 +3266,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(false);
+    await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
     expect(Date.now() - startedAt).toBe(31_250);
   });
 
@@ -3286,7 +3286,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(false);
+    await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
     expect(Date.now() - startedAt).toBe(1_250);
   });
 
@@ -3303,7 +3303,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     );
 
     await vi.advanceTimersByTimeAsync(1_750);
-    await expect(evidencePromise).resolves.toBe(false);
+    await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
     expect(Date.now() - startedAt).toBe(1_750);
   });
 
@@ -3330,7 +3330,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(true);
+    await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: false });
     expect(Date.now() - startedAt).toBe(1_250);
   });
 
@@ -3365,7 +3365,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     expect(settled).toBe(false);
 
     await vi.advanceTimersByTimeAsync(1);
-    await expect(evidencePromise).resolves.toBe(false);
+    await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
     expect(Date.now() - startedAt).toBe(31_000);
   });
 
@@ -3507,7 +3507,10 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
         expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
+        expect(runtime.startupFailures).toEqual([
+          { worker: 'worker-1', reason: 'worker_startup_evidence_missing_pane_busy' },
+        ]);
       } finally {
         if (startPromise) await startPromise;
       }
@@ -3802,7 +3805,9 @@ describe('runtime v2 startup inbox dispatch', () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]).toMatchObject({
         status: 'failed',
-        last_reason: 'worker_startup_evidence_missing',
+        last_reason: mode === 'probe-throw'
+          ? 'worker_startup_evidence_missing'
+          : 'worker_startup_evidence_missing_pane_busy',
       });
       const persistedConfig = JSON.parse(await readFile(
         absPath(cwd, TeamPaths.config(fixture.teamName)),
@@ -3926,7 +3931,7 @@ describe('runtime v2 startup inbox dispatch', () => {
           committed: false,
           error: 'runtime_owner_unavailable',
         });
-        expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
         expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
           kind: 'final',
           outcome: 'succeeded',
@@ -4265,7 +4270,10 @@ describe('runtime v2 startup inbox dispatch', () => {
 
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-    expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+    expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
+    expect(runtime.startupFailures).toEqual([
+      { worker: 'worker-1', reason: 'worker_startup_evidence_missing_pane_busy' },
+    ]);
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
     expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(
       expect.objectContaining({ attempt_id: 'attempt-worker-1' }),
