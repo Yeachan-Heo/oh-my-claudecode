@@ -47,7 +47,11 @@ const SECTION_REGEXES = {
 function createSectionRegexSet(header) {
     return {
         extract: new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`),
-        replace: new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`),
+        // Mirrors `extract`: the boundary lookahead is anchored to a line start and
+        // excludes `### ` subsections, so a section body is never cut short at the
+        // first entry heading. Trailing blank lines are absorbed so the replacement
+        // can emit a single deterministic separator.
+        replace: new RegExp(`(${header}\\n)([\\s\\S]*?)\\n*(?=\\n## [^#]|$)`),
         comment: new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
     };
 }
@@ -139,7 +143,10 @@ function replaceSection(content, header, newContent) {
     // Preserve comment if it exists
     const commentMatch = content.match(commentPattern);
     const preservedComment = commentMatch ? commentMatch[1] + "\n" : "";
-    return content.replace(replace, `$1${preservedComment}${newContent}\n\n`);
+    // Function replacement: `newContent` and `preservedComment` are user/section
+    // text and must never be interpreted as replacement patterns (`$1`, `$&`,
+    // `` $` ``, `$'`).
+    return content.replace(replace, (_match, matchedHeader) => `${matchedHeader}${preservedComment}${newContent}\n`);
 }
 // ============================================================================
 // Section Access

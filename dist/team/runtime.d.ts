@@ -1,6 +1,9 @@
 import type { CliAgentType } from './model-contract.js';
+import { type WorkerPaneOwnership } from './tmux-session.js';
+import { type TeamInstanceId, type TmuxServerIdentity } from './types.js';
 export interface TeamConfig {
     teamName: string;
+    instance_id?: TeamInstanceId;
     workerCount: number;
     agentTypes: CliAgentType[];
     tasks: Array<{
@@ -12,6 +15,10 @@ export interface TeamConfig {
     tmuxSession?: string;
     leaderPaneId?: string;
     tmuxOwnsWindow?: boolean;
+    tmuxServerIdentity?: TmuxServerIdentity;
+    workerNames?: string[];
+    workerPaneIds?: string[];
+    workerPaneByName?: Record<string, string>;
 }
 export interface ActiveWorkerState {
     paneId: string;
@@ -28,9 +35,10 @@ export interface TeamRuntime {
     workerPaneIds: string[];
     activeWorkers: Map<string, ActiveWorkerState>;
     cwd: string;
-    /** Preflight-validated absolute binary paths, keyed by agent type */
-    resolvedBinaryPaths?: Partial<Record<CliAgentType, string>>;
-    stopWatchdog?: () => Promise<void>;
+    instanceId?: TeamInstanceId;
+    tmuxServerIdentity?: TmuxServerIdentity;
+    workerPaneOwnership?: Map<string, WorkerPaneOwnership>;
+    workerPaneByName?: Map<string, string>;
 }
 export interface WorkerStatus {
     workerName: string;
@@ -57,48 +65,27 @@ export interface TeamSnapshot {
         totalMs: number;
     };
 }
-export interface WatchdogCompletionEvent {
-    workerName: string;
-    taskId: string;
-    status: 'completed' | 'failed';
-    summary: string;
-}
-export declare function allTasksTerminal(runtime: TeamRuntime): Promise<boolean>;
 /**
- * Start a new team: create tmux session, spawn workers, wait for ready.
+ * Reject unsupported legacy startup before any effects.
  */
-export declare function startTeam(config: TeamConfig): Promise<TeamRuntime>;
+export declare function startTeam(_config: TeamConfig): Promise<TeamRuntime>;
 /**
  * Monitor team: poll worker health, detect stalls, return snapshot.
  */
 export declare function monitorTeam(teamName: string, cwd: string, workerPaneIds: string[]): Promise<TeamSnapshot>;
 /**
- * Runtime-owned worker watchdog/orchestrator loop.
- * Handles done.json completion, dead pane failures, and next-task spawning.
- */
-export declare function watchdogCliWorkers(runtime: TeamRuntime, intervalMs: number): () => Promise<void>;
-/**
- * Spawn a worker pane for an explicit task assignment.
- */
-export declare function spawnWorkerForTask(runtime: TeamRuntime, workerNameValue: string, taskIndex: number): Promise<string>;
-/**
- * Kill a single worker pane and update runtime state.
- */
-export declare function killWorkerPane(runtime: TeamRuntime, workerNameValue: string, paneId: string, options?: {
-    strict?: boolean;
-}): Promise<void>;
-/**
- * Assign a task to a specific worker via inbox + tmux trigger.
- */
-export declare function assignTask(teamName: string, taskId: string, targetWorkerName: string, paneId: string, sessionName: string, cwd: string): Promise<void>;
-/**
  * Gracefully shut down all workers and clean up.
+ *
+ * The legacy runtime is intentionally destructive only when the caller
+ * supplies an instance identity backed by the durable reservation protocol.
+ * Omitting the identity preserves state rather than falling back to names or
+ * pane IDs.
  */
-export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string, ownsWindow?: boolean): Promise<boolean>;
+export declare function shutdownTeam(teamName: string, sessionName: string, cwd: string, timeoutMs?: number, workerPaneIds?: string[], leaderPaneId?: string, ownsWindow?: boolean, instanceId?: TeamInstanceId): Promise<boolean>;
 /**
  * Resume an existing team from persisted state.
  * Reconstructs activeWorkers by scanning task files for in_progress tasks
- * so the watchdog loop can continue processing without stalling.
+ * for read-only status consumers. No legacy mutation loop is resumed.
  */
 export declare function resumeTeam(teamName: string, cwd: string): Promise<TeamRuntime | null>;
 //# sourceMappingURL=runtime.d.ts.map

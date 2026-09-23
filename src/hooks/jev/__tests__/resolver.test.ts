@@ -16,7 +16,7 @@ const ENV_KEYS = [
 ] as const;
 
 const QUESTIONS: JevQuestions = {
-  route: { type: 'Choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
+  route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
 
 const TWIN = { tier: 'sonnet' };
@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 function jevOk(answer: Partial<JevAnswer>): Response {
-  return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'Choice', ...answer } } }) } as unknown as Response;
+  return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', ...answer } } }) } as unknown as Response;
 }
 
 function httpErrorResponse(): Response {
@@ -103,7 +103,7 @@ describe('resolveJudgment', () => {
       point: 'model-routing',
       mode: 'shadow',
       heuristic: TWIN,
-      jev: { type: 'Choice', choice: 'opus', confidence: 0.9 },
+      jev: { type: 'choice', choice: 'opus', confidence: 0.9 },
       confidence: 0.9,
     });
     expect(typeof line.ts).toBe('string');
@@ -273,7 +273,7 @@ describe('resolveJudgment', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const line = JSON.parse(await readLog());
     expect(line.mode).toBe('shadow');
-    expect(line.jev).toEqual({ type: 'Choice', choice: 'opus' });
+    expect(line.jev).toEqual({ type: 'choice', choice: 'opus' });
   });
 
   it('OMC_JEV=all opts every point into shadow', async () => {

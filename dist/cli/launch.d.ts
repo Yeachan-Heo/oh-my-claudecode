@@ -144,7 +144,38 @@ export declare function runClaude(cwd: string, args: string[], sessionId: string
  * so our values take precedence.
  */
 export declare const TMUX_ENV_FORWARD: string[];
+/**
+ * Credential-shaped variables must never reach a command line.
+ * `buildEnvExportPrefix` output is handed to tmux as an argument, so anything
+ * it interpolates is readable through `/proc/<pid>/cmdline` (world-readable by
+ * default on Linux) and through `#{pane_start_command}`. Pattern-matched
+ * rather than enumerated so a newly supported provider key is contained by
+ * default instead of leaking until someone remembers to add it.
+ */
+export declare function isSensitiveTmuxEnvironmentVariable(name: string): boolean;
 export declare function buildEnvExportPrefix(vars: string[]): string;
+export interface SensitiveEnvTransport {
+    /** Shell fragment that loads the credentials and schedules artifact cleanup. */
+    prefix: string;
+    /** The secret-bearing file and its private parent directory. */
+    paths: string[];
+    /** Remove all artifacts immediately; safe to call more than once. */
+    cleanup(): void;
+}
+/**
+ * Forward credential-shaped variables through a private temporary transport.
+ * The returned shell prefix contains only artifact paths; the credential
+ * values are written to the transport file and loaded immediately before the
+ * Claude command. Callers must invoke cleanup() whenever launch preparation or
+ * tmux execution fails before the child shell can consume the prefix.
+ *
+ * POSIX shells source a 0600 `env.sh` file. Native Windows shells `call` a
+ * 0600-equivalent `env.cmd` fragment; its parent temp directory and file are
+ * removed by the command and by cleanup() on pre-execution failures. Windows
+ * values retain the existing percent escaping and NUL/CR/LF rejection.
+ */
+export declare function buildSensitiveEnvFilePrefix(vars: string[]): SensitiveEnvTransport;
+export declare function buildTmuxClaudeCommand(args: string[]): string;
 /**
  * postLaunch: Cleanup after Claude exits
  * Currently a placeholder - can be extended for:

@@ -180,7 +180,15 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
         result = spawnSync('sh', [wrapperPath, hudScript], {
             input: JSON.stringify({ session_id: 'unrelated', cwd: tempRoot }),
             encoding: 'utf8',
-            env: { ...process.env, PATH: `${fakeBin}:/usr/bin:/bin`, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:/usr/bin:/bin`,
+                OMC_HUD_CACHE_DIR: cacheDir,
+                OMC_HUD_SYNC_REFRESH: '1',
+                // Reclaiming another session's abandoned lock is part of the interval-gated
+                // global sweep, and the previous run in this cache dir already stamped it.
+                OMC_HUD_SWEEP_INTERVAL_SECONDS: '0',
+            },
             timeout: 2000,
         });
         expect(existsSync(staleBad)).toBe(false);
@@ -367,6 +375,101 @@ describe('HUD cache wrapper per-session cache TTL (issue #3938)', () => {
         expect(existsSync(staleTxt)).toBe(false);
         expect(readFileSync(freshJson, 'utf8')).toContain('fresh-session');
         expect(readFileSync(freshTxt, 'utf8')).toContain('fresh render');
+        rmSync(tempRoot, { recursive: true, force: true });
+    });
+    it('does not re-sweep the shared cache directory while the sweep stamp is fresh (issue #4045)', () => {
+        const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-4045-throttle-'));
+        const cacheDir = join(tempRoot, 'cache');
+        mkdirSync(cacheDir, { recursive: true });
+        const hudScript = join(tempRoot, 'fake-hud.mjs');
+        writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('sweep-ok'));\n");
+        const env = { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' };
+        const render = (sessionId) => execFileSync('sh', [wrapperPath, hudScript], {
+            input: JSON.stringify({ session_id: sessionId, cwd: tempRoot }),
+            encoding: 'utf8',
+            env,
+            timeout: 4000,
+        });
+        expect(render('sweep-first')).toBe('sweep-ok\n');
+        const stamp = join(cacheDir, 'sweep.stamp');
+        expect(existsSync(stamp)).toBe(true);
+        // The sweep lock must never be left behind, otherwise every later render backs off.
+        expect(existsSync(join(cacheDir, 'sweep.lock'))).toBe(false);
+        // Expired cache published after the first sweep: the second render is inside the
+        // interval, so it must return without touching another session's files.
+        const expired = join(cacheDir, 'statusline.expired-other.txt');
+        writeFileSync(expired, 'expired\n');
+        makeVeryOld(expired);
+        expect(render('sweep-second')).toBe('sweep-ok\n');
+        expect(existsSync(expired)).toBe(true);
+        // Interval elapsed — the next render sweeps and reclaims it.
+        makeOld(stamp);
+        expect(execFileSync('sh', [wrapperPath, hudScript], {
+            input: JSON.stringify({ session_id: 'sweep-third', cwd: tempRoot }),
+            encoding: 'utf8',
+            env: { ...env, OMC_HUD_SWEEP_INTERVAL_SECONDS: '5' },
+            timeout: 4000,
+        })).toBe('sweep-ok\n');
+        expect(existsSync(expired)).toBe(false);
+        rmSync(tempRoot, { recursive: true, force: true });
+    });
+    it('sweeps expired session caches without spawning a process per file (issue #4045)', () => {
+        const tempRoot = mkdtempSync(join(tmpdir(), 'omc-hud-4045-fanout-'));
+        const cacheDir = join(tempRoot, 'cache');
+        mkdirSync(cacheDir, { recursive: true });
+        const hudScript = join(tempRoot, 'fake-hud.mjs');
+        writeFileSync(hudScript, "process.stdin.resume(); process.stdin.on('end', () => console.log('fanout-ok'));\n");
+        const expiredPaths = [];
+        const freshPaths = [];
+        for (let index = 0; index < 40; index += 1) {
+            const expiredJson = join(cacheDir, `stdin.expired-${index}.json`);
+            const expiredTxt = join(cacheDir, `statusline.expired-${index}.txt`);
+            writeFileSync(expiredJson, '{}\n');
+            writeFileSync(expiredTxt, 'expired\n');
+            makeVeryOld(expiredJson);
+            makeVeryOld(expiredTxt);
+            expiredPaths.push(expiredJson, expiredTxt);
+            const freshJson = join(cacheDir, `stdin.fresh-${index}.json`);
+            writeFileSync(freshJson, '{}\n');
+            makeFresh(freshJson);
+            freshPaths.push(freshJson);
+        }
+        // `date` and `stat` are the utilities the old per-file predicate spawned. A counting
+        // shim on PATH proves the sweep no longer scales its subprocess count with file count.
+        const fakeBin = join(tempRoot, 'bin');
+        mkdirSync(fakeBin, { recursive: true });
+        const counterDir = join(tempRoot, 'counts');
+        mkdirSync(counterDir, { recursive: true });
+        for (const name of ['date', 'stat', 'head']) {
+            const resolved = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
+            expect(resolved, `${name} must be resolvable`).toMatch(/^\//);
+            const shim = join(fakeBin, name);
+            writeFileSync(shim, `#!/bin/sh\nprintf 'x' >> ${JSON.stringify(join(counterDir, name))}\nexec ${JSON.stringify(resolved)} "$@"\n`);
+            chmodSync(shim, 0o755);
+        }
+        const output = execFileSync('sh', [wrapperPath, hudScript], {
+            input: JSON.stringify({ session_id: 'fanout-probe', cwd: tempRoot }),
+            encoding: 'utf8',
+            env: {
+                ...process.env,
+                PATH: `${fakeBin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+                OMC_HUD_CACHE_DIR: cacheDir,
+                OMC_HUD_SYNC_REFRESH: '1',
+            },
+            timeout: 10_000,
+        });
+        expect(output).toBe('fanout-ok\n');
+        for (const path of expiredPaths)
+            expect(existsSync(path)).toBe(false);
+        for (const path of freshPaths)
+            expect(existsSync(path)).toBe(true);
+        const spawnCount = ['date', 'stat', 'head'].reduce((total, name) => {
+            const counter = join(counterDir, name);
+            return total + (existsSync(counter) ? readFileSync(counter, 'utf8').length : 0);
+        }, 0);
+        // 120 session-cache files. The old loop spent 4 spawns per file; the sweep is now a
+        // single find, so the count must stay far below one spawn per file.
+        expect(spawnCount).toBeLessThan(expiredPaths.length + freshPaths.length);
         rmSync(tempRoot, { recursive: true, force: true });
     });
     it('active session json/txt survives because its mtime is refreshed on each render', () => {

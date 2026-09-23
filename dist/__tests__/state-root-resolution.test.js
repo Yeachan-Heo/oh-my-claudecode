@@ -560,4 +560,79 @@ describe('OMC_STATE_DIR state-root resolution (issue #2532)', () => {
         }
     });
 });
+/**
+ * Regression tests for issue #4033: the inline state-root fallbacks in
+ * scripts/lib/state-root.{mjs,cjs} and templates/hooks/lib/state-root.mjs
+ * classify "not a git repository" by matching git's English stderr. Without
+ * LC_ALL=C on the spawn, a non-English shell makes probeGitRoot() throw
+ * instead of returning null, and every caller that awaits it dies silently.
+ *
+ * The locale is exercised through a fake `git` on PATH rather than a real
+ * system locale, so the test reproduces the failure on any host regardless of
+ * which locales happen to be installed.
+ */
+describe('state-root inline fallback — locale independence (#4033)', () => {
+    const STATE_ROOT_COPIES = [
+        join(REPO_ROOT, 'scripts', 'lib', 'state-root.mjs'),
+        join(REPO_ROOT, 'scripts', 'lib', 'state-root.cjs'),
+        join(REPO_ROOT, 'templates', 'hooks', 'lib', 'state-root.mjs'),
+    ];
+    let shimDir;
+    let workDir;
+    beforeEach(() => {
+        shimDir = mkdtempSync(join(tmpdir(), 'omc-4033-shim-'));
+        workDir = mkdtempSync(join(tmpdir(), 'omc-4033-work-'));
+        // A git that localizes its failure exactly the way real git does: the
+        // English message only when the C locale is forced, a translated one
+        // otherwise. Exit status 128 in both cases.
+        const shim = join(shimDir, 'git');
+        writeFileSync(shim, [
+            '#!/bin/sh',
+            'if [ "$LC_ALL" = "C" ]; then',
+            '  echo "fatal: not a git repository (or any of the parent directories): .git" >&2',
+            'else',
+            '  echo "fatal: (현재 폴더 또는 상위 폴더 중 일부가) 깃 저장소가 아닙니다: .git" >&2',
+            'fi',
+            'exit 128',
+            '',
+        ].join('\n'), { mode: 0o755 });
+    });
+    afterEach(() => {
+        rmSync(shimDir, { recursive: true, force: true });
+        rmSync(workDir, { recursive: true, force: true });
+    });
+    it.each(STATE_ROOT_COPIES)('%s forces LC_ALL=C on every git spawn', (copy) => {
+        const source = readFileSync(copy, 'utf-8');
+        const spawns = source.match(/execFileSync\('git',/g) ?? [];
+        expect(spawns.length).toBeGreaterThan(0);
+        // every spawn carries the env; none may be added later without it
+        expect((source.match(/env: gitEnv\(\)/g) ?? []).length).toBe(spawns.length);
+        expect(source).toContain("LC_ALL: 'C'");
+    });
+    it.each(STATE_ROOT_COPIES)('%s resolves a non-git dir under a localized git', (copy) => {
+        const isCjs = copy.endsWith('.cjs');
+        const loader = isCjs
+            ? `const { resolveOmcStateRoot } = require(${JSON.stringify(copy)});`
+            : `const { resolveOmcStateRoot } = await import(${JSON.stringify(copy)});`;
+        // Under the localized shim the whole probe must still classify the
+        // directory as non-git and fall back to the home root, not throw.
+        const program = isCjs
+            ? `${loader}\nresolveOmcStateRoot(${JSON.stringify(workDir)}).then((r) => { console.log(r); }, (e) => { console.error('THREW: ' + e.message); process.exit(3); });`
+            : `${loader}\nconst r = await resolveOmcStateRoot(${JSON.stringify(workDir)});\nconsole.log(r);`;
+        const out = execFileSync(NODE, [`--input-type=${isCjs ? 'commonjs' : 'module'}`, '-e', program], {
+            encoding: 'utf-8',
+            env: {
+                ...buildHookEnv(),
+                PATH: `${shimDir}:${process.env.PATH ?? ''}`,
+                HOME: workDir,
+                USERPROFILE: workDir,
+                LC_ALL: 'ko_KR.UTF-8',
+                LANG: 'ko_KR.UTF-8',
+                OMC_DISABLE_MULTIREPO: '1',
+            },
+            timeout: 15000,
+        }).trim();
+        expect(out).toBe(join(workDir, '.omc'));
+    });
+});
 //# sourceMappingURL=state-root-resolution.test.js.map

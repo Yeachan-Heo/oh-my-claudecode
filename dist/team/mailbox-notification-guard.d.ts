@@ -1,6 +1,6 @@
 import { type StrictDispatchReadResult, type TeamDispatchRequest } from './dispatch-queue.js';
 import { type StrictCanonicalMailboxMessageReadResult } from './team-ops.js';
-import type { TeamConfig, TeamMailboxMessage } from './types.js';
+import { type TeamConfig, type TeamMailboxMessage, type TmuxServerIdentity } from './types.js';
 export interface MailboxNotificationGuardInput {
     teamName: string;
     recipient: string;
@@ -16,10 +16,18 @@ export interface MailboxNotificationTarget {
     recipientRole: 'leader' | 'worker';
     paneId: string;
     workerIndex?: number;
+    /** Present only for tmux targets and copied from the persisted config binding. */
+    tmuxServerIdentity?: TmuxServerIdentity;
 }
 export type MailboxTargetOwnership = {
     kind: 'owned';
-    provider: MailboxNotificationProvider;
+    provider: 'tmux';
+    providerTarget: string;
+    paneId: string;
+    tmuxServerIdentity: TmuxServerIdentity;
+} | {
+    kind: 'owned';
+    provider: 'cmux';
     providerTarget: string;
     paneId: string;
 } | {
@@ -32,7 +40,11 @@ export type MailboxTargetOwnership = {
 /** Fields that must remain identical between the guard's pre-effect re-reads. */
 export interface MailboxNotificationSecurityTuple {
     configName: string;
+    configInstanceId: string;
     configProviderTarget: string;
+    configTmuxServerSocketPath?: string;
+    configTmuxServerPid?: number;
+    configTmuxServerProcessStartedAt?: string;
     recipient: string;
     recipientRole: 'leader' | 'worker';
     canonicalPaneId: string;

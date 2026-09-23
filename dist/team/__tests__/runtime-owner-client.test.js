@@ -8,10 +8,12 @@ import { canonicalRecoveryPayloadHash, readRecoveryOutcome, readRecoveryRequestR
 import { createRecoveryOwnerClient, isExpectedRecoveryOwnerSuccessor, recoveryOwnerBootstrapTestHooks, requestRuntimeOwnerRecovery, setRuntimeOwnerDispatch, withRecoveryAdmissionLock } from '../runtime-owner-client.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { currentProcessStartIdentity, isProcessIdentityDead, isValidProcessStartIdentity, publishOwnerEpoch } from '../team-owner-epoch.js';
+import { createTeamInstanceBinding } from '../team-instance.js';
 import { executeRecoverDeadWorkerV2Owner, prepareRecoveryOwnerBootstrap } from '../runtime-v2.js';
 let previousHome;
 let previousUserProfile;
 let previousOmcStateDir;
+const INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
 beforeEach(() => {
     previousHome = process.env.HOME;
     previousUserProfile = process.env.USERPROFILE;
@@ -112,6 +114,7 @@ function publishSuccess(cwd, requestId) {
 function validV2Config(teamName, overrides = {}) {
     return {
         name: teamName,
+        instance_id: INSTANCE_ID,
         task: 'runtime owner recovery',
         agent_type: 'claude',
         worker_launch_mode: 'interactive',
@@ -125,34 +128,77 @@ function validV2Config(teamName, overrides = {}) {
         ...overrides,
     };
 }
+function seedInstanceReservation(cwd, teamName = 'recovery-team') {
+    const binding = createTeamInstanceBinding({ teamName, cwd, instanceId: INSTANCE_ID });
+    const reservationPath = absPath(cwd, TeamPaths.teamInstanceReservation(binding.workspace_hash, teamName));
+    mkdirSync(join(reservationPath, '..'), { recursive: true });
+    const now = new Date().toISOString();
+    const processStartedAt = currentProcessStartIdentity();
+    if (!processStartedAt)
+        throw new Error('fixture process identity unavailable');
+    writeFileSync(reservationPath, JSON.stringify({
+        schema_version: 1,
+        kind: 'team-instance-reservation',
+        instance_id: binding.instance_id,
+        team_name: binding.team_name,
+        cwd: binding.cwd,
+        workspace_hash: binding.workspace_hash,
+        state_root: binding.state_root,
+        phase: 'active',
+        owner: { pid: process.pid, process_started_at: processStartedAt, nonce: 'fixture-owner' },
+        reservation_path: reservationPath,
+        lifecycle_lock_path: absPath(cwd, TeamPaths.recoveryLifecycleLock(binding.workspace_hash, teamName)),
+        created_at: now,
+        updated_at: now,
+    }));
+}
 function seedV2Team(cwd, teamName = 'recovery-team') {
     const configPath = absPath(cwd, TeamPaths.config(teamName));
     const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
-    writeFileSync(manifestPath, JSON.stringify({ schema_version: 2 }));
+    writeFileSync(manifestPath, JSON.stringify({ schema_version: 2, instance_id: INSTANCE_ID }));
+    seedInstanceReservation(cwd, teamName);
+}
+function seedOwnedV2Team(cwd, teamName = 'recovery-team') {
+    seedV2Team(cwd, teamName);
+    const processStartedAt = currentProcessStartIdentity();
+    if (!processStartedAt)
+        throw new Error('fixture process identity unavailable');
+    const owner = publishOwnerEpoch(cwd, teamName, 1, {
+        pid: process.pid,
+        processStartedAt,
+        nonce: 'fixture-runtime-owner',
+    });
+    const configPath = absPath(cwd, TeamPaths.config(teamName));
+    writeFileSync(configPath, JSON.stringify(validV2Config(teamName, {
+        lifecycle_state: 'active',
+        runtime_owner_epoch: owner,
+    })));
 }
 function seedBootstrapRecoveryRequest(cwd, teamName, requestId, recoveryId) {
     const payload = { operation: 'recover-worker',
-        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' };
+        workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: INSTANCE_ID };
     reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
     const intentPath = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
     mkdirSync(join(intentPath, '..'), { recursive: true });
     writeFileSync(intentPath, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
         recovery_id: recoveryId, operation: payload.operation, workspace_hash: payload.workspaceHash,
         payload_hash: canonicalRecoveryPayloadHash(payload), team_name: teamName, worker_name: 'worker-1',
+        instance_id: INSTANCE_ID,
         created_at: new Date().toISOString() }));
 }
 describe('runtime owner durable request admission', () => {
     it('joins concurrent copies of the same request and never dispatches owner effects twice', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-replay-'));
         try {
+            seedV2Team(cwd);
             const dispatch = vi.fn(async (input) => {
                 await new Promise(resolve => setTimeout(resolve, 100));
                 return publishSuccess(input.cwd, input.requestId);
             });
             setRuntimeOwnerDispatch(dispatch);
-            const input = { teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-a', timeoutMs: 180_000 };
+            const input = { teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-a', instanceId: INSTANCE_ID, timeoutMs: 180_000 };
             const [first, joined] = await Promise.all([
                 requestRuntimeOwnerRecovery(input),
                 requestRuntimeOwnerRecovery(input),
@@ -169,18 +215,19 @@ describe('runtime owner durable request admission', () => {
     it('aliases concurrent identical requests to one recovery identity and one owner dispatch', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-alias-'));
         try {
+            seedV2Team(cwd);
             const dispatch = vi.fn(async (input) => {
                 await new Promise(resolve => setTimeout(resolve, 200));
                 return publishSuccess(input.cwd, input.requestId);
             });
             setRuntimeOwnerDispatch(dispatch);
             const [first, second] = await Promise.all([
-                requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-a', timeoutMs: 180_000 }),
-                requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-b', timeoutMs: 180_000 }),
+                requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-a', instanceId: INSTANCE_ID, timeoutMs: 180_000 }),
+                requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-b', instanceId: INSTANCE_ID, timeoutMs: 180_000 }),
             ]);
             expect(first.recoveryId).toBe(second.recoveryId);
             expect(dispatch).toHaveBeenCalledTimes(1);
-            const later = await requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-c', timeoutMs: 180_000 });
+            const later = await requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'request-c', instanceId: INSTANCE_ID, timeoutMs: 180_000 });
             expect(later.recoveryId).not.toBe(first.recoveryId);
             expect(dispatch).toHaveBeenCalledTimes(2);
         }
@@ -205,14 +252,14 @@ describe('runtime owner durable request admission', () => {
             ];
             for (const [name, from, to] of mutations) {
                 reserveRecoveryRequest(cwd, requestId, { operation: 'recover-worker', workspaceHash,
-                    teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-inconsistent');
+                    teamName: 'recovery-team', workerName: 'worker-1', instanceId: INSTANCE_ID }, 'recovery-inconsistent');
                 const bytes = readFileSync(path, 'utf8');
                 writeFileSync(path, bytes.replace(from, to));
                 const configBytes = readFileSync(configPath, 'utf8');
                 const dispatch = vi.fn();
                 const client = createRecoveryOwnerClient(dispatch, { minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
                 await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                    requestId, timeoutMs: 100 }), name).rejects.toThrow('malformed_recovery_request_reservation');
+                    requestId, instanceId: INSTANCE_ID, timeoutMs: 100 }), name).rejects.toThrow('malformed_recovery_request_reservation');
                 expect(dispatch, name).not.toHaveBeenCalled();
                 expect(existsSync(absPath(cwd, TeamPaths.recoveryIntent('recovery-team', 'recovery-inconsistent'))), name).toBe(false);
                 expect(existsSync(absPath(cwd, TeamPaths.recoveryRequestResult(requestId))), name).toBe(false);
@@ -227,12 +274,13 @@ describe('runtime owner durable request admission', () => {
     it('reconstructs a missing canonical intent after a crash following reservation publication', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-missing-intent-'));
         try {
+            seedV2Team(cwd);
             reserveRecoveryRequest(cwd, 'request-crash', { operation: 'recover-worker',
-                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-crash');
+                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1', instanceId: INSTANCE_ID }, 'recovery-crash');
             const dispatch = vi.fn(async (input) => publishSuccess(input.cwd, input.requestId));
             setRuntimeOwnerDispatch(dispatch);
             const pending = requestRuntimeOwnerRecovery({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'request-crash', timeoutMs: 180_000 });
+                requestId: 'request-crash', instanceId: INSTANCE_ID, timeoutMs: 180_000 });
             const intentPath = absPath(cwd, TeamPaths.recoveryIntent('recovery-team', 'recovery-crash'));
             for (let attempt = 0; attempt < 50 && !existsSync(intentPath); attempt++) {
                 await new Promise(resolve => setTimeout(resolve, 10));
@@ -261,7 +309,7 @@ describe('runtime owner durable request admission', () => {
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'first-owner-request', timeoutMs: 100 })).resolves.toMatchObject({ outcome: 'recovered' });
+                requestId: 'first-owner-request', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ outcome: 'recovered' });
             expect(bootstrapOwner).toHaveBeenCalledTimes(1);
         }
         finally {
@@ -278,7 +326,7 @@ describe('runtime owner durable request admission', () => {
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'unknown-owner-request', timeoutMs: 100 })).resolves.toMatchObject({ error: 'recovery_request_timeout' });
+                requestId: 'unknown-owner-request', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ error: 'recovery_request_timeout' });
             expect(readRecoveryOutcome(cwd, 'unknown-owner-request')).not.toMatchObject({ kind: 'final' });
             expect(bootstrapOwner).not.toHaveBeenCalled();
         }
@@ -304,7 +352,7 @@ describe('runtime owner durable request admission', () => {
             const client = createRecoveryOwnerClient(dispatch, { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'successor-request', timeoutMs: 100 })).resolves.toMatchObject({ outcome: 'recovered' });
+                requestId: 'successor-request', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ outcome: 'recovered' });
             expect(bootstrapOwner).toHaveBeenCalledTimes(1);
             expect(dispatch).not.toHaveBeenCalled();
         }
@@ -315,12 +363,12 @@ describe('runtime owner durable request admission', () => {
     it('replays a canonical final after team deletion without publishing an empty-recovery result', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-deleted-final-'));
         try {
-            seedV2Team(cwd);
+            seedOwnedV2Team(cwd);
             const requestId = 'deleted-final-request';
             const admissionDispatch = vi.fn(async (input) => publishSuccess(input.cwd, input.requestId));
-            const admittingClient = createRecoveryOwnerClient(admissionDispatch, { minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
+            const admittingClient = createRecoveryOwnerClient(admissionDispatch, { minTimeoutMs: 1_000, maxTimeoutMs: 1_000, pollIntervalMs: 10 });
             const expected = await admittingClient.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId, timeoutMs: 100 });
+                requestId, instanceId: INSTANCE_ID, timeoutMs: 1_000 });
             const reservation = readRecoveryRequestReservation(cwd, requestId);
             expect(reservation).toMatchObject({ kind: 'reservation', request_id: requestId,
                 team_name: 'recovery-team', worker_name: 'worker-1' });
@@ -330,9 +378,9 @@ describe('runtime owner durable request admission', () => {
             unlinkSync(absPath(cwd, TeamPaths.config('recovery-team')));
             const bootstrapOwner = vi.fn(async () => true);
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
-                minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
+                minTimeoutMs: 1_000, maxTimeoutMs: 1_000, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId, timeoutMs: 100 })).resolves.toEqual(expected);
+                requestId, instanceId: INSTANCE_ID, timeoutMs: 1_000 })).resolves.toEqual(expected);
             expect(bootstrapOwner).not.toHaveBeenCalled();
             expect(readRecoveryOutcome(cwd, requestId)).toMatchObject({
                 kind: 'final', recovery_id: expected.recoveryId,
@@ -347,13 +395,13 @@ describe('runtime owner durable request admission', () => {
         try {
             seedV2Team(cwd);
             reserveRecoveryRequest(cwd, 'deleted-conflict-request', { operation: 'recover-worker',
-                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'other-team', workerName: 'worker-1' }, 'other-recovery');
+                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'other-team', workerName: 'worker-1', instanceId: INSTANCE_ID }, 'other-recovery');
             unlinkSync(absPath(cwd, TeamPaths.config('recovery-team')));
             const bootstrapOwner = vi.fn(async () => true);
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'deleted-conflict-request', timeoutMs: 100 })).resolves.toMatchObject({
+                requestId: 'deleted-conflict-request', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({
                 outcome: 'failed', error: 'recovery_attempt_conflict', recoveryId: 'other-recovery',
             });
             expect(bootstrapOwner).not.toHaveBeenCalled();
@@ -367,16 +415,17 @@ describe('runtime owner durable request admission', () => {
         }
     });
     it.each([
-        ['absent', undefined],
-        ['malformed', '{'],
-        ['stale', JSON.stringify({ schema_version: 2, state_revision: 0, name: 'stale-projection' })],
-    ])('accepts revisioned config authority with a %s manifest', async (_manifestState, manifest) => {
+        ['absent', undefined, 'recovered'],
+        ['malformed', '{', 'invalid_persisted_state'],
+        ['stale', JSON.stringify({ schema_version: 2, state_revision: 0, name: 'recovery-team', instance_id: INSTANCE_ID }), 'recovered'],
+    ])('classifies revisioned config authority with a %s manifest', async (_manifestState, manifest, expected) => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-config-authority-'));
         try {
             const teamName = 'recovery-team';
             const configPath = absPath(cwd, TeamPaths.config(teamName));
             mkdirSync(join(configPath, '..'), { recursive: true });
             writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+            seedInstanceReservation(cwd, teamName);
             if (manifest !== undefined)
                 writeFileSync(absPath(cwd, TeamPaths.manifest(teamName)), manifest);
             publishOwnerEpoch(cwd, teamName, 1, {
@@ -390,15 +439,23 @@ describe('runtime owner durable request admission', () => {
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName, cwd, workerName: 'worker-1',
-                requestId: `manifest-${_manifestState}`, timeoutMs: 100 })).resolves.toMatchObject({ outcome: 'recovered' });
-            expect(bootstrapOwner).toHaveBeenCalledTimes(1);
+                requestId: `manifest-${_manifestState}`, instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject(expected === 'recovered' ? { outcome: 'recovered' } : { error: expected });
+            expect(bootstrapOwner).toHaveBeenCalledTimes(expected === 'recovered' ? 1 : 0);
+            if (expected !== 'recovered') {
+                expect(readRecoveryRequestReservation(cwd, `manifest-${_manifestState}`)).toBeNull();
+                expect(readRecoveryOutcome(cwd, `manifest-${_manifestState}`)).toBeNull();
+            }
         }
         finally {
             rmSync(cwd, { recursive: true, force: true });
         }
     });
     it.each([
-        ['incomplete revisioned', { state_revision: 1 }],
+        ['incomplete revisioned', (() => {
+                const incomplete = validV2Config('recovery-team');
+                delete incomplete.worker_count;
+                return incomplete;
+            })()],
         ['negative revision', validV2Config('recovery-team', { state_revision: -1 })],
         ['malformed worker', validV2Config('recovery-team', { workers: [{ name: 'worker-1', index: 'bad' }], worker_count: 1 })],
         ['malformed owner', validV2Config('recovery-team', { runtime_owner_epoch: { epoch: 1, nonce: 'owner' } })],
@@ -409,13 +466,17 @@ describe('runtime owner durable request admission', () => {
         try {
             const path = absPath(cwd, TeamPaths.config('recovery-team'));
             mkdirSync(join(path, '..'), { recursive: true });
+            seedInstanceReservation(cwd, 'recovery-team');
             writeFileSync(path, JSON.stringify(config));
             const bootstrapOwner = vi.fn(async () => true);
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: `malformed-${_name.replace(/\s+/g, '-')}`, timeoutMs: 100 })).resolves.toMatchObject({ error: 'invalid_persisted_state' });
+                requestId: `malformed-${_name.replace(/\s+/g, '-')}`, instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ error: 'invalid_persisted_state' });
             expect(bootstrapOwner).not.toHaveBeenCalled();
+            const requestId = `malformed-${_name.replace(/\s+/g, '-')}`;
+            expect(readRecoveryRequestReservation(cwd, requestId)).toBeNull();
+            expect(readRecoveryOutcome(cwd, requestId)).toBeNull();
         }
         finally {
             rmSync(cwd, { recursive: true, force: true });
@@ -431,13 +492,18 @@ describe('runtime owner durable request admission', () => {
             const legacy = validV2Config('recovery-team');
             delete legacy.state_revision;
             writeFileSync(configPath, JSON.stringify(legacy));
+            seedInstanceReservation(legacyCwd, 'recovery-team');
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd: legacyCwd, workerName: 'worker-1',
-                requestId: 'legacy-config', timeoutMs: 100 })).resolves.toMatchObject({ error: 'runtime_v2_required' });
+                requestId: 'legacy-config', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ error: 'runtime_v2_required' });
+            expect(readRecoveryRequestReservation(legacyCwd, 'legacy-config')).toBeNull();
+            expect(readRecoveryOutcome(legacyCwd, 'legacy-config')).toBeNull();
             setFixtureEnv(absentCwd);
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd: absentCwd, workerName: 'worker-1',
-                requestId: 'absent-config', timeoutMs: 100 })).resolves.toMatchObject({ error: 'team_not_found' });
+                requestId: 'absent-config', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ error: 'team_not_found' });
+            expect(readRecoveryRequestReservation(absentCwd, 'absent-config')).toBeNull();
+            expect(readRecoveryOutcome(absentCwd, 'absent-config')).toBeNull();
         }
         finally {
             rmSync(legacyCwd, { recursive: true, force: true });
@@ -454,7 +520,7 @@ describe('runtime owner durable request admission', () => {
             const client = createRecoveryOwnerClient(dispatch, { persistentOwnerBootstrap: true, bootstrapOwner,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'live-request', timeoutMs: 100 })).resolves.toMatchObject({ error: 'recovery_request_timeout' });
+                requestId: 'live-request', instanceId: INSTANCE_ID, timeoutMs: 100 })).resolves.toMatchObject({ error: 'recovery_request_timeout' });
             expect(bootstrapOwner).not.toHaveBeenCalled();
             expect(dispatch).not.toHaveBeenCalled();
         }
@@ -465,10 +531,11 @@ describe('runtime owner durable request admission', () => {
     it('returns the exact typed timeout while leaving the durable intent pending', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-timeout-'));
         try {
+            seedV2Team(cwd);
             const neverSettles = new Promise(() => undefined);
             const client = createRecoveryOwnerClient(vi.fn(() => neverSettles), { minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             const result = await client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'request-timeout', timeoutMs: 100 });
+                requestId: 'request-timeout', instanceId: INSTANCE_ID, timeoutMs: 100 });
             const reservation = readRecoveryRequestReservation(cwd, 'request-timeout');
             expect(reservation).not.toBeNull();
             expect(result).toEqual({
@@ -486,15 +553,16 @@ describe('runtime owner durable request admission', () => {
     it('rejects a truncated existing canonical intent without dispatching owner effects', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-truncated-intent-'));
         try {
+            seedV2Team(cwd);
             reserveRecoveryRequest(cwd, 'request-truncated', { operation: 'recover-worker',
-                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-truncated');
+                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1', instanceId: INSTANCE_ID }, 'recovery-truncated');
             const intentPath = absPath(cwd, TeamPaths.recoveryIntent('recovery-team', 'recovery-truncated'));
             mkdirSync(join(intentPath, '..'), { recursive: true });
             writeFileSync(intentPath, '{"schema_version":1');
             const dispatch = vi.fn(async (input) => publishSuccess(input.cwd, input.requestId));
             const client = createRecoveryOwnerClient(dispatch, { minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'request-truncated', timeoutMs: 100 })).rejects.toThrow('invalid_persisted_state');
+                requestId: 'request-truncated', instanceId: INSTANCE_ID, timeoutMs: 100 })).rejects.toThrow('invalid_persisted_state');
             expect(dispatch).not.toHaveBeenCalled();
             expect(readRecoveryOutcome(cwd, 'request-truncated')).toBeNull();
         }
@@ -505,8 +573,9 @@ describe('runtime owner durable request admission', () => {
     it('rejects a tuple-matching incomplete final instead of replaying or dispatching', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-incomplete-final-'));
         try {
+            seedV2Team(cwd);
             reserveRecoveryRequest(cwd, 'request-incomplete', { operation: 'recover-worker',
-                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1' }, 'recovery-incomplete');
+                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName: 'recovery-team', workerName: 'worker-1', instanceId: INSTANCE_ID }, 'recovery-incomplete');
             writeFileSync(absPath(cwd, TeamPaths.recoveryRequestResult('request-incomplete')), JSON.stringify({
                 schema_version: 1, kind: 'final', request_id: 'request-incomplete', recovery_id: 'recovery-incomplete',
                 team_name: 'recovery-team', worker_name: 'worker-1', outcome: 'failed',
@@ -519,7 +588,7 @@ describe('runtime owner durable request admission', () => {
             const dispatch = vi.fn(async (input) => publishSuccess(input.cwd, input.requestId));
             const client = createRecoveryOwnerClient(dispatch, { minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
             await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1',
-                requestId: 'request-incomplete', timeoutMs: 100 })).rejects.toThrow('invalid_persisted_state');
+                requestId: 'request-incomplete', instanceId: INSTANCE_ID, timeoutMs: 100 })).rejects.toThrow('invalid_persisted_state');
             expect(dispatch).not.toHaveBeenCalled();
         }
         finally {
@@ -572,7 +641,7 @@ describe('runtime owner bootstrap spawn lifecycle regressions', () => {
             recoveryOwnerBootstrapTestHooks.spawn((() => { throw new Error('spawn failed'); }));
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
-            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, timeoutMs: 100 }))
+            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID, timeoutMs: 100 }))
                 .resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
             expect(readRecoveryRequestReservation(cwd, requestId)).toMatchObject({ recovery_id: recoveryId, kind: 'reservation' });
             expect(readRecoveryOutcome(cwd, requestId)).not.toMatchObject({ kind: 'final' });
@@ -609,7 +678,7 @@ describe('runtime owner bootstrap spawn lifecycle regressions', () => {
             }));
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
-            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, timeoutMs: 100 }))
+            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID, timeoutMs: 100 }))
                 .resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
             expect(readRecoveryOutcome(cwd, requestId)).not.toMatchObject({ kind: 'final' });
             expect(readRecoveryRequestReservation(cwd, requestId)).toMatchObject({ recovery_id: recoveryId });
@@ -634,7 +703,7 @@ describe('runtime owner bootstrap spawn lifecycle regressions', () => {
             }));
             const client = createRecoveryOwnerClient(vi.fn(), { persistentOwnerBootstrap: true,
                 minTimeoutMs: 100, maxTimeoutMs: 100, pollIntervalMs: 10 });
-            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, timeoutMs: 100 }))
+            await expect(client.recoverDeadWorker({ teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID, timeoutMs: 100 }))
                 .resolves.toMatchObject({ outcome: 'failed', error: 'recovery_request_timeout' });
             expect(readRecoveryOutcome(cwd, requestId)).not.toMatchObject({ kind: 'final' });
             expect(existsSync(absPath(cwd, TeamPaths.recoveryIntent('recovery-team', recoveryId)))).toBe(true);
@@ -652,18 +721,20 @@ describe('recovery owner bootstrap candidates', () => {
             const requestId = 'candidate-retry-request';
             const recoveryId = 'candidate-retry-recovery';
             const payload = { operation: 'recover-worker',
-                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1' };
+                workspaceHash: createHash('sha256').update(cwd).digest('hex'), teamName, workerName: 'worker-1', instanceId: INSTANCE_ID };
             const configPath = absPath(cwd, TeamPaths.config(teamName));
             mkdirSync(join(configPath, '..'), { recursive: true });
             writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+            seedInstanceReservation(cwd, teamName);
             reserveRecoveryRequest(cwd, requestId, payload, recoveryId);
             const intentPath = absPath(cwd, TeamPaths.recoveryIntent(teamName, recoveryId));
             mkdirSync(join(intentPath, '..'), { recursive: true });
             writeFileSync(intentPath, JSON.stringify({ schema_version: 1, kind: 'recover-worker', request_id: requestId,
                 recovery_id: recoveryId, operation: payload.operation, workspace_hash: payload.workspaceHash,
                 payload_hash: canonicalRecoveryPayloadHash(payload), team_name: teamName, worker_name: 'worker-1',
+                instance_id: INSTANCE_ID,
                 created_at: new Date().toISOString() }));
-            const baseInput = { teamName, cwd, workerName: 'worker-1', requestId };
+            const baseInput = { teamName, cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID };
             const deadCandidateStartIdentity = hostValidDeadProcessStartIdentity(2_147_483_647);
             await recoveryOwnerBootstrapTestHooks.publishCandidate(baseInput, recoveryId, 1, 'dead-child', 2_147_483_647, deadCandidateStartIdentity, null);
             expect(recoveryOwnerBootstrapTestHooks.hasLiveOrUnknownCandidate(baseInput, recoveryId, 1, null)).toBe(false);
@@ -700,12 +771,13 @@ describe('recovery owner bootstrap candidates', () => {
             const configPath = absPath(cwd, TeamPaths.config(teamName));
             mkdirSync(join(configPath, '..'), { recursive: true });
             writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+            seedInstanceReservation(cwd, teamName);
             seedBootstrapRecoveryRequest(cwd, teamName, requestId, recoveryId);
             const processStartedAt = currentProcessStartIdentity();
             expect(processStartedAt).toBeTruthy();
             let now = 0;
             let sleepCalls = 0;
-            const input = { teamName, cwd, workerName: 'worker-1', requestId, bootstrap: {
+            const input = { teamName, cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID, bootstrap: {
                     expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
                     predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: processStartedAt, nonce: 'missing-child', recoveryId,
                 } };
@@ -733,11 +805,12 @@ describe('recovery owner bootstrap candidates', () => {
             const configPath = absPath(cwd, TeamPaths.config(teamName));
             mkdirSync(join(configPath, '..'), { recursive: true });
             writeFileSync(configPath, JSON.stringify(validV2Config(teamName)));
+            seedInstanceReservation(cwd, teamName);
             seedBootstrapRecoveryRequest(cwd, teamName, requestId, recoveryId);
             const processStartedAt = currentProcessStartIdentity();
             expect(processStartedAt).toBeTruthy();
             const controller = new AbortController();
-            const input = { teamName, cwd, workerName: 'worker-1', requestId, bootstrap: {
+            const input = { teamName, cwd, workerName: 'worker-1', requestId, instanceId: INSTANCE_ID, bootstrap: {
                     expectedEpoch: 1, predecessorEpoch: 0, predecessorNonce: null, predecessorPid: null,
                     predecessorProcessStartedAt: null, pid: process.pid, processStartedAt: processStartedAt, nonce: 'aborted-child', recoveryId,
                 } };
@@ -757,7 +830,7 @@ describe('recovery owner bootstrap candidates', () => {
     it('fails closed when a same-epoch bootstrap candidate sibling is malformed', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'runtime-owner-bootstrap-malformed-'));
         try {
-            const input = { teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'candidate-malformed-request' };
+            const input = { teamName: 'recovery-team', cwd, workerName: 'worker-1', requestId: 'candidate-malformed-request', instanceId: INSTANCE_ID };
             const path = absPath(cwd, TeamPaths.recoveryOwnerBootstrapCandidate(input.teamName, 1, 'malformed-child'));
             mkdirSync(join(path, '..'), { recursive: true });
             writeFileSync(path, '{ malformed');

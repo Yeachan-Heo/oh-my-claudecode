@@ -108,7 +108,7 @@ describe('repair-plugin-cache.mjs', () => {
         expect(result.status).toBe(0);
         expect(result.stdout).toContain('hooks=platform');
         const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
-        expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe('sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs');
+        expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe('sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs');
     });
     it.runIf(process.platform !== 'win32')('repairs every bundled direct-node hook command to find-node on Unix/macOS', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-repair-unix-bundled-hooks-'));
@@ -130,7 +130,7 @@ describe('repair-plugin-cache.mjs', () => {
             .map(command => ({ event, command }))));
         expect(commands.length).toBeGreaterThan(0);
         for (const { event, command } of commands) {
-            expect(command, event).toMatch(/^sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs /);
+            expect(command, event).toMatch(/^sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/find-node\.sh "\$\{CLAUDE_PLUGIN_ROOT\}"\/scripts\/run\.cjs /);
             expect(command, event).not.toContain('/bin/sh');
         }
     });
@@ -158,7 +158,7 @@ describe('repair-plugin-cache.mjs', () => {
         });
         expect(result.status).toBe(0);
         const hooksJson = JSON.parse(readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf-8'));
-        expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/session-end.mjs');
+        expect(hooksJson.hooks.SessionEnd[0].hooks[0].command).toBe('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/session-end.mjs');
     });
     it('setup instructions delegate cache resolution and retain phase repair without unsafe deletion', () => {
         const setupSkill = readFileSync(join(REPO_ROOT, 'skills', 'omc-setup', 'SKILL.md'), 'utf-8');

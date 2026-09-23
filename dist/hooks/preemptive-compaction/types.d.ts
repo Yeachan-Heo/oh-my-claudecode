@@ -72,5 +72,7 @@ export interface PreemptiveCompactionConfig {
     maxWarnings?: number;
     /** Custom warning message */
     customMessage?: string;
+    /** Test hook: fetch transport for the Jev context-pruning shadow judgment */
+    jevFetchFn?: typeof fetch;
 }
 //# sourceMappingURL=types.d.ts.map

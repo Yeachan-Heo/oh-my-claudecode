@@ -2,154 +2,192 @@
  * Tests for team MCP cleanup hardening (plan: team-mcp-cleanup-4.4.0.md)
  *
  * Coverage:
- * - killWorkerPanes: leader-pane guard, empty no-op, shutdown sentinel write
+ * - killOwnedWorkerPane: immutable ownership, strict membership, and leader guard
  * - killTeamSession: never kill-session on split-pane (':'), leader-pane skip
  * - validateJobId regex logic (inline, since function is internal to team-server.ts)
  * - exit-code mapping: runtime-cli exitCodeFor logic (no dedicated timeout exit code)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { tmpdir } from 'os';
 import { join } from 'path';
-import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
-import { readFile } from 'fs/promises';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
-// ─── killWorkerPanes + killTeamSession ───────────────────────────────────────
-// Mock child_process so tmux calls don't require a real tmux install
-vi.mock('child_process', async (importOriginal) => {
+import { readFileSync } from 'fs';
+import { currentStrictProcessStartIdentity } from '../../team/team-owner-epoch.js';
+import { isValidOmcTeamJob, isValidTeamPaneArtifact } from '../team-job-convergence.js';
+const INSTANCE_ID = '77777777-7777-4777-8777-777777777777';
+const OTHER_INSTANCE_ID = '88888888-8888-4888-8888-888888888888';
+const strictProcessStartedAt = (process.platform === 'darwin' || process.platform === 'linux')
+    ? currentStrictProcessStartIdentity()
+    : null;
+const supportsStrictTmuxFixture = Boolean(strictProcessStartedAt);
+const tmuxServerIdentity = strictProcessStartedAt
+    ? {
+        socket_path: '/tmp/omc-mcp-cleanup.sock',
+        server_pid: process.pid,
+        process_started_at: strictProcessStartedAt,
+    }
+    : undefined;
+function strictTmuxIdentity() {
+    if (!tmuxServerIdentity)
+        throw new Error('strict tmux fixture unsupported on this platform');
+    return tmuxServerIdentity;
+}
+const tmuxUtilsMocks = vi.hoisted(() => {
+    const state = {
+        killedPanes: [],
+        killedSessions: [],
+    };
+    return {
+        ...state,
+        tmuxExecAsync: vi.fn(async (args) => {
+            if (args.includes('list-panes'))
+                return { stdout: '%2\n%3\n', stderr: '' };
+            return { stdout: '', stderr: '' };
+        }),
+        tmuxCmdAsync: vi.fn(async (args) => {
+            const joined = args.join(' ');
+            const marker = joined.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+            if (marker) {
+                const pane = joined.match(/'kill-pane' '-t' '(%\d+)'/)?.[1];
+                if (pane)
+                    state.killedPanes.push(pane);
+                const session = joined.match(/'kill-session' '-t' '(\$\d+)'/)?.[1];
+                if (session)
+                    state.killedSessions.push(session);
+                return { stdout: `${marker}\n`, stderr: '' };
+            }
+            if (joined.includes('#{pane_dead}'))
+                return { stdout: '0\n', stderr: '' };
+            if (joined.includes('#{pid}'))
+                return { stdout: `${process.pid}\n`, stderr: '' };
+            if (joined.includes('list-sessions')) {
+                return { stdout: '$42\tomc-team-myteam-worker1\n', stderr: '' };
+            }
+            return { stdout: '', stderr: '' };
+        }),
+    };
+});
+// ─── killOwnedWorkerPane + killTeamSession ───────────────────────────────────
+// Inject matching server identity, exact membership inventories, and guard markers
+// so destructive calls remain exercised without connecting to a real tmux server.
+vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
     const actual = await importOriginal();
     return {
         ...actual,
-        execFile: vi.fn((_cmd, _args, cb) => cb(null, '', '')),
-        execFileSync: actual.execFileSync,
-        execSync: actual.execSync,
+        tmuxExecAsync: tmuxUtilsMocks.tmuxExecAsync,
+        tmuxCmdAsync: tmuxUtilsMocks.tmuxCmdAsync,
     };
 });
-import { killWorkerPanes, killTeamSession } from '../../team/tmux-session.js';
-let killedPanes = [];
-let killedSessions = [];
-beforeEach(async () => {
-    killedPanes = [];
-    killedSessions = [];
-    const cp = await import('child_process');
-    vi.mocked(cp.execFile).mockImplementation(((_cmd, args, cb) => {
-        if (args[0] === 'kill-pane')
-            killedPanes.push(args[2]);
-        if (args[0] === 'kill-session')
-            killedSessions.push(args[2]);
-        cb(null, '', '');
-        return {};
-    }));
+import { killOwnedWorkerPane, killTeamSession, } from '../../team/tmux-session.js';
+beforeEach(() => {
+    tmuxUtilsMocks.killedPanes.length = 0;
+    tmuxUtilsMocks.killedSessions.length = 0;
 });
 afterEach(() => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
 });
-// ─── killWorkerPanes ─────────────────────────────────────────────────────────
-describe('killWorkerPanes', () => {
-    it('is a no-op when paneIds is empty', async () => {
-        await killWorkerPanes({ paneIds: [], teamName: 'myteam', cwd: tmpdir(), graceMs: 0 });
-        expect(killedPanes).toHaveLength(0);
+// The removed v1 bulk helper's empty-array no-op, shutdown-sentinel write, and
+// swallowed cleanup-error behavior are intentionally not recreated here.
+// Graceful shutdown is covered by the v2 shutdown suite; this file exercises
+// only the owned pane primitive and its proof boundaries.
+const originalWorkerOwnership = tmuxServerIdentity
+    ? Object.freeze({
+        provider: 'tmux',
+        providerTarget: 'myteam:0',
+        paneId: '%2',
+        splitTarget: '%1',
+        leaderPaneId: '%1',
+        reservedPaneIds: Object.freeze([]),
+        source: 'split',
+        tmuxServerIdentity: Object.freeze({ ...tmuxServerIdentity }),
+    })
+    : undefined;
+function strictWorkerOwnership() {
+    if (!originalWorkerOwnership) {
+        throw new Error('strict tmux fixture unsupported on this platform');
+    }
+    return originalWorkerOwnership;
+}
+describe('killOwnedWorkerPane', () => {
+    it.skipIf(!supportsStrictTmuxFixture)('kills only an exactly owned worker pane through the native guard', async () => {
+        await killOwnedWorkerPane(strictWorkerOwnership());
+        expect(tmuxUtilsMocks.killedPanes).toEqual(['%2']);
+        expect(tmuxUtilsMocks.tmuxExecAsync).toHaveBeenCalledWith(expect.arrayContaining(['list-panes', '-t', expect.any(String)]));
     });
-    it('kills worker panes', async () => {
-        await killWorkerPanes({
-            paneIds: ['%2', '%3'],
-            teamName: 'myteam',
-            cwd: tmpdir(),
-            graceMs: 0,
-        });
-        expect(killedPanes).toContain('%2');
-        expect(killedPanes).toContain('%3');
-    });
-    it('NEVER kills the leader pane', async () => {
-        await killWorkerPanes({
-            paneIds: ['%1', '%2', '%3'],
+    it('rejects cleanup when immutable tmux server authority is missing', async () => {
+        const ownership = {
+            provider: 'tmux',
+            providerTarget: 'myteam:0',
+            paneId: '%2',
+            splitTarget: '%1',
             leaderPaneId: '%1',
-            teamName: 'myteam',
-            cwd: tmpdir(),
-            graceMs: 0,
-        });
-        expect(killedPanes).not.toContain('%1'); // leader guarded
-        expect(killedPanes).toContain('%2');
-        expect(killedPanes).toContain('%3');
+            reservedPaneIds: [],
+            source: 'split',
+        };
+        await expect(killOwnedWorkerPane(ownership))
+            .rejects.toThrow('owned_pane_tmux_server_identity_missing');
+        expect(tmuxUtilsMocks.killedPanes).toHaveLength(0);
+        expect(tmuxUtilsMocks.tmuxExecAsync).not.toHaveBeenCalled();
     });
-    it('writes shutdown sentinel before force-killing', async () => {
-        const cwd = mkdtempSync(join(tmpdir(), 'omc-cleanup-test-'));
-        const previousHome = process.env.HOME;
-        const previousUserProfile = process.env.USERPROFILE;
-        const previousStateDir = process.env.OMC_STATE_DIR;
-        process.env.HOME = cwd;
-        process.env.USERPROFILE = cwd;
-        process.env.OMC_STATE_DIR = cwd;
-        const stateDir = join(getOmcRoot(cwd), 'state', 'team', 'myteam');
-        mkdirSync(stateDir, { recursive: true });
-        try {
-            await killWorkerPanes({
-                paneIds: ['%2'],
-                teamName: 'myteam',
-                cwd,
-                graceMs: 0,
-            });
-            const sentinelPath = join(stateDir, 'shutdown.json');
-            expect(existsSync(sentinelPath)).toBe(true);
-            const content = JSON.parse(await readFile(sentinelPath, 'utf8'));
-            expect(content).toHaveProperty('requestedAt');
-            expect(typeof content.requestedAt).toBe('number');
-        }
-        finally {
-            if (previousHome === undefined)
-                delete process.env.HOME;
-            else
-                process.env.HOME = previousHome;
-            if (previousUserProfile === undefined)
-                delete process.env.USERPROFILE;
-            else
-                process.env.USERPROFILE = previousUserProfile;
-            if (previousStateDir === undefined)
-                delete process.env.OMC_STATE_DIR;
-            else
-                process.env.OMC_STATE_DIR = previousStateDir;
-            rmSync(cwd, { recursive: true, force: true });
-        }
+    it.skipIf(!supportsStrictTmuxFixture)('rejects foreign membership without running a native kill', async () => {
+        const ownership = {
+            ...strictWorkerOwnership(),
+            paneId: '%99',
+        };
+        await expect(killOwnedWorkerPane(ownership))
+            .rejects.toThrow('owned_pane_membership_unverified');
+        expect(tmuxUtilsMocks.killedPanes).toHaveLength(0);
+        expect(tmuxUtilsMocks.tmuxExecAsync).toHaveBeenCalledWith(expect.arrayContaining(['list-panes']));
     });
-    it('does not throw when sentinel directory does not exist (non-fatal)', async () => {
-        await expect(killWorkerPanes({
-            paneIds: ['%2'],
-            teamName: 'nonexistent-team',
-            cwd: '/tmp/does-not-exist-omc-test',
-            graceMs: 0,
-        })).resolves.toBeUndefined();
-        expect(killedPanes).toContain('%2');
+    it('excludes the leader before any provider query or native effect', async () => {
+        const ownership = {
+            provider: 'tmux',
+            providerTarget: 'myteam:0',
+            paneId: '%1',
+            splitTarget: '%1',
+            leaderPaneId: '%1',
+            reservedPaneIds: [],
+            source: 'split',
+        };
+        await expect(killOwnedWorkerPane(ownership))
+            .rejects.toThrow('owned_pane_leader_excluded');
+        expect(tmuxUtilsMocks.killedPanes).toHaveLength(0);
+        expect(tmuxUtilsMocks.tmuxExecAsync).not.toHaveBeenCalled();
+        expect(tmuxUtilsMocks.tmuxCmdAsync).not.toHaveBeenCalled();
     });
 });
 // ─── killTeamSession ─────────────────────────────────────────────────────────
 describe('killTeamSession', () => {
     it('NEVER calls kill-session when sessionName contains ":" (split-pane mode)', async () => {
         await killTeamSession('mysession:1', ['%2', '%3'], '%1');
-        expect(killedSessions).toHaveLength(0);
+        expect(tmuxUtilsMocks.killedSessions).toHaveLength(0);
     });
     it('preserves worker panes when split-pane membership cannot be proven', async () => {
         await killTeamSession('mysession:1', ['%2', '%3'], '%1');
-        expect(killedPanes).toEqual([]);
+        expect(tmuxUtilsMocks.killedPanes).toEqual([]);
     });
     it('still skips the leader when split-pane membership is unavailable', async () => {
         await killTeamSession('mysession:1', ['%1', '%2'], '%1');
-        expect(killedPanes).not.toContain('%1');
-        expect(killedPanes).toEqual([]);
+        expect(tmuxUtilsMocks.killedPanes).not.toContain('%1');
+        expect(tmuxUtilsMocks.killedPanes).toEqual([]);
     });
     it('is a no-op in split-pane mode when paneIds is empty', async () => {
         await killTeamSession('mysession:1', [], '%1');
-        expect(killedPanes).toHaveLength(0);
-        expect(killedSessions).toHaveLength(0);
+        expect(tmuxUtilsMocks.killedPanes).toHaveLength(0);
+        expect(tmuxUtilsMocks.killedSessions).toHaveLength(0);
     });
     it('is a no-op in split-pane mode when paneIds is undefined', async () => {
         await killTeamSession('mysession:1', undefined, '%1');
-        expect(killedPanes).toHaveLength(0);
-        expect(killedSessions).toHaveLength(0);
+        expect(tmuxUtilsMocks.killedPanes).toHaveLength(0);
+        expect(tmuxUtilsMocks.killedSessions).toHaveLength(0);
     });
-    it('calls kill-session for session-mode sessions (no ":" in name)', async () => {
+    it.skipIf(!supportsStrictTmuxFixture)('calls kill-session for session-mode sessions (no ":" in name)', async () => {
+        const identity = strictTmuxIdentity();
         vi.stubEnv('TMUX', '');
-        await killTeamSession('omc-team-myteam-worker1');
-        expect(killedSessions).toContain('omc-team-myteam-worker1');
+        await killTeamSession('omc-team-myteam-worker1', [], undefined, {
+            sessionMode: 'detached-session',
+            tmuxServerIdentity: identity,
+        });
+        expect(tmuxUtilsMocks.killedSessions).toContain('$42');
     });
 });
 // ─── validateJobId regex ──────────────────────────────────────────────────────
@@ -192,6 +230,69 @@ describe('team start validation wiring', () => {
         const source = readFileSync(join(__dirname, '..', 'team-server.ts'), 'utf-8');
         expect(source).toContain("hasOwnProperty.call(args, 'timeoutSeconds')");
         expect(source).toContain('no longer accepts timeoutSeconds');
+    });
+    it('requires instance identity for jobs and pane cleanup evidence', () => {
+        const source = readFileSync(join(__dirname, '..', 'team-server.ts'), 'utf-8');
+        const identity = source.indexOf('const instanceId = randomUUID();');
+        const publication = source.indexOf('persistJob(jobId, job);', identity);
+        const spawn = source.indexOf('child = spawn(process.execPath', publication);
+        expect(identity).toBeGreaterThan(-1);
+        expect(publication).toBeGreaterThan(identity);
+        expect(spawn).toBeGreaterThan(publication);
+        expect(source).toContain('instanceId: job.instanceId');
+        expect(source).toContain('shutdownTeamV2(job.teamName!, job.cwd!, {');
+        expect(source).toContain('instanceId: job.instanceId');
+        expect(source).not.toContain('clearScopedTeamState');
+        const cleanupSource = source.slice(source.indexOf('export async function handleCleanup'));
+        expect(cleanupSource).toContain('shutdownTeamV2(job.teamName!, job.cwd!, {');
+        expect(cleanupSource).not.toContain('isRuntimeV2Enabled');
+    });
+});
+describe('strict team job and pane artifact identity', () => {
+    it('accepts complete identity-bearing records with worker launch attempts', () => {
+        expect(isValidOmcTeamJob({
+            status: 'running',
+            startedAt: Date.now(),
+            teamName: 'strict-team',
+            cwd: '/tmp/strict-team',
+            instanceId: INSTANCE_ID,
+        })).toBe(true);
+        expect(isValidTeamPaneArtifact({
+            instanceId: INSTANCE_ID,
+            paneIds: ['%2'],
+            leaderPaneId: '%1',
+            workers: [{
+                    workerName: 'worker-1',
+                    paneId: '%2',
+                    launchAttemptId: 'attempt-1',
+                }],
+        }, INSTANCE_ID)).toBe(true);
+    });
+    it('rejects missing or foreign identity and pane-only success evidence', () => {
+        const baseJob = {
+            status: 'running',
+            startedAt: Date.now(),
+            teamName: 'strict-team',
+            cwd: '/tmp/strict-team',
+        };
+        expect(isValidOmcTeamJob(baseJob)).toBe(false);
+        expect(isValidOmcTeamJob({ ...baseJob, instanceId: OTHER_INSTANCE_ID })).toBe(true);
+        expect(isValidTeamPaneArtifact({
+            instanceId: INSTANCE_ID,
+            paneIds: ['%2'],
+            leaderPaneId: '%1',
+            workers: [],
+        }, INSTANCE_ID)).toBe(false);
+        expect(isValidTeamPaneArtifact({
+            instanceId: OTHER_INSTANCE_ID,
+            paneIds: ['%2'],
+            leaderPaneId: '%1',
+            workers: [{
+                    workerName: 'worker-1',
+                    paneId: '%2',
+                    launchAttemptId: 'attempt-1',
+                }],
+        }, INSTANCE_ID)).toBe(false);
     });
 });
 // ─── timeoutSeconds rejection (runtime) ──────────────────────────────────────

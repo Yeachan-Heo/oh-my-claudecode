@@ -4,6 +4,8 @@ import { execSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { absPath, TeamPaths } from '../state-paths.js';
+import { activateTeamInstanceUnderLock, createTeamInstanceBinding, reserveTeamInstanceUnderLock, withTeamInstanceLifecycleLock, } from '../team-instance.js';
 const tmuxMocks = vi.hoisted(() => ({ getWorkerLiveness: vi.fn(async () => 'dead') }));
 vi.mock('../tmux-session.js', async (importOriginal) => ({
     ...await importOriginal(),
@@ -37,15 +39,22 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
         const previousStateDir = process.env.OMC_STATE_DIR;
         process.env.HOME = cwd;
         process.env.USERPROFILE = cwd;
-        delete process.env.OMC_STATE_DIR;
+        process.env.OMC_STATE_DIR = join(cwd, 'omc-state');
         try {
             const teamName = 'critic-int';
-            const teamRoot = join(cwd, '.omc', 'state', 'team', teamName);
+            const instance = createTeamInstanceBinding({ teamName, cwd });
+            await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+                await reserveTeamInstanceUnderLock({ teamName, cwd, instanceId: instance.instance_id });
+            });
+            const teamRoot = absPath(cwd, TeamPaths.root(teamName));
             mkdirSync(join(teamRoot, 'tasks'), { recursive: true });
             mkdirSync(join(teamRoot, 'workers', 'worker-critic'), { recursive: true });
             const outputFile = join(teamRoot, 'workers', 'worker-critic', 'verdict.json');
             writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
                 name: teamName,
+                instance_id: instance.instance_id,
+                leader_cwd: cwd,
+                lifecycle_state: 'active',
                 task: 'integration smoke',
                 agent_type: 'codex',
                 worker_launch_mode: 'interactive',
@@ -91,14 +100,18 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
                 summary: 'integration smoke ok',
                 findings: [],
             }), 'utf-8');
+            await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
+                await activateTeamInstanceUnderLock(instance);
+            });
             const { readTeamConfig } = await import('../monitor.js');
             expect((await readTeamConfig(teamName, cwd))?.workers[0]?.output_file).toBe(outputFile);
-            const results = await processCliWorkerVerdicts(teamName, cwd);
+            const results = await processCliWorkerVerdicts(teamName, cwd, instance.instance_id);
             expect(tmuxMocks.getWorkerLiveness).toHaveBeenCalledWith('%dead');
             expect(results).toHaveLength(1);
             expect(results[0].status).toBe('completed');
             const finalTask = JSON.parse(readFileSync(taskPath, 'utf-8'));
             expect(finalTask.status).toBe('completed');
+            expect(finalTask.version).toBe(2);
             expect(finalTask.metadata?.verdict).toBe('approve');
             expect(finalTask.metadata?.verdict_role).toBe('critic');
             expect(existsSync(outputFile + '.processed')).toBe(true);

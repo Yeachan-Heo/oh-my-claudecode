@@ -139,7 +139,8 @@ export declare function isUserAbort(context?: StopContext): boolean;
  * Detect explicit /cancel command paths that should bypass stop-hook reinforcement.
  *
  * This is stricter than generic user-abort detection and is intended to prevent
- * re-enforcement races when the user explicitly invokes /cancel or /cancel --force.
+ * re-enforcement races when the user explicitly invokes /cancel with a known
+ * cancellation flag.
  */
 export declare function isExplicitCancelCommand(context?: StopContext): boolean;
 /**

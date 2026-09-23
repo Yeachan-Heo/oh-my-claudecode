@@ -147,7 +147,7 @@ export function clearAutopilot(directory, sessionId) {
             failedCleanup.push('ultraqa');
     }
     if (failedCleanup.length > 0) {
-        return { success: false, message: `Autopilot state cleared, but linked cleanup failed for: ${failedCleanup.join(', ')}. Retry /cancel --force.` };
+        return { success: false, message: `Autopilot state cleared, but linked cleanup failed for: ${failedCleanup.join(', ')}; retry within the same session scope. Cancel all sessions only when the user explicitly requests \`--all\`.` };
     }
     return {
         success: true,

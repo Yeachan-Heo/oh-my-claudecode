@@ -17,6 +17,13 @@ export declare function createDeprecatedCliOnlyEnvelopeWithArgs(toolName: Deprec
     }>;
     isError: true;
 };
+type TeamToolResponse = {
+    content: Array<{
+        type: 'text';
+        text: string;
+    }>;
+    isError?: boolean;
+};
 export declare function handleStatus(args: unknown): Promise<{
     content: Array<{
         type: 'text';
@@ -29,11 +36,6 @@ export declare function handleWait(args: unknown): Promise<{
         text: string;
     }>;
 }>;
-export declare function handleCleanup(args: unknown): Promise<{
-    content: Array<{
-        type: 'text';
-        text: string;
-    }>;
-}>;
+export declare function handleCleanup(args: unknown): Promise<TeamToolResponse>;
 export {};
 //# sourceMappingURL=team-server.d.ts.map

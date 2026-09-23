@@ -13,6 +13,12 @@ export interface DetectedKeyword {
     keyword: string;
     position: number;
 }
+/**
+ * Priority order for keyword detection. Exported so the shadow judgment
+ * points (jev-shadow.ts) can derive their criteria from the same constants
+ * the detector emits.
+ */
+export declare const KEYWORD_PRIORITY: KeywordType[];
 export declare function isRetiredWorkflowSlashInvocation(text: string): boolean;
 /**
  * Canonical workflow skills detected via explicit slash invocation.

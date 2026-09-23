@@ -364,11 +364,17 @@ export function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, ex
         if (action.runner)
             action.runner.phase = 'terminal';
     }
-} job.owner = null; job.phase = 'recoverable-failure'; }); }
-export function releaseSessionEndJob(directory, sessionId, nonce, generation) { const current = readSessionEndJob(directory, sessionId); if (!current)
+} job.owner = null; job.phase = 'recoverable-failure'; job.recoverableFailure = { reason: `owner-reaped-${liveness}`, releasedAt: nowIso(), ownerNonce: expectedNonce }; }); }
+/**
+ * Releasing ownership without reaching `complete` is the one path that leaves a
+ * job non-terminal, so the caller's reason is persisted with it (issue #4076).
+ */
+export function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 'worker-released') { const current = readSessionEndJob(directory, sessionId); if (!current)
     return null; return mutateSessionEndJob(directory, sessionId, current.revision, (job) => { if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation)
-    throw new Error('release-conflict'); job.owner = null; if (job.phase !== 'complete')
-    job.phase = 'recoverable-failure'; }); }
+    throw new Error('release-conflict'); job.owner = null; if (job.phase !== 'complete') {
+    job.phase = 'recoverable-failure';
+    job.recoverableFailure = { reason, releasedAt: nowIso(), ownerNonce: nonce };
+} }); }
 export function updateSessionEndJob(directory, sessionId, expectedOwner, mutate) { const current = readSessionEndJob(directory, sessionId); if (!current)
     return null; return mutateSessionEndJob(directory, sessionId, current.revision, (job) => { if (job.owner?.nonce !== expectedOwner || job.phase === 'complete')
     throw new Error('owner-conflict'); mutate(job); }); }

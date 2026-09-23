@@ -46,6 +46,13 @@ export type StrictCanonicalMailboxMessageReadResult = {
     marker: 'notified_at' | 'delivered_at';
 };
 declare function writeAtomic(path: string, data: string): Promise<void>;
+/**
+ * Validate and canonicalize a task record at a persistence boundary.
+ *
+ * The runtime and public task APIs must share this guard so malformed task
+ * fields cannot be published while nullable wire fields are normalized.
+ */
+export declare function normalizeTaskRecord(value: unknown): TeamTaskV2;
 export declare function withTaskClaimLock<T>(teamName: string, taskId: string, cwd: string, fn: () => Promise<T>): Promise<{
     ok: true;
     value: T;
@@ -54,7 +61,6 @@ export declare function withTaskClaimLock<T>(teamName: string, taskId: string, c
 }>;
 export declare function teamReadConfig(teamName: string, cwd: string): Promise<TeamConfig | null>;
 export declare function teamReadManifest(teamName: string, cwd: string): Promise<TeamManifestV2 | null>;
-export declare function teamCleanup(teamName: string, cwd: string): Promise<void>;
 export declare function teamWriteWorkerIdentity(teamName: string, workerName: string, identity: WorkerInfo, cwd: string): Promise<void>;
 export declare function teamReadWorkerHeartbeat(teamName: string, workerName: string, cwd: string): Promise<WorkerHeartbeat | null>;
 export declare function teamUpdateWorkerHeartbeat(teamName: string, workerName: string, heartbeat: WorkerHeartbeat, cwd: string): Promise<void>;
@@ -101,5 +107,11 @@ export declare function teamWriteShutdownRequest(teamName: string, workerName: s
 export declare function teamReadShutdownAck(teamName: string, workerName: string, cwd: string, minUpdatedAt?: string): Promise<ShutdownAck | null>;
 export declare function teamReadMonitorSnapshot(teamName: string, cwd: string): Promise<TeamMonitorSnapshotState | null>;
 export declare function teamWriteMonitorSnapshot(teamName: string, snapshot: TeamMonitorSnapshotState, cwd: string): Promise<void>;
+/**
+ * Persist only the completion marker for a task. The latest monitor snapshot
+ * is read while holding the snapshot lock, so an older completion operation
+ * cannot overwrite fresh monitor-owned fields.
+ */
+export declare function teamMarkTaskCompleted(teamName: string, taskId: string, cwd: string): Promise<void>;
 export { writeAtomic };
 //# sourceMappingURL=team-ops.d.ts.map

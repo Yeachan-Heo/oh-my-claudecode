@@ -51,9 +51,11 @@ const KEYWORD_SKIP_PREDICATES = {
     'deep-interview': (text) => OUROBOROS_BRAND_AT_START.test(text),
 };
 /**
- * Priority order for keyword detection
+ * Priority order for keyword detection. Exported so the shadow judgment
+ * points (jev-shadow.ts) can derive their criteria from the same constants
+ * the detector emits.
  */
-const KEYWORD_PRIORITY = [
+export const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team',
     'ralplan', 'tdd', 'code-review', 'security-review',
     'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'

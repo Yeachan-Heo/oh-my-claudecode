@@ -44,7 +44,7 @@ function stubFetch(): { fetchFn: typeof fetch; calls: Array<{ url: string; body:
     return {
       ok: true,
       status: 200,
-      json: async () => ({ answers: { completion_criteria_met: { type: 'Noul', noul: true, confidence: 0.9 } } }),
+      json: async () => ({ answers: { completion_criteria_met: { type: 'noul', noul: true, confidence: 0.9 } } }),
     } as unknown as Response;
   }) as unknown as typeof fetch;
   return { fetchFn, calls };
@@ -106,7 +106,7 @@ describe('applyRalphVerdictShadow', () => {
     for (const entry of parsed) {
       expect(entry.point).toBe('ralph-verdict');
       expect(entry.mode).toBe('shadow');
-      expect(entry.jev?.type).toBe('Noul');
+      expect(entry.jev?.type).toBe('noul');
     }
     expect(parsed.map((entry) => entry.heuristic)).toEqual([true, false]);
   });

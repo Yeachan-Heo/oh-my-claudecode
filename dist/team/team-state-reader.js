@@ -71,7 +71,10 @@ export function deriveManifestProjection(config, existing) {
         schema_version: 2,
         name: config.name,
         task: config.task,
-        leader: { ...(source?.leader ?? { worker_id: 'leader', role: 'leader' }), session_id: config.tmux_session },
+        leader: {
+            ...(source?.leader ?? { worker_id: 'leader', role: 'leader' }),
+            session_id: config.leader_session_id ?? config.tmux_session,
+        },
         policy: config.policy ?? source?.policy ?? { display_mode: 'split_pane', worker_launch_mode: config.worker_launch_mode, dispatch_mode: 'hook_preferred_with_fallback', dispatch_ack_timeout_ms: 3000 },
         governance: config.governance ?? source?.governance ?? { delegation_only: false, plan_approval_required: false, nested_teams_allowed: false, one_team_per_leader_session: false, cleanup_requires_all_workers_inactive: false },
         permissions_snapshot: source?.permissions_snapshot ?? { approval_mode: 'default', sandbox_mode: 'default', network_access: false },

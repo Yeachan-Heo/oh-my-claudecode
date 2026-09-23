@@ -2,17 +2,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { migrateTeamConfigRevision, readRevisionedTeamConfig, readTeamConfig, readTeamManifest, saveTeamConfig, saveTeamConfigAtRevision, assertActiveFenceOwnershipTransition, withScalingLock } from '../monitor.js';
+import { commitInitialTeamConfigUnderLock, migrateTeamConfigRevision, readRevisionedTeamConfig, readTeamConfig, readTeamManifest, saveTeamConfig, saveTeamConfigAtRevision, assertActiveFenceOwnershipTransition, validateRevisionedTeamConfig, withScalingLock } from '../monitor.js';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { withProcessIdentityFileLock, withProcessIdentityFileLockSync } from '../process-identity-lock.js';
 import { currentProcessStartIdentity } from '../team-owner-epoch.js';
 import { teamCreateTask, teamReadConfig, teamReadManifest, withTaskClaimLock } from '../team-ops.js';
+import { buildTeamInstancePendingConfig, createTeamInstanceBinding, reserveTeamInstance, withTeamInstanceLifecycleLock } from '../team-instance.js';
 let cwd;
 let previousHome;
 let previousUserProfile;
 let previousStateDir;
 const teamName = 'config-lock-team';
 const deadProcessStart = process.platform === 'darwin' ? 'darwin:1:0' : process.platform === 'win32' ? 'win32:1' : 'linux:1';
+const instanceA = '00000000-0000-4000-8000-000000000001';
+const instanceB = '00000000-0000-4000-8000-000000000002';
+const tmuxIdentity = {
+    socket_path: '/tmp/omc-team-config-lock.sock',
+    server_pid: 12345,
+    process_started_at: 'server-start-a',
+};
 function initialConfig() {
     return {
         name: teamName,
@@ -68,6 +76,225 @@ afterEach(() => {
     rmSync(cwd, { recursive: true, force: true });
 });
 describe('team config revision transaction', () => {
+    it.each(['active_scale_up', 'active_scale_down', 'shutdown_attempt'])('rejects malformed or cross-instance identity in %s', family => {
+        const attempt = {
+            instance_id: instanceA, operation_id: 'operation-a', nonce: 'shutdown-a', phase: 'effects',
+            pid: process.pid, process_started_at: deadProcessStart, state_revision: 1,
+            created_at: new Date().toISOString(), updated_at: new Date().toISOString(), workers: [],
+        };
+        const config = { ...initialConfig(), active_recovery: undefined, instance_id: instanceA, [family]: attempt };
+        expect(validateRevisionedTeamConfig(config, teamName)).toBe(config);
+        attempt.instance_id = instanceB;
+        expect(validateRevisionedTeamConfig(config, teamName)).toBeNull();
+        attempt.instance_id = 'malformed-instance';
+        expect(validateRevisionedTeamConfig(config, teamName)).toBeNull();
+        attempt.instance_id = instanceA;
+        expect(validateRevisionedTeamConfig({ ...config, instance_id: undefined }, teamName)).toBeNull();
+    });
+    it.each([
+        ['launch_attempt_id', ''],
+        ['provider', 'unknown-provider'],
+        ['launch_descriptor', { schema_version: 1, provider: 'codex', model: null, binary: '', args: [] }],
+    ])('rejects malformed scale-down worker %s evidence', (field, value) => {
+        const worker = {
+            name: 'worker-1', pane_id: '%1', launch_attempt_id: instanceB, provider: 'codex',
+            launch_descriptor: { schema_version: 1, provider: 'codex', model: null, binary: '/usr/bin/codex', args: [] },
+        };
+        const config = {
+            ...initialConfig(), active_recovery: undefined, instance_id: instanceA,
+            active_scale_down: {
+                instance_id: instanceA, operation_id: 'scale-down-a', phase: 'effects',
+                pid: process.pid, process_started_at: deadProcessStart, state_revision: 1,
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(), workers: [worker],
+            },
+        };
+        expect(validateRevisionedTeamConfig(config, teamName)).toBe(config);
+        expect(validateRevisionedTeamConfig({
+            ...config,
+            active_scale_down: { ...config.active_scale_down, workers: [{ ...worker, [field]: value }] },
+        }, teamName)).toBeNull();
+    });
+    it('atomically promotes an identity-bearing pending startup config without unlinking it', async () => {
+        const startupTeamName = 'initial-commit-team';
+        const instance = createTeamInstanceBinding({ teamName: startupTeamName, cwd, instanceId: instanceA });
+        await reserveTeamInstance({ teamName: startupTeamName, cwd, instanceId: instance.instance_id });
+        const pendingPath = absPath(cwd, TeamPaths.config(startupTeamName));
+        mkdirSync(join(pendingPath, '..'), { recursive: true });
+        writeFileSync(pendingPath, JSON.stringify(buildTeamInstancePendingConfig(instance)));
+        const config = {
+            ...initialConfig(),
+            name: startupTeamName,
+            instance_id: instance.instance_id,
+            tmux_server_identity: tmuxIdentity,
+            state_revision: 0,
+            lifecycle_state: 'starting',
+            active_recovery: undefined,
+        };
+        await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () => commitInitialTeamConfigUnderLock(config, cwd, instance));
+        expect(JSON.parse(readFileSync(pendingPath, 'utf8'))).toMatchObject({
+            name: startupTeamName,
+            instance_id: instance.instance_id,
+            state_revision: 0,
+            lifecycle_state: 'starting',
+        });
+        expect((await readTeamConfig(startupTeamName, cwd))?.instance_id).toBe(instance.instance_id);
+        expect((await readTeamConfig(startupTeamName, cwd))?.tmux_server_identity).toEqual(tmuxIdentity);
+    });
+    it('rejects immutable instance UUID substitution through revision CAS', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA };
+        writeConfig(current);
+        const proposed = { ...current, instance_id: instanceB, state_revision: 2 };
+        await expect(saveTeamConfigAtRevision(proposed, 1, cwd)).rejects.toThrow('team_instance_mismatch');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).instance_id).toBe(instanceA);
+    });
+    it('rejects a config/manifest instance projection mismatch before config commit', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA };
+        writeConfig(current);
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        mkdirSync(join(manifestPath, '..'), { recursive: true });
+        writeFileSync(manifestPath, JSON.stringify({ name: teamName, instance_id: instanceB }));
+        await expect(saveTeamConfig({ ...current, next_task_id: 2 }, cwd, 1))
+            .rejects.toThrow('invalid_persisted_state');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).instance_id).toBe(instanceA);
+    });
+    it.each([
+        ['socket', { socket_path: '/tmp/omc-team-config-lock-other.sock' }],
+        ['pid', { server_pid: 12346 }],
+        ['start token', { process_started_at: 'server-start-b' }],
+        ['removal', { tmux_server_identity: undefined }],
+    ])('rejects ordinary tmux server identity %s mutation', async (_label, mutation) => {
+        const current = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
+        writeConfig(current);
+        const proposed = {
+            ...current,
+            ...('tmux_server_identity' in mutation
+                ? mutation
+                : { tmux_server_identity: { ...tmuxIdentity, ...mutation } }),
+            state_revision: 2,
+        };
+        await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+            .rejects.toThrow('tmux_server_identity_immutable');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).tmux_server_identity)
+            .toEqual(tmuxIdentity);
+    });
+    it('rejects ordinary tmux server identity addition to a historical config', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA };
+        writeConfig(current);
+        const proposed = { ...current, tmux_server_identity: tmuxIdentity, state_revision: 2 };
+        await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+            .rejects.toThrow('tmux_server_identity_immutable');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).tmux_server_identity)
+            .toBeUndefined();
+    });
+    it('rejects ordinary leader_session_id mutation', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA, leader_session_id: 'pid-owner-a' };
+        writeConfig(current);
+        const proposed = { ...current, leader_session_id: 'pid-owner-b', state_revision: 2 };
+        await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+            .rejects.toThrow('leader_session_id_immutable');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).leader_session_id)
+            .toBe('pid-owner-a');
+    });
+    it('rejects ordinary leader_session_id addition to a historical config', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA };
+        writeConfig(current);
+        const proposed = { ...current, leader_session_id: 'pid-owner-a', state_revision: 2 };
+        await expect(saveTeamConfigAtRevision(proposed, 1, cwd))
+            .rejects.toThrow('leader_session_id_immutable');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).leader_session_id)
+            .toBeUndefined();
+    });
+    it('rejects identity initialization by an ordinary writer with no config', async () => {
+        unlinkSync(absPath(cwd, TeamPaths.config(teamName)));
+        const proposed = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
+        await expect(saveTeamConfig(proposed, cwd)).rejects.toThrow('tmux_server_identity_immutable');
+        expect(existsSync(absPath(cwd, TeamPaths.config(teamName)))).toBe(false);
+    });
+    it('does not inherit a stale manifest identity when authoritative config lacks proof', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA };
+        writeConfig(current);
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        writeFileSync(manifestPath, JSON.stringify({
+            name: teamName,
+            instance_id: instanceA,
+            tmux_server_identity: tmuxIdentity,
+        }));
+        await expect(saveTeamConfig({ ...current, next_task_id: 2 }, cwd, 1))
+            .rejects.toThrow('tmux_server_identity_mismatch');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).tmux_server_identity)
+            .toBeUndefined();
+        expect(JSON.parse(readFileSync(manifestPath, 'utf8')).tmux_server_identity).toEqual(tmuxIdentity);
+    });
+    it('rejects ordinary identity initialization from a manifest-only historical record', async () => {
+        const configPath = absPath(cwd, TeamPaths.config(teamName));
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        unlinkSync(configPath);
+        writeFileSync(manifestPath, JSON.stringify({
+            name: teamName,
+            instance_id: instanceA,
+            tmux_server_identity: tmuxIdentity,
+        }));
+        const proposed = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
+        await expect(saveTeamConfig(proposed, cwd)).rejects.toThrow('tmux_server_identity_immutable');
+        expect(existsSync(configPath)).toBe(false);
+        expect(JSON.parse(readFileSync(manifestPath, 'utf8')).tmux_server_identity).toEqual(tmuxIdentity);
+    });
+    it('rejects a config/manifest tmux server identity mismatch before config commit', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
+        writeConfig(current);
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        mkdirSync(join(manifestPath, '..'), { recursive: true });
+        writeFileSync(manifestPath, JSON.stringify({
+            name: teamName,
+            instance_id: instanceA,
+            tmux_server_identity: { ...tmuxIdentity, server_pid: 12346 },
+        }));
+        await expect(saveTeamConfig({ ...current, next_task_id: 2 }, cwd, 1))
+            .rejects.toThrow('tmux_server_identity_mismatch');
+        expect(JSON.parse(readFileSync(absPath(cwd, TeamPaths.config(teamName)), 'utf8')).tmux_server_identity)
+            .toEqual(tmuxIdentity);
+    });
+    it('copies the authoritative tmux server identity into the manifest projection', async () => {
+        const current = { ...initialConfig(), instance_id: instanceA, tmux_server_identity: tmuxIdentity };
+        writeConfig(current);
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        mkdirSync(join(manifestPath, '..'), { recursive: true });
+        writeFileSync(manifestPath, JSON.stringify({
+            name: teamName,
+            instance_id: instanceA,
+            tmux_server_identity: tmuxIdentity,
+        }));
+        await expect(saveTeamConfigAtRevision({
+            ...current, next_task_id: 2, state_revision: 2,
+        }, 1, cwd)).resolves.toBe(true);
+        expect(JSON.parse(readFileSync(manifestPath, 'utf8')).tmux_server_identity).toEqual(tmuxIdentity);
+    });
+    it('preserves a valid tmux server identity when normalizing a manifest-only read', async () => {
+        unlinkSync(absPath(cwd, TeamPaths.config(teamName)));
+        writeFileSync(absPath(cwd, TeamPaths.manifest(teamName)), JSON.stringify({
+            schema_version: 2,
+            name: teamName,
+            tmux_server_identity: tmuxIdentity,
+        }));
+        await expect(readTeamManifest(teamName, cwd)).resolves.toMatchObject({
+            tmux_server_identity: tmuxIdentity,
+        });
+    });
+    it('rejects a malformed tmux server identity in a manifest read', async () => {
+        writeFileSync(absPath(cwd, TeamPaths.manifest(teamName)), JSON.stringify({
+            schema_version: 2,
+            name: teamName,
+            tmux_server_identity: { ...tmuxIdentity, server_pid: 0 },
+        }));
+        await expect(readTeamManifest(teamName, cwd)).rejects.toThrow('tmux_server_identity_invalid');
+    });
+    it('rejects malformed tmux server identity in authoritative config', () => {
+        expect(validateRevisionedTeamConfig({
+            ...initialConfig(),
+            instance_id: instanceA,
+            tmux_server_identity: { ...tmuxIdentity, server_pid: 0 },
+        }, teamName)).toBeNull();
+    });
     it('rejects recovery cleanup and publishes no final after a normal writer wins the revision', async () => {
         const normal = initialConfig();
         normal.next_task_id = 2;
@@ -131,14 +358,15 @@ describe('team config revision transaction', () => {
         expect(existsSync(configPath)).toBe(false);
     });
     it('does not commit authoritative config when manifest projection cannot be written', async () => {
+        const configPath = absPath(cwd, TeamPaths.config(teamName));
+        const originalConfig = readFileSync(configPath, 'utf8');
         const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
         mkdirSync(manifestPath, { recursive: true });
         const next = { ...initialConfig(), state_revision: 2, next_task_id: 99,
             active_recovery: { ...initialConfig().active_recovery, state_revision: 2 } };
         await expect(saveTeamConfigAtRevision(next, 1, cwd)).rejects.toThrow('invalid_persisted_state');
-        const persisted = await readRevisionedTeamConfig(teamName, cwd);
-        expect(persisted?.stateRevision).toBe(1);
-        expect(persisted?.config.next_task_id).toBe(1);
+        await expect(readRevisionedTeamConfig(teamName, cwd)).rejects.toThrow('invalid_persisted_state');
+        expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
     });
     it('holds the config lock through terminal publication and rejects a stale competing writer', async () => {
         let releaseFinal;

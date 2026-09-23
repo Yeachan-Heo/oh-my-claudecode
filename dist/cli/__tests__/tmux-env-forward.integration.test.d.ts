@@ -3,8 +3,9 @@
  *
  * Verifies that env vars set on the omc process actually arrive inside
  * a tmux session created the same way runClaudeOutsideTmux does.
- * No Claude CLI or API tokens are involved — the test runs `printenv`
- * inside the tmux pane and reads the output from a temp file.
+ * No Claude CLI is involved — the test runs `printenv` inside the tmux pane
+ * and reads the output from a temp file. The credential case uses a synthetic
+ * token and only asserts that it arrives through the private transport.
  *
  * Skipped when tmux is not available (CI without tmux, Windows, etc.).
  */

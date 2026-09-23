@@ -124,7 +124,9 @@ async function waitForTerminalCallback(cwd, sessionId) {
         manifest = null;
     }
     const callback = manifest?.actions?.callback;
-    throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} file=${existsSync(callbackPath)}`);
+    // recoverableFailure.reason is the only record of why a non-terminal release
+    // happened, so a CI-only failure must print it (issue #4076).
+    throw new Error(`detached SessionEnd worker did not complete its callback: phase=${manifest?.phase ?? 'missing'} owner=${manifest?.owner === null ? 'none' : typeof manifest?.owner} callback=${callback?.status ?? 'missing'} error=${callback?.error ?? 'none'} release=${manifest?.recoverableFailure?.reason ?? 'unrecorded'} file=${existsSync(callbackPath)}`);
 }
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     const tempDirs = [];

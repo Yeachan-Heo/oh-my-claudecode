@@ -56,18 +56,19 @@ function gitTopLevel(cwd) {
  * Compare one twin answer against one Jev answer.
  * Returns true/false when the pair is comparable, null when incommensurable
  * (including missing Jev answer, e.g. degraded lines).
- * Comparable shapes: twin boolean <-> Jev Noul.noul; twin string <-> Jev
- * Choice.choice; twin number <-> Jev Score.score.
+ * Comparable shapes: twin boolean <-> Jev noul.noul; twin string <-> Jev
+ * choice.choice; twin number <-> Jev score.score. Answer types are the
+ * lower-case wire literals the API returns.
  */
 export function comparePair(heuristic, jev) {
   if (jev === null || typeof jev !== 'object') return null;
-  if (jev.type === 'Noul' && typeof heuristic === 'boolean' && typeof jev.noul === 'boolean') {
+  if (jev.type === 'noul' && typeof heuristic === 'boolean' && typeof jev.noul === 'boolean') {
     return heuristic === jev.noul;
   }
-  if (jev.type === 'Choice' && typeof heuristic === 'string' && typeof jev.choice === 'string') {
+  if (jev.type === 'choice' && typeof heuristic === 'string' && typeof jev.choice === 'string') {
     return heuristic === jev.choice;
   }
-  if (jev.type === 'Score' && typeof heuristic === 'number' && typeof jev.score === 'number') {
+  if (jev.type === 'score' && typeof heuristic === 'number' && typeof jev.score === 'number') {
     return heuristic === jev.score;
   }
   return null;

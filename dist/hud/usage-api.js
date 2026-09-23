@@ -660,6 +660,16 @@ function fetchUsageFromApi(accessToken, clientVersion) {
                     }
                     resolve({ data: null, rateLimited: true });
                 }
+                else if (res.statusCode === 403) {
+                    // Tokens minted by `claude setup-token` (headless / multi-account
+                    // setups launched with CLAUDE_CODE_OAUTH_TOKEN) lack the `user:profile`
+                    // scope this endpoint requires, so it answers 403. Such a token can
+                    // still read its own throttle status from the anthropic-ratelimit-
+                    // unified-* headers of an ordinary inference call, so fall back to that.
+                    // This recovers the 5h + weekly windows only — per-model weekly buckets
+                    // (e.g. "Fable") exist solely in this endpoint's body and are lost here.
+                    fetchUsageViaRateLimitHeaders(accessToken, clientVersion).then(resolve);
+                }
                 else {
                     resolve({ data: null });
                 }
@@ -670,6 +680,104 @@ function fetchUsageFromApi(accessToken, clientVersion) {
             req.destroy();
             resolve({ data: null });
         });
+        req.end();
+    });
+}
+/**
+ * Model used only to elicit rate-limit headers in the 403 fallback below. Any
+ * cheap, broadly-available model works; the reply content is discarded and
+ * max_tokens is 1. If it is ever retired the fallback degrades to "no data"
+ * (exactly as before this fallback existed), never an error.
+ */
+const RATE_LIMIT_PROBE_MODEL = 'claude-haiku-4-5-20251001';
+/**
+ * Build a synthetic UsageApiResponse from the `anthropic-ratelimit-unified-*`
+ * response headers of a /v1/messages call. Header utilization is a 0..1 fraction
+ * while the usage body (and parseUsageResponse) works in 0..100, so scale by 100.
+ * Reset headers are unix epoch seconds. Returns null when neither window is
+ * present. Exported for unit testing.
+ */
+export function rateLimitHeadersToUsage(headers) {
+    const num = (name) => {
+        const raw = headers[name];
+        const value = Array.isArray(raw) ? raw[0] : raw;
+        if (value == null)
+            return undefined;
+        const parsed = Number(value);
+        return isFinite(parsed) ? parsed : undefined;
+    };
+    const iso = (name) => {
+        const secs = num(name);
+        if (secs == null)
+            return undefined;
+        return new Date(secs * 1000).toISOString();
+    };
+    const fiveHour = num('anthropic-ratelimit-unified-5h-utilization');
+    const sevenDay = num('anthropic-ratelimit-unified-7d-utilization');
+    if (fiveHour == null && sevenDay == null)
+        return null;
+    const usage = {};
+    if (fiveHour != null) {
+        usage.five_hour = {
+            utilization: fiveHour * 100,
+            resets_at: iso('anthropic-ratelimit-unified-5h-reset'),
+        };
+    }
+    if (sevenDay != null) {
+        usage.seven_day = {
+            utilization: sevenDay * 100,
+            resets_at: iso('anthropic-ratelimit-unified-7d-reset'),
+        };
+    }
+    return usage;
+}
+/**
+ * Fallback usage source for OAuth tokens that lack the `user:profile` scope
+ * /api/oauth/usage requires (notably `claude setup-token` credentials used by
+ * headless / multi-account setups, which get 403 there). A minimal inference call
+ * carries the account's throttle status in its `anthropic-ratelimit-unified-*`
+ * response headers, which we turn into a five-hour + weekly UsageApiResponse.
+ * Best-effort: any non-200, transport error, or timeout resolves to no data.
+ */
+function fetchUsageViaRateLimitHeaders(accessToken, clientVersion) {
+    const userAgent = buildUserAgent(clientVersion);
+    const body = JSON.stringify({
+        model: RATE_LIMIT_PROBE_MODEL,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: '.' }],
+    });
+    return new Promise((resolve) => {
+        const req = https.request({
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'anthropic-beta': 'oauth-2025-04-20',
+                'anthropic-version': '2023-06-01',
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(body),
+                ...(userAgent ? { 'User-Agent': userAgent } : {}),
+            },
+            timeout: API_TIMEOUT_MS,
+        }, (res) => {
+            // Only the headers matter; drain the body so the socket can close.
+            res.on('data', () => { });
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    resolve({ data: rateLimitHeadersToUsage(res.headers) });
+                }
+                else {
+                    resolve({ data: null, rateLimited: res.statusCode === 429 });
+                }
+            });
+        });
+        req.on('error', () => resolve({ data: null }));
+        req.on('timeout', () => {
+            req.destroy();
+            resolve({ data: null });
+        });
+        req.write(body);
         req.end();
     });
 }

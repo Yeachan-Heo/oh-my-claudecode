@@ -1,10 +1,11 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
-import { link, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { dirname, join, relative, resolve } from 'node:path';
+import { link, lstat, mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, isProcessIdentityLive, terminateOwnedProcessGroup } from '../platform/process-utils.js';
+import { isValidTeamInstanceId } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
@@ -42,8 +43,8 @@ export function buildWindowsSupervisorSource() {
         '  $envPairs = @($payload.provider_env.psobject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)',
         '  $si = New-Object O+STARTUPINFO; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si); $flags = 0x00000004 -bor 0x00000400; if (-not [O]::CreateProcessW($null, $cmd, [IntPtr]::Zero, [IntPtr]::Zero, $false, $flags, $envPtr, $payload.cwd, [ref]$si, [ref]$pi)) { throw "worker_launch_create_process_failed" }',
         '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; if ([O]::ResumeThread($pi.hThread) -eq [uint32]0xffffffff) { throw "worker_launch_resume_failed" }',
-        '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
-        '  $readTask = [Console]::In.ReadLineAsync(); while ($true) { if ([O]::WaitForSingleObject($pi.hProcess, 50) -eq 0) { $exitCode = [uint32]0; [O]::GetExitCodeProcess($pi.hProcess, [ref]$exitCode) | Out-Null; if (-not [O]::TerminateJobObject($job, $exitCode)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="exit"; cleanup_verified=$true; exit_code=$exitCode } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }; if (-not $readTask.IsCompleted) { continue }; $line = $readTask.Result; if ($null -eq $line) { throw "worker_launch_authority_lost" }; $readTask = [Console]::In.ReadLineAsync(); if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }; try { $msg = $line | ConvertFrom-Json } catch { continue }; if ($msg.protocol -ne "' + WINDOWS_SUPERVISOR_PROTOCOL + '" -or $msg.attempt_id -ne $payload.identity.attempt_id -or $msg.authority_digest -ne $payload.authority_digest -or $msg.containment_nonce -ne $payload.containment_nonce -or $msg.kind -ne "terminate") { continue }; if (-not [O]::TerminateJobObject($job, 1)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="terminated"; cleanup_verified=$true } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }',
+        '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
+        '  $readTask = [Console]::In.ReadLineAsync(); while ($true) { if ([O]::WaitForSingleObject($pi.hProcess, 50) -eq 0) { $exitCode = [uint32]0; [O]::GetExitCodeProcess($pi.hProcess, [ref]$exitCode) | Out-Null; if (-not [O]::TerminateJobObject($job, $exitCode)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="exit"; cleanup_verified=$true; exit_code=$exitCode } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }; if (-not $readTask.IsCompleted) { continue }; $line = $readTask.Result; if ($null -eq $line) { throw "worker_launch_authority_lost" }; $readTask = [Console]::In.ReadLineAsync(); if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }; try { $msg = $line | ConvertFrom-Json } catch { continue }; if ($msg.protocol -ne "' + WINDOWS_SUPERVISOR_PROTOCOL + '" -or $msg.attempt_id -ne $payload.identity.attempt_id -or $msg.instance_id -ne $payload.identity.instance_id -or $msg.authority_digest -ne $payload.authority_digest -or $msg.containment_nonce -ne $payload.containment_nonce -or $msg.kind -ne "terminate") { continue }; if (-not [O]::TerminateJobObject($job, 1)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="terminated"; cleanup_verified=$true } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }',
         '} catch { if ($pi.hProcess -ne [IntPtr]::Zero) { if ($job -ne [IntPtr]::Zero) { [O]::TerminateJobObject($job, 1) | Out-Null } else { [O]::TerminateProcess($pi.hProcess, 1) | Out-Null }; [O]::WaitForSingleObject($pi.hProcess, 5000) | Out-Null }; throw } finally { if ($envPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($envPtr) }; if ($pi.hThread -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hThread) | Out-Null }; if ($pi.hProcess -ne [IntPtr]::Zero) { [O]::CloseHandle($pi.hProcess) | Out-Null }; if ($job -ne [IntPtr]::Zero) { [O]::CloseHandle($job) | Out-Null } }',
     ].join("`n");
 }
@@ -132,6 +133,7 @@ function identityMatches(value, expected) {
     return record.schema_version === WORKER_LAUNCH_SCHEMA_VERSION
         && record.attempt_id === expected.attempt_id
         && record.nonce === expected.nonce
+        && record.instance_id === expected.instance_id
         && record.team_name === expected.team_name
         && record.worker_name === expected.worker_name
         && record.pane_id === expected.pane_id
@@ -145,6 +147,7 @@ function isValidIdentity(value) {
     return record.schema_version === WORKER_LAUNCH_SCHEMA_VERSION
         && isUuid(record.attempt_id)
         && isUuid(record.nonce)
+        && isValidTeamInstanceId(record.instance_id)
         && isExactText(record.team_name)
         && isExactText(record.worker_name)
         && isExactText(record.pane_id)
@@ -169,12 +172,80 @@ function identityOf(attempt) {
         schema_version: attempt.schema_version,
         attempt_id: attempt.attempt_id,
         nonce: attempt.nonce,
+        instance_id: attempt.instance_id,
         team_name: attempt.team_name,
         worker_name: attempt.worker_name,
         pane_id: attempt.pane_id,
         provider: attempt.provider,
         created_at: attempt.created_at,
     };
+}
+function completionBindingOf(spec) {
+    return {
+        ...identityOf(spec),
+        containment_nonce: spec.containment_nonce,
+        authority_digest: spec.authority_digest,
+    };
+}
+function isValidCompletionBinding(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return false;
+    const record = value;
+    const identityValid = isValidIdentity(record);
+    const containmentNonce = record.containment_nonce;
+    const authorityDigest = record.authority_digest;
+    return identityValid
+        && isExactText(containmentNonce)
+        && typeof authorityDigest === 'string'
+        && /^[0-9a-f]{64}$/.test(authorityDigest);
+}
+function completionRecordTemplate(binding, exitCode) {
+    const sentinel = '__WORKER_LAUNCH_EXIT__';
+    const serialized = JSON.stringify({
+        ...identityOf(binding),
+        kind: 'worker_launch_provider_completion',
+        containment_nonce: binding.containment_nonce,
+        authority_digest: binding.authority_digest,
+        exit_code: sentinel,
+    });
+    return serialized.replace(`"exit_code":${JSON.stringify(sentinel)}`, `"exit_code":${exitCode}`);
+}
+function parseProviderCompletionExitCode(raw, binding) {
+    if (!binding) {
+        const normalized = raw.trim();
+        if (!/^\d+$/.test(normalized))
+            return undefined;
+        const exitCode = Number(normalized);
+        return Number.isSafeInteger(exitCode) && exitCode >= 0 ? exitCode : undefined;
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    }
+    catch {
+        return undefined;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+        return undefined;
+    const record = parsed;
+    if (!identityMatches(record, binding)
+        || record.kind !== 'worker_launch_provider_completion'
+        || record.containment_nonce !== binding.containment_nonce
+        || record.authority_digest !== binding.authority_digest
+        || !Number.isSafeInteger(record.exit_code)
+        || Number(record.exit_code) < 0)
+        return undefined;
+    return Number(record.exit_code);
+}
+/** Read one launch-owned completion marker, or an unbound numeric marker for
+ * generic process-wrapper callers that have no worker launch identity. */
+export async function readProviderCompletionExitCode(path, binding) {
+    try {
+        return parseProviderCompletionExitCode(await readFile(path, 'utf8'), binding);
+    }
+    catch {
+        return undefined;
+    }
 }
 async function readJson(path) {
     try {
@@ -231,11 +302,15 @@ function resolvePositiveInteger(value, fallback) {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 export async function prepareWorkerLaunchAttempt(input) {
+    const instanceId = input.instanceId;
+    if (!isValidTeamInstanceId(instanceId))
+        throw new Error('worker_launch_instance_id_invalid');
     const attemptId = randomUUID();
     const identity = {
         schema_version: WORKER_LAUNCH_SCHEMA_VERSION,
         attempt_id: attemptId,
         nonce: randomUUID(),
+        instance_id: instanceId,
         team_name: input.teamName,
         worker_name: input.workerName,
         pane_id: input.paneId,
@@ -279,13 +354,15 @@ export async function prepareWorkerLaunchAttempt(input) {
     return attempt;
 }
 export async function loadWorkerLaunchAttempt(input) {
+    if (!isValidTeamInstanceId(input.instanceId))
+        return null;
     const expectedPath = absPath(input.cwd, TeamPaths.workerLaunchExpected(input.teamName, input.workerName, input.attemptId));
     const expected = await readJson(expectedPath);
     if (expected.kind !== 'value' || !isValidIdentity(expected.value))
         return null;
     const identity = expected.value;
     if (identity.attempt_id !== input.attemptId || identity.team_name !== input.teamName
-        || identity.worker_name !== input.workerName || identity.pane_id !== input.paneId
+        || identity.instance_id !== input.instanceId || identity.worker_name !== input.workerName || identity.pane_id !== input.paneId
         || identity.provider !== input.provider)
         return null;
     return {
@@ -303,6 +380,8 @@ export async function loadWorkerLaunchAttempt(input) {
     };
 }
 export async function loadCurrentWorkerLaunchAttempt(input) {
+    if (!isValidTeamInstanceId(input.instanceId))
+        return null;
     const currentPath = absPath(input.cwd, TeamPaths.workerLaunchCurrent(input.teamName, input.workerName));
     try {
         return await withFileLock(lockPathFor(currentPath), async () => {
@@ -310,7 +389,7 @@ export async function loadCurrentWorkerLaunchAttempt(input) {
             if (current.kind !== 'value' || !isValidIdentity(current.value))
                 return null;
             const record = current.value;
-            if (record.team_name !== input.teamName || record.worker_name !== input.workerName
+            if (record.team_name !== input.teamName || record.instance_id !== input.instanceId || record.worker_name !== input.workerName
                 || record.provider !== input.provider || !isExactText(record.runtime_cli_path)
                 || (record.context !== undefined && !isValidLaunchContext(record.context)))
                 return null;
@@ -318,6 +397,7 @@ export async function loadCurrentWorkerLaunchAttempt(input) {
                 cwd: input.cwd,
                 teamName: input.teamName,
                 workerName: input.workerName,
+                instanceId: input.instanceId,
                 paneId: record.pane_id,
                 provider: input.provider,
                 attemptId: record.attempt_id,
@@ -338,6 +418,8 @@ export async function loadCurrentWorkerLaunchAttempt(input) {
     }
 }
 export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd, options = {}) {
+    if (!isValidIdentity(attempt))
+        throw new Error('worker_launch_attempt_identity_invalid');
     const providerEnv = buildProviderEnvironment(options.providerEnv);
     const absoluteCwd = resolve(cwd);
     const containmentNonce = randomUUID();
@@ -627,6 +709,9 @@ function acknowledgementResult(value, attempt) {
         return { ok: false, reason: 'ack_malformed' };
     return identityMatches(record, attempt) ? null : { ok: false, reason: 'ack_mismatch' };
 }
+function isValidWorkerLaunchAcknowledgement(read, attempt) {
+    return read.kind === 'value' && acknowledgementResult(read.value, attempt) === null;
+}
 async function acceptObservedAcknowledgement(attempt, read) {
     if (read.kind === 'absent')
         return null;
@@ -733,18 +818,26 @@ export async function retireWorkerLaunchAttempt(attempt, reason) {
 export async function retireAndCleanupCurrentWorkerLaunchAttempt(attempt, reason, cleanup) {
     const retiredPath = `${attempt.decisionPath}.retired`;
     const cleanupCompletePath = `${retiredPath}.cleanup-complete`;
-    const cleanupIsComplete = async () => {
-        const completed = await readJson(cleanupCompletePath);
-        return completed.kind === 'value'
-            && identityMatches(completed.value, attempt)
-            && completed.value.kind === 'worker_launch_cleanup_complete';
+    const finalizeCleanupUnlocked = () => finishWorkerLaunchRetirementCleanupUnlocked(attempt);
+    const finalizeCleanup = async () => {
+        try {
+            return await withFileLock(lockPathFor(attempt.currentPath), finalizeCleanupUnlocked, { timeoutMs: 10_000, retryDelayMs: 10 });
+        }
+        catch {
+            return 'failed';
+        }
     };
-    if (await cleanupIsComplete())
-        return true;
+    const existingCleanup = await readWorkerLaunchRetirementCleanupState(attempt);
+    if (existingCleanup === 'valid') {
+        return await finalizeCleanup() === 'complete';
+    }
+    if (existingCleanup === 'invalid')
+        return false;
     try {
         return await withFileLock(lockPathFor(attempt.currentPath), async () => {
-            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt))
-                return cleanupIsComplete();
+            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt)) {
+                return await finalizeCleanupUnlocked() === 'complete';
+            }
             if (!await isWorkerLaunchAttemptAccepted(attempt))
                 return false;
             const existing = await readJson(retiredPath);
@@ -776,19 +869,79 @@ export async function retireAndCleanupCurrentWorkerLaunchAttempt(attempt, reason
                 || !identityMatches(completed.value, attempt)
                 || completed.value.kind !== 'worker_launch_cleanup_complete')
                 return false;
-            if (!await isCurrentLaunchIdentity(attempt.currentPath, attempt))
-                return false;
-            await unlink(attempt.currentPath);
-            return true;
+            return await finalizeCleanupUnlocked() === 'complete';
         }, { timeoutMs: 10_000, retryDelayMs: 10 });
     }
     catch {
         return false;
     }
 }
+async function readWorkerLaunchRetirementState(attempt) {
+    const retired = await readJson(`${attempt.decisionPath}.retired`);
+    if (retired.kind === 'absent')
+        return 'absent';
+    if (retired.kind !== 'value'
+        || !identityMatches(retired.value, attempt)
+        || retired.value.kind !== 'worker_launch_retired'
+        || !isExactText(retired.value.reason)
+        || typeof retired.value.written_at !== 'string'
+        || !Number.isFinite(Date.parse(retired.value.written_at)))
+        return 'invalid';
+    return 'valid';
+}
+async function readWorkerLaunchRetirementCleanupState(attempt) {
+    const completed = await readJson(`${attempt.decisionPath}.retired.cleanup-complete`);
+    if (completed.kind === 'absent')
+        return 'absent';
+    if (completed.kind !== 'value'
+        || !identityMatches(completed.value, attempt)
+        || completed.value.kind !== 'worker_launch_cleanup_complete')
+        return 'invalid';
+    return 'valid';
+}
+async function finishWorkerLaunchRetirementCleanupUnlocked(attempt) {
+    const cleanupState = await readWorkerLaunchRetirementCleanupState(attempt);
+    if (cleanupState === 'absent')
+        return 'pending';
+    if (cleanupState === 'invalid')
+        return 'failed';
+    const current = await readJson(attempt.currentPath);
+    if (current.kind === 'absent')
+        return 'complete';
+    if (current.kind !== 'value')
+        return 'failed';
+    // A successor owns the shared pointer now; never remove it as part of the
+    // older attempt's retry. A failed unlink remains failed so the caller can
+    // retry only this finalization without repeating provider or pane cleanup.
+    if (!identityMatches(current.value, attempt))
+        return 'complete';
+    try {
+        await unlink(attempt.currentPath);
+    }
+    catch (error) {
+        if (error.code !== 'ENOENT')
+            return 'failed';
+    }
+    const remaining = await readJson(attempt.currentPath);
+    if (remaining.kind === 'absent')
+        return 'complete';
+    return remaining.kind === 'value' && !identityMatches(remaining.value, attempt)
+        ? 'complete'
+        : 'failed';
+}
 function isValidProcessStartIdentity(value) {
-    return typeof value === 'string' && (/^\d+$/.test(value) || /^ticks:\d+$/.test(value)
-        || /^dmtf:\d{14}\.\d{6}[+-]\d{3}$/.test(value));
+    if (typeof value !== 'string' || value.length > 1024)
+        return false;
+    if (/^\d+$/.test(value) || /^ticks:\d+$/.test(value)
+        || /^dmtf:\d{14}\.\d{6}[+-]\d{3}$/.test(value))
+        return true;
+    if (/^linux:[1-9]\d*$/.test(value) || /^win32:[1-9]\d*$/.test(value))
+        return true;
+    const darwin = /^darwin:([1-9]\d*):(\d+)$/.exec(value);
+    return darwin !== null && Number(darwin[2]) < 1_000_000;
+}
+function isPositiveProcessId(value) {
+    return Number.isSafeInteger(value) && Number(value) > 0;
 }
 async function readWorkerLaunchCleanupProof(attempt, started) {
     const startedPath = 'startedPath' in attempt ? attempt.startedPath : attempt.started_path;
@@ -836,9 +989,86 @@ async function readWorkerLaunchCleanupProof(attempt, started) {
     }
     return false;
 }
-async function readWorkerLaunchTerminalState(attempt, started) {
-    if (process.platform === 'win32')
+async function readWorkerLaunchProviderCompletionState(attempt, started) {
+    if (started.supervisor_completion_path === undefined)
         return 'absent';
+    if (!isExactText(started.supervisor_completion_path)
+        || !isAbsolute(started.supervisor_completion_path))
+        return 'invalid';
+    // The path and marker are both producer-bound. A caller cannot make an
+    // arbitrary numeric file authoritative by substituting this optional field.
+    const bindingReceipt = await readJson(`${attempt.startedPath}.completion-binding`);
+    if (bindingReceipt.kind !== 'value'
+        || !bindingReceipt.value
+        || typeof bindingReceipt.value !== 'object'
+        || Array.isArray(bindingReceipt.value))
+        return 'invalid';
+    const bindingValue = bindingReceipt.value;
+    if (bindingValue.kind !== 'worker_launch_completion_binding'
+        || bindingValue.completion_path !== started.supervisor_completion_path
+        || !identityMatches(bindingValue, attempt)
+        || bindingValue.containment_nonce !== started.containment_nonce
+        || bindingValue.authority_digest !== started.authority_digest
+        || !isExactText(bindingValue.containment_nonce)
+        || !/^[0-9a-f]{64}$/.test(bindingValue.authority_digest ?? '')
+        || typeof bindingValue.written_at !== 'string'
+        || !Number.isFinite(Date.parse(bindingValue.written_at)))
+        return 'invalid';
+    const completionBinding = {
+        ...identityOf(attempt),
+        containment_nonce: bindingValue.containment_nonce,
+        authority_digest: bindingValue.authority_digest,
+    };
+    if (!isValidCompletionBinding(completionBinding))
+        return 'invalid';
+    const absoluteCompletionPath = resolve(started.supervisor_completion_path);
+    const trustedTempRoot = resolve(tmpdir());
+    const pathParts = [];
+    let pathPart = dirname(absoluteCompletionPath);
+    if (absoluteCompletionPath === trustedTempRoot
+        || absoluteCompletionPath.startsWith(`${trustedTempRoot}${sep}`)) {
+        while (pathPart !== trustedTempRoot && pathPart !== dirname(pathPart)) {
+            pathParts.push(pathPart);
+            pathPart = dirname(pathPart);
+        }
+    }
+    else {
+        // Actual supervised writers place markers below the OS temp root. For
+        // manually supplied paths, still reject a directly symlinked parent
+        // without imposing assumptions on trusted system path components.
+        pathParts.push(pathPart);
+    }
+    for (const parentPath of pathParts) {
+        try {
+            if ((await lstat(parentPath)).isSymbolicLink())
+                return 'invalid';
+        }
+        catch (error) {
+            if (error.code === 'ENOENT')
+                return 'absent';
+            return 'invalid';
+        }
+    }
+    let raw;
+    let handle;
+    try {
+        handle = await open(started.supervisor_completion_path, constants.O_RDONLY
+            | (constants.O_NOFOLLOW ?? 0)
+            | (process.platform === 'win32' ? 0 : (constants.O_NONBLOCK ?? 0)));
+        const info = await handle.stat();
+        if (!info.isFile() || info.nlink !== 1)
+            return 'invalid';
+        raw = await handle.readFile('utf8');
+    }
+    catch (error) {
+        return error.code === 'ENOENT' ? 'absent' : 'invalid';
+    }
+    finally {
+        await handle?.close().catch(() => undefined);
+    }
+    return parseProviderCompletionExitCode(raw, completionBinding) === undefined ? 'invalid' : 'valid';
+}
+async function readWorkerLaunchTerminalState(attempt, started) {
     const terminal = await readJson(`${attempt.startedPath}.terminal`);
     if (terminal.kind === 'absent')
         return 'absent';
@@ -847,19 +1077,32 @@ async function readWorkerLaunchTerminalState(attempt, started) {
     if (!terminal.value || typeof terminal.value !== 'object' || Array.isArray(terminal.value))
         return 'invalid';
     const value = terminal.value;
-    const matchesProcessGroup = Number.isSafeInteger(started.process_group_id)
-        && Number(started.process_group_id) > 0
-        && value.process_group_id === started.process_group_id;
     if (!identityMatches(value, attempt)
         || value.kind !== 'worker_launch_provider_terminal'
         || value.pid !== started.pid
         || value.process_start_identity !== started.process_start_identity
         || !Number.isSafeInteger(value.pid)
         || Number(value.pid) <= 0
-        || !isValidProcessStartIdentity(value.process_start_identity)
-        || !matchesProcessGroup
-        || typeof value.child_reaped !== 'boolean'
-        || typeof value.cleanup_verified !== 'boolean')
+        || !isValidProcessStartIdentity(value.process_start_identity))
+        return 'invalid';
+    if (process.platform === 'win32') {
+        if (typeof value.cleanup_verified !== 'boolean')
+            return 'invalid';
+        if (value.outcome === 'exit' && value.cleanup_verified === true)
+            return 'reaped';
+        if (value.outcome === 'cleanup_unverified' && value.cleanup_verified === false)
+            return 'live-unreaped';
+        return 'invalid';
+    }
+    const matchesProcessGroup = Number.isSafeInteger(started.process_group_id)
+        && Number(started.process_group_id) > 0
+        && value.process_group_id === started.process_group_id;
+    if (!matchesProcessGroup || typeof value.cleanup_verified !== 'boolean')
+        return 'invalid';
+    if (value.child_reaped === undefined) {
+        return value.outcome === 'exit' && value.cleanup_verified === true ? 'reaped' : 'invalid';
+    }
+    if (typeof value.child_reaped !== 'boolean')
         return 'invalid';
     if (value.child_reaped === true
         && (value.outcome === 'exit' || value.outcome === 'cleanup_unverified'))
@@ -869,6 +1112,176 @@ async function readWorkerLaunchTerminalState(attempt, started) {
         && value.cleanup_verified === false)
         return 'live-unreaped';
     return 'invalid';
+}
+async function readWorkerLaunchTerminationProofState(attempt, started) {
+    const completed = await readJson(`${attempt.startedPath}.termination-complete`);
+    if (completed.kind === 'absent')
+        return 'absent';
+    if (completed.kind !== 'value')
+        return 'invalid';
+    if (!completed.value || typeof completed.value !== 'object' || Array.isArray(completed.value))
+        return 'invalid';
+    const value = completed.value;
+    const processGroupMatches = process.platform === 'win32'
+        || (Number.isSafeInteger(started.process_group_id)
+            && Number(started.process_group_id) > 0
+            && value.process_group_id === started.process_group_id);
+    return identityMatches(value, attempt)
+        && value.kind === 'worker_launch_termination_complete'
+        && value.cleanup_verified === true
+        && value.pid === started.pid
+        && Number.isSafeInteger(value.pid)
+        && Number(value.pid) > 0
+        && value.process_start_identity === started.process_start_identity
+        && isValidProcessStartIdentity(value.process_start_identity)
+        && processGroupMatches
+        ? 'valid'
+        : 'invalid';
+}
+/**
+ * Read the exact launch evidence and provider process identity without
+ * changing launch receipts or attempting cleanup. `dead` describes provider
+ * execution only; supervised completion is accepted only when the producer's
+ * exact completion-binding receipt matches the started record. It never grants
+ * authority to delete the provider tree or pane resources. Callers must retain
+ * `terminateWorkerLaunchProvider` for creation-bound cleanup.
+ */
+export async function observeWorkerLaunchProvider(attempt) {
+    try {
+        if (!isValidIdentity(attempt))
+            return 'unknown';
+        const expected = await readJson(attempt.expectedPath);
+        if (expected.kind !== 'value' || !identityMatches(expected.value, attempt))
+            return 'unknown';
+        const acknowledgement = await readJson(attempt.ackPath);
+        if (!isValidWorkerLaunchAcknowledgement(acknowledgement, attempt))
+            return 'unknown';
+        const current = await readJson(attempt.currentPath);
+        if (current.kind === 'malformed'
+            || (current.kind === 'value' && !identityMatches(current.value, attempt)))
+            return 'unknown';
+        const decision = await readJson(attempt.decisionPath);
+        if (decision.kind === 'malformed'
+            || (decision.kind === 'value'
+                && (!identityMatches(decision.value, attempt)
+                    || decision.value.kind !== 'worker_launch_decision'))) {
+            return 'unknown';
+        }
+        const retirement = await readWorkerLaunchRetirementState(attempt);
+        if (retirement === 'invalid')
+            return 'unknown';
+        const retirementCleanup = await readWorkerLaunchRetirementCleanupState(attempt);
+        if (retirementCleanup === 'invalid')
+            return 'unknown';
+        if (retirementCleanup === 'valid') {
+            // A completed retirement removes the current pointer. An extant pointer
+            // is contradictory evidence, not proof that the provider is alive.
+            if (current.kind !== 'absent'
+                || decision.kind !== 'value'
+                || !identityMatches(decision.value, attempt)
+                || decision.value.kind !== 'worker_launch_decision'
+                || decision.value.decision !== 'accepted'
+                || !await isWorkerLaunchAttemptAccepted(attempt))
+                return 'unknown';
+            return 'dead';
+        }
+        if (retirement === 'valid')
+            return 'unknown';
+        if (current.kind !== 'value' || decision.kind !== 'value'
+            || decision.value.decision !== 'accepted'
+            || !await isWorkerLaunchAttemptAccepted(attempt))
+            return 'unknown';
+        const started = await readValidProviderStarted(attempt, {
+            allowSupervisorCompletion: true,
+            allowTerminal: true,
+        });
+        const startedPid = started?.pid;
+        if (!started
+            || !isPositiveProcessId(startedPid)
+            || !isValidProcessStartIdentity(started.process_start_identity))
+            return 'unknown';
+        const completionState = await readWorkerLaunchProviderCompletionState(attempt, started);
+        if (completionState === 'invalid')
+            return 'unknown';
+        const terminalState = await readWorkerLaunchTerminalState(attempt, started);
+        if (terminalState === 'invalid')
+            return 'unknown';
+        const terminationProof = await readWorkerLaunchTerminationProofState(attempt, started);
+        if (terminationProof === 'invalid')
+            return 'unknown';
+        if (terminalState === 'reaped' || terminationProof === 'valid')
+            return 'dead';
+        const liveness = await isProcessIdentityLive(startedPid, started.process_start_identity);
+        const finalExpected = await readJson(attempt.expectedPath);
+        if (finalExpected.kind !== 'value' || !identityMatches(finalExpected.value, attempt))
+            return 'unknown';
+        const finalAcknowledgement = await readJson(attempt.ackPath);
+        if (!isValidWorkerLaunchAcknowledgement(finalAcknowledgement, attempt))
+            return 'unknown';
+        const finalRetirement = await readWorkerLaunchRetirementState(attempt);
+        if (finalRetirement === 'invalid')
+            return 'unknown';
+        const finalRetirementCleanup = await readWorkerLaunchRetirementCleanupState(attempt);
+        if (finalRetirementCleanup === 'invalid')
+            return 'unknown';
+        if (finalRetirementCleanup === 'valid') {
+            const finalCurrent = await readJson(attempt.currentPath);
+            if (finalCurrent.kind !== 'absent')
+                return 'unknown';
+            const finalDecision = await readJson(attempt.decisionPath);
+            if (finalDecision.kind !== 'value'
+                || !identityMatches(finalDecision.value, attempt)
+                || finalDecision.value.kind !== 'worker_launch_decision'
+                || finalDecision.value.decision !== 'accepted'
+                || !await isWorkerLaunchAttemptAccepted(attempt))
+                return 'unknown';
+            return 'dead';
+        }
+        if (finalRetirement === 'valid')
+            return 'unknown';
+        const finalCurrent = await readJson(attempt.currentPath);
+        if (finalCurrent.kind !== 'value' || !identityMatches(finalCurrent.value, attempt))
+            return 'unknown';
+        const finalDecision = await readJson(attempt.decisionPath);
+        if (finalDecision.kind !== 'value'
+            || !identityMatches(finalDecision.value, attempt)
+            || finalDecision.value.kind !== 'worker_launch_decision'
+            || finalDecision.value.decision !== 'accepted'
+            || !await isWorkerLaunchAttemptAccepted(attempt))
+            return 'unknown';
+        const finalStarted = await readValidProviderStarted(attempt, {
+            allowSupervisorCompletion: true,
+            allowTerminal: true,
+        });
+        const finalStartedPid = finalStarted?.pid;
+        if (!finalStarted
+            || !isPositiveProcessId(finalStartedPid)
+            || finalStartedPid !== startedPid
+            || finalStarted.process_start_identity !== started.process_start_identity)
+            return 'unknown';
+        const finalTerminalState = await readWorkerLaunchTerminalState(attempt, finalStarted);
+        if (finalTerminalState === 'invalid')
+            return 'unknown';
+        const finalTerminationProof = await readWorkerLaunchTerminationProofState(attempt, finalStarted);
+        if (finalTerminationProof === 'invalid')
+            return 'unknown';
+        if (finalTerminalState === 'reaped' || finalTerminationProof === 'valid')
+            return 'dead';
+        const finalCompletionState = await readWorkerLaunchProviderCompletionState(attempt, finalStarted);
+        if (finalCompletionState === 'invalid')
+            return 'unknown';
+        if (completionState === 'valid' || finalCompletionState === 'valid')
+            return 'dead';
+        let finalLiveness = liveness;
+        if (liveness === 'live') {
+            const recheck = await isProcessIdentityLive(finalStartedPid, finalStarted.process_start_identity);
+            finalLiveness = recheck === 'live' || recheck === 'dead' ? recheck : 'unknown';
+        }
+        return finalLiveness === 'live' ? 'alive' : finalLiveness === 'dead' ? 'dead' : 'unknown';
+    }
+    catch {
+        return 'unknown';
+    }
 }
 export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) {
     const started = await readJson(attempt.startedPath);
@@ -913,6 +1326,17 @@ export async function terminateWorkerLaunchProvider(attempt, timeoutMs = 2_000) 
         }
         else if (existingRequest.kind !== 'value')
             return false;
+        else {
+            const request = existingRequest.value;
+            if (!identityMatches(request, attempt)
+                || request.kind !== 'worker_launch_termination_request'
+                || request.operation !== 'terminate'
+                || request.pid !== record.pid
+                || request.process_start_identity !== record.process_start_identity
+                || request.authority_digest !== (record.authority_digest ?? '')
+                || request.containment_nonce !== (record.containment_nonce ?? attempt.nonce))
+                return false;
+        }
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
             const complete = await readJson(terminationCompletePath);
@@ -1023,19 +1447,23 @@ async function publishWorkerLaunchTerminationComplete(terminationCompletePath, a
         && value.process_start_identity === record.process_start_identity
         && (process.platform === 'win32' || value.process_group_id === record.process_group_id);
 }
-async function readValidProviderStarted(attempt) {
+async function readValidProviderStarted(attempt, options = {}) {
     const started = await readJson(attempt.startedPath);
-    if ((await readJson(`${attempt.startedPath}.terminal`)).kind !== 'absent')
+    if (!options.allowTerminal && (await readJson(`${attempt.startedPath}.terminal`)).kind !== 'absent')
         return null;
     if (started.kind !== 'value')
         return null;
     if (!started.value || typeof started.value !== 'object' || Array.isArray(started.value))
         return null;
     const record = started.value;
-    if (record.supervisor_completion_path !== undefined
+    if (!options.allowSupervisorCompletion && record.supervisor_completion_path !== undefined
         && (typeof record.supervisor_completion_path !== 'string'
             || record.supervisor_completion_path.trim().length === 0
             || existsSync(record.supervisor_completion_path)))
+        return null;
+    if (options.allowSupervisorCompletion && record.supervisor_completion_path !== undefined
+        && (typeof record.supervisor_completion_path !== 'string'
+            || record.supervisor_completion_path.trim().length === 0))
         return null;
     return identityMatches(record, attempt)
         && record.kind === 'worker_launch_provider_started'
@@ -1122,6 +1550,7 @@ async function publishAcknowledgement(spec) {
         schema_version: spec.schema_version,
         attempt_id: spec.attempt_id,
         nonce: spec.nonce,
+        instance_id: spec.instance_id,
         team_name: spec.team_name,
         worker_name: spec.worker_name,
         pane_id: spec.pane_id,
@@ -1230,7 +1659,9 @@ async function awaitExternalTerminationCompletion(spec, timeoutMs = 2_000) {
         const completed = await readJson(`${spec.started_path}.termination-complete`);
         if (completed.kind === 'value'
             && identityMatches(completed.value, spec)
-            && completed.value.cleanup_verified === true)
+            && completed.value.cleanup_verified === true
+            && completed.value.authority_digest === spec.authority_digest
+            && completed.value.containment_nonce === spec.containment_nonce)
             return true;
         if (completed.kind === 'malformed')
             return false;
@@ -1241,6 +1672,18 @@ async function awaitExternalTerminationCompletion(spec, timeoutMs = 2_000) {
 export async function materializeProviderSpawnInvocation(invocation, options = {}) {
     const superviseProcessTree = options.superviseProcessTree ?? options.superviseWindowsTree ?? false;
     const gateProviderExecution = options.gateProviderExecution === true && !invocation.batchScript;
+    const completionBinding = options.completionIdentity === undefined
+        ? undefined
+        : completionBindingOf(options.completionIdentity);
+    if (options.completionIdentity !== undefined && !isValidBootstrapSpec(options.completionIdentity)) {
+        throw new Error('worker_launch_completion_identity_invalid');
+    }
+    if (completionBinding && !isValidCompletionBinding(completionBinding)) {
+        throw new Error('worker_launch_completion_identity_invalid');
+    }
+    if (completionBinding && !superviseProcessTree) {
+        throw new Error('worker_launch_completion_supervision_required');
+    }
     if (!invocation.batchScript && !superviseProcessTree) {
         return { command: invocation.command, args: invocation.args, cleanup: async () => { } };
     }
@@ -1249,14 +1692,18 @@ export async function materializeProviderSpawnInvocation(invocation, options = {
         const completionPath = superviseProcessTree ? join(wrapperDir, 'provider-exit.txt') : undefined;
         if (invocation.batchScript) {
             const wrapperPath = join(wrapperDir, 'launch.cmd');
+            const completionPayload = completionBinding
+                ? completionRecordTemplate(completionBinding, '%_OMC_EXIT%')
+                : '%_OMC_EXIT%';
             const completionScript = completionPath
-                ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo %_OMC_EXIT%\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
+                ? `set "_OMC_EXIT=%ERRORLEVEL%"\r\n> ${quoteWindowsCmdArgument(completionPath)} echo ${completionPayload}\r\n:omc_hold\r\nping -n 3600 127.0.0.1 >nul\r\ngoto omc_hold\r\n`
                 : '';
             await writeFile(wrapperPath, `${invocation.batchScript}${completionScript}`, { encoding: 'utf8', mode: 0o600 });
             return {
                 command: invocation.command,
                 args: [...invocation.args, `"${wrapperPath}"`],
                 ...(completionPath ? { completionPath } : {}),
+                ...(completionBinding ? { completionBinding } : {}),
                 cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
             };
         }
@@ -1265,11 +1712,15 @@ export async function materializeProviderSpawnInvocation(invocation, options = {
         const providerGate = gateProviderExecution
             ? 'if ! IFS= read -r _omc_provider_release <&3; then exit 125; fi\nexec 3<&-\n'
             : '';
-        await writeFile(wrapperPath, `#!/bin/sh\n${providerGate}"$@"\n_omc_exit=$?\nprintf '%s\\n' "$_omc_exit" > ${quotedCompletion}\nwhile :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
+        const completionScript = completionBinding
+            ? `printf '%s%s}\\n' ${quotePosixShellArgument(completionRecordTemplate(completionBinding, '').slice(0, -1))} "$_omc_exit" > ${quotedCompletion}\n`
+            : `printf '%s\\n' "$_omc_exit" > ${quotedCompletion}\n`;
+        await writeFile(wrapperPath, `#!/bin/sh\n${providerGate}"$@"\n_omc_exit=$?\n${completionScript}while :; do sleep 3600; done\n`, { encoding: 'utf8', mode: 0o700 });
         return {
             command: '/bin/sh',
             args: [wrapperPath, invocation.command, ...invocation.args],
             completionPath,
+            ...(completionBinding ? { completionBinding } : {}),
             ...(gateProviderExecution ? { providerGateFd: 3 } : {}),
             cleanup: async () => { await rm(wrapperDir, { recursive: true, force: true }); },
         };
@@ -1284,6 +1735,7 @@ async function publishProviderStarted(spec, pid, processStartIdentity, superviso
         schema_version: spec.schema_version,
         attempt_id: spec.attempt_id,
         nonce: spec.nonce,
+        instance_id: spec.instance_id,
         team_name: spec.team_name,
         worker_name: spec.worker_name,
         pane_id: spec.pane_id,
@@ -1342,10 +1794,31 @@ export async function runWorkerLaunchBootstrap(value) {
                 ? buildWindowsSupervisorInvocation(spec)
                 : await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(spec.provider_argv, process.platform, providerEnv), {
                     superviseProcessTree: true,
+                    completionIdentity: spec,
                     // Keep the detached shell alive without running the provider until
                     // this bootstrap has captured and revalidated its native ownership.
                     gateProviderExecution: true,
                 });
+            if (process.platform !== 'win32') {
+                if (!invocation.completionPath || !invocation.completionBinding) {
+                    await invocation.cleanup().catch(() => undefined);
+                    return { outcome: 'provider_spawn_failed' };
+                }
+                try {
+                    await writeExclusiveAtomic(`${spec.started_path}.completion-binding`, {
+                        ...identityOf(spec),
+                        kind: 'worker_launch_completion_binding',
+                        completion_path: invocation.completionPath,
+                        containment_nonce: invocation.completionBinding.containment_nonce,
+                        authority_digest: invocation.completionBinding.authority_digest,
+                        written_at: new Date().toISOString(),
+                    });
+                }
+                catch {
+                    await invocation.cleanup().catch(() => undefined);
+                    return { outcome: 'provider_spawn_failed' };
+                }
+            }
             const child = spawn(invocation.command, invocation.args, {
                 cwd: spec.cwd,
                 env: providerEnv,
@@ -1458,6 +1931,7 @@ export async function runWorkerLaunchBootstrap(value) {
                         }
                         const matches = message.protocol === WINDOWS_SUPERVISOR_PROTOCOL
                             && message.attempt_id === spec.attempt_id
+                            && message.instance_id === spec.instance_id
                             && message.authority_digest === spec.authority_digest
                             && message.containment_nonce === spec.containment_nonce;
                         if (!matches)
@@ -1602,6 +2076,7 @@ export async function runWorkerLaunchBootstrap(value) {
                         return false;
                     const frame = JSON.stringify({
                         protocol: WINDOWS_SUPERVISOR_PROTOCOL, kind: 'terminate', attempt_id: spec.attempt_id,
+                        instance_id: spec.instance_id,
                         authority_digest: spec.authority_digest, containment_nonce: spec.containment_nonce,
                     });
                     child.stdin.write(`${frame}\n`);
@@ -1803,8 +2278,8 @@ export async function runWorkerLaunchBootstrap(value) {
                     return { completion };
             }
             if (invocation.completionPath && existsSync(invocation.completionPath)) {
-                const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
-                if (Number.isSafeInteger(exitCode))
+                const exitCode = await readProviderCompletionExitCode(invocation.completionPath, invocation.completionBinding);
+                if (exitCode !== undefined)
                     supervisedExitCode = exitCode;
                 return cleanupProvider('provider_spawn_failed');
             }
@@ -1826,8 +2301,8 @@ export async function runWorkerLaunchBootstrap(value) {
                 return cleanupProvider('provider_spawn_failed');
             }
             if (invocation.completionPath && existsSync(invocation.completionPath)) {
-                const exitCode = Number(await readFile(invocation.completionPath, 'utf8').catch(() => ''));
-                if (Number.isSafeInteger(exitCode))
+                const exitCode = await readProviderCompletionExitCode(invocation.completionPath, invocation.completionBinding);
+                if (exitCode !== undefined)
                     supervisedExitCode = exitCode;
                 const cleaned = await terminateProvider();
                 if (!cleaned)
@@ -1850,8 +2325,8 @@ export async function runWorkerLaunchBootstrap(value) {
                         return;
                     pollingCompletion = true;
                     void readFile(invocation.completionPath, 'utf8').then(async (raw) => {
-                        const exitCode = Number(raw.trim());
-                        if (!Number.isSafeInteger(exitCode))
+                        const exitCode = parseProviderCompletionExitCode(raw, invocation.completionBinding);
+                        if (exitCode === undefined)
                             return;
                         supervisedExitCode = exitCode;
                         const cleaned = await terminateProvider();

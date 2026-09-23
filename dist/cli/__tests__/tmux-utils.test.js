@@ -19,7 +19,7 @@ vi.mock('child_process', async (importOriginal) => {
         spawnSync: vi.fn(),
     };
 });
-import { buildTmuxShellCommand, buildTmuxShellCommandWithEnv, createHudWatchPane, isClaudeAvailable, killTmuxPane, listHudWatchPaneIdsInCurrentWindow, resolveLaunchPolicy, tmuxExec, tmuxEnv, tmuxSpawn, tmuxCmdAsync, wrapWithLoginShell, quoteShellArg, sanitizeTmuxToken, } from '../tmux-utils.js';
+import { buildTmuxShellCommand, buildTmuxShellCommandWithEnv, createHudWatchPane, isClaudeAvailable, isNativeWindowsShell, killTmuxPane, listHudWatchPaneIdsInCurrentWindow, resolveLaunchPolicy, tmuxExec, tmuxEnv, tmuxSpawn, tmuxCmdAsync, wrapWithLoginShell, quoteShellArg, sanitizeTmuxToken, } from '../tmux-utils.js';
 const mockedExecFileSync = vi.mocked(execFileSync);
 const mockedExec = vi.mocked(exec);
 const mockedExecFile = vi.mocked(execFile);
@@ -278,6 +278,25 @@ describe('tmux command execution parity on Windows', () => {
     });
 });
 // ---------------------------------------------------------------------------
+// isNativeWindowsShell
+// ---------------------------------------------------------------------------
+describe('isNativeWindowsShell', () => {
+    it('keeps plain MSYS tmux on the POSIX path', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        vi.stubEnv('MSYSTEM', 'MSYS');
+        vi.stubEnv('MINGW_PREFIX', '');
+        vi.stubEnv('SYSTEM', '');
+        expect(isNativeWindowsShell()).toBe(false);
+    });
+    it('does not mistake SYSTEM for an MSYS shell marker', () => {
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        vi.stubEnv('MSYSTEM', '');
+        vi.stubEnv('MINGW_PREFIX', '');
+        vi.stubEnv('SYSTEM', 'MSYS');
+        expect(isNativeWindowsShell()).toBe(true);
+    });
+});
+// ---------------------------------------------------------------------------
 // wrapWithLoginShell
 // ---------------------------------------------------------------------------
 describe('wrapWithLoginShell', () => {
@@ -306,6 +325,19 @@ describe('wrapWithLoginShell', () => {
         Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
         expect(buildTmuxShellCommandWithEnv('claude', ['--print'], { CODEX_HOME: 'C:\\Users\\me\\codex home' }))
             .toBe('set "CODEX_HOME=C:\\Users\\me\\codex home" && claude --print');
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    });
+    it('escapes literal percent signs in native env assignments', () => {
+        const originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        expect(buildTmuxShellCommandWithEnv('claude', [], { TOKEN: 'literal%PATH%' }))
+            .toContain('set "TOKEN=literal%%PATH%%"');
+        Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    });
+    it.each(['line\nbreak', 'line\rbreak', `nul\0value`])('rejects unsafe native env value %j', (value) => {
+        const originalPlatform = process.platform;
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        expect(() => buildTmuxShellCommandWithEnv('claude', [], { TOKEN: value })).toThrow('Native Windows tmux command values cannot contain NUL, CR, or LF characters');
         Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
     });
     it('keeps Unix login-shell wrapping on MSYS2 Windows', () => {

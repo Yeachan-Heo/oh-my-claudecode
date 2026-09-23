@@ -18,7 +18,6 @@ import { findNextTask, updateTask, writeTaskFailure } from "./task-file-ops.js";
 import { readNewInboxMessages, appendOutbox, rotateOutboxIfNeeded, rotateInboxIfNeeded, checkShutdownSignal, deleteShutdownSignal, checkDrainSignal, deleteDrainSignal, } from "./inbox-outbox.js";
 import { unregisterMcpWorker } from "./team-registration.js";
 import { writeHeartbeat, deleteHeartbeat } from "./heartbeat.js";
-import { killSession } from "./tmux-session.js";
 import { logAuditEvent } from "./audit-log.js";
 import { getEffectivePermissions, findPermissionViolations, } from "./permissions.js";
 import { getBuiltinExternalDefaultModel } from "../config/models.js";
@@ -460,13 +459,6 @@ async function handleShutdown(config, signal, activeChild) {
     // 6. Outbox/inbox preserved for lead to read final ack
     audit(config, "bridge_shutdown");
     log(`[bridge] Shutdown complete. Goodbye.`);
-    // 7. Kill own tmux session (terminates this process)
-    try {
-        killSession(teamName, workerName);
-    }
-    catch {
-        /* ignore — this kills us */
-    }
 }
 /** Main bridge daemon entry point */
 export async function runBridge(config) {

@@ -13,12 +13,13 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildWorkerStartCommand } from '../tmux-session.js';
 import { getProcessStartIdentity, isProcessAlive, isProcessIdentityLive } from '../../platform/process-utils.js';
-import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, cleanupWorkerLaunchTransport, materializeWorkerLaunchTransport, prepareWorkerLaunchAttempt, readAndConsumeWorkerLaunchDescriptor, terminateWorkerLaunchProvider, } from '../worker-launch-ack.js';
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, cleanupWorkerLaunchTransport, materializeWorkerLaunchTransport, observeWorkerLaunchProvider, prepareWorkerLaunchAttempt, readAndConsumeWorkerLaunchDescriptor, terminateWorkerLaunchProvider, } from '../worker-launch-ack.js';
 import { runWorkerLaunchFromEnvironment } from '../runtime-cli.js';
 let cwd = '';
 let restoreFixtureEnv;
@@ -48,6 +49,7 @@ async function makeAttempt() {
         cwd,
         teamName: 'posix-team',
         workerName: 'worker-1',
+        instanceId: randomUUID(),
         paneId: '%2',
         provider: 'codex',
         runtimeCliPath: '/runtime-cli.cjs',
@@ -122,6 +124,7 @@ describe('POSIX supervised worker-launch transport (issue #3655)', () => {
         ].join(';');
         const config = {
             teamName: 'posix-team',
+            instanceId: attempt.instance_id,
             workerName: 'worker-1',
             envVars: {
                 OMC_TEAM_WORKER: 'posix-team/worker-1',
@@ -322,6 +325,25 @@ describe('POSIX supervised worker-launch transport (issue #3655)', () => {
             // remains live; resolving here would make runtime-cli throw/exit(1).
             await new Promise(resolve => setTimeout(resolve, 150));
             expect(cli.exitCode).toBeNull();
+            // Provider execution has completed even though the supervising wrapper
+            // is still held open after cleanup failed.
+            const startedBeforeObservation = await readFile(attempt.startedPath, 'utf8');
+            const terminalBeforeObservation = await readFile(`${attempt.startedPath}.terminal`, 'utf8');
+            const completionBindingBeforeObservation = await readFile(`${attempt.startedPath}.completion-binding`, 'utf8');
+            await expect(observeWorkerLaunchProvider(attempt)).resolves.toBe('dead');
+            await expect(readFile(attempt.startedPath, 'utf8')).resolves.toBe(startedBeforeObservation);
+            await expect(readFile(`${attempt.startedPath}.terminal`, 'utf8')).resolves.toBe(terminalBeforeObservation);
+            await expect(readFile(`${attempt.startedPath}.completion-binding`, 'utf8'))
+                .resolves.toBe(completionBindingBeforeObservation);
+            await expect(readFile(started.supervisor_completion_path, 'utf8').then(JSON.parse)).resolves.toMatchObject({
+                kind: 'worker_launch_provider_completion',
+                instance_id: attempt.instance_id,
+                attempt_id: attempt.attempt_id,
+                nonce: attempt.nonce,
+                containment_nonce: started.containment_nonce,
+                authority_digest: started.authority_digest,
+                exit_code: 0,
+            });
             await expect(terminateWorkerLaunchProvider(attempt, 2_000)).resolves.toBe(true);
             await expect(cliExit).resolves.toEqual({ code: 0, signal: null });
             await vi.waitFor(async () => {
@@ -357,7 +379,11 @@ describe('POSIX supervised worker-launch transport (issue #3655)', () => {
             cwd,
         });
         const consumed = await readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath);
-        expect(consumed).toMatchObject({ attempt_id: attempt.attempt_id, provider: 'codex' });
+        expect(consumed).toMatchObject({
+            attempt_id: attempt.attempt_id,
+            instance_id: attempt.instance_id,
+            provider: 'codex',
+        });
         // Second consume fails closed: the descriptor is gone.
         await expect(readAndConsumeWorkerLaunchDescriptor(materialized.bootstrapDescriptorPath))
             .rejects.toThrow('worker_launch_descriptor_missing');
@@ -397,6 +423,7 @@ describe('POSIX supervised worker-launch transport (issue #3655)', () => {
         const startCmd = buildWorkerStartCommand({
             teamName: 'posix-team',
             workerName: 'worker-1',
+            instanceId: attempt.instance_id,
             envVars: { OMC_TEAM_WORKER: 'posix-team/worker-1' },
             launchBinary: process.execPath,
             launchArgs: ['--version'],

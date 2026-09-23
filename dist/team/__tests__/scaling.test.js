@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'fs/promises';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'path';
 import { tmpdir } from 'os';
+import { activateTeamInstanceUnderLock, createTeamInstanceBinding, reserveTeamInstanceUnderLock, withTeamInstanceLifecycleLock, } from '../team-instance.js';
+import { absPath, teamStateRoot, TeamPaths } from '../state-paths.js';
 const tmuxUtilsMocks = vi.hoisted(() => ({
     tmuxExec: vi.fn(),
     tmuxSpawn: vi.fn(),
@@ -48,26 +50,92 @@ vi.mock('../team-owner-epoch.js', () => ({
     isProcessIdentityDead: processIdentityMocks.isProcessIdentityDead,
     isValidProcessStartIdentity: (value) => typeof value === 'string' && /^(linux|darwin|win32):/.test(value),
 }));
-const tmuxSessionMocks = vi.hoisted(() => ({
-    sanitizeName: vi.fn((name) => name),
-    getWorkerLiveness: vi.fn(),
-    killWorkerPanes: vi.fn(),
-    adoptWorkerPaneOwnership: vi.fn(async (input) => ({
-        ok: true,
-        ownership: { provider: 'tmux', providerTarget: input.providerTarget, paneId: input.paneId,
-            splitTarget: '', leaderPaneId: input.leaderPaneId, reservedPaneIds: [], source: 'adopted' },
-    })),
-    spawnOwnedWorkerInPane: vi.fn(async (_session, ownership, config) => ({
-        ownership,
-        provider: config.provider,
-        attempt: { attempt_id: `attempt-${ownership.paneId}`, currentPath: '/tmp/current', decisionPath: '/tmp/decision',
-            startedPath: '/tmp/started' },
-    })),
-    killOwnedWorkerPane: vi.fn(async (ownership) => {
-        tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
-    }),
-    waitForPaneReady: vi.fn(),
-}));
+const tmuxSessionMocks = vi.hoisted(() => {
+    const tmuxServerIdentity = {
+        socket_path: '/tmp/omc-test-tmux.sock',
+        server_pid: 4242,
+        process_started_at: process.platform === 'darwin'
+            ? 'darwin:1700000000:123456'
+            : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+    };
+    const getWorkerLiveness = vi.fn(async (_paneId) => 'dead');
+    return {
+        tmuxServerIdentity,
+        sanitizeName: vi.fn((name) => name),
+        getWorkerLiveness,
+        getOwnedWorkerLiveness: vi.fn(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return 'unknown';
+            return getWorkerLiveness(ownership.paneId);
+        }),
+        killWorkerPanes: vi.fn(),
+        workerPaneBelongsToOwnedProviderTarget: vi.fn(async (input) => {
+            if (input.provider === 'tmux' && !input.tmuxServerIdentity)
+                return false;
+            const format = input.providerTarget.includes(':')
+                ? '#{session_name}:#{window_index}'
+                : '#{session_name}';
+            const probed = tmuxUtilsMocks.tmuxSpawn(['display-message', '-t', input.paneId, '-p', format]);
+            return probed.status === 0 && probed.stdout.trim() === input.providerTarget;
+        }),
+        splitTeamWorkerPaneWithEvidence: vi.fn(async (splitTarget, direction, cwd, provider, identity) => {
+            if (provider === 'tmux' && !identity) {
+                return {
+                    commandSucceeded: false,
+                    provider,
+                    splitTarget,
+                    direction,
+                    rawOutput: '',
+                    stderr: 'tmux_server_identity_unknown',
+                    paneId: null,
+                };
+            }
+            const spawned = tmuxUtilsMocks.tmuxSpawn([
+                'split-window',
+                direction === 'right' ? '-h' : '-v',
+                '-t', splitTarget,
+                '-d', '-P', '-F', '#{pane_id}',
+                '-c', cwd,
+            ]);
+            const paneId = spawned.stdout.trim();
+            return {
+                commandSucceeded: true,
+                provider,
+                splitTarget,
+                direction,
+                rawOutput: spawned.stdout,
+                stderr: spawned.stderr ?? '',
+                paneId: paneId.length > 0 ? paneId : null,
+                ...(provider === 'tmux' && identity ? { tmuxServerIdentity: identity } : {}),
+            };
+        }),
+        adoptWorkerPaneOwnership: vi.fn(async (input) => ({
+            ok: true,
+            ownership: {
+                provider: input.provider ?? 'tmux',
+                providerTarget: input.providerTarget,
+                paneId: input.paneId,
+                splitTarget: '',
+                leaderPaneId: input.leaderPaneId,
+                reservedPaneIds: [],
+                source: 'adopted',
+                ...(input.provider !== 'cmux'
+                    ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxServerIdentity }
+                    : {}),
+            },
+        })),
+        spawnOwnedWorkerInPane: vi.fn(async (_session, ownership, config) => ({
+            ownership,
+            provider: config.provider,
+            attempt: { attempt_id: `attempt-${ownership.paneId}`, instance_id: config.instanceId, currentPath: '/tmp/current', decisionPath: '/tmp/decision',
+                startedPath: '/tmp/started' },
+        })),
+        killOwnedWorkerPane: vi.fn(async (ownership) => {
+            tmuxUtilsMocks.tmuxExec(['kill-pane', '-t', ownership.paneId], { stdio: 'pipe' });
+        }),
+        waitForPaneReady: vi.fn(),
+    };
+});
 const gitWorktreeMocks = vi.hoisted(() => ({
     ensureWorkerWorktree: vi.fn(),
     installWorktreeRootAgents: vi.fn(),
@@ -115,7 +183,10 @@ vi.mock('../monitor.js', () => ({
 vi.mock('../tmux-session.js', () => ({
     sanitizeName: tmuxSessionMocks.sanitizeName,
     getWorkerLiveness: tmuxSessionMocks.getWorkerLiveness,
+    getOwnedWorkerLiveness: tmuxSessionMocks.getOwnedWorkerLiveness,
     killWorkerPanes: tmuxSessionMocks.killWorkerPanes,
+    workerPaneBelongsToOwnedProviderTarget: tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget,
+    splitTeamWorkerPaneWithEvidence: tmuxSessionMocks.splitTeamWorkerPaneWithEvidence,
     adoptWorkerPaneOwnership: tmuxSessionMocks.adoptWorkerPaneOwnership,
     spawnOwnedWorkerInPane: tmuxSessionMocks.spawnOwnedWorkerInPane,
     killOwnedWorkerPane: tmuxSessionMocks.killOwnedWorkerPane,
@@ -132,19 +203,54 @@ vi.mock('../git-worktree.js', () => ({
 vi.mock('../runtime-owner-client.js', () => ({ resolveRuntimeCliPath: () => '/runtime-cli.js' }));
 vi.mock('../worker-launch-ack.js', () => workerLaunchMocks);
 import { scaleDown, scaleUp } from '../scaling.js';
-import { absPath, TeamPaths } from '../state-paths.js';
+const TEAM_INSTANCE_ID = '11111111-1111-4111-8111-111111111111';
+const FIXTURE_LAUNCH_DESCRIPTOR = {
+    schema_version: 1,
+    provider: 'claude',
+    model: null,
+    binary: '/usr/bin/claude',
+    args: [],
+};
+async function activateFixtureInstance(teamName, cwd, instanceId = TEAM_INSTANCE_ID) {
+    const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+    await withTeamInstanceLifecycleLock(binding.cwd, binding.team_name, async () => {
+        await reserveTeamInstanceUnderLock({ teamName, cwd, instanceId });
+        await mkdir(binding.state_root, { recursive: true });
+        await writeFile(absPath(binding.cwd, TeamPaths.config(teamName)), JSON.stringify({
+            name: teamName,
+            instance_id: instanceId,
+            tmux_session: 'demo-session:0',
+            tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
+            leader_cwd: binding.cwd,
+            team_state_root: binding.state_root,
+        }));
+        await activateTeamInstanceUnderLock(binding);
+    });
+}
 describe('scaleUp duplicate worker guard', () => {
     let cwd;
     let config;
+    let previousStateDir;
     function makeConfig(overrides = {}) {
         const base = {
             name: 'demo-team',
+            instance_id: TEAM_INSTANCE_ID,
+            tmux_server_identity: tmuxSessionMocks.tmuxServerIdentity,
             task: 'demo',
             agent_type: 'claude',
             worker_launch_mode: 'interactive',
             worker_count: 1,
             max_workers: 20,
-            workers: [{ name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' }],
+            workers: [{
+                    name: 'worker-1',
+                    index: 1,
+                    role: 'claude',
+                    assigned_tasks: [],
+                    pane_id: '%1',
+                    worker_cli: 'claude',
+                    launch_attempt_id: 'attempt-worker-1',
+                    launch_descriptor: FIXTURE_LAUNCH_DESCRIPTOR,
+                }],
             created_at: new Date().toISOString(),
             tmux_session: 'demo-session:0',
             next_task_id: 2,
@@ -153,18 +259,20 @@ describe('scaleUp duplicate worker guard', () => {
             hud_pane_id: null,
             resize_hook_name: null,
             resize_hook_target: null,
-            team_state_root: `${resolve(cwd)}/.omc/state/team/demo-team`,
+            team_state_root: teamStateRoot(cwd, 'demo-team'),
         };
         return { ...base, ...overrides };
     }
     function setActiveScaleUpFence(pid, processStartedAt, phase = 'reserved') {
         config.active_scale_up = {
-            operation_id: 'abandoned-scale-up', phase, pid, process_started_at: processStartedAt,
+            operation_id: 'abandoned-scale-up', phase, pid, instance_id: TEAM_INSTANCE_ID, process_started_at: processStartedAt,
             state_revision: config.state_revision ?? 0, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         };
     }
     beforeEach(async () => {
         cwd = await mkdtemp(join(tmpdir(), 'omc-scaling-duplicate-'));
+        previousStateDir = process.env.OMC_STATE_DIR;
+        process.env.OMC_STATE_DIR = join(await realpath(cwd), '.omc-state');
         vi.clearAllMocks();
         processIdentityMocks.currentProcessStartIdentity.mockImplementation((pid = process.pid) => currentPlatformProcessIdentity(pid));
         processIdentityMocks.isProcessIdentityDead.mockReturnValue(false);
@@ -193,6 +301,9 @@ describe('scaleUp duplicate worker guard', () => {
             if (args[0] === 'display-message' && args.includes('#{session_name}:#{window_index}')) {
                 return { status: 0, stdout: 'demo-session:0\n', stderr: '' };
             }
+            if (args[0] === 'display-message' && args.includes('#{session_name}')) {
+                return { status: 0, stdout: 'demo-session\n', stderr: '' };
+            }
             if (args[0] === 'split-window') {
                 return { status: 0, stdout: '%12\n', stderr: '' };
             }
@@ -201,12 +312,78 @@ describe('scaleUp duplicate worker guard', () => {
             }
             return { status: 0, stdout: '', stderr: '' };
         });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        tmuxSessionMocks.getOwnedWorkerLiveness.mockImplementation(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return 'unknown';
+            return tmuxSessionMocks.getWorkerLiveness(ownership.paneId);
+        });
+        tmuxSessionMocks.workerPaneBelongsToOwnedProviderTarget.mockImplementation(async (input) => {
+            if (input.provider === 'tmux' && !input.tmuxServerIdentity)
+                return false;
+            const format = input.providerTarget.includes(':')
+                ? '#{session_name}:#{window_index}'
+                : '#{session_name}';
+            const probed = tmuxUtilsMocks.tmuxSpawn(['display-message', '-t', input.paneId, '-p', format]);
+            return probed.status === 0 && probed.stdout.trim() === input.providerTarget;
+        });
+        tmuxSessionMocks.splitTeamWorkerPaneWithEvidence.mockImplementation(async (splitTarget, direction, cwd, provider, identity) => {
+            if (provider === 'tmux' && !identity) {
+                return {
+                    commandSucceeded: false,
+                    provider,
+                    splitTarget,
+                    direction,
+                    rawOutput: '',
+                    stderr: 'tmux_server_identity_unknown',
+                    paneId: null,
+                };
+            }
+            const spawned = tmuxUtilsMocks.tmuxSpawn([
+                'split-window',
+                direction === 'right' ? '-h' : '-v',
+                '-t', splitTarget,
+                '-d', '-P', '-F', '#{pane_id}',
+                '-c', cwd,
+            ]);
+            const paneId = spawned.stdout.trim();
+            return {
+                commandSucceeded: true,
+                provider,
+                splitTarget,
+                direction,
+                rawOutput: spawned.stdout,
+                stderr: spawned.stderr ?? '',
+                paneId: paneId.length > 0 ? paneId : null,
+                ...(provider === 'tmux' && identity ? { tmuxServerIdentity: identity } : {}),
+            };
+        });
+        tmuxSessionMocks.adoptWorkerPaneOwnership.mockImplementation(async (input) => ({
+            ok: true,
+            ownership: {
+                provider: input.provider ?? 'tmux',
+                providerTarget: input.providerTarget,
+                paneId: input.paneId,
+                splitTarget: '',
+                leaderPaneId: input.leaderPaneId,
+                reservedPaneIds: [],
+                source: 'adopted',
+                ...(input.provider !== 'cmux'
+                    ? { tmuxServerIdentity: input.tmuxServerIdentity ?? tmuxSessionMocks.tmuxServerIdentity }
+                    : {}),
+            },
+        }));
         tmuxSessionMocks.waitForPaneReady.mockResolvedValue(undefined);
         config = makeConfig();
+        await activateFixtureInstance('demo-team', cwd);
     });
     afterEach(async () => {
         if (cwd)
             await rm(cwd, { recursive: true, force: true });
+        if (previousStateDir === undefined)
+            delete process.env.OMC_STATE_DIR;
+        else
+            process.env.OMC_STATE_DIR = previousStateDir;
     });
     it('skips past colliding worker names when next_worker_index is stale without touching real tmux', async () => {
         const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'demo task' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
@@ -216,6 +393,75 @@ describe('scaleUp duplicate worker guard', () => {
         expect(tmuxUtilsMocks.tmuxSpawn).toHaveBeenCalledWith([
             'split-window', '-v', '-t', '%1', '-d', '-P', '-F', '#{pane_id}', '-c', resolve(cwd),
         ]);
+    });
+    it('requires the immutable instance authority before scale-up effects', async () => {
+        config = makeConfig({ instance_id: undefined });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'missing instance authority' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_instance_authority_missing' });
+        expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1']);
+    });
+    it('preserves every pending launch resource after receipt cleanup is unverified', async () => {
+        config.worktree_mode = 'named';
+        const worktreePath = join(cwd, 'pending-worker-worktree');
+        const receiptAttemptId = 'attempt-rejected-after-receipt';
+        await mkdir(worktreePath, { recursive: true });
+        gitWorktreeMocks.ensureWorkerWorktree.mockReturnValueOnce({
+            path: worktreePath,
+            branch: 'omc-team/demo-team/worker-2',
+            workerName: 'worker-2',
+            teamName: 'demo-team',
+            createdAt: new Date().toISOString(),
+            repoRoot: resolve(cwd),
+            mode: 'named',
+            detached: false,
+            created: true,
+            reused: false,
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('unknown');
+        tmuxSessionMocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_session, ownership, launchConfig) => {
+            const receiptRoot = absPath(launchConfig.launchStateCwd ?? cwd, TeamPaths.workerLaunchAttemptRoot(launchConfig.teamName, launchConfig.workerName, receiptAttemptId));
+            await mkdir(receiptRoot, { recursive: true });
+            await writeFile(join(receiptRoot, 'expected.json'), JSON.stringify({
+                schema_version: 1,
+                attempt_id: receiptAttemptId,
+                nonce: 'receipt-boundary',
+                instance_id: TEAM_INSTANCE_ID,
+                team_name: launchConfig.teamName,
+                worker_name: launchConfig.workerName,
+                pane_id: ownership.paneId,
+                provider: 'claude',
+                created_at: new Date().toISOString(),
+            }));
+            throw new Error(`worker_launch_cleanup_unverified:${launchConfig.workerName}:${ownership.paneId}`);
+        });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'receipt boundary', owner: 'worker-2' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1' });
+        const receiptRoot = absPath(cwd, TeamPaths.workerLaunchAttemptRoot('demo-team', 'worker-2', receiptAttemptId));
+        const workerDir = absPath(cwd, TeamPaths.workerDir('demo-team', 'worker-2'));
+        expect(result).toMatchObject({ ok: false, error: expect.stringContaining('rollback incomplete') });
+        expect(gitWorktreeMocks.ensureWorkerWorktree).toHaveBeenCalledWith('demo-team', 'worker-2', expect.any(String), { mode: 'named', requireCleanLeader: true });
+        expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(existsSync(worktreePath)).toBe(true);
+        expect(existsSync(workerDir)).toBe(true);
+        expect(existsSync(receiptRoot)).toBe(true);
+        expect(config.workers).toEqual(expect.arrayContaining([
+            expect.objectContaining({ name: 'worker-2', operational_state: 'starting', worktree_path: worktreePath }),
+        ]));
+        expect(config.active_scale_up).toMatchObject({
+            phase: 'failed',
+            instance_id: TEAM_INSTANCE_ID,
+        });
+        expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('provider_launch_authority_unavailable'));
+    });
+    it('keeps a valid same-instance reservation through scale-up launch', async () => {
+        const binding = createTeamInstanceBinding({ teamName: 'demo-team', cwd, instanceId: TEAM_INSTANCE_ID });
+        const reservation = JSON.parse(await readFile(absPath(binding.cwd, TeamPaths.teamInstanceReservation(binding.workspace_hash, binding.team_name)), 'utf8'));
+        expect(reservation).toMatchObject({ phase: 'active', instance_id: TEAM_INSTANCE_ID });
+        const result = await scaleUp('demo-team', 1, 'claude', [{ subject: 'demo', description: 'same instance' }], cwd, { OMC_TEAM_SCALING_ENABLED: '1', OMC_TEAM_SKIP_READY_WAIT: '1' });
+        expect(result).toMatchObject({ ok: true, newWorkerCount: 2 });
+        expect(tmuxSessionMocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith('demo-session:0', expect.anything(), expect.objectContaining({ instanceId: TEAM_INSTANCE_ID }));
     });
     it.each(['claude', 'codex', 'gemini', 'antigravity', 'grok', 'cursor'])('passes the shared default model through unrouted scale-up for %s', async (provider) => {
         config = makeConfig({ agent_type: provider, next_worker_index: 2 });
@@ -485,8 +731,8 @@ describe('scaleUp duplicate worker guard', () => {
         expect(result).toMatchObject({ ok: false });
         expect(result.ok).toBe(false);
         if (!result.ok) {
-            expect(result.error).toContain('Refusing to split tmux pane %999');
-            expect(result.error).toContain('expected demo-session');
+            expect(result.error).toContain('Refusing to split pane %999');
+            expect(result.error).toContain('demo-session:0');
         }
         expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
     });
@@ -511,8 +757,8 @@ describe('scaleUp duplicate worker guard', () => {
         expect(result).toMatchObject({ ok: false });
         expect(result.ok).toBe(false);
         if (!result.ok) {
-            expect(result.error).toContain('Refusing to split tmux pane %998');
-            expect(result.error).toContain('expected demo-session:0');
+            expect(result.error).toContain('Refusing to split pane %998');
+            expect(result.error).toContain('demo-session:0');
         }
         expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
     });
@@ -667,6 +913,86 @@ describe('scaleUp duplicate worker guard', () => {
         expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
         expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringContaining('missing_pane_id:worker-2'));
     });
+    it('preserves workers and claims when a scale-down launch receipt is missing', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2',
+                    worker_cli: 'claude',
+                    launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/usr/bin/claude', args: [] } },
+            ],
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('dead');
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'provider_cleanup_unverified:worker-2' });
+        expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+        expect(config.active_scale_down).toMatchObject({
+            phase: 'failed',
+            instance_id: TEAM_INSTANCE_ID,
+            workers: [expect.objectContaining({
+                    name: 'worker-2',
+                    provider: 'claude',
+                    launch_descriptor: expect.objectContaining({ provider: 'claude' }),
+                })],
+        });
+    });
+    it('preserves workers and worktrees when a launch receipt is unreadable', async () => {
+        config = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2',
+                    worker_cli: 'claude', launch_attempt_id: 'missing-receipt',
+                    launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/usr/bin/claude', args: [] } },
+            ],
+        });
+        tmuxSessionMocks.getWorkerLiveness.mockReset();
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('unknown');
+        workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+        workerLaunchMocks.loadWorkerLaunchAttempt.mockImplementation(async () => null);
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'provider_cleanup_unverified:worker-2' });
+        expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(config.workers.map(worker => worker.name)).toEqual(['worker-1', 'worker-2']);
+    });
+    it('rejects a stale replacement instance before scale-down effects', async () => {
+        const original = makeConfig({
+            state_revision: 4,
+            worker_count: 2,
+            workers: [
+                { name: 'worker-1', index: 1, role: 'claude', assigned_tasks: [], pane_id: '%1' },
+                { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
+            ],
+        });
+        const replacement = makeConfig({
+            state_revision: 4,
+            instance_id: '33333333-3333-4333-8333-333333333333',
+            worker_count: 2,
+            workers: original.workers,
+        });
+        config = original;
+        monitorMocks.migrateTeamConfigRevision
+            .mockImplementationOnce(async () => {
+            config = replacement;
+            return { config: replacement, stateRevision: replacement.state_revision ?? 0 };
+        })
+            .mockImplementation(async () => {
+            config = replacement;
+            return { config: replacement, stateRevision: replacement.state_revision ?? 0 };
+        });
+        const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
+        expect(result).toEqual({ ok: false, error: 'team_instance_mismatch' });
+        expect(tmuxUtilsMocks.tmuxSpawn).not.toHaveBeenCalledWith(expect.arrayContaining(['split-window']));
+        expect(tmuxSessionMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(gitWorktreeMocks.removeWorkerWorktree).not.toHaveBeenCalled();
+        expect(monitorMocks.saveTeamConfigAtRevision).not.toHaveBeenCalled();
+    });
     it('publishes scale-down evidence even when durable failure marking throws after pane effects', async () => {
         config = makeConfig({
             state_revision: 4,
@@ -678,10 +1004,21 @@ describe('scaleUp duplicate worker guard', () => {
                         binary: '/usr/bin/claude', args: [] } },
             ],
         });
+        tmuxSessionMocks.getWorkerLiveness.mockReset();
+        tmuxSessionMocks.getWorkerLiveness.mockResolvedValue('unknown');
+        workerLaunchMocks.loadWorkerLaunchAttempt.mockReset();
+        workerLaunchMocks.loadWorkerLaunchAttempt.mockResolvedValue({
+            attempt_id: 'attempt-loaded',
+            currentPath: '/tmp/current',
+            decisionPath: '/tmp/decision',
+            startedPath: '/tmp/started',
+        });
         tmuxSessionMocks.killOwnedWorkerPane.mockRejectedValueOnce(new Error('kill failed after partial effect'));
+        monitorMocks.readRevisionedTeamConfig.mockReset();
         monitorMocks.readRevisionedTeamConfig
             .mockImplementationOnce(async () => ({ config, stateRevision: config.state_revision ?? 0 }))
-            .mockRejectedValueOnce(new Error('config read unavailable'));
+            .mockRejectedValueOnce(new Error('config read unavailable'))
+            .mockImplementation(async () => ({ config, stateRevision: config.state_revision ?? 0 }));
         const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
         expect(result).toEqual({ ok: false, error: 'pane_cleanup_failed:worker-2:kill failed after partial effect' });
         expect(teamOpsMocks.writeAtomic).toHaveBeenCalledWith(expect.stringContaining('scaling-rollback'), expect.stringMatching(/pane_cleanup_failed:worker-2:kill failed after partial effect[\s\S]*config_mark_error[\s\S]*config read unavailable/));
@@ -695,9 +1032,12 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
         });
-        Object.assign(config, { active_scale_down: { operation_id: 'incomplete-owner', phase: 'draining',
+        Object.assign(config, { active_scale_down: {
+                operation_id: 'incomplete-owner', phase: 'draining', instance_id: TEAM_INSTANCE_ID,
+                pid: 0, process_started_at: '',
                 workers: [{ name: 'worker-2', pane_id: '%2' }], state_revision: 4,
-                created_at: new Date().toISOString(), updated_at: new Date().toISOString() } });
+                created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+            } });
         const result = await scaleDown('demo-team', cwd, { workerNames: ['worker-2'], force: true }, { OMC_TEAM_SCALING_ENABLED: '1' });
         expect(result).toEqual({ ok: false, error: 'team_mutation_busy' });
         expect(tmuxSessionMocks.killWorkerPanes).not.toHaveBeenCalled();
@@ -713,7 +1053,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_down: {
-                operation_id: 'cross-platform-owner', phase: 'draining', pid: 2_147_483_647,
+                operation_id: 'cross-platform-owner', phase: 'draining', instance_id: TEAM_INSTANCE_ID, pid: 2_147_483_647,
                 process_started_at: process.platform === 'linux' ? 'win32:123' : 'linux:123',
                 workers: [{ name: 'worker-2', pane_id: '%2' }], state_revision: 4,
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -733,7 +1073,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_down: {
-                operation_id: 'failed-dead-owner', phase: 'failed', pid: 999_999,
+                operation_id: 'failed-dead-owner', phase: 'failed', instance_id: TEAM_INSTANCE_ID, pid: 999_999,
                 process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
                 state_revision: 4, failure_reason: 'pane_cleanup_failed',
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -759,7 +1099,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_down: {
-                operation_id: 'failed-same-owner', phase: 'failed', pid: process.pid,
+                operation_id: 'failed-same-owner', phase: 'failed', instance_id: TEAM_INSTANCE_ID, pid: process.pid,
                 process_started_at: 'linux:same', workers: [{ name: 'worker-2', pane_id: '%2' }],
                 state_revision: 4, failure_reason: 'pane_cleanup_failed',
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -779,7 +1119,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_down: {
-                operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+                operation_id: 'effects-dead-owner', phase: 'effects', instance_id: TEAM_INSTANCE_ID, pid: 999_999,
                 process_started_at: 'dead-process', workers: [{ name: 'worker-2', pane_id: '%2' }],
                 state_revision: 4,
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
@@ -796,7 +1136,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_up: {
-                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999, instance_id: TEAM_INSTANCE_ID,
                 process_started_at: 'dead-process', state_revision: 4,
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
             },
@@ -810,7 +1150,7 @@ describe('scaleUp duplicate worker guard', () => {
     it('does not reclaim an effects-phase fence even when the owner process is dead', async () => {
         config = makeConfig({ state_revision: 5, next_worker_index: 3, worktree_mode: 'disabled',
             active_scale_up: {
-                operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999,
+                operation_id: 'effects-dead-owner', phase: 'effects', pid: 999_999, instance_id: TEAM_INSTANCE_ID,
                 process_started_at: 'dead-process', state_revision: 4,
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
             },
@@ -826,7 +1166,7 @@ describe('scaleUp duplicate worker guard', () => {
                 { name: 'worker-2', index: 2, role: 'claude', assigned_tasks: [], pane_id: '%2' },
             ],
             active_scale_up: {
-                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999,
+                operation_id: 'committed-but-unreleased', phase: 'committed', pid: 999_999, instance_id: TEAM_INSTANCE_ID,
                 process_started_at: 'dead-process', state_revision: 4,
                 created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
             },

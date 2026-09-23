@@ -86,20 +86,24 @@ export async function processSessionEndWorker(payload: SessionEndWorkerPayload):
   }
   let producerReady = Boolean(admitted && ['sealed', 'no-op'].includes(admitted.producers.core.state) && ['sealed', 'no-op'].includes(admitted.producers.wiki.state));
   let generation = claimed.owner.leaseGeneration;
+  // Every loop exit that is not "all actions settled" leaves the job in
+  // recoverable-failure; naming the exit is what makes that state diagnosable
+  // from the manifest alone (issue #4076).
+  let exitReason = 'actions-settled';
   try {
     for (const name of Object.keys(claimed.actions) as SessionEndActionName[]) {
-      if (Date.now() >= deadlineAt) break;
+      if (Date.now() >= deadlineAt) { exitReason = 'run-deadline-reached'; break; }
       const before = readSessionEndJob(payload.directory, payload.sessionId);
-      if (!before || before.owner?.nonce !== nonce) break;
+      if (!before || before.owner?.nonce !== nonce) { exitReason = before ? 'ownership-lost' : 'manifest-unreadable'; break; }
       if (!producerReady && (name !== 'foreground-cleanup' || !graceExpired || before.producers.core.state !== 'prepared')) continue;
       if (name === 'wiki-capture' && before.producers.wiki.state === 'absent') continue;
       const owned = claimSessionEndAction(payload.directory, payload.sessionId, nonce, name, deadlineAt);
       const action = owned?.actions[name];
       if (!owned || !action || action.status !== 'claimed' || !action.runner) continue;
       const renewed = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
-      if (!renewed?.owner) break;
+      if (!renewed?.owner) { exitReason = 'lease-renew-failed-before-action'; break; }
       generation = renewed.owner.leaseGeneration;
-      if (!markSessionEndActionRunner(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, 'started')) break;
+      if (!markSessionEndActionRunner(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, 'started')) { exitReason = `runner-start-rejected-${name}`; break; }
       const stopWatchdog = armSessionEndActionWatchdog({ directory: payload.directory, jobId: owned.jobId, action: name, attempt: action.attempts, runnerNonce: action.runner.runnerNonce, deadlineAt: Math.min(deadlineAt, Date.now() + action.budgetMs) });
       const actionDeadline = Math.min(deadlineAt, Date.now() + action.budgetMs);
       let leaseLost = false;
@@ -109,7 +113,7 @@ export async function processSessionEndWorker(payload: SessionEndWorkerPayload):
       const result = await runSessionEndAction({ directory: payload.directory, sessionId: payload.sessionId, job: owned, actionName: name, action, ownerNonce: nonce, runnerNonce: action.runner.runnerNonce, deadlineAt: actionDeadline }, () => executeSessionEndAction(name, payload, actionDeadline, authority));
       clearInterval(heartbeatTimer);
       stopWatchdog();
-      if (leaseLost) break;
+      if (leaseLost) { exitReason = `lease-lost-during-${name}`; break; }
       finishSessionEndAction(payload.directory, payload.sessionId, nonce, name, action.runner.runnerNonce, result.completed, result.code);
       if (name === 'foreground-cleanup' && result.completed) {
         recoverPreparedCoreProducer(payload.directory, payload.sessionId);
@@ -117,11 +121,11 @@ export async function processSessionEndWorker(payload: SessionEndWorkerPayload):
         producerReady = Boolean(recovered && ['sealed', 'no-op'].includes(recovered.producers.core.state) && ['sealed', 'no-op'].includes(recovered.producers.wiki.state));
       }
       const heartbeat = renewSessionEndLease(payload.directory, payload.sessionId, nonce, generation, deadlineAt);
-      if (!heartbeat?.owner) break;
+      if (!heartbeat?.owner) { exitReason = `lease-renew-failed-after-${name}`; break; }
       generation = heartbeat.owner.leaseGeneration;
     }
   } finally {
-    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation);
+    const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation, exitReason);
     const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
     reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
   }

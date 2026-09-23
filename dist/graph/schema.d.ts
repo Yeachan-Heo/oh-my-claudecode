@@ -902,8 +902,8 @@ export declare const graphNodeResultSchema: z.ZodObject<{
     }>, "many">;
     external_idempotency_key: z.ZodOptional<z.ZodString>;
 }, "strict", z.ZodTypeAny, {
-    attempt_id: string;
     outcome: "failed" | "succeeded";
+    attempt_id: string;
     evidence_refs: {
         kind: "file" | "command" | "test" | "url" | "human";
         ref: string;
@@ -913,8 +913,8 @@ export declare const graphNodeResultSchema: z.ZodObject<{
     output_summary?: string | undefined;
     external_idempotency_key?: string | undefined;
 }, {
-    attempt_id: string;
     outcome: "failed" | "succeeded";
+    attempt_id: string;
     evidence_refs: {
         kind: "file" | "command" | "test" | "url" | "human";
         ref: string;

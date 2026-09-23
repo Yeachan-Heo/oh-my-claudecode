@@ -40,7 +40,7 @@ import { checkpointCommand } from './checkpoint.js';
 import { lookoutCommand } from './lookout.js';
 import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
-import { runHudWatchLoop } from './hud-watch.js';
+import { parseHudWatchInterval, runHudWatchLoop } from './hud-watch.js';
 const version = getRuntimePackageVersion();
 /**
  * Apply a --plugin-dir option value: resolve to absolute path, warn if it
@@ -1303,12 +1303,11 @@ program
     .command('hud')
     .description('Run the OMC HUD statusline renderer')
     .option('--watch', 'Run in watch mode (continuous polling for tmux pane)')
-    .option('--interval <ms>', 'Poll interval in milliseconds', '1000')
+    .option('--interval <ms>', 'Poll interval in milliseconds', parseHudWatchInterval, 1000)
     .action(async (options) => {
     const { main: hudMain } = await import('../hud/index.js');
     if (options.watch) {
-        const intervalMs = parseInt(options.interval, 10);
-        await runHudWatchLoop({ intervalMs, hudMain });
+        await runHudWatchLoop({ intervalMs: options.interval, hudMain });
     }
     else {
         await hudMain();

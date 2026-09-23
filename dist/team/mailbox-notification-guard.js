@@ -1,11 +1,37 @@
 import { readDispatchRequestStrict, } from './dispatch-queue.js';
 import { teamReadCanonicalMailboxMessageStrict, teamReadConfig, } from './team-ops.js';
+import { isValidTeamInstanceId, isValidTmuxServerIdentity, } from './types.js';
+import { isValidStrictProcessStartIdentity } from './team-owner-epoch.js';
 import { canonicalizeWorkers } from './worker-canonicalization.js';
 function hasExactText(value) {
     return typeof value === 'string' && value !== '' && value === value.trim();
 }
 function providerForTarget(providerTarget) {
     return providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+}
+function validTmuxServerIdentity(value) {
+    return isValidTmuxServerIdentity(value)
+        && isValidStrictProcessStartIdentity(value.process_started_at);
+}
+function persistedTargetServerIdentity(config) {
+    if (!validTmuxServerIdentity(config.tmux_server_identity))
+        return undefined;
+    const identity = config.tmux_server_identity;
+    return {
+        socket_path: identity.socket_path,
+        server_pid: identity.server_pid,
+        process_started_at: identity.process_started_at,
+    };
+}
+function targetHasPersistedAuthority(config, target) {
+    if (!isValidTeamInstanceId(config.instance_id))
+        return false;
+    if (target.provider === 'cmux')
+        return target.tmuxServerIdentity === undefined;
+    return validTmuxServerIdentity(target.tmuxServerIdentity)
+        && target.tmuxServerIdentity.socket_path === config.tmux_server_identity?.socket_path
+        && target.tmuxServerIdentity.server_pid === config.tmux_server_identity?.server_pid
+        && target.tmuxServerIdentity.process_started_at === config.tmux_server_identity?.process_started_at;
 }
 function dispatchFailureReason(read) {
     switch (read.kind) {
@@ -49,6 +75,7 @@ function resolveCanonicalTarget(config, recipient) {
         return { reason: 'mailbox_team_unavailable' };
     const providerTarget = config.tmux_session;
     const provider = providerForTarget(providerTarget);
+    const tmuxServerIdentity = provider === 'tmux' ? persistedTargetServerIdentity(config) : undefined;
     if (recipient === 'leader-fixed') {
         if (!hasExactText(config.leader_pane_id))
             return { reason: 'leader_pane_missing_deferred' };
@@ -59,6 +86,7 @@ function resolveCanonicalTarget(config, recipient) {
                 recipient,
                 recipientRole: 'leader',
                 paneId: config.leader_pane_id,
+                ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
             },
         };
     }
@@ -74,6 +102,7 @@ function resolveCanonicalTarget(config, recipient) {
             recipient,
             recipientRole: 'worker',
             paneId: worker.pane_id,
+            ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
             ...(typeof worker.index === 'number' && Number.isFinite(worker.index) ? { workerIndex: worker.index } : {}),
         },
     };
@@ -140,6 +169,13 @@ export function evaluateMailboxNotificationGuard(input, state) {
     if (message.message_id !== input.messageId || message.to_worker !== input.recipient) {
         return { kind: 'suppress', reason: 'mailbox_recipient_mismatch', safePendingRequest, target };
     }
+    if (!targetHasPersistedAuthority(state.config, target)) {
+        return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
+    }
+    const configInstanceId = state.config.instance_id;
+    if (!isValidTeamInstanceId(configInstanceId)) {
+        return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
+    }
     const ownership = state.ownership;
     if (!ownership)
         return { kind: 'suppress', reason: 'mailbox_membership_unresolvable', safePendingRequest, target };
@@ -156,6 +192,22 @@ export function evaluateMailboxNotificationGuard(input, state) {
         || ownership.paneId !== target.paneId) {
         return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
     }
+    if (target.provider === 'tmux') {
+        if (ownership.provider !== 'tmux') {
+            return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+        }
+        const ownershipIdentity = ownership.tmuxServerIdentity;
+        const targetIdentity = target.tmuxServerIdentity;
+        if (!validTmuxServerIdentity(ownershipIdentity) || !targetIdentity
+            || ownershipIdentity.socket_path !== targetIdentity.socket_path
+            || ownershipIdentity.server_pid !== targetIdentity.server_pid
+            || ownershipIdentity.process_started_at !== targetIdentity.process_started_at) {
+            return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+        }
+    }
+    else if ('tmuxServerIdentity' in ownership) {
+        return { kind: 'suppress', reason: 'mailbox_provider_mismatch', safePendingRequest, target };
+    }
     return {
         kind: 'allow',
         target,
@@ -163,7 +215,15 @@ export function evaluateMailboxNotificationGuard(input, state) {
         message: { ...message },
         securityTuple: {
             configName: state.config.name,
+            configInstanceId,
             configProviderTarget: state.config.tmux_session,
+            ...(target.tmuxServerIdentity
+                ? {
+                    configTmuxServerSocketPath: target.tmuxServerIdentity.socket_path,
+                    configTmuxServerPid: target.tmuxServerIdentity.server_pid,
+                    configTmuxServerProcessStartedAt: target.tmuxServerIdentity.process_started_at,
+                }
+                : {}),
             recipient: input.recipient,
             recipientRole: target.recipientRole,
             canonicalPaneId: target.paneId,
@@ -191,7 +251,11 @@ export function evaluateMailboxNotificationGuard(input, state) {
 /** Compares only authorization-relevant fields; diagnostic dispatch fields are absent by design. */
 export function mailboxNotificationSecurityTupleEquals(left, right) {
     return left.configName === right.configName
+        && left.configInstanceId === right.configInstanceId
         && left.configProviderTarget === right.configProviderTarget
+        && left.configTmuxServerSocketPath === right.configTmuxServerSocketPath
+        && left.configTmuxServerPid === right.configTmuxServerPid
+        && left.configTmuxServerProcessStartedAt === right.configTmuxServerProcessStartedAt
         && left.recipient === right.recipient
         && left.recipientRole === right.recipientRole
         && left.canonicalPaneId === right.canonicalPaneId
@@ -234,8 +298,15 @@ export async function readCurrentMailboxNotificationGuard(input, cwd, dependenci
     if (initial.kind !== 'suppress' || initial.reason !== 'mailbox_membership_unresolvable' || !initial.target) {
         return initial;
     }
+    if (!config || !targetHasPersistedAuthority(config, initial.target))
+        return initial;
     const ownership = dependencies.verifyProviderOwnership
-        ? await dependencies.verifyProviderOwnership(initial.target).catch(() => ({ kind: 'unavailable' }))
+        ? await dependencies.verifyProviderOwnership({
+            ...initial.target,
+            ...(initial.target.tmuxServerIdentity
+                ? { tmuxServerIdentity: { ...initial.target.tmuxServerIdentity } }
+                : {}),
+        }).catch(() => ({ kind: 'unavailable' }))
         : { kind: 'unavailable' };
     return evaluateMailboxNotificationGuard(input, { ...state, ownership });
 }

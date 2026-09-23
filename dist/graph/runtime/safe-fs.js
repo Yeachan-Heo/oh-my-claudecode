@@ -1,6 +1,8 @@
-import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, } from "fs";
+import { randomBytes } from "crypto";
+import { closeSync, constants as fsConstants, fstatSync, fsyncSync, openSync, readFileSync, writeSync, } from "fs";
 import { isAbsolute, join, normalize, win32 } from "path";
-import { containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
+import { directoryOperations, containedFdPath, containedFsPlatformSupported } from "./contained-fd.js";
+import { openOrCreateDirectoryAt, openExistingDirectoryAt } from "./run-dir.js";
 const NO_FOLLOW = process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
 const UNSAFE_CONTROL = /[\u0000-\u001f\u007f]/;
 const WINDOWS_DEVICE_NAME = /^(?:con|prn|aux|nul|clock\$|com[1-9¹²³]|lpt[1-9¹²³])(?:\..*)?$/i;
@@ -84,7 +86,7 @@ export function containedPathForPlatform(directoryFd, runDirPath, fileName, plat
 export function withContainedPath(runDir, fileName, operation) {
     return withContainedPathForPlatform(runDir, fileName, operation, process.platform);
 }
-/** Run several related operations beneath one identity-checked directory FD. */
+/** Legacy Linux-only path callback; use withContainedOperations for portable I/O. */
 export function withContainedDirectory(runDir, operation, platform = process.platform) {
     assertContainedFsSupported(platform);
     const directoryFd = openNoFollow(runDir.path, fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY ?? 0));
@@ -116,6 +118,170 @@ export function withContainedPathForPlatform(runDir, fileName, operation, platfo
 }
 /** Read a named artifact through a validated run-directory handle. */
 export function readContainedFileNoFollow(runDir, fileName) {
-    return withContainedPath(runDir, fileName, readFileNoFollow);
+    return withContainedOperations(runDir, (operations) => readOperationFileNoFollow(operations, fileName));
+}
+/**
+ * Bind synchronous operations to one identity-checked directory descriptor.
+ * The callback must not return a Promise. Retained operations fail closed after
+ * callback return, before the OS can reuse the closed descriptor number.
+ */
+export function withContainedOperations(runDir, operation) {
+    assertContainedFsSupported();
+    const fd = openNoFollow(runDir.path, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+    let active = true;
+    const checkActive = () => {
+        if (!active)
+            throw new Error("contained operations used outside synchronous callback");
+    };
+    try {
+        const stats = fstatSync(fd);
+        if (stats.dev !== runDir.device || stats.ino !== runDir.inode)
+            throw new Error("run directory identity changed");
+        const operations = directoryOperations(fd);
+        const check = (name) => { checkActive(); assertSafeContainedFileName(name); return name; };
+        return operation({ ...operations,
+            open: (name, flags, mode) => operations.open(check(name), flags, mode),
+            mkdir: (name, mode) => operations.mkdir(check(name), mode),
+            lstat: (name) => operations.lstat(check(name)),
+            rename: (source, destination) => operations.rename(check(source), check(destination)),
+            unlink: (name) => operations.unlink(check(name)),
+            link: (source, destination) => operations.link(check(source), check(destination)),
+            readDir: () => { checkActive(); return operations.readDir(); },
+            realpath: () => { checkActive(); return operations.realpath(); },
+            sync: () => { checkActive(); operations.sync(); },
+        });
+    }
+    finally {
+        active = false;
+        closeSync(fd);
+    }
+}
+export function readOperationFileNoFollow(operations, name) {
+    const fd = operations.open(name, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    try {
+        assertPrivateRegularFile(fd, name);
+        return readFileSync(fd, "utf8");
+    }
+    finally {
+        closeSync(fd);
+    }
+}
+/**
+ * Publish one contained artifact atomically through directory-relative
+ * operations only: the temp file is created, written, and fsynced through the
+ * descriptor, then renamed into place at the same descriptor. No pathname is
+ * ever re-resolved between validation and use, so a component swapped for a
+ * symlink mid-flight cannot redirect the artifact out of the directory.
+ */
+export function writeOperationFileAtomically(operations, name, contents) {
+    assertSafeContainedFileName(name);
+    const temporary = `${name}.tmp.${randomBytes(6).toString("hex")}`;
+    const fd = operations.open(temporary, fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        (fsConstants.O_NONBLOCK ?? 0), 0o600);
+    try {
+        assertPrivateRegularFile(fd, temporary);
+        writeSync(fd, contents);
+        fsyncSync(fd);
+    }
+    catch (error) {
+        closeSync(fd);
+        try {
+            operations.unlink(temporary);
+        }
+        catch { /* best-effort temp cleanup */ }
+        throw error;
+    }
+    closeSync(fd);
+    try {
+        operations.rename(temporary, name);
+    }
+    catch (error) {
+        try {
+            operations.unlink(temporary);
+        }
+        catch { /* best-effort temp cleanup */ }
+        throw error;
+    }
+    operations.sync();
+}
+/**
+ * Bind synchronous operations to a directory nested below a validated run
+ * directory. Every component is opened O_NOFOLLOW from its parent descriptor
+ * (and created at that descriptor when requested), so swapping any nested
+ * component for a symlink between validation and use fails closed rather than
+ * relocating artifacts outside the contained run directory.
+ *
+ * Returns null when `create` is false and a component does not exist.
+ */
+export function withContainedSubdirectoryOperations(runDir, components, operation, options = {}) {
+    assertContainedFsSupported();
+    if (components.length === 0) {
+        throw new RangeError("contained subdirectory requires at least one component");
+    }
+    for (const component of components)
+        assertSafeContainedFileName(component);
+    const runDirFd = openNoFollow(runDir.path, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY);
+    let directoryFd = null;
+    let active = true;
+    const checkActive = () => {
+        if (!active)
+            throw new Error("contained operations used outside synchronous callback");
+    };
+    try {
+        const stats = fstatSync(runDirFd);
+        if (stats.dev !== runDir.device || stats.ino !== runDir.inode) {
+            throw new Error("run directory identity changed");
+        }
+        let parentFd = runDirFd;
+        for (const component of components) {
+            let nextFd;
+            if (options.create === true) {
+                nextFd = openOrCreateDirectoryAt(parentFd, component, "approvals directory");
+            }
+            else {
+                const opened = openExistingDirectoryAt(parentFd, component, "approvals directory");
+                if (opened === null)
+                    return null;
+                nextFd = opened;
+            }
+            if (parentFd !== runDirFd)
+                closeSync(parentFd);
+            parentFd = nextFd;
+            directoryFd = nextFd;
+        }
+        return operation(guardedOperations(directoryFd, checkActive));
+    }
+    finally {
+        active = false;
+        if (directoryFd !== null)
+            closeSync(directoryFd);
+        closeSync(runDirFd);
+    }
+}
+/**
+ * Wrap raw descriptor operations with the same name validation and
+ * post-callback fail-closed guard withContainedOperations applies.
+ */
+function guardedOperations(fd, checkActive) {
+    const operations = directoryOperations(fd);
+    const check = (name) => {
+        checkActive();
+        assertSafeContainedFileName(name);
+        return name;
+    };
+    return {
+        ...operations,
+        open: (name, flags, mode) => operations.open(check(name), flags, mode),
+        mkdir: (name, mode) => operations.mkdir(check(name), mode),
+        lstat: (name) => operations.lstat(check(name)),
+        rename: (source, destination) => operations.rename(check(source), check(destination)),
+        unlink: (name) => operations.unlink(check(name)),
+        link: (source, destination) => operations.link(check(source), check(destination)),
+        readDir: () => { checkActive(); return operations.readDir(); },
+        realpath: () => { checkActive(); return operations.realpath(); },
+        sync: () => { checkActive(); operations.sync(); },
+    };
 }
 //# sourceMappingURL=safe-fs.js.map

@@ -19,6 +19,7 @@ import { normalizeDelegationRole } from './delegation-routing/types.js';
 import { loadConfig } from '../config/loader.js';
 import { isProviderSpecificModelId, resolveClaudeFamily } from '../config/models.js';
 import { createBuiltinSkills, getSkillsDir } from './builtin-skills/skills.js';
+import { recordModelRoutingShadow } from './jev-model-routing.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
 // ---------------------------------------------------------------------------
@@ -318,6 +319,10 @@ export function processPreToolUse(toolName, toolInput) {
         return { modifiedInput: toolInput };
     }
     const result = enforceModel(toolInput);
+    // Jev judgment point ④ (issue-3669): record the pinned tier vs Jev's Choice
+    // in shadow mode. Fire-and-forget and twin-decided — the enforcement result
+    // below is unchanged with or without a Jev key.
+    void recordModelRoutingShadow(toolName, result).catch(() => undefined);
     if (result.warning) {
         console.warn(result.warning);
     }

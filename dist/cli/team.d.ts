@@ -30,11 +30,13 @@ export interface TeamStartInput {
 }
 export interface TeamStartResult {
     jobId: string;
+    instanceId: string;
     status: 'running';
     pid?: number;
 }
 export interface TeamJobStatus {
     jobId: string;
+    instanceId?: string;
     status: 'running' | 'completed' | 'failed';
     elapsedSeconds: string;
     result?: unknown;

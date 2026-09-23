@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a800c0090ee5de16ada303539dc947e5be379ba7",
-    "sourceSha256": "6562f38ce2f6ca429fc84e6c49aeb85120dcac2d278c66a5ae9389f6aa2434b9",
+    "head": "aa6ceec7bf1eb9cb9e0e14b748ff2c2cb214e584",
+    "sourceSha256": "3d42b73b13be4f2e279690f1002e0795068d99fd7751ab26ae428bcff417fdcd",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a800c0090ee5de16ada303539dc947e5be379ba7",
-  "sourceSha256": "6562f38ce2f6ca429fc84e6c49aeb85120dcac2d278c66a5ae9389f6aa2434b9",
+  "head": "aa6ceec7bf1eb9cb9e0e14b748ff2c2cb214e584",
+  "sourceSha256": "3d42b73b13be4f2e279690f1002e0795068d99fd7751ab26ae428bcff417fdcd",
   "counts": {
     "public": {
       "skills": 43,
@@ -23,25 +23,25 @@
       "total": 92
     },
     "internal": {
-      "hookFiles": 318,
+      "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1384,
-      "total": 1406
+      "srcFiles": 1386,
+      "total": 1408
     },
     "generated": {
-      "distFiles": 5032,
+      "distFiles": 5066,
       "bridgeFiles": 9,
-      "total": 5041
+      "total": 5075
     },
     "prompt": {
       "promptLikeFiles": 61
     },
     "skills": 43,
     "commands": 21,
-    "hookFiles": 318,
+    "hookFiles": 319,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -244,6 +244,7 @@
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/points-wire-shape.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -756,6 +757,7 @@
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
       "scripts/build-contained-fs.mjs",
+      "scripts/build-generated-artifact-authorization.mjs",
       "scripts/build-mcp-server.mjs",
       "scripts/build-prompt-ssot.ts",
       "scripts/build-runtime-cli.mjs",
@@ -2494,6 +2496,10 @@
       "dist/features/index.d.ts.map",
       "dist/features/index.js",
       "dist/features/index.js.map",
+      "dist/features/jev-model-routing.d.ts",
+      "dist/features/jev-model-routing.js",
+      "dist/features/jev-slop-warning.d.ts",
+      "dist/features/jev-slop-warning.js",
       "dist/features/lookout/command-parser.d.ts",
       "dist/features/lookout/command-parser.d.ts.map",
       "dist/features/lookout/command-parser.js",
@@ -2694,6 +2700,8 @@
       "dist/graph/runtime/fence.js",
       "dist/graph/runtime/journal.d.ts",
       "dist/graph/runtime/journal.js",
+      "dist/graph/runtime/native-contained-fs.d.ts",
+      "dist/graph/runtime/native-contained-fs.js",
       "dist/graph/runtime/progress.d.ts",
       "dist/graph/runtime/progress.js",
       "dist/graph/runtime/remote-approval.d.ts",
@@ -2993,6 +3001,8 @@
       "dist/hooks/code-simplifier/index.d.ts.map",
       "dist/hooks/code-simplifier/index.js",
       "dist/hooks/code-simplifier/index.js.map",
+      "dist/hooks/code-simplifier/jev-shadow.d.ts",
+      "dist/hooks/code-simplifier/jev-shadow.js",
       "dist/hooks/codebase-map.d.ts",
       "dist/hooks/codebase-map.d.ts.map",
       "dist/hooks/codebase-map.js",
@@ -3081,6 +3091,18 @@
       "dist/hooks/index.d.ts.map",
       "dist/hooks/index.js",
       "dist/hooks/index.js.map",
+      "dist/hooks/jev/client.d.ts",
+      "dist/hooks/jev/client.js",
+      "dist/hooks/jev/config.d.ts",
+      "dist/hooks/jev/config.js",
+      "dist/hooks/jev/index.d.ts",
+      "dist/hooks/jev/index.js",
+      "dist/hooks/jev/points.d.ts",
+      "dist/hooks/jev/points.js",
+      "dist/hooks/jev/resolver.d.ts",
+      "dist/hooks/jev/resolver.js",
+      "dist/hooks/jev/types.d.ts",
+      "dist/hooks/jev/types.js",
       "dist/hooks/keyword-detector/__tests__/index.test.d.ts",
       "dist/hooks/keyword-detector/__tests__/index.test.d.ts.map",
       "dist/hooks/keyword-detector/__tests__/index.test.js",
@@ -3089,6 +3111,8 @@
       "dist/hooks/keyword-detector/index.d.ts.map",
       "dist/hooks/keyword-detector/index.js",
       "dist/hooks/keyword-detector/index.js.map",
+      "dist/hooks/keyword-detector/jev-shadow.d.ts",
+      "dist/hooks/keyword-detector/jev-shadow.js",
       "dist/hooks/learner/auto-invoke.d.ts",
       "dist/hooks/learner/auto-invoke.d.ts.map",
       "dist/hooks/learner/auto-invoke.js",
@@ -3125,6 +3149,8 @@
       "dist/hooks/learner/index.d.ts.map",
       "dist/hooks/learner/index.js",
       "dist/hooks/learner/index.js.map",
+      "dist/hooks/learner/jev-shadow.d.ts",
+      "dist/hooks/learner/jev-shadow.js",
       "dist/hooks/learner/loader.d.ts",
       "dist/hooks/learner/loader.d.ts.map",
       "dist/hooks/learner/loader.js",
@@ -3329,6 +3355,8 @@
       "dist/hooks/persistent-mode/index.d.ts.map",
       "dist/hooks/persistent-mode/index.js",
       "dist/hooks/persistent-mode/index.js.map",
+      "dist/hooks/persistent-mode/jev-shadow.d.ts",
+      "dist/hooks/persistent-mode/jev-shadow.js",
       "dist/hooks/persistent-mode/session-isolation.test.d.ts",
       "dist/hooks/persistent-mode/session-isolation.test.d.ts.map",
       "dist/hooks/persistent-mode/session-isolation.test.js",
@@ -3361,6 +3389,8 @@
       "dist/hooks/preemptive-compaction/index.d.ts.map",
       "dist/hooks/preemptive-compaction/index.js",
       "dist/hooks/preemptive-compaction/index.js.map",
+      "dist/hooks/preemptive-compaction/jev-shadow.d.ts",
+      "dist/hooks/preemptive-compaction/jev-shadow.js",
       "dist/hooks/preemptive-compaction/types.d.ts",
       "dist/hooks/preemptive-compaction/types.d.ts.map",
       "dist/hooks/preemptive-compaction/types.js",
@@ -3449,6 +3479,8 @@
       "dist/hooks/ralph/index.d.ts.map",
       "dist/hooks/ralph/index.js",
       "dist/hooks/ralph/index.js.map",
+      "dist/hooks/ralph/jev-shadow.d.ts",
+      "dist/hooks/ralph/jev-shadow.js",
       "dist/hooks/ralph/loop.d.ts",
       "dist/hooks/ralph/loop.d.ts.map",
       "dist/hooks/ralph/loop.js",
@@ -3742,6 +3774,8 @@
       "dist/hooks/task-size-detector/index.d.ts.map",
       "dist/hooks/task-size-detector/index.js",
       "dist/hooks/task-size-detector/index.js.map",
+      "dist/hooks/task-size-detector/jev-shadow.d.ts",
+      "dist/hooks/task-size-detector/jev-shadow.js",
       "dist/hooks/team-canonical-state.d.ts",
       "dist/hooks/team-canonical-state.d.ts.map",
       "dist/hooks/team-canonical-state.js",
@@ -5477,6 +5511,8 @@
       "dist/team/task-router.d.ts.map",
       "dist/team/task-router.js",
       "dist/team/task-router.js.map",
+      "dist/team/team-instance.d.ts",
+      "dist/team/team-instance.js",
       "dist/team/team-name.d.ts",
       "dist/team/team-name.d.ts.map",
       "dist/team/team-name.js",
@@ -6006,6 +6042,7 @@
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/points-wire-shape.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -15502,6 +15539,26 @@
         "path": "dist/features/index.js.map"
       },
       {
+        "id": "dist/features/jev-model-routing.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-model-routing.d.ts"
+      },
+      {
+        "id": "dist/features/jev-model-routing.js",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-model-routing.js"
+      },
+      {
+        "id": "dist/features/jev-slop-warning.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-slop-warning.d.ts"
+      },
+      {
+        "id": "dist/features/jev-slop-warning.js",
+        "kind": "generated-dist",
+        "path": "dist/features/jev-slop-warning.js"
+      },
+      {
         "id": "dist/features/lookout/command-parser.d.ts",
         "kind": "generated-dist",
         "path": "dist/features/lookout/command-parser.d.ts"
@@ -16500,6 +16557,16 @@
         "id": "dist/graph/runtime/journal.js",
         "kind": "generated-dist",
         "path": "dist/graph/runtime/journal.js"
+      },
+      {
+        "id": "dist/graph/runtime/native-contained-fs.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/native-contained-fs.d.ts"
+      },
+      {
+        "id": "dist/graph/runtime/native-contained-fs.js",
+        "kind": "generated-dist",
+        "path": "dist/graph/runtime/native-contained-fs.js"
       },
       {
         "id": "dist/graph/runtime/progress.d.ts",
@@ -17997,6 +18064,16 @@
         "path": "dist/hooks/code-simplifier/index.js.map"
       },
       {
+        "id": "dist/hooks/code-simplifier/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/code-simplifier/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/code-simplifier/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/code-simplifier/jev-shadow.js"
+      },
+      {
         "id": "dist/hooks/codebase-map.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/codebase-map.d.ts"
@@ -18437,6 +18514,66 @@
         "path": "dist/hooks/index.js.map"
       },
       {
+        "id": "dist/hooks/jev/client.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/client.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/client.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/client.js"
+      },
+      {
+        "id": "dist/hooks/jev/config.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/config.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/config.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/config.js"
+      },
+      {
+        "id": "dist/hooks/jev/index.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/index.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/index.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/index.js"
+      },
+      {
+        "id": "dist/hooks/jev/points.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/points.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/points.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/points.js"
+      },
+      {
+        "id": "dist/hooks/jev/resolver.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/resolver.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/resolver.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/resolver.js"
+      },
+      {
+        "id": "dist/hooks/jev/types.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/types.d.ts"
+      },
+      {
+        "id": "dist/hooks/jev/types.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/jev/types.js"
+      },
+      {
         "id": "dist/hooks/keyword-detector/__tests__/index.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/keyword-detector/__tests__/index.test.d.ts"
@@ -18475,6 +18612,16 @@
         "id": "dist/hooks/keyword-detector/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/keyword-detector/index.js.map"
+      },
+      {
+        "id": "dist/hooks/keyword-detector/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/keyword-detector/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/keyword-detector/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/keyword-detector/jev-shadow.js"
       },
       {
         "id": "dist/hooks/learner/auto-invoke.d.ts",
@@ -18655,6 +18802,16 @@
         "id": "dist/hooks/learner/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/learner/index.js.map"
+      },
+      {
+        "id": "dist/hooks/learner/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/learner/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/learner/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/learner/jev-shadow.js"
       },
       {
         "id": "dist/hooks/learner/loader.d.ts",
@@ -19677,6 +19834,16 @@
         "path": "dist/hooks/persistent-mode/index.js.map"
       },
       {
+        "id": "dist/hooks/persistent-mode/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/persistent-mode/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/persistent-mode/jev-shadow.js"
+      },
+      {
         "id": "dist/hooks/persistent-mode/session-isolation.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/persistent-mode/session-isolation.test.d.ts"
@@ -19835,6 +20002,16 @@
         "id": "dist/hooks/preemptive-compaction/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/preemptive-compaction/index.js.map"
+      },
+      {
+        "id": "dist/hooks/preemptive-compaction/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/preemptive-compaction/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/preemptive-compaction/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/preemptive-compaction/jev-shadow.js"
       },
       {
         "id": "dist/hooks/preemptive-compaction/types.d.ts",
@@ -20275,6 +20452,16 @@
         "id": "dist/hooks/ralph/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/index.js.map"
+      },
+      {
+        "id": "dist/hooks/ralph/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/jev-shadow.js"
       },
       {
         "id": "dist/hooks/ralph/loop.d.ts",
@@ -21740,6 +21927,16 @@
         "id": "dist/hooks/task-size-detector/index.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/task-size-detector/index.js.map"
+      },
+      {
+        "id": "dist/hooks/task-size-detector/jev-shadow.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/hooks/task-size-detector/jev-shadow.d.ts"
+      },
+      {
+        "id": "dist/hooks/task-size-detector/jev-shadow.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/task-size-detector/jev-shadow.js"
       },
       {
         "id": "dist/hooks/team-canonical-state.d.ts",
@@ -30417,6 +30614,16 @@
         "path": "dist/team/task-router.js.map"
       },
       {
+        "id": "dist/team/team-instance.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/team/team-instance.d.ts"
+      },
+      {
+        "id": "dist/team/team-instance.js",
+        "kind": "generated-dist",
+        "path": "dist/team/team-instance.js"
+      },
+      {
         "id": "dist/team/team-name.d.ts",
         "kind": "generated-dist",
         "path": "dist/team/team-name.d.ts"
@@ -33327,6 +33534,11 @@
         "path": "scripts/build-contained-fs.mjs"
       },
       {
+        "id": "scripts/build-generated-artifact-authorization.mjs",
+        "kind": "script",
+        "path": "scripts/build-generated-artifact-authorization.mjs"
+      },
+      {
         "id": "scripts/build-mcp-server.mjs",
         "kind": "script",
         "path": "scripts/build-mcp-server.mjs"
@@ -35447,6 +35659,11 @@
         "path": "src/__tests__/run-cjs-windows-stdio-contract.test.ts"
       },
       {
+        "id": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/run-cjs-worker-skip-guard.test.ts"
+      },
+      {
         "id": "src/__tests__/runtime-guidance-plan-ralph.test.ts",
         "kind": "src",
         "path": "src/__tests__/runtime-guidance-plan-ralph.test.ts"
@@ -37480,6 +37697,11 @@
         "id": "src/hooks/jev/__tests__/client.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/client.test.ts"
+      },
+      {
+        "id": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
       },
       {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
@@ -42121,6 +42343,21 @@
       {
         "from": "scripts/build-contained-fs.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/build-generated-artifact-authorization.mjs",
+        "to": "external:fs",
         "kind": "imports"
       },
       {
@@ -48150,6 +48387,11 @@
       },
       {
         "from": "src/__tests__/preemptive-compaction-hook.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/preemptive-compaction-hook.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -49226,6 +49468,26 @@
       {
         "from": "src/__tests__/run-cjs-windows-stdio-contract.test.ts",
         "to": "scripts/run.cjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -59160,6 +59422,31 @@
       },
       {
         "from": "src/hooks/jev/__tests__/client.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
         "to": "src/hooks/jev/types.ts",
         "kind": "type-imports"
       },
@@ -80660,12 +80947,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7028,
-      "edgeCount": 7812,
-      "importEdgeCount": 6427,
+      "nodeCount": 7065,
+      "edgeCount": 7825,
+      "importEdgeCount": 6439,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "c1133e0dbda4e0008970c7dd7afb6f3fb249f02d38aa4b4a74ba89da740e638a",
-  "manifestSha256": "21dec46390e874cc79ed886fb35b0f6eda2f7bbb329c7e7a985bbe5ddeef4b62"
+  "inventorySha256": "a3c348dc0d6b027bf489953cdf1c170141aba3047680b0d6f6795ed0208ef1dc",
+  "manifestSha256": "69bad8f621af975112edee74becc39ae9667d0b97c6d9563bc20272782b46268"
 }

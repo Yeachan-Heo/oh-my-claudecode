@@ -11,6 +11,8 @@ export interface TmuxExecOptions {
 }
 export declare function tmuxEnv(): NodeJS.ProcessEnv;
 export declare function isNativeWindowsShell(): boolean;
+export declare function quoteForCmd(arg: string): string;
+export declare function escapeForCmdSet(value: string): string;
 export declare function tmuxExec(args: string[], opts?: TmuxExecOptions & Omit<ExecFileSyncOptionsWithStringEncoding, 'env' | 'encoding'> & {
     encoding?: BufferEncoding;
 }): string;

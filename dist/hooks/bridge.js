@@ -24,6 +24,8 @@ import { dispatchNotificationInBackground } from "./background-notifications.js"
 import { readCanonicalTeamStateCandidate } from "./team-canonical-state.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import { removeCodeBlocks, getAllKeywordsWithSizeCheck, applyRalplanGate, sanitizeForKeywordDetection, NON_LATIN_SCRIPT_PATTERN, parseExplicitWorkflowSlashInvocation, isRetiredWorkflowSlashInvocation, } from "./keyword-detector/index.js";
+import { recordIntentShadow, recordSkillTriggerShadow, } from "./keyword-detector/jev-shadow.js";
+import { recordTaskSizeShadow } from "./task-size-detector/jev-shadow.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool, } from "./omc-orchestrator/index.js";
 import { normalizeHookInput } from "./bridge-normalize.js";
 import { addBackgroundTask, completeBackgroundTask, completeMostRecentMatchingBackgroundTask, getRunningTaskCount, remapBackgroundTaskId, remapMostRecentMatchingBackgroundTaskId, } from "../hud/background-tasks.js";
@@ -1167,6 +1169,12 @@ async function processKeywordDetector(input) {
                 `Use explicit mode keywords (e.g. \`ralph\`) only when you need full orchestration.`);
         }
     }
+    // Jev shadow points (issue #3669): record skill-trigger, intent, and
+    // task-size comparisons for later eval. Fire-and-forget; never changes
+    // emissions.
+    void recordSkillTriggerShadow(cleanedText).catch(() => { });
+    void recordIntentShadow(cleanedText).catch(() => { });
+    void recordTaskSizeShadow(cleanedText).catch(() => { });
     const promptPrerequisiteParse = parsePromptPrerequisiteSections(promptText, promptPrerequisiteConfig);
     const executionKeywords = fullKeywords.filter((keywordType) => promptPrerequisiteConfig.executionKeywords.includes(keywordType));
     if (shouldEnforcePromptPrerequisites(executionKeywords, promptPrerequisiteParse, promptPrerequisiteConfig)) {

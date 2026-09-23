@@ -18,7 +18,7 @@ import { resolveRunDirHandle } from "./run-dir.js";
 import { computeJournalFingerprint, FileJournal } from "./journal.js";
 import { FileOwnershipFence } from "./fence.js";
 import { FileProjectionStore } from "./store.js";
-import { assertContainedFsSupported, readContainedFileNoFollow, withContainedPath, } from "./safe-fs.js";
+import { assertContainedFsSupported, readContainedFileNoFollow, withContainedOperations, } from "./safe-fs.js";
 import { EXIT_CODES, FenceError, JournalCorruptionError } from "./types.js";
 const DEFAULT_RUNS_ROOT_SEGMENTS = [".omc", "graph-runs"];
 const DESCRIPTOR_FILE_NAME = "descriptor.json";
@@ -397,8 +397,8 @@ export async function runGraph(sealed, options) {
         }
         let descriptorIsFresh = false;
         if (rawDescriptor === null) {
-            withContainedPath(runDirHandle, DESCRIPTOR_FILE_NAME, (path) => {
-                atomicWriteFileSync(path, canonicalJson(sealed));
+            withContainedOperations(runDirHandle, (operations) => {
+                atomicWriteFileSync(DESCRIPTOR_FILE_NAME, canonicalJson(sealed), undefined, operations);
             });
             stored = sealed;
             descriptorIsFresh = true;

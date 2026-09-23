@@ -21,6 +21,10 @@ describe('getWorkerLiveness', () => {
         tmuxMocks.tmuxCmdAsync.mockResolvedValueOnce({ stdout: '1\n', stderr: '' });
         await expect(getWorkerLiveness('%1')).resolves.toBe('dead');
     });
+    it.each(['', '\n', 'garbage\n', '0\n1\n'])('keeps malformed pane_dead output unknown: %j', async (stdout) => {
+        tmuxMocks.tmuxCmdAsync.mockResolvedValueOnce({ stdout, stderr: '' });
+        await expect(getWorkerLiveness('%1')).resolves.toBe('unknown');
+    });
     it('treats missing pane errors as dead after successful cleanup kills', async () => {
         const error = new Error('display-message failed');
         error.stderr = "can't find pane: %1";

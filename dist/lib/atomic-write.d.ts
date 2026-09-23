@@ -2,6 +2,16 @@
  * Atomic, durable file writes for oh-my-claudecode.
  * Self-contained module with no external dependencies.
  */
+import * as fsSync from "fs";
+/** Optional basename-based backend for an already-open directory. */
+export interface AtomicWriteOperations {
+    open(name: string, flags: number, mode?: number): number;
+    lstat(name: string): Pick<fsSync.Stats, "dev" | "ino" | "mode" | "nlink" | "isFile">;
+    rename(source: string, destination: string): void;
+    unlink(name: string): void;
+    link(source: string, destination: string): void;
+    sync(): void;
+}
 /**
  * Create directory recursively (inline implementation).
  * Ensures parent directories exist before creating the target directory.
@@ -47,7 +57,7 @@ export declare function atomicWriteSync(filePath: string, content: string, hooks
  * @param content String content to write
  * @throws Error if write operation fails
  */
-export declare function atomicWriteFileSync(filePath: string, content: string, hooks?: AtomicWriteHooks): void;
+export declare function atomicWriteFileSync(filePath: string, content: string, hooks?: AtomicWriteHooks, operations?: AtomicWriteOperations): void;
 /**
  * Write JSON data atomically to a file (synchronous version).
  * Uses temp file + atomic rename pattern with fsync for durability.
@@ -56,7 +66,7 @@ export declare function atomicWriteFileSync(filePath: string, content: string, h
  * @param data Data to serialize as JSON
  * @throws Error if JSON serialization fails or write operation fails
  */
-export declare function atomicWriteJsonSync(filePath: string, data: unknown, hooks?: AtomicWriteHooks): void;
+export declare function atomicWriteJsonSync(filePath: string, data: unknown, hooks?: AtomicWriteHooks, operations?: AtomicWriteOperations): void;
 /**
  * Bounded set of independently atomic writes. This is not a multi-file
  * transaction: a crash between renames can expose a prefix of the batch.

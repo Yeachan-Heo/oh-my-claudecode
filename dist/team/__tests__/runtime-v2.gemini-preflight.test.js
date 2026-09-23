@@ -7,6 +7,11 @@ const mocks = vi.hoisted(() => ({
     createTeamSession: vi.fn(),
     spawnWorkerInPane: vi.fn(),
     spawnOwnedWorkerInPane: vi.fn(),
+    splitTeamWorkerPaneWithEvidence: vi.fn(),
+    workerPaneBelongsToOwnedProviderTarget: vi.fn(async () => true),
+    observeTmuxServerIdentity: vi.fn(async () => 'matching'),
+    getOwnedWorkerLiveness: vi.fn(async () => 'dead'),
+    adoptWorkerPaneOwnership: vi.fn(),
     deliverStartupInbox: vi.fn(),
     sendToWorker: vi.fn(),
     waitForPaneReady: vi.fn(),
@@ -40,6 +45,13 @@ const modelContractMocks = vi.hoisted(() => ({
     }),
     validateWorkerLaunchDescriptor: vi.fn((value) => value),
 }));
+const FIXTURE_TMUX_SERVER_IDENTITY = {
+    socket_path: '/tmp/omc-test-tmux.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'darwin'
+        ? 'darwin:1700000000:123456'
+        : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+};
 vi.mock('../worker-launch-ack.js', async (importOriginal) => {
     const actual = await importOriginal();
     return { ...actual, withWorkerLaunchAttemptFence: launchMocks.withWorkerLaunchAttemptFence };
@@ -52,6 +64,11 @@ vi.mock('../tmux-session.js', async (importOriginal) => ({
     createTeamSession: mocks.createTeamSession,
     spawnWorkerInPane: mocks.spawnWorkerInPane,
     spawnOwnedWorkerInPane: mocks.spawnOwnedWorkerInPane,
+    splitTeamWorkerPaneWithEvidence: mocks.splitTeamWorkerPaneWithEvidence,
+    workerPaneBelongsToOwnedProviderTarget: mocks.workerPaneBelongsToOwnedProviderTarget,
+    observeTmuxServerIdentity: mocks.observeTmuxServerIdentity,
+    getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
+    adoptWorkerPaneOwnership: mocks.adoptWorkerPaneOwnership,
     deliverStartupInbox: mocks.deliverStartupInbox,
     sendToWorker: mocks.sendToWorker,
     waitForPaneReady: mocks.waitForPaneReady,
@@ -108,7 +125,36 @@ describe('runtime-v2 Gemini preflight routing', () => {
             leaderPaneId: '%1',
             workerPaneIds: [],
             sessionMode: 'split-pane',
+            tmuxServerIdentity: FIXTURE_TMUX_SERVER_IDENTITY,
         });
+        mocks.splitTeamWorkerPaneWithEvidence.mockImplementation(async (splitTarget, direction, _cwd, provider = 'tmux', identity) => ({
+            commandSucceeded: true,
+            provider,
+            splitTarget,
+            direction,
+            rawOutput: '%2\n',
+            stderr: '',
+            paneId: '%2',
+            ...(provider === 'tmux' ? { tmuxServerIdentity: identity ?? FIXTURE_TMUX_SERVER_IDENTITY } : {}),
+        }));
+        mocks.workerPaneBelongsToOwnedProviderTarget.mockResolvedValue(true);
+        mocks.observeTmuxServerIdentity.mockResolvedValue('matching');
+        mocks.getOwnedWorkerLiveness.mockResolvedValue('dead');
+        mocks.adoptWorkerPaneOwnership.mockImplementation(async (input) => ({
+            ok: true,
+            ownership: {
+                provider: input.provider ?? 'tmux',
+                providerTarget: input.providerTarget,
+                paneId: input.paneId,
+                splitTarget: '',
+                leaderPaneId: input.leaderPaneId,
+                reservedPaneIds: [],
+                source: 'adopted',
+                ...(input.provider !== 'cmux'
+                    ? { tmuxServerIdentity: input.tmuxServerIdentity ?? FIXTURE_TMUX_SERVER_IDENTITY }
+                    : {}),
+            },
+        }));
         mocks.spawnWorkerInPane.mockResolvedValue(undefined);
         mocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName, ownership, config) => {
             await mocks.spawnWorkerInPane(sessionName, ownership.paneId, config);

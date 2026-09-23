@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { parseJevEnv, resolveRequest, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { parseJevEnv, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -30,7 +30,7 @@ function onExit(fn) { afterHooks.push(fn); }
 onExit(() => rmSync(tmp, { recursive: true, force: true }));
 afterAll(async () => { for (const fn of afterHooks.reverse()) await fn(); });
 
-const QUESTIONS = { route: { type: 'Choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } } };
+const QUESTIONS = { route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } } };
 
 function baseEnv(overrides = {}) {
   return {
@@ -62,9 +62,39 @@ describe('parseJevEnv tri-state parity', () => {
   });
 });
 
+describe('wire shape parity with the TS client (#4091)', () => {
+  it('serializes score criteria to the ordered list the API requires', () => {
+    const wire = serializeQuestions({
+      staleness: { type: 'score', criteria: { fresh: 'Fresh', aging: 'Aging', stale: 'Stale' } },
+    });
+    expect(wire.staleness.criteria).toEqual(['Fresh', 'Aging', 'Stale']);
+  });
+
+  it('leaves choice and noul criteria as the named map', () => {
+    const wire = serializeQuestions({
+      intent: { type: 'noul', criteria: { true: 'yes', false: 'no' } },
+    });
+    expect(wire.intent.criteria).toEqual({ true: 'yes', false: 'no' });
+  });
+
+  it('sends the serialized questions on the wire', async () => {
+    let body;
+    const fetchFn = async (_url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ answers: { staleness: { type: 'score', score: 2 } } }) };
+    };
+    await resolveRequest(
+      { point: 'context-pruning', state: { p: 'x' }, questions: { staleness: { type: 'score', criteria: { fresh: 'Fresh', stale: 'Stale' } } }, heuristic: 1 },
+      baseEnv({ OMC_JEV: 'context-pruning' }),
+      fetchFn,
+    );
+    expect(body.questions.staleness.criteria).toEqual(['Fresh', 'Stale']);
+  });
+});
+
 describe('validateJevResponse', () => {
   it('accepts a valid answers object and rejects invalid shapes', () => {
-    validateJevResponse({ answers: { a: { type: 'Choice', choice: 'x' } } });
+    validateJevResponse({ answers: { a: { type: 'choice', choice: 'x' } } });
     expect(() => validateJevResponse(null)).toThrow();
     expect(() => validateJevResponse({ answers: {} })).toThrow();
     expect(() => validateJevResponse({ answers: { a: {} } })).toThrow();
@@ -81,19 +111,19 @@ describe('resolveRequest', () => {
   });
 
   it('shadow: one fetch, one log line, heuristic preserved', async () => {
-    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'Choice', choice: 'opus' } } }) });
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
     const result = await resolveRequest({ point: 'model-routing', state: { prompt: 'hi' }, questions: QUESTIONS, heuristic: 'sonnet' }, baseEnv(), fetchFn);
     expect(result.mode).toBe('shadow');
-    expect(result.answer).toEqual({ type: 'Choice', choice: 'opus' });
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
     const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
     expect(line).toMatchObject({ point: 'model-routing', mode: 'shadow', heuristic: 'sonnet', jev: { choice: 'opus' } });
   });
 
   it('active-by-env: Jev decides (mode active, answer returned)', async () => {
-    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'Choice', choice: 'opus' } } }) });
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
     const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
     expect(result.mode).toBe('active');
-    expect(result.answer).toEqual({ type: 'Choice', choice: 'opus' });
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
   });
 
   it('degrades on HTTP error and logs jev:null', async () => {
@@ -108,7 +138,7 @@ describe('resolveRequest', () => {
 
   it('bounds excerpts before send and log', async () => {
     let body;
-    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'Choice', choice: 'x' } } }) }; };
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
     await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(50);
   });
@@ -118,7 +148,7 @@ describe('end-to-end child process', () => {
   it('a plain-Node caller feeds stdin JSON to the child and reads the result from stdout', async () => {
     const server = createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ answers: { route: { type: 'Choice', choice: 'opus', confidence: 0.9 } } }));
+      res.end(JSON.stringify({ answers: { route: { type: 'choice', choice: 'opus', confidence: 0.9 } } }));
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     onExit(() => new Promise((resolve) => server.close(resolve)));
@@ -132,6 +162,6 @@ describe('end-to-end child process', () => {
       child.stdin.end();
     });
 
-    expect(result).toMatchObject({ mode: 'active', answer: { type: 'Choice', choice: 'opus' } });
+    expect(result).toMatchObject({ mode: 'active', answer: { type: 'choice', choice: 'opus' } });
   });
 });

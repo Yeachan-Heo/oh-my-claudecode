@@ -57,12 +57,19 @@ function makeJevFetchStub(choice = 'opus') {
   return fetchFn;
 }
 
-/** The shadow log line settles asynchronously after the twin answer returns. */
+/**
+ * The shadow log line settles asynchronously after the twin answer returns.
+ * `appendFile` creates the file before the line lands, so existence alone is
+ * not the signal: wait for a newline-terminated record.
+ */
 async function waitForShadowLog(logDir: string, timeoutMs = 1000): Promise<string | null> {
   const logPath = join(logDir, 'shadow.jsonl');
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (existsSync(logPath)) return readFileSync(logPath, 'utf-8');
+    if (existsSync(logPath)) {
+      const contents = readFileSync(logPath, 'utf-8');
+      if (contents.includes('\n')) return contents;
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   return null;

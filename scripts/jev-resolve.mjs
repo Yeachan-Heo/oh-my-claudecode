@@ -31,9 +31,24 @@ import { pathToFileURL } from 'node:url';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 
 const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
-const DEFAULT_TIMEOUT_MS = 250;
+const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
 const JEV_MODEL = 'jev-latest';
+
+/**
+ * Mirror of serializeQuestions in src/hooks/jev/client.ts. `score` questions
+ * are rejected with HTTP 422 unless their criteria are an ordered low-to-high
+ * list; `choice`/`noul` take the named map unchanged (#4091).
+ */
+export function serializeQuestions(questions) {
+  const out = {};
+  for (const [name, question] of Object.entries(questions ?? {})) {
+    out[name] = question?.type === 'score' && question.criteria && !Array.isArray(question.criteria)
+      ? { ...question, criteria: Object.values(question.criteria) }
+      : question;
+  }
+  return out;
+}
 
 /**
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
@@ -151,7 +166,7 @@ export async function resolveRequest(request, env = process.env, fetchFn = fetch
           'Content-Type': 'application/json',
           Authorization: 'Bearer ' + env.TYPESAFE_API_KEY,
         },
-        body: JSON.stringify({ state: bound.state, questions: bound.questions, model: JEV_MODEL }),
+        body: JSON.stringify({ state: bound.state, questions: serializeQuestions(bound.questions), model: JEV_MODEL }),
         signal: controller.signal,
       }),
       timeoutPromise,

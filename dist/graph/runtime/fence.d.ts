@@ -48,7 +48,6 @@ export declare class FileOwnershipFence implements OwnershipFence {
      */
     constructor(runsRoot: string, runId?: string, options?: FileOwnershipFenceOptions, runDirHandle?: RunDirHandle);
     private runDir;
-    private lockPath;
     acquire(): Promise<FenceAcquireResult>;
     private acquireAt;
     assertEpoch(epoch: number): void;

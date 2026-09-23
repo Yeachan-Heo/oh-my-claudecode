@@ -1,3 +1,4 @@
+import { readFileSync } from 'fs';
 import { execFileSync } from 'node:child_process';
 import type { TeamConfig, TeamRuntimeOwnerEpoch } from './types.js';
 export interface OwnerFence {
@@ -27,7 +28,27 @@ export type OwnerFenceCheck = {
 };
 export declare function processStartIdentityForPlatform(pid: number, platform?: NodeJS.Platform, exec?: typeof execFileSync): string | null;
 export declare function isValidProcessStartIdentity(value: unknown, platform?: NodeJS.Platform): value is string;
+/**
+ * Return a process creation token suitable for destructive resource
+ * ownership.  Unlike `processStartIdentityForPlatform`, this never uses the
+ * Darwin second-resolution `ps` fallback and includes Linux boot identity so
+ * PID/start-tick reuse after reboot cannot match.
+ */
+export declare function strictProcessStartIdentityForPlatform(pid: number, platform?: NodeJS.Platform, exec?: typeof execFileSync, read?: typeof readFileSync): string | null;
+/** Alias describing the strict token in creation-identity terminology. */
+export declare const processCreationIdentityForPlatform: typeof strictProcessStartIdentityForPlatform;
+export declare function isValidStrictProcessStartIdentity(value: unknown, platform?: NodeJS.Platform): value is string;
 export declare function currentProcessStartIdentity(pid?: number): string | null;
+export declare function currentStrictProcessStartIdentity(pid?: number): string | null;
+/** Alias used by tmux resource ownership callers. */
+export declare const currentProcessCreationIdentity: typeof currentStrictProcessStartIdentity;
+export type ProcessIdentityObservation = 'matching' | 'dead' | 'unknown';
+/**
+ * Observe one strict process incarnation.  `unknown` is deliberately
+ * distinct from `dead`: an unavailable or coarse probe never authorizes
+ * destructive cleanup.
+ */
+export declare function observeProcessIdentity(record: Pick<TeamRuntimeOwnerEpoch, 'pid' | 'process_started_at'>): ProcessIdentityObservation;
 export declare function isProcessIdentityDead(record: Pick<OwnerEpochRecord, 'pid' | 'process_started_at'>): boolean;
 export declare function readLatestOwnerEpoch(cwd: string, teamName: string): OwnerEpochRecord | null;
 /** Publish a complete, canonical epoch through a hard link. Epoch files are never reclaimed. */

@@ -10,7 +10,7 @@
  * - 'draining' worker status for graceful transitions during scale_down
  */
 import { type WorkerInfo } from './team-ops.js';
-import type { TeamConfig } from './types.js';
+import { type TeamConfig } from './types.js';
 export declare function isScalingEnabled(env?: NodeJS.ProcessEnv): boolean;
 export interface ScaleUpResult {
     ok: true;

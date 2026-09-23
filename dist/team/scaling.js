@@ -12,23 +12,23 @@
 import { join, resolve } from 'path';
 import { mkdir, readFile, rm } from 'fs/promises';
 import { existsSync } from 'node:fs';
-import { createHash, randomUUID } from 'node:crypto';
-import { tmuxSpawn } from '../cli/tmux-utils.js';
+import { randomUUID } from 'node:crypto';
 import { buildWorkerArgv, clearResolvedPathCache, getWorkerEnv as getModelWorkerEnv, resolveDefaultWorkerModel, assertHeadlessSupported, resolveValidatedBinaryPath, validateWorkerLaunchDescriptor, } from './model-contract.js';
 import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
 import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
 import { routeTaskToRole } from './role-router.js';
 import { teamReadConfig, teamWriteWorkerIdentity, teamReadWorkerStatus, teamAppendEvent, writeAtomic, } from './team-ops.js';
+import { isValidTmuxServerIdentity, } from './types.js';
 import { withScalingLock, migrateTeamConfigRevision, readRevisionedTeamConfig, saveTeamConfigAtRevision } from './monitor.js';
-import { adoptWorkerPaneOwnership, sanitizeName, getWorkerLiveness, killOwnedWorkerPane, spawnOwnedWorkerInPane, waitForPaneReady, } from './tmux-session.js';
-import { TeamPaths, absPath, teamStateRoot as resolveTeamStateRoot } from './state-paths.js';
+import { adoptWorkerPaneOwnership, sanitizeName, getOwnedWorkerLiveness, killOwnedWorkerPane, spawnOwnedWorkerInPane, splitTeamWorkerPaneWithEvidence, workerPaneBelongsToOwnedProviderTarget, waitForPaneReady, } from './tmux-session.js';
+import { TeamPaths, absPath, canonicalTeamCwd, canonicalTeamStatePath, teamStateRoot as resolveTeamStateRoot, } from './state-paths.js';
 import { writeWorkerOverlay } from './worker-bootstrap.js';
 import { ensureWorkerWorktree, installWorktreeRootAgents, prepareWorkerWorktreeForRemoval, removeWorkerWorktree, restoreWorktreeRootAgents, } from './git-worktree.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
-import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { currentProcessStartIdentity, isProcessIdentityDead } from './team-owner-epoch.js';
 import { resolveRuntimeCliPath } from './runtime-owner-client.js';
 import { loadWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt } from './worker-launch-ack.js';
+import { assertTeamInstanceUnderLock, createTeamInstanceBinding, TeamInstanceError, withTeamInstanceLifecycleLock, } from './team-instance.js';
 // ── Environment gate ──────────────────────────────────────────────────────────
 const OMC_TEAM_SCALING_ENABLED_ENV = 'OMC_TEAM_SCALING_ENABLED';
 const CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -52,34 +52,102 @@ function asCliAgentType(agentType) {
 }
 function configuredTmuxTarget(tmuxSession) {
     const expectedTarget = typeof tmuxSession === 'string' ? tmuxSession.trim() : '';
-    return {
-        expectedTarget,
-        format: expectedTarget.includes(':') ? '#{session_name}:#{window_index}' : '#{session_name}',
-    };
+    return { expectedTarget };
 }
-function validateSplitTargetPaneInConfiguredSession(splitTarget, tmuxSession) {
-    const { expectedTarget, format } = configuredTmuxTarget(tmuxSession);
+async function validateSplitTargetPaneInConfiguredSession(splitTarget, tmuxSession, tmuxServerIdentity) {
+    const { expectedTarget } = configuredTmuxTarget(tmuxSession);
     if (!splitTarget.trim()) {
-        return 'Refusing to split tmux pane: missing leader/worker pane target.';
+        return 'Refusing to split pane: missing leader/worker pane target.';
     }
     if (!expectedTarget) {
         return `Refusing to split tmux pane ${splitTarget}: missing configured tmux_session.`;
     }
-    const result = tmuxSpawn(['display-message', '-t', splitTarget, '-p', format]);
-    if (result.status !== 0) {
-        const reason = (result.stderr || '').trim()
-            || (result.error instanceof Error ? result.error.message : undefined)
-            || `tmux display-message exited with status ${result.status}`;
-        return `Refusing to split tmux pane ${splitTarget}: unable to validate pane belongs to configured tmux_session ${expectedTarget} (${reason}).`;
+    const provider = expectedTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+    if (provider === 'tmux' && !isValidTmuxServerIdentity(tmuxServerIdentity)) {
+        return `Refusing to split tmux pane ${splitTarget}: tmux server identity is unavailable.`;
     }
-    const actualTarget = (result.stdout || '').trim().split('\n')[0]?.trim() ?? '';
-    if (actualTarget !== expectedTarget) {
-        return `Refusing to split tmux pane ${splitTarget}: pane belongs to tmux target ${actualTarget || '<unknown>'}, expected ${expectedTarget}.`;
+    const belongs = await workerPaneBelongsToOwnedProviderTarget({
+        provider,
+        providerTarget: expectedTarget,
+        paneId: splitTarget,
+        ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    });
+    if (!belongs) {
+        return `Refusing to split pane ${splitTarget}: pane is not verified in configured target ${expectedTarget}.`;
     }
     return null;
 }
 function scaleUpAttempt(config) {
     return config.active_scale_up;
+}
+/**
+ * Scale operations are destructive only for one immutable team incarnation.
+ * The assertion is intentionally under the caller's lifecycle lock; using the
+ * convenience locking form here would recursively acquire the same name lock
+ * from the reservation/fence transitions below.
+ */
+async function assertScalingInstanceUnderLock(config, teamName, cwd, expectedInstanceId) {
+    const configuredInstanceId = config.instance_id;
+    if (!configuredInstanceId)
+        throw new Error('team_instance_authority_missing');
+    if (config.tmux_session
+        && !config.tmux_session.startsWith('cmux:')
+        && !isValidTmuxServerIdentity(config.tmux_server_identity)) {
+        throw new Error('tmux_server_identity_missing');
+    }
+    if (config.name !== teamName
+        || (config.leader_cwd !== undefined && canonicalTeamCwd(config.leader_cwd) !== canonicalTeamCwd(cwd))) {
+        throw new Error('team_instance_mismatch');
+    }
+    if (expectedInstanceId !== undefined
+        && configuredInstanceId.toLowerCase() !== expectedInstanceId.toLowerCase()) {
+        throw new Error('team_instance_mismatch');
+    }
+    const binding = createTeamInstanceBinding({
+        teamName,
+        cwd,
+        instanceId: configuredInstanceId,
+    });
+    if (config.team_state_root !== undefined
+        && canonicalTeamStatePath(cwd, config.team_state_root) !== binding.state_root) {
+        throw new Error('team_instance_mismatch');
+    }
+    const assertion = await assertTeamInstanceUnderLock(binding);
+    if (assertion.reservation.phase !== 'active') {
+        throw new Error('team_instance_reservation_active');
+    }
+    if (assertion.observed_state !== 'bound') {
+        throw new Error('team_instance_state_missing');
+    }
+    return binding;
+}
+function scaleInstanceError(error) {
+    if (error instanceof TeamInstanceError)
+        return error.code;
+    return error instanceof Error ? error.message : String(error);
+}
+function configuredPaneOwnership(config, paneId, excludeWorkerName) {
+    if (!config.tmux_session || !paneId.trim())
+        return null;
+    const provider = paneId.startsWith('%') ? 'tmux' : 'cmux';
+    const identity = config.tmux_server_identity;
+    const validIdentity = provider === 'tmux' && isValidTmuxServerIdentity(identity)
+        ? identity
+        : undefined;
+    if (provider === 'tmux' && !validIdentity)
+        return null;
+    return {
+        provider,
+        providerTarget: config.tmux_session,
+        paneId,
+        splitTarget: '',
+        leaderPaneId: config.leader_pane_id ?? '',
+        reservedPaneIds: config.workers
+            .filter(worker => worker.name !== excludeWorkerName && worker.pane_id)
+            .map(worker => worker.pane_id),
+        source: 'adopted',
+        ...(validIdentity ? { tmuxServerIdentity: validIdentity } : {}),
+    };
 }
 /**
  * Returns true if the active_scale_up fence blocks team mutations.
@@ -119,6 +187,9 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         }
         let config = revisioned.config;
         let configRevision = revisioned.stateRevision;
+        if (!config.instance_id)
+            return { ok: false, error: 'team_instance_authority_missing' };
+        let originalInstanceId = config.instance_id;
         if (config.active_recovery || config.active_scale_down)
             return { ok: false, error: 'team_mutation_busy' };
         if (config.lifecycle_state === 'shutting_down' || config.lifecycle_state === 'stopped') {
@@ -133,8 +204,6 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             };
         }
         const operationId = randomUUID();
-        const workspaceHash = createHash('sha256').update(leaderCwd).digest('hex');
-        const lifecycleLock = absPath(leaderCwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
         const processStartedAt = currentProcessStartIdentity();
         if (!processStartedAt)
             return { ok: false, error: 'process_start_identity_unavailable' };
@@ -155,8 +224,17 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             }
         };
         try {
-            config = await withProcessIdentityFileLock(lifecycleLock, async () => {
+            config = await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
                 const current = await migrateTeamConfigRevision(sanitized, leaderCwd);
+                if (current) {
+                    try {
+                        const binding = await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+                        originalInstanceId = binding.instance_id;
+                    }
+                    catch (error) {
+                        throw new Error(scaleInstanceError(error));
+                    }
+                }
                 if (!current || current.config.active_recovery || current.config.active_scale_down
                     || current.config.lifecycle_state === 'shutting_down' || current.config.lifecycle_state === 'stopped') {
                     throw new Error('team_mutation_busy');
@@ -170,12 +248,23 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     && (existing.phase !== 'reserved' || !isProcessIdentityDead(existing))) {
                     throw new Error('team_mutation_busy');
                 }
+                if (existing) {
+                    const existingInstanceId = existing.instance_id;
+                    if (!existingInstanceId)
+                        throw new Error('team_mutation_busy');
+                    if (existingInstanceId.toLowerCase() !== originalInstanceId.toLowerCase()) {
+                        throw new Error('team_instance_mismatch');
+                    }
+                }
                 const nextRevision = current.stateRevision + 1;
-                const next = { ...current.config, state_revision: nextRevision, active_scale_up: {
+                const next = { ...current.config, state_revision: nextRevision, active_scale_up: ({
                         operation_id: operationId, phase: 'reserved', pid: process.pid,
                         process_started_at: processStartedAt, state_revision: nextRevision,
                         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-                    } };
+                        // Keep the immutable incarnation on the operation fence.  A later
+                        // same-name config can never be adopted by this operation.
+                        instance_id: originalInstanceId,
+                    }) };
                 // Replacing an existing fence (dead reserved, or reconciling committed) is foreign install.
                 if (!await saveScaleUpConfig(next, current.stateRevision, existing ? { reclaim: { active_scale_up: true } } : undefined))
                     throw new Error('team_mutation_busy');
@@ -184,13 +273,23 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             });
         }
         catch (error) {
-            return { ok: false, error: error instanceof Error ? error.message : 'team_mutation_busy' };
+            return { ok: false, error: scaleInstanceError(error) };
         }
-        const releaseScaleUpReservation = async (failureReason) => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const releaseScaleUpReservation = async (failureReason) => withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
             const reservation = current ? scaleUpAttempt(current.config) : undefined;
             if (!current || !reservation || reservation.operation_id !== operationId
                 || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt)
+                return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            const reservationInstanceId = reservation.instance_id;
+            if (!reservationInstanceId
+                || reservationInstanceId.toLowerCase() !== originalInstanceId.toLowerCase())
                 return false;
             // Never clear a committed fence or advance state while shutdown owns the team.
             if (!failureReason && current.config.lifecycle_state && current.config.lifecycle_state !== 'active') {
@@ -209,25 +308,54 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             configRevision = nextRevision;
             return !failureReason;
         });
-        const reserveScaleUpEffects = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const reserveScaleUpEffects = async () => withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
             const reservation = current ? scaleUpAttempt(current.config) : undefined;
             if (!current || !reservation || reservation.operation_id !== operationId
                 || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt
+                || reservation.phase !== 'reserved'
                 || current.config.active_recovery || current.config.active_scale_down
                 || current.config.lifecycle_state === 'shutting_down' || current.config.lifecycle_state === 'stopped')
                 return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            const reservationInstanceId = reservation.instance_id;
+            if (!reservationInstanceId
+                || reservationInstanceId.toLowerCase() !== originalInstanceId.toLowerCase())
+                return false;
             const nextRevision = current.stateRevision + 1;
-            const next = { ...current.config, state_revision: nextRevision, active_scale_up: {
+            const next = { ...current.config, state_revision: nextRevision, active_scale_up: ({
                     ...reservation, phase: 'effects', state_revision: nextRevision, updated_at: new Date().toISOString(),
-                } };
+                }) };
             if (!await saveScaleUpConfig(next, current.stateRevision))
                 return false;
             config = next;
             configRevision = nextRevision;
             return true;
         });
-        if (!await reserveScaleUpEffects()) {
+        const assertScaleUpEffectsAuthority = async () => withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
+            const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
+            const reservation = current ? scaleUpAttempt(current.config) : undefined;
+            if (!current || !reservation || reservation.operation_id !== operationId
+                || reservation.phase !== 'effects'
+                || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt)
+                return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            const reservationInstanceId = reservation.instance_id;
+            if (!reservationInstanceId)
+                return false;
+            return reservationInstanceId.toLowerCase() === originalInstanceId.toLowerCase();
+        }).catch(() => false);
+        if (!await reserveScaleUpEffects().catch(() => false)) {
             const released = await releaseScaleUpReservation().catch(() => false);
             return { ok: false, error: released ? 'team_mutation_busy' : 'scale_up_fence_release_failed' };
         }
@@ -241,6 +369,9 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         const reservedWorkerNames = new Set();
         const reservedLaunchDescriptors = new Map();
         const launchContexts = new Map();
+        const unresolvedLaunchPanes = new Set();
+        const paneWorkerNames = new Map();
+        const pendingPanes = new Map();
         const paneOwnerships = new Map();
         const cleanupScaledWorkerWorktree = (workerName, created) => {
             if (created) {
@@ -255,16 +386,49 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
         };
         const rollbackScaleUp = async (error, paneId, orphanFailure) => {
             const cleanupFailures = orphanFailure ? [orphanFailure] : [];
+            let authorityFailure;
+            try {
+                await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
+                    const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
+                    const reservation = current ? scaleUpAttempt(current.config) : undefined;
+                    if (!current || !reservation || reservation.operation_id !== operationId
+                        || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt) {
+                        throw new Error('scale_up_instance_fence_lost');
+                    }
+                    await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+                    const reservationInstanceId = reservation.instance_id;
+                    if (!reservationInstanceId
+                        || reservationInstanceId.toLowerCase() !== originalInstanceId.toLowerCase()) {
+                        throw new Error('team_instance_mismatch');
+                    }
+                });
+            }
+            catch (authorityError) {
+                authorityFailure = scaleInstanceError(authorityError);
+            }
+            if (authorityFailure) {
+                // Do not infer ownership from pane/worktree names when the instance
+                // authority disappeared or changed.  In particular, never clean a
+                // replacement team's resources during rollback.
+                return {
+                    ok: false,
+                    error: `${error}; rollback incomplete (instance_authority_unverified:${authorityFailure})`,
+                };
+            }
             const cleanedWorktrees = new Set();
             // Preserve launch/termination evidence when provider/pane cleanup is not proven.
             const preserveIdentity = new Set();
             const cleanupPane = async (candidate, label, workerName) => {
                 const launch = launchContexts.get(candidate);
+                const launchCleanupUnverified = unresolvedLaunchPanes.has(candidate);
                 const ownership = paneOwnerships.get(candidate);
-                const paneAlreadyDead = await getWorkerLiveness(candidate).catch(() => 'unknown') === 'dead';
+                const paneAlreadyDead = ownership
+                    ? await getOwnedWorkerLiveness(ownership).catch(() => 'unknown') === 'dead'
+                    : false;
+                const attributableWorkerName = workerName ?? paneWorkerNames.get(candidate);
                 const markPreserve = () => {
-                    if (workerName)
-                        preserveIdentity.add(workerName);
+                    if (attributableWorkerName)
+                        preserveIdentity.add(attributableWorkerName);
                     if (launch?.attempt?.worker_name)
                         preserveIdentity.add(String(launch.attempt.worker_name));
                 };
@@ -273,14 +437,23 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     markPreserve();
                     return false;
                 }
+                if (launchCleanupUnverified && !launch) {
+                    // Once an owned launch was attempted, pane state is not enough to
+                    // authorize provider teardown. Preserve the pane and launch evidence
+                    // until the provider boundary can be retried with its exact receipt.
+                    cleanupFailures.push(`${label}:provider_launch_authority_unavailable:${candidate}`);
+                    markPreserve();
+                    return false;
+                }
+                ;
                 const killPane = async () => {
-                    if (await getWorkerLiveness(candidate).catch(() => 'unknown') === 'dead')
+                    if (ownership && await getOwnedWorkerLiveness(ownership).catch(() => 'unknown') === 'dead')
                         return true;
                     if (!ownership)
                         return false;
                     for (let attempt = 0; attempt < 2; attempt++) {
                         await killOwnedWorkerPane(ownership).catch(() => undefined);
-                        if (await getWorkerLiveness(candidate).catch(() => 'unknown') === 'dead')
+                        if (await getOwnedWorkerLiveness(ownership).catch(() => 'unknown') === 'dead')
                             return true;
                     }
                     return false;
@@ -304,30 +477,44 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 if (existsSync(workerDir))
                     cleanupFailures.push(`${workerName}:identity:${workerDir}`);
             };
+            // A launch may have created a durable provider receipt before its
+            // wrapper rejects. Classify and attempt every such pane first, before
+            // touching its worktree, receipt directory, or reserved worker row.
+            for (const [pendingPaneId, pendingWorkerName] of pendingPanes) {
+                await cleanupPane(pendingPaneId, pendingWorkerName, pendingWorkerName);
+            }
             for (const worker of addedWorkers) {
                 const idx = config.workers.findIndex(candidate => candidate.name === worker.name);
-                if (idx >= 0)
-                    config.workers.splice(idx, 1);
                 if (worker.pane_id)
                     await cleanupPane(worker.pane_id, worker.name, worker.name);
                 if (worker.worktree_path) {
-                    let cleaned = false;
-                    for (let attempt = 0; attempt < 2 && !cleaned; attempt++) {
-                        try {
-                            cleanupScaledWorkerWorktree(worker.name, worker.worktree_created === true);
-                            cleaned = true;
-                        }
-                        catch { /* retry */ }
+                    if (preserveIdentity.has(worker.name)) {
+                        cleanupFailures.push(`${worker.name}:worktree_authority_unverified:${worker.worktree_path}`);
                     }
-                    if (cleaned)
-                        cleanedWorktrees.add(worker.name);
-                    if (!cleaned || existsSync(worker.worktree_path))
-                        cleanupFailures.push(`${worker.name}:worktree:${worker.worktree_path}`);
+                    else {
+                        let cleaned = false;
+                        for (let attempt = 0; attempt < 2 && !cleaned; attempt++) {
+                            try {
+                                cleanupScaledWorkerWorktree(worker.name, worker.worktree_created === true);
+                                cleaned = true;
+                            }
+                            catch { /* retry */ }
+                        }
+                        if (cleaned)
+                            cleanedWorktrees.add(worker.name);
+                        if (!cleaned || existsSync(worker.worktree_path))
+                            cleanupFailures.push(`${worker.name}:worktree:${worker.worktree_path}`);
+                    }
                 }
                 await cleanupIdentity(worker.name);
+                if (idx >= 0 && !preserveIdentity.has(worker.name))
+                    config.workers.splice(idx, 1);
             }
             for (const pending of pendingWorktrees) {
-                if (!cleanedWorktrees.has(pending.workerName)) {
+                if (preserveIdentity.has(pending.workerName)) {
+                    cleanupFailures.push(`${pending.workerName}:pending_worktree_authority_unverified:${pending.path}`);
+                }
+                else if (!cleanedWorktrees.has(pending.workerName)) {
                     let cleaned = false;
                     for (let attempt = 0; attempt < 2 && !cleaned; attempt++) {
                         try {
@@ -343,7 +530,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             }
             for (const workerName of pendingIdentities)
                 await cleanupIdentity(workerName);
-            if (paneId)
+            if (paneId && !pendingPanes.has(paneId))
                 await cleanupPane(paneId, 'pending');
             config.worker_count = config.workers.length;
             config.next_worker_index = nextIndex;
@@ -357,7 +544,10 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                         const expectedLaunch = reservedLaunchDescriptors.get(row.name);
                         const launchMatches = JSON.stringify(row.launch_descriptor) === JSON.stringify(expectedLaunch);
                         const activated = addedByName.get(row.name);
-                        if (launchMatches && (row.operational_state === 'starting'
+                        if (preserveIdentity.has(row.name)) {
+                            cleanupFailures.push(`scale_up_reservation_preserved:${row.name}`);
+                        }
+                        else if (launchMatches && (row.operational_state === 'starting'
                             || (row.operational_state === 'active' && activated?.pane_id === row.pane_id))) {
                             safeToRetire.add(row.name);
                         }
@@ -392,6 +582,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 await releaseScaleUpReservation(error).catch(() => false);
                 const evidencePath = absPath(leaderCwd, TeamPaths.scalingRollbackFailure(sanitized, Date.now()));
                 await writeAtomic(evidencePath, JSON.stringify({ schema_version: 1, team_name: sanitized,
+                    instance_id: originalInstanceId,
                     error, cleanup_failures: cleanupFailures, recorded_at: new Date().toISOString() }, null, 2));
                 return { ok: false, error: `${error}; rollback incomplete (${cleanupFailures.join(', ')}) evidence=${evidencePath}` };
             }
@@ -400,6 +591,9 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
             return { ok: false, error };
         };
         for (let i = 0; i < count; i++) {
+            if (!await assertScaleUpEffectsAuthority()) {
+                return await rollbackScaleUp('scale_up_instance_authority_lost');
+            }
             // Skip past any colliding worker names so stale next_worker_index
             // values self-heal instead of causing a permanent failure loop.
             const maxSkip = config.workers.length + count;
@@ -436,7 +630,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 ? (config.workers[config.workers.length - 1]?.pane_id ?? config.leader_pane_id ?? '')
                 : (config.leader_pane_id ?? '');
             const splitDirection = splitTarget === (config.leader_pane_id ?? '') ? '-h' : '-v';
-            const splitTargetError = validateSplitTargetPaneInConfiguredSession(splitTarget, config.tmux_session);
+            const splitTargetError = await validateSplitTargetPaneInConfiguredSession(splitTarget, config.tmux_session, config.tmux_server_identity);
             if (splitTargetError) {
                 return await rollbackScaleUp(splitTargetError);
             }
@@ -588,24 +782,27 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                         return await rollbackScaleUp(`Failed to install worker overlay for ${workerName}: ${reason}`);
                     }
                 }
-                // Allocate an empty pane first so the exact pane identity can be bound to
-                // the durable launch attempt before any provider command executes.
-                const result = tmuxSpawn([
-                    'split-window', splitDirection, '-t', splitTarget, '-d', '-P', '-F', '#{pane_id}', '-c', workerCwd,
-                ]);
-                if (result.status !== 0) {
-                    return await rollbackScaleUp(`Failed to create tmux pane for ${workerName}: ${(result.stderr || '').trim()}`);
+                // Allocate an empty pane through the guarded provider API so the exact
+                // server incarnation remains bound from split through launch.
+                const splitEvidence = await splitTeamWorkerPaneWithEvidence(splitTarget, splitDirection === '-h' ? 'right' : 'down', workerCwd, config.tmux_session.startsWith('cmux:') ? 'cmux' : 'tmux', config.tmux_server_identity);
+                if (!splitEvidence.commandSucceeded) {
+                    return await rollbackScaleUp(`Failed to create pane for ${workerName}: ${splitEvidence.stderr || 'split_unverified'}`);
                 }
-                const paneId = (result.stdout || '').trim().split('\n')[0]?.trim();
-                if (!paneId || !paneId.startsWith('%')) {
-                    return await rollbackScaleUp(`Failed to capture pane ID for ${workerName}`, undefined, `unaddressable_spawned_pane:${(result.stdout || '').trim() || '<missing>'}`);
+                const paneId = splitEvidence.paneId?.trim();
+                if (!paneId || (splitEvidence.provider === 'tmux' && !paneId.startsWith('%'))) {
+                    return await rollbackScaleUp(`Failed to capture pane ID for ${workerName}`, undefined, `unaddressable_spawned_pane:${splitEvidence.rawOutput.trim() || '<missing>'}`);
                 }
+                pendingPanes.set(paneId, workerName);
+                paneWorkerNames.set(paneId, workerName);
                 const ownershipResult = await adoptWorkerPaneOwnership({
                     provider: paneId.startsWith('%') ? 'tmux' : 'cmux',
                     providerTarget: config.tmux_session,
                     paneId,
                     leaderPaneId: config.leader_pane_id ?? '',
                     reservedPaneIds: config.workers.map(worker => worker.pane_id).filter((id) => Boolean(id)),
+                    ...(config.tmux_server_identity
+                        ? { tmuxServerIdentity: config.tmux_server_identity }
+                        : {}),
                 });
                 if (!ownershipResult.ok) {
                     return await rollbackScaleUp(`Failed to prove pane ownership for ${workerName}: ${ownershipResult.reason}`, undefined, `unaddressable_spawned_pane:${paneId}`);
@@ -616,6 +813,7 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     startupContext = await spawnOwnedWorkerInPane(config.tmux_session, ownershipResult.ownership, {
                         teamName: sanitized,
                         workerName,
+                        instanceId: originalInstanceId,
                         envVars: extraEnv,
                         launchArgs: [...launchDescriptor.args],
                         launchBinary: launchDescriptor.binary,
@@ -624,22 +822,19 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                         launchBootstrapPath: resolveRuntimeCliPath(),
                         launchStateCwd: leaderCwd,
                         launchContext: { kind: 'initial' },
+                        ...(ownershipResult.ownership.tmuxServerIdentity
+                            ? { tmuxServerIdentity: ownershipResult.ownership.tmuxServerIdentity }
+                            : {}),
                     });
                 }
                 catch (error) {
-                    return await rollbackScaleUp(`Failed durable worker launch for ${workerName}: ${error instanceof Error ? error.message : String(error)}`, paneId);
+                    const launchError = error instanceof Error ? error.message : String(error);
+                    if (launchError.startsWith('worker_launch_cleanup_unverified:')) {
+                        unresolvedLaunchPanes.add(paneId);
+                    }
+                    return await rollbackScaleUp(`Failed durable worker launch for ${workerName}: ${launchError}`, paneId);
                 }
                 launchContexts.set(paneId, startupContext);
-                // Get PID
-                let panePid;
-                try {
-                    const pidResult = tmuxSpawn(['display-message', '-t', paneId, '-p', '#{pane_pid}']);
-                    const pidStr = (pidResult.stdout || '').trim();
-                    const parsed = Number.parseInt(pidStr, 10);
-                    if (Number.isFinite(parsed))
-                        panePid = parsed;
-                }
-                catch { /* best-effort pid lookup */ }
                 // The starting reservation already persisted role and immutable launch identity.
                 const workerInfo = {
                     name: workerName,
@@ -649,7 +844,6 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     worker_cli: launchDescriptor.provider,
                     launch_descriptor: launchDescriptor,
                     operational_state: 'active',
-                    pid: panePid,
                     pane_id: paneId,
                     launch_attempt_id: startupContext.attempt.attempt_id,
                     working_dir: workerCwd,
@@ -663,11 +857,17 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                     } : {}),
                 };
                 addedWorkers.push(workerInfo);
+                pendingPanes.delete(paneId);
                 await teamWriteWorkerIdentity(sanitized, workerName, workerInfo, leaderCwd);
                 // Wait for worker readiness
                 const readyTimeoutMs = resolveWorkerReadyTimeoutMs(env);
                 const skipReadyWait = env.OMC_TEAM_SKIP_READY_WAIT === '1';
-                if (!skipReadyWait) {
+                // tmux pane IDs are only meaningful on the captured server incarnation;
+                // waitForPaneReady is an observational legacy helper without an
+                // identity argument, so do not query tmux by pane ID here. The owned
+                // launch protocol already proves provider startup; retain the legacy
+                // readiness probe only for CMUX surfaces.
+                if (!skipReadyWait && !paneId.startsWith('%')) {
                     try {
                         await waitForPaneReady(paneId, { timeoutMs: readyTimeoutMs, provider: workerAgentType });
                     }
@@ -699,7 +899,26 @@ export async function scaleUpOwned(teamName, count, agentType, tasks, cwd, env =
                 state_revision: configRevision + 1, updated_at: new Date().toISOString() },
         };
         try {
-            if (!await saveScaleUpConfig(committedConfig, configRevision)) {
+            const commitAuthority = await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
+                const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
+                const reservation = current ? scaleUpAttempt(current.config) : undefined;
+                if (!current || !reservation || reservation.operation_id !== operationId
+                    || reservation.phase !== 'effects'
+                    || reservation.pid !== process.pid || reservation.process_started_at !== processStartedAt)
+                    return false;
+                try {
+                    await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+                }
+                catch {
+                    return false;
+                }
+                const reservationInstanceId = reservation.instance_id;
+                if (!reservationInstanceId
+                    || reservationInstanceId.toLowerCase() !== originalInstanceId.toLowerCase())
+                    return false;
+                return true;
+            });
+            if (!commitAuthority || !await saveScaleUpConfig(committedConfig, configRevision)) {
                 return await rollbackScaleUp('Scale-up config commit lost its revision: stale_state_revision');
             }
             config = committedConfig;
@@ -761,6 +980,9 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         if (!loadedConfig) {
             return { ok: false, error: `Team ${sanitized} not found` };
         }
+        if (!loadedConfig.instance_id)
+            return { ok: false, error: 'team_instance_authority_missing' };
+        let originalInstanceId = loadedConfig.instance_id;
         if (loadedConfig.active_recovery || scaleUpFenceBlocks(loadedConfig))
             return { ok: false, error: 'team_mutation_busy' };
         let config = loadedConfig;
@@ -811,24 +1033,40 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             return { ok: false, error: 'Cannot remove all workers — at least 1 must remain' };
         }
         let operationId = randomUUID();
-        const workspaceHash = createHash('sha256').update(leaderCwd).digest('hex');
-        const lifecycleLock = absPath(leaderCwd, TeamPaths.recoveryLifecycleLock(workspaceHash, sanitized));
         let selectedNames = targetWorkers.map(worker => worker.name);
-        const workerIdentity = (worker) => ({
-            name: worker.name,
-            ...(worker.pane_id ? { pane_id: worker.pane_id } : {}),
-            ...(worker.worktree_path ? { worktree_path: worker.worktree_path } : {}),
-            ...(worker.worktree_created !== undefined ? { worktree_created: worker.worktree_created } : {}),
-        });
+        const workerIdentity = (worker) => {
+            const launchDescriptor = worker.launch_descriptor
+                ? { ...worker.launch_descriptor, args: [...worker.launch_descriptor.args] }
+                : undefined;
+            return {
+                name: worker.name,
+                ...(worker.pane_id ? { pane_id: worker.pane_id } : {}),
+                ...(worker.worktree_path ? { worktree_path: worker.worktree_path } : {}),
+                ...(worker.worktree_created !== undefined ? { worktree_created: worker.worktree_created } : {}),
+                ...(worker.launch_attempt_id ? { launch_attempt_id: worker.launch_attempt_id } : {}),
+                ...(launchDescriptor?.provider || worker.worker_cli
+                    ? { provider: launchDescriptor?.provider ?? worker.worker_cli } : {}),
+                ...(launchDescriptor ? { launch_descriptor: launchDescriptor } : {}),
+            };
+        };
         const identitiesMatch = (workers, expected) => JSON.stringify(workers.map(workerIdentity)) === JSON.stringify(expected);
         try {
-            config = await withProcessIdentityFileLock(lifecycleLock, async () => {
+            config = await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
                 const current = await migrateTeamConfigRevision(sanitized, leaderCwd);
+                if (current) {
+                    const binding = await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+                    originalInstanceId = binding.instance_id;
+                }
                 if (!current || current.config.active_recovery || scaleUpFenceBlocks(current.config)
                     || current.config.lifecycle_state === 'shutting_down' || current.config.lifecycle_state === 'stopped') {
                     throw new Error('team_mutation_busy');
                 }
                 const existingScaleDown = current.config.active_scale_down;
+                if (existingScaleDown
+                    && (!existingScaleDown.instance_id
+                        || existingScaleDown.instance_id.toLowerCase() !== originalInstanceId.toLowerCase())) {
+                    throw new Error('team_mutation_busy');
+                }
                 // Reclaim/resume policy:
                 // - draining + dead owner: replace with new draining (no effects started)
                 // - failed + same/dead owner: RESUME the exact operation_id + workers (never retarget)
@@ -860,7 +1098,8 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                     const resumeWorkers = resumeFailed.workers;
                     const selected = resumeWorkers.map(w => current.config.workers.find(worker => worker.name === w.name));
                     // Workers may still be present (cleanup incomplete) — required for discoverability.
-                    if (selected.some((worker) => !worker))
+                    if (selected.some((worker) => !worker)
+                        || !identitiesMatch(selected, resumeWorkers))
                         throw new Error('team_mutation_busy');
                     const next = { ...current.config, state_revision: nextRevision,
                         ...(current.config.active_scale_up?.phase === 'committed' ? { active_scale_up: undefined } : {}),
@@ -894,11 +1133,12 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                     // Reconcile a committed scale-up fence: workers are provably
                     // durable, so clearing the fence is safe and idempotent.
                     ...(current.config.active_scale_up?.phase === 'committed' ? { active_scale_up: undefined } : {}),
-                    active_scale_down: {
+                    active_scale_down: ({
                         operation_id: operationId, phase: 'draining', pid: process.pid,
+                        instance_id: originalInstanceId,
                         process_started_at: processStartedAt, workers: selected.map(workerIdentity),
                         state_revision: nextRevision, created_at: now, updated_at: now,
-                    } };
+                    }) };
                 // New install or reclaim over dead draining.
                 if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd, undefined, {
                     ...(existingScaleDown ? { reclaim: { active_scale_down: true } } : {}),
@@ -910,57 +1150,115 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             });
         }
         catch (error) {
-            return { ok: false, error: error instanceof Error ? error.message : 'team_mutation_busy' };
+            return { ok: false, error: scaleInstanceError(error) };
         }
         // Bind cleanup authority to the durable fence (resume may retain a prior operation_id).
         const activeFence = config.active_scale_down;
         if (!activeFence)
             return { ok: false, error: 'team_mutation_busy' };
+        if (!activeFence.instance_id
+            || activeFence.instance_id.toLowerCase() !== originalInstanceId.toLowerCase()) {
+            return { ok: false, error: 'team_mutation_busy' };
+        }
         operationId = activeFence.operation_id;
         selectedNames = activeFence.workers.map(w => w.name);
         targetWorkers = selectedNames
             .map(name => config.workers.find(worker => worker.name === name))
             .filter(Boolean);
+        if (targetWorkers.length !== selectedNames.length
+            || !identitiesMatch(targetWorkers, activeFence.workers)) {
+            return { ok: false, error: 'team_mutation_busy' };
+        }
         const markScaleDownFailed = async (reason) => {
             let configMarkError;
+            let authorityVerified = false;
+            let authorityCheckFailed = false;
             try {
-                await withProcessIdentityFileLock(lifecycleLock, async () => {
+                await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
                     const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
-                    if (!current || current.config.active_scale_down?.operation_id !== operationId)
+                    if (!current || current.config.active_scale_down?.operation_id !== operationId) {
+                        authorityCheckFailed = true;
                         return;
+                    }
+                    await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+                    const currentAttempt = current.config.active_scale_down;
+                    if (!currentAttempt?.instance_id
+                        || currentAttempt.instance_id.toLowerCase() !== originalInstanceId.toLowerCase()
+                        || !identitiesMatch(selectedNames.map(name => current.config.workers.find(worker => worker.name === name)).filter(Boolean), currentAttempt.workers)) {
+                        authorityCheckFailed = true;
+                        return;
+                    }
+                    authorityVerified = true;
                     const nextRevision = current.stateRevision + 1;
-                    if (!await saveTeamConfigAtRevision({ ...current.config, state_revision: nextRevision, active_scale_down: {
+                    if (!await saveTeamConfigAtRevision({ ...current.config, state_revision: nextRevision, active_scale_down: ({
                             ...current.config.active_scale_down, phase: 'failed', failure_reason: reason,
                             state_revision: nextRevision, updated_at: new Date().toISOString(),
-                        } }, current.stateRevision, leaderCwd))
+                        }) }, current.stateRevision, leaderCwd))
                         configMarkError = 'config_mark_cas_failed';
                 });
             }
             catch (error) {
-                configMarkError = error instanceof Error ? error.message : String(error);
+                authorityCheckFailed = true;
+                configMarkError = scaleInstanceError(error);
             }
+            // Never write failure evidence into a replacement state root after the
+            // instance authority has disappeared or changed.
+            if (!authorityVerified && authorityCheckFailed
+                && configMarkError?.startsWith('team_instance_'))
+                return;
+            if (!authorityVerified && authorityCheckFailed && !configMarkError)
+                return;
             const evidencePath = absPath(leaderCwd, TeamPaths.scalingRollbackFailure(sanitized, Date.now()));
             await writeAtomic(evidencePath, JSON.stringify({ schema_version: 1, operation: 'scale_down',
-                operation_id: operationId, team_name: sanitized, workers: selectedNames, reason,
+                operation_id: operationId, team_name: sanitized, instance_id: originalInstanceId, workers: selectedNames, reason,
                 ...(configMarkError ? { config_mark_error: configMarkError } : {}),
                 recorded_at: new Date().toISOString() }, null, 2));
         };
-        const reserveEffects = async () => withProcessIdentityFileLock(lifecycleLock, async () => {
+        const reserveEffects = async () => withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
             const reservation = current?.config.active_scale_down;
             if (!current || reservation?.operation_id !== operationId || current.config.active_recovery || scaleUpFenceBlocks(current.config)
+                || reservation.phase !== 'draining'
+                || reservation.pid !== process.pid || reservation.process_started_at !== currentProcessStartIdentity()
                 || !identitiesMatch(selectedNames.map(name => current.config.workers.find(worker => worker.name === name)).filter(Boolean), reservation.workers))
                 return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            if (!reservation.instance_id
+                || reservation.instance_id.toLowerCase() !== originalInstanceId.toLowerCase())
+                return false;
             const nextRevision = current.stateRevision + 1;
-            const next = { ...current.config, state_revision: nextRevision, active_scale_down: {
+            const next = { ...current.config, state_revision: nextRevision, active_scale_down: ({
                     ...reservation, phase: 'effects', state_revision: nextRevision, updated_at: new Date().toISOString(),
-                } };
+                }) };
             if (!await saveTeamConfigAtRevision(next, current.stateRevision, leaderCwd))
                 return false;
             config = next;
             targetWorkers = selectedNames.map(name => next.workers.find(worker => worker.name === name)).filter(Boolean);
             return true;
         });
+        const assertScaleDownEffectsAuthority = async () => withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
+            const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
+            const reservation = current?.config.active_scale_down;
+            if (!current || !reservation || reservation.operation_id !== operationId
+                || reservation.phase !== 'effects'
+                || reservation.pid !== process.pid
+                || reservation.process_started_at !== currentProcessStartIdentity())
+                return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            return Boolean(reservation.instance_id
+                && reservation.instance_id.toLowerCase() === originalInstanceId.toLowerCase()
+                && identitiesMatch(selectedNames.map(name => current.config.workers.find(worker => worker.name === name)).filter(Boolean), reservation.workers));
+        }).catch(() => false);
         const unaddressableWorkers = targetWorkers
             .filter(worker => typeof worker.pane_id !== 'string' || worker.pane_id.trim().length === 0)
             .map(worker => worker.name);
@@ -988,7 +1286,8 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             while (Date.now() < deadline) {
                 const allDrained = await Promise.all(targetWorkers.map(async (w) => {
                     const status = await teamReadWorkerStatus(sanitized, w.name, leaderCwd);
-                    const liveness = w.pane_id ? await getWorkerLiveness(w.pane_id) : 'unknown';
+                    const ownership = w.pane_id ? configuredPaneOwnership(config, w.pane_id, w.name) : null;
+                    const liveness = ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown';
                     return status.state === 'idle' || status.state === 'done' || liveness === 'dead';
                 }));
                 if (allDrained.every(Boolean))
@@ -996,7 +1295,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 await new Promise(r => setTimeout(r, 2_000));
             }
         }
-        if (!await reserveEffects()) {
+        if (!await reserveEffects().catch(() => false)) {
             await markScaleDownFailed('scale_down_fence_lost_before_effects');
             return { ok: false, error: 'team_mutation_busy' };
         }
@@ -1005,51 +1304,17 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
             const paneId = worker.pane_id;
             const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
             if (!provider || !worker.launch_attempt_id) {
-                // Legacy workers may have pane_id but no launch_attempt_id.
-                // Attempt ownership-safe pane cleanup without provider termination.
-                if (!provider) {
-                    const reason = `provider_cleanup_unverified:missing_provider:${worker.name}`;
-                    await markScaleDownFailed(reason);
-                    return { ok: false, error: reason };
-                }
-                const legacyLiveness = await getWorkerLiveness(paneId);
-                if (legacyLiveness === 'dead')
-                    continue;
-                const legacyOwnership = await adoptWorkerPaneOwnership({
-                    provider: paneId.startsWith('%') ? 'tmux' : 'cmux',
-                    providerTarget: config.tmux_session,
-                    paneId,
-                    leaderPaneId: config.leader_pane_id ?? '',
-                    reservedPaneIds: config.workers
-                        .filter(candidate => candidate.name !== worker.name)
-                        .map(candidate => candidate.pane_id)
-                        .filter((id) => Boolean(id)),
-                });
-                if (!legacyOwnership.ok) {
-                    const reason = `pane_cleanup_failed:${worker.name}:${legacyOwnership.reason}`;
-                    await markScaleDownFailed(reason);
-                    return { ok: false, error: reason };
-                }
-                try {
-                    let lastLegacyLiveness = await getWorkerLiveness(paneId);
-                    for (let attempt = 0; attempt < 2 && lastLegacyLiveness !== 'dead'; attempt++) {
-                        await killOwnedWorkerPane(legacyOwnership.ownership);
-                        lastLegacyLiveness = await getWorkerLiveness(paneId);
-                    }
-                    if (lastLegacyLiveness !== 'dead') {
-                        const reason = `pane_cleanup_failed:${worker.name}:${lastLegacyLiveness === 'alive' ? 'pane_still_alive' : 'pane_liveness_unknown'}`;
-                        await markScaleDownFailed(reason);
-                        return { ok: false, error: reason };
-                    }
-                }
-                catch (cleanupError) {
-                    const reason = `pane_cleanup_failed:${worker.name}:${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`;
-                    await markScaleDownFailed(reason);
-                    return { ok: false, error: reason };
-                }
-                continue;
+                // A pane is not provider-death authority.  Missing or corrupt launch
+                // receipts preserve the worker claim, pane, and worktree for a
+                // retryable failed operation.
+                const reason = `provider_cleanup_unverified:${worker.name}`;
+                await markScaleDownFailed(reason);
+                return { ok: false, error: reason };
             }
-            const initialPaneLiveness = await getWorkerLiveness(paneId);
+            const initialOwnership = configuredPaneOwnership(config, paneId, worker.name);
+            const initialPaneLiveness = initialOwnership
+                ? await getOwnedWorkerLiveness(initialOwnership)
+                : 'unknown';
             let paneOwnership = null;
             if (initialPaneLiveness !== 'dead') {
                 const ownershipResult = await adoptWorkerPaneOwnership({
@@ -1061,6 +1326,9 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                         .filter(candidate => candidate.name !== worker.name)
                         .map(candidate => candidate.pane_id)
                         .filter((id) => Boolean(id)),
+                    ...(config.tmux_server_identity
+                        ? { tmuxServerIdentity: config.tmux_server_identity }
+                        : {}),
                 });
                 if (!ownershipResult.ok) {
                     const reason = `pane_cleanup_failed:${worker.name}:${ownershipResult.reason}`;
@@ -1069,42 +1337,57 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 }
                 paneOwnership = ownershipResult.ownership;
             }
-            const attempt = await loadWorkerLaunchAttempt({
-                cwd: leaderCwd,
-                teamName: sanitized,
-                workerName: worker.name,
-                paneId,
-                provider,
-                attemptId: worker.launch_attempt_id,
-                runtimeCliPath: resolveRuntimeCliPath(),
-            });
+            let attempt = null;
+            try {
+                attempt = await loadWorkerLaunchAttempt({
+                    cwd: leaderCwd,
+                    teamName: sanitized,
+                    workerName: worker.name,
+                    instanceId: originalInstanceId,
+                    paneId,
+                    provider,
+                    attemptId: worker.launch_attempt_id,
+                    runtimeCliPath: resolveRuntimeCliPath(),
+                });
+            }
+            catch {
+                // Malformed/unreadable receipts are not cleanup authority.
+            }
             if (!attempt) {
                 const reason = `provider_cleanup_unverified:${worker.name}`;
                 await markScaleDownFailed(reason);
                 return { ok: false, error: reason };
             }
             let paneCleanupError = null;
-            const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'scale_down', async () => {
-                try {
-                    let lastLiveness = await getWorkerLiveness(paneId);
-                    if (lastLiveness === 'dead')
-                        return true;
-                    if (!paneOwnership)
-                        return false;
-                    for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
-                        await killOwnedWorkerPane(paneOwnership);
-                        lastLiveness = await getWorkerLiveness(paneId);
+            let cleaned = false;
+            try {
+                cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'scale_down', async () => {
+                    try {
+                        let lastLiveness = paneOwnership
+                            ? await getOwnedWorkerLiveness(paneOwnership)
+                            : initialPaneLiveness;
                         if (lastLiveness === 'dead')
                             return true;
+                        if (!paneOwnership)
+                            return false;
+                        for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
+                            await killOwnedWorkerPane(paneOwnership);
+                            lastLiveness = await getOwnedWorkerLiveness(paneOwnership);
+                            if (lastLiveness === 'dead')
+                                return true;
+                        }
+                        paneCleanupError = lastLiveness === 'alive' ? 'pane_still_alive' : 'pane_liveness_unknown';
+                        return false;
                     }
-                    paneCleanupError = lastLiveness === 'alive' ? 'pane_still_alive' : 'pane_liveness_unknown';
-                    return false;
-                }
-                catch (error) {
-                    paneCleanupError = error instanceof Error ? error.message : String(error);
-                    return false;
-                }
-            });
+                    catch (error) {
+                        paneCleanupError = error instanceof Error ? error.message : String(error);
+                        return false;
+                    }
+                });
+            }
+            catch {
+                cleaned = false;
+            }
             if (!cleaned) {
                 const reason = paneCleanupError
                     ? `pane_cleanup_failed:${worker.name}:${paneCleanupError}`
@@ -1113,7 +1396,14 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 return { ok: false, error: reason };
             }
         }
-        const liveness = await Promise.all(targetWorkers.map(async (w) => (w.pane_id ? [w.name, await getWorkerLiveness(w.pane_id)] : [w.name, 'unknown'])));
+        if (!await assertScaleDownEffectsAuthority()) {
+            await markScaleDownFailed('scale_down_instance_authority_lost_before_worktree_cleanup');
+            return { ok: false, error: 'team_mutation_busy' };
+        }
+        const liveness = await Promise.all(targetWorkers.map(async (w) => {
+            const ownership = w.pane_id ? configuredPaneOwnership(config, w.pane_id, w.name) : null;
+            return [w.name, ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown'];
+        }));
         const aliveNames = liveness.filter(([, state]) => state === 'alive').map(([name]) => name);
         if (aliveNames.length > 0) {
             const error = `Refusing to remove worker state while pane(s) are still alive: ${aliveNames.join(', ')}`;
@@ -1146,9 +1436,24 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
         }
         // Phase 5: Update config and release the durable scale-down reservation.
         const removedSet = new Set(removedNames);
-        const committed = await withProcessIdentityFileLock(lifecycleLock, async () => {
+        const committed = await withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
             const current = await readRevisionedTeamConfig(sanitized, leaderCwd);
-            if (!current || current.config.active_scale_down?.operation_id !== operationId || current.config.active_recovery || scaleUpFenceBlocks(current.config))
+            const reservation = current?.config.active_scale_down;
+            if (!current || !reservation || reservation.operation_id !== operationId
+                || reservation.phase !== 'effects'
+                || reservation.pid !== process.pid
+                || reservation.process_started_at !== currentProcessStartIdentity()
+                || current.config.active_recovery || scaleUpFenceBlocks(current.config))
+                return false;
+            try {
+                await assertScalingInstanceUnderLock(current.config, sanitized, leaderCwd, originalInstanceId);
+            }
+            catch {
+                return false;
+            }
+            if (!reservation.instance_id
+                || reservation.instance_id.toLowerCase() !== originalInstanceId.toLowerCase()
+                || !identitiesMatch(selectedNames.map(name => current.config.workers.find(worker => worker.name === name)).filter(Boolean), reservation.workers))
                 return false;
             const workers = current.config.workers.filter(worker => !removedSet.has(worker.name));
             const nextRevision = current.stateRevision + 1;
@@ -1160,7 +1465,7 @@ export async function scaleDownOwned(teamName, cwd, options = {}, env = process.
                 return false;
             config = next;
             return true;
-        });
+        }).catch(() => false);
         if (!committed) {
             await markScaleDownFailed('scale_down_config_commit_failed_after_effects');
             return { ok: false, error: 'scale_down_config_commit_failed_after_effects' };

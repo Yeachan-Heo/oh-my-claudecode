@@ -51,8 +51,13 @@ describe('package dir resolution regression (#1322, #1324)', () => {
         const snippet = getSnippetByMarker(source, 'function getPackageDir() {');
         expect(snippet).toContain('typeof __dirname !== "undefined"');
         expect(snippet).toContain('currentDirName === "bridge"');
-        expect(snippet).toContain('fileURLToPath)(import_meta.url)');
-        expect(snippet.indexOf('typeof __dirname !== "undefined"')).toBeLessThan(snippet.indexOf('fileURLToPath)(import_meta.url)'));
+        // esbuild spells the import.meta shim either inline (`import_meta.url`) or
+        // through a hoisted binding (`importMetaUrl`) depending on how the bundle
+        // groups the surrounding modules. Accept both so the ordering invariant
+        // survives unrelated bundling shifts.
+        const importMetaIndex = snippet.search(/fileURLToPath\)\((?:import_meta\.url|importMetaUrl)\)/);
+        expect(importMetaIndex).toBeGreaterThan(-1);
+        expect(snippet.indexOf('typeof __dirname !== "undefined"')).toBeLessThan(importMetaIndex);
     });
     it('bridge/cli.cjs keeps builtin skills package-dir resolution bridge-aware', () => {
         const source = readFileSync(join(REPO_ROOT, 'bridge', 'cli.cjs'), 'utf-8');
@@ -71,13 +76,15 @@ describe('package dir resolution regression (#1322, #1324)', () => {
     it('bridge/team.js keeps import.meta package-dir resolution bridge-aware', () => {
         const source = readFileSync(join(REPO_ROOT, 'bridge', 'team.js'), 'utf-8');
         const snippet = getSnippetByMarker(source, 'function getPackageDir() {');
-        expect(snippet).toContain('fileURLToPath(import.meta.url)');
         expect(snippet).toContain('currentDirName === "bridge"');
-        // esbuild numbers bundled helper imports (join7/join9/…) non-deterministically
-        // across bundle composition changes, so match the shape, not the exact alias.
+        // esbuild numbers bundled helper imports (join7/join9/…, fileURLToPath2/…)
+        // non-deterministically across bundle composition changes, so match the
+        // shape, not the exact alias.
+        const importMetaIndex = snippet.search(/fileURLToPath\d*\(import\.meta\.url\)/);
+        expect(importMetaIndex).toBeGreaterThan(-1);
         const dirnameReturn = snippet.search(/return join\d*\(__dirname2, "\.\.", "\.\."\)/);
         expect(dirnameReturn).toBeGreaterThan(-1);
-        expect(snippet.indexOf('fileURLToPath(import.meta.url)')).toBeLessThan(dirnameReturn);
+        expect(importMetaIndex).toBeLessThan(dirnameReturn);
     });
     it('loadAgentPrompt resolves prompts even when cwd is unrelated', () => {
         const sandboxDir = mkdtempSync(join(tmpdir(), 'omc-agents-path-resolution-'));

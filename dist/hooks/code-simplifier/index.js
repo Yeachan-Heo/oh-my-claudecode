@@ -11,6 +11,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from '
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { getGlobalOmcConfigCandidates } from '../../utils/paths.js';
+import { recordSimplifierTriggerShadow } from './jev-shadow.js';
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
 /** Marker filename used to prevent re-triggering within the same turn cycle */
@@ -140,6 +141,15 @@ export function processCodeSimplifier(cwd, stateDir) {
     if (files.length === 0) {
         return { shouldBlock: false, message: '' };
     }
+    // Jev advisory point "simplifier-trigger" (ticket 12): record the fire-once
+    // heuristic vs Jev's Noul in shadow mode. Fire-and-forget and twin-decided —
+    // the returned block/message below is unchanged with or without a Jev key.
+    void recordSimplifierTriggerShadow({
+        cwd,
+        stateDir,
+        files,
+        shouldBlock: true,
+    }).catch(() => { });
     writeTriggerMarker(stateDir);
     return {
         shouldBlock: true,

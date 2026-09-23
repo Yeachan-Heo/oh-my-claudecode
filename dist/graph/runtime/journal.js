@@ -12,7 +12,7 @@ import { createHash } from "crypto";
 import { join } from "path";
 import { canonicalJson } from "../descriptor.js";
 import { resolveRunDirHandle } from "./run-dir.js";
-import { openNoFollow, assertPrivateRegularFile, readContainedFileNoFollow, withContainedPath, } from "./safe-fs.js";
+import { assertPrivateRegularFile, readContainedFileNoFollow, withContainedOperations, } from "./safe-fs.js";
 import { JournalCorruptionError } from "./types.js";
 const DESCRIPTOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const JOURNAL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
@@ -91,10 +91,11 @@ export class FileJournal {
         };
         const line = `${canonicalJson(committed)}\n`;
         // O_APPEND single writeSync + fsync: one complete line per append by contract.
-        withContainedPath(runDir, "journal.jsonl", (filePath) => {
+        withContainedOperations(runDir, (operations) => {
+            const filePath = "journal.jsonl";
             let fd;
             try {
-                fd = openNoFollow(filePath, fsConstants.O_APPEND |
+                fd = operations.open(filePath, fsConstants.O_APPEND |
                     fsConstants.O_CREAT |
                     fsConstants.O_WRONLY |
                     (fsConstants.O_NONBLOCK ?? 0));

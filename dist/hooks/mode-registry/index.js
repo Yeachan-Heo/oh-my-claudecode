@@ -9,7 +9,7 @@
  * All modes store state in `.omc/state/` subdirectory for consistency.
  */
 import { existsSync, readFileSync, mkdirSync, readdirSync, statSync, rmdirSync, rmSync, } from "fs";
-import { canClearStateForSession, clearStateFileLockedIf, writeStateFileLocked } from "../../lib/mode-state-io.js";
+import { canClearStateForSession, clearStateFileLockedIf, getStateMutationLockFailureMessage, writeStateFileLocked } from "../../lib/mode-state-io.js";
 import { join, dirname } from "path";
 import { listSessionIds, resolveSessionStatePath, getSessionStateDir, getOmcRoot, } from '../../lib/worktree-paths.js';
 import { getStateSessionOwner } from '../../lib/mode-state-io.js';
@@ -377,7 +377,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
         try {
             const result = clearStateFileLockedIf(sessionStateFile, (current) => canClearStateForSession(current, sessionId) && (!expectedState || JSON.stringify(current) === JSON.stringify(expectedState)));
             if (result === 'failed' || (result === 'skipped' && existsSync(sessionStateFile)))
-                throw new Error("state mutation lock unavailable");
+                throw new Error(getStateMutationLockFailureMessage());
         }
         catch (err) {
             if (err.code !== "ENOENT") {
@@ -389,7 +389,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
         if (sessionMarkerFile) {
             try {
                 if (!clearDiscoveredJsonFile(sessionMarkerFile, sessionMarkerSnapshot, (current) => canClearStateForSession(current, sessionId)))
-                    throw new Error("state mutation lock unavailable");
+                    throw new Error(getStateMutationLockFailureMessage());
             }
             catch (err) {
                 if (err.code !== "ENOENT") {
@@ -406,7 +406,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
                 if (!markerSessionId || markerSessionId === sessionId) {
                     try {
                         if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId)))
-                            throw new Error("state mutation lock unavailable");
+                            throw new Error(getStateMutationLockFailureMessage());
                     }
                     catch (err) {
                         if (err.code !== "ENOENT") {
@@ -419,7 +419,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
                 // Malformed or unreadable session-scoped markers fail closed.
                 try {
                     if (!clearDiscoveredJsonFile(markerFile, markerSnapshot, (current) => canClearStateForSession(current, sessionId)))
-                        throw new Error("state mutation lock unavailable");
+                        throw new Error(getStateMutationLockFailureMessage());
                 }
                 catch (err) {
                     if (err.code !== "ENOENT") {
@@ -435,7 +435,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
         try {
             const result = clearStateFileLockedIf(stateFile, (current) => !expectedState || JSON.stringify(current) === JSON.stringify(expectedState));
             if (result === 'failed' || (result === 'skipped' && existsSync(stateFile)))
-                throw new Error("state mutation lock unavailable");
+                throw new Error(getStateMutationLockFailureMessage());
         }
         catch (err) {
             if (err.code !== "ENOENT") {
@@ -447,7 +447,7 @@ export function clearModeState(mode, cwd, sessionId, expectedState) {
     if (markerFile && !isSessionScopedClear) {
         try {
             if (!clearDiscoveredJsonFile(markerFile, markerSnapshot))
-                throw new Error("state mutation lock unavailable");
+                throw new Error(getStateMutationLockFailureMessage());
         }
         catch (err) {
             if (err.code !== "ENOENT")
@@ -471,7 +471,7 @@ export function clearAllModeStates(cwd) {
     const skillStatePath = join(getStateDir(cwd), "skill-active-state.json");
     try {
         if (!clearObservedJsonFile(skillStatePath))
-            throw new Error("state mutation lock unavailable");
+            throw new Error(getStateMutationLockFailureMessage());
     }
     catch (err) {
         if (err.code !== "ENOENT") {

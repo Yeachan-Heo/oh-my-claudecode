@@ -1,5 +1,58 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { runHudWatchLoop } from '../hud-watch.js';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { MAX_HUD_WATCH_INTERVAL_MS, parseHudWatchInterval, runHudWatchLoop, } from '../hud-watch.js';
+const originalSkipParse = process.env.OMC_CLI_SKIP_PARSE;
+process.env.OMC_CLI_SKIP_PARSE = '1';
+afterAll(() => {
+    if (originalSkipParse === undefined)
+        delete process.env.OMC_CLI_SKIP_PARSE;
+    else
+        process.env.OMC_CLI_SKIP_PARSE = originalSkipParse;
+});
+describe('parseHudWatchInterval', () => {
+    it.each([
+        ['1', 1],
+        ['250', 250],
+        [' 1000 ', 1_000],
+        [String(MAX_HUD_WATCH_INTERVAL_MS), MAX_HUD_WATCH_INTERVAL_MS],
+    ])('parses %j as %i milliseconds', (raw, expected) => {
+        expect(parseHudWatchInterval(raw)).toBe(expected);
+    });
+    it.each([
+        '',
+        '0',
+        '-1',
+        '1.5',
+        '100ms',
+        'abc',
+        String(MAX_HUD_WATCH_INTERVAL_MS + 1),
+        String(Number.MAX_SAFE_INTEGER),
+        `${Number.MAX_SAFE_INTEGER}0`,
+    ])('rejects invalid interval %j', (raw) => {
+        expect(() => parseHudWatchInterval(raw)).toThrow(`must be an integer between 1 and ${MAX_HUD_WATCH_INTERVAL_MS} milliseconds`);
+    });
+});
+describe('HUD interval Commander integration', () => {
+    it('uses a numeric default and rejects invalid input before the action', async () => {
+        vi.resetModules();
+        const { buildProgram } = await import('../index.js');
+        const program = buildProgram();
+        const hudCommand = program.commands.find((command) => command.name() === 'hud');
+        const intervalOption = hudCommand?.options.find((option) => option.long === '--interval');
+        expect(hudCommand).toBeDefined();
+        expect(intervalOption).toBeDefined();
+        expect(intervalOption?.defaultValue).toBe(1_000);
+        expect(typeof intervalOption?.defaultValue).toBe('number');
+        expect(intervalOption?.parseArg?.('250', intervalOption.defaultValue)).toBe(250);
+        expect(hudCommand?.helpInformation()).toContain('--interval <ms>');
+        program.configureOutput({ writeErr: () => undefined });
+        program.exitOverride();
+        hudCommand?.exitOverride();
+        await expect(program.parseAsync(['node', 'omc', 'hud', '--interval', '0'], { from: 'node' })).rejects.toMatchObject({
+            code: 'commander.invalidArgument',
+            exitCode: 1,
+        });
+    });
+});
 describe('runHudWatchLoop', () => {
     afterEach(() => {
         vi.useRealTimers();

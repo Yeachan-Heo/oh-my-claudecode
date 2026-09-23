@@ -1,15 +1,106 @@
 import { randomUUID } from 'crypto';
 import { join } from 'path';
-import { existsSync } from 'fs';
-import { readFile, readdir } from 'fs/promises';
+import { lstat, readFile, readdir } from 'fs/promises';
+import { TASK_ID_SAFE_PATTERN } from '../contracts.js';
+import { createSwallowedErrorLogger } from '../../lib/swallowed-error.js';
+const logEventAppendFailure = createSwallowedErrorLogger('team.state.tasks transitionTaskStatus appendTeamEvent failed');
+const logCompletionMarkerFailure = createSwallowedErrorLogger('team.state.tasks transitionTaskStatus completion marker failed');
+/**
+ * `depends_on` is the canonical dependency field, while `blocked_by` is kept
+ * for compatibility with older task producers. Once both fields are present
+ * they must describe the same ordered set; otherwise a reader could claim a
+ * task using one field while a monitor or writer reasons about the other.
+ */
+export function validateTaskDependencies(fields, errorMessage = 'invalid_task_dependencies') {
+    const taskId = fields.id;
+    if (taskId !== undefined
+        && (typeof taskId !== 'string'
+            || !TASK_ID_SAFE_PATTERN.test(taskId)
+            || String(Number(taskId)) !== taskId)) {
+        throw new Error(errorMessage);
+    }
+    const dependsOn = fields.depends_on;
+    const blockedBy = fields.blocked_by;
+    if (dependsOn !== undefined && !Array.isArray(dependsOn)) {
+        throw new Error(errorMessage);
+    }
+    if (blockedBy !== undefined && !Array.isArray(blockedBy)) {
+        throw new Error(errorMessage);
+    }
+    if (dependsOn !== undefined && blockedBy !== undefined
+        && (dependsOn.length !== blockedBy.length
+            || dependsOn.some((dependencyId, index) => dependencyId !== blockedBy[index]))) {
+        throw new Error(errorMessage);
+    }
+    const dependencies = (dependsOn ?? blockedBy ?? []);
+    const seen = new Set();
+    for (const dependencyId of dependencies) {
+        const numericId = typeof dependencyId === 'string' ? Number(dependencyId) : Number.NaN;
+        if (typeof dependencyId !== 'string'
+            || !TASK_ID_SAFE_PATTERN.test(dependencyId)
+            || !Number.isSafeInteger(numericId)
+            || numericId < 1
+            || String(numericId) !== dependencyId
+            || dependencyId === taskId
+            || seen.has(dependencyId)) {
+            throw new Error(errorMessage);
+        }
+        seen.add(dependencyId);
+    }
+    return dependencies;
+}
+function taskDependencyIds(task) {
+    return validateTaskDependencies(task, 'invalid_persisted_state');
+}
+/**
+ * Build the canonical persisted representation for a newly-created task.
+ *
+ * Task files are the source of truth, so every producer must use the same
+ * dependency normalization and must not persist null/undefined optional
+ * fields that readers treat as absent.
+ */
+export function createTaskRecord(id, task) {
+    const dependencyIds = validateTaskDependencies({
+        id,
+        depends_on: task.depends_on,
+        blocked_by: task.blocked_by,
+    }, 'invalid_task_dependencies');
+    const record = {
+        ...task,
+        id,
+        status: task.status ?? 'pending',
+        depends_on: [...dependencyIds],
+        version: 1,
+        created_at: new Date().toISOString(),
+    };
+    if (task.blocked_by !== undefined)
+        record.blocked_by = [...dependencyIds];
+    else
+        delete record.blocked_by;
+    // Optional wire fields historically used null as an empty value. Keep the
+    // task shape canonical without mutating the caller's object.
+    for (const key of ['owner', 'result', 'error']) {
+        if (record[key] === undefined || record[key] === null)
+            delete record[key];
+    }
+    for (const [key, value] of Object.entries(record)) {
+        if (value === undefined)
+            Reflect.deleteProperty(record, key);
+    }
+    return record;
+}
 export async function computeTaskReadiness(teamName, taskId, cwd, deps) {
     const task = await deps.readTask(teamName, taskId, cwd);
     if (!task)
         return { ready: false, reason: 'blocked_dependency', dependencies: [] };
-    const depIds = task.depends_on ?? task.blocked_by ?? [];
+    const depIds = taskDependencyIds(task);
     if (depIds.length === 0)
         return { ready: true };
     const depTasks = await Promise.all(depIds.map((depId) => deps.readTask(teamName, depId, cwd)));
+    for (const depTask of depTasks) {
+        if (depTask)
+            taskDependencyIds(depTask);
+    }
     const incomplete = depIds.filter((_, idx) => depTasks[idx]?.status !== 'completed');
     if (incomplete.length > 0)
         return { ready: false, reason: 'blocked_dependency', dependencies: incomplete };
@@ -95,6 +186,14 @@ function requiresDelegationComplianceEvidence(task) {
     const plan = task.delegation;
     return !!plan && (plan.mode === 'auto' || plan.mode === 'required' || plan.required_parallel_probe === true);
 }
+function hasValidLease(claim) {
+    if (!claim || typeof claim.owner !== 'string' || claim.owner.trim() === ''
+        || typeof claim.token !== 'string' || claim.token.trim() === ''
+        || typeof claim.leased_until !== 'string' || claim.leased_until.trim() === '') {
+        return false;
+    }
+    return Number.isFinite(Date.parse(claim.leased_until));
+}
 export async function transitionTaskStatus(taskId, from, to, claimToken, terminalData, deps) {
     if (!deps.canTransitionTaskStatus(from, to))
         return { ok: false, error: 'invalid_transition' };
@@ -109,10 +208,10 @@ export async function transitionTaskStatus(taskId, from, to, claimToken, termina
             return { ok: false, error: 'invalid_transition' };
         if (v.status !== from)
             return { ok: false, error: 'invalid_transition' };
-        if (!v.owner || !v.claim || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
+        if (!v.owner || !hasValidLease(v.claim) || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
             return { ok: false, error: 'claim_conflict' };
         }
-        if (new Date(v.claim.leased_until) <= new Date())
+        if (Date.parse(v.claim.leased_until) <= Date.now())
             return { ok: false, error: 'lease_expired' };
         const normalizedResult = typeof terminalData?.result === 'string' ? terminalData.result : undefined;
         const normalizedError = typeof terminalData?.error === 'string' ? terminalData.error : undefined;
@@ -136,33 +235,34 @@ export async function transitionTaskStatus(taskId, from, to, claimToken, termina
                 : {}),
         };
         await deps.writeAtomic(deps.taskFilePath(deps.teamName, taskId, deps.cwd), JSON.stringify(updated, null, 2));
-        if (to === 'completed') {
-            await deps.appendTeamEvent(deps.teamName, { type: 'task_completed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: undefined }, deps.cwd);
+        let eventAppended = true;
+        try {
+            if (to === 'completed') {
+                await deps.appendTeamEvent(deps.teamName, { type: 'task_completed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: undefined }, deps.cwd);
+            }
+            else if (to === 'failed') {
+                await deps.appendTeamEvent(deps.teamName, { type: 'task_failed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: updated.error || 'task_failed' }, deps.cwd);
+            }
         }
-        else if (to === 'failed') {
-            await deps.appendTeamEvent(deps.teamName, { type: 'task_failed', worker: updated.owner || 'unknown', task_id: updated.id, message_id: null, reason: updated.error || 'task_failed' }, deps.cwd);
+        catch (error) {
+            eventAppended = false;
+            logEventAppendFailure(error);
         }
-        return { ok: true, task: updated };
+        return { ok: true, task: updated, eventAppended };
     });
     if (!lock.ok)
         return { ok: false, error: 'claim_conflict' };
-    if (to === 'completed') {
-        const existing = await deps.readMonitorSnapshot(deps.teamName, deps.cwd);
-        const updated = existing
-            ? { ...existing, completedEventTaskIds: { ...(existing.completedEventTaskIds ?? {}), [taskId]: true } }
-            : {
-                taskStatusById: {},
-                workerAliveByName: {},
-                workerLivenessByName: {},
-                workerStateByName: {},
-                workerTurnCountByName: {},
-                workerTaskIdByName: {},
-                mailboxNotifiedByMessageId: {},
-                completedEventTaskIds: { [taskId]: true },
-            };
-        await deps.writeMonitorSnapshot(deps.teamName, updated, deps.cwd);
+    if (!lock.value.ok)
+        return lock.value;
+    if (to === 'completed' && lock.value.eventAppended) {
+        try {
+            await deps.markTaskCompleted(deps.teamName, lock.value.task.id, deps.cwd);
+        }
+        catch (error) {
+            logCompletionMarkerFailure(error);
+        }
     }
-    return lock.value;
+    return { ok: true, task: lock.value.task };
 }
 export async function releaseTaskClaim(taskId, claimToken, _workerName, deps) {
     const lock = await deps.withTaskClaimLock(deps.teamName, taskId, deps.cwd, async () => {
@@ -174,10 +274,10 @@ export async function releaseTaskClaim(taskId, claimToken, _workerName, deps) {
             return { ok: true, task: v };
         if (v.status === 'completed' || v.status === 'failed')
             return { ok: false, error: 'already_terminal' };
-        if (!v.owner || !v.claim || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
+        if (!v.owner || !hasValidLease(v.claim) || v.claim.owner !== v.owner || v.claim.token !== claimToken) {
             return { ok: false, error: 'claim_conflict' };
         }
-        if (new Date(v.claim.leased_until) <= new Date())
+        if (Date.parse(v.claim.leased_until) <= Date.now())
             return { ok: false, error: 'lease_expired' };
         const updated = {
             ...v,
@@ -195,36 +295,118 @@ export async function releaseTaskClaim(taskId, claimToken, _workerName, deps) {
 }
 export async function listTasks(teamName, cwd, deps) {
     const tasksRoot = join(deps.teamDir(teamName, cwd), 'tasks');
-    if (!existsSync(tasksRoot))
-        return [];
-    const entries = await readdir(tasksRoot, { withFileTypes: true });
-    const matched = entries.flatMap((entry) => {
-        if (!entry.isFile())
+    const invalidState = (path, cause) => deps.stateError?.(path, cause) ?? new Error('invalid_persisted_state');
+    let entries;
+    try {
+        entries = await readdir(tasksRoot, { withFileTypes: true });
+    }
+    catch (error) {
+        if (error.code === 'ENOENT')
             return [];
-        const match = /^(?:task-)?(\d+)\.json$/.exec(entry.name);
+        throw invalidState(tasksRoot, 'unreadable');
+    }
+    const candidates = new Map();
+    for (const entry of entries) {
+        const canonical = /^task-(\d{1,20})\.json$/.exec(entry.name);
+        const legacy = /^(\d{1,20})\.json$/.exec(entry.name);
+        const match = canonical ?? legacy;
         if (!match)
-            return [];
-        return [{ id: match[1], fileName: entry.name }];
-    });
-    const loaded = await Promise.all(matched.map(async ({ id, fileName }) => {
+            continue;
+        const id = match[1];
+        const current = candidates.get(id) ?? {};
+        if (canonical)
+            current.canonical = entry.name;
+        else
+            current.legacy = entry.name;
+        candidates.set(id, current);
+    }
+    const tasks = [];
+    for (const [id, paths] of candidates) {
+        let fileName = paths.canonical ?? paths.legacy;
+        if (!fileName)
+            continue;
+        let path = join(tasksRoot, fileName);
+        let fileStat;
         try {
-            const raw = await readFile(join(tasksRoot, fileName), 'utf8');
-            const parsed = JSON.parse(raw);
-            if (!deps.isTeamTask(parsed))
-                return null;
-            const normalized = deps.normalizeTask(parsed);
-            if (normalized.id !== id)
-                return null;
-            return normalized;
+            fileStat = await lstat(path);
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                if (fileName === paths.canonical && paths.legacy) {
+                    fileName = paths.legacy;
+                    path = join(tasksRoot, fileName);
+                    try {
+                        fileStat = await lstat(path);
+                    }
+                    catch (legacyError) {
+                        if (legacyError.code === 'ENOENT')
+                            continue;
+                        throw invalidState(path, 'unreadable');
+                    }
+                }
+                else {
+                    continue;
+                }
+            }
+            else {
+                throw invalidState(path, 'unreadable');
+            }
+        }
+        if (fileStat.isSymbolicLink() || !fileStat.isFile()) {
+            throw invalidState(path, 'unreadable');
+        }
+        let raw;
+        try {
+            raw = await readFile(path, 'utf8');
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                if (fileName === paths.canonical && paths.legacy) {
+                    fileName = paths.legacy;
+                    path = join(tasksRoot, fileName);
+                    try {
+                        const legacyStat = await lstat(path);
+                        if (legacyStat.isSymbolicLink() || !legacyStat.isFile()) {
+                            throw invalidState(path, 'unreadable');
+                        }
+                        raw = await readFile(path, 'utf8');
+                    }
+                    catch (legacyError) {
+                        if (legacyError.code === 'ENOENT')
+                            continue;
+                        if (legacyError instanceof Error && legacyError.message.startsWith('invalid_persisted_state')) {
+                            throw legacyError;
+                        }
+                        throw invalidState(path, 'unreadable');
+                    }
+                }
+                else {
+                    continue;
+                }
+            }
+            else {
+                throw invalidState(path, 'unreadable');
+            }
+        }
+        let parsed;
+        try {
+            parsed = JSON.parse(raw);
         }
         catch {
-            return null;
+            throw invalidState(join(tasksRoot, fileName), 'json');
         }
-    }));
-    const tasks = [];
-    for (const task of loaded) {
-        if (task)
-            tasks.push(task);
+        if (!deps.isTeamTask(parsed))
+            throw invalidState(path, 'schema');
+        const task = deps.normalizeTask(parsed);
+        if (task.id !== id)
+            throw invalidState(path, 'schema');
+        try {
+            taskDependencyIds(task);
+        }
+        catch {
+            throw invalidState(path, 'schema');
+        }
+        tasks.push(task);
     }
     tasks.sort((a, b) => Number(a.id) - Number(b.id));
     return tasks;

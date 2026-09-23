@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireSuccessorOwnerEpoch, checkOwnerFence, currentProcessStartIdentity, isActiveRecoveryEffect, isProcessIdentityDead, isValidProcessStartIdentity, isFencedServiceMaintenance, isFreshRecoveryElection, isSameAttemptSuccessorRebind, publishOwnerEpoch, processStartIdentityForPlatform, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity, } from '../team-owner-epoch.js';
+import { acquireSuccessorOwnerEpoch, checkOwnerFence, currentProcessStartIdentity, currentStrictProcessStartIdentity, isActiveRecoveryEffect, isProcessIdentityDead, isValidProcessStartIdentity, isValidStrictProcessStartIdentity, isFencedServiceMaintenance, isFreshRecoveryElection, isSameAttemptSuccessorRebind, observeProcessIdentity, publishOwnerEpoch, strictProcessStartIdentityForPlatform, processStartIdentityForPlatform, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity, } from '../team-owner-epoch.js';
 import { TeamPaths, absPath } from '../state-paths.js';
 let cwd;
 let restoreFixtureEnv;
@@ -92,12 +92,75 @@ describe('runtime owner epochs', () => {
         const missingHelpers = vi.fn(() => { throw new Error('missing'); });
         expect(processStartIdentityForPlatform(42, 'darwin', missingHelpers)).toBeNull();
     });
+    it('binds strict Linux identities to boot id and start ticks', () => {
+        const fields = Array.from({ length: 20 }, () => '1');
+        fields[18] = '456';
+        const read = vi.fn((path) => path.endsWith('/stat')
+            ? `42 (node) S ${fields.join(' ')}`
+            : 'boot-id\n');
+        const exec = vi.fn();
+        expect(strictProcessStartIdentityForPlatform(42, 'linux', exec, read)).toBe('linux:boot-id:456');
+        expect(read).toHaveBeenCalledWith('/proc/42/stat', 'utf8');
+        expect(read).toHaveBeenCalledWith('/proc/sys/kernel/random/boot_id', 'utf8');
+        expect(exec).not.toHaveBeenCalled();
+        expect(isValidStrictProcessStartIdentity('linux:boot-id:456', 'linux')).toBe(true);
+        expect(isValidStrictProcessStartIdentity('linux:456', 'linux')).toBe(false);
+        const invalidBoot = vi.fn((path) => path.endsWith('/stat') ? `42 (node) S ${fields.join(' ')}` : 'boot id\n');
+        expect(strictProcessStartIdentityForPlatform(42, 'linux', exec, invalidBoot)).toBeNull();
+    });
+    it('rejects invalid strict pids and never uses the Darwin ps fallback', () => {
+        const exec = vi.fn(() => 'Wed Jul 15 23:00:00 2026\n');
+        const read = vi.fn(() => '');
+        expect(strictProcessStartIdentityForPlatform(0, 'linux', exec, read)).toBeNull();
+        expect(strictProcessStartIdentityForPlatform(1.5, 'linux', exec, read)).toBeNull();
+        expect(strictProcessStartIdentityForPlatform(2_147_483_648, 'darwin', exec, read)).toBeNull();
+        expect(strictProcessStartIdentityForPlatform(process.pid, 'win32', exec, read)).toBeNull();
+        expect(strictProcessStartIdentityForPlatform(process.pid, 'aix', exec, read)).toBeNull();
+        expect(exec).not.toHaveBeenCalled();
+        expect(isValidStrictProcessStartIdentity('darwin:1783701296:0', 'darwin')).toBe(false);
+        expect(isValidStrictProcessStartIdentity('win32:638878752000000000', 'win32')).toBe(false);
+    });
+    it('uses the native Darwin probe for a current process when available', () => {
+        const exec = vi.fn(() => 'Wed Jul 15 23:00:00 2026\n');
+        const identity = strictProcessStartIdentityForPlatform(process.pid, 'darwin', exec);
+        expect(exec).not.toHaveBeenCalled();
+        if (process.platform === 'darwin') {
+            expect(identity).toMatch(/^darwin:[1-9]\d*:[1-9]\d*$/);
+            expect(currentStrictProcessStartIdentity()).toBe(identity);
+        }
+        else {
+            expect(identity).toBeNull();
+        }
+    });
     it('does not declare a live Darwin process dead when precision falls back to seconds', () => {
         if (process.platform !== 'darwin')
             return;
         expect(start).toMatch(/^darwin:[1-9]\d*:0$/);
         const nativePrecisionIdentity = start.replace(/:0$/, ':123456');
         expect(isProcessIdentityDead({ pid: process.pid, process_started_at: nativePrecisionIdentity })).toBe(false);
+    });
+    it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('observes only the recorded strict process incarnation', () => {
+        const identity = currentStrictProcessStartIdentity();
+        expect(isValidStrictProcessStartIdentity(identity)).toBe(true);
+        expect(observeProcessIdentity({ pid: process.pid, process_started_at: identity })).toBe('matching');
+        const parts = identity.split(':');
+        parts[parts.length - 1] = parts[parts.length - 1] === '1' ? '2' : '1';
+        expect(observeProcessIdentity({ pid: process.pid, process_started_at: parts.join(':') })).toBe('dead');
+        expect(observeProcessIdentity({ pid: process.pid, process_started_at: 'unverified' })).toBe('unknown');
+    });
+    it.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('distinguishes a missing process from denied observation', () => {
+        const identity = currentStrictProcessStartIdentity();
+        expect(isValidStrictProcessStartIdentity(identity)).toBe(true);
+        const kill = vi.spyOn(process, 'kill');
+        try {
+            kill.mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+            expect(observeProcessIdentity({ pid: process.pid, process_started_at: identity })).toBe('unknown');
+            kill.mockImplementation(() => { throw Object.assign(new Error('missing'), { code: 'ESRCH' }); });
+            expect(observeProcessIdentity({ pid: process.pid, process_started_at: identity })).toBe('dead');
+        }
+        finally {
+            kill.mockRestore();
+        }
     });
     it('refuses a successor while a process remains live even when its heartbeat is stale, but allows confirmed-dead takeover', () => {
         publishOwnerEpoch(cwd, teamName, 1, { pid: process.pid, processStartedAt: start, nonce: 'live', heartbeat: { observed_at: '2000-01-01T00:00:00.000Z' } });

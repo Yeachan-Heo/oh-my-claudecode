@@ -24,20 +24,18 @@ jobs:
       contents: write
     runs-on: ubuntu-latest
     env:
-      RECOVERY_TAG: v4.15.4
-      RECOVERY_SHA: cb6932311ac956687e3c66bb6a48d52a8df14d56
-      RECOVERY_INPUT_TAG: ${{ inputs.tag }}
-      RECOVERY_INPUT_SHA: ${{ inputs.sha }}
+      RECOVERY_TAG: ${{ inputs.tag }}
+      RECOVERY_SHA: ${{ inputs.sha }}
     steps:
       - name: Validate recovery inputs
         run: |
-          test "$RECOVERY_INPUT_TAG" = "v4.15.4"
-          test "$RECOVERY_INPUT_SHA" = "cb6932311ac956687e3c66bb6a48d52a8df14d56"
+          printf '%s' "$RECOVERY_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+          printf '%s' "$RECOVERY_SHA" | grep -Eq '^[0-9a-f]{40}$'
 
       - name: Checkout recovery source
         uses: actions/checkout@v4
         with:
-          ref: cb6932311ac956687e3c66bb6a48d52a8df14d56
+          ref: ${{ inputs.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -97,7 +95,7 @@ jobs:
       - name: Upload recovered release evidence
         uses: actions/upload-artifact@v4
         with:
-          name: npm-release-boundary-recovery-v4.15.4
+          name: npm-release-boundary-recovery-${{ inputs.tag }}
           path: |
             ${{ runner.temp }}/recovery-archive/*.tgz
             ${{ runner.temp }}/recovery-evidence.json
@@ -127,10 +125,10 @@ jobs:
       - name: Create recovered GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v4.15.4
+          tag_name: ${{ inputs.tag }}
           body_path: release-notes.md
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(inputs.tag, 'alpha') || contains(inputs.tag, 'beta') || contains(inputs.tag, 'rc') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

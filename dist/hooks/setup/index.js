@@ -95,13 +95,17 @@ export function setEnvironmentVariables() {
  *
  * This function reads the plugin's hooks.json and rewrites every command of the
  * current form:
- *   sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
  * or stale absolute-shell cache form:
- *   "/bin/sh" "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   "/bin/sh" "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... [args]
  * or legacy form:
  *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
  * to:
- *   node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
+ *
+ * The braced placeholder is required: Claude Code substitutes it itself, while
+ * the bare `$CLAUDE_PLUGIN_ROOT` spelling only expands when a POSIX shell runs
+ * the command — which the direct-node Windows form deliberately avoids (#4042).
  *
  * The file is only written when at least one command was actually changed, so
  * the function is safe to call on every init (idempotent after first patch).
@@ -113,13 +117,16 @@ export function patchHooksJsonForWindows(pluginRoot) {
     try {
         const content = readFileSync(hooksJsonPath, 'utf-8');
         const data = JSON.parse(content);
+        // Either spelling of the placeholder is accepted on input so that manifests
+        // written by any earlier version are repaired; output is always braced.
+        const ROOT = String.raw `(?:\$\{CLAUDE_PLUGIN_ROOT\}|\$CLAUDE_PLUGIN_ROOT)`;
         // Matches current hooks.json:
-        // sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [optional args]
+        // sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... /scripts/X.mjs [optional args]
         // Also matches older hotfix cache entries that hardcoded "/bin/sh".
-        const currentPattern = /^(?:"\/bin\/sh"|sh) "\$CLAUDE_PLUGIN_ROOT"\/scripts\/find-node\.sh "\$CLAUDE_PLUGIN_ROOT"\/scripts\/run\.cjs "\$CLAUDE_PLUGIN_ROOT"\/scripts\/([^"\s]+)"?(.*)$/;
+        const currentPattern = new RegExp(String.raw `^(?:"\/bin\/sh"|sh) "${ROOT}"\/scripts\/find-node\.sh "${ROOT}"\/scripts\/run\.cjs "${ROOT}"\/scripts\/([^"\s]+)"?(.*)$`);
         // Matches legacy hooks.json:
         // sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [optional args]
-        const legacyPattern = /^sh "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/find-node\.sh" "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/([^"\s]+)"?(.*)$/;
+        const legacyPattern = new RegExp(String.raw `^sh "${ROOT}\/scripts\/find-node\.sh" "${ROOT}\/scripts\/([^"\s]+)"?(.*)$`);
         let patched = false;
         for (const groups of Object.values(data.hooks ?? {})) {
             for (const group of groups) {
@@ -127,7 +134,7 @@ export function patchHooksJsonForWindows(pluginRoot) {
                     if (typeof hook.command === 'string') {
                         const m = hook.command.match(currentPattern) ?? hook.command.match(legacyPattern);
                         if (m) {
-                            hook.command = `node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/${m[1]}${m[2]}`;
+                            hook.command = `node "\${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "\${CLAUDE_PLUGIN_ROOT}"/scripts/${m[1]}${m[2]}`;
                             patched = true;
                         }
                     }

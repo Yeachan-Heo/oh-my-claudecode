@@ -209,6 +209,14 @@ export declare function getSubscriptionInfo(): {
  */
 export declare function buildUserAgent(clientVersion?: string): string | undefined;
 /**
+ * Build a synthetic UsageApiResponse from the `anthropic-ratelimit-unified-*`
+ * response headers of a /v1/messages call. Header utilization is a 0..1 fraction
+ * while the usage body (and parseUsageResponse) works in 0..100, so scale by 100.
+ * Reset headers are unix epoch seconds. Returns null when neither window is
+ * present. Exported for unit testing.
+ */
+export declare function rateLimitHeadersToUsage(headers: Record<string, string | string[] | undefined>): UsageApiResponse | null;
+/**
  * Parse API response into RateLimits
  */
 export declare function parseUsageResponse(response: UsageApiResponse, options?: ParseUsageResponseOptions): RateLimits | null;

@@ -9,15 +9,18 @@
  * the monitor loop.
  */
 import { existsSync } from 'fs';
-import { readFile, mkdir } from 'fs/promises';
+import { readFile, mkdir, rm, writeFile, rename } from 'fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'path';
 import { performance } from 'perf_hooks';
 import { CANONICAL_TEAM_ROLES, KNOWN_AGENT_NAMES } from '../shared/types.js';
 import { WORKER_NAME_SAFE_PATTERN } from './contracts.js';
-import { TeamPaths, absPath } from './state-paths.js';
+import { TeamPaths, absPath, canonicalTeamCwd, canonicalTeamStatePath } from './state-paths.js';
 import { withProcessIdentityFileLock } from './process-identity-lock.js';
 import { normalizeTeamManifest, resolveMaxWorkers } from './governance.js';
 import { canonicalizeTeamConfigWorkers } from './worker-canonicalization.js';
+import { assertTeamInstanceUnderLock, createTeamInstanceBinding, disposeTeamInstanceUnderLock } from './team-instance.js';
+import { isValidLeaderSessionId, isValidTeamInstanceId, isValidTmuxServerIdentity } from './types.js';
 // ---------------------------------------------------------------------------
 // State I/O helpers (self-contained, no external deps beyond fs)
 // ---------------------------------------------------------------------------
@@ -41,19 +44,25 @@ async function readJsonFileState(filePath) {
     }
 }
 async function writeAtomic(filePath, data) {
-    const { writeFile } = await import('fs/promises');
     await mkdir(dirname(filePath), { recursive: true });
-    const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-    await writeFile(tmpPath, data, 'utf-8');
-    const { rename } = await import('fs/promises');
-    await rename(tmpPath, filePath);
+    const tmpPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    try {
+        await writeFile(tmpPath, data, 'utf-8');
+        await rename(tmpPath, filePath);
+    }
+    finally {
+        await rm(tmpPath, { force: true }).catch(() => undefined);
+    }
 }
 // ---------------------------------------------------------------------------
 // Config / Manifest readers
 // ---------------------------------------------------------------------------
 function configFromManifest(manifest) {
+    assertValidTmuxServerIdentity(manifest.tmux_server_identity);
     return {
         name: manifest.name,
+        instance_id: manifest.instance_id,
+        tmux_server_identity: manifest.tmux_server_identity,
         task: manifest.task,
         agent_type: 'claude',
         policy: manifest.policy,
@@ -157,17 +166,22 @@ function isRecoveryAttempt(value) {
 }
 function isScaleUpAttempt(value) {
     return isRecord(value) && isNonEmptyString(value.operation_id) && ['reserved', 'effects', 'committed', 'failed'].includes(value.phase)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id))
         && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision)
         && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
         && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
 }
 function isScaleDownAttempt(value) {
     return isRecord(value) && isNonEmptyString(value.operation_id) && ['draining', 'effects', 'failed'].includes(value.phase)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id))
         && isSafeCounter(value.pid) && value.pid > 0 && isNonEmptyString(value.process_started_at) && Array.isArray(value.workers)
         && value.workers.every(worker => isRecord(worker) && isNonEmptyString(worker.name)
             && (worker.pane_id === undefined || typeof worker.pane_id === 'string')
             && (worker.worktree_path === undefined || typeof worker.worktree_path === 'string')
-            && (worker.worktree_created === undefined || typeof worker.worktree_created === 'boolean'))
+            && (worker.worktree_created === undefined || typeof worker.worktree_created === 'boolean')
+            && (worker.launch_attempt_id === undefined || isNonEmptyString(worker.launch_attempt_id))
+            && (worker.provider === undefined || ['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'].includes(worker.provider))
+            && (worker.launch_descriptor === undefined || isLaunchDescriptor(worker.launch_descriptor)))
         && isSafeCounter(value.state_revision) && isTimestamp(value.created_at) && isTimestamp(value.updated_at)
         && (value.failure_reason === undefined || typeof value.failure_reason === 'string');
 }
@@ -179,13 +193,16 @@ function isServiceDescriptor(value) {
 }
 function isShutdownAttempt(value) {
     return isRecord(value) && isNonEmptyString(value.nonce) && isSafeCounter(value.pid) && value.pid > 0
-        && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at);
+        && isNonEmptyString(value.process_started_at) && isSafeCounter(value.state_revision) && isTimestamp(value.created_at)
+        && (value.instance_id === undefined || isValidTeamInstanceId(value.instance_id));
 }
 function isAllDeadRecovery(value) {
     return isRecord(value) && isTimestamp(value.detected_at) && isTimestamp(value.deadline_at) && isSafeCounter(value.state_revision);
 }
 function isTeamConfig(value, requireRevision, expectedTeamName) {
     if (!isRecord(value) || !isNonEmptyString(value.name) || (expectedTeamName !== undefined && value.name !== expectedTeamName)
+        || (value.instance_id !== undefined && !isValidTeamInstanceId(value.instance_id))
+        || (value.tmux_server_identity !== undefined && !isValidTmuxServerIdentity(value.tmux_server_identity))
         || !isNonEmptyString(value.agent_type)
         || (value.task !== undefined && typeof value.task !== 'string')
         || (value.worker_launch_mode !== undefined && !['interactive', 'prompt'].includes(value.worker_launch_mode))
@@ -194,6 +211,7 @@ function isTeamConfig(value, requireRevision, expectedTeamName) {
         || !Array.isArray(value.workers) || value.worker_count !== value.workers.length
         || !value.workers.every(isWorkerInfo) || !hasUniqueWorkerIdentity(value.workers)
         || !isTimestamp(value.created_at) || !isNonEmptyString(value.tmux_session)
+        || (value.leader_session_id !== undefined && !isValidLeaderSessionId(value.leader_session_id))
         || (value.next_task_id !== undefined && !isSafeCounter(value.next_task_id))
         || !isOptionalPolicy(value.policy) || !isOptionalGovernance(value.governance)
         || !isOptionalWorkspaceShape(value) || !isOptionalPaneShape(value)
@@ -205,7 +223,7 @@ function isTeamConfig(value, requireRevision, expectedTeamName) {
         return false;
     if (!requireRevision && Object.hasOwn(value, 'state_revision'))
         return false;
-    return (value.lifecycle_state === undefined || ['active', 'shutting_down', 'stopped'].includes(value.lifecycle_state))
+    return (value.lifecycle_state === undefined || ['starting', 'active', 'shutting_down', 'stopped'].includes(value.lifecycle_state))
         && (value.runtime_owner_epoch === undefined || isOwnerEpoch(value.runtime_owner_epoch))
         && (value.active_recovery === undefined || isRecoveryAttempt(value.active_recovery))
         && (value.last_recovery === undefined || isRecoveryAttempt(value.last_recovery))
@@ -214,7 +232,25 @@ function isTeamConfig(value, requireRevision, expectedTeamName) {
         && (value.service_descriptor === undefined || isServiceDescriptor(value.service_descriptor))
         && (value.shutdown_attempt === undefined || isShutdownAttempt(value.shutdown_attempt))
         && (value.all_dead_recovery === undefined || isAllDeadRecovery(value.all_dead_recovery))
+        && hasMatchingLifecycleInstanceIdentity(value)
         && hasMatchingActiveFenceRevisions(value);
+}
+/**
+ * A newly written lifecycle fence may carry the instance UUID, but a legacy
+ * fence may omit it and remain readable for diagnosis. A present fence UUID
+ * is never allowed to disagree with the authoritative config UUID.
+ */
+function hasMatchingLifecycleInstanceIdentity(value) {
+    const configId = value.instance_id;
+    return [value.shutdown_attempt, value.active_scale_up, value.active_scale_down].every(attempt => {
+        if (attempt === undefined || !isRecord(attempt) || attempt.instance_id === undefined)
+            return true;
+        return typeof configId === 'string'
+            && isValidTeamInstanceId(configId)
+            && typeof attempt.instance_id === 'string'
+            && isValidTeamInstanceId(attempt.instance_id)
+            && configId.toLowerCase() === attempt.instance_id.toLowerCase();
+    });
 }
 function hasUniqueWorkerIdentity(workers) {
     const names = new Set();
@@ -300,6 +336,91 @@ export function validateRevisionedTeamConfig(value, expectedTeamName) {
 export function validateLegacyTeamConfig(value, expectedTeamName) {
     return isTeamConfig(value, false, expectedTeamName) ? value : null;
 }
+function isPendingTeamInstanceConfig(value, binding) {
+    if (!isRecord(value)
+        || Object.keys(value).some(key => !['name', 'instance_id', 'leader_cwd', 'team_state_root', 'lifecycle_state'].includes(key))
+        || value.name !== binding.team_name
+        || !isValidTeamInstanceId(value.instance_id)
+        || typeof value.leader_cwd !== 'string'
+        || typeof value.team_state_root !== 'string'
+        || value.lifecycle_state !== 'starting')
+        return false;
+    return canonicalTeamCwd(value.leader_cwd) === binding.cwd
+        && canonicalTeamStatePath(binding.cwd, value.team_state_root) === binding.state_root;
+}
+/**
+ * Instance and tmux-server identities are immutable once they appear in
+ * authoritative state. Legacy state with no identity remains readable, but it
+ * cannot be upgraded by a CAS writer because that would turn unknown
+ * ownership into delete authority.
+ */
+export function assertTeamInstanceConfigImmutable(current, proposed) {
+    const currentId = current.instance_id;
+    const proposedId = proposed.instance_id;
+    if (currentId === undefined && proposedId !== undefined)
+        throw new Error('team_instance_identity_unknown');
+    if (currentId !== undefined && (proposedId === undefined || currentId.toLowerCase() !== proposedId.toLowerCase())) {
+        throw new Error('team_instance_mismatch');
+    }
+    const currentServerIdentity = current.tmux_server_identity;
+    const proposedServerIdentity = proposed.tmux_server_identity;
+    if (currentServerIdentity !== undefined && !isValidTmuxServerIdentity(currentServerIdentity)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+    if (proposedServerIdentity !== undefined && !isValidTmuxServerIdentity(proposedServerIdentity)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+    if (currentServerIdentity === undefined && proposedServerIdentity === undefined)
+        return;
+    if (currentServerIdentity === undefined || proposedServerIdentity === undefined) {
+        throw new Error('tmux_server_identity_immutable');
+    }
+    if (!sameTmuxServerIdentity(currentServerIdentity, proposedServerIdentity)) {
+        throw new Error('tmux_server_identity_immutable');
+    }
+}
+function assertLeaderSessionIdImmutable(current, proposed) {
+    const currentId = current.leader_session_id;
+    const proposedId = proposed.leader_session_id;
+    if (currentId === undefined && proposedId === undefined)
+        return;
+    if (currentId === undefined || proposedId === undefined || currentId !== proposedId) {
+        throw new Error('leader_session_id_immutable');
+    }
+}
+function sameTmuxServerIdentity(a, b) {
+    return a.socket_path === b.socket_path
+        && a.server_pid === b.server_pid
+        && a.process_started_at === b.process_started_at;
+}
+function assertMatchingProjectionIdentity(config, manifest) {
+    if (!config || !manifest)
+        return;
+    if ((config.instance_id !== undefined && !isValidTeamInstanceId(config.instance_id))
+        || (manifest.instance_id !== undefined && !isValidTeamInstanceId(manifest.instance_id))) {
+        throw new Error('invalid_persisted_state');
+    }
+    if ((config.instance_id === undefined) !== (manifest.instance_id === undefined)
+        || (config.instance_id !== undefined && manifest.instance_id !== undefined
+            && config.instance_id.toLowerCase() !== manifest.instance_id.toLowerCase())) {
+        throw new Error('invalid_persisted_state');
+    }
+    const configServerIdentity = config.tmux_server_identity;
+    const manifestServerIdentity = manifest.tmux_server_identity;
+    assertValidTmuxServerIdentity(configServerIdentity);
+    assertValidTmuxServerIdentity(manifestServerIdentity);
+    if (configServerIdentity === undefined && manifestServerIdentity === undefined)
+        return;
+    if (configServerIdentity === undefined || manifestServerIdentity === undefined
+        || !sameTmuxServerIdentity(configServerIdentity, manifestServerIdentity)) {
+        throw new Error('tmux_server_identity_mismatch');
+    }
+}
+function assertValidTmuxServerIdentity(value) {
+    if (value !== undefined && !isValidTmuxServerIdentity(value)) {
+        throw new Error('tmux_server_identity_invalid');
+    }
+}
 async function assertPersistedConfigPathBinding(teamName, cwd, includeManifestWhenAbsent = false) {
     const state = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
     if (state.kind === 'invalid')
@@ -310,6 +431,11 @@ async function assertPersistedConfigPathBinding(teamName, cwd, includeManifestWh
             : validateLegacyTeamConfig(state.value, teamName);
         if (!valid)
             throw new Error('invalid_persisted_state');
+        const manifestState = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
+        if (manifestState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        if (manifestState.kind === 'value')
+            assertMatchingProjectionIdentity(valid, manifestState.value);
         return;
     }
     if (!includeManifestWhenAbsent)
@@ -329,6 +455,11 @@ export async function readTeamConfig(teamName, cwd) {
     if (configState.kind === 'invalid')
         throw new Error('invalid_persisted_state');
     const config = configState.kind === 'value' ? configState.value : null;
+    const manifest = manifestState.kind === 'value' ? normalizeTeamManifest(manifestState.value) : null;
+    if (manifest)
+        assertValidTmuxServerIdentity(manifest.tmux_server_identity);
+    if (config && manifest)
+        assertMatchingProjectionIdentity(config, manifest);
     if (config && Object.hasOwn(config, 'state_revision')) {
         const revisioned = validateRevisionedTeamConfig(config, teamName);
         if (!revisioned)
@@ -339,7 +470,6 @@ export async function readTeamConfig(teamName, cwd) {
         throw new Error('invalid_persisted_state');
     if (manifestState.kind === 'invalid')
         throw new Error('invalid_persisted_state');
-    const manifest = manifestState.kind === 'value' ? normalizeTeamManifest(manifestState.value) : null;
     if (!config && !manifest)
         return null;
     if (!manifest)
@@ -357,14 +487,22 @@ export async function readTeamConfig(teamName, cwd) {
 }
 /** Recovery readers keep revisioned config authoritative without changing legacy reads. */
 export async function readRevisionedTeamConfig(teamName, cwd) {
-    const state = await readJsonFileState(absPath(cwd, TeamPaths.config(teamName)));
+    const [state, manifestState] = await Promise.all([
+        readJsonFileState(absPath(cwd, TeamPaths.config(teamName))),
+        readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName))),
+    ]);
     if (state.kind === 'invalid')
         throw new Error('invalid_persisted_state');
     if (state.kind === 'missing')
         return null;
     const revisioned = validateRevisionedTeamConfig(state.value, teamName);
-    if (revisioned)
+    if (revisioned) {
+        if (manifestState.kind === 'invalid')
+            throw new Error('invalid_persisted_state');
+        if (manifestState.kind === 'value')
+            assertMatchingProjectionIdentity(revisioned, manifestState.value);
         return { config: canonicalizeTeamConfigWorkers(revisioned), stateRevision: revisioned.state_revision };
+    }
     if (!validateLegacyTeamConfig(state.value, teamName))
         throw new Error('invalid_persisted_state');
     return null;
@@ -430,7 +568,10 @@ function sameRecoveryAttempt(a, b) {
         && a.worker_name === b.worker_name;
 }
 function sameShutdownOwner(a, b) {
-    return a.nonce === b.nonce && a.pid === b.pid && a.process_started_at === b.process_started_at;
+    const aInstanceId = typeof a.instance_id === 'string' ? a.instance_id.toLowerCase() : undefined;
+    const bInstanceId = typeof b.instance_id === 'string' ? b.instance_id.toLowerCase() : undefined;
+    return a.nonce === b.nonce && a.pid === b.pid && a.process_started_at === b.process_started_at
+        && aInstanceId === bInstanceId;
 }
 function sameAllDead(a, b) {
     // Grace deadline is the durable identity; detected_at may refresh on reload.
@@ -542,6 +683,8 @@ export async function saveTeamConfigAtRevision(config, expectedRevision, cwd, af
         if (!current || current.stateRevision !== expectedRevision)
             return false;
         // Trust boundary: compare ownership/phase against authoritative fences BEFORE rebasing.
+        assertTeamInstanceConfigImmutable(current.config, config);
+        assertLeaderSessionIdImmutable(current.config, config);
         assertActiveFenceOwnershipTransition(current.config, config, options);
         const locked = alignActiveFenceRevisions(config, config.state_revision);
         if (!validateRevisionedTeamConfig(locked, locked.name))
@@ -559,7 +702,11 @@ export async function readTeamManifest(teamName, cwd) {
     const state = await readJsonFileState(absPath(cwd, TeamPaths.manifest(teamName)));
     if (state.kind === 'invalid')
         throw new Error('invalid_persisted_state');
-    return state.kind === 'value' ? normalizeTeamManifest(state.value) : null;
+    if (state.kind === 'missing')
+        return null;
+    const manifest = normalizeTeamManifest(state.value);
+    assertValidTmuxServerIdentity(manifest.tmux_server_identity);
+    return manifest;
 }
 // ---------------------------------------------------------------------------
 // Worker status / heartbeat readers
@@ -577,50 +724,6 @@ export async function writeWorkerStatus(teamName, workerName, status, cwd) {
 }
 export async function readWorkerHeartbeat(teamName, workerName, cwd) {
     return readJsonSafe(absPath(cwd, TeamPaths.heartbeat(teamName, workerName)));
-}
-// ---------------------------------------------------------------------------
-// Monitor snapshot persistence
-// ---------------------------------------------------------------------------
-export async function readMonitorSnapshot(teamName, cwd) {
-    const p = absPath(cwd, TeamPaths.monitorSnapshot(teamName));
-    if (!existsSync(p))
-        return null;
-    try {
-        const raw = await readFile(p, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object')
-            return null;
-        const monitorTimings = (() => {
-            const candidate = parsed.monitorTimings;
-            if (!candidate || typeof candidate !== 'object')
-                return undefined;
-            if (typeof candidate.list_tasks_ms !== 'number' ||
-                typeof candidate.worker_scan_ms !== 'number' ||
-                typeof candidate.mailbox_delivery_ms !== 'number' ||
-                typeof candidate.total_ms !== 'number' ||
-                typeof candidate.updated_at !== 'string') {
-                return undefined;
-            }
-            return candidate;
-        })();
-        return {
-            taskStatusById: parsed.taskStatusById ?? {},
-            workerAliveByName: parsed.workerAliveByName ?? {},
-            workerLivenessByName: parsed.workerLivenessByName ?? {},
-            workerStateByName: parsed.workerStateByName ?? {},
-            workerTurnCountByName: parsed.workerTurnCountByName ?? {},
-            workerTaskIdByName: parsed.workerTaskIdByName ?? {},
-            mailboxNotifiedByMessageId: parsed.mailboxNotifiedByMessageId ?? {},
-            completedEventTaskIds: parsed.completedEventTaskIds ?? {},
-            monitorTimings,
-        };
-    }
-    catch {
-        return null;
-    }
-}
-export async function writeMonitorSnapshot(teamName, snapshot, cwd) {
-    await writeAtomic(absPath(cwd, TeamPaths.monitorSnapshot(teamName)), JSON.stringify(snapshot, null, 2));
 }
 // ---------------------------------------------------------------------------
 // Phase state persistence
@@ -677,26 +780,6 @@ export async function writeWorkerIdentity(teamName, workerName, workerInfo, cwd)
     await writeAtomic(absPath(cwd, TeamPaths.workerIdentity(teamName, workerName)), JSON.stringify(workerInfo, null, 2));
 }
 // ---------------------------------------------------------------------------
-// Task listing (reads task files from the tasks directory)
-// ---------------------------------------------------------------------------
-export async function listTasksFromFiles(teamName, cwd) {
-    const tasksDir = absPath(cwd, TeamPaths.tasks(teamName));
-    if (!existsSync(tasksDir))
-        return [];
-    const { readdir } = await import('fs/promises');
-    const entries = await readdir(tasksDir);
-    const tasks = [];
-    for (const entry of entries) {
-        const match = /^(?:task-)?(\d+)\.json$/.exec(entry);
-        if (!match)
-            continue;
-        const task = await readJsonSafe(absPath(cwd, `${TeamPaths.tasks(teamName)}/${entry}`));
-        if (task)
-            tasks.push(task);
-    }
-    return tasks.sort((a, b) => Number(a.id) - Number(b.id));
-}
-// ---------------------------------------------------------------------------
 // Worker inbox I/O
 // ---------------------------------------------------------------------------
 export async function writeWorkerInbox(teamName, workerName, content, cwd) {
@@ -711,7 +794,8 @@ export async function getTeamSummary(teamName, cwd) {
     if (!config)
         return null;
     const tasksStartMs = performance.now();
-    const tasks = await listTasksFromFiles(teamName, cwd);
+    const { teamListTasks } = await import('./team-ops.js');
+    const tasks = await teamListTasks(teamName, cwd);
     const tasksLoadedMs = performance.now() - tasksStartMs;
     const counts = { total: tasks.length, pending: 0, blocked: 0, in_progress: 0, completed: 0, failed: 0 };
     for (const t of tasks) {
@@ -787,13 +871,22 @@ async function saveTeamConfigUnlocked(config, cwd) {
         throw new Error('invalid_persisted_state');
     const existingManifest = manifestState.kind === 'value' ? manifestState.value : null;
     if (existingManifest) {
+        assertTeamInstanceConfigImmutable(existingManifest, config);
         const nextManifest = normalizeTeamManifest({
             ...existingManifest,
+            instance_id: config.instance_id ?? existingManifest.instance_id,
+            tmux_server_identity: config.tmux_server_identity,
             workers: config.workers,
             worker_count: config.worker_count,
             tmux_session: config.tmux_session,
             next_task_id: config.next_task_id,
             created_at: config.created_at,
+            leader: {
+                ...(existingManifest.leader ?? { worker_id: 'leader', role: 'leader' }),
+                session_id: config.leader_session_id
+                    ?? existingManifest.leader?.session_id
+                    ?? config.tmux_session,
+            },
             leader_cwd: config.leader_cwd,
             team_state_root: config.team_state_root,
             workspace_mode: config.workspace_mode,
@@ -817,6 +910,55 @@ async function saveTeamConfigUnlocked(config, cwd) {
     }
     await writeAtomic(absPath(cwd, TeamPaths.config(config.name)), JSON.stringify(config, null, 2));
 }
+/**
+ * Atomically replace the identity-bearing `starting` projection written by
+ * startup with the first complete revisioned config.
+ *
+ * The caller MUST already hold `teamInstanceLifecycleLockPath(cwd, teamName)`
+ * for the entire reservation/effects transaction. This function acquires only
+ * the existing config-mutation lock and intentionally does not acquire the
+ * lifecycle lock recursively.
+ */
+export async function commitInitialTeamConfigUnderLock(config, cwd, instance) {
+    if (canonicalTeamCwd(cwd) !== instance.cwd
+        || config.name !== instance.team_name
+        || config.instance_id === undefined
+        || config.instance_id.toLowerCase() !== instance.instance_id) {
+        throw new Error('team_instance_mismatch');
+    }
+    if (config.state_revision !== 0 || !validateRevisionedTeamConfig(config, config.name)) {
+        throw new Error('invalid_persisted_state');
+    }
+    // Preflight the state/authority paths before the config-mutation lock can
+    // create its first directory entry; repeat under that lock below.
+    await assertTeamInstanceUnderLock(instance);
+    await withTeamConfigMutationLock(config.name, instance.cwd, async () => {
+        const pendingState = await readJsonFileState(absPath(instance.cwd, TeamPaths.config(config.name)));
+        if (pendingState.kind === 'missing')
+            throw new Error('team_instance_startup_config_missing');
+        if (pendingState.kind === 'invalid' || !isPendingTeamInstanceConfig(pendingState.value, instance)) {
+            throw new Error('team_instance_startup_config_invalid');
+        }
+        const assertion = await assertTeamInstanceUnderLock(instance);
+        if (assertion.reservation.instance_id !== instance.instance_id
+            || assertion.reservation.phase !== 'pending'
+            || assertion.observed_state !== 'bound') {
+            throw new Error('team_instance_mismatch');
+        }
+        const manifestState = await readJsonFileState(absPath(instance.cwd, TeamPaths.manifest(config.name)));
+        if (manifestState.kind === 'invalid' || manifestState.kind === 'value') {
+            throw new Error('invalid_persisted_state');
+        }
+        await saveTeamConfigUnlocked(config, instance.cwd);
+        const persisted = await readJsonFileState(absPath(instance.cwd, TeamPaths.config(config.name)));
+        if (persisted.kind !== 'value'
+            || !validateRevisionedTeamConfig(persisted.value, config.name)
+            || persisted.value.state_revision !== 0
+            || persisted.value.instance_id?.toLowerCase() !== instance.instance_id) {
+            throw new Error('team_instance_startup_config_commit_unverified');
+        }
+    });
+}
 export async function saveTeamConfig(config, cwd, expectedRevision) {
     const inputIsRevisioned = Object.hasOwn(config, 'state_revision');
     if (!(inputIsRevisioned ? validateRevisionedTeamConfig(config, config.name) : validateLegacyTeamConfig(config, config.name))) {
@@ -832,6 +974,13 @@ export async function saveTeamConfig(config, cwd, expectedRevision) {
             throw new Error('invalid_persisted_state');
         if (current && !Object.hasOwn(current, 'state_revision') && !validateLegacyTeamConfig(current, config.name))
             throw new Error('invalid_persisted_state');
+        if (current) {
+            assertTeamInstanceConfigImmutable(current, config);
+            assertLeaderSessionIdImmutable(current, config);
+        }
+        if (!current && config.tmux_server_identity !== undefined) {
+            throw new Error('tmux_server_identity_immutable');
+        }
         const currentRevision = current?.state_revision;
         let nextRevision;
         if (typeof currentRevision === 'number' && Number.isSafeInteger(currentRevision)) {
@@ -916,11 +1065,16 @@ export function diffSnapshots(prev, current) {
 // ---------------------------------------------------------------------------
 // State cleanup
 // ---------------------------------------------------------------------------
-export async function cleanupTeamState(teamName, cwd) {
-    const root = absPath(cwd, TeamPaths.root(teamName));
-    const { rm } = await import('fs/promises');
+/**
+ * Cleanup entry point retained for monitor callers.  It deliberately requires
+ * the immutable instance id and caller-owned final-state proof; callers must
+ * already hold `teamInstanceLifecycleLockPath(cwd, teamName)`.  The under-lock
+ * call avoids recursively acquiring the same external name lock.
+ */
+export async function cleanupTeamState(teamName, cwd, instanceId, authorization) {
     try {
-        await rm(root, { recursive: true, force: true });
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        await disposeTeamInstanceUnderLock(binding, authorization);
         return true;
     }
     catch {

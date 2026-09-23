@@ -5,9 +5,21 @@
  * descriptor-supplied and therefore untrusted: resolving it must never let a
  * traversal-shaped id or a symlinked run directory redirect writes outside
  * the runs root. resolveRunDir validates, creates, and containment-checks
- * the directory with a Linux directory FD, failing closed on any escape or
+ * the directory with directory-FD-relative operations, failing closed on any escape or
  * on platforms without that primitive.
  */
+/**
+ * Open or create one directory component below an already-open directory.
+ * Both the mkdir and the subsequent open are anchored at the parent FD, so a
+ * pathname replacement cannot redirect creation through a symlink.
+ */
+export declare function openOrCreateDirectoryAt(parentFd: number, name: string, label: string): number;
+/**
+ * Open one existing directory component below an already-open directory
+ * without following a symlink at that component. Returns null when the
+ * component does not exist; a symlinked component fails closed.
+ */
+export declare function openExistingDirectoryAt(parentFd: number, name: string, label: string): number | null;
 export interface RunDirHandle {
     readonly path: string;
     readonly device: number;

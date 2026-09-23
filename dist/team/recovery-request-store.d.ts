@@ -5,6 +5,8 @@ export interface RecoveryRequestPayload {
     workspaceHash: string;
     teamName: string;
     workerName: string;
+    /** Immutable team incarnation; never resolve this from mutable config. */
+    instanceId: string;
 }
 export interface RecoveryRequestReservation {
     schema_version: 1;
@@ -15,6 +17,8 @@ export interface RecoveryRequestReservation {
     workspace_hash: string;
     team_name: string;
     worker_name: string;
+    /** Immutable team incarnation captured at admission. */
+    instance_id: string;
     recovery_id: string;
     created_at: string;
     expires_at: string;

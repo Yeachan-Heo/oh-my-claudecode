@@ -84,7 +84,14 @@ export declare function listPendingApprovals(runsRoot: string): PendingApprovalE
  * written into a directory nobody polls.
  */
 export declare function writeApprovalDecision(runsRoot: string, runId: string, activationId: string, decision: Decision, decidedBy?: string): ApprovalDecisionRecord;
-/** Remove a run's pending artifact directory (best-effort housekeeping). */
+/**
+ * Remove a run's pending artifacts (best-effort housekeeping).
+ *
+ * Descriptor-relative unlink of the entries rather than a recursive pathname
+ * removal: `rmSync` on `<runDir>/approvals/pending` would re-resolve the
+ * nested pathname and could follow a swapped component. The now-empty
+ * directory is left in place, which only affects listing freshness.
+ */
 export declare function prunePendingApprovals(runsRoot: string, runId: string): void;
 export {};
 //# sourceMappingURL=remote-approval.d.ts.map

@@ -9,7 +9,7 @@
 import { join } from "path";
 import { atomicWriteJsonSync, } from "../../lib/atomic-write.js";
 import { resolveRunDirHandle } from "./run-dir.js";
-import { readContainedFileNoFollow, withContainedPath } from "./safe-fs.js";
+import { readContainedFileNoFollow, withContainedOperations } from "./safe-fs.js";
 const DESCRIPTOR_HASH_PATTERN = /^[a-f0-9]{64}$/;
 const PROJECTION_FILE_NAME = "projection.json";
 /** Closed error surface for projection snapshot failures. */
@@ -107,7 +107,7 @@ export class FileProjectionStore {
                     envelope.saved_at_seq < stored.saved_at_seq))) {
             throw new ProjectionStoreError("corrupt", `projection snapshot regresses from epoch ${stored.epoch} seq ${stored.saved_at_seq} to epoch ${envelope.epoch} seq ${envelope.saved_at_seq}`);
         }
-        withContainedPath(this.runDir(), PROJECTION_FILE_NAME, (filePath) => {
+        withContainedOperations(this.runDir(), (operations) => {
             assertOwnership?.();
             const hooks = assertOwnership
                 ? {
@@ -115,7 +115,7 @@ export class FileProjectionStore {
                     afterRename: assertOwnership,
                 }
                 : undefined;
-            atomicWriteJsonSync(filePath, envelope, hooks);
+            atomicWriteJsonSync(PROJECTION_FILE_NAME, envelope, hooks, operations);
         });
     }
     async load() {

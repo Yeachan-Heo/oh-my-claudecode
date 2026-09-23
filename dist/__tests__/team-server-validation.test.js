@@ -109,14 +109,18 @@ describe('team-server handler validation integration', () => {
         expect(waitMatch).toBeTruthy();
         const statusBody = statusMatch[0];
         const waitBody = waitMatch[0];
-        // validateJobId must appear before loadJobFromDisk in each handler
+        // validateJobId must appear before the first disk-backed job read.
+        // handleStatus/handleWait now converge via readConvergedJob, which still
+        // loads from disk internally.
         const statusValidatePos = statusBody.indexOf('validateJobId(job_id)');
-        const statusDiskPos = statusBody.indexOf('loadJobFromDisk');
+        const statusDiskPos = statusBody.search(/readConvergedJob|loadJobFromDisk/);
         expect(statusValidatePos).toBeGreaterThan(-1);
+        expect(statusDiskPos).toBeGreaterThan(-1);
         expect(statusValidatePos).toBeLessThan(statusDiskPos);
         const waitValidatePos = waitBody.indexOf('validateJobId(job_id)');
-        const waitDiskPos = waitBody.indexOf('loadJobFromDisk');
+        const waitDiskPos = waitBody.search(/readConvergedJob|loadJobFromDisk/);
         expect(waitValidatePos).toBeGreaterThan(-1);
+        expect(waitDiskPos).toBeGreaterThan(-1);
         expect(waitValidatePos).toBeLessThan(waitDiskPos);
     });
 });

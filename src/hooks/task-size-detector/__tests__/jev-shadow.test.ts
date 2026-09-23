@@ -45,7 +45,7 @@ function stubFetch(answer: Partial<JevAnswer>): { fetchFn: typeof fetch; calls: 
   const calls: unknown[] = [];
   const body = JSON.stringify({
     answers: {
-      answer: { type: answer.choice !== undefined ? 'Choice' : 'Noul', ...answer },
+      answer: { type: answer.choice !== undefined ? 'choice' : 'noul', ...answer },
     },
   } satisfies JevResponse);
   const fetchFn = (async (_url: unknown, init?: unknown) => {
@@ -88,7 +88,7 @@ describe('task-size-detector shadow judgment point', () => {
       mode: 'shadow',
       state: { prompt: PROMPT, source: 'user-prompt-submit' },
       heuristic: classifyTaskSize(PROMPT),
-      jev: { type: 'Choice', choice: 'medium', confidence: 0.6 },
+      jev: { type: 'choice', choice: 'medium', confidence: 0.6 },
     });
     expect(calls).toHaveLength(1);
   });

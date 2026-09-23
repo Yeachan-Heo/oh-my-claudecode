@@ -49,13 +49,17 @@ export declare function setEnvironmentVariables(): string[];
  *
  * This function reads the plugin's hooks.json and rewrites every command of the
  * current form:
- *   sh "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   sh "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
  * or stale absolute-shell cache form:
- *   "/bin/sh" "$CLAUDE_PLUGIN_ROOT"/scripts/find-node.sh "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   "/bin/sh" "${CLAUDE_PLUGIN_ROOT}"/scripts/find-node.sh ... [args]
  * or legacy form:
  *   sh "${CLAUDE_PLUGIN_ROOT}/scripts/find-node.sh" "${CLAUDE_PLUGIN_ROOT}/scripts/X.mjs" [args]
  * to:
- *   node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/X.mjs [args]
+ *   node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/X.mjs [args]
+ *
+ * The braced placeholder is required: Claude Code substitutes it itself, while
+ * the bare `$CLAUDE_PLUGIN_ROOT` spelling only expands when a POSIX shell runs
+ * the command — which the direct-node Windows form deliberately avoids (#4042).
  *
  * The file is only written when at least one command was actually changed, so
  * the function is safe to call on every init (idempotent after first patch).

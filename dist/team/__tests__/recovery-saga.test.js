@@ -8,6 +8,7 @@ let cwd;
 let previousHome;
 let previousUserProfile;
 let previousOmcStateDir;
+const TEAM_INSTANCE_ID = '33333333-3333-4333-8333-333333333333';
 const input = {
     requestId: 'request-a',
     recoveryId: 'recovery-a',
@@ -34,7 +35,7 @@ beforeEach(() => {
     process.env.USERPROFILE = cwd;
     delete process.env.OMC_STATE_DIR;
     reserveRecoveryRequest(cwd, input.requestId, { operation: 'recover-worker', workspaceHash: 'a'.repeat(64),
-        teamName: input.teamName, workerName: input.workerName }, input.recoveryId);
+        teamName: input.teamName, workerName: input.workerName, instanceId: TEAM_INSTANCE_ID }, input.recoveryId);
 });
 afterEach(() => {
     if (previousHome === undefined)

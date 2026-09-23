@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
 import { DEFAULT_THRESHOLD, CRITICAL_THRESHOLD, COMPACTION_COOLDOWN_MS, MAX_WARNINGS, CLAUDE_DEFAULT_CONTEXT_LIMIT, CHARS_PER_TOKEN, CONTEXT_WARNING_MESSAGE, CONTEXT_CRITICAL_MESSAGE, } from './constants.js';
+import { recordContextPruningShadow, } from './jev-shadow.js';
 const DEBUG = process.env.PREEMPTIVE_COMPACTION_DEBUG === '1';
 const DEBUG_FILE = path.join(tmpdir(), 'preemptive-compaction-debug.log');
 /**
@@ -213,6 +214,17 @@ export function createPreemptiveCompactionHook(config) {
             if (!usage.isWarning) {
                 return null;
             }
+            // Jev shadow judgment (point 5, context-pruning): fire-and-forget. The
+            // heuristic decision above is untouched; with no key configured this is
+            // a no-op with zero HTTP calls.
+            void recordContextPruningShadow({
+                action: usage.action,
+                totalTokens: state.estimatedTokens,
+                candidates: [buildPruningCandidate(input.tool_name, input.tool_response)],
+                fetchFn: config?.jevFetchFn,
+            }).catch(() => {
+                // Shadow-only recording must never affect the compaction path.
+            });
             if (!shouldShowWarning(input.session_id, config)) {
                 return null;
             }
@@ -246,6 +258,20 @@ export function createPreemptiveCompactionHook(config) {
             lastAnalysisTime.delete(input.session_id);
             return null;
         },
+    };
+}
+/**
+ * Build the metadata-only candidate summary for the Jev shadow judgment:
+ * tool name, token estimate, and a bounded first-line excerpt. The resolver
+ * bounds every string again before send/log.
+ */
+const JEV_EXCERPT_MAX_CHARS = 200;
+function buildPruningCandidate(toolName, toolResponse) {
+    const firstLine = toolResponse.split('\n', 1)[0] ?? '';
+    return {
+        tool: toolName.toLowerCase(),
+        tokens: estimateTokens(toolResponse),
+        excerpt: firstLine.slice(0, JEV_EXCERPT_MAX_CHARS),
     };
 }
 /**

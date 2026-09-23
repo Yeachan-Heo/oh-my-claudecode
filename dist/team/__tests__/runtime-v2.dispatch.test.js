@@ -1,45 +1,136 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
-import { join } from 'path';
-import { promisify } from 'util';
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'fs/promises';
+import { join, resolve } from 'path';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { createHash } from 'node:crypto';
+const { atomicWriteControl, mockFsPromises } = vi.hoisted(() => {
+    const atomicWriteControl = {
+        failCanonicalPath: undefined,
+        triggerReadPath: undefined,
+        corruptSiblingPath: undefined,
+        readTriggered: false,
+        requestedPath(path) {
+            if (typeof path === 'string')
+                return path;
+            if (path instanceof URL)
+                return decodeURIComponent(path.pathname);
+            return String(path);
+        },
+        samePath(left, right) {
+            if (left === right)
+                return true;
+            const normalize = (value) => value.replace(/^\/private\/var\//, '/var/');
+            if (normalize(left) === normalize(right))
+                return true;
+            const tail = normalize(right).split('/').slice(-4).join('/');
+            return tail.length > 0 && normalize(left).endsWith(`/${tail}`);
+        },
+    };
+    async function mockFsPromises(importOriginal) {
+        const actual = await importOriginal();
+        return {
+            ...actual,
+            writeFile: async (path, data, options) => {
+                const target = atomicWriteControl.failCanonicalPath;
+                if (target && atomicWriteControl.requestedPath(path).startsWith(`${target}.`)) {
+                    throw new Error('injected_task_publication_interruption');
+                }
+                return actual.writeFile(path, data, options);
+            },
+            readFile: async (path, options) => {
+                const requested = atomicWriteControl.requestedPath(path);
+                if (atomicWriteControl.triggerReadPath
+                    && atomicWriteControl.samePath(requested, atomicWriteControl.triggerReadPath)
+                    && !atomicWriteControl.readTriggered) {
+                    atomicWriteControl.readTriggered = true;
+                    if (atomicWriteControl.corruptSiblingPath) {
+                        await actual.writeFile(atomicWriteControl.corruptSiblingPath, '{corrupt sibling', 'utf8');
+                    }
+                }
+                return actual.readFile(path, options);
+            },
+        };
+    }
+    return { atomicWriteControl, mockFsPromises };
+});
+vi.mock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
+vi.mock('fs/promises', importOriginal => mockFsPromises(importOriginal));
 import { enqueueDispatchRequest, listDispatchRequests, transitionDispatchRequest } from '../dispatch-queue.js';
 import { readRecoveryOutcome, reserveRecoveryRequest } from '../recovery-request-store.js';
+import { hashTaskRecoveryCheckpointPayload, taskRecoveryClaimTokenHash } from '../task-recovery-checkpoint.js';
 import { absPath, TeamPaths } from '../state-paths.js';
+import { createTeamInstanceBinding, reserveTeamInstance } from '../team-instance.js';
+import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getWorkerStartupEvidencePolicy, settleStartupEvidence, promptModeRecoveryRequiresProgressEvidence, waitForStartupEvidenceBudget, } from '../runtime-v2.js';
-const mocks = vi.hoisted(() => ({
-    createTeamSession: vi.fn(),
-    spawnWorkerInPane: vi.fn(),
-    spawnOwnedWorkerInPane: vi.fn(),
-    deliverStartupInbox: vi.fn(),
-    probeStartupPaneActivity: vi.fn(),
-    retryStartupInboxSubmit: vi.fn(),
-    sendToWorker: vi.fn(),
-    waitForPaneReady: vi.fn(),
-    applyMainVerticalLayout: vi.fn(),
-    killWorkerPanes: vi.fn(async () => undefined),
-    killOwnedWorkerPane: vi.fn(async () => { }),
-    killTeamSession: vi.fn(async () => { }),
-    resolveSplitPaneWorkerPaneIds: vi.fn(async (_session, paneIds) => paneIds),
-    getWorkerLiveness: vi.fn(async () => 'dead'),
-    execFile: vi.fn(),
-    spawnSync: vi.fn(() => ({ status: 0 })),
-    tmuxExecAsync: vi.fn(),
-    autoStartupEvidence: true,
-    nextStartupTaskId: 1,
-    nextSplitPaneId: 2,
-    cmuxSplitPaneId: null,
-    workerPaneBelongsToProviderTarget: vi.fn(async () => true),
-}));
+const ORIGINAL_INSTANCE_ID = '66666666-6666-4666-8666-666666666666';
+function teamStatePath(cwd, teamName, suffix) {
+    return join(absPath(cwd, TeamPaths.root(teamName)), suffix);
+}
+function teamWorktreePath(cwd, teamName, workerName) {
+    return join(getOmcRoot(cwd), 'team', teamName, 'worktrees', workerName);
+}
+const mocks = vi.hoisted(() => {
+    const tmuxServerIdentity = {
+        socket_path: '/tmp/omc-test-tmux.sock',
+        server_pid: 4242,
+        process_started_at: process.platform === 'darwin'
+            ? 'darwin:1700000000:123456'
+            : 'linux:01234567-89ab-cdef-0123-456789abcdef:424242',
+    };
+    const getWorkerLiveness = vi.fn(async (_paneId) => 'dead');
+    const workerPaneBelongsToOwnedProviderTarget = vi.fn(async (input) => input.provider !== 'tmux' || Boolean(input.tmuxServerIdentity));
+    const captureTeamPane = vi.fn(async (_paneId) => '');
+    return {
+        tmuxServerIdentity,
+        createTeamSession: vi.fn(),
+        spawnWorkerInPane: vi.fn(),
+        spawnOwnedWorkerInPane: vi.fn(),
+        deliverStartupInbox: vi.fn(),
+        probeStartupPaneActivity: vi.fn(),
+        retryStartupInboxSubmit: vi.fn(),
+        sendToWorker: vi.fn(),
+        waitForPaneReady: vi.fn(),
+        applyMainVerticalLayout: vi.fn(),
+        killWorkerPanes: vi.fn(async () => undefined),
+        killOwnedWorkerPane: vi.fn(async () => { }),
+        killTeamSession: vi.fn(async () => { }),
+        resolveSplitPaneWorkerPaneIds: vi.fn(async (_session, paneIds) => paneIds),
+        splitTeamWorkerPaneWithEvidence: vi.fn(),
+        adoptWorkerPaneOwnership: vi.fn(),
+        getWorkerLiveness,
+        getOwnedWorkerLiveness: vi.fn(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return 'unknown';
+            return getWorkerLiveness(ownership.paneId);
+        }),
+        captureTeamPane,
+        captureOwnedTeamPane: vi.fn(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return '';
+            return captureTeamPane(ownership.paneId);
+        }),
+        observeTmuxServerIdentity: vi.fn(async () => 'matching'),
+        observeTeamSessionTargetPresence: vi.fn(async () => ({ kind: 'owned' })),
+        execFile: vi.fn(),
+        spawnSync: vi.fn((..._args) => ({ status: 0 })),
+        tmuxExecAsync: vi.fn(),
+        autoStartupEvidence: true,
+        nextStartupTaskId: 1,
+        nextSplitPaneId: 2,
+        cmuxSplitPaneId: null,
+        workerPaneBelongsToProviderTarget: workerPaneBelongsToOwnedProviderTarget,
+        workerPaneBelongsToOwnedProviderTarget,
+    };
+});
 const launchMocks = vi.hoisted(() => ({
     withWorkerLaunchAttemptFence: vi.fn(async (_attempt, fn) => ({ ok: true, value: await fn() })),
     retireWorkerLaunchAttempt: vi.fn(async () => true),
     terminateWorkerLaunchProvider: vi.fn(async () => true),
     retireAndCleanupCurrentWorkerLaunchAttempt: vi.fn(async (_attempt, _reason, cleanup) => cleanup()),
-    loadWorkerLaunchAttempt: vi.fn(async () => ({})),
+    loadWorkerLaunchAttempt: vi.fn(async (_input) => null),
     loadCurrentWorkerLaunchAttempt: vi.fn(async () => null),
+    observeWorkerLaunchProvider: vi.fn(async (_attempt) => 'dead'),
     isWorkerLaunchAttemptAccepted: vi.fn(async () => true),
     isWorkerLaunchAttemptCurrent: vi.fn(async () => true),
 }));
@@ -59,8 +150,10 @@ const modelContractMocks = vi.hoisted(() => ({
     buildWorkerArgv: vi.fn((_agentType, _config) => ['/usr/bin/claude']),
     resolveValidatedBinaryPath: vi.fn(() => '/usr/bin/claude'),
     clearResolvedPathCache: vi.fn(),
-    getWorkerEnv: vi.fn(() => ({ OMC_TEAM_WORKER: 'dispatch-team/worker-1' })),
-    isPromptModeAgent: vi.fn(() => false),
+    getWorkerEnv: vi.fn((..._args) => ({
+        OMC_TEAM_WORKER: 'dispatch-team/worker-1',
+    })),
+    isPromptModeAgent: vi.fn((_agentType) => false),
     getPromptModeArgs: vi.fn((_agentType, instruction) => [instruction]),
     resolveClaudeWorkerModel: vi.fn(() => undefined),
     normalizeExternalModelsDefaults: vi.fn((defaults) => defaults),
@@ -84,8 +177,23 @@ const modelContractMocks = vi.hoisted(() => ({
     }),
     validateWorkerLaunchDescriptor: vi.fn((value) => value),
 }));
+async function useActualModelContractLaunchBuilder() {
+    const actual = await vi.importActual('../model-contract.js');
+    modelContractMocks.buildWorkerArgv.mockImplementation((agentType, config) => actual.buildWorkerArgv(agentType, config));
+    modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockImplementation((agentType, config, appendedArgs = []) => actual.buildValidatedWorkerLaunchDescriptor(agentType, config, appendedArgs));
+    modelContractMocks.getPromptModeArgs.mockImplementation((agentType, instruction) => actual.getPromptModeArgs(agentType, instruction));
+    modelContractMocks.isPromptModeAgent.mockImplementation((agentType) => actual.isPromptModeAgent(agentType));
+    modelContractMocks.getWorkerEnv.mockImplementation((...args) => actual.getWorkerEnv(args[0], args[1], args[2], args[3]));
+}
 vi.mock('child_process', async (importOriginal) => {
     const actual = await importOriginal();
+    const { promisify: makePromise } = await import('node:util');
+    const execProcessProbe = makePromise(actual.execFile);
+    mocks.execFile[makePromise.custom] = async (file, args, options) => {
+        if (file === 'ps')
+            return execProcessProbe(file, args, options);
+        return { stdout: args[0] === 'split-window' ? '%2\n' : '', stderr: '' };
+    };
     return {
         ...actual,
         execFile: mocks.execFile,
@@ -125,6 +233,7 @@ vi.mock('../worker-launch-ack.js', async (importOriginal) => {
         retireAndCleanupCurrentWorkerLaunchAttempt: launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt,
         loadWorkerLaunchAttempt: launchMocks.loadWorkerLaunchAttempt,
         loadCurrentWorkerLaunchAttempt: launchMocks.loadCurrentWorkerLaunchAttempt,
+        observeWorkerLaunchProvider: launchMocks.observeWorkerLaunchProvider,
         isWorkerLaunchAttemptAccepted: launchMocks.isWorkerLaunchAttemptAccepted,
         isWorkerLaunchAttemptCurrent: launchMocks.isWorkerLaunchAttemptCurrent,
     };
@@ -142,23 +251,20 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
         sendToWorker: mocks.sendToWorker,
         waitForPaneReady: mocks.waitForPaneReady,
         applyMainVerticalLayout: mocks.applyMainVerticalLayout,
-        splitTeamWorkerPaneWithEvidence: async (splitTarget, direction, cwd, provider) => provider === 'cmux' && mocks.cmuxSplitPaneId
-            ? {
-                commandSucceeded: true,
-                provider,
-                splitTarget,
-                direction,
-                rawOutput: `${mocks.cmuxSplitPaneId}\n`,
-                stderr: '',
-                paneId: mocks.cmuxSplitPaneId,
-            }
-            : actual.splitTeamWorkerPaneWithEvidence(splitTarget, direction, cwd, provider),
+        splitTeamWorkerPaneWithEvidence: mocks.splitTeamWorkerPaneWithEvidence,
+        adoptWorkerPaneOwnership: mocks.adoptWorkerPaneOwnership,
+        captureTeamPane: mocks.captureTeamPane,
+        captureOwnedTeamPane: mocks.captureOwnedTeamPane,
+        observeTmuxServerIdentity: mocks.observeTmuxServerIdentity,
+        observeTeamSessionTargetPresence: mocks.observeTeamSessionTargetPresence,
         workerPaneBelongsToProviderTarget: mocks.workerPaneBelongsToProviderTarget,
+        workerPaneBelongsToOwnedProviderTarget: mocks.workerPaneBelongsToOwnedProviderTarget,
         killWorkerPanes: mocks.killWorkerPanes,
         killOwnedWorkerPane: mocks.killOwnedWorkerPane,
         killTeamSession: mocks.killTeamSession,
         resolveSplitPaneWorkerPaneIds: mocks.resolveSplitPaneWorkerPaneIds,
         getWorkerLiveness: mocks.getWorkerLiveness,
+        getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
     };
 });
 vi.mock('../merge-orchestrator.js', () => ({
@@ -170,14 +276,20 @@ vi.mock('../worker-commit-cadence.js', () => ({
     startFallbackPoller: cadenceMocks.startFallbackPoller,
     uninstallCommitCadence: cadenceMocks.uninstallCommitCadence,
 }));
-vi.mock('../../platform/process-utils.js', async (importOriginal) => ({
-    ...await importOriginal(),
-    isProcessIdentityLive: async (pid, identity) => pid === process.pid && identity === 'fixture-provider-start' ? 'live' : 'unknown',
-}));
+vi.mock('../../platform/process-utils.js', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        isProcessIdentityLive: async (pid, identity) => pid === process.pid && identity === 'fixture-provider-start'
+            ? 'live'
+            : actual.isProcessIdentityLive(pid, identity),
+    };
+});
 describe('runtime v2 startup inbox dispatch', () => {
     let cwd;
     let restoreFixtureEnv;
     let startupDeliveryGate;
+    const activeRealLaunches = [];
     const originalCwd = process.cwd();
     function deferred() {
         let resolve;
@@ -190,11 +302,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     }
     async function mkdtempFixture(prefix) {
         const root = await mkdtemp(join(tmpdir(), prefix));
+        const canonicalRoot = await realpath(root);
         const previousHome = process.env.HOME;
         const previousUserProfile = process.env.USERPROFILE;
         const previousOmcStateDir = process.env.OMC_STATE_DIR;
-        process.env.HOME = root;
-        process.env.USERPROFILE = root;
+        process.env.HOME = canonicalRoot;
+        process.env.USERPROFILE = canonicalRoot;
         delete process.env.OMC_STATE_DIR;
         restoreFixtureEnv = () => {
             if (previousHome === undefined)
@@ -210,10 +323,68 @@ describe('runtime v2 startup inbox dispatch', () => {
             else
                 process.env.OMC_STATE_DIR = previousOmcStateDir;
         };
-        return root;
+        return canonicalRoot;
     }
     async function flushRealIo() {
         await new Promise(resolve => setImmediate(resolve));
+    }
+    async function awaitGateOrRecoveryFailure(gate, recovery, label) {
+        return Promise.race([
+            gate,
+            recovery.then(result => {
+                throw new Error(`${label} ended before gate: ${JSON.stringify(result)}`);
+            }),
+        ]);
+    }
+    async function configureRealUnresolvedStartupLaunch(options) {
+        const launchActual = await vi.importActual('../worker-launch-ack.js');
+        let attempt;
+        mocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_sessionName, ownership, config) => {
+            attempt = await launchActual.prepareWorkerLaunchAttempt({
+                cwd: config.launchStateCwd ?? cwd,
+                teamName: config.teamName,
+                workerName: config.workerName,
+                instanceId: config.instanceId ?? options.instanceId,
+                paneId: ownership.paneId,
+                provider: config.provider,
+                runtimeCliPath: config.launchBootstrapPath ?? '/runtime-cli.cjs',
+                context: { kind: 'initial' },
+            });
+            let bootstrapOutcome;
+            const bootstrap = launchActual.runWorkerLaunchBootstrap(launchActual.buildWorkerLaunchBootstrapSpec(attempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], config.launchStateCwd ?? cwd, { releaseAfterSpawn: true })).then(outcome => {
+                bootstrapOutcome = outcome;
+                return outcome;
+            });
+            activeRealLaunches.push({
+                attempt,
+                bootstrap,
+                terminate: launchActual.terminateWorkerLaunchProvider,
+            });
+            const acknowledgement = await launchActual.awaitWorkerLaunchAcknowledgement(attempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+            if (!acknowledgement.ok)
+                throw new Error(`fixture_launch_ack_failed:${config.workerName}`);
+            if (!await launchActual.awaitWorkerLaunchProviderStarted(attempt, { timeoutMs: 10_000, pollIntervalMs: 5 }))
+                throw new Error(`fixture_provider_start_failed:${config.workerName}:${JSON.stringify(bootstrapOutcome)}`);
+            await options.onProviderStarted?.(config.cwd ?? cwd);
+            const enriched = new Error(options.error);
+            enriched.unresolvedLaunch = {
+                name: config.workerName,
+                paneId: ownership.paneId,
+                launchAttemptId: attempt.attempt_id,
+                provider: attempt.provider,
+            };
+            throw enriched;
+        });
+        launchMocks.loadWorkerLaunchAttempt.mockImplementation(async (input) => (attempt && input.attemptId === attempt.attempt_id ? attempt : null));
+        launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementationOnce(async (candidate, _reason, cleanup) => {
+            if (candidate.attempt_id !== attempt?.attempt_id)
+                return false;
+            if (options.cleanup === 'unverified')
+                return false;
+            const providerStopped = await launchActual.terminateWorkerLaunchProvider(candidate, 2_000);
+            return providerStopped && await cleanup();
+        });
+        return () => attempt;
     }
     async function seedOwnerRecoveryFixture(provider, label) {
         const teamName = 'dispatch-team';
@@ -235,11 +406,56 @@ describe('runtime v2 startup inbox dispatch', () => {
             assigned_tasks: [],
             pane_id: '%91',
             working_dir: cwd,
+            launch_attempt_id: undefined,
+            operational_state: undefined,
         };
+        await reserveTeamInstance({ teamName, cwd, instanceId: ORIGINAL_INSTANCE_ID });
+        const launchActual = await vi.importActual('../worker-launch-ack.js');
         const configPath = absPath(cwd, TeamPaths.config(teamName));
         await mkdir(join(configPath, '..'), { recursive: true });
         await writeFile(configPath, JSON.stringify({
             name: teamName,
+            instance_id: ORIGINAL_INSTANCE_ID,
+            tmux_server_identity: mocks.tmuxServerIdentity,
+            task: 'owner recovery startup settlement',
+            agent_type: provider,
+            worker_launch_mode: 'interactive',
+            worker_count: 1,
+            max_workers: 20,
+            workers: [worker],
+            created_at: createdAt,
+            tmux_session: 'dispatch-session',
+            state_revision: 0,
+            lifecycle_state: 'active',
+            leader_pane_id: '%1',
+            next_task_id: 1,
+            workspace_mode: 'single',
+            worktree_mode: 'disabled',
+            service_descriptor: {
+                schema_version: 1,
+                service_generation: 1,
+                service_attempt_id: 'service-attempt',
+                auto_merge_enabled: false,
+                workspace_root: cwd,
+                cadence_policy: 'disabled',
+            },
+        }), 'utf8');
+        const launchAttempt = await launchActual.prepareWorkerLaunchAttempt({
+            cwd,
+            teamName,
+            workerName: 'worker-1',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            paneId: '%91',
+            provider,
+            runtimeCliPath: '/runtime-cli.cjs',
+            context: { kind: 'initial' },
+        });
+        worker.launch_attempt_id = launchAttempt.attempt_id;
+        worker.operational_state = 'active';
+        await writeFile(configPath, JSON.stringify({
+            name: teamName,
+            instance_id: ORIGINAL_INSTANCE_ID,
+            tmux_server_identity: mocks.tmuxServerIdentity,
             task: 'owner recovery startup settlement',
             agent_type: provider,
             worker_launch_mode: 'interactive',
@@ -267,6 +483,8 @@ describe('runtime v2 startup inbox dispatch', () => {
             schema_version: 2,
             state_revision: 0,
             name: teamName,
+            instance_id: ORIGINAL_INSTANCE_ID,
+            tmux_server_identity: mocks.tmuxServerIdentity,
             task: 'owner recovery startup settlement',
             leader: { session_id: 'dispatch-session', worker_id: 'leader-fixed', role: 'leader' },
             tmux_session: 'dispatch-session',
@@ -275,17 +493,44 @@ describe('runtime v2 startup inbox dispatch', () => {
             next_task_id: 1,
             created_at: createdAt,
         }), 'utf8');
+        const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+        await writeFile(launchAttempt.ackPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_ack',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(launchAttempt.decisionPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_decision',
+            decision: 'accepted',
+            reason: 'fixture_provider_authority',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: 999_999,
+            process_start_identity: '1',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        launchMocks.loadWorkerLaunchAttempt.mockImplementation(async (input) => input.attemptId === launchAttempt.attempt_id
+            ? launchAttempt
+            : { ...launchAttempt, attempt_id: input.attemptId });
+        launchMocks.observeWorkerLaunchProvider.mockImplementation(async (attempt) => attempt.attempt_id === launchAttempt.attempt_id ? 'dead' : 'alive');
         reserveRecoveryRequest(cwd, requestId, {
             operation: 'recover-worker',
             workspaceHash: createHash('sha256').update(cwd).digest('hex'),
             teamName,
             workerName: 'worker-1',
+            instanceId: ORIGINAL_INSTANCE_ID,
         }, recoveryId);
         return {
             teamName,
             requestId,
             recoveryId,
             correlationKey: `recovery:${recoveryId}:attempt-worker-1`,
+            instanceId: ORIGINAL_INSTANCE_ID,
+            launchAttemptId: launchAttempt.attempt_id,
         };
     }
     function configureOwnerPaneLifecycle() {
@@ -297,6 +542,14 @@ describe('runtime v2 startup inbox dispatch', () => {
             deadPanes.add(ownership.paneId);
         });
         return deadPanes;
+    }
+    function expectOriginalProviderRetired(fixture) {
+        expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledTimes(1);
+        expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(expect.objectContaining({
+            attempt_id: fixture.launchAttemptId,
+            instance_id: fixture.instanceId,
+            pane_id: '%91',
+        }), 'recovery_replacement', expect.any(Function));
     }
     function configureOwnerEvidenceProbe(mode, probeGate, evidenceGate) {
         mocks.probeStartupPaneActivity.mockImplementation(async (context) => {
@@ -320,6 +573,48 @@ describe('runtime v2 startup inbox dispatch', () => {
             return 'busy';
         });
     }
+    const modelContractLaunchCases = [
+        {
+            agentType: 'claude',
+            modelEnv: 'ANTHROPIC_MODEL',
+            fallbackEnv: undefined,
+            model: 'claude-opus-4-1',
+            expectedArgs: ['--dangerously-skip-permissions'],
+            promptMode: false,
+        },
+        {
+            agentType: 'codex',
+            modelEnv: 'OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL',
+            fallbackEnv: 'OMC_CODEX_DEFAULT_MODEL',
+            model: 'gpt-4o',
+            expectedArgs: ['--dangerously-bypass-approvals-and-sandbox', '--model', 'gpt-4o'],
+            promptMode: false,
+        },
+        {
+            agentType: 'gemini',
+            modelEnv: 'OMC_EXTERNAL_MODELS_DEFAULT_GEMINI_MODEL',
+            fallbackEnv: 'OMC_GEMINI_DEFAULT_MODEL',
+            model: 'gemini-2.0-flash',
+            expectedArgs: ['--approval-mode', 'yolo', '--model', 'gemini-2.0-flash'],
+            promptMode: true,
+        },
+        {
+            agentType: 'grok',
+            modelEnv: 'OMC_EXTERNAL_MODELS_DEFAULT_GROK_MODEL',
+            fallbackEnv: 'OMC_GROK_DEFAULT_MODEL',
+            model: 'grok-4-fast',
+            expectedArgs: ['--always-approve', '--model', 'grok-4-fast'],
+            promptMode: true,
+        },
+        {
+            agentType: 'antigravity',
+            modelEnv: 'OMC_EXTERNAL_MODELS_DEFAULT_ANTIGRAVITY_MODEL',
+            fallbackEnv: 'OMC_ANTIGRAVITY_DEFAULT_MODEL',
+            model: 'Gemini 3.1 Pro (High)',
+            expectedArgs: ['--dangerously-skip-permissions', '--model', 'Gemini 3.1 Pro (High)'],
+            promptMode: true,
+        },
+    ];
     async function seedRecoveryDispatchCheckpoint(fixture, status) {
         const queued = await enqueueDispatchRequest(fixture.teamName, {
             kind: 'inbox',
@@ -335,13 +630,96 @@ describe('runtime v2 startup inbox dispatch', () => {
             await transitionDispatchRequest(fixture.teamName, queued.request.request_id, 'pending', status, { last_reason: `checkpoint_${status}` }, cwd);
         }
     }
+    async function seedRecoveryTaskOwnershipFixture(fixture) {
+        const tasksRoot = absPath(cwd, TeamPaths.tasks(fixture.teamName));
+        await mkdir(tasksRoot, { recursive: true });
+        const createdAt = '2026-01-01T00:00:00.000Z';
+        const tasks = [
+            {
+                id: '1',
+                subject: 'Owned continuation',
+                description: 'Continue the task owned by the recovered worker.',
+                status: 'in_progress',
+                owner: 'worker-1',
+                version: 1,
+                created_at: createdAt,
+                claim: {
+                    owner: 'worker-1',
+                    token: 'owner-recovery-token',
+                    leased_until: '2099-01-01T00:00:00.000Z',
+                },
+            },
+            {
+                id: '2',
+                subject: 'Later pending task',
+                description: 'This task belongs to no worker yet.',
+                status: 'pending',
+                owner: null,
+                version: 1,
+                created_at: createdAt,
+            },
+            {
+                id: '3',
+                subject: 'Terminal task',
+                description: 'This task completed before recovery.',
+                status: 'completed',
+                owner: 'worker-2',
+                result: 'done elsewhere',
+                version: 2,
+                created_at: createdAt,
+            },
+            {
+                id: '4',
+                subject: 'Transferred task',
+                description: 'This task is owned by another live worker.',
+                status: 'in_progress',
+                owner: 'worker-2',
+                version: 2,
+                created_at: createdAt,
+                claim: {
+                    owner: 'worker-2',
+                    token: 'transferred-task-token',
+                    leased_until: '2099-01-01T00:00:00.000Z',
+                },
+            },
+        ];
+        const before = new Map();
+        for (const task of tasks) {
+            const path = absPath(cwd, TeamPaths.taskFile(fixture.teamName, task.id));
+            const contents = JSON.stringify(task, null, 2);
+            await writeFile(path, contents, 'utf8');
+            before.set(task.id, contents);
+        }
+        const { teamPublishTaskRecoveryCheckpoint } = await import('../team-ops.js');
+        const checkpoint = await teamPublishTaskRecoveryCheckpoint({
+            teamName: fixture.teamName,
+            taskId: '1',
+            workerName: 'worker-1',
+            taskVersion: 1,
+            claimToken: 'owner-recovery-token',
+            sequence: 1,
+            resumePayload: { cursor: 17, note: 'continue owned task' },
+        }, cwd);
+        if (!checkpoint.ok)
+            throw new Error(`fixture_checkpoint_publication_failed:${checkpoint.error}`);
+        return before;
+    }
     it('does not require progress evidence for an idle prompt-mode recovery', () => {
         expect(promptModeRecoveryRequiresProgressEvidence(true, 0)).toBe(false);
         expect(promptModeRecoveryRequiresProgressEvidence(true, 1)).toBe(true);
         expect(promptModeRecoveryRequiresProgressEvidence(false, 0)).toBe(false);
     });
-    beforeEach(() => {
+    beforeEach(async () => {
         vi.resetModules();
+        // resetModules drops the file-level fs mocks after enough iterations.
+        // Re-install so later recovery tests still see the exact-read intercept.
+        vi.doMock('node:fs/promises', importOriginal => mockFsPromises(importOriginal));
+        vi.doMock('fs/promises', importOriginal => mockFsPromises(importOriginal));
+        atomicWriteControl.failCanonicalPath = undefined;
+        atomicWriteControl.triggerReadPath = undefined;
+        atomicWriteControl.corruptSiblingPath = undefined;
+        atomicWriteControl.readTriggered = false;
+        const processActual = await vi.importActual('child_process');
         startupDeliveryGate = undefined;
         mocks.createTeamSession.mockReset();
         mocks.spawnWorkerInPane.mockReset();
@@ -362,7 +740,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.killWorkerPanes.mockResolvedValue(undefined);
         mocks.resolveSplitPaneWorkerPaneIds.mockImplementation(async (_session, paneIds) => paneIds);
         mocks.getWorkerLiveness.mockImplementation(async () => mocks.killOwnedWorkerPane.mock.calls.length > 0 ? 'dead' : 'alive');
-        mocks.workerPaneBelongsToProviderTarget.mockResolvedValue(true);
+        mocks.workerPaneBelongsToOwnedProviderTarget.mockResolvedValue(true);
         mocks.execFile.mockReset();
         mocks.spawnSync.mockReset();
         modelContractMocks.buildWorkerArgv.mockReset();
@@ -371,7 +749,17 @@ describe('runtime v2 startup inbox dispatch', () => {
         modelContractMocks.isPromptModeAgent.mockReset();
         modelContractMocks.getPromptModeArgs.mockReset();
         modelContractMocks.resolveClaudeWorkerModel.mockReset();
-        modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockClear();
+        modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockReset();
+        modelContractMocks.buildValidatedWorkerLaunchDescriptor.mockImplementation((agentType, config, appendedArgs = []) => {
+            const [binary, ...args] = modelContractMocks.buildWorkerArgv(agentType, config);
+            return {
+                schema_version: 1,
+                provider: agentType,
+                model: config.model ?? null,
+                binary: binary ?? config.resolvedBinaryPath ?? `/usr/bin/${agentType}`,
+                args: [...args, ...appendedArgs],
+            };
+        });
         modelContractMocks.validateWorkerLaunchDescriptor.mockClear();
         mergeMocks.startMergeOrchestrator.mockReset();
         mergeMocks.recoverFromRestart.mockReset();
@@ -390,9 +778,11 @@ describe('runtime v2 startup inbox dispatch', () => {
         launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockReset();
         launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockImplementation(async (_attempt, _reason, cleanup) => cleanup());
         launchMocks.loadWorkerLaunchAttempt.mockReset();
-        launchMocks.loadWorkerLaunchAttempt.mockResolvedValue({});
+        launchMocks.loadWorkerLaunchAttempt.mockResolvedValue(null);
         launchMocks.loadCurrentWorkerLaunchAttempt.mockReset();
         launchMocks.loadCurrentWorkerLaunchAttempt.mockResolvedValue(null);
+        launchMocks.observeWorkerLaunchProvider.mockReset();
+        launchMocks.observeWorkerLaunchProvider.mockResolvedValue('dead');
         launchMocks.isWorkerLaunchAttemptAccepted.mockReset();
         launchMocks.isWorkerLaunchAttemptAccepted.mockResolvedValue(true);
         launchMocks.isWorkerLaunchAttemptCurrent.mockReset();
@@ -402,12 +792,73 @@ describe('runtime v2 startup inbox dispatch', () => {
             leaderPaneId: '%1',
             workerPaneIds: [],
             sessionMode: 'split-pane',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
         });
         mocks.spawnWorkerInPane.mockResolvedValue(undefined);
         mocks.autoStartupEvidence = true;
         mocks.nextStartupTaskId = 1;
         mocks.nextSplitPaneId = 2;
         mocks.cmuxSplitPaneId = null;
+        mocks.splitTeamWorkerPaneWithEvidence.mockReset();
+        mocks.splitTeamWorkerPaneWithEvidence.mockImplementation(async (splitTarget, direction, _cwd, provider = 'tmux', identity) => {
+            if (provider === 'tmux' && !identity) {
+                return {
+                    commandSucceeded: false,
+                    provider,
+                    splitTarget,
+                    direction,
+                    rawOutput: '',
+                    stderr: 'tmux_server_identity_unknown',
+                    paneId: null,
+                };
+            }
+            const paneId = provider === 'cmux'
+                ? mocks.cmuxSplitPaneId ?? `cmux-worker-${mocks.nextSplitPaneId++}`
+                : `%${mocks.nextSplitPaneId++}`;
+            return {
+                commandSucceeded: true,
+                provider,
+                splitTarget,
+                direction,
+                rawOutput: `${paneId}\n`,
+                stderr: '',
+                paneId,
+                ...(provider === 'tmux' ? { tmuxServerIdentity: identity ?? mocks.tmuxServerIdentity } : {}),
+            };
+        });
+        mocks.adoptWorkerPaneOwnership.mockReset();
+        mocks.adoptWorkerPaneOwnership.mockImplementation(async (input) => {
+            if (input.provider === 'tmux' && !input.tmuxServerIdentity) {
+                return { ok: false, reason: 'tmux_server_identity_missing' };
+            }
+            return {
+                ok: true,
+                ownership: {
+                    provider: input.provider,
+                    providerTarget: input.providerTarget,
+                    paneId: input.paneId,
+                    splitTarget: '',
+                    leaderPaneId: input.leaderPaneId,
+                    reservedPaneIds: [...input.reservedPaneIds],
+                    source: 'adopted',
+                    ...(input.provider === 'tmux' ? { tmuxServerIdentity: input.tmuxServerIdentity } : {}),
+                },
+            };
+        });
+        mocks.getOwnedWorkerLiveness.mockClear();
+        mocks.getOwnedWorkerLiveness.mockImplementation(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return 'unknown';
+            return mocks.getWorkerLiveness(ownership.paneId);
+        });
+        mocks.captureOwnedTeamPane.mockClear();
+        mocks.captureOwnedTeamPane.mockImplementation(async (ownership) => {
+            if (ownership.provider === 'tmux' && !ownership.tmuxServerIdentity)
+                return '';
+            return mocks.captureTeamPane(ownership.paneId);
+        });
+        mocks.observeTmuxServerIdentity.mockReset();
+        mocks.observeTmuxServerIdentity.mockResolvedValue('matching');
         mocks.spawnOwnedWorkerInPane.mockImplementation(async (sessionName, ownership, config) => {
             const attempt = {
                 schema_version: 1,
@@ -471,14 +922,14 @@ describe('runtime v2 startup inbox dispatch', () => {
             };
         });
         mocks.deliverStartupInbox.mockImplementation(async (context, message) => {
-            const sent = await mocks.sendToWorker('', context.ownership.paneId, message);
+            const sent = await mocks.sendToWorker('', context.ownership.paneId, message, context.ownership.tmuxServerIdentity);
             if (!sent) {
                 startupDeliveryGate?.resolve();
                 return { ok: false, reason: 'startup_send_failed' };
             }
             if (mocks.autoStartupEvidence) {
                 const taskId = String(mocks.nextStartupTaskId++);
-                const workerDir = join(cwd, '.omc', 'state', 'team', context.attempt.team_name, 'workers', context.attempt.worker_name);
+                const workerDir = absPath(cwd, TeamPaths.workerDir(context.attempt.team_name, context.attempt.worker_name));
                 await mkdir(workerDir, { recursive: true });
                 await writeFile(join(workerDir, 'status.json'), JSON.stringify({
                     state: 'working',
@@ -495,7 +946,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.waitForPaneReady.mockResolvedValue(true);
         mocks.sendToWorker.mockResolvedValue(true);
         mocks.applyMainVerticalLayout.mockResolvedValue(undefined);
-        mocks.spawnSync.mockReturnValue({ status: 0 });
+        mocks.spawnSync.mockImplementation((...args) => (args[0] === 'ps' ? processActual.spawnSync(...args) : { status: 0 }));
         modelContractMocks.buildWorkerArgv.mockImplementation((agentType) => [`/usr/bin/${agentType ?? 'claude'}`]);
         modelContractMocks.resolveValidatedBinaryPath.mockImplementation((agentType) => `/usr/bin/${agentType ?? 'claude'}`);
         modelContractMocks.getWorkerEnv.mockImplementation((...args) => {
@@ -518,19 +969,18 @@ describe('runtime v2 startup inbox dispatch', () => {
         cadenceMocks.installCommitCadence.mockResolvedValue({ method: 'hook' });
         cadenceMocks.startFallbackPoller.mockImplementation(() => ({ stop: vi.fn() }));
         cadenceMocks.uninstallCommitCadence.mockResolvedValue(undefined);
-        mocks.execFile.mockImplementation((_file, args, cb) => {
+        mocks.execFile.mockImplementation((file, args, ...rest) => {
+            if (file === 'ps')
+                return Reflect.apply(processActual.execFile, undefined, [file, args, ...rest]);
+            const cb = rest.at(-1);
+            if (typeof cb !== 'function')
+                throw new Error('fixture_execFile_callback_missing');
             if (args[0] === 'split-window') {
                 cb(null, '%2\n', '');
                 return;
             }
             cb(null, '', '');
         });
-        mocks.execFile[promisify.custom] = async (_file, args) => {
-            if (args[0] === 'split-window') {
-                return { stdout: '%2\n', stderr: '' };
-            }
-            return { stdout: '', stderr: '' };
-        };
         mocks.tmuxExecAsync.mockImplementation(async (args) => {
             if (args[0] === 'split-window') {
                 return { stdout: `%${mocks.nextSplitPaneId++}\n`, stderr: '' };
@@ -542,6 +992,10 @@ describe('runtime v2 startup inbox dispatch', () => {
         vi.useRealTimers();
         delete process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS;
         startupDeliveryGate = undefined;
+        for (const launch of activeRealLaunches.splice(0)) {
+            await launch.terminate(launch.attempt).catch(() => false);
+            await launch.bootstrap.catch(() => undefined);
+        }
         restoreFixtureEnv?.();
         restoreFixtureEnv = undefined;
         process.chdir(originalCwd);
@@ -570,19 +1024,22 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(requests[0]?.trigger_message).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
         expect(requests[0]?.trigger_message).toContain('execute now');
         expect(requests[0]?.trigger_message).toContain('concrete progress');
-        const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
+        const inboxPath = absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1'));
         const inbox = await readFile(inboxPath, 'utf-8');
         expect(inbox).toContain('Dispatch test');
         expect(inbox).toContain('ACK/progress replies are not a stop signal');
-        expect(mocks.sendToWorker).toHaveBeenCalledWith('', '%2', expect.stringContaining('concrete progress'));
+        expect(mocks.sendToWorker).toHaveBeenCalledWith('', '%2', expect.stringContaining('concrete progress'), mocks.tmuxServerIdentity);
         expect(mocks.spawnWorkerInPane).toHaveBeenCalledWith('dispatch-session', '%2', expect.objectContaining({
             envVars: expect.objectContaining({
                 OMC_TEAM_WORKER: 'dispatch-team/worker-1',
-                OMC_TEAM_STATE_ROOT: join(cwd, '.omc', 'state', 'team', 'dispatch-team'),
+                OMC_TEAM_STATE_ROOT: absPath(cwd, TeamPaths.root('dispatch-team')),
                 OMC_TEAM_LEADER_CWD: cwd,
             }),
         }));
-        expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session', { required: true });
+        expect(mocks.applyMainVerticalLayout).toHaveBeenCalledWith('dispatch-session', {
+            required: true,
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        });
         const layoutOrder = mocks.applyMainVerticalLayout.mock.invocationCallOrder[0];
         const ownedSpawnOrder = mocks.spawnOwnedWorkerInPane.mock.invocationCallOrder[0];
         const providerOrder = mocks.spawnWorkerInPane.mock.invocationCallOrder[0];
@@ -591,11 +1048,440 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(ownedSpawnOrder).toBeLessThan(providerOrder);
         expect(layoutOrder).toBeLessThan(providerOrder);
         expect(providerOrder).toBeLessThan(inboxOrder);
-        const config = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf-8'));
-        const manifest = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json'), 'utf-8'));
+        const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('dispatch-team')), 'utf-8'));
+        const manifest = JSON.parse(await readFile(absPath(cwd, TeamPaths.manifest('dispatch-team')), 'utf-8'));
+        expect(config.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
+        expect(manifest.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
         expect(config.workers[0].launch_descriptor).toMatchObject({ provider: 'claude', binary: '/usr/bin/claude', args: [] });
         expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
         expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
+    });
+    it('does not publish a corrupt canonical task when startup publication is interrupted', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-atomic-task-publication-');
+        const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', '1'));
+        atomicWriteControl.failCanonicalPath = taskPath;
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Interrupted task', description: 'Must not leave a torn task file.' }],
+            cwd,
+        })).rejects.toThrow('injected_task_publication_interruption');
+        await expect(readFile(taskPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(mocks.createTeamSession).not.toHaveBeenCalled();
+    });
+    it('persists dependencies and leaves dependent tasks out of startup dispatch', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-dependencies-');
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 2,
+            agentTypes: ['claude', 'claude'],
+            tasks: [
+                { subject: 'Root task', description: 'Run first.' },
+                { subject: 'Dependent task', description: 'Run second.', depends_on: ['1'] },
+            ],
+            cwd,
+        });
+        const dependent = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-2.json'), 'utf8'));
+        expect(dependent).toMatchObject({ depends_on: ['1'], status: 'pending', version: 1 });
+        expect(dependent).not.toHaveProperty('result');
+        expect(runtime.config.workers[1]?.pane_id).toBeUndefined();
+        expect(runtime.config.workers[1]?.assigned_tasks).toEqual([]);
+        expect(mocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
+        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+        expect(requests.map(request => request.to_worker)).toEqual(['worker-1']);
+    });
+    it.each([
+        ['out-of-range', [{ subject: 'Only task', description: 'invalid', depends_on: ['2'] }]],
+        ['self-reference', [{ subject: 'Self task', description: 'invalid', depends_on: ['1'] }]],
+        ['duplicate', [
+                { subject: 'First task', description: 'valid' },
+                { subject: 'Second task', description: 'valid' },
+                { subject: 'Duplicate dependency', description: 'invalid', depends_on: ['1', '1'] },
+            ]],
+        ['mismatched-fields', [{
+                    subject: 'Mismatched fields',
+                    description: 'invalid',
+                    depends_on: ['1'],
+                    blocked_by: ['2'],
+                }]],
+        ['non-string-id', [{
+                    subject: 'Non-string dependency',
+                    description: 'invalid',
+                    depends_on: [1],
+                }]],
+        ['cycle', [
+                { subject: 'First task', description: 'invalid', depends_on: ['2'] },
+                { subject: 'Second task', description: 'invalid', depends_on: ['1'] },
+            ]],
+    ])('rejects %s task dependencies before startup side effects', async (_label, tasks) => {
+        cwd = await mkdtempFixture('omc-runtime-v2-invalid-dependencies-');
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks,
+            cwd,
+        })).rejects.toThrow(/(?:invalid_task_dependenc(?:y|ies)|cyclic_task_dependency)/);
+        expect(mocks.createTeamSession).not.toHaveBeenCalled();
+        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf8'))
+            .rejects.toMatchObject({ code: 'ENOENT' });
+    });
+    it.each([
+        ['unknown', [{ subject: 'Unknown owner', description: 'invalid', owner: 'worker-9' }]],
+        ['blank', [{ subject: 'Blank owner', description: 'invalid', owner: '   ' }]],
+        ['null', [{ subject: 'Null owner', description: 'invalid', owner: null }]],
+        ['non-string', [{ subject: 'Numeric owner', description: 'invalid', owner: 7 }]],
+        ['blocked unknown', [
+                { subject: 'Root task', description: 'valid' },
+                { subject: 'Blocked task', description: 'invalid', depends_on: ['1'], owner: 'worker-9' },
+            ]],
+    ])('rejects %s explicit task owner before state or pane side effects', async (_label, tasks) => {
+        cwd = await mkdtempFixture('omc-runtime-v2-invalid-owner-');
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks,
+            cwd,
+        })).rejects.toThrow('invalid_task_owner');
+        expect(mocks.createTeamSession).not.toHaveBeenCalled();
+        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf8'))
+            .rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json'), 'utf8'))
+            .rejects.toMatchObject({ code: 'ENOENT' });
+    });
+    it.each(modelContractLaunchCases)('uses the real $agentType model contract at the launch boundary', async ({ agentType, modelEnv, fallbackEnv, model, expectedArgs, promptMode }) => {
+        cwd = await mkdtempFixture(`omc-runtime-v2-model-contract-${agentType}-`);
+        await useActualModelContractLaunchBuilder();
+        const previousModel = process.env[modelEnv];
+        const previousFallback = fallbackEnv ? process.env[fallbackEnv] : undefined;
+        process.env[modelEnv] = model;
+        if (fallbackEnv)
+            process.env[fallbackEnv] = `legacy-${model}`;
+        try {
+            if (promptMode) {
+                mocks.spawnWorkerInPane.mockImplementationOnce(async (_sessionName, _paneId, config) => {
+                    const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
+                    const task = JSON.parse(await readFile(taskPath, 'utf8'));
+                    await writeFile(taskPath, JSON.stringify({
+                        ...task,
+                        status: 'in_progress',
+                        owner: 'worker-1',
+                        claim: {
+                            owner: 'worker-1',
+                            token: `model-contract-${agentType}`,
+                            leased_until: '2099-01-01T00:00:00.000Z',
+                            launch_attempt_id: config.envVars?.OMC_WORKER_LAUNCH_ATTEMPT_ID,
+                        },
+                    }), 'utf8');
+                });
+            }
+            const { startTeamV2 } = await import('../runtime-v2.js');
+            await startTeamV2({
+                teamName: 'dispatch-team',
+                workerCount: 1,
+                agentTypes: [agentType],
+                tasks: [{ subject: 'Model contract', description: 'Verify exact provider launch arguments.' }],
+                cwd,
+            });
+            const launchConfig = mocks.spawnWorkerInPane.mock.calls[0]?.[2];
+            expect(launchConfig).toBeDefined();
+            expect(launchConfig?.launchArgs?.slice(0, expectedArgs.length)).toEqual(expectedArgs);
+            expect(launchConfig?.envVars?.[modelEnv]).toBe(model);
+            expect(launchConfig?.envVars).not.toHaveProperty('ANTHROPIC_API_KEY');
+            if (fallbackEnv) {
+                expect(launchConfig?.envVars?.[fallbackEnv]).toBe(`legacy-${model}`);
+                expect(launchConfig?.launchArgs).not.toContain(`legacy-${model}`);
+            }
+            if (promptMode) {
+                const promptIndex = launchConfig?.launchArgs?.indexOf('-p') ?? -1;
+                expect(promptIndex).toBe(expectedArgs.length);
+                expect(launchConfig?.launchArgs?.[promptIndex + 1]).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/inbox.md');
+                expect(mocks.sendToWorker).not.toHaveBeenCalled();
+                expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+            }
+            else {
+                expect(launchConfig?.launchArgs).not.toContain('-p');
+            }
+        }
+        finally {
+            if (previousModel === undefined)
+                delete process.env[modelEnv];
+            else
+                process.env[modelEnv] = previousModel;
+            if (fallbackEnv) {
+                if (previousFallback === undefined)
+                    delete process.env[fallbackEnv];
+                else
+                    process.env[fallbackEnv] = previousFallback;
+            }
+        }
+    });
+    it('uses a legacy provider model fallback only when the canonical variable is unset', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-model-contract-legacy-fallback-');
+        await useActualModelContractLaunchBuilder();
+        const canonicalKey = 'OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL';
+        const fallbackKey = 'OMC_CODEX_DEFAULT_MODEL';
+        const previousCanonical = process.env[canonicalKey];
+        const previousFallback = process.env[fallbackKey];
+        delete process.env[canonicalKey];
+        process.env[fallbackKey] = 'o3-mini';
+        try {
+            const { startTeamV2 } = await import('../runtime-v2.js');
+            await startTeamV2({
+                teamName: 'dispatch-team',
+                workerCount: 1,
+                agentTypes: ['codex'],
+                tasks: [{ subject: 'Legacy fallback', description: 'Use the supported fallback model.' }],
+                cwd,
+            });
+            const launchConfig = mocks.spawnWorkerInPane.mock.calls[0]?.[2];
+            expect(launchConfig?.launchArgs).toEqual([
+                '--dangerously-bypass-approvals-and-sandbox',
+                '--model',
+                'o3-mini',
+            ]);
+            expect(launchConfig?.envVars?.[fallbackKey]).toBe('o3-mini');
+        }
+        finally {
+            if (previousCanonical === undefined)
+                delete process.env[canonicalKey];
+            else
+                process.env[canonicalKey] = previousCanonical;
+            if (previousFallback === undefined)
+                delete process.env[fallbackKey];
+            else
+                process.env[fallbackKey] = previousFallback;
+        }
+    });
+    it('forwards Claude provider and tier environment variables at the launch boundary', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-claude-env-matrix-');
+        await useActualModelContractLaunchBuilder();
+        const values = {
+            CLAUDE_MODEL: 'vertex_ai/claude-3-5-sonnet',
+            ANTHROPIC_BASE_URL: 'https://gateway.example.invalid',
+            CLAUDE_CODE_USE_BEDROCK: '1',
+            CLAUDE_CODE_BEDROCK_OPUS_MODEL: 'us.anthropic.claude-opus-4-6-v1:0',
+            CLAUDE_CODE_BEDROCK_SONNET_MODEL: 'us.anthropic.claude-sonnet-4-6-v1:0',
+            CLAUDE_CODE_BEDROCK_HAIKU_MODEL: 'us.anthropic.claude-haiku-4-5-v1:0',
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus-4-6-custom',
+            ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-6-custom',
+            ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku-4-5-custom',
+            OMC_MODEL_HIGH: 'claude-opus-4-6-override',
+            OMC_MODEL_MEDIUM: 'claude-sonnet-4-6-override',
+            OMC_MODEL_LOW: 'claude-haiku-4-5-override',
+        };
+        const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+        Object.assign(process.env, values);
+        try {
+            const { startTeamV2 } = await import('../runtime-v2.js');
+            await startTeamV2({
+                teamName: 'dispatch-team',
+                workerCount: 1,
+                agentTypes: ['claude'],
+                tasks: [{ subject: 'Claude env', description: 'Preserve provider environment.' }],
+                cwd,
+            });
+            const launchConfig = mocks.spawnWorkerInPane.mock.calls[0]?.[2];
+            expect(launchConfig?.launchArgs).toEqual(['--dangerously-skip-permissions']);
+            expect(launchConfig?.envVars).toMatchObject(values);
+        }
+        finally {
+            for (const [key, value] of Object.entries(previous)) {
+                if (value === undefined)
+                    delete process.env[key];
+                else
+                    process.env[key] = value;
+            }
+        }
+    });
+    it('writes the prompt inbox before the provider spawn callback and preserves the v2 pointer contract', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-prompt-inbox-order-');
+        await useActualModelContractLaunchBuilder();
+        let inboxAtProviderSpawn;
+        mocks.spawnWorkerInPane.mockImplementationOnce(async (_sessionName, _paneId, config) => {
+            inboxAtProviderSpawn = await readFile(absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1')), 'utf8');
+            const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
+            const task = JSON.parse(await readFile(taskPath, 'utf8'));
+            await writeFile(taskPath, JSON.stringify({
+                ...task,
+                status: 'in_progress',
+                owner: 'worker-1',
+                claim: {
+                    owner: 'worker-1',
+                    token: 'prompt-order-token',
+                    leased_until: '2099-01-01T00:00:00.000Z',
+                    launch_attempt_id: config.envVars?.OMC_WORKER_LAUNCH_ATTEMPT_ID,
+                },
+            }), 'utf8');
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['gemini'],
+            tasks: [{ subject: 'Prompt startup', description: 'Read the inbox before starting.' }],
+            cwd,
+        });
+        expect(inboxAtProviderSpawn).toContain('Read the inbox before starting.');
+        expect(inboxAtProviderSpawn).toContain('Prompt startup');
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
+        expect(mocks.sendToWorker).not.toHaveBeenCalled();
+        expect(mocks.deliverStartupInbox).not.toHaveBeenCalled();
+    });
+    it('keeps a no-pane split from creating a provider launch or orphan task assignment', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-no-pane-orphan-');
+        mocks.splitTeamWorkerPaneWithEvidence.mockResolvedValueOnce({
+            commandSucceeded: true,
+            provider: 'tmux',
+            splitTarget: '%1',
+            direction: 'right',
+            rawOutput: '',
+            stderr: '',
+            paneId: null,
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['codex'],
+            tasks: [{ subject: 'No pane', description: 'A missing pane must not orphan this task.' }],
+            cwd,
+        });
+        expect(mocks.spawnOwnedWorkerInPane).not.toHaveBeenCalled();
+        expect(mocks.spawnWorkerInPane).not.toHaveBeenCalled();
+        expect(runtime.config.workers[0]?.pane_id).toBeUndefined();
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        const task = JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')), 'utf8'));
+        expect(task).toMatchObject({ status: 'pending' });
+        expect(task.owner ?? null).toBeNull();
+    });
+    it.each(['identified', 'unparseable'])('retains the reservation and pending startup state when session creation cleanup is unknown after a %s native allocation', async (resourceKind) => {
+        cwd = await mkdtempFixture(`omc-runtime-v2-session-create-${resourceKind}-`);
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), `session creation ${resourceKind}\n`, 'utf8');
+        execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        const { TeamSessionCreationError } = await import('../tmux-session.js');
+        const partialSession = {
+            sessionName: 'dispatch-session',
+            leaderPaneId: '%1',
+            workerPaneIds: resourceKind === 'identified' ? ['%77'] : ['native-resource-unparseable'],
+            sessionMode: 'split-pane',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        };
+        const creationEvidence = {
+            provider: 'tmux',
+            operation: 'split-window',
+            rawOutput: resourceKind === 'identified' ? '%77\t/tmp/omc-test-tmux.sock\t4242\n' : 'native output cannot be parsed',
+            stderr: 'fixture split failure',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        };
+        mocks.createTeamSession.mockImplementationOnce(async () => {
+            throw new TeamSessionCreationError(`tmux_creation_cleanup_unverified:${resourceKind}`, partialSession, creationEvidence);
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            workerCount: 1,
+            agentTypes: ['claude'],
+            pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
+            tasks: [{ subject: 'Session create failure', description: 'Retain cleanup authority.' }],
+            cwd,
+        })).rejects.toThrow('worker_cleanup_incomplete');
+        const binding = createTeamInstanceBinding({
+            teamName: 'dispatch-team',
+            cwd,
+            instanceId: ORIGINAL_INSTANCE_ID,
+        });
+        const reservation = JSON.parse(await readFile(absPath(cwd, TeamPaths.teamInstanceReservation(binding.workspace_hash, 'dispatch-team')), 'utf8'));
+        expect(reservation).toMatchObject({
+            instance_id: ORIGINAL_INSTANCE_ID,
+            team_name: 'dispatch-team',
+            phase: 'pending',
+        });
+        const pendingConfig = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('dispatch-team')), 'utf8'));
+        expect(pendingConfig).toMatchObject({
+            name: 'dispatch-team',
+            instance_id: ORIGINAL_INSTANCE_ID,
+            lifecycle_state: 'starting',
+        });
+        if (pendingConfig.tmux_server_identity !== undefined) {
+            expect(pendingConfig.tmux_server_identity).toEqual(mocks.tmuxServerIdentity);
+        }
+        const marker = JSON.parse(await readFile(absPath(cwd, `${TeamPaths.root('dispatch-team')}/startup-failure.json`), 'utf8'));
+        expect(marker).toMatchObject({
+            instance_id: ORIGINAL_INSTANCE_ID,
+            cleanup_status: 'unknown',
+            cleanup_incomplete: true,
+            partial_session: {
+                tmuxServerIdentity: mocks.tmuxServerIdentity,
+                workerPaneIds: partialSession.workerPaneIds,
+            },
+            creation_evidence: {
+                tmuxServerIdentity: mocks.tmuxServerIdentity,
+                rawOutput: creationEvidence.rawOutput,
+            },
+        });
+        await expect(lstat(teamWorktreePath(cwd, 'dispatch-team', 'worker-1'))).resolves.toBeDefined();
+        await expect(readFile(absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, 'dispatch-team', ORIGINAL_INSTANCE_ID)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(mocks.killTeamSession).not.toHaveBeenCalled();
+        expect(mocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    });
+    it('performs the existing clean rollback when session creation reports verified cleanup', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-session-create-verified-');
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), 'verified session cleanup\n', 'utf8');
+        execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        const { TeamSessionCreationError } = await import('../tmux-session.js');
+        const error = new TeamSessionCreationError('tmux_creation_cleanup_verified', {
+            sessionName: 'dispatch-session',
+            leaderPaneId: '%1',
+            workerPaneIds: ['%77'],
+            sessionMode: 'split-pane',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        }, {
+            provider: 'tmux',
+            operation: 'split-window',
+            rawOutput: '%77\t/tmp/omc-test-tmux.sock\t4242\n',
+            stderr: '',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
+        });
+        error.cleanupStatus = 'verified';
+        mocks.createTeamSession.mockRejectedValueOnce(error);
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName: 'dispatch-team',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            workerCount: 1,
+            agentTypes: ['claude'],
+            pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
+            tasks: [{ subject: 'Verified session cleanup', description: 'Use clean rollback.' }],
+            cwd,
+        })).rejects.toThrow('tmux_creation_cleanup_verified');
+        const binding = createTeamInstanceBinding({
+            teamName: 'dispatch-team',
+            cwd,
+            instanceId: ORIGINAL_INSTANCE_ID,
+        });
+        await expect(readFile(absPath(cwd, TeamPaths.teamInstanceReservation(binding.workspace_hash, 'dispatch-team')), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(lstat(absPath(cwd, TeamPaths.root('dispatch-team')))).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(lstat(teamWorktreePath(cwd, 'dispatch-team', 'worker-1'))).rejects.toMatchObject({ code: 'ENOENT' });
+        expect(mocks.killTeamSession).not.toHaveBeenCalled();
+        expect(mocks.killWorkerPanes).not.toHaveBeenCalled();
     });
     it('delivers trusted Cursor reviewer guidance in the default non-worktree inbox', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-cursor-bootstrap-');
@@ -611,9 +1497,9 @@ describe('runtime v2 startup inbox dispatch', () => {
                 }],
             cwd,
         });
-        const config = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'cursor-bootstrap-team', 'config.json'), 'utf-8'));
+        const config = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('cursor-bootstrap-team')), 'utf-8'));
         expect(config.workers[0].role).toBe('critic');
-        const inbox = await readFile(join(cwd, '.omc', 'state', 'team', 'cursor-bootstrap-team', 'workers', 'worker-1', 'inbox.md'), 'utf-8');
+        const inbox = await readFile(absPath(cwd, TeamPaths.inbox('cursor-bootstrap-team', 'worker-1')), 'utf-8');
         expect(inbox).toContain('Agent-Type Guidance (cursor)');
         expect(inbox).toContain('The trusted runtime has provided a "REQUIRED: Structured Verdict Output" section');
         expect(inbox).toContain('do NOT edit, create, or delete any file');
@@ -625,7 +1511,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     it('settles every tmux worker between its split and provider spawn', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-layout-order-multi-');
-        mocks.tmuxExecAsync.mockClear();
+        mocks.splitTeamWorkerPaneWithEvidence.mockClear();
         mocks.applyMainVerticalLayout.mockClear();
         mocks.spawnOwnedWorkerInPane.mockClear();
         mocks.spawnWorkerInPane.mockClear();
@@ -640,13 +1526,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             ],
             cwd,
         });
-        const splitOrders = mocks.tmuxExecAsync.mock.calls
-            .map((call, index) => ({
-            args: call[0],
-            order: mocks.tmuxExecAsync.mock.invocationCallOrder[index],
-        }))
-            .filter(call => call.args[0] === 'split-window')
-            .map(call => call.order);
+        const splitOrders = mocks.splitTeamWorkerPaneWithEvidence.mock.invocationCallOrder;
         const layoutOrders = mocks.applyMainVerticalLayout.mock.invocationCallOrder;
         const ownedSpawnOrders = mocks.spawnOwnedWorkerInPane.mock.invocationCallOrder;
         const providerOrders = mocks.spawnWorkerInPane.mock.invocationCallOrder;
@@ -700,55 +1580,89 @@ describe('runtime v2 startup inbox dispatch', () => {
                 }],
             cwd,
         });
-        const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+        const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
         const task = JSON.parse(await readFile(taskPath, 'utf-8'));
         expect(task.delegation).toMatchObject({
             mode: 'auto',
             required_parallel_probe: true,
         });
-        const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
+        const inboxPath = absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1'));
         const inbox = await readFile(inboxPath, 'utf-8');
         expect(inbox).toContain('"result"');
         expect(inbox).toContain('Subagent skip reason:');
         expect(inbox).toContain('only when explicitly allowed by the leader');
     });
-    it('preserves startup failure evidence when a worker launch throws after scaffolding', async () => {
+    it('disposes a verified-clean startup failure while retaining external cleanup evidence', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-startup-failure-');
+        const teamName = 'dispatch-team';
+        const instanceId = ORIGINAL_INSTANCE_ID;
         mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('claude launch exploded'));
         const { startTeamV2 } = await import('../runtime-v2.js');
         await expect(startTeamV2({
-            teamName: 'dispatch-team',
+            teamName,
+            instanceId,
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify startup failure evidence' }],
             cwd,
         })).rejects.toThrow('claude launch exploded');
-        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
-        const marker = JSON.parse(await readFile(markerPath, 'utf-8'));
-        expect(marker.reason).toBe('startup_failed_before_config_persisted');
-        expect(marker.error).toContain('claude launch exploded');
-        expect(marker.recorded_at).toBeTruthy();
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        const configPath = absPath(cwd, TeamPaths.config(teamName));
+        await expect(readFile(configPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(lstat(absPath(cwd, TeamPaths.root(teamName)))).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(readFile(teamStatePath(cwd, teamName, 'startup-failure.json'), 'utf8'))
+            .rejects.toMatchObject({ code: 'ENOENT' });
+        const cleanupPath = absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, teamName, instanceId));
+        const cleanup = JSON.parse(await readFile(cleanupPath, 'utf8'));
+        expect(cleanup).toMatchObject({
+            phase: 'completed',
+            instance_id: instanceId,
+            team_name: teamName,
+        });
         expect(mocks.killTeamSession).not.toHaveBeenCalled();
     });
     it('does not persist sensitive cmux worker command payloads in startup failure evidence', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-redacted-startup-failure-');
         const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+        const getAttempt = await configureRealUnresolvedStartupLaunch({
+            error: 'cmux command failed for both current and legacy forms: current=send-surface ([redacted]); legacy=send ([redacted])',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            cleanup: 'unverified',
+        });
         modelContractMocks.getWorkerEnv.mockImplementation(() => ({
             OMC_TEAM_WORKER: 'dispatch-team/worker-1',
             SECRET_ENV: secret,
         }));
         modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--api-key', secret]);
-        mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('cmux command failed for both current and legacy forms: current=send-surface ([redacted]); legacy=send ([redacted])'));
         const { startTeamV2 } = await import('../runtime-v2.js');
         await expect(startTeamV2({
             teamName: 'dispatch-team',
+            instanceId: ORIGINAL_INSTANCE_ID,
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify redacted startup failure evidence' }],
             cwd,
-        })).rejects.toThrow(/cmux command failed for both current and legacy forms/);
-        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+        })).rejects.toThrow('worker_cleanup_incomplete');
+        const markerPath = teamStatePath(cwd, 'dispatch-team', 'startup-failure.json');
         const markerText = await readFile(markerPath, 'utf-8');
+        const marker = JSON.parse(markerText);
+        expect(marker.cleanup_incomplete).toBe(true);
+        expect(marker.launch_attempts).toContainEqual(expect.objectContaining({
+            launch_attempt_id: getAttempt()?.attempt_id,
+            pane_id: '%2',
+        }));
+        const persisted = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('dispatch-team')), 'utf8'));
+        expect(persisted).toMatchObject({
+            instance_id: ORIGINAL_INSTANCE_ID,
+            lifecycle_state: 'starting',
+            workers: [{ launch_attempt_id: getAttempt()?.attempt_id, operational_state: 'starting' }],
+        });
+        const binding = createTeamInstanceBinding({
+            teamName: 'dispatch-team',
+            cwd,
+            instanceId: ORIGINAL_INSTANCE_ID,
+        });
+        await expect(readFile(absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, 'dispatch-team', ORIGINAL_INSTANCE_ID)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
         expect(markerText).toContain('current=send-surface');
         expect(markerText).toContain('legacy=send');
         expect(markerText).not.toContain(secret);
@@ -758,29 +1672,52 @@ describe('runtime v2 startup inbox dispatch', () => {
     it('does not persist sensitive primary cmux failure payloads in startup failure evidence', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-redacted-primary-failure-');
         const secret = 'SECRET_TOKEN_SHOULD_NOT_LEAK';
+        const getAttempt = await configureRealUnresolvedStartupLaunch({
+            error: 'cmux command failed for current form: current=send-surface (cmux transport timed out after partial write [redacted])',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            cleanup: 'unverified',
+        });
         modelContractMocks.getWorkerEnv.mockImplementation(() => ({
             OMC_TEAM_WORKER: 'dispatch-team/worker-1',
             SECRET_ENV: secret,
         }));
         modelContractMocks.buildWorkerArgv.mockReturnValue(['/usr/bin/claude', '--api-key', secret]);
-        mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('cmux command failed for current form: current=send-surface (cmux transport timed out after partial write [redacted])'));
         const { startTeamV2 } = await import('../runtime-v2.js');
         await expect(startTeamV2({
             teamName: 'dispatch-team',
+            instanceId: ORIGINAL_INSTANCE_ID,
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify redacted primary failure evidence' }],
             cwd,
-        })).rejects.toThrow(/cmux command failed for current form/);
-        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+        })).rejects.toThrow('worker_cleanup_incomplete');
+        const markerPath = teamStatePath(cwd, 'dispatch-team', 'startup-failure.json');
         const markerText = await readFile(markerPath, 'utf-8');
+        const marker = JSON.parse(markerText);
+        expect(marker.cleanup_incomplete).toBe(true);
+        expect(marker.launch_attempts).toContainEqual(expect.objectContaining({
+            launch_attempt_id: getAttempt()?.attempt_id,
+            pane_id: '%2',
+        }));
+        const persisted = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('dispatch-team')), 'utf8'));
+        expect(persisted).toMatchObject({
+            instance_id: ORIGINAL_INSTANCE_ID,
+            lifecycle_state: 'starting',
+            workers: [{ launch_attempt_id: getAttempt()?.attempt_id, operational_state: 'starting' }],
+        });
+        const binding = createTeamInstanceBinding({
+            teamName: 'dispatch-team',
+            cwd,
+            instanceId: ORIGINAL_INSTANCE_ID,
+        });
+        await expect(readFile(absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, 'dispatch-team', ORIGINAL_INSTANCE_ID)), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
         expect(markerText).toContain('current=send-surface');
         expect(markerText).toContain('cmux transport timed out after partial write');
         expect(markerText).not.toContain(secret);
         expect(markerText).not.toContain('SECRET_ENV');
         expect(markerText).not.toContain('--api-key');
     });
-    it('keeps dirty worktree preservation metadata when startup rollback records failure evidence', async () => {
+    it('preserves a dirty worktree after verified provider cleanup during startup rollback', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-dirty-startup-failure-');
         execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
         execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
@@ -789,29 +1726,39 @@ describe('runtime v2 startup inbox dispatch', () => {
         await writeFile(join(cwd, 'AGENTS.md'), 'root agents\n', 'utf-8');
         execFileSync('git', ['add', 'README.md', 'AGENTS.md'], { cwd, stdio: 'pipe' });
         execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
-        mocks.spawnWorkerInPane.mockImplementationOnce(async (_session, _pane, paneConfig) => {
-            await writeFile(join(paneConfig.cwd ?? cwd, 'dirty-startup.txt'), 'preserve me\n', 'utf-8');
-            throw new Error('claude launch exploded after dirty worktree');
+        const getAttempt = await configureRealUnresolvedStartupLaunch({
+            error: 'claude launch exploded after dirty worktree',
+            instanceId: ORIGINAL_INSTANCE_ID,
+            cleanup: 'verified',
+            onProviderStarted: async (workerCwd) => {
+                await writeFile(join(workerCwd, 'dirty-startup.txt'), 'preserve me\n', 'utf-8');
+            },
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
         await expect(startTeamV2({
             teamName: 'dispatch-team',
+            instanceId: ORIGINAL_INSTANCE_ID,
             workerCount: 1,
             agentTypes: ['claude'],
             pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
             tasks: [{ subject: 'Dispatch test', description: 'Verify dirty worktree preservation evidence' }],
             cwd,
-        })).rejects.toThrow('claude launch exploded after dirty worktree');
-        const markerPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'startup-failure.json');
+        })).rejects.toThrow('worker_cleanup_incomplete');
+        const markerPath = teamStatePath(cwd, 'dispatch-team', 'startup-failure.json');
         const marker = JSON.parse(await readFile(markerPath, 'utf-8'));
-        const backupPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'worktree-root-agents.json');
-        const worktreePath = join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1');
+        const backupPath = teamStatePath(cwd, 'dispatch-team', 'workers/worker-1/worktree-root-agents.json');
+        const worktreePath = teamWorktreePath(cwd, 'dispatch-team', 'worker-1');
         expect(marker.error).toContain('claude launch exploded after dirty worktree');
-        expect(marker.preserved?.[0]).toMatchObject({
-            workerName: 'worker-1',
-            path: worktreePath,
-        });
-        expect(marker.preserved?.[0]?.reason).toContain('worktree_dirty');
+        expect(marker.cleanup_incomplete).toBe(true);
+        expect(marker.rollback_error).toContain('worktree_cleanup_unverified');
+        expect(marker.preserved).toBeUndefined();
+        const attempt = getAttempt();
+        expect(attempt?.attempt_id).toBeTruthy();
+        expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(expect.objectContaining({
+            attempt_id: attempt?.attempt_id,
+            instance_id: ORIGINAL_INSTANCE_ID,
+            pane_id: '%2',
+        }), 'startup_rollback', expect.any(Function));
         await expect(readFile(backupPath, 'utf-8')).resolves.toContain('root agents');
         await expect(readFile(join(worktreePath, 'dirty-startup.txt'), 'utf-8')).resolves.toBe('preserve me\n');
     });
@@ -836,18 +1783,18 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(runtime.config.workspace_mode).toBe('worktree');
         expect(runtime.config.worktree_mode).toBe('named');
         expect(runtime.config.workers[0]).toMatchObject({
-            working_dir: join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1'),
+            working_dir: teamWorktreePath(cwd, 'dispatch-team', 'worker-1'),
             worktree_repo_root: cwd,
             worktree_branch: 'omc-team/dispatch-team/worker-1',
             worktree_detached: false,
             worktree_created: true,
         });
         expect(mocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith('dispatch-session', expect.objectContaining({ paneId: '%2' }), expect.objectContaining({
-            cwd: join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1'),
+            cwd: teamWorktreePath(cwd, 'dispatch-team', 'worker-1'),
             launchStateCwd: cwd,
         }));
-        const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
-        const manifestPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json');
+        const configPath = absPath(cwd, TeamPaths.config('dispatch-team'));
+        const manifestPath = absPath(cwd, TeamPaths.manifest('dispatch-team'));
         const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
         const manifest = JSON.parse(await readFile(manifestPath, 'utf-8'));
         expect(persisted.state_revision).toBe(1);
@@ -862,8 +1809,8 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(runtime.config.team_state_root).toBeDefined();
         const teamStateRoot = runtime.config.team_state_root;
         expect(requests[0]?.trigger_message.replace('$OMC_TEAM_STATE_ROOT', teamStateRoot))
-            .toContain(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md'));
-        const overlay = await readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'AGENTS.md'), 'utf-8');
+            .toContain(absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1')));
+        const overlay = await readFile(absPath(cwd, TeamPaths.overlay('dispatch-team', 'worker-1')), 'utf-8');
         expect(overlay).toContain('$OMC_TEAM_STATE_ROOT/workers/worker-1/status.json');
         expect(overlay).not.toContain('$OMC_TEAM_STATE_ROOT/team/dispatch-team');
     });
@@ -885,7 +1832,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             tasks: [{ subject: 'Auto merge fail', description: 'Registration failure must abort startup' }],
             cwd,
             autoMerge: true,
-        })).rejects.toThrow(/auto-merge startup failed: registration exploded/);
+        })).rejects.toThrow('worker_cleanup_incomplete');
         expect(mergeMocks.startMergeOrchestrator).toHaveBeenCalledTimes(1);
         expect(mergeMocks.registerWorker).toHaveBeenCalledWith('worker-1');
         expect(cadenceMocks.installCommitCadence).toHaveBeenCalledWith(expect.objectContaining({
@@ -897,6 +1844,8 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(cadenceMocks.uninstallCommitCadence).toHaveBeenCalledWith(expect.objectContaining({
             workerName: 'worker-1',
         }));
+        const startupFailure = JSON.parse(await readFile(absPath(cwd, `${TeamPaths.root('dispatch-team')}/startup-failure.json`), 'utf8'));
+        expect(startupFailure.error).toContain('registration exploded');
     });
     it('wires auto-merge worker cadence and drains before unregistering on shutdown', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-auto-merge-cadence-');
@@ -909,7 +1858,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         execFileSync('git', ['checkout', '-b', 'feature-auto-merge'], { cwd, stdio: 'pipe' });
         cadenceMocks.installCommitCadence.mockResolvedValue({ method: 'fallback-poll' });
         const { startTeamV2, shutdownTeamV2 } = await import('../runtime-v2.js');
-        await startTeamV2({
+        const runtime = await startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['codex'],
@@ -922,10 +1871,14 @@ describe('runtime v2 startup inbox dispatch', () => {
             workerName: 'worker-1',
             agentType: 'codex',
             enabled: true,
-            worktreePath: join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1'),
+            worktreePath: teamWorktreePath(cwd, 'dispatch-team', 'worker-1'),
         }));
-        expect(cadenceMocks.startFallbackPoller).toHaveBeenCalledWith(join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1'), 'worker-1');
-        await shutdownTeamV2('dispatch-team', cwd, { timeoutMs: 0, force: true });
+        expect(cadenceMocks.startFallbackPoller).toHaveBeenCalledWith(teamWorktreePath(cwd, 'dispatch-team', 'worker-1'), 'worker-1');
+        await shutdownTeamV2('dispatch-team', cwd, {
+            timeoutMs: 0,
+            force: true,
+            instanceId: runtime.instanceId,
+        });
         // This shutdown may be preserved (alive panes) or succeed (dead panes).
         // On preserved/rollback: orchestration is preserved for retry.
         // On success: drainAndStop is called by terminal finalization.
@@ -946,7 +1899,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         cadenceMocks.installCommitCadence.mockResolvedValue({ method: 'fallback-poll' });
         mocks.getWorkerLiveness.mockResolvedValue('alive');
         const { startTeamV2, shutdownTeamV2 } = await import('../runtime-v2.js');
-        await startTeamV2({
+        const runtime = await startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['codex'],
@@ -954,7 +1907,11 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
             autoMerge: true,
         });
-        await shutdownTeamV2('dispatch-team', cwd, { timeoutMs: 0, force: true });
+        await shutdownTeamV2('dispatch-team', cwd, {
+            timeoutMs: 0,
+            force: true,
+            instanceId: runtime.instanceId,
+        });
         // Retryable shutdown rollback preserves orchestration: drainAndStop
         // and cadence uninstall are skipped because the team is going back
         // to active for retry.
@@ -974,25 +1931,51 @@ describe('runtime v2 startup inbox dispatch', () => {
             leaderPaneId: '%1',
             workerPaneIds: [],
             sessionMode: 'dedicated-window',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
         });
-        await mkdir(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'manifest.json'), { recursive: true });
-        const { startTeamV2 } = await import('../runtime-v2.js');
-        await expect(startTeamV2({
-            teamName: 'dispatch-team',
-            workerCount: 1,
-            agentTypes: ['claude'],
-            pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
-            tasks: [{ subject: 'Worktree rollback', description: 'Fail after tmux session starts' }],
-            cwd,
-            newWindow: true,
-        })).rejects.toThrow();
-        expect(mocks.killTeamSession).toHaveBeenCalledWith('dispatch-window', [], '%1', { sessionMode: 'dedicated-window' });
-        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf-8'))
+        const teamName = 'dispatch-team';
+        const instanceId = ORIGINAL_INSTANCE_ID;
+        const manifestPath = absPath(cwd, TeamPaths.manifest(teamName));
+        vi.doMock('fs/promises', async (importOriginal) => {
+            const actual = await importOriginal();
+            return {
+                ...actual,
+                writeFile: async (...args) => {
+                    const target = args[0];
+                    if (typeof target === 'string' && resolve(target) === resolve(manifestPath)) {
+                        throw new Error('manifest_publication_write_failed');
+                    }
+                    await actual.writeFile(...args);
+                },
+            };
+        });
+        try {
+            const { startTeamV2 } = await import('../runtime-v2.js');
+            await expect(startTeamV2({
+                teamName,
+                instanceId,
+                workerCount: 1,
+                agentTypes: ['claude'],
+                pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
+                tasks: [{ subject: 'Worktree rollback', description: 'Fail after tmux session starts' }],
+                cwd,
+                newWindow: true,
+            })).rejects.toThrow('manifest_publication_write_failed');
+        }
+        finally {
+            vi.doUnmock('fs/promises');
+            vi.resetModules();
+        }
+        expect(mocks.killTeamSession).toHaveBeenCalledWith('dispatch-window', [], '%1', { sessionMode: 'dedicated-window', tmuxServerIdentity: mocks.tmuxServerIdentity });
+        await expect(readFile(absPath(cwd, TeamPaths.config(teamName)), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'worktrees.json'), 'utf-8'))
+        await expect(readFile(teamStatePath(cwd, teamName, 'worktrees.json'), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(readFile(join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1', 'AGENTS.md'), 'utf-8'))
+        await expect(readFile(join(teamWorktreePath(cwd, teamName, 'worker-1'), 'AGENTS.md'), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        const cleanup = JSON.parse(await readFile(absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, teamName, instanceId)), 'utf8'));
+        expect(cleanup).toMatchObject({ phase: 'completed', instance_id: instanceId });
     });
     it('rolls back clean native worktrees when startup fails before config is persisted', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-worktree-rollback-');
@@ -1012,11 +1995,11 @@ describe('runtime v2 startup inbox dispatch', () => {
             tasks: [{ subject: 'Worktree rollback', description: 'Fail before config persists' }],
             cwd,
         })).rejects.toThrow('tmux_start_failed');
-        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json'), 'utf-8'))
+        await expect(readFile(absPath(cwd, TeamPaths.config('dispatch-team')), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(readFile(join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'worktrees.json'), 'utf-8'))
+        await expect(readFile(teamStatePath(cwd, 'dispatch-team', 'worktrees.json'), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
-        await expect(readFile(join(cwd, '.omc', 'team', 'dispatch-team', 'worktrees', 'worker-1', 'AGENTS.md'), 'utf-8'))
+        await expect(readFile(join(teamWorktreePath(cwd, 'dispatch-team', 'worker-1'), 'AGENTS.md'), 'utf-8'))
             .rejects.toMatchObject({ code: 'ENOENT' });
     });
     it('uses owner-aware startup allocation when task owners are provided', async () => {
@@ -1057,7 +2040,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(requests.map((request) => request.to_worker)).toEqual(['worker-2']);
         const spawnedWorkers = mocks.spawnWorkerInPane.mock.calls.map((call) => call[2]?.envVars?.OMC_TEAM_WORKER);
         expect(spawnedWorkers).toEqual(['dispatch-team/worker-2']);
-        const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+        const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
         const persistedTask = JSON.parse(await readFile(taskPath, 'utf-8'));
         expect(persistedTask.role).toBe('test-engineer');
     });
@@ -1076,10 +2059,10 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
         });
         expect(runtime.config.workers.map((worker) => worker.role)).toEqual(['architect', 'writer']);
-        const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+        const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
         const persistedTask = JSON.parse(await readFile(taskPath, 'utf-8'));
         expect(persistedTask.role).toBe('architect');
-        const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
+        const configPath = absPath(cwd, TeamPaths.config('dispatch-team'));
         const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
         expect(persisted.workers.map((worker) => worker.role)).toEqual(['architect', 'writer']);
     });
@@ -1135,12 +2118,12 @@ describe('runtime v2 startup inbox dispatch', () => {
         // The worker is a cursor reviewer and owns a verdict-output file, which is
         // what lets the leader transition the task. Without it the task would
         // strand in_progress — the failure mode that kept these gates closed.
-        const persisted = JSON.parse(await readFile(join(cwd, '.omc', 'state', 'team', 'cursor-routing-team', 'config.json'), 'utf-8'));
+        const persisted = JSON.parse(await readFile(absPath(cwd, TeamPaths.config('cursor-routing-team')), 'utf-8'));
         expect(persisted.workers[0].worker_cli).toBe('cursor');
         expect(persisted.workers[0].role).toBe('code-reviewer');
         expect(persisted.workers[0].output_file).toBeTruthy();
         // And the reviewer contract actually reached the worker.
-        const inbox = await readFile(join(cwd, '.omc', 'state', 'team', 'cursor-routing-team', 'workers', 'worker-1', 'inbox.md'), 'utf-8');
+        const inbox = await readFile(absPath(cwd, TeamPaths.inbox('cursor-routing-team', 'worker-1')), 'utf-8');
         expect(inbox).toContain('REQUIRED: Structured Verdict Output');
         expect(inbox).toContain('do NOT edit, create, or delete any file');
     });
@@ -1159,10 +2142,15 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     it('fails closed when split aliases the leader pane before any worker launch or inbox delivery', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-leader-alias-');
-        mocks.tmuxExecAsync.mockImplementation(async (args) => {
-            if (args[0] === 'split-window')
-                return { stdout: '%1\n', stderr: '' };
-            return { stdout: '', stderr: '' };
+        mocks.splitTeamWorkerPaneWithEvidence.mockResolvedValueOnce({
+            commandSucceeded: true,
+            provider: 'tmux',
+            splitTarget: '%1',
+            direction: 'right',
+            rawOutput: '%1\n',
+            stderr: '',
+            paneId: '%1',
+            tmuxServerIdentity: mocks.tmuxServerIdentity,
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
         const runtime = await startTeamV2({
@@ -1179,7 +2167,7 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     it('fails closed when a distinct split pane is not a member of the provider target', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-foreign-split-');
-        mocks.workerPaneBelongsToProviderTarget
+        mocks.workerPaneBelongsToOwnedProviderTarget
             .mockResolvedValueOnce(true)
             .mockResolvedValueOnce(false);
         const { startTeamV2 } = await import('../runtime-v2.js');
@@ -1195,10 +2183,13 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
     it('aborts startup without persisting a live worker when launch acknowledgement fails', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-start-delivery-fail-');
+        const teamName = 'dispatch-team';
+        const instanceId = ORIGINAL_INSTANCE_ID;
         mocks.spawnWorkerInPane.mockRejectedValueOnce(new Error('worker_start_ack_ack_timeout:worker-1:%2:attempt'));
         const { startTeamV2 } = await import('../runtime-v2.js');
         await expect(startTeamV2({
-            teamName: 'dispatch-team',
+            teamName,
+            instanceId,
             workerCount: 1,
             agentTypes: ['codex'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify start command delivery failure aborts startup' }],
@@ -1206,10 +2197,16 @@ describe('runtime v2 startup inbox dispatch', () => {
         })).rejects.toThrow('worker_start_ack_ack_timeout:worker-1:%2:attempt');
         expect(mocks.spawnWorkerInPane).toHaveBeenCalledTimes(1);
         expect(mocks.killTeamSession).not.toHaveBeenCalled();
-        const configPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'config.json');
-        const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
-        expect(persisted.workers[0].pane_id).toBeUndefined();
-        expect(persisted.workers[0].assigned_tasks).toEqual([]);
+        const configPath = absPath(cwd, TeamPaths.config(teamName));
+        await expect(readFile(configPath, 'utf-8')).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(lstat(absPath(cwd, TeamPaths.root(teamName)))).rejects.toMatchObject({ code: 'ENOENT' });
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        const cleanup = JSON.parse(await readFile(absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, teamName, instanceId)), 'utf8'));
+        expect(cleanup).toMatchObject({
+            phase: 'completed',
+            instance_id: instanceId,
+            team_name: teamName,
+        });
     });
     it('cleans the owned pane before provider launch when required layout fails', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-layout-failure-');
@@ -1253,7 +2250,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             const [ownership] = args;
             deadPaneIds.add(ownership.paneId);
         });
-        mocks.workerPaneBelongsToProviderTarget.mockImplementation(async (...args) => {
+        mocks.workerPaneBelongsToOwnedProviderTarget.mockImplementation(async (...args) => {
             const [{ paneId }] = args;
             return !deadPaneIds.has(paneId);
         });
@@ -1288,6 +2285,9 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         expect(mocks.execFile.mock.calls.some((call) => call[1]?.[0] === 'kill-pane')).toBe(false);
         expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+        const task = JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')), 'utf8'));
+        expect(task).toMatchObject({ status: 'pending' });
+        expect(task.owner ?? null).toBeNull();
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests).toHaveLength(1);
         expect(requests[0]?.status).toBe('failed');
@@ -1306,9 +2306,111 @@ describe('runtime v2 startup inbox dispatch', () => {
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Reject unverified provider cleanup' }],
             cwd,
-        })).rejects.toThrow('worker_startup_cleanup_unverified:worker-1:%2');
+        })).rejects.toThrow('worker_cleanup_incomplete');
         expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalled();
         expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+    });
+    it('retains the instance and every startup artifact when a durable launch cleanup is unknown', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-durable-launch-cleanup-');
+        const teamName = 'durable-launch-team';
+        const instanceId = '55555555-5555-4555-8555-555555555555';
+        execFileSync('git', ['init'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['config', 'user.name', 'Test User'], { cwd, stdio: 'pipe' });
+        await writeFile(join(cwd, 'README.md'), 'durable launch cleanup test\n', 'utf8');
+        execFileSync('git', ['add', 'README.md'], { cwd, stdio: 'pipe' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd, stdio: 'pipe' });
+        const launchActual = await vi.importActual('../worker-launch-ack.js');
+        let durableAttempt;
+        launchMocks.loadWorkerLaunchAttempt.mockImplementation(async () => durableAttempt ?? null);
+        launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt.mockResolvedValueOnce(false);
+        mocks.spawnOwnedWorkerInPane.mockImplementationOnce(async (_sessionName, ownership, paneConfig) => {
+            durableAttempt = await launchActual.prepareWorkerLaunchAttempt({
+                cwd: paneConfig.launchStateCwd ?? cwd,
+                teamName: paneConfig.teamName,
+                workerName: paneConfig.workerName,
+                instanceId: paneConfig.instanceId ?? instanceId,
+                paneId: ownership.paneId,
+                provider: 'claude',
+                runtimeCliPath: paneConfig.launchBootstrapPath ?? '/runtime-cli.cjs',
+                context: { kind: 'initial' },
+            });
+            throw new Error(`worker_launch_cleanup_unverified:${paneConfig.workerName}:${ownership.paneId}`);
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await expect(startTeamV2({
+            teamName,
+            instanceId,
+            workerCount: 1,
+            agentTypes: ['claude'],
+            pluginConfig: { team: { ops: { worktreeMode: 'named' } } },
+            tasks: [{ subject: 'Retain startup ownership', description: 'Preserve all artifacts after unknown cleanup' }],
+            cwd,
+        })).rejects.toThrow('worker_cleanup_incomplete');
+        expect(mocks.spawnOwnedWorkerInPane).toHaveBeenCalledWith('dispatch-session', expect.objectContaining({ paneId: '%2' }), expect.objectContaining({ teamName, instanceId, workerName: 'worker-1' }));
+        expect(durableAttempt).toBeDefined();
+        const attempt = durableAttempt;
+        const expectedReceipt = JSON.parse(await readFile(attempt.expectedPath, 'utf8'));
+        const currentReceipt = JSON.parse(await readFile(attempt.currentPath, 'utf8'));
+        expect(expectedReceipt).toMatchObject({
+            instance_id: instanceId,
+            team_name: teamName,
+            worker_name: 'worker-1',
+            pane_id: '%2',
+            attempt_id: attempt.attempt_id,
+        });
+        expect(currentReceipt).toMatchObject(expectedReceipt);
+        const configPath = absPath(cwd, TeamPaths.config(teamName));
+        const pendingConfig = JSON.parse(await readFile(configPath, 'utf8'));
+        expect(pendingConfig).toMatchObject({
+            instance_id: instanceId,
+            lifecycle_state: 'starting',
+        });
+        expect(pendingConfig.workers?.[0]).toMatchObject({
+            name: 'worker-1',
+            pane_id: '%2',
+            launch_attempt_id: attempt.attempt_id,
+            operational_state: 'starting',
+        });
+        const binding = createTeamInstanceBinding({ teamName, cwd, instanceId });
+        const reservationPath = absPath(cwd, TeamPaths.teamInstanceReservation(binding.workspace_hash, teamName));
+        const reservation = JSON.parse(await readFile(reservationPath, 'utf8'));
+        expect(reservation).toMatchObject({
+            instance_id: instanceId,
+            team_name: teamName,
+            phase: 'active',
+        });
+        const markerPath = absPath(cwd, `${TeamPaths.root(teamName)}/startup-failure.json`);
+        const marker = JSON.parse(await readFile(markerPath, 'utf8'));
+        expect(marker.cleanup_incomplete).toBe(true);
+        expect(marker.launch_attempts).toContainEqual(expect.objectContaining({
+            worker: 'worker-1',
+            pane_id: '%2',
+            launch_attempt_id: attempt.attempt_id,
+        }));
+        expect(marker.rollback_error).toContain('provider_cleanup_unverified');
+        const workerStatePath = absPath(cwd, TeamPaths.workerDir(teamName, 'worker-1'));
+        expect((await lstat(workerStatePath)).isDirectory()).toBe(true);
+        const worktreePath = teamWorktreePath(cwd, teamName, 'worker-1');
+        expect((await lstat(worktreePath)).isDirectory()).toBe(true);
+        const worktreeMetadata = JSON.parse(await readFile(absPath(cwd, `${TeamPaths.root(teamName)}/worktrees.json`), 'utf8'));
+        expect(worktreeMetadata).toContainEqual(expect.objectContaining({
+            workerName: 'worker-1',
+            path: await realpath(worktreePath),
+        }));
+        expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
+        expect(mocks.killWorkerPanes).not.toHaveBeenCalled();
+        expect(mocks.killTeamSession).not.toHaveBeenCalled();
+        expect(launchMocks.retireWorkerLaunchAttempt).not.toHaveBeenCalled();
+        expect(launchMocks.terminateWorkerLaunchProvider).not.toHaveBeenCalled();
+        expect(launchMocks.loadWorkerLaunchAttempt).toHaveBeenCalledWith(expect.objectContaining({
+            teamName,
+            workerName: 'worker-1',
+            instanceId,
+            attemptId: attempt.attempt_id,
+        }));
+        const cleanupReceiptPath = absPath(cwd, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, teamName, instanceId));
+        await expect(readFile(cleanupReceiptPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     });
     it('requires Claude startup evidence without resending the startup inbox', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-evidence-missing-');
@@ -1573,9 +2675,9 @@ describe('runtime v2 startup inbox dispatch', () => {
             activityProbeCalls++;
             setTimeout(() => {
                 void (async () => {
-                    const workerDir = join(cwd, '.omc', 'state', 'team', context.attempt.team_name, 'workers', context.attempt.worker_name);
+                    const workerDir = absPath(cwd, TeamPaths.workerDir(context.attempt.team_name, context.attempt.worker_name));
                     await mkdir(workerDir, { recursive: true });
-                    await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+                    await writeFile(absPath(cwd, TeamPaths.workerStatus(context.attempt.team_name, context.attempt.worker_name)), JSON.stringify({
                         state: 'working',
                         current_task_id: '1',
                         updated_at: new Date().toISOString(),
@@ -1596,13 +2698,13 @@ describe('runtime v2 startup inbox dispatch', () => {
                 tasks: [{ subject: 'Dispatch test', description: `Verify delayed ${provider} startup evidence` }],
                 cwd,
             });
-            await deliveryGate.promise;
+            await awaitGateOrRecoveryFailure(deliveryGate.promise, startPromise, 'startup delivery');
             await flushRealIo();
             await vi.advanceTimersByTimeAsync(30_000);
             await flushRealIo();
-            await activityProbeGate.promise;
+            await awaitGateOrRecoveryFailure(activityProbeGate.promise, startPromise, 'startup activity probe');
             await vi.advanceTimersByTimeAsync(1_500);
-            await evidenceWriteGate.promise;
+            await awaitGateOrRecoveryFailure(evidenceWriteGate.promise, startPromise, 'startup evidence');
             await flushRealIo();
             await vi.advanceTimersByTimeAsync(250);
             const runtime = await startPromise;
@@ -1633,9 +2735,9 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.probeStartupPaneActivity.mockImplementation(async (context) => {
             setTimeout(() => {
                 void (async () => {
-                    const workerDir = join(cwd, '.omc', 'state', 'team', context.attempt.team_name, context.attempt.worker_name);
+                    const workerDir = absPath(cwd, TeamPaths.workerDir(context.attempt.team_name, context.attempt.worker_name));
                     await mkdir(workerDir, { recursive: true });
-                    await writeFile(join(workerDir, 'status.json'), JSON.stringify({
+                    await writeFile(absPath(cwd, TeamPaths.workerStatus(context.attempt.team_name, context.attempt.worker_name)), JSON.stringify({
                         state: 'working',
                         current_task_id: '1',
                         updated_at: new Date().toISOString(),
@@ -1656,13 +2758,13 @@ describe('runtime v2 startup inbox dispatch', () => {
                 tasks: [{ subject: 'Dispatch test', description: `Reject stale ${provider} startup evidence` }],
                 cwd,
             });
-            await deliveryGate.promise;
+            await awaitGateOrRecoveryFailure(deliveryGate.promise, startPromise, 'startup delivery');
             await flushRealIo();
             await vi.advanceTimersByTimeAsync(30_000);
             await flushRealIo();
-            await activityProbeGate.promise;
+            await awaitGateOrRecoveryFailure(activityProbeGate.promise, startPromise, 'startup activity probe');
             await vi.advanceTimersByTimeAsync(1_500);
-            await evidenceWriteGate.promise;
+            await awaitGateOrRecoveryFailure(evidenceWriteGate.promise, startPromise, 'startup evidence');
             await flushRealIo();
             await vi.advanceTimersByTimeAsync(2_000);
             const runtime = await startPromise;
@@ -1696,6 +2798,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
             workerName: 'worker-1',
             requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
         });
         await Promise.race([
             deliveryGate.promise,
@@ -1704,9 +2807,9 @@ describe('runtime v2 startup inbox dispatch', () => {
         await flushRealIo();
         await vi.advanceTimersByTimeAsync(30_000);
         await flushRealIo();
-        await probeGate.promise;
+        await awaitGateOrRecoveryFailure(probeGate.promise, recoveryPromise, 'before-dispatch probe');
         await vi.advanceTimersByTimeAsync(1_500);
-        await evidenceGate.promise;
+        await awaitGateOrRecoveryFailure(evidenceGate.promise, recoveryPromise, 'before-dispatch evidence');
         await flushRealIo();
         await vi.advanceTimersByTimeAsync(250);
         const result = await recoveryPromise;
@@ -1722,7 +2825,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
         expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
         expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
-        expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalled();
+        expectOriginalProviderRetired(fixture);
         const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
         expect(requests).toHaveLength(1);
         expect(requests[0]).toMatchObject({
@@ -1734,6 +2837,145 @@ describe('runtime v2 startup inbox dispatch', () => {
             kind: 'final',
             outcome: 'succeeded',
         });
+    });
+    it('requeues the selected task through an exact read when a sibling corrupts after inventory', async () => {
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+        cwd = await mkdtempFixture('omc-runtime-v2-requeue-target-read-');
+        mocks.autoStartupEvidence = false;
+        const fixture = await seedOwnerRecoveryFixture('codex', 'target-read');
+        const taskRoot = absPath(cwd, TeamPaths.tasks(fixture.teamName));
+        const targetPath = absPath(cwd, TeamPaths.taskFile(fixture.teamName, '1'));
+        const siblingPath = absPath(cwd, TeamPaths.taskFile(fixture.teamName, '2'));
+        const claimToken = 'target-claim-token';
+        const createdAt = new Date().toISOString();
+        await mkdir(taskRoot, { recursive: true });
+        await writeFile(targetPath, JSON.stringify({
+            id: '1',
+            subject: 'Recover target',
+            description: 'Only this task should be requeued.',
+            status: 'in_progress',
+            owner: 'worker-1',
+            version: 1,
+            claim: { owner: 'worker-1', token: claimToken, leased_until: '2099-01-01T00:00:00.000Z' },
+            created_at: createdAt,
+        }));
+        await writeFile(siblingPath, JSON.stringify({
+            id: '2',
+            subject: 'Unrelated sibling',
+            description: 'This file is corrupted after inventory.',
+            status: 'completed',
+            version: 1,
+            created_at: createdAt,
+        }));
+        const resumePayload = { resume: 'continue target' };
+        const checkpointPath = absPath(cwd, TeamPaths.checkpoint(fixture.teamName, '1', taskRecoveryClaimTokenHash(claimToken), 1));
+        await mkdir(join(checkpointPath, '..'), { recursive: true });
+        await writeFile(checkpointPath, JSON.stringify({
+            schema_version: 1,
+            team_name: fixture.teamName,
+            task_id: '1',
+            worker_name: 'worker-1',
+            sequence: 1,
+            task_version: 1,
+            claim_token: claimToken,
+            resume_payload_hash: hashTaskRecoveryCheckpointPayload(resumePayload),
+            resume_payload: resumePayload,
+            updated_at: createdAt,
+        }));
+        atomicWriteControl.triggerReadPath = checkpointPath;
+        atomicWriteControl.corruptSiblingPath = siblingPath;
+        configureOwnerPaneLifecycle();
+        const deliveryGate = deferred();
+        const probeGate = deferred();
+        const evidenceGate = deferred();
+        startupDeliveryGate = deliveryGate;
+        configureOwnerEvidenceProbe('current', probeGate, evidenceGate);
+        const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+        const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+            teamName: fixture.teamName,
+            cwd,
+            workerName: 'worker-1',
+            requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
+        });
+        await deliveryGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(30_000);
+        await flushRealIo();
+        await probeGate.promise;
+        await vi.advanceTimersByTimeAsync(1_500);
+        await evidenceGate.promise;
+        await flushRealIo();
+        await vi.advanceTimersByTimeAsync(250);
+        await expect(recoveryPromise).resolves.toMatchObject({
+            outcome: 'recovered',
+            committed: true,
+            requeuedTaskIds: ['1'],
+        });
+        expect(atomicWriteControl.readTriggered).toBe(true);
+        await expect(readFile(siblingPath, 'utf8')).resolves.toBe('{corrupt sibling');
+        const target = JSON.parse(await readFile(targetPath, 'utf8'));
+        expect(target).toMatchObject({
+            status: 'in_progress',
+            owner: 'worker-1',
+            version: 3,
+            claim: { owner: 'worker-1', token: expect.any(String) },
+            recovery_adoption: { recovery_id: fixture.recoveryId, request_id: fixture.requestId },
+        });
+        expect(target).not.toHaveProperty('recovery_reservation');
+        expect(target).not.toMatchObject({ claim: { token: claimToken } });
+    });
+    it('keeps an actual owner recovery promise unsettled behind deferred launch mutation and preserves unrelated task ownership', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-owner-task-preservation-');
+        const fixture = await seedOwnerRecoveryFixture('codex', 'task-preservation');
+        const before = await seedRecoveryTaskOwnershipFixture(fixture);
+        configureOwnerPaneLifecycle();
+        const providerSpawnEntered = deferred();
+        const releaseProviderSpawn = deferred();
+        mocks.deliverStartupInbox.mockImplementationOnce(async (context) => {
+            const statusPath = absPath(cwd, TeamPaths.workerStatus(context.attempt.team_name, context.attempt.worker_name));
+            await mkdir(join(statusPath, '..'), { recursive: true });
+            await writeFile(statusPath, JSON.stringify({
+                state: 'working',
+                current_task_id: '1',
+                updated_at: new Date().toISOString(),
+                launch_attempt_id: context.attempt.attempt_id,
+            }), 'utf8');
+            providerSpawnEntered.resolve();
+            await releaseProviderSpawn.promise;
+            return { ok: true, kind: 'attempted_unconfirmed' };
+        });
+        const { executeRecoverDeadWorkerV2Owner } = await import('../runtime-v2.js');
+        const recoveryPromise = executeRecoverDeadWorkerV2Owner({
+            teamName: fixture.teamName,
+            cwd,
+            workerName: 'worker-1',
+            requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
+        });
+        let settled = false;
+        void recoveryPromise.then(() => { settled = true; }, () => { settled = true; });
+        await providerSpawnEntered.promise;
+        await Promise.resolve();
+        expect(settled).toBe(false);
+        for (const taskId of ['2', '3', '4']) {
+            expect(await readFile(absPath(cwd, TeamPaths.taskFile(fixture.teamName, taskId)), 'utf8'))
+                .toBe(before.get(taskId));
+        }
+        releaseProviderSpawn.resolve();
+        const result = await recoveryPromise;
+        expect(result).toMatchObject({
+            outcome: 'recovered',
+            committed: true,
+            oldPaneId: '%91',
+            newPaneId: '%2',
+            requeuedTaskIds: ['1'],
+        });
+        expectOriginalProviderRetired(fixture);
+        for (const taskId of ['2', '3', '4']) {
+            expect(await readFile(absPath(cwd, TeamPaths.taskFile(fixture.teamName, taskId)), 'utf8'))
+                .toBe(before.get(taskId));
+        }
     });
     it.each([
         ['codex', 'stale'],
@@ -1760,15 +3002,16 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
             workerName: 'worker-1',
             requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
         });
-        await deliveryGate.promise;
+        await awaitGateOrRecoveryFailure(deliveryGate.promise, recoveryPromise, 'postcommit recovery');
         await flushRealIo();
         await vi.advanceTimersByTimeAsync(30_000);
         await flushRealIo();
-        await probeGate.promise;
+        await awaitGateOrRecoveryFailure(probeGate.promise, recoveryPromise, 'postcommit probe');
         if (mode === 'stale') {
             await vi.advanceTimersByTimeAsync(1_500);
-            await evidenceGate.promise;
+            await awaitGateOrRecoveryFailure(evidenceGate.promise, recoveryPromise, 'postcommit evidence');
             await flushRealIo();
         }
         await vi.advanceTimersByTimeAsync(2_000);
@@ -1783,7 +3026,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(mocks.probeStartupPaneActivity).toHaveBeenCalledTimes(1);
         expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
         expect(mocks.killOwnedWorkerPane).not.toHaveBeenCalled();
-        expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).not.toHaveBeenCalled();
+        expectOriginalProviderRetired(fixture);
         const requests = await listDispatchRequests(fixture.teamName, cwd, { kind: 'inbox' });
         expect(requests).toHaveLength(1);
         expect(requests[0]).toMatchObject({
@@ -1813,6 +3056,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
             workerName: 'worker-1',
             requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
         });
         expect(result).toMatchObject({
             outcome: 'failed',
@@ -1859,15 +3103,16 @@ describe('runtime v2 startup inbox dispatch', () => {
             cwd,
             workerName: 'worker-1',
             requestId: fixture.requestId,
+            instanceId: fixture.instanceId,
         });
-        await deliveryGate.promise;
+        await awaitGateOrRecoveryFailure(deliveryGate.promise, recoveryPromise, 'checkpoint recovery');
         await flushRealIo();
         await vi.advanceTimersByTimeAsync(30_000);
         await flushRealIo();
-        await probeGate.promise;
+        await awaitGateOrRecoveryFailure(probeGate.promise, recoveryPromise, 'checkpoint probe');
         if (mode === 'current') {
             await vi.advanceTimersByTimeAsync(1_500);
-            await evidenceGate.promise;
+            await awaitGateOrRecoveryFailure(evidenceGate.promise, recoveryPromise, 'checkpoint evidence');
             await flushRealIo();
             await vi.advanceTimersByTimeAsync(250);
         }
@@ -1903,13 +3148,22 @@ describe('runtime v2 startup inbox dispatch', () => {
     it('rejects a stale worker status that predates the current startup trigger', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-stale-status-');
         mocks.autoStartupEvidence = false;
-        const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
-        await mkdir(workerDir, { recursive: true });
-        await writeFile(join(workerDir, 'status.json'), JSON.stringify({
-            state: 'working',
-            current_task_id: '1',
-            updated_at: '2026-01-01T00:00:00.000Z',
-        }), 'utf8');
+        mocks.createTeamSession.mockImplementationOnce(async () => {
+            const workerStatusPath = absPath(cwd, TeamPaths.workerStatus('dispatch-team', 'worker-1'));
+            await mkdir(join(workerStatusPath, '..'), { recursive: true });
+            await writeFile(workerStatusPath, JSON.stringify({
+                state: 'working',
+                current_task_id: '1',
+                updated_at: '2026-01-01T00:00:00.000Z',
+            }), 'utf8');
+            return {
+                sessionName: 'dispatch-session',
+                tmuxServerIdentity: mocks.tmuxServerIdentity,
+                leaderPaneId: '%1',
+                workerPaneIds: [],
+                sessionMode: 'split-pane',
+            };
+        });
         const { startTeamV2 } = await import('../runtime-v2.js');
         const runtime = await startTeamV2({
             teamName: 'dispatch-team',
@@ -1928,7 +3182,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         cwd = await mkdtempFixture('omc-runtime-v2-stale-claim-');
         mocks.autoStartupEvidence = false;
         mocks.createTeamSession.mockImplementationOnce(async () => {
-            const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+            const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
             const task = JSON.parse(await readFile(taskPath, 'utf8'));
             await writeFile(taskPath, JSON.stringify({
                 ...task,
@@ -1939,6 +3193,7 @@ describe('runtime v2 startup inbox dispatch', () => {
             }), 'utf8');
             return {
                 sessionName: 'dispatch-session',
+                tmuxServerIdentity: mocks.tmuxServerIdentity,
                 leaderPaneId: '%1',
                 workerPaneIds: [],
                 sessionMode: 'split-pane',
@@ -1956,11 +3211,55 @@ describe('runtime v2 startup inbox dispatch', () => {
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
     });
+    it('does not steal a task already owned by another worker during v2 startup', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-owned-task-preservation-');
+        mocks.autoStartupEvidence = false;
+        const existingOwner = 'worker-2';
+        const existingClaim = {
+            owner: existingOwner,
+            token: 'existing-owner-token',
+            leased_until: '2099-01-01T00:00:00.000Z',
+        };
+        mocks.createTeamSession.mockImplementationOnce(async () => {
+            const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
+            const task = JSON.parse(await readFile(taskPath, 'utf8'));
+            await writeFile(taskPath, JSON.stringify({
+                ...task,
+                status: 'in_progress',
+                owner: existingOwner,
+                version: 2,
+                claim: existingClaim,
+            }), 'utf8');
+            return {
+                sessionName: 'dispatch-session',
+                tmuxServerIdentity: mocks.tmuxServerIdentity,
+                leaderPaneId: '%1',
+                workerPaneIds: [],
+                sessionMode: 'split-pane',
+            };
+        });
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Already owned', description: 'Preserve the existing owner.' }],
+            cwd,
+        });
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')), 'utf8'))).toMatchObject({
+            status: 'in_progress',
+            owner: existingOwner,
+            version: 2,
+            claim: existingClaim,
+        });
+        expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+    });
     it('does not treat ACK-only mailbox replies as Claude startup evidence or resend the startup inbox', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-evidence-ack-');
         mocks.autoStartupEvidence = false;
         mocks.sendToWorker.mockImplementation(async () => {
-            const mailboxDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'mailbox');
+            const mailboxDir = teamStatePath(cwd, 'dispatch-team', 'mailbox');
             await mkdir(mailboxDir, { recursive: true });
             await writeFile(join(mailboxDir, 'leader-fixed.json'), JSON.stringify({
                 worker: 'leader-fixed',
@@ -1990,7 +3289,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         mocks.autoStartupEvidence = false;
         mocks.sendToWorker.mockImplementation(async () => {
             if (evidenceKind === 'claim') {
-                const taskPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks', 'task-1.json');
+                const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
                 const task = JSON.parse(await readFile(taskPath, 'utf-8'));
                 await writeFile(taskPath, JSON.stringify({
                     ...task,
@@ -2005,7 +3304,7 @@ describe('runtime v2 startup inbox dispatch', () => {
                 }, null, 2), 'utf-8');
             }
             else {
-                const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+                const workerDir = absPath(cwd, TeamPaths.workerDir('dispatch-team', 'worker-1'));
                 await mkdir(workerDir, { recursive: true });
                 await writeFile(join(workerDir, 'status.json'), JSON.stringify({
                     state: 'working',
@@ -2032,8 +3331,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-evidence-claim-');
         mocks.autoStartupEvidence = false;
         mocks.sendToWorker.mockImplementation(async () => {
-            const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
-            const taskPath = join(taskDir, 'task-1.json');
+            const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
             const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
             await writeFile(taskPath, JSON.stringify({
                 ...existing,
@@ -2063,7 +3361,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-evidence-status-');
         mocks.autoStartupEvidence = false;
         mocks.sendToWorker.mockImplementation(async () => {
-            const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+            const workerDir = absPath(cwd, TeamPaths.workerDir('dispatch-team', 'worker-1'));
             await mkdir(workerDir, { recursive: true });
             await writeFile(join(workerDir, 'status.json'), JSON.stringify({
                 state: 'working',
@@ -2091,7 +3389,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         // pane visibly consumed the startup trigger (spinner + esc-to-interrupt),
         // and the first-turn status evidence lands only after the initial budget.
         mocks.retryStartupInboxSubmit.mockImplementation(async () => {
-            const workerDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1');
+            const workerDir = absPath(cwd, TeamPaths.workerDir('dispatch-team', 'worker-1'));
             await mkdir(workerDir, { recursive: true });
             await writeFile(join(workerDir, 'status.json'), JSON.stringify({
                 state: 'working',
@@ -2341,18 +3639,12 @@ describe('runtime v2 startup inbox dispatch', () => {
     it('keeps gemini prompt-mode launch args to a short inbox pointer and waits for claim evidence', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-gemini-prompt-');
         modelContractMocks.isPromptModeAgent.mockImplementation((agentType) => agentType === 'gemini');
+        let claimedTaskPath;
         mocks.spawnWorkerInPane.mockImplementation(async (_sessionName, _paneId, config) => {
-            const taskDir = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'tasks');
-            const canonicalTaskPath = join(taskDir, 'task-1.json');
-            const legacyTaskPath = join(taskDir, '1.json');
-            const taskPath = await readFile(canonicalTaskPath, 'utf-8')
-                .then(() => canonicalTaskPath)
-                .catch(async () => {
-                await readFile(legacyTaskPath, 'utf-8');
-                return legacyTaskPath;
-            });
-            const existing = JSON.parse(await readFile(taskPath, 'utf-8'));
-            await writeFile(taskPath, JSON.stringify({
+            const canonicalTaskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1'));
+            claimedTaskPath = canonicalTaskPath;
+            const existing = JSON.parse(await readFile(canonicalTaskPath, 'utf-8'));
+            await writeFile(canonicalTaskPath, JSON.stringify({
                 ...existing,
                 status: 'in_progress',
                 owner: 'worker-1',
@@ -2393,11 +3685,24 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(launchArgs.some((arg) => arg.includes('transition-task-status'))).toBe(false);
         expect(launchArgs.some((arg) => arg.includes('blocked'))).toBe(false);
         expect(launchArgs.some((arg) => arg.includes('Reviewer seed'))).toBe(false);
-        const inboxPath = join(cwd, '.omc', 'state', 'team', 'dispatch-team', 'workers', 'worker-1', 'inbox.md');
+        const inboxPath = absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1'));
         const inbox = await readFile(inboxPath, 'utf-8');
         expect(inbox).toContain('team api claim-task');
+        expect(inbox).toContain('Task ID: 1');
+        expect(inbox).toContain('Worker: worker-1');
         expect(inbox).toContain('transition-task-status');
         expect(inbox).toContain('Reviewer seed says the worker may be blocked');
+        expect(claimedTaskPath).toBe(absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')));
+        const claimedTask = JSON.parse(await readFile(claimedTaskPath, 'utf8'));
+        expect(claimedTask).toMatchObject({
+            id: '1',
+            status: 'in_progress',
+            owner: 'worker-1',
+            claim: {
+                owner: 'worker-1',
+                launch_attempt_id: expect.any(String),
+            },
+        });
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual(['1']);
         expect(mocks.sendToWorker).not.toHaveBeenCalled();
     });

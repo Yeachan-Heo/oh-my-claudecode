@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { sanitizeName, sessionName, createSession, killSession, shouldAttemptAdaptiveRetry, getDefaultShell, buildWorkerStartCommand, paneLooksReady, paneHasActiveTask, paneHasTrustPrompt, } from '../tmux-session.js';
+import { sanitizeName, sessionName, shouldAttemptAdaptiveRetry, getDefaultShell, buildWorkerStartCommand, paneLooksReady, paneHasActiveTask, paneHasTrustPrompt, verifyTeamTargetOwnership, TeamSessionCreationError, normalizeDetachedSessionTarget, buildDetachedTmuxServerKeepaliveArgs, buildPrivateTmuxSocketPath, captureTmuxServerIdentity, observeTmuxServerIdentity, runTmuxServerIdentityGuard, } from '../tmux-session.js';
+import { isValidTmuxServerIdentity } from '../types.js';
 afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
 });
+const testProcessStartedAt = process.platform === 'linux'
+    ? 'linux:test-boot:1'
+    : process.platform === 'darwin'
+        ? 'darwin:1:1'
+        : process.platform === 'win32'
+            ? 'win32:1'
+            : 'unsupported:identity';
 describe('sanitizeName', () => {
     it('passes alphanumeric names', () => {
         expect(sanitizeName('worker1')).toBe('worker1');
@@ -38,7 +46,244 @@ describe('sessionName', () => {
         expect(sessionName('my team!', 'work@er')).toBe('omc-team-myteam-worker');
     });
 });
+describe('detached session target normalization', () => {
+    it('normalizes only the explicit zero-window response form', () => {
+        expect(normalizeDetachedSessionTarget('worker-detached-session:0')).toBe('worker-detached-session');
+        expect(normalizeDetachedSessionTarget('worker-detached-session:1')).toBeNull();
+        expect(normalizeDetachedSessionTarget('worker-detached-session:workers')).toBeNull();
+        expect(normalizeDetachedSessionTarget('worker-detached-session')).toBe('worker-detached-session');
+    });
+});
+describe('tmux creation allocation evidence', () => {
+    it('retains typed evidence when creation cleanup is unknown', () => {
+        const error = new TeamSessionCreationError('tmux_creation_cleanup_unverified', {
+            sessionName: 'team:0',
+            leaderPaneId: '%1',
+            workerPaneIds: [],
+            sessionMode: 'split-pane',
+            tmuxServerIdentity: {
+                socket_path: '/tmp/team.sock',
+                server_pid: 7,
+                process_started_at: testProcessStartedAt,
+            },
+        }, {
+            provider: 'tmux',
+            operation: 'split-window',
+            rawOutput: 'unexpected output',
+            stderr: '',
+        });
+        expect(error.cleanupStatus).toBe('unknown');
+        expect(error.creationEvidence?.rawOutput).toBe('unexpected output');
+        expect(error.partialSession.workerPaneIds).toEqual([]);
+    });
+});
+describe('verifyTeamTargetOwnership tmux target kinds', () => {
+    const processStartedAt = process.platform === 'linux'
+        ? 'linux:test-boot:1'
+        : process.platform === 'darwin'
+            ? 'darwin:1:1'
+            : 'unsupported:identity';
+    const serverIdentity = {
+        socket_path: '/tmp/omc-tmux-membership.sock',
+        server_pid: 42,
+        process_started_at: processStartedAt,
+    };
+    const dependenciesFor = (tmuxExec) => ({
+        tmuxExec,
+        cmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        serverIdentityDependencies: {
+            tmuxQuery: vi.fn(async () => ({ stdout: '42\n', stderr: '' })),
+            processIdentity: () => processStartedAt,
+            processObservation: () => 'matching',
+        },
+    });
+    const target = (providerTarget) => ({
+        provider: 'tmux',
+        providerTarget,
+        recipient: 'worker-1',
+        recipientRole: 'worker',
+        paneId: '%9',
+        workerIndex: 1,
+        tmuxServerIdentity: serverIdentity,
+    });
+    it('uses an exact session selector for bare named-session membership', async () => {
+        const tmuxExec = vi.fn(async () => ({ stdout: '%9\n', stderr: '' }));
+        await expect(verifyTeamTargetOwnership(target('dispatch-session'), dependenciesFor(tmuxExec))).resolves.toEqual({
+            kind: 'owned',
+            provider: 'tmux',
+            providerTarget: 'dispatch-session',
+            paneId: '%9',
+            tmuxServerIdentity: serverIdentity,
+        });
+        expect(tmuxExec).toHaveBeenCalledWith([
+            '-S', serverIdentity.socket_path, 'list-panes', '-s', '-t', '=dispatch-session:', '-F', '#{pane_id}',
+        ]);
+    });
+    it('keeps an explicit session:window target exact without session scope', async () => {
+        const tmuxExec = vi.fn(async () => ({ stdout: '%9\n', stderr: '' }));
+        await expect(verifyTeamTargetOwnership(target('dispatch-session:0'), dependenciesFor(tmuxExec)))
+            .resolves.toMatchObject({ kind: 'owned', paneId: '%9', tmuxServerIdentity: serverIdentity });
+        expect(tmuxExec).toHaveBeenCalledWith([
+            '-S', serverIdentity.socket_path, 'list-panes', '-t', '=dispatch-session:0', '-F', '#{pane_id}',
+        ]);
+    });
+    it('adds exact matching to named windows to prevent prefix collisions', async () => {
+        const tmuxExec = vi.fn(async () => ({ stdout: '%9\n', stderr: '' }));
+        await expect(verifyTeamTargetOwnership(target('dispatch-session:worker'), dependenciesFor(tmuxExec)))
+            .resolves.toMatchObject({ kind: 'owned', paneId: '%9', tmuxServerIdentity: serverIdentity });
+        expect(tmuxExec).toHaveBeenCalledWith([
+            '-S', serverIdentity.socket_path, 'list-panes', '-t', '=dispatch-session:=worker', '-F', '#{pane_id}',
+        ]);
+    });
+    it('passes supported native session/window IDs without name prefixes', async () => {
+        const tmuxExec = vi.fn(async () => ({ stdout: '%9\n', stderr: '' }));
+        const dependencies = dependenciesFor(tmuxExec);
+        await expect(verifyTeamTargetOwnership(target('$7'), dependencies))
+            .resolves.toMatchObject({ kind: 'owned', paneId: '%9', tmuxServerIdentity: serverIdentity });
+        expect(tmuxExec).toHaveBeenLastCalledWith([
+            '-S', serverIdentity.socket_path, 'list-panes', '-s', '-t', '$7', '-F', '#{pane_id}',
+        ]);
+        await expect(verifyTeamTargetOwnership(target('@13'), dependencies))
+            .resolves.toMatchObject({ kind: 'owned', paneId: '%9', tmuxServerIdentity: serverIdentity });
+        expect(tmuxExec).toHaveBeenLastCalledWith([
+            '-S', serverIdentity.socket_path, 'list-panes', '-t', '@13', '-F', '#{pane_id}',
+        ]);
+    });
+    it('fails closed for malformed native-looking target IDs', async () => {
+        const tmuxExec = vi.fn(async () => ({ stdout: '%9\n', stderr: '' }));
+        await expect(verifyTeamTargetOwnership(target('$session'), dependenciesFor(tmuxExec)))
+            .resolves.toEqual({ kind: 'unavailable' });
+        expect(tmuxExec).not.toHaveBeenCalled();
+    });
+});
+describe('tmux server incarnation identity', () => {
+    const startIdentity = process.platform === 'linux'
+        ? 'linux:test-boot:1'
+        : process.platform === 'darwin'
+            ? 'darwin:1:1'
+            : process.platform === 'win32'
+                ? 'win32:1'
+                : `${process.platform}:native`;
+    const identity = {
+        socket_path: '/tmp/omc-tmux-test.sock',
+        server_pid: 42,
+        process_started_at: startIdentity,
+    };
+    it('captures socket and PID from tmux output, then binds strict process identity', async () => {
+        const tmuxQuery = vi.fn(async () => ({ stdout: `${identity.socket_path}\t${identity.server_pid}\n`, stderr: '' }));
+        await expect(captureTmuxServerIdentity(undefined, {
+            tmuxQuery,
+            processIdentity: () => identity.process_started_at,
+        })).resolves.toEqual(identity);
+        expect(tmuxQuery).toHaveBeenCalledWith(['display-message', '-p', '#{socket_path}\t#{pid}'], undefined);
+    });
+    it.each([
+        ['matching', 'matching', 'matching'],
+        ['dead', 'dead', 'dead'],
+        ['unknown', 'unknown', 'unknown'],
+    ])('keeps process identity observation distinct for %s', async (_label, processState, expected) => {
+        const actual = await observeTmuxServerIdentity(identity, {
+            tmuxQuery: vi.fn(async () => ({ stdout: '42\n', stderr: '' })),
+            processIdentity: () => identity.process_started_at,
+            processObservation: () => processState,
+        });
+        expect(actual).toBe(expected);
+    });
+    it('rejects malformed identity before querying and rejects a mismatched server response', async () => {
+        expect(isValidTmuxServerIdentity({ socket_path: 'relative', server_pid: 42, process_started_at: startIdentity })).toBe(false);
+        const tmuxQuery = vi.fn(async () => ({ stdout: '42\n', stderr: '' }));
+        await expect(observeTmuxServerIdentity({
+            ...identity,
+            socket_path: 'relative',
+        }, { tmuxQuery })).resolves.toBe('unknown');
+        expect(tmuxQuery).not.toHaveBeenCalled();
+        await expect(observeTmuxServerIdentity({
+            ...identity,
+            server_pid: 43,
+        }, {
+            tmuxQuery,
+            processIdentity: () => identity.process_started_at,
+            processObservation: () => 'matching',
+        })).resolves.toBe('unknown');
+        expect(tmuxQuery).toHaveBeenCalledExactlyOnceWith(['-S', identity.socket_path, 'display-message', '-p', '#{pid}'], { timeout: 2_000, stripTmux: true });
+    });
+    it('returns guard success only for exact PID/socket and strict process identity', () => {
+        expect(runTmuxServerIdentityGuard(identity, '42', identity.socket_path, {
+            processIdentity: () => identity.process_started_at,
+        })).toBe(0);
+        expect(runTmuxServerIdentityGuard(identity, '43', identity.socket_path, {
+            processIdentity: () => identity.process_started_at,
+        })).toBe(1);
+        expect(runTmuxServerIdentityGuard(identity, '42', '/tmp/other.sock', {
+            processIdentity: () => identity.process_started_at,
+        })).toBe(1);
+    });
+});
+describe('detached tmux no-server startup handshake', () => {
+    it('starts the first session directly on a short private endpoint', () => {
+        const socketPath = buildPrivateTmuxSocketPath();
+        const keepalive = buildDetachedTmuxServerKeepaliveArgs(socketPath);
+        expect(keepalive).toEqual([
+            '-S', socketPath, 'start-server', ';', 'set-option', '-g', 'exit-empty', 'off',
+        ]);
+        if (process.platform === 'darwin' || process.platform === 'linux') {
+            expect(Buffer.byteLength(socketPath, 'utf8')).toBeLessThan(104);
+        }
+    });
+});
+describe('getWorkerLiveness tmux inventory fallback', () => {
+    async function loadLivenessWithTmuxOutputs(displayOutput, inventoryOutput) {
+        const calls = [];
+        const tmuxCmdAsync = vi.fn(async (args) => {
+            calls.push(args);
+            if (args[0] === 'display-message')
+                return { stdout: displayOutput, stderr: '' };
+            return { stdout: inventoryOutput, stderr: '' };
+        });
+        vi.resetModules();
+        vi.doMock('../../cli/tmux-utils.js', async (importOriginal) => {
+            const actual = await importOriginal();
+            return { ...actual, tmuxCmdAsync };
+        });
+        try {
+            const { getWorkerLiveness } = await import('../tmux-session.js');
+            return { liveness: await getWorkerLiveness('%1'), calls };
+        }
+        finally {
+            vi.doUnmock('../../cli/tmux-utils.js');
+            vi.resetModules();
+        }
+    }
+    it('proves a removed pane dead from a valid non-empty native inventory', async () => {
+        const result = await loadLivenessWithTmuxOutputs('', '%0 0\n');
+        expect(result.liveness).toBe('dead');
+        expect(result.calls).toEqual([
+            ['display-message', '-t', '%1', '-p', '#{pane_dead}'],
+            ['list-panes', '-a', '-F', '#{pane_id} #{pane_dead}'],
+        ]);
+    });
+    it.each(['', 'not-a-pane\n', '%0 malformed\n', '%0 0\nmalformed\n'])('preserves unknown when fallback inventory is empty or malformed: %j', async (inventoryOutput) => {
+        const result = await loadLivenessWithTmuxOutputs('', inventoryOutput);
+        expect(result.liveness).toBe('unknown');
+    });
+    it('matches native pane IDs exactly instead of treating a prefix as present', async () => {
+        const result = await loadLivenessWithTmuxOutputs('', '%10 0\n');
+        expect(result.liveness).toBe('dead');
+    });
+});
 describe('applyMainVerticalLayout', () => {
+    const identity = {
+        socket_path: '/tmp/layout-test.sock',
+        server_pid: 42,
+        process_started_at: process.platform === 'linux' ? 'linux:fixture:42' : 'darwin:42:123456',
+    };
+    function guardedResult(args) {
+        expect(args.slice(0, 3)).toEqual(['-S', identity.socket_path, 'if-shell']);
+        expect(args[3]).toContain('--tmux-server-identity-guard');
+        const marker = args[4]?.match(/OMC_TMUX_GUARD_OK_[A-Za-z0-9_]+/)?.[0];
+        expect(marker).toBeDefined();
+        return { stdout: `${marker}\n`, stderr: '' };
+    }
     it('sets the 80-column main width before its sole layout selection', async () => {
         const calls = [];
         let mainPaneWidth;
@@ -50,32 +295,36 @@ describe('applyMainVerticalLayout', () => {
                 ...actual,
                 tmuxCmdAsync: vi.fn(async (args) => {
                     calls.push(args);
+                    if (args[2] === 'if-shell') {
+                        const command = args[4] ?? '';
+                        const width = command.match(/'main-pane-width' '(\d+)'/)?.[1];
+                        if (width)
+                            mainPaneWidth = Number(width);
+                        if (command.includes("'select-layout'"))
+                            selectedPaneWidths.push(mainPaneWidth);
+                        return guardedResult(args);
+                    }
                     return { stdout: '80\n', stderr: '' };
                 }),
                 tmuxExecAsync: vi.fn(async (args) => {
-                    calls.push(args);
-                    if (args[0] === 'set-window-option')
-                        mainPaneWidth = Number(args[args.length - 1]);
-                    if (args[0] === 'select-layout')
-                        selectedPaneWidths.push(mainPaneWidth);
-                    return { stdout: '', stderr: '' };
+                    throw new Error(`unguarded layout effect: ${args.join(' ')}`);
                 }),
             };
         });
         try {
             const { applyMainVerticalLayout } = await import('../tmux-session.js');
-            await applyMainVerticalLayout('team-session');
+            await applyMainVerticalLayout('team-session', { tmuxServerIdentity: identity });
         }
         finally {
             vi.doUnmock('../../cli/tmux-utils.js');
             vi.resetModules();
         }
         expect(calls).toEqual([
-            ['display-message', '-p', '-t', 'team-session', '#{window_width}'],
-            ['set-window-option', '-t', 'team-session', 'main-pane-width', '40'],
-            ['select-layout', '-t', 'team-session', 'main-vertical'],
+            ['-S', identity.socket_path, 'display-message', '-p', '-t', 'team-session', '#{window_width}'],
+            ['-S', identity.socket_path, 'if-shell', expect.any(String), expect.stringContaining("'main-pane-width' '40'"), expect.any(String)],
+            ['-S', identity.socket_path, 'if-shell', expect.any(String), expect.stringContaining("'select-layout' '-t' 'team-session' 'main-vertical'"), expect.any(String)],
         ]);
-        expect(calls.filter(([command]) => command === 'select-layout')).toHaveLength(1);
+        expect(calls.filter(args => args[4]?.includes("'select-layout'"))).toHaveLength(1);
         expect(selectedPaneWidths).toEqual([40]);
     });
     it('fails required startup layout before selecting when width is invalid', async () => {
@@ -97,7 +346,7 @@ describe('applyMainVerticalLayout', () => {
         });
         try {
             const { applyMainVerticalLayout } = await import('../tmux-session.js');
-            await expect(applyMainVerticalLayout('team-session', { required: true }))
+            await expect(applyMainVerticalLayout('team-session', { required: true, tmuxServerIdentity: identity }))
                 .rejects.toThrow('team_layout_window_width_invalid:not-a-width');
         }
         finally {
@@ -105,7 +354,7 @@ describe('applyMainVerticalLayout', () => {
             vi.resetModules();
         }
         expect(calls).toEqual([
-            ['display-message', '-p', '-t', 'team-session', '#{window_width}'],
+            ['-S', identity.socket_path, 'display-message', '-p', '-t', 'team-session', '#{window_width}'],
         ]);
     });
     it('rejects a required layout below the startup width boundary', async () => {
@@ -127,7 +376,7 @@ describe('applyMainVerticalLayout', () => {
         });
         try {
             const { applyMainVerticalLayout } = await import('../tmux-session.js');
-            await expect(applyMainVerticalLayout('team-session', { required: true }))
+            await expect(applyMainVerticalLayout('team-session', { required: true, tmuxServerIdentity: identity }))
                 .rejects.toThrow('team_layout_window_width_invalid:39');
         }
         finally {
@@ -135,7 +384,7 @@ describe('applyMainVerticalLayout', () => {
             vi.resetModules();
         }
         expect(calls).toEqual([
-            ['display-message', '-p', '-t', 'team-session', '#{window_width}'],
+            ['-S', identity.socket_path, 'display-message', '-p', '-t', 'team-session', '#{window_width}'],
         ]);
     });
     it('never selects a best-effort layout when main-pane-width cannot be set', async () => {
@@ -147,6 +396,10 @@ describe('applyMainVerticalLayout', () => {
                 ...actual,
                 tmuxCmdAsync: vi.fn(async (args) => {
                     calls.push(args);
+                    if (args[2] === 'if-shell') {
+                        guardedResult(args);
+                        return { stdout: '', stderr: 'set failed' };
+                    }
                     return { stdout: '80\n', stderr: '' };
                 }),
                 tmuxExecAsync: vi.fn(async (args) => {
@@ -159,15 +412,16 @@ describe('applyMainVerticalLayout', () => {
         });
         try {
             const { applyMainVerticalLayout } = await import('../tmux-session.js');
-            await expect(applyMainVerticalLayout('team-session')).resolves.toBeUndefined();
+            await expect(applyMainVerticalLayout('team-session', { tmuxServerIdentity: identity }))
+                .rejects.toThrow('team_layout_server_guard_failed');
         }
         finally {
             vi.doUnmock('../../cli/tmux-utils.js');
             vi.resetModules();
         }
         expect(calls).toEqual([
-            ['display-message', '-p', '-t', 'team-session', '#{window_width}'],
-            ['set-window-option', '-t', 'team-session', 'main-pane-width', '40'],
+            ['-S', identity.socket_path, 'display-message', '-p', '-t', 'team-session', '#{window_width}'],
+            ['-S', identity.socket_path, 'if-shell', expect.any(String), expect.stringContaining("'main-pane-width' '40'"), expect.any(String)],
         ]);
     });
 });
@@ -263,6 +517,7 @@ describe('buildWorkerStartCommand', () => {
                 schema_version: 1,
                 attempt_id: '11111111-1111-4111-8111-111111111111',
                 nonce: '22222222-2222-4222-8222-222222222222',
+                instance_id: '33333333-3333-4333-8333-333333333333',
                 team_name: 't',
                 worker_name: 'w',
                 pane_id: '%2',
@@ -303,6 +558,7 @@ describe('buildWorkerStartCommand', () => {
                 schema_version: 1,
                 attempt_id: '11111111-1111-4111-8111-111111111111',
                 nonce: '22222222-2222-4222-8222-222222222222',
+                instance_id: '33333333-3333-4333-8333-333333333333',
                 team_name: 't',
                 worker_name: 'w',
                 pane_id: '%2',
@@ -750,31 +1006,6 @@ describe('sendToWorker implementation guards', () => {
         expect(source).toContain('Safety gate: copy-mode can turn on while we retry');
         expect(source).toContain('Before fallback control keys, re-check copy-mode');
         expect(source).toContain('Fail-closed: one final submit attempt');
-    });
-});
-// NOTE: createSession, killSession require tmux to be installed.
-// Gate with: describe.skipIf(!hasTmux)('tmux integration', () => { ... })
-function hasTmux() {
-    try {
-        const { execSync } = require('child_process');
-        execSync('tmux -V', { stdio: 'pipe', timeout: 3000 });
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-describe.skipIf(!hasTmux())('createSession with workingDirectory', () => {
-    it('accepts optional workingDirectory param', () => {
-        // Should not throw — workingDirectory is optional
-        const name = createSession('tmuxtest', 'wdtest', '/tmp');
-        expect(name).toBe('omc-team-tmuxtest-wdtest');
-        killSession('tmuxtest', 'wdtest');
-    });
-    it('works without workingDirectory param', () => {
-        const name = createSession('tmuxtest', 'nowd');
-        expect(name).toBe('omc-team-tmuxtest-nowd');
-        killSession('tmuxtest', 'nowd');
     });
 });
 //# sourceMappingURL=tmux-session.test.js.map

@@ -5,7 +5,7 @@
  */
 export type { BridgeConfig, TaskFile, TaskFileUpdate, InboxMessage, OutboxMessage, ShutdownSignal, DrainSignal, McpWorkerMember, HeartbeatData, InboxCursor, ConfigProbeResult, TaskModeMap, TaskFailureSidecar, WorkerBackend, WorkerCapability, } from './types.js';
 export { readTask, updateTask, findNextTask, areBlockersResolved, writeTaskFailure, readTaskFailure, listTaskIds, } from './task-file-ops.js';
-export { validateTmux, sanitizeName, sessionName, createSession, killSession, isSessionAlive, listActiveSessions, spawnBridgeInSession, } from './tmux-session.js';
+export { validateTmux, sanitizeName, sessionName, isSessionAlive, listActiveSessions, } from './tmux-session.js';
 export { appendOutbox, rotateOutboxIfNeeded, rotateInboxIfNeeded, readNewInboxMessages, readAllInboxMessages, clearInbox, writeShutdownSignal, checkShutdownSignal, deleteShutdownSignal, writeDrainSignal, checkDrainSignal, deleteDrainSignal, cleanupWorkerFiles, } from './inbox-outbox.js';
 export { registerMcpWorker, unregisterMcpWorker, isMcpWorker, listMcpWorkers, getRegistrationStrategy, readProbeResult, writeProbeResult, } from './team-registration.js';
 export { writeHeartbeat, readHeartbeat, listHeartbeats, isWorkerAlive, deleteHeartbeat, cleanupTeamHeartbeats, } from './heartbeat.js';
@@ -55,8 +55,8 @@ export { LayoutStabilizer } from './layout-stabilizer.js';
 export type { LayoutStabilizerOptions } from './layout-stabilizer.js';
 export type { TeamPhase, PhaseableTask } from './phase-controller.js';
 export { inferPhase, getPhaseTransitionLog, isTerminalPhase } from './phase-controller.js';
-export type { TeamConfig, TeamRuntime, WorkerStatus as RuntimeWorkerStatus, TeamSnapshot, WatchdogCompletionEvent, } from './runtime.js';
-export { startTeam, monitorTeam, assignTask, shutdownTeam, resumeTeam, watchdogCliWorkers } from './runtime.js';
+export type { TeamConfig, TeamRuntime, WorkerStatus as RuntimeWorkerStatus, TeamSnapshot, } from './runtime.js';
+export { startTeam, monitorTeam, shutdownTeam, resumeTeam } from './runtime.js';
 export { setRuntimeOwnerRecoveryClient, recoverDeadWorkerV2, readRecoverDeadWorkerV2Outcome, readRecoverDeadWorkerV2Result, } from './runtime-v2.js';
 export type { RecoverDeadWorkerV2Options, RuntimeOwnerRecoveryClient, } from './runtime-v2.js';
 export type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Result, RecoverDeadWorkerV2Success, RecoverDeadWorkerV2Failure, } from './types.js';

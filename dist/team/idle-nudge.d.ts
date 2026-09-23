@@ -10,6 +10,8 @@
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
+import { type WorkerPaneOwnership } from './tmux-session.js';
+import { type TeamInstanceId, type TmuxServerIdentity } from './types.js';
 export interface NudgeConfig {
     /** Milliseconds a pane must be idle before the first nudge (default: 30000) */
     delayMs: number;
@@ -18,14 +20,35 @@ export interface NudgeConfig {
     /** Text sent to the pane as a nudge (default below) */
     message: string;
 }
+export interface NudgeAuthority {
+    /** Original durable team incarnation from the job record. */
+    instanceId: TeamInstanceId;
+    /** Exact persisted provider/session target from the team config. */
+    sessionName: string;
+    /** Tmux server incarnation captured when the team was created. */
+    tmuxServerIdentity?: TmuxServerIdentity;
+    /** Provider inferred from the persisted target when omitted. */
+    provider?: 'tmux' | 'cmux';
+    /**
+     * Return the exact provider ownership for one persisted worker pane.
+     * Missing ownership is never replaced with ambient pane capture.
+     */
+    getPaneOwnership: (paneId: string) => WorkerPaneOwnership | undefined;
+    /**
+     * Perform final authority validation and transport while holding the
+     * original instance lifecycle lock. Returning false means no delivery was
+     * proven and must not increment counters.
+     */
+    executeNudge: (paneId: string, message: string) => Promise<boolean>;
+}
 export declare const DEFAULT_NUDGE_CONFIG: NudgeConfig;
 /** Capture the last 80 lines of a team pane. Returns '' on error. */
-export declare function capturePane(paneId: string): Promise<string>;
+export declare function capturePane(ownership: WorkerPaneOwnership): Promise<string>;
 /**
  * A pane is idle when it shows a prompt (ready for input) but has no
  * active task running.
  */
-export declare function isPaneIdle(paneId: string): Promise<boolean>;
+export declare function isPaneIdle(ownership: WorkerPaneOwnership): Promise<boolean>;
 export declare class NudgeTracker {
     private readonly config;
     private readonly states;
@@ -39,9 +62,9 @@ export declare class NudgeTracker {
      *
      * @param paneIds   - Worker pane IDs from the job's panes file
      * @param leaderPaneId - Leader pane ID (never nudged)
-     * @param sessionName  - Tmux session name (passed to sendToWorker)
+     * @param authority   - Original instance and exact persisted provider target
      */
-    checkAndNudge(paneIds: string[], leaderPaneId: string | undefined, sessionName: string): Promise<string[]>;
+    checkAndNudge(paneIds: string[], leaderPaneId: string | undefined, authority: NudgeAuthority): Promise<string[]>;
     /** Summary of nudge activity per pane. */
     getSummary(): Record<string, {
         nudgeCount: number;

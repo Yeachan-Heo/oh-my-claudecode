@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute, join } from 'path';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 /**
  * Typed path builders for all team state files.
@@ -29,6 +31,65 @@ export function normalizeTaskFileStem(taskId) {
     if (/^\d+$/.test(trimmed))
         return `task-${trimmed}`;
     return trimmed;
+}
+/**
+ * Resolve the cwd component of the identity binding used by team lifecycle
+ * operations.
+ *
+ * Team state may be reached through a symlink (or through a path containing
+ * `..`).  The lifecycle lock must nevertheless be shared by every spelling of
+ * the same workspace. Non-existent paths retain their lexical, resolved
+ * spelling so startup can reserve a new workspace before the first state
+ * directory is created.
+ */
+export function canonicalTeamCwd(cwd) {
+    const resolved = resolve(cwd);
+    try {
+        return realpathSync.native(resolved);
+    }
+    catch {
+        try {
+            return realpathSync(resolved);
+        }
+        catch {
+            return resolved;
+        }
+    }
+}
+function canonicalStoragePath(path) {
+    let cursor = resolve(path);
+    const missingSuffix = [];
+    const visitedLinks = new Set();
+    while (true) {
+        try {
+            const stat = lstatSync(cursor);
+            if (stat.isSymbolicLink()) {
+                if (visitedLinks.has(cursor))
+                    throw new Error('team_storage_anchor_symlink_cycle');
+                visitedLinks.add(cursor);
+                cursor = resolve(dirname(cursor), readlinkSync(cursor));
+                continue;
+            }
+            const canonical = (() => {
+                try {
+                    return realpathSync.native(cursor);
+                }
+                catch {
+                    return realpathSync(cursor);
+                }
+            })();
+            return missingSuffix.length === 0 ? canonical : join(canonical, ...missingSuffix.reverse());
+        }
+        catch (error) {
+            if (error instanceof Error && error.message === 'team_storage_anchor_symlink_cycle')
+                throw error;
+            const parent = dirname(cursor);
+            if (parent === cursor)
+                return resolve(path);
+            missingSuffix.push(basename(cursor));
+            cursor = parent;
+        }
+    }
 }
 export const TeamPaths = {
     root: (teamName) => `.omc/state/team/${teamName}`,
@@ -106,6 +167,16 @@ export const TeamPaths = {
     recoveryRequestsRoot: () => '.omc/state/team-recovery/by-request',
     recoveryAdmissionLock: (payloadHash) => `.omc/state/team-recovery/admission-locks/${payloadHash}.lock`,
     recoveryLifecycleLock: (workspaceHash, teamName) => `.omc/state/team-recovery/lifecycle-locks/${workspaceHash}/${teamName}.lock`,
+    /**
+     * External team-instance authority.  These paths deliberately live outside
+     * `.omc/state/team/{teamName}` so cleanup can retain authorization after the
+     * state tree is detached or partially removed.
+     */
+    teamInstanceAuthorityRoot: (workspaceHash, teamName) => `.omc/state/team-recovery/team-instances/${workspaceHash}/${teamName}`,
+    teamInstanceReservation: (workspaceHash, teamName) => `.omc/state/team-recovery/team-instances/${workspaceHash}/${teamName}/reservation.json`,
+    teamInstanceCleanupRoot: (workspaceHash, teamName, instanceId) => `.omc/state/team-recovery/team-instances/${workspaceHash}/${teamName}/${instanceId}`,
+    teamInstanceCleanupReceipt: (workspaceHash, teamName, instanceId) => `.omc/state/team-recovery/team-instances/${workspaceHash}/${teamName}/${instanceId}/cleanup.json`,
+    teamInstanceDetachedRoot: (workspaceHash, teamName, instanceId) => `.omc/state/team-recovery/team-instances/${workspaceHash}/${teamName}/${instanceId}/detached`,
     recoveryRequestPending: (requestId) => `.omc/state/team-recovery/by-request/${requestId}.pending.json`,
     recoveryRequestResult: (requestId) => `.omc/state/team-recovery/by-request/${requestId}.result.json`,
     recoveryResultByTeam: (workspaceHash, teamName, recoveryId) => `.omc/state/team-recovery/by-team/${workspaceHash}/${teamName}/${recoveryId}.json`,
@@ -125,11 +196,115 @@ export function absPath(cwd, relativePath) {
     }
     return join(cwd, relativePath);
 }
+/** Canonical OMC storage root, with symlink aliases collapsed when possible. */
+export function canonicalTeamOmcRoot(cwd) {
+    return canonicalStoragePath(getOmcRoot(canonicalTeamCwd(cwd)));
+}
+/**
+ * Canonical absolute path for an OMC-relative state path.  Lifecycle and
+ * detached-instance authority must use this helper so cwd aliases cannot
+ * produce different physical lock/receipt files.
+ */
+export function canonicalTeamStatePath(cwd, relativePath) {
+    if (isAbsolute(relativePath)) {
+        const target = resolve(relativePath);
+        const rawAnchor = resolve(getOmcRoot(canonicalTeamCwd(cwd)));
+        const suffix = relative(rawAnchor, target);
+        if (suffix !== '..' && !suffix.startsWith(`..${sep}`) && !isAbsolute(suffix)) {
+            return join(canonicalTeamOmcRoot(cwd), suffix);
+        }
+        return target;
+    }
+    if (relativePath === '.omc' || relativePath.startsWith('.omc/')) {
+        return join(canonicalTeamOmcRoot(cwd), relativePath.slice('.omc'.length).replace(/^\//, ''));
+    }
+    return join(canonicalTeamCwd(cwd), relativePath);
+}
+/**
+ * Absolute lifecycle lock shared by startup, mutation, shutdown and external
+ * cleanup.  Callers must use this one path rather than deriving a hash from
+ * the caller's uncanonicalized cwd.
+ */
+export function teamInstanceLifecycleLockPath(cwd, teamName) {
+    return canonicalTeamStatePath(cwd, TeamPaths.recoveryLifecycleLock(teamWorkspaceHash(cwd, teamName), teamName));
+}
 /**
  * Get absolute root path for a team's state directory.
  */
 export function teamStateRoot(cwd, teamName) {
     return absPath(cwd, TeamPaths.root(teamName));
+}
+/**
+ * Canonical state storage root used as the ownership key.
+ *
+ * Only the accepted OMC storage anchor is canonicalized. The team suffix is
+ * deliberately appended lexically so a disposable team-root symlink remains
+ * visible to `assertTeamStatePathSafe()` instead of being followed.
+ */
+export function canonicalTeamStateRoot(cwd, teamName) {
+    return join(canonicalTeamOmcRoot(cwd), 'state', 'team', teamName);
+}
+/** Stable key derived from the canonical `{OMC root}/state/team/{name}` root. */
+export function teamWorkspaceHash(cwd, teamName) {
+    return createHash('sha256').update(canonicalTeamStateRoot(cwd, teamName)).digest('hex');
+}
+/**
+ * Reject symlink components below the accepted OMC storage anchor.
+ *
+ * `canonicalTeamOmcRoot()` intentionally canonicalizes the storage anchor
+ * itself (a configured storage symlink is an accepted alias), but state and
+ * external authority suffixes remain lexical.  Checking each suffix component
+ * with `lstat` prevents a disposable team root or receipt parent from routing
+ * effects into an unrelated directory.
+ */
+export async function assertTeamStatePathSafe(cwd, path) {
+    const storageRoot = canonicalTeamOmcRoot(cwd);
+    const target = canonicalTeamStatePath(cwd, path);
+    const suffix = relative(storageRoot, target);
+    if (suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+        throw new Error('team_instance_path_outside_storage_root');
+    }
+    let cursor = storageRoot;
+    for (const component of suffix.split(sep).filter(Boolean)) {
+        cursor = join(cursor, component);
+        try {
+            const stat = await lstat(cursor);
+            if (stat.isSymbolicLink())
+                throw new Error('team_instance_path_symlink');
+        }
+        catch (error) {
+            if (error instanceof Error && error.message === 'team_instance_path_symlink')
+                throw error;
+            if (error.code === 'ENOENT')
+                break;
+            throw new Error('team_instance_path_unreadable', { cause: error });
+        }
+    }
+}
+/** Synchronous preflight variant used before acquiring a lifecycle lock. */
+export function assertTeamStatePathSafeSync(cwd, path) {
+    const storageRoot = canonicalTeamOmcRoot(cwd);
+    const target = canonicalTeamStatePath(cwd, path);
+    const suffix = relative(storageRoot, target);
+    if (suffix === '..' || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+        throw new Error('team_instance_path_outside_storage_root');
+    }
+    let cursor = storageRoot;
+    for (const component of suffix.split(sep).filter(Boolean)) {
+        cursor = join(cursor, component);
+        try {
+            const stat = lstatSync(cursor);
+            if (stat.isSymbolicLink())
+                throw new Error('team_instance_path_symlink');
+        }
+        catch (error) {
+            if (error instanceof Error && error.message === 'team_instance_path_symlink')
+                throw error;
+            if (error.code === 'ENOENT')
+                break;
+            throw new Error('team_instance_path_unreadable', { cause: error });
+        }
+    }
 }
 /**
  * Canonical task storage path builder.

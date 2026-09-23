@@ -1,3 +1,4 @@
+import { type DirectoryOperations } from "./contained-fd.js";
 import type { RunDirHandle } from "./run-dir.js";
 /** Fail closed before acquiring any run-scoped locks on unsupported platforms. */
 export declare function assertContainedFsSupported(platform?: NodeJS.Platform): void;
@@ -31,9 +32,38 @@ export declare function containedPathForPlatform(directoryFd: number, runDirPath
  * Platforms without a traversable directory FD fail closed.
  */
 export declare function withContainedPath<T>(runDir: RunDirHandle, fileName: string, operation: (filePath: string) => T): T;
-/** Run several related operations beneath one identity-checked directory FD. */
+/** Legacy Linux-only path callback; use withContainedOperations for portable I/O. */
 export declare function withContainedDirectory<T>(runDir: RunDirHandle, operation: (directoryPath: string) => T, platform?: NodeJS.Platform): T;
 export declare function withContainedPathForPlatform<T>(runDir: RunDirHandle, fileName: string, operation: (filePath: string) => T, platform: NodeJS.Platform): T;
 /** Read a named artifact through a validated run-directory handle. */
 export declare function readContainedFileNoFollow(runDir: RunDirHandle, fileName: string): string;
+/**
+ * Bind synchronous operations to one identity-checked directory descriptor.
+ * The callback must not return a Promise. Retained operations fail closed after
+ * callback return, before the OS can reuse the closed descriptor number.
+ */
+export declare function withContainedOperations<T>(runDir: RunDirHandle, operation: (operations: DirectoryOperations) => T): T;
+export declare function readOperationFileNoFollow(operations: DirectoryOperations, name: string): string;
+/**
+ * Publish one contained artifact atomically through directory-relative
+ * operations only: the temp file is created, written, and fsynced through the
+ * descriptor, then renamed into place at the same descriptor. No pathname is
+ * ever re-resolved between validation and use, so a component swapped for a
+ * symlink mid-flight cannot redirect the artifact out of the directory.
+ */
+export declare function writeOperationFileAtomically(operations: DirectoryOperations, name: string, contents: string): void;
+export interface ContainedSubdirectoryOptions {
+    /** Create missing components (descriptor-relative). Default: false. */
+    readonly create?: boolean;
+}
+/**
+ * Bind synchronous operations to a directory nested below a validated run
+ * directory. Every component is opened O_NOFOLLOW from its parent descriptor
+ * (and created at that descriptor when requested), so swapping any nested
+ * component for a symlink between validation and use fails closed rather than
+ * relocating artifacts outside the contained run directory.
+ *
+ * Returns null when `create` is false and a component does not exist.
+ */
+export declare function withContainedSubdirectoryOperations<T>(runDir: RunDirHandle, components: readonly string[], operation: (operations: DirectoryOperations) => T, options?: ContainedSubdirectoryOptions): T | null;
 //# sourceMappingURL=safe-fs.d.ts.map

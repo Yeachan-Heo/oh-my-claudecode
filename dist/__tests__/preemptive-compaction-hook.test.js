@@ -75,10 +75,10 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
     it('keeps preemptive compaction on the existing PostToolUse runtime instead of a standalone script', () => {
         const hooksJson = JSON.parse(readFileSync(HOOKS_PATH, 'utf-8'));
         const commands = hooksJson.hooks.PostToolUse.flatMap(entry => entry.hooks.map(hook => hook.command));
-        expect(commands).not.toContain('node "$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs "$CLAUDE_PLUGIN_ROOT"/scripts/preemptive-compaction.mjs');
-        expect(commands.some(command => command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/run.cjs') &&
-            command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/post-tool-verifier.mjs'))).toBe(true);
-        expect(commands.some(command => command.includes('"$CLAUDE_PLUGIN_ROOT"/scripts/preemptive-compaction.mjs'))).toBe(false);
+        expect(commands).not.toContain('node "${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs "${CLAUDE_PLUGIN_ROOT}"/scripts/preemptive-compaction.mjs');
+        expect(commands.some(command => command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/run.cjs') &&
+            command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/post-tool-verifier.mjs'))).toBe(true);
+        expect(commands.some(command => command.includes('"${CLAUDE_PLUGIN_ROOT}"/scripts/preemptive-compaction.mjs'))).toBe(false);
     });
     it('warns when transcript usage crosses the configured threshold', () => {
         const dir = makeTempDir();

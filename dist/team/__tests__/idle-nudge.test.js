@@ -6,6 +6,7 @@
  * - isPaneIdle: idle detection via paneLooksReady + !paneHasActiveTask
  * - Nudge summary and totalNudges counter
  * - Scan throttling (5s minimum between scans)
+ * - Instance/server authority and guarded delivery accounting
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ---------------------------------------------------------------------------
@@ -25,12 +26,13 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     return {
         ...actual,
         sendToWorker: vi.fn(async () => true),
+        captureOwnedTeamPane: vi.fn(async (ownership) => actual.captureTeamPane(ownership.paneId)),
         paneLooksReady: actual.paneLooksReady,
         paneHasActiveTask: actual.paneHasActiveTask,
     };
 });
 import { NudgeTracker, DEFAULT_NUDGE_CONFIG, capturePane, isPaneIdle } from '../idle-nudge.js';
-import { sendToWorker, paneLooksReady, paneHasActiveTask } from '../tmux-session.js';
+import { sendToWorker, captureOwnedTeamPane, paneLooksReady, paneHasActiveTask, } from '../tmux-session.js';
 import { tmuxExecAsync } from '../../cli/tmux-utils.js';
 // ---------------------------------------------------------------------------
 // Helpers
@@ -52,6 +54,31 @@ const ACTIVE_PANE_CONTENT = [
 ].join('\n');
 /** Empty pane (just started, not yet ready) */
 const EMPTY_PANE_CONTENT = '';
+const TEST_TMUX_IDENTITY = {
+    socket_path: '/tmp/idle-nudge.sock',
+    server_pid: 4242,
+    process_started_at: 'darwin:idle-nudge',
+};
+const TEST_OWNERSHIP = {
+    provider: 'tmux',
+    providerTarget: 'test-session',
+    paneId: '%2',
+    splitTarget: '%1',
+    leaderPaneId: '%1',
+    reservedPaneIds: [],
+    source: 'adopted',
+    tmuxServerIdentity: TEST_TMUX_IDENTITY,
+};
+const TEST_AUTHORITY = {
+    instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    sessionName: 'test-session',
+    provider: 'tmux',
+    tmuxServerIdentity: TEST_TMUX_IDENTITY,
+    getPaneOwnership: (paneId) => ['%2', '%3'].includes(paneId)
+        ? { ...TEST_OWNERSHIP, paneId }
+        : undefined,
+    executeNudge: (paneId, message) => sendToWorker(TEST_AUTHORITY.sessionName, paneId, message, TEST_TMUX_IDENTITY),
+};
 beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -100,14 +127,27 @@ describe('capturePane', () => {
     it('returns tmux capture-pane output', async () => {
         vi.useRealTimers();
         mockCaptureOutput('hello world\n');
-        const result = await capturePane('%1');
+        const result = await capturePane({ ...TEST_OWNERSHIP, paneId: '%1' });
         expect(result).toBe('hello world\n');
     });
     it('returns empty string on error', async () => {
         vi.useRealTimers();
         vi.mocked(tmuxExecAsync).mockRejectedValue(new Error('tmux not found'));
-        const result = await capturePane('%1');
+        const result = await capturePane({ ...TEST_OWNERSHIP, paneId: '%1' });
         expect(result).toBe('');
+    });
+    it('passes the original custom-server ownership when pane IDs are reused', async () => {
+        vi.useRealTimers();
+        mockCaptureOutput('custom server pane\n');
+        const ownership = {
+            ...TEST_OWNERSHIP,
+            tmuxServerIdentity: {
+                ...TEST_TMUX_IDENTITY,
+                socket_path: '/tmp/custom-idle-nudge.sock',
+            },
+        };
+        await capturePane(ownership);
+        expect(vi.mocked(captureOwnedTeamPane)).toHaveBeenCalledWith(ownership);
     });
 });
 // ---------------------------------------------------------------------------
@@ -117,17 +157,17 @@ describe('isPaneIdle', () => {
     it('returns true when pane shows prompt and no active task', async () => {
         vi.useRealTimers();
         mockCaptureOutput(IDLE_PANE_CONTENT);
-        expect(await isPaneIdle('%1')).toBe(true);
+        expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(true);
     });
     it('returns false when pane has active task', async () => {
         vi.useRealTimers();
         mockCaptureOutput(ACTIVE_PANE_CONTENT);
-        expect(await isPaneIdle('%1')).toBe(false);
+        expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
     });
     it('returns false when pane is empty', async () => {
         vi.useRealTimers();
         mockCaptureOutput(EMPTY_PANE_CONTENT);
-        expect(await isPaneIdle('%1')).toBe(false);
+        expect(await isPaneIdle({ ...TEST_OWNERSHIP, paneId: '%1' })).toBe(false);
     });
 });
 // ---------------------------------------------------------------------------
@@ -148,7 +188,7 @@ describe('NudgeTracker', () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 10_000 });
         // First call: detects idle, starts timer
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(nudged).toEqual([]);
         expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
     });
@@ -156,49 +196,49 @@ describe('NudgeTracker', () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 10_000 });
         // First call at T=0: detects idle, starts timer
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         // Advance past delay + scan interval
         vi.advanceTimersByTime(15_000);
         // Second call: delay has elapsed, should nudge
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(nudged).toEqual(['%2']);
-        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', DEFAULT_NUDGE_CONFIG.message);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', DEFAULT_NUDGE_CONFIG.message, TEST_TMUX_IDENTITY);
         expect(tracker.totalNudges).toBe(1);
     });
     it('uses custom nudge message', async () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const customMessage = 'Hey, keep going!';
         const tracker = new NudgeTracker({ delayMs: 1000, message: customMessage });
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         vi.advanceTimersByTime(6_000);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
-        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', customMessage);
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', customMessage, TEST_TMUX_IDENTITY);
     });
     it('never nudges the leader pane', async () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 0 });
         // Advance past scan interval
         vi.advanceTimersByTime(6_000);
-        const nudged = await tracker.checkAndNudge(['%1', '%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%1', '%2'], '%1', TEST_AUTHORITY);
         // %1 is the leader — should not be nudged
         expect(nudged).toEqual(['%2']);
         expect(vi.mocked(sendToWorker)).toHaveBeenCalledTimes(1);
-        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', expect.any(String));
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('test-session', '%2', expect.any(String), TEST_TMUX_IDENTITY);
     });
     it('respects maxCount limit', async () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 0, maxCount: 2 });
         // Nudge 1
         vi.advanceTimersByTime(6_000);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(tracker.totalNudges).toBe(1);
         // Nudge 2
         vi.advanceTimersByTime(6_000);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(tracker.totalNudges).toBe(2);
         // Nudge 3 — should be blocked by maxCount=2
         vi.advanceTimersByTime(6_000);
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(nudged).toEqual([]);
         expect(tracker.totalNudges).toBe(2);
     });
@@ -206,18 +246,18 @@ describe('NudgeTracker', () => {
         const tracker = new NudgeTracker({ delayMs: 5_000 });
         // T=0: idle
         mockCaptureOutput(IDLE_PANE_CONTENT);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         // T=3s: pane becomes active — resets timer
         vi.advanceTimersByTime(6_000);
         mockCaptureOutput(ACTIVE_PANE_CONTENT);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         // T=6s: idle again — timer restarts from here
         vi.advanceTimersByTime(6_000);
         mockCaptureOutput(IDLE_PANE_CONTENT);
-        await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         // T=9s: only 3s since idle restart — should NOT nudge
         vi.advanceTimersByTime(3_000);
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(nudged).toEqual([]);
         expect(tracker.totalNudges).toBe(0);
     });
@@ -225,17 +265,17 @@ describe('NudgeTracker', () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 0 });
         // First call runs (scan interval starts at 0)
-        const first = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const first = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(first).toEqual(['%2']);
         // Immediate second call — throttled (< 5s scan interval)
-        const second = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const second = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         expect(second).toEqual([]);
     });
     it('getSummary returns nudge counts per pane', async () => {
         mockCaptureOutput(IDLE_PANE_CONTENT);
         const tracker = new NudgeTracker({ delayMs: 0 });
         vi.advanceTimersByTime(6_000);
-        await tracker.checkAndNudge(['%2', '%3'], '%1', 'test-session');
+        await tracker.checkAndNudge(['%2', '%3'], '%1', TEST_AUTHORITY);
         const summary = tracker.getSummary();
         expect(summary['%2']).toEqual({ nudgeCount: 1, lastNudgeAt: expect.any(Number) });
         expect(summary['%3']).toEqual({ nudgeCount: 1, lastNudgeAt: expect.any(Number) });
@@ -245,10 +285,67 @@ describe('NudgeTracker', () => {
         vi.mocked(sendToWorker).mockResolvedValueOnce(false);
         const tracker = new NudgeTracker({ delayMs: 0 });
         vi.advanceTimersByTime(6_000);
-        const nudged = await tracker.checkAndNudge(['%2'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', TEST_AUTHORITY);
         // sendToWorker returned false — pane should not be counted as nudged
         expect(nudged).toEqual([]);
         expect(tracker.totalNudges).toBe(0);
+    });
+    it('does not deliver or count a tmux nudge without the original server identity', async () => {
+        mockCaptureOutput(IDLE_PANE_CONTENT);
+        const tracker = new NudgeTracker({ delayMs: 0 });
+        vi.advanceTimersByTime(6_000);
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', {
+            ...TEST_AUTHORITY,
+            tmuxServerIdentity: undefined,
+        });
+        expect(nudged).toEqual([]);
+        expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
+        expect(tracker.totalNudges).toBe(0);
+    });
+    it('does not fall back to ambient capture when pane ownership is missing', async () => {
+        mockCaptureOutput(IDLE_PANE_CONTENT);
+        const tracker = new NudgeTracker({ delayMs: 0 });
+        const authority = {
+            ...TEST_AUTHORITY,
+            getPaneOwnership: () => undefined,
+        };
+        vi.advanceTimersByTime(6_000);
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', authority);
+        expect(nudged).toEqual([]);
+        expect(vi.mocked(captureOwnedTeamPane)).not.toHaveBeenCalled();
+        expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
+        expect(tracker.totalNudges).toBe(0);
+    });
+    it('does not send input when final lifecycle authority is lost', async () => {
+        mockCaptureOutput(IDLE_PANE_CONTENT);
+        const executeNudge = vi.fn(async () => false);
+        const tracker = new NudgeTracker({ delayMs: 0 });
+        vi.advanceTimersByTime(6_000);
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', {
+            ...TEST_AUTHORITY,
+            executeNudge,
+        });
+        expect(nudged).toEqual([]);
+        expect(executeNudge).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(sendToWorker)).not.toHaveBeenCalled();
+        expect(tracker.totalNudges).toBe(0);
+    });
+    it('allows CMUX with instance identity but without a fabricated tmux identity', async () => {
+        mockCaptureOutput(IDLE_PANE_CONTENT);
+        const tracker = new NudgeTracker({ delayMs: 0 });
+        const authority = {
+            instanceId: TEST_AUTHORITY.instanceId,
+            sessionName: 'cmux:workspace',
+            provider: 'cmux',
+            getPaneOwnership: (paneId) => paneId === '%2'
+                ? { ...TEST_OWNERSHIP, provider: 'cmux', providerTarget: 'cmux:workspace', tmuxServerIdentity: undefined }
+                : undefined,
+            executeNudge: (paneId, message) => sendToWorker('cmux:workspace', paneId, message),
+        };
+        vi.advanceTimersByTime(6_000);
+        const nudged = await tracker.checkAndNudge(['%2'], '%1', authority);
+        expect(nudged).toEqual(['%2']);
+        expect(vi.mocked(sendToWorker)).toHaveBeenCalledWith('cmux:workspace', '%2', DEFAULT_NUDGE_CONFIG.message);
     });
     it('handles multiple panes independently', async () => {
         const tracker = new NudgeTracker({ delayMs: 0, maxCount: 1 });
@@ -264,7 +361,7 @@ describe('NudgeTracker', () => {
             return { stdout: '', stderr: '' };
         });
         vi.advanceTimersByTime(6_000);
-        const nudged = await tracker.checkAndNudge(['%2', '%3'], '%1', 'test-session');
+        const nudged = await tracker.checkAndNudge(['%2', '%3'], '%1', TEST_AUTHORITY);
         expect(nudged).toEqual(['%2']); // only %2 was idle
         expect(tracker.totalNudges).toBe(1);
     });

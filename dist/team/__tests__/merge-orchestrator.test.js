@@ -54,20 +54,29 @@ const mocks = vi.hoisted(() => {
         execFile: vi.fn(),
     };
 });
-vi.mock('node:child_process', () => ({
-    execFileSync: mocks.execFileSync,
-    exec: mocks.exec,
-    execSync: mocks.execSync,
-    execFile: mocks.execFile,
-}));
+vi.mock('node:child_process', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        execFileSync: mocks.execFileSync,
+        exec: mocks.exec,
+        execSync: mocks.execSync,
+        execFile: mocks.execFile,
+    };
+});
 // Re-mount the same mock for the unprefixed module name (some callers import
-// 'child_process' rather than 'node:child_process').
-vi.mock('child_process', () => ({
-    execFileSync: mocks.execFileSync,
-    exec: mocks.exec,
-    execSync: mocks.execSync,
-    execFile: mocks.execFile,
-}));
+// 'child_process' rather than 'node:child_process'). Preserve `spawn` so
+// transitive imports such as runtime-owner-client can load.
+vi.mock('child_process', async (importOriginal) => {
+    const actual = await importOriginal();
+    return {
+        ...actual,
+        execFileSync: mocks.execFileSync,
+        exec: mocks.exec,
+        execSync: mocks.execSync,
+        execFile: mocks.execFile,
+    };
+});
 // ---------------------------------------------------------------------------
 // Imports of the SUT (after mocks are installed).
 // ---------------------------------------------------------------------------

@@ -1,15 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import * as processUtils from '../../platform/process-utils.js';
-import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, buildWindowsSupervisorSource, cleanupWorkerLaunchTransport, isWorkerLaunchAttemptAccepted, isWorkerLaunchProviderStarted, loadWorkerLaunchAttempt, loadCurrentWorkerLaunchAttempt, prepareWorkerLaunchAttempt, materializeWorkerLaunchTransport, runWorkerLaunchBootstrap, readAndConsumeWorkerLaunchDescriptor, retireWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, terminateWorkerLaunchProvider, revokeWorkerLaunchAttempt, withWorkerLaunchAttemptFence, buildProviderEnvironment, buildProviderSpawnInvocation, materializeProviderSpawnInvocation, quoteWindowsCreateProcessArgument, } from '../worker-launch-ack.js';
+import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, buildWindowsSupervisorSource, cleanupWorkerLaunchTransport, observeWorkerLaunchProvider, isWorkerLaunchAttemptAccepted, isWorkerLaunchProviderStarted, loadWorkerLaunchAttempt, loadCurrentWorkerLaunchAttempt, prepareWorkerLaunchAttempt, materializeWorkerLaunchTransport, runWorkerLaunchBootstrap, readAndConsumeWorkerLaunchDescriptor, retireWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, terminateWorkerLaunchProvider, revokeWorkerLaunchAttempt, withWorkerLaunchAttemptFence, buildProviderEnvironment, buildProviderSpawnInvocation, materializeProviderSpawnInvocation, quoteWindowsCreateProcessArgument, } from '../worker-launch-ack.js';
 import { captureOwnedProcessGroup, getProcessStartIdentity, isProcessAlive, terminateOwnedProcessGroup, terminateOwnedProcessTree, } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 let cwd = '';
 const disposableProviders = new Set();
+// These waits poll for a condition produced by a spawned process, so they
+// return as soon as it holds and the bound only matters on failure. A 2s bound
+// was tight enough that a loaded CI runner could miss a legitimate
+// acknowledgement, reddening unrelated pull requests.
+const LAUNCH_WAIT_TIMEOUT_MS = 15_000;
 let fixtureEnvCaptured = false;
 let originalHome;
 let originalUserProfile;
@@ -79,10 +85,64 @@ async function attempt() {
         cwd,
         teamName: 'launch-team',
         workerName: 'worker-1',
+        instanceId: randomUUID(),
         paneId: '%2',
         provider: 'codex',
         runtimeCliPath: '/runtime-cli.cjs',
     });
+}
+async function acceptFixtureAttempt(launchAttempt) {
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    await writeFile(launchAttempt.ackPath, JSON.stringify({
+        ...expected,
+        kind: 'worker_launch_ack',
+        written_at: new Date().toISOString(),
+    }), 'utf8');
+    await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+        timeoutMs: 500,
+        pollIntervalMs: 5,
+    })).resolves.toEqual({ ok: true });
+    return expected;
+}
+async function writeBoundCompletionEvidence(launchAttempt, completionPath, options = {}) {
+    const expected = JSON.parse(await readFile(launchAttempt.expectedPath, 'utf8'));
+    const completionSpec = buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd);
+    const processStartIdentity = await getProcessStartIdentity(process.pid);
+    if (!processStartIdentity)
+        throw new Error('worker_launch_test_process_identity_missing');
+    await writeFile(launchAttempt.startedPath, JSON.stringify({
+        ...expected,
+        kind: 'worker_launch_provider_started',
+        pid: process.pid,
+        process_start_identity: processStartIdentity,
+        supervisor_completion_path: completionPath,
+        containment_nonce: completionSpec.containment_nonce,
+        authority_digest: completionSpec.authority_digest,
+        written_at: new Date().toISOString(),
+    }), 'utf8');
+    await writeFile(`${launchAttempt.startedPath}.completion-binding`, JSON.stringify({
+        ...expected,
+        kind: 'worker_launch_completion_binding',
+        completion_path: completionPath,
+        containment_nonce: completionSpec.containment_nonce,
+        authority_digest: completionSpec.authority_digest,
+        written_at: new Date().toISOString(),
+    }), 'utf8');
+    await writeFile(launchAttempt.transportOwnerPath, JSON.stringify({
+        ...expected,
+        kind: 'worker_launch_transport_owner',
+        authority_digest: completionSpec.authority_digest,
+    }), 'utf8');
+    if (options.marker !== false) {
+        await writeFile(completionPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_completion',
+            containment_nonce: completionSpec.containment_nonce,
+            authority_digest: completionSpec.authority_digest,
+            exit_code: 0,
+            ...options.marker,
+        }), 'utf8');
+    }
 }
 async function spawnDisposableProvider() {
     const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
@@ -137,13 +197,189 @@ async function stopDisposableProvider(child) {
     }
 }
 describe('worker launch acknowledgement', () => {
+    it('refuses a missing or invalid immutable instance id without generating a fallback', async () => {
+        cwd = await createFixture('worker-launch-instance-id-');
+        await expect(prepareWorkerLaunchAttempt({
+            cwd,
+            teamName: 'launch-team',
+            workerName: 'worker-1',
+            instanceId: undefined,
+            paneId: '%2',
+            provider: 'codex',
+            runtimeCliPath: '/runtime-cli.cjs',
+        })).rejects.toThrow('worker_launch_instance_id_invalid');
+        await expect(prepareWorkerLaunchAttempt({
+            cwd,
+            teamName: 'launch-team',
+            workerName: 'worker-1',
+            instanceId: 'not-a-uuid',
+            paneId: '%2',
+            provider: 'codex',
+            runtimeCliPath: '/runtime-cli.cjs',
+        })).rejects.toThrow('worker_launch_instance_id_invalid');
+    });
+    it('observes a live provider from an exact accepted launch receipt', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        if (!processStartIdentity)
+            throw new Error('worker_launch_test_process_identity_missing');
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('alive');
+    });
+    it('returns unknown when the accepted launch loses its acknowledgement receipt', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        if (!processStartIdentity)
+            throw new Error('worker_launch_test_process_identity_missing');
+        await rm(launchAttempt.ackPath);
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it('observes a dead provider after its exact process identity exits', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const disposable = await spawnDisposableProvider();
+        const { child, pid, processStartIdentity } = disposable;
+        await stopDisposableProvider(child);
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid,
+            process_start_identity: processStartIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('dead');
+    });
+    it('returns unknown when process identity observation is inconclusive', async () => {
+        vi.resetModules();
+        const dynamicProcessUtils = await import('../../platform/process-utils.js');
+        const identitySpy = vi.spyOn(dynamicProcessUtils, 'isProcessIdentityLive')
+            .mockResolvedValue('unknown');
+        try {
+            const workerLaunch = await import('../worker-launch-ack.js');
+            const launchAttempt = await attempt();
+            const expected = await acceptFixtureAttempt(launchAttempt);
+            const processStartIdentity = await getProcessStartIdentity(process.pid);
+            if (!processStartIdentity)
+                throw new Error('worker_launch_test_process_identity_missing');
+            await writeFile(launchAttempt.startedPath, JSON.stringify({
+                ...expected,
+                kind: 'worker_launch_provider_started',
+                pid: process.pid,
+                process_start_identity: processStartIdentity,
+                written_at: new Date().toISOString(),
+            }), 'utf8');
+            await expect(workerLaunch.observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+        }
+        finally {
+            identitySpy.mockRestore();
+            vi.resetModules();
+        }
+    });
+    it('returns unknown for a live process with a mismatched start identity', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        if (!processStartIdentity)
+            throw new Error('worker_launch_test_process_identity_missing');
+        const mismatchedIdentity = processStartIdentity.startsWith('ticks:')
+            ? `ticks:${BigInt(processStartIdentity.slice('ticks:'.length)) + 1n}`
+            : String(BigInt(processStartIdentity) + 1n);
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: mismatchedIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it.runIf(process.platform !== 'win32')('observes a reaped provider as dead without requiring tree cleanup proof', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        const processGroup = captureOwnedProcessGroup(process.pid);
+        if (!processStartIdentity || !processGroup)
+            throw new Error('worker_launch_test_process_identity_missing');
+        const started = {
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            process_group_id: processGroup.processGroupId,
+            written_at: new Date().toISOString(),
+        };
+        await writeFile(launchAttempt.startedPath, JSON.stringify(started), 'utf8');
+        await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({
+            ...started,
+            kind: 'worker_launch_provider_terminal',
+            outcome: 'cleanup_unverified',
+            cleanup_verified: false,
+            child_reaped: true,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('dead');
+    });
+    it('returns unknown while an exact retirement receipt is still awaiting cleanup', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        if (!processStartIdentity)
+            throw new Error('worker_launch_test_process_identity_missing');
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(`${launchAttempt.decisionPath}.retired`, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_retired',
+            reason: 'test_cleanup_pending',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it('observes a retired attempt as dead from its exact cleanup-complete receipt', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        await rm(launchAttempt.currentPath);
+        await writeFile(`${launchAttempt.decisionPath}.retired`, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_retired',
+            reason: 'test_cleanup',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(`${launchAttempt.decisionPath}.retired.cleanup-complete`, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_cleanup_complete',
+            reason: 'test_cleanup',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('dead');
+    });
     it('accepts only the exact child-written acknowledgement before running the provider', async () => {
         const launchAttempt = await attempt();
         const stopPath = join(cwd, 'provider-stop');
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', `const fs=require('node:fs');setInterval(()=>{if(fs.existsSync(${JSON.stringify(stopPath)}))process.exit(0)},10)`], cwd);
         const bootstrap = runWorkerLaunchBootstrap(spec);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
@@ -173,6 +409,7 @@ describe('worker launch acknowledgement', () => {
             schema_version: launchAttempt.schema_version,
             attempt_id: launchAttempt.attempt_id,
             nonce: launchAttempt.nonce,
+            instance_id: launchAttempt.instance_id,
             team_name: launchAttempt.team_name,
             worker_name: launchAttempt.worker_name,
             pane_id: launchAttempt.pane_id,
@@ -189,6 +426,7 @@ describe('worker launch acknowledgement', () => {
             schema_version: launchAttempt.schema_version,
             attempt_id: launchAttempt.attempt_id,
             nonce: launchAttempt.nonce,
+            instance_id: launchAttempt.instance_id,
             team_name: launchAttempt.team_name,
             worker_name: launchAttempt.worker_name,
             pane_id: launchAttempt.pane_id,
@@ -208,18 +446,81 @@ describe('worker launch acknowledgement', () => {
         const launchAttempt = await attempt();
         const identity = await getProcessStartIdentity(process.pid);
         const completionPath = join(cwd, 'provider-exit.txt');
+        const completionSpec = buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd);
         const base = {
             schema_version: launchAttempt.schema_version, attempt_id: launchAttempt.attempt_id, nonce: launchAttempt.nonce,
+            instance_id: launchAttempt.instance_id,
             team_name: launchAttempt.team_name, worker_name: launchAttempt.worker_name, pane_id: launchAttempt.pane_id,
             provider: launchAttempt.provider, created_at: launchAttempt.created_at,
         };
         await writeFile(launchAttempt.ackPath, JSON.stringify({ ...base, kind: 'worker_launch_ack', written_at: new Date().toISOString() }), 'utf8');
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
-        await writeFile(completionPath, '0\r\n', 'utf8');
+        await writeFile(completionPath, JSON.stringify({
+            ...base,
+            kind: 'worker_launch_provider_completion',
+            containment_nonce: completionSpec.containment_nonce,
+            authority_digest: completionSpec.authority_digest,
+            exit_code: 0,
+        }), 'utf8');
         await writeFile(launchAttempt.startedPath, JSON.stringify({ ...base, kind: 'worker_launch_provider_started',
             pid: process.pid, process_start_identity: identity, supervisor_completion_path: completionPath,
+            containment_nonce: completionSpec.containment_nonce,
+            authority_digest: completionSpec.authority_digest,
             written_at: new Date().toISOString() }), 'utf8');
+        await writeFile(`${launchAttempt.startedPath}.completion-binding`, JSON.stringify({
+            ...base,
+            kind: 'worker_launch_completion_binding',
+            completion_path: completionPath,
+            containment_nonce: completionSpec.containment_nonce,
+            authority_digest: completionSpec.authority_digest,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(launchAttempt.transportOwnerPath, JSON.stringify({
+            ...base,
+            kind: 'worker_launch_transport_owner',
+            authority_digest: completionSpec.authority_digest,
+        }), 'utf8');
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, { timeoutMs: 50, pollIntervalMs: 5 })).resolves.toBe(false);
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('dead');
+        await writeFile(completionPath, '0\n', 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+        await writeFile(completionPath, 'not-an-exit-code\n', 'utf8');
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it('rejects a completion marker from another launch even when the path is substituted', async () => {
+        const launchAttempt = await attempt();
+        await acceptFixtureAttempt(launchAttempt);
+        const foreignMarker = join(cwd, 'foreign-provider-exit.json');
+        await writeBoundCompletionEvidence(launchAttempt, foreignMarker, {
+            marker: { attempt_id: randomUUID() },
+        });
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it.runIf(process.platform !== 'win32')('rejects completion evidence through a symlinked parent', async () => {
+        const launchAttempt = await attempt();
+        await acceptFixtureAttempt(launchAttempt);
+        const realParent = join(cwd, 'real-completion-parent');
+        const linkedParent = join(cwd, 'linked-completion-parent');
+        await mkdir(realParent, { recursive: true });
+        await symlink(realParent, linkedParent);
+        const completionPath = join(linkedParent, 'provider-exit.json');
+        await writeBoundCompletionEvidence(launchAttempt, completionPath);
+        await expect(observeWorkerLaunchProvider(launchAttempt)).resolves.toBe('unknown');
+    });
+    it.runIf(process.platform !== 'win32')('rejects a writerless FIFO completion path without blocking', async () => {
+        const launchAttempt = await attempt();
+        await acceptFixtureAttempt(launchAttempt);
+        const completionPath = join(cwd, 'provider-exit.fifo');
+        execFileSync('mkfifo', [completionPath]);
+        await writeBoundCompletionEvidence(launchAttempt, completionPath, { marker: false });
+        const result = await Promise.race([
+            observeWorkerLaunchProvider(launchAttempt),
+            new Promise(resolve => {
+                const timer = setTimeout(() => resolve('timeout'), 500);
+                timer.unref();
+            }),
+        ]);
+        expect(result).toBe('unknown');
     });
     it('rejects a provider that exits after publishing start evidence but before handoff', async () => {
         const launchAttempt = await attempt();
@@ -227,7 +528,7 @@ describe('worker launch acknowledgement', () => {
         const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', `const fs=require('node:fs');setInterval(()=>{if(fs.existsSync(${JSON.stringify(stopPath)}))process.exit(0)},10)`], cwd));
         try {
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await vi.waitFor(async () => {
@@ -263,11 +564,11 @@ describe('worker launch acknowledgement', () => {
         try {
             bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             await vi.waitFor(async () => {
@@ -311,11 +612,11 @@ describe('worker launch acknowledgement', () => {
         try {
             bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             await vi.waitFor(async () => {
@@ -426,13 +727,14 @@ describe('worker launch acknowledgement', () => {
         const accepted = await attempt();
         await writeFile(accepted.ackPath, JSON.stringify({
             schema_version: accepted.schema_version, attempt_id: accepted.attempt_id, nonce: accepted.nonce,
+            instance_id: accepted.instance_id,
             team_name: accepted.team_name, worker_name: accepted.worker_name, pane_id: accepted.pane_id,
             provider: accepted.provider, created_at: accepted.created_at, kind: 'worker_launch_ack', written_at: new Date().toISOString(),
         }), 'utf8');
         await expect(awaitWorkerLaunchAcknowledgement(accepted, { timeoutMs: 500, pollIntervalMs: 5 })).resolves.toEqual({ ok: true });
         await expect(retireWorkerLaunchAttempt(accepted, 'superseded')).resolves.toBe(true);
         const successor = await prepareWorkerLaunchAttempt({
-            cwd, teamName: accepted.team_name, workerName: accepted.worker_name, paneId: '%3',
+            cwd, teamName: accepted.team_name, workerName: accepted.worker_name, instanceId: randomUUID(), paneId: '%3',
             provider: accepted.provider, runtimeCliPath: accepted.runtimeCliPath,
         });
         const cleanup = vi.fn(async () => true);
@@ -456,6 +758,90 @@ describe('worker launch acknowledgement', () => {
         const retryCleanup = vi.fn(async () => true);
         await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'partial_shutdown_retry', retryCleanup)).resolves.toBe(true);
         expect(retryCleanup).not.toHaveBeenCalled();
+    });
+    it('retries cleanup-complete retirement after a current-pointer unlink failure', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        const processGroup = captureOwnedProcessGroup(process.pid);
+        if (!processStartIdentity || !processGroup)
+            throw new Error('worker_launch_test_process_identity_missing');
+        const started = {
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            process_group_id: processGroup.processGroupId,
+            written_at: new Date().toISOString(),
+        };
+        await writeFile(launchAttempt.startedPath, JSON.stringify(started), 'utf8');
+        await writeFile(`${launchAttempt.startedPath}.terminal`, JSON.stringify({
+            ...started,
+            kind: 'worker_launch_provider_terminal',
+            outcome: 'exit',
+            cleanup_verified: true,
+            child_reaped: true,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        vi.resetModules();
+        const actualFsPromises = await vi.importActual('node:fs/promises');
+        let currentUnlinkFailuresRemaining = 2;
+        vi.doMock('node:fs/promises', () => ({
+            ...actualFsPromises,
+            unlink: async (...args) => {
+                if (args[0] === launchAttempt.currentPath && currentUnlinkFailuresRemaining > 0) {
+                    currentUnlinkFailuresRemaining--;
+                    throw Object.assign(new Error('fixture_current_unlink_failure'), { code: 'EACCES' });
+                }
+                return actualFsPromises.unlink(...args);
+            },
+        }));
+        const workerLaunch = await import('../worker-launch-ack.js');
+        const cleanup = vi.fn(async () => true);
+        try {
+            await expect(workerLaunch.retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'retry_after_unlink_failure', cleanup)).resolves.toBe(false);
+            expect(cleanup).toHaveBeenCalledOnce();
+            await expect(readFile(launchAttempt.currentPath, 'utf8')).resolves.toContain(launchAttempt.attempt_id);
+            const retryCleanup = vi.fn(async () => true);
+            await expect(workerLaunch.retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'retry_after_unlink_failure', retryCleanup)).resolves.toBe(false);
+            expect(retryCleanup).not.toHaveBeenCalled();
+            await expect(readFile(launchAttempt.currentPath, 'utf8')).resolves.toContain(launchAttempt.attempt_id);
+            await expect(workerLaunch.retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'retry_after_unlink_failure', retryCleanup)).resolves.toBe(true);
+            expect(retryCleanup).not.toHaveBeenCalled();
+            await expect(readFile(launchAttempt.currentPath, 'utf8'))
+                .rejects.toMatchObject({ code: 'ENOENT' });
+        }
+        finally {
+            vi.doUnmock('node:fs/promises');
+            vi.resetModules();
+        }
+    });
+    it('preserves a successor current pointer when retrying an older cleanup-complete retirement', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        await writeFile(`${launchAttempt.decisionPath}.retired`, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_retired',
+            reason: 'successor_race',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        await writeFile(`${launchAttempt.decisionPath}.retired.cleanup-complete`, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_cleanup_complete',
+            reason: 'successor_race',
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        const successor = await prepareWorkerLaunchAttempt({
+            cwd,
+            teamName: launchAttempt.team_name,
+            workerName: launchAttempt.worker_name,
+            instanceId: launchAttempt.instance_id,
+            paneId: '%3',
+            provider: launchAttempt.provider,
+            runtimeCliPath: launchAttempt.runtimeCliPath,
+        });
+        await expect(retireAndCleanupCurrentWorkerLaunchAttempt(launchAttempt, 'successor_race_retry', vi.fn(async () => true))).resolves.toBe(true);
+        await expect(readFile(successor.currentPath, 'utf8')).resolves.toContain(successor.attempt_id);
     });
     it.runIf(process.platform !== 'win32')('does not synthesize completion from an already-dead retry after a prior request', async () => {
         const launchAttempt = await attempt();
@@ -967,7 +1353,7 @@ describe('worker launch acknowledgement', () => {
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'], cwd);
         const first = runWorkerLaunchBootstrap(spec);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(first).resolves.toMatchObject({ outcome: 'ran', exitCode: 0 });
@@ -978,7 +1364,7 @@ describe('worker launch acknowledgement', () => {
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [join(cwd, 'definitely-missing-provider')], cwd);
         const bootstrap = runWorkerLaunchBootstrap(spec);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -986,6 +1372,7 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: launchAttempt.team_name,
             workerName: launchAttempt.worker_name,
+            instanceId: launchAttempt.instance_id,
             provider: launchAttempt.provider,
         })).resolves.toBeNull();
     });
@@ -1002,7 +1389,7 @@ describe('worker launch acknowledgement', () => {
         ].join(';');
         const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd));
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -1022,7 +1409,7 @@ describe('worker launch acknowledgement', () => {
         try {
             const bootstrap = runWorkerLaunchBootstrap(spec);
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(bootstrap).resolves.toEqual({ outcome: 'provider_spawn_failed' });
@@ -1074,7 +1461,7 @@ describe('worker launch acknowledgement', () => {
             const providerMarker = join(cwd, 'async-release-provider-ran');
             bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(providerMarker)}, 'ran');setInterval(()=>{},1000)`], cwd));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             const result = await bootstrap;
@@ -1135,11 +1522,11 @@ describe('worker launch acknowledgement', () => {
                     `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStop)})){clearInterval(timer);process.exit(0)}},5)`,
                 ].join(';')], cwd));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             await expect(readFile(providerMarker, 'utf8')).resolves.toBe('ran');
@@ -1188,11 +1575,11 @@ describe('worker launch acknowledgement', () => {
                     `const timer=setInterval(()=>{if(fs.existsSync(${JSON.stringify(providerStop)})){clearInterval(timer);process.exit(0)}},5)`,
                 ].join(';')], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             expect(emitLateGateError).toBeDefined();
@@ -1269,7 +1656,7 @@ describe('worker launch acknowledgement', () => {
                     'setInterval(()=>{},1000)',
                 ].join(';')], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             const providerMarker = join(cwd, 'failed-release-provider.json');
@@ -1342,11 +1729,11 @@ describe('worker launch acknowledgement', () => {
                     'process.exit(0)',
                 ].join(';')], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8'));
@@ -1399,11 +1786,11 @@ describe('worker launch acknowledgement', () => {
         ].join(';');
         const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd));
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: true });
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toBe(true);
         const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8'));
@@ -1429,12 +1816,13 @@ describe('worker launch acknowledgement', () => {
         const launchAttempt = await attempt();
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'setTimeout(() => process.exit(0), 300)'], cwd);
         const bootstrap = runWorkerLaunchBootstrap(spec);
-        await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+        await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 });
         await bootstrap;
         await expect(loadWorkerLaunchAttempt({
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: launchAttempt.instance_id,
             paneId: '%2',
             provider: 'codex',
             attemptId: launchAttempt.attempt_id,
@@ -1444,6 +1832,17 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: randomUUID(),
+            paneId: '%2',
+            provider: 'codex',
+            attemptId: launchAttempt.attempt_id,
+            runtimeCliPath: '/runtime-cli.cjs',
+        })).resolves.toBeNull();
+        await expect(loadWorkerLaunchAttempt({
+            cwd,
+            teamName: 'launch-team',
+            workerName: 'worker-1',
+            instanceId: launchAttempt.instance_id,
             paneId: '%1',
             provider: 'codex',
             attemptId: launchAttempt.attempt_id,
@@ -1453,6 +1852,7 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: launchAttempt.instance_id,
             provider: 'claude',
         })).resolves.toBeNull();
     });
@@ -1466,7 +1866,7 @@ describe('worker launch acknowledgement', () => {
         }, { timeout: 2_000, interval: 5 });
         await expect(revokeWorkerLaunchAttempt(launchAttempt, 'timeout')).resolves.toBe(true);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: false, reason: 'decision_conflict' });
         await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1483,7 +1883,7 @@ describe('worker launch acknowledgement', () => {
         }, { timeout: 2_000, interval: 5 });
         await expect(retireWorkerLaunchAttempt(launchAttempt, 'pane_cleanup')).resolves.toBe(true);
         await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
         await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1505,14 +1905,14 @@ describe('worker launch acknowledgement', () => {
         try {
             bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd, { releaseAfterSpawn: true }));
             await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toEqual({ ok: true });
             await expect(revokeWorkerLaunchAttempt(launchAttempt, 'late_timeout')).resolves.toBe(false);
             const decision = JSON.parse(await readFile(launchAttempt.decisionPath, 'utf8'));
             expect(decision).toMatchObject({ decision: 'accepted', reason: 'ack_valid' });
             await expect(awaitWorkerLaunchProviderStarted(launchAttempt, {
-                timeoutMs: 2_000,
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
                 pollIntervalMs: 5,
             })).resolves.toBe(true);
             await vi.waitFor(async () => {
@@ -1535,6 +1935,7 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: randomUUID(),
             paneId: '%2',
             provider: 'codex',
             runtimeCliPath: '/runtime-cli.cjs',
@@ -1561,13 +1962,14 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: olderAttempt.team_name,
             workerName: olderAttempt.worker_name,
+            instanceId: randomUUID(),
             paneId: '%3',
             provider: olderAttempt.provider,
             runtimeCliPath: olderAttempt.runtimeCliPath,
             context: { kind: 'recovery', recovery_id: 'recovery-new', replacement_generation: 2, pane_attempt_id: 'pane-new' },
         });
         await expect(awaitWorkerLaunchAcknowledgement(olderAttempt, {
-            timeoutMs: 2_000,
+            timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
             pollIntervalMs: 5,
         })).resolves.toEqual({ ok: false, reason: 'attempt_superseded' });
         await expect(bootstrap).resolves.toEqual({ outcome: 'revoked' });
@@ -1587,6 +1989,7 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: randomUUID(),
             paneId: '%22',
             provider: 'codex',
             runtimeCliPath: '/runtime-cli.cjs',
@@ -1599,7 +2002,7 @@ describe('worker launch acknowledgement', () => {
         });
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', 'setInterval(()=>{},1000)'], cwd);
         const bootstrap = runWorkerLaunchBootstrap(spec);
-        await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 });
+        await awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 });
         await expect(awaitWorkerLaunchProviderStarted(launchAttempt, { timeoutMs: 10_000, pollIntervalMs: 5 })).resolves.toBe(true);
         const started = JSON.parse(await readFile(launchAttempt.startedPath, 'utf8'));
         expect(started).toMatchObject({
@@ -1613,6 +2016,7 @@ describe('worker launch acknowledgement', () => {
             cwd,
             teamName: 'launch-team',
             workerName: 'worker-1',
+            instanceId: launchAttempt.instance_id,
             provider: 'codex',
         })).resolves.toMatchObject({
             attempt_id: launchAttempt.attempt_id,
@@ -1789,7 +2193,7 @@ describe('worker launch acknowledgement', () => {
         const marker = join(cwd, 'provider-home.txt');
         const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, ['/bin/bash', '--noprofile', '--norc', '-u', '-c', 'set -u; printf "%s" "$HOME" > "$1"; sleep 0.2', 'bash-provider', marker], cwd, { releaseAfterSpawn: true });
         const bootstrap = runWorkerLaunchBootstrap(spec);
-        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 }))
             .resolves.toEqual({ ok: true });
         await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
         await expect(readFile(marker, 'utf8')).resolves.toBe(process.env.HOME);
@@ -1812,7 +2216,7 @@ describe('worker launch acknowledgement', () => {
             },
             releaseAfterSpawn: true,
         }));
-        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: 2_000, pollIntervalMs: 5 }))
+        await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, { timeoutMs: LAUNCH_WAIT_TIMEOUT_MS, pollIntervalMs: 5 }))
             .resolves.toEqual({ ok: true });
         await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
         await expect(readFile(marker, 'utf8').then(JSON.parse)).resolves.toEqual({
@@ -1830,6 +2234,15 @@ describe('worker launch acknowledgement', () => {
             provider_env: { ...spec.provider_env, HOME: '/home/authority-tampered' },
         };
         expect(tampered.authority_digest).toBe(spec.authority_digest);
+        await expect(runWorkerLaunchBootstrap(tampered)).resolves.toEqual({ outcome: 'invalid_spec' });
+    });
+    it('binds the authority digest to the immutable instance identity', async () => {
+        const launchAttempt = await attempt();
+        const spec = buildWorkerLaunchBootstrapSpec(launchAttempt, ['codex'], cwd);
+        const tampered = {
+            ...spec,
+            instance_id: randomUUID(),
+        };
         await expect(runWorkerLaunchBootstrap(tampered)).resolves.toEqual({ outcome: 'invalid_spec' });
     });
     it('routes native Windows batch shims through a percent-safe temporary wrapper without changing POSIX argv', async () => {
@@ -2070,8 +2483,61 @@ describe('worker launch acknowledgement', () => {
         expect(source).toContain('WaitForSingleObject($job, 5000)');
         expect(source).toContain('worker_launch_job_cleanup_timeout');
         expect(source).toContain('process_start_identity=("ticks:" +');
+        expect(source).toContain('instance_id=$payload.identity.instance_id');
+        expect(source).toContain('$msg.instance_id -ne $payload.identity.instance_id');
         expect(source).toContain('containment_nonce=$payload.containment_nonce');
         expect(source).toContain('finally {');
+    });
+    it('binds every Windows supervisor frame to the exact launch instance', () => {
+        const source = buildWindowsSupervisorSource();
+        expect(source.match(/instance_id=\$payload\.identity\.instance_id/g)).toHaveLength(3);
+        expect(source).toContain('$msg.instance_id -ne $payload.identity.instance_id');
+        expect(source).toContain('if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }');
+        expect(source).toContain('try { $msg = $line | ConvertFrom-Json } catch { continue }');
+    });
+    it('rejects a Windows termination request from another launch instance', async () => {
+        const launchAttempt = await attempt();
+        const expected = await acceptFixtureAttempt(launchAttempt);
+        const processStartIdentity = await getProcessStartIdentity(process.pid);
+        if (!processStartIdentity)
+            throw new Error('worker_launch_test_process_identity_missing');
+        await writeFile(launchAttempt.startedPath, JSON.stringify({
+            ...expected,
+            kind: 'worker_launch_provider_started',
+            pid: process.pid,
+            process_start_identity: processStartIdentity,
+            written_at: new Date().toISOString(),
+        }), 'utf8');
+        vi.resetModules();
+        const actualFsPromises = await vi.importActual('node:fs/promises');
+        const openMock = vi.fn(actualFsPromises.open);
+        vi.doMock('node:fs/promises', () => ({ ...actualFsPromises, open: openMock }));
+        const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+        Object.defineProperty(process, 'platform', { value: 'win32' });
+        try {
+            const workerLaunch = await import('../worker-launch-ack.js');
+            await expect(workerLaunch.terminateWorkerLaunchProvider(launchAttempt, 5)).resolves.toBe(false);
+            const requestPath = `${launchAttempt.startedPath}.termination-request`;
+            const request = JSON.parse(await readFile(requestPath, 'utf8'));
+            expect(request.instance_id).toBe(launchAttempt.instance_id);
+            const requestWrites = openMock.mock.calls.filter(call => String(call[0]).includes('.candidate')).length;
+            expect(requestWrites).toBeGreaterThan(0);
+            await writeFile(requestPath, JSON.stringify({
+                ...request,
+                instance_id: randomUUID(),
+            }), 'utf8');
+            await expect(workerLaunch.terminateWorkerLaunchProvider(launchAttempt, 5)).resolves.toBe(false);
+            // A mismatched request is rejected before another durable write; the
+            // first false result was only a bounded wait with a valid request.
+            expect(openMock.mock.calls.filter(call => String(call[0]).includes('.candidate')).length)
+                .toBe(requestWrites);
+        }
+        finally {
+            if (originalPlatform)
+                Object.defineProperty(process, 'platform', originalPlatform);
+            vi.doUnmock('node:fs/promises');
+            vi.resetModules();
+        }
     });
     it('quotes exact Windows CreateProcess arguments', () => {
         expect(quoteWindowsCreateProcessArgument('')).toBe('""');

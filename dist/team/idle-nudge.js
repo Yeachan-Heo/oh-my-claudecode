@@ -10,7 +10,8 @@
  *
  * @see https://github.com/anthropics/oh-my-claudecode/issues/1047
  */
-import { paneLooksReady, paneHasActiveTask, sendToWorker, captureTeamPane } from './tmux-session.js';
+import { paneLooksReady, paneHasActiveTask, captureOwnedTeamPane, } from './tmux-session.js';
+import { isValidTeamInstanceId, isValidTmuxServerIdentity, } from './types.js';
 export const DEFAULT_NUDGE_CONFIG = {
     delayMs: 30_000,
     maxCount: 3,
@@ -20,15 +21,20 @@ export const DEFAULT_NUDGE_CONFIG = {
 // Pane capture + idle detection
 // ---------------------------------------------------------------------------
 /** Capture the last 80 lines of a team pane. Returns '' on error. */
-export async function capturePane(paneId) {
-    return captureTeamPane(paneId);
+export async function capturePane(ownership) {
+    try {
+        return await captureOwnedTeamPane(ownership);
+    }
+    catch {
+        return '';
+    }
 }
 /**
  * A pane is idle when it shows a prompt (ready for input) but has no
  * active task running.
  */
-export async function isPaneIdle(paneId) {
-    const captured = await capturePane(paneId);
+export async function isPaneIdle(ownership) {
+    const captured = await capturePane(ownership);
     if (!captured)
         return false;
     return paneLooksReady(captured) && !paneHasActiveTask(captured);
@@ -48,9 +54,27 @@ export class NudgeTracker {
      *
      * @param paneIds   - Worker pane IDs from the job's panes file
      * @param leaderPaneId - Leader pane ID (never nudged)
-     * @param sessionName  - Tmux session name (passed to sendToWorker)
+     * @param authority   - Original instance and exact persisted provider target
      */
-    async checkAndNudge(paneIds, leaderPaneId, sessionName) {
+    async checkAndNudge(paneIds, leaderPaneId, authority) {
+        if (!authority || typeof authority !== 'object')
+            return [];
+        const sessionName = typeof authority.sessionName === 'string' ? authority.sessionName : '';
+        const provider = authority.provider
+            ?? (sessionName.startsWith('cmux:') ? 'cmux' : 'tmux');
+        if (!Array.isArray(paneIds)
+            || (provider !== 'tmux' && provider !== 'cmux')
+            || sessionName.length === 0
+            || !isValidTeamInstanceId(authority.instanceId)
+            || sessionName.trim() !== sessionName
+            || (authority.provider !== undefined && authority.provider !== provider)
+            || typeof authority.getPaneOwnership !== 'function'
+            || typeof authority.executeNudge !== 'function'
+            || (provider === 'tmux'
+                && (!authority.tmuxServerIdentity || !isValidTmuxServerIdentity(authority.tmuxServerIdentity)))
+            || (provider === 'cmux' && authority.tmuxServerIdentity !== undefined)) {
+            return [];
+        }
         const now = Date.now();
         // Throttle: skip if last scan was too recent
         if (now - this.lastScanAt < this.scanIntervalMs)
@@ -69,7 +93,27 @@ export class NudgeTracker {
             // Max nudges reached for this pane — skip
             if (state.nudgeCount >= this.config.maxCount)
                 continue;
-            const idle = await isPaneIdle(paneId);
+            let ownership;
+            try {
+                ownership = authority.getPaneOwnership(paneId);
+            }
+            catch {
+                continue;
+            }
+            if (!ownership
+                || ownership.paneId !== paneId
+                || ownership.provider !== provider
+                || ownership.providerTarget !== sessionName
+                || (provider === 'tmux'
+                    && (!authority.tmuxServerIdentity
+                        || !ownership.tmuxServerIdentity
+                        || ownership.tmuxServerIdentity.socket_path !== authority.tmuxServerIdentity.socket_path
+                        || ownership.tmuxServerIdentity.server_pid !== authority.tmuxServerIdentity.server_pid
+                        || ownership.tmuxServerIdentity.process_started_at !== authority.tmuxServerIdentity.process_started_at))
+                || (provider === 'cmux' && ownership.tmuxServerIdentity !== undefined)) {
+                continue;
+            }
+            const idle = await isPaneIdle(ownership);
             if (!idle) {
                 // Pane is active — reset idle tracking
                 state.firstIdleAt = null;
@@ -83,7 +127,13 @@ export class NudgeTracker {
             if (now - state.firstIdleAt < this.config.delayMs)
                 continue;
             // Send the nudge
-            const ok = await sendToWorker(sessionName, paneId, this.config.message);
+            let ok = false;
+            try {
+                ok = await authority.executeNudge(paneId, this.config.message);
+            }
+            catch {
+                ok = false;
+            }
             if (ok) {
                 state.nudgeCount++;
                 state.lastNudgeAt = now;

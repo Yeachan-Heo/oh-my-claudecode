@@ -5,10 +5,12 @@ const ownerInput = {
     cwd: '/workspace',
     workerName: 'worker-1',
     requestId: 'request-a',
+    instanceId: '44444444-4444-4444-8444-444444444444',
 };
 function activeConfig() {
     return {
         name: 'recovery-team',
+        instance_id: ownerInput.instanceId,
         worker_count: 1,
         workers: [{ name: 'worker-1', index: 1 }],
         agent_type: 'claude',

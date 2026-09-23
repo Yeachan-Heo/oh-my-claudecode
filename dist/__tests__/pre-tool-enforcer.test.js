@@ -42,6 +42,10 @@ function runPreToolEnforcerWithEnv(input, env = {}) {
             // Reset Bedrock/routing env vars so tests are isolated from the host environment.
             // Tests that exercise Bedrock model-routing behaviour set these explicitly via `env`.
             OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '',
+            // Read budget (issue #4054): reset so a host-exported off switch or
+            // threshold cannot mask the gate these tests assert on.
+            OMC_READ_BUDGET: '',
+            OMC_READ_BUDGET_MAX_LINES: '',
             OMC_ROUTING_FORCE_INHERIT: '',
             OMC_SUBAGENT_MODEL: '',
             CLAUDE_MODEL: '',
@@ -879,16 +883,31 @@ describe('pre-tool-enforcer fallback gating (issue #970)', () => {
     it('falls back to the default preflight threshold when the env value is invalid', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');
         writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
+        for (const threshold of ['abc', '95abc', '0', '101']) {
+            const output = evaluateAgentHeavyPreflight({
+                toolName: 'Task',
+                transcriptPath,
+                env: {
+                    ...process.env,
+                    OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: threshold,
+                },
+            });
+            expect(output?.decision).toBe('block');
+            expect(String(output?.reason)).toContain('threshold: 72%');
+        }
+    });
+    it('preserves a valid preflight threshold env value', () => {
+        const transcriptPath = join(tempDir, 'transcript.jsonl');
+        writeTranscriptWithContext(transcriptPath, 1000, 800); // 80%
         const output = evaluateAgentHeavyPreflight({
             toolName: 'Task',
             transcriptPath,
             env: {
                 ...process.env,
-                OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: 'abc',
+                OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '85',
             },
         });
-        expect(output?.decision).toBe('block');
-        expect(String(output?.reason)).toContain('threshold: 72%');
+        expect(output).toBeNull();
     });
     it('allows non-agent-heavy tools even when transcript context is high', () => {
         const transcriptPath = join(tempDir, 'transcript.jsonl');
@@ -2420,6 +2439,163 @@ describe('pre-tool-enforcer session-scoped agent tracking (issue #3732)', () => 
         const advisory = output.hookSpecificOutput.additionalContext;
         expect(advisory).toContain('Spawning agent:');
         expect(advisory).not.toContain('Active agents:');
+    });
+});
+describe('pre-tool-enforcer read budget enforcement (issue #4054)', () => {
+    let tempDir;
+    beforeEach(() => {
+        tempDir = makeGitTemp('pre-tool-enforcer-read-budget-');
+    });
+    afterEach(() => {
+        rmSync(tempDir, { recursive: true, force: true });
+    });
+    function writeFileWithLines(name, lines) {
+        const filePath = join(tempDir, name);
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(filePath, `${Array.from({ length: lines }, (_, i) => `line ${i + 1}`).join('\n')}\n`);
+        return filePath;
+    }
+    function writeReadBudgetConfig(readBudget) {
+        writeJson(join(tempDir, '.omc', 'config.json'), { context: { readBudget } });
+    }
+    function readFullFile(filePath, session, env = {}) {
+        return runPreToolEnforcerWithEnv({
+            tool_name: 'Read',
+            toolInput: { file_path: filePath },
+            cwd: tempDir,
+            session_id: session,
+        }, env);
+    }
+    function hookOutputOf(output) {
+        return output.hookSpecificOutput || {};
+    }
+    it('warns on the first unbounded read of an oversized file and denies the next one', () => {
+        writeReadBudgetConfig({ maxLines: 50 });
+        const filePath = writeFileWithLines('big.ts', 400);
+        const first = readFullFile(filePath, 'session-rb-warn');
+        const firstHook = hookOutputOf(first);
+        expect(first.continue).toBe(true);
+        expect(firstHook.permissionDecision).toBeUndefined();
+        expect(String(firstHook.additionalContext)).toContain('[OMC READ BUDGET]');
+        expect(String(firstHook.additionalContext)).toContain('400 lines');
+        expect(String(firstHook.additionalContext)).toContain('lsp_document_symbols');
+        const second = readFullFile(filePath, 'session-rb-warn');
+        const secondHook = hookOutputOf(second);
+        expect(secondHook.hookEventName).toBe('PreToolUse');
+        expect(secondHook.permissionDecision).toBe('deny');
+        expect(String(secondHook.permissionDecisionReason)).toContain('Denied');
+        expect(String(secondHook.permissionDecisionReason)).toContain('budget 50');
+        expect(String(secondHook.permissionDecisionReason)).toContain('ast_grep_search');
+    });
+    it('allows a targeted read of the same oversized file', () => {
+        writeReadBudgetConfig({ maxLines: 50 });
+        const filePath = writeFileWithLines('big.ts', 400);
+        for (const toolInput of [
+            { file_path: filePath, offset: 1, limit: 100 },
+            { file_path: filePath, limit: 20 },
+            { file_path: filePath, offset: 300 },
+        ]) {
+            const output = runPreToolEnforcer({
+                tool_name: 'Read',
+                toolInput,
+                cwd: tempDir,
+                session_id: 'session-rb-targeted',
+            });
+            const hook = hookOutputOf(output);
+            expect(hook.permissionDecision).toBeUndefined();
+            expect(String(hook.additionalContext || '')).not.toContain('READ BUDGET');
+        }
+    });
+    it('ignores files at or under the budget', () => {
+        writeReadBudgetConfig({ maxLines: 50 });
+        const exact = writeFileWithLines('exact.ts', 50);
+        const small = writeFileWithLines('small.ts', 10);
+        for (const filePath of [exact, small]) {
+            const hook = hookOutputOf(readFullFile(filePath, 'session-rb-small'));
+            expect(hook.permissionDecision).toBeUndefined();
+            expect(String(hook.additionalContext || '')).not.toContain('READ BUDGET');
+        }
+    });
+    it('ignores paths matched by the allowlist', () => {
+        writeReadBudgetConfig({ maxLines: 50, allowPaths: ['docs/**', 'CHANGELOG.md'] });
+        const doc = writeFileWithLines('docs/adr/0001-decision.md', 400);
+        const changelog = writeFileWithLines('CHANGELOG.md', 900);
+        for (const filePath of [doc, changelog]) {
+            const hook = hookOutputOf(readFullFile(filePath, 'session-rb-allow'));
+            expect(hook.permissionDecision).toBeUndefined();
+            expect(String(hook.additionalContext || '')).not.toContain('READ BUDGET');
+        }
+    });
+    it('denies immediately in deny mode and never denies in warn mode', () => {
+        writeReadBudgetConfig({ maxLines: 50, mode: 'deny' });
+        const filePath = writeFileWithLines('big.ts', 400);
+        const denied = hookOutputOf(readFullFile(filePath, 'session-rb-deny'));
+        expect(denied.permissionDecision).toBe('deny');
+        writeReadBudgetConfig({ maxLines: 50, mode: 'warn' });
+        for (let i = 0; i < 3; i++) {
+            const hook = hookOutputOf(readFullFile(filePath, 'session-rb-warn-only'));
+            expect(hook.permissionDecision).toBeUndefined();
+            expect(String(hook.additionalContext)).toContain('[OMC READ BUDGET]');
+        }
+    });
+    it('honours the off switch and the env threshold override', () => {
+        writeReadBudgetConfig({ maxLines: 50, mode: 'deny' });
+        const filePath = writeFileWithLines('big.ts', 400);
+        const off = hookOutputOf(readFullFile(filePath, 'session-rb-off', { OMC_READ_BUDGET: 'off' }));
+        expect(off.permissionDecision).toBeUndefined();
+        expect(String(off.additionalContext || '')).not.toContain('READ BUDGET');
+        const raised = hookOutputOf(readFullFile(filePath, 'session-rb-env', { OMC_READ_BUDGET_MAX_LINES: '1000' }));
+        expect(raised.permissionDecision).toBeUndefined();
+    });
+    it('respects enabled: false', () => {
+        writeReadBudgetConfig({ enabled: false, maxLines: 50, mode: 'deny' });
+        const filePath = writeFileWithLines('big.ts', 400);
+        const hook = hookOutputOf(readFullFile(filePath, 'session-rb-disabled'));
+        expect(hook.permissionDecision).toBeUndefined();
+    });
+    it('gates a bare cat but allows piped, redirected, and ranged shell reads', () => {
+        writeReadBudgetConfig({ maxLines: 50, mode: 'deny' });
+        const filePath = writeFileWithLines('big.ts', 400);
+        const bareCat = runPreToolEnforcer({
+            tool_name: 'Bash',
+            toolInput: { command: `cat ${filePath}` },
+            cwd: tempDir,
+            session_id: 'session-rb-cat',
+        });
+        expect(hookOutputOf(bareCat).permissionDecision).toBe('deny');
+        for (const command of [
+            `cat ${filePath} | grep line`,
+            `cat ${filePath} > /tmp/out.txt`,
+            `sed -n '1,200p' ${filePath}`,
+            `wc -l ${filePath}`,
+        ]) {
+            const output = runPreToolEnforcer({
+                tool_name: 'Bash',
+                toolInput: { command },
+                cwd: tempDir,
+                session_id: 'session-rb-cat-allowed',
+            });
+            expect(hookOutputOf(output).permissionDecision).toBeUndefined();
+        }
+    });
+    it('ignores missing files and non-read tools', () => {
+        writeReadBudgetConfig({ maxLines: 50, mode: 'deny' });
+        const missing = hookOutputOf(readFullFile(join(tempDir, 'nope.ts'), 'session-rb-missing'));
+        expect(missing.permissionDecision).toBeUndefined();
+        const filePath = writeFileWithLines('big.ts', 400);
+        const write = runPreToolEnforcer({
+            tool_name: 'Write',
+            toolInput: { file_path: filePath, content: 'x' },
+            cwd: tempDir,
+            session_id: 'session-rb-write',
+        });
+        expect(hookOutputOf(write).permissionDecision).toBeUndefined();
+    });
+    it('applies the 1500-line default when no config is present', () => {
+        const under = writeFileWithLines('under.ts', 1200);
+        const over = writeFileWithLines('over.ts', 1600);
+        expect(hookOutputOf(readFullFile(under, 'session-rb-default')).additionalContext || '').not.toContain('READ BUDGET');
+        expect(String(hookOutputOf(readFullFile(over, 'session-rb-default')).additionalContext)).toContain('budget 1500');
     });
 });
 //# sourceMappingURL=pre-tool-enforcer.test.js.map

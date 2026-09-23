@@ -13,6 +13,13 @@ export interface RecoverySagaInput {
 export interface RecoverySagaDependencies {
     cwd: string;
     getLiveness: (teamName: string, workerName: string) => Promise<'dead' | 'alive' | 'unknown'>;
+    /**
+     * A committed replacement is already the recovery target.  Its execution
+     * liveness must not take the original-worker `already_running` shortcut:
+     * activation, continuation adoption, service repair, and writeRun still
+     * need to reconcile.
+     */
+    isCommittedReplacement?: (input: RecoverySagaInput) => Promise<boolean>;
     listOwnedInProgressTasks: (teamName: string, workerName: string) => Promise<TeamTask[]>;
     /** Must validate every checkpoint before any transition is made. */
     validateCheckpoint: (teamName: string, task: TeamTask) => Promise<{

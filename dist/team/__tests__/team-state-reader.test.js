@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readTeamState } from '../team-state-reader.js';
+import { deriveManifestProjection, readTeamState } from '../team-state-reader.js';
 import { TeamPaths, absPath } from '../state-paths.js';
 let cwd;
 const teamName = 'reader-team';
@@ -78,6 +78,55 @@ describe('team state reader authority table', () => {
         expect(readTeamState(cwd, teamName)).toMatchObject({ classification: 'invalid_config', state: null, config: { source: 'malformed' } });
         rmSync(configPath());
         expect(readTeamState(cwd, teamName)).toMatchObject({ classification: 'manifest_only_legacy', state: { tmux_session: 'manifest-session' } });
+    });
+    it('projects Claude-session ownership instead of the tmux target', () => {
+        const projection = deriveManifestProjection({
+            name: teamName,
+            task: 'demo',
+            agent_type: 'claude',
+            worker_launch_mode: 'interactive',
+            worker_count: 0,
+            max_workers: 20,
+            workers: [],
+            created_at: new Date().toISOString(),
+            tmux_session: 'reader-team:0',
+            leader_session_id: 'pid-claude-owner',
+            next_task_id: 1,
+            leader_pane_id: '%1',
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+        }, {
+            schema_version: 2,
+            name: teamName,
+            task: 'demo',
+            leader: { session_id: 'reader-team:0', worker_id: 'leader', role: 'leader' },
+            policy: {
+                display_mode: 'split_pane',
+                worker_launch_mode: 'interactive',
+                dispatch_mode: 'hook_preferred_with_fallback',
+                dispatch_ack_timeout_ms: 3000,
+            },
+            governance: {
+                delegation_only: false,
+                plan_approval_required: false,
+                nested_teams_allowed: false,
+                one_team_per_leader_session: false,
+                cleanup_requires_all_workers_inactive: false,
+            },
+            permissions_snapshot: { approval_mode: 'default', sandbox_mode: 'default', network_access: false },
+            tmux_session: 'reader-team:0',
+            worker_count: 0,
+            workers: [],
+            next_task_id: 1,
+            created_at: new Date().toISOString(),
+            leader_pane_id: '%1',
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+        });
+        expect(projection.leader.session_id).toBe('pid-claude-owner');
+        expect(projection.tmux_session).toBe('reader-team:0');
     });
 });
 //# sourceMappingURL=team-state-reader.test.js.map

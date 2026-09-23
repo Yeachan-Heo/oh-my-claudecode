@@ -10,6 +10,16 @@ let suiteHome;
 let previousHome;
 let previousUserProfile;
 let previousStateDir;
+const instanceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const tmuxServerIdentity = {
+    socket_path: '/tmp/dispatch-session.sock',
+    server_pid: 4242,
+    process_started_at: process.platform === 'linux'
+        ? 'linux:fixture:4242'
+        : process.platform === 'win32'
+            ? 'win32:4242'
+            : 'darwin:4242:123456',
+};
 beforeEach(async () => {
     suiteHome = await mkdtemp(join(tmpdir(), 'omc-mcp-comm-home-'));
     previousHome = process.env.HOME;
@@ -83,12 +93,17 @@ function target(input) {
         recipientRole: 'worker',
         paneId: '%9',
         workerIndex: 1,
+        tmuxServerIdentity,
     };
 }
-function tuple(input, paneId = '%9') {
+function tuple(input, paneId = '%9', overrides = {}) {
     return {
         configName: input.teamName,
+        configInstanceId: instanceId,
         configProviderTarget: 'dispatch-session:0',
+        configTmuxServerSocketPath: tmuxServerIdentity.socket_path,
+        configTmuxServerPid: tmuxServerIdentity.server_pid,
+        configTmuxServerProcessStartedAt: tmuxServerIdentity.process_started_at,
         recipient: input.recipient,
         recipientRole: 'worker',
         canonicalPaneId: paneId,
@@ -110,15 +125,16 @@ function tuple(input, paneId = '%9') {
         provider: 'tmux',
         providerTarget: 'dispatch-session:0',
         providerPaneId: paneId,
+        ...overrides,
     };
 }
-function allow(input, current, paneId = '%9') {
+function allow(input, current, paneId = '%9', tupleOverrides = {}) {
     return {
         kind: 'allow',
         target: { ...target(input), paneId },
         request: { ...current, pane_id: paneId },
         message: message(input),
-        securityTuple: tuple(input, paneId),
+        securityTuple: tuple(input, paneId, tupleOverrides),
     };
 }
 function suppress(current, reason = 'mailbox_target_metadata_mismatch') {
@@ -365,6 +381,36 @@ describe.sequential('direct mailbox notification orchestration', () => {
         const changedTuple = await runMailboxNotificationAttempt(tupleChange.input, tupleChange.dependencies);
         expect(changedTuple.reason).toBe('mailbox_security_tuple_changed');
         expect(tupleChange.effect).not.toHaveBeenCalled();
+    });
+    it('does not authorize an A-to-B instance or tmux-server tuple change', async () => {
+        const state = harness();
+        const nextTuple = {
+            configInstanceId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+            configTmuxServerSocketPath: '/tmp/dispatch-session-b.sock',
+            configTmuxServerPid: 4343,
+            configTmuxServerProcessStartedAt: process.platform === 'linux'
+                ? 'linux:fixture:4343'
+                : process.platform === 'win32'
+                    ? 'win32:4343'
+                    : 'darwin:4343:123456',
+        };
+        state.dependencies.readGuard = vi.fn()
+            .mockResolvedValueOnce(allow(state.input, state.request))
+            .mockResolvedValueOnce(allow(state.input, state.request, '%9', nextTuple));
+        const outcome = await runMailboxNotificationAttempt(state.input, state.dependencies);
+        expect(outcome.reason).toBe('mailbox_security_tuple_changed');
+        expect(state.effect).not.toHaveBeenCalled();
+        expect(state.dependencies.invokeEffect).not.toHaveBeenCalled();
+    });
+    it('does not rebind a pending notification when the second read loses generation proof', async () => {
+        const state = harness();
+        state.dependencies.readGuard = vi.fn()
+            .mockResolvedValueOnce(allow(state.input, state.request))
+            .mockResolvedValueOnce(suppress(state.request, 'mailbox_membership_unresolvable'));
+        const outcome = await runMailboxNotificationAttempt(state.input, state.dependencies);
+        expect(outcome.reason).toBe('mailbox_membership_unresolvable');
+        expect(state.effect).not.toHaveBeenCalled();
+        expect(state.dependencies.invokeEffect).not.toHaveBeenCalled();
     });
     it('surfaces pending-reason persistence failures without calling transport', async () => {
         const state = harness();

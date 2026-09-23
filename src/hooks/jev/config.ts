@@ -6,7 +6,8 @@
  * - OMC_JEV=<point[,point...]>: explicit per-point opt-in; only these points
  *   run. Unset = no points enabled — a key alone sends nothing anywhere
  *   (zero egress by default, per the owner's data-egress review of #4058)
- * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 250
+ * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 2000 (measured single-question
+ *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
@@ -30,7 +31,7 @@ import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 export const JEV_DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
-const DEFAULT_TIMEOUT_MS = 250;
+const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
 
 /** Points currently promoted to active. Empty until the promotion ticket (07). */

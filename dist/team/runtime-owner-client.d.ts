@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readLatestOwnerEpoch } from './team-owner-epoch.js';
-import type { RecoverDeadWorkerV2Result } from './types.js';
+import { type RecoverDeadWorkerV2Result } from './types.js';
 export interface RecoveryOwnerBootstrap {
     expectedEpoch: number;
     predecessorEpoch: number;
@@ -17,6 +17,7 @@ export interface RecoverDeadWorkerOwnerInput {
     cwd: string;
     workerName: string;
     requestId: string;
+    instanceId: string;
     timeoutMs?: number;
     bootstrap?: RecoveryOwnerBootstrap;
 }
@@ -32,6 +33,8 @@ export interface RecoveryIntentRecord {
     recovery_id: string;
     team_name: string;
     worker_name: string;
+    /** Immutable team incarnation captured at admission. */
+    instance_id: string;
     operation: 'recover-worker';
     workspace_hash: string;
     payload_hash: string;
@@ -47,6 +50,8 @@ export declare const recoveryOwnerBootstrapTestHooks: {
     spawn: (implementation?: typeof spawn) => typeof spawn;
 };
 export declare function parseRecoveryIntent(raw: string): RecoveryIntentRecord;
+export type TeamRecoveryState = 'v2' | 'team_not_found' | 'runtime_v2_required' | 'invalid_persisted_state';
+export declare function teamRecoveryState(cwd: string, teamName: string): Promise<TeamRecoveryState>;
 export declare function resolveRuntimeCliPath(): string;
 export declare function isExpectedRecoveryOwnerSuccessor(owner: ReturnType<typeof readLatestOwnerEpoch>, expectedEpoch: number, childPid: number, childProcessStartedAt: string | null, fenceOk: boolean, expectedNonce?: string): boolean;
 /** Durable admission/replay client. The injected owner alone performs recovery effects. */

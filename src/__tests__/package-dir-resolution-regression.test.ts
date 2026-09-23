@@ -99,13 +99,15 @@ describe('package dir resolution regression (#1322, #1324)', () => {
     const source = readFileSync(join(REPO_ROOT, 'bridge', 'team.js'), 'utf-8');
     const snippet = getSnippetByMarker(source, 'function getPackageDir() {');
 
-    expect(snippet).toContain('fileURLToPath(import.meta.url)');
     expect(snippet).toContain('currentDirName === "bridge"');
-    // esbuild numbers bundled helper imports (join7/join9/…) non-deterministically
-    // across bundle composition changes, so match the shape, not the exact alias.
+    // esbuild numbers bundled helper imports (join7/join9/…, fileURLToPath2/…)
+    // non-deterministically across bundle composition changes, so match the
+    // shape, not the exact alias.
+    const importMetaIndex = snippet.search(/fileURLToPath\d*\(import\.meta\.url\)/);
+    expect(importMetaIndex).toBeGreaterThan(-1);
     const dirnameReturn = snippet.search(/return join\d*\(__dirname2, "\.\.", "\.\."\)/);
     expect(dirnameReturn).toBeGreaterThan(-1);
-    expect(snippet.indexOf('fileURLToPath(import.meta.url)')).toBeLessThan(dirnameReturn);
+    expect(importMetaIndex).toBeLessThan(dirnameReturn);
   });
 
   it('loadAgentPrompt resolves prompts even when cwd is unrelated', () => {

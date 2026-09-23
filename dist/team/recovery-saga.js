@@ -13,9 +13,12 @@ export async function runRecoverySaga(input, deps) {
     };
     const finalize = (result, _continuation, _adoption, _services = 'terminal_degraded') => result;
     const liveness = await deps.getLiveness(input.teamName, input.workerName);
+    const committedReplacement = liveness === 'alive'
+        ? await deps.isCommittedReplacement?.(input) ?? false
+        : false;
     if (liveness === 'unknown')
         return finalize(failure(input, 'worker_liveness_unknown'), 'none', 'not_started');
-    if (liveness === 'alive') {
+    if (liveness === 'alive' && !committedReplacement) {
         if (!input.originalPaneId?.trim())
             return finalize(failure(input, 'worker_liveness_unknown'), 'none', 'not_started');
         return finalize({ outcome: 'already_running', committed: true, oldPaneId: null, newPaneId: input.originalPaneId, requeuedTaskIds: [], continuationSequenceByTask: {}, stateRevision: 0, activation: 'active', manifestSync: 'synced', servicesSync: 'synced', warnings: [], requestId: input.requestId, recoveryId: input.recoveryId, teamName: input.teamName, workerName: input.workerName, updatedAt: new Date().toISOString() }, 'none', 'not_started', 'synced');
