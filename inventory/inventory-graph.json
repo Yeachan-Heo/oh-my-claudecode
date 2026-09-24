@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "93af1428e5e69d05ca5c53937b954bb92c95da69",
-    "sourceSha256": "eada34fe2f2fc27ae68dc8069445230bc7e070d5a84e00e2dcd9ec538547ae70",
+    "head": "0b4c105a325d89abf658abf1a5440d10ff228cce",
+    "sourceSha256": "e09e747cd2f0f5ea52d18d42600f02458654030404859c0dbc103c22fa9b45ab",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "93af1428e5e69d05ca5c53937b954bb92c95da69",
-  "sourceSha256": "eada34fe2f2fc27ae68dc8069445230bc7e070d5a84e00e2dcd9ec538547ae70",
+  "head": "0b4c105a325d89abf658abf1a5440d10ff228cce",
+  "sourceSha256": "e09e747cd2f0f5ea52d18d42600f02458654030404859c0dbc103c22fa9b45ab",
   "counts": {
     "public": {
-      "skills": 43,
+      "skills": 45,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 92
+      "total": 94
     },
     "internal": {
       "hookFiles": 319,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 61
     },
-    "skills": 43,
+    "skills": 45,
     "commands": 21,
     "hookFiles": 319,
     "workflows": 8,
@@ -75,9 +75,11 @@
       "omc-doctor",
       "omc-setup",
       "plan",
+      "pr",
       "project-session-manager",
       "ralph",
       "ralplan",
+      "refit",
       "release",
       "remember",
       "research",
@@ -34325,6 +34327,11 @@
         "path": "skills/plan/SKILL.md"
       },
       {
+        "id": "skills/pr/SKILL.md",
+        "kind": "skill",
+        "path": "skills/pr/SKILL.md"
+      },
+      {
         "id": "skills/project-session-manager/SKILL.md",
         "kind": "skill",
         "path": "skills/project-session-manager/SKILL.md"
@@ -34433,6 +34440,11 @@
         "id": "skills/ralplan/SKILL.md",
         "kind": "skill",
         "path": "skills/ralplan/SKILL.md"
+      },
+      {
+        "id": "skills/refit/SKILL.md",
+        "kind": "skill",
+        "path": "skills/refit/SKILL.md"
       },
       {
         "id": "skills/release/SKILL.md",
@@ -44402,6 +44414,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/pr/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/project-session-manager/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -44413,6 +44430,11 @@
       },
       {
         "from": "skills/ralplan/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/refit/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -81113,12 +81135,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7071,
-      "edgeCount": 7852,
+      "nodeCount": 7073,
+      "edgeCount": 7854,
       "importEdgeCount": 6465,
-      "registerEdgeCount": 64
+      "registerEdgeCount": 66
     }
   },
-  "inventorySha256": "a1e433f9e8d6370b9779a4ebd1316a671fc774c1b3c5aa251cb16781fbc9c7aa",
-  "manifestSha256": "587889e6ce07c6cdd91103a15803bb7d53b2c2f8db30b173057e9b7c20c8dd73"
+  "inventorySha256": "6dd6a06c89f8863fd83dc611ed1e96e854985c358f1e559e2688d6f86ff24876",
+  "manifestSha256": "802c83e2af55e249fed69c08330924eae1fc9352b24d9921b65a5948508ea5ee"
 }
