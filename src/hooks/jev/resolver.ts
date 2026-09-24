@@ -86,6 +86,15 @@ interface ShadowLogEntry {
   usage?: JevUsage;
 }
 
+/** Keep only finite, non-negative token counts; the client does not validate `usage`. */
+function sanitizeUsage(usage: unknown): JevUsage | undefined {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return undefined;
+  const { input_tokens, output_tokens } = usage as Record<string, unknown>;
+  const isCount = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : undefined;
+}
+
 function firstAnswer(response: JevResponse): JevAnswer {
   return Object.values(response.answers)[0] as JevAnswer;
 }
@@ -211,8 +220,9 @@ function buildLogEntry(
   entryMode: ShadowLogEntry['mode'],
   heuristic: unknown,
   jev: JevAnswer | null,
-  usage?: JevUsage,
+  usage?: unknown,
 ): ShadowLogEntry {
+  const safeUsage = sanitizeUsage(usage);
   return {
     ts: new Date().toISOString(),
     point,
@@ -222,6 +232,6 @@ function buildLogEntry(
     jev,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
-    ...(usage ? { usage } : {}),
+    ...(safeUsage ? { usage: safeUsage } : {}),
   };
 }

@@ -349,6 +349,18 @@ describe('resolveJudgment', () => {
     expect(line.usage).toEqual({ input_tokens: 120, output_tokens: 30 });
   });
 
+  it('drops malformed Jev usage instead of logging it verbatim', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    const { fetchFn } = captureFetch(() => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } }, usage: { input_tokens: '120', output_tokens: 30, extra: 'x'.repeat(10_000) } }),
+    }) as unknown as Response);
+    await call({ point: 'model-routing', fetchFn });
+    const line = JSON.parse(await readLog());
+    expect(line).not.toHaveProperty('usage');
+  });
+
   it('OMC_JEV_QUIET=1 silences the env-activation warning', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     process.env.OMC_JEV = 'model-routing:active';
