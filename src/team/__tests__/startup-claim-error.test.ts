@@ -7,7 +7,12 @@ const claimLine = JSON.stringify({
   command: 'omc team api claim-task',
   ok: true,
   operation: 'claim-task',
-  data: { ok: false, error: 'claim_conflict' },
+  data: {
+    ok: false,
+    error: 'claim_conflict',
+    claim_token: 'secret-claim-token',
+    prompt: 'private worker instructions',
+  },
 });
 
 describe('claimErrorLineFromPane', () => {
@@ -17,7 +22,7 @@ describe('claimErrorLineFromPane', () => {
       'Reading src/fixture.json',
       claimLine,
     ].join('\n');
-    expect(claimErrorLineFromPane(captured)).toBe(claimLine);
+    expect(claimErrorLineFromPane(captured)).toBe('{"ok":false,"error":"claim_conflict"}');
     expect(claimErrorLineFromPane('team api claim-task --input "{}" --json')).toBeUndefined();
     expect(claimErrorLineFromPane('')).toBeUndefined();
   });
@@ -32,15 +37,35 @@ describe('claimErrorLineFromPane', () => {
       'ok operation=claim-task',
       '{',
       '  "ok": false,',
-      '  "error": "claim_conflict"',
+      '  "error": "claim_conflict",',
+      '  "details": "brace } inside a string",',
+      '  "claim_token": "secret-claim-token",',
+      '  "prompt": "private worker instructions"',
       '}',
     ].join('\n');
     expect(claimErrorLineFromPane(captured)).toBe('{"ok":false,"error":"claim_conflict"}');
     expect(claimErrorLineFromPane('ok operation=claim-task\n{\n  "ok": true\n}')).toBeUndefined();
   });
 
+  it('ignores malformed or partial pretty JSON without throwing', () => {
+    const captured = 'ok operation=claim-task\n{\n  "ok": false,\n  "error": "claim_conflict"';
+    expect(() => claimErrorLineFromPane(captured)).not.toThrow();
+    expect(claimErrorLineFromPane(captured)).toBeUndefined();
+  });
+
+  it('bounds how much captured pane text is parsed', () => {
+    const oldClaimError = [
+      'ok operation=claim-task',
+      '{',
+      '  "ok": false,',
+      '  "error": "claim_conflict"',
+      '}',
+    ].join('\n');
+    expect(claimErrorLineFromPane(`${oldClaimError}\n${'x'.repeat(16_384)}`)).toBeUndefined();
+  });
+
   it('bounds a long claim-task failure line', () => {
-    const line = `{"ok":false,"command":"omc team api claim-task","error":{"message":"${'x'.repeat(300)}"}}`;
+    const line = `error operation=claim-task code=invalid_input: ${'x'.repeat(300)}`;
     expect(claimErrorLineFromPane(line)).toHaveLength(240);
   });
 });

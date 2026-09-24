@@ -4332,7 +4332,11 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
 
     expect(runtime.startupFailures).toEqual([
-      { worker: 'worker-1', reason: 'worker_startup_evidence_missing_pane_busy', claimError: claimLine },
+      {
+        worker: 'worker-1',
+        reason: 'worker_startup_evidence_missing_pane_busy',
+        claimError: '{"ok":false,"error":"claim_conflict"}',
+      },
     ]);
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
     expect(mocks.captureOwnedTeamPane).toHaveBeenCalledTimes(1);

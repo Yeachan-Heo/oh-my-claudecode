@@ -1307,42 +1307,71 @@ function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentTyp
   return paneBusy ? `${base}_pane_busy` : base;
 }
 
+const CLAIM_ERROR_CAPTURE_MAX = 16_384;
+const CLAIM_ERROR_JSON_LINES_MAX = 80;
 const CLAIM_ERROR_LINE_MAX = 240;
+const CLAIM_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
 
 function normalizePaneLine(line: string): string {
   return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
 }
 
-function singleLineClaimFailure(line: string): string | undefined {
-  if (/error operation=claim-task\b/.test(line)) return line;
-  if (line.includes('claim-task') && /"ok"\s*:\s*false/.test(line)) return line;
-  return undefined;
+function claimFailureSummary(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result = value as Record<string, unknown>;
+  if (result.ok !== false) return undefined;
+  const error = result.error;
+  const code = error && typeof error === 'object' && !Array.isArray(error)
+    ? (error as Record<string, unknown>).code
+    : error;
+  return typeof code === 'string' && CLAIM_ERROR_CODE.test(code)
+    ? JSON.stringify({ ok: false, error: code })
+    : undefined;
 }
 
-/** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
-function textModeClaimFailure(lines: string[], index: number): string | undefined {
-  if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{') return undefined;
-  let depth = 0;
-  const collected: string[] = [];
-  for (const line of lines.slice(index + 1)) {
-    collected.push(line);
-    for (const char of line) {
-      if (char === '{') depth += 1;
-      else if (char === '}') depth -= 1;
-    }
-    if (depth <= 0) break;
-  }
+function singleLineClaimFailure(line: string): string | undefined {
+  if (/^error operation=claim-task\b/.test(line)) return line;
+  if (!line.includes('claim-task')) return undefined;
   try {
-    const parsed = JSON.parse(collected.join('')) as { ok?: unknown };
-    return parsed.ok === false ? JSON.stringify(parsed) : undefined;
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const envelope = parsed as Record<string, unknown>;
+    const isClaimOperation = envelope.operation === 'claim-task'
+      || (typeof envelope.command === 'string' && /\bteam api claim-task\b/.test(envelope.command));
+    if (!isClaimOperation) return undefined;
+    if (envelope.ok === false) return claimFailureSummary(envelope);
+    return envelope.ok === true ? claimFailureSummary(envelope.data) : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
+function textModeClaimFailure(lines: string[], index: number): string | undefined {
+  if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{') return undefined;
+  const collected: string[] = [];
+  let collectedLength = 0;
+  const end = Math.min(lines.length, index + 1 + CLAIM_ERROR_JSON_LINES_MAX);
+  for (let lineIndex = index + 1; lineIndex < end; lineIndex += 1) {
+    const line = lines[lineIndex] ?? '';
+    collectedLength += line.length + 1;
+    if (collectedLength > CLAIM_ERROR_CAPTURE_MAX) return undefined;
+    collected.push(line);
+    try {
+      return claimFailureSummary(JSON.parse(collected.join('\n')));
+    } catch {
+      // Ignore malformed or incomplete JSON and continue within the fixed bounds.
+    }
+  }
+  return undefined;
+}
+
 /** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
 export function claimErrorLineFromPane(captured: string): string | undefined {
-  const lines = captured.split(/\r?\n/).map(normalizePaneLine);
+  const boundedCapture = captured.length > CLAIM_ERROR_CAPTURE_MAX
+    ? captured.slice(-CLAIM_ERROR_CAPTURE_MAX)
+    : captured;
+  const lines = boundedCapture.split(/\r?\n/).map(normalizePaneLine);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const failure = textModeClaimFailure(lines, index) ?? singleLineClaimFailure(lines[index] ?? '');
     if (failure) return failure.slice(0, CLAIM_ERROR_LINE_MAX);
@@ -1592,6 +1621,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     : undefined;
   const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
     settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
+  let paneBusyEvidenceMiss = false;
   const fencedDispatch = await (async () => {
     try {
       return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -1615,8 +1645,10 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
     inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
     notify: async (_target, triggerMessage) => {
+      paneBusyEvidenceMiss = false;
       if (usePromptMode) {
         const settlement = await waitForBoundedStartupEvidence();
+        paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
         return settlement.settled
           ? { ok: true, transport: 'prompt_stdin' as const, reason: 'prompt_mode_worker_confirmed' }
           : { ok: false, transport: 'prompt_stdin' as const, reason: startupEvidenceMissingReason(settlement.paneBusy, opts.agentType) };
@@ -1631,6 +1663,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
           ? undefined
           : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
       );
+      paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
       return settlement.settled
         ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
         : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
@@ -1660,7 +1693,8 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? fencedDispatch.value
     : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
-    const claimError = dispatchOutcome.reason.endsWith('_startup_evidence_missing_pane_busy')
+    const paneBusyFailureReason = startupEvidenceMissingReason(true, usePromptMode ? opts.agentType : undefined);
+    const claimError = paneBusyEvidenceMiss && dispatchOutcome.reason === paneBusyFailureReason
       ? claimErrorLineFromPane(await captureOwnedTeamPane(ownership, { joinWrappedLines: true }))
       : undefined;
     try {
