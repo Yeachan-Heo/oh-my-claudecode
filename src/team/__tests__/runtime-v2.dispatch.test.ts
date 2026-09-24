@@ -4300,12 +4300,52 @@ describe('runtime v2 startup inbox dispatch', () => {
     });
 
     expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+    expect(runtime.startupFailures).toEqual([
+      { worker: 'worker-1', reason: 'worker_startup_evidence_missing' },
+    ]);
+    expect(mocks.captureOwnedTeamPane).not.toHaveBeenCalled();
     expect(mocks.retryStartupInboxSubmit).toHaveBeenCalledTimes(1);
     expect(Date.now() - startedAt).toBeLessThan(5_000);
     const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
     expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
     expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
   });
+
+  it('keeps one claim-task error line on a busy evidence miss and ignores other pane text', async () => {
+    cwd = await mkdtempFixture('omc-runtime-v2-claude-claim-error-');
+    mocks.autoStartupEvidence = false;
+    process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS = '250';
+    mocks.retryStartupInboxSubmit.mockImplementation(async () => 'pane_busy');
+    const claimLine = JSON.stringify({ schema_version: '1.0', timestamp: '2026-09-06T00:00:00.000Z', command: 'omc team api claim-task', ok: true, operation: 'claim-task', data: { ok: false, error: 'claim_conflict' } });
+    mocks.captureOwnedTeamPane.mockImplementation(async () => [
+      'team api claim-task --input "{\\"team_name\\":\\"dispatch-team\\"}" --json',
+      claimLine,
+    ].join('\n'));
+
+    const { startTeamV2 } = await import('../runtime-v2.js');
+    const runtime = await startTeamV2({
+      teamName: 'dispatch-team',
+      workerCount: 1,
+      agentTypes: ['claude'],
+      tasks: [{ subject: 'Dispatch test', description: 'Verify claim error line is kept' }],
+      cwd,
+    });
+
+    expect(runtime.startupFailures).toEqual([
+      {
+        worker: 'worker-1',
+        reason: 'worker_startup_evidence_missing_pane_busy',
+        claimError: '{"ok":false,"error":"claim_conflict"}',
+      },
+    ]);
+    expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+    expect(mocks.captureOwnedTeamPane).toHaveBeenCalledTimes(1);
+    expect(mocks.captureOwnedTeamPane).toHaveBeenCalledWith(expect.anything(), { joinWrappedLines: true });
+    expect(mocks.captureOwnedTeamPane.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.killOwnedWorkerPane.mock.invocationCallOrder[0],
+    );
+  });
+
 
   it('direct grok launch resolves model from grok env vars and never calls resolveClaudeWorkerModel', async () => {
     cwd = await mkdtempFixture('omc-runtime-v2-grok-direct-');
