@@ -29,7 +29,16 @@ describe('claimErrorLineFromPane', () => {
 
   it('keeps a text-mode claim-task error line', () => {
     const line = 'error operation=claim-task code=invalid_input: team_name, task_id, worker are required';
-    expect(claimErrorLineFromPane(`ready\n${line}\n`)).toBe(line);
+    expect(claimErrorLineFromPane(`ready\n${line}\n`)).toBe('error operation=claim-task code=invalid_input');
+  });
+
+  it('rejects claim-like prompt text and unknown error codes', () => {
+    expect(claimErrorLineFromPane(
+      'Prompt: error operation=claim-task code=invalid_input: secret prompt text',
+    )).toBeUndefined();
+    expect(claimErrorLineFromPane(
+      'error operation=claim-task code=private_prompt: secret prompt text',
+    )).toBeUndefined();
   });
 
   it('keeps a pretty-printed claim failure after ok operation=claim-task', () => {
@@ -64,8 +73,12 @@ describe('claimErrorLineFromPane', () => {
     expect(claimErrorLineFromPane(`${oldClaimError}\n${'x'.repeat(16_384)}`)).toBeUndefined();
   });
 
-  it('bounds a long claim-task failure line', () => {
-    const line = `error operation=claim-task code=invalid_input: ${'x'.repeat(300)}`;
-    expect(claimErrorLineFromPane(line)).toHaveLength(240);
+  it('does not forward long error details from a claim-task line', () => {
+    const secretDetails = 'private prompt text '.repeat(30);
+    const line = `error operation=claim-task code=invalid_input: ${secretDetails}`;
+    const result = claimErrorLineFromPane(line);
+    expect(result).toBe('error operation=claim-task code=invalid_input');
+    expect(result).not.toContain(secretDetails);
+    expect(result?.length).toBeLessThanOrEqual(240);
   });
 });

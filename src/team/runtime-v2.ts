@@ -1310,7 +1310,15 @@ function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentTyp
 const CLAIM_ERROR_CAPTURE_MAX = 16_384;
 const CLAIM_ERROR_JSON_LINES_MAX = 80;
 const CLAIM_ERROR_LINE_MAX = 240;
-const CLAIM_ERROR_CODE = /^[a-z][a-z0-9_]{0,63}$/;
+const CLAIM_ERROR_CODES = new Set([
+  'already_terminal',
+  'blocked_dependency',
+  'claim_conflict',
+  'invalid_input',
+  'operation_failed',
+  'task_not_found',
+  'worker_not_found',
+]);
 
 function normalizePaneLine(line: string): string {
   return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
@@ -1324,21 +1332,24 @@ function claimFailureSummary(value: unknown): string | undefined {
   const code = error && typeof error === 'object' && !Array.isArray(error)
     ? (error as Record<string, unknown>).code
     : error;
-  return typeof code === 'string' && CLAIM_ERROR_CODE.test(code)
+  return typeof code === 'string' && CLAIM_ERROR_CODES.has(code)
     ? JSON.stringify({ ok: false, error: code })
     : undefined;
 }
 
 function singleLineClaimFailure(line: string): string | undefined {
-  if (/^error operation=claim-task\b/.test(line)) return line;
-  if (!line.includes('claim-task')) return undefined;
+  const textError = /^error operation=claim-task code=([a-z][a-z0-9_]{0,63})(?:: .*)?$/.exec(line);
+  if (textError) {
+    const code = textError[1];
+    return code && CLAIM_ERROR_CODES.has(code)
+      ? `error operation=claim-task code=${code}`
+      : undefined;
+  }
   try {
     const parsed: unknown = JSON.parse(line);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
     const envelope = parsed as Record<string, unknown>;
-    const isClaimOperation = envelope.operation === 'claim-task'
-      || (typeof envelope.command === 'string' && /\bteam api claim-task\b/.test(envelope.command));
-    if (!isClaimOperation) return undefined;
+    if (envelope.operation !== 'claim-task' || envelope.command !== 'omc team api claim-task') return undefined;
     if (envelope.ok === false) return claimFailureSummary(envelope);
     return envelope.ok === true ? claimFailureSummary(envelope.data) : undefined;
   } catch {
