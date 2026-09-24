@@ -691,6 +691,7 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
       expect(command).toContain('$HOME');
       expect(command).toContain('command -v claude');
       expect(command).toContain('claude CLI not found in PATH.');
+      expect(command).toContain('exit 127; }; ');
       expect(command).toContain('exec');
       expect(command).toContain('claude');
       expect(vi.mocked(buildTmuxShellCommand)).toHaveBeenCalledWith('claude', args);
@@ -707,6 +708,47 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
         delete process.env.CLAUDE_CONFIG_DIR;
       } else {
         process.env.CLAUDE_CONFIG_DIR = savedConfigDir;
+      }
+    }
+  });
+
+  it('groups the native Windows availability guard before the env and Claude chain', () => {
+    const originalPlatform = process.platform;
+    const originalEnv = { ...process.env };
+    const originalNativeWindowsImplementation = vi.mocked(isNativeWindowsShell).getMockImplementation();
+
+    try {
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      process.env.CLAUDE_CONFIG_DIR = '/tmp/omc-native-windows-test';
+      vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+
+      const command = buildTmuxClaudeCommand([]);
+      const shellCommandMarker = '/c "';
+      const shellCommandIndex = command.indexOf(shellCommandMarker);
+      expect(shellCommandIndex).toBeGreaterThanOrEqual(0);
+      const nativeCommand = command
+        .slice(shellCommandIndex + shellCommandMarker.length, -1)
+        .replace(/""/g, '"');
+
+      expect(nativeCommand).toMatch(
+        /^\(where claude >nul 2>nul \|\| \(echo \[omc\] Error: claude CLI not found in PATH\. 1>&2 & exit \/b 1\)\) && /,
+      );
+      expect(nativeCommand).toContain(
+        ')) && exec set "CLAUDE_CONFIG_DIR=/tmp/omc-native-windows-test" && claude',
+      );
+      const guardSeparator = nativeCommand.indexOf(')) && ');
+      expect(guardSeparator).toBeGreaterThanOrEqual(0);
+      const claudeIndex = nativeCommand.indexOf('claude', guardSeparator + ')) && '.length);
+      expect(claudeIndex).toBeGreaterThan(guardSeparator);
+    } finally {
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.assign(process.env, originalEnv);
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (originalNativeWindowsImplementation) {
+        vi.mocked(isNativeWindowsShell).mockImplementation(originalNativeWindowsImplementation);
+      } else {
+        vi.mocked(isNativeWindowsShell).mockReset();
       }
     }
   });

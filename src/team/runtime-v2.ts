@@ -562,6 +562,8 @@ export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamStartupFailure {
   worker: string;
   reason: string;
+  /** One claim-task error line from the owned pane. Set only for a pane-busy evidence miss. */
+  claimError?: string;
 }
 
 export interface TeamRuntimeV2 {
@@ -1066,6 +1068,7 @@ interface SpawnV2WorkerResult {
   paneId: string | null;
   startupAssigned: boolean;
   startupFailureReason?: string;
+  claimError?: string;
   launchAttemptId?: string;
   /**
    * Set when the CLI-worker output contract (AC-7) was injected. The
@@ -1262,15 +1265,16 @@ async function waitForWorkerStatusTransition(
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
  * the caller's fail-closed teardown. Interactive providers may also supply a
- * read-only activity probe when resubmission is disabled. Panes that are idle,
- * wrong, or dead never earn that recheck and keep the existing fast failure path.
+ * read-only activity probe when resubmission is disabled. `paneBusy` records
+ * that observation and is not startup success. Panes that are idle, wrong, or
+ * dead never earn that recheck and keep the existing fast failure path.
  */
 export async function settleStartupEvidence(
   policy: WorkerStartupEvidencePolicy,
   waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>,
   resubmit?: () => Promise<StartupInboxResubmitOutcome>,
   probeActivity?: () => Promise<StartupPaneActivity>,
-): Promise<boolean> {
+): Promise<{ settled: boolean; paneBusy: boolean }> {
   let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
   let engagedPane = false;
   for (let attempt = 1; !settled && resubmit && attempt <= policy.resubmitAttempts; attempt++) {
@@ -1295,7 +1299,95 @@ export async function settleStartupEvidence(
       ? policy.engagedPaneRecheckBudgetMs
       : policy.finalRecheckBudgetMs);
   }
-  return settled;
+  return { settled, paneBusy: engagedPane };
+}
+
+function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentType): string {
+  const base = agentType ? `${agentType}_startup_evidence_missing` : 'worker_startup_evidence_missing';
+  return paneBusy ? `${base}_pane_busy` : base;
+}
+
+const CLAIM_ERROR_CAPTURE_MAX = 16_384;
+const CLAIM_ERROR_JSON_LINES_MAX = 80;
+const CLAIM_ERROR_LINE_MAX = 240;
+const CLAIM_ERROR_CODES = new Set([
+  'already_terminal',
+  'blocked_dependency',
+  'claim_conflict',
+  'invalid_input',
+  'operation_failed',
+  'task_not_found',
+  'worker_not_found',
+]);
+
+function normalizePaneLine(line: string): string {
+  return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+
+function claimFailureSummary(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const result = value as Record<string, unknown>;
+  if (result.ok !== false) return undefined;
+  const error = result.error;
+  const code = error && typeof error === 'object' && !Array.isArray(error)
+    ? (error as Record<string, unknown>).code
+    : error;
+  return typeof code === 'string' && CLAIM_ERROR_CODES.has(code)
+    ? JSON.stringify({ ok: false, error: code })
+    : undefined;
+}
+
+function singleLineClaimFailure(line: string): string | undefined {
+  const textError = /^error operation=claim-task code=([a-z][a-z0-9_]{0,63})(?:: .*)?$/.exec(line);
+  if (textError) {
+    const code = textError[1];
+    return code && CLAIM_ERROR_CODES.has(code)
+      ? `error operation=claim-task code=${code}`
+      : undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const envelope = parsed as Record<string, unknown>;
+    if (envelope.operation !== 'claim-task' || envelope.command !== 'omc team api claim-task') return undefined;
+    if (envelope.ok === false) return claimFailureSummary(envelope);
+    return envelope.ok === true ? claimFailureSummary(envelope.data) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
+function textModeClaimFailure(lines: string[], index: number): string | undefined {
+  if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{') return undefined;
+  const collected: string[] = [];
+  let collectedLength = 0;
+  const end = Math.min(lines.length, index + 1 + CLAIM_ERROR_JSON_LINES_MAX);
+  for (let lineIndex = index + 1; lineIndex < end; lineIndex += 1) {
+    const line = lines[lineIndex] ?? '';
+    collectedLength += line.length + 1;
+    if (collectedLength > CLAIM_ERROR_CAPTURE_MAX) return undefined;
+    collected.push(line);
+    try {
+      return claimFailureSummary(JSON.parse(collected.join('\n')));
+    } catch {
+      // Ignore malformed or incomplete JSON and continue within the fixed bounds.
+    }
+  }
+  return undefined;
+}
+
+/** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
+export function claimErrorLineFromPane(captured: string): string | undefined {
+  const boundedCapture = captured.length > CLAIM_ERROR_CAPTURE_MAX
+    ? captured.slice(-CLAIM_ERROR_CAPTURE_MAX)
+    : captured;
+  const lines = boundedCapture.split(/\r?\n/).map(normalizePaneLine);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const failure = textModeClaimFailure(lines, index) ?? singleLineClaimFailure(lines[index] ?? '');
+    if (failure) return failure.slice(0, CLAIM_ERROR_LINE_MAX);
+  }
+  return undefined;
 }
 
 export function promptModeRecoveryRequiresProgressEvidence(
@@ -1540,6 +1632,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     : undefined;
   const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
     settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
+  let paneBusyEvidenceMiss = false;
   const fencedDispatch = await (async () => {
     try {
       return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -1563,25 +1656,28 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
     inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
     notify: async (_target, triggerMessage) => {
+      paneBusyEvidenceMiss = false;
       if (usePromptMode) {
-        const settled = await waitForBoundedStartupEvidence();
-        return settled
+        const settlement = await waitForBoundedStartupEvidence();
+        paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
+        return settlement.settled
           ? { ok: true, transport: 'prompt_stdin' as const, reason: 'prompt_mode_worker_confirmed' }
-          : { ok: false, transport: 'prompt_stdin' as const, reason: `${opts.agentType}_startup_evidence_missing` };
+          : { ok: false, transport: 'prompt_stdin' as const, reason: startupEvidenceMissingReason(settlement.paneBusy, opts.agentType) };
       }
 
       const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
       if (!attempted.ok) {
         return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
       }
-      const settled = await waitForBoundedStartupEvidence(
+      const settlement = await waitForBoundedStartupEvidence(
         opts.agentType === 'cursor' || opts.agentType === 'codex'
           ? undefined
           : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
       );
-      return settled
+      paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
+      return settlement.settled
         ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-        : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
+        : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
     },
     deps: { writeWorkerInbox },
     });
@@ -1608,6 +1704,10 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? fencedDispatch.value
     : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
+    const paneBusyFailureReason = startupEvidenceMissingReason(true, usePromptMode ? opts.agentType : undefined);
+    const claimError = paneBusyEvidenceMiss && dispatchOutcome.reason === paneBusyFailureReason
+      ? claimErrorLineFromPane(await captureOwnedTeamPane(ownership, { joinWrappedLines: true }))
+      : undefined;
     try {
       await cleanupStartedLaunch('startup_dispatch_failed');
     } catch (error) {
@@ -1626,6 +1726,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       paneId,
       startupAssigned: false,
       startupFailureReason: dispatchOutcome.reason,
+      ...(claimError ? { claimError } : {}),
       launchAttemptId: startupContext.attempt.attempt_id,
     };
   }
@@ -3509,7 +3610,8 @@ export async function executeRecoverDeadWorkerV2Owner(
         const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
           await ensureFence();
           if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
-            if (!await waitForBoundedStartupEvidence()) return { ok: false as const, error: `${pending.agentType}_startup_evidence_missing` };
+            const settlement = await waitForBoundedStartupEvidence();
+            if (!settlement.settled) return { ok: false as const, error: startupEvidenceMissingReason(settlement.paneBusy, pending.agentType) };
           } else if (pending.promptMode) {
             // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
             // intentionally have no task/status progress to prove. At this point
@@ -3538,14 +3640,14 @@ export async function executeRecoverDeadWorkerV2Owner(
               if (!attempted.ok) {
                 return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
               }
-              const settled = await waitForBoundedStartupEvidence(
+              const settlement = await waitForBoundedStartupEvidence(
                 pending.agentType === 'cursor' || pending.agentType === 'codex'
                   ? undefined
                   : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
               );
-              return settled
+              return settlement.settled
                 ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-                : { ok: false, transport: 'tmux_send_keys' as const, reason: 'worker_startup_evidence_missing' };
+                : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
             },
             deps: { writeWorkerInbox },
           });
@@ -4355,7 +4457,11 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     }
 
     if (workerLaunch.startupFailureReason) {
-      startupFailures.push({ worker: wName, reason: workerLaunch.startupFailureReason });
+      startupFailures.push({
+        worker: wName,
+        reason: workerLaunch.startupFailureReason,
+        ...(workerLaunch.claimError ? { claimError: workerLaunch.claimError } : {}),
+      });
       const logEventFailure = createSwallowedErrorLogger(
         'team.runtime-v2.startTeamV2 appendTeamEvent failed',
       );
