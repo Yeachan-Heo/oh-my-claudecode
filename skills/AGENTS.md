@@ -3,7 +3,7 @@
 
 # skills
 
-42 skill directories for workflow automation and specialized behaviors.
+45 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
@@ -56,6 +56,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `drydock/SKILL.md` | drydock | Shipyard harness scaffold: 4-pillar shared environment across 5 surfaces, with --check drift audit |
 | `harbor/SKILL.md` | harbor | Shipyard intake gate: sweeps external issues and PRs, verifies claims, hands the maintainer a signature docket |
 | `loft/SKILL.md` | loft | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions prose cannot settle |
+| `refit/SKILL.md` | refit | Cross-session environment retrospective: OMC instruments (trace, friction, logs, notepads) in, user-approved fixes out onto checks/steering/tooling/information surfaces |
 | `minimal-code-discipline/SKILL.md` | minimal-code-discipline | YAGNI-ladder writing-time discipline: existence-first, reuse before writing, shortest correct diff |
 | `minimal-prose-discipline/SKILL.md` | minimal-prose-discipline | Writing-time discipline for the agent's own prose: protected core, no filler, close on the action |
 | `skillify/SKILL.md` | skillify | Extract reusable skill from session |
@@ -70,6 +71,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `omc-help/SKILL.md` | omc-help | Usage guide |
 | `mcp-setup/SKILL.md` | mcp-setup | Configure MCP servers |
 | `skill/SKILL.md` | skill | Manage local skills |
+| `pr/SKILL.md` | pr | PR body assembly from OMC's paper trail: smallest-visual summary (show-me credit), verify-protocol evidence, ADR-test reversibility |
 
 ### Domain Skills
 

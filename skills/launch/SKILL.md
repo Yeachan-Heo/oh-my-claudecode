@@ -121,6 +121,12 @@ Integration-wiring rule: every vertical slice includes its own wiring and a smok
 
 The frontier is every ticket whose blockers are all complete.
 
+**Scout pass.** Exploration shared by two or more tickets runs once, before dispatch: an explore subagent resolves the shared questions and writes notes under `.omc/specs/<feature-slug>/notes/`. Tickets reference notes by pointer; workers consume pointers and never re-explore what a note already settles. A question only one ticket needs stays in that ticket.
+
+**Integration topology.** Worker output converges on one surface that outlives the workers: an integration branch created at Phase 4 start — on a PR platform, opened as a draft PR referencing the spec and every ticket. A worker branch merges through team's merge coordination (`checkMergeConflicts` → `mergeWorkerBranch`) only after the two-axis review gate passes for that ticket, and C5 verify runs against the integration surface. This stays inside Team's contract: the branch is topology, not a new launch state machine.
+
+**Repair rule.** Two-axis review findings are repaired by a single repair worker and re-passed through the same gate. The reviewer judges and never repairs; the implementer never self-approves.
+
 **Parallel (default, 2+ tickets).** Hand tickets to team: each ticket becomes a team task, `blockedBy` edges carry over — team's claim mechanics pick only frontier tasks. Spawn N workers. Each worker implements with the tdd discipline at the seams approved in C2, applying `/oh-my-claudecode:minimal-code-discipline` as the writing-time discipline (it stays opt-in); a ticket closes only after code-review passes on the diff, declared by the reviewer — the implementer never self-approves.
 
 **Serial (single ticket, or `--serial`).** Delegate one ticket at a time to an executor subagent; same review gate.
@@ -161,6 +167,7 @@ On a later explicit Launch invocation, first require the owning Team lifecycle t
 - **thin-entry budget:** the `CLAUDE.md` body carries at most five hot entries. A lesson is thin-entry grade only when the source checklist evidences the same violation at least twice in this run, or the captain marks it load-bearing. Entries are listed most-recently-promoted first; the coldest entry is deterministically the last one listed, and a promotion over budget must demote exactly that entry in the same proposal, moving its full text back to `docs/standards/` — nothing is deleted, only re-tiered. Bloat is rebalanced ship by ship and is deliberately not a `--check` finding.
 - state the **run numbers** in the completion report: tickets completed, C4 decisions surfaced, three-strike halts, and sediment lines proposed — plain facts in the report text, no telemetry system, no state files
 - emit the **completion report**: shipped scope, verification evidence, paper-trail locations, yard-drift findings (if any), the sediment list (each line vetoable), and Open Assumptions ranked by how much a human would likely want to veto them
+- when the platform reviews through PRs and Phase 4 opened a draft PR, draft the PR body per `/oh-my-claudecode:pr` from the report's evidence and linked ADRs, and mark the PR ready only after C5 acceptance
 
 ## Context hygiene
 

@@ -83,11 +83,14 @@ describe('workflow registry — risk classes and gate policy', () => {
 });
 
 describe('workflow registry — aliases and classification', () => {
-  it('classifies all 43 installed skills and 21 installed commands exactly once', () => {
+  it('classifies all 45 installed skills and 21 installed commands exactly once', () => {
     const skills = WORKFLOW_ENTRIES.filter((e) => e.kind === 'skill' && !e.declaredOnly);
     const commands = WORKFLOW_ENTRIES.filter((e) => e.kind === 'command' && !e.declaredOnly);
     // execute/review/research and graph ship as real skill directories.
-    expect(skills).toHaveLength(43);
+    expect(skills).toHaveLength(45);
+    for (const name of ['pr', 'refit']) {
+      expect(getEntry(name, 'skill')).toMatchObject({ decision: 'keep', riskClass: 'advisory' });
+    }
     expect(commands).toHaveLength(21);
     const keys = WORKFLOW_ENTRIES.map((e) => `${e.kind}:${e.name}`);
     expect(new Set(keys).size).toBe(keys.length);
