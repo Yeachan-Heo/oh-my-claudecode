@@ -38,7 +38,7 @@ function skillTriggerCriteria(): Record<string, string> {
 function skillTriggerQuestions(): JevQuestions {
   return {
     'skill-trigger': {
-      type: 'Choice',
+      type: 'choice',
       instructions: 'Which skill or mode should this user prompt trigger?',
       criteria: skillTriggerCriteria(),
     },
@@ -48,7 +48,7 @@ function skillTriggerQuestions(): JevQuestions {
 /** Point "intent" (ticket 02): Noul over Intent-intake requests. */
 const INTENT_QUESTIONS: JevQuestions = {
   intent: {
-    type: 'Noul',
+    type: 'noul',
     instructions:
       'Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?',
     criteria: {
@@ -65,7 +65,7 @@ const INTENT_QUESTIONS: JevQuestions = {
  */
 const NOUL_QUESTIONS: JevQuestions = {
   task_complete: {
-    type: 'Noul',
+    type: 'noul',
     instructions: 'Is the task complete — is there no substantive work left for this mode?',
     criteria: {},
   },
@@ -73,7 +73,7 @@ const NOUL_QUESTIONS: JevQuestions = {
 
 const SCORE_QUESTIONS: JevQuestions = {
   iteration_progress: {
-    type: 'Score',
+    type: 'score',
     instructions: 'How much substantive progress did the current iteration make?',
     criteria: {
       no_progress: 'No progress',
@@ -91,7 +91,7 @@ const SCORE_QUESTIONS: JevQuestions = {
  */
 const MODEL_ROUTING_QUESTIONS: JevQuestions = {
   'model-tier': {
-    type: 'Choice',
+    type: 'choice',
     instructions: 'Which model tier should this delegated task use?',
     criteria: {
       haiku: 'Quick lookups and lightweight, mechanical work',
@@ -108,7 +108,7 @@ const MODEL_ROUTING_QUESTIONS: JevQuestions = {
  */
 const STALENESS_QUESTIONS: JevQuestions = {
   staleness: {
-    type: 'Score',
+    type: 'score',
     instructions: 'How stale is this context candidate?',
     criteria: {
       fresh: 'Fresh — keep',
@@ -122,7 +122,7 @@ const STALENESS_QUESTIONS: JevQuestions = {
 /** Point "ralph-verdict" (ticket 08): Noul over the completion claim. */
 const VERDICT_QUESTIONS: JevQuestions = {
   completion_criteria_met: {
-    type: 'Noul',
+    type: 'noul',
     instructions: 'Does the completion claim satisfy the PRD acceptance criteria for this mode?',
     criteria: {
       true: 'All acceptance criteria are demonstrably satisfied by the evidence',
@@ -134,7 +134,7 @@ const VERDICT_QUESTIONS: JevQuestions = {
 /** Point "task-size" (ticket 09): Choice over small/medium/large. */
 const TASK_SIZE_QUESTIONS: JevQuestions = {
   'task-size': {
-    type: 'Choice',
+    type: 'choice',
     instructions: 'What size is this task — how much orchestration does it warrant?',
     criteria: {
       small: 'Single-file or few-line change; run directly without heavy modes',
@@ -152,7 +152,7 @@ const TASK_SIZE_QUESTIONS: JevQuestions = {
 /** Point "learner-extraction" (ticket 12): Noul over one assistant message. */
 const LEARNER_EXTRACTION_QUESTIONS: JevQuestions = {
   extractable_moment: {
-    type: 'Noul',
+    type: 'noul',
     instructions: 'Does this assistant message contain an extractable memory-worthy moment?',
     criteria: {
       true: 'Contains a reusable pattern, decision, or correction worth persisting',
@@ -164,7 +164,7 @@ const LEARNER_EXTRACTION_QUESTIONS: JevQuestions = {
 /** Point "slop-warning" (ticket 12): Noul over one tool input. */
 const SLOP_WARNING_QUESTIONS: JevQuestions = {
   slop_advisory: {
-    type: 'Noul',
+    type: 'noul',
     instructions: 'Does this tool input contain fallback/workaround language worth an advisory warning?',
     criteria: {
       true: 'Contains fallback/workaround phrasing outside doc or self-referential context',
@@ -176,7 +176,7 @@ const SLOP_WARNING_QUESTIONS: JevQuestions = {
 /** Point "simplifier-trigger" (ticket 12): Noul over one change. */
 const SIMPLIFIER_TRIGGER_QUESTIONS: JevQuestions = {
   simplification_worthy: {
-    type: 'Noul',
+    type: 'noul',
     instructions: 'Is this change simplification-worthy enough to inject the simplifier delegation?',
     criteria: {
       true: 'The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)',

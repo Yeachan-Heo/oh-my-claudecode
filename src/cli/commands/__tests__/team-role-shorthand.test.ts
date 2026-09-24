@@ -11,6 +11,12 @@ const agentUtilsMocks = vi.hoisted(() => ({
   loadAgentPrompt: vi.fn((role: string) => `prompt:${role}`),
 }));
 
+const monitorMocks = vi.hoisted(() => ({
+  readTeamConfig: vi.fn(async () => ({
+    instance_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  })),
+}));
+
 vi.mock('../../../team/runtime-v2.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../team/runtime-v2.js')>();
   return {
@@ -26,6 +32,14 @@ vi.mock('../../../agents/utils.js', () => ({
   loadAgentPrompt: agentUtilsMocks.loadAgentPrompt,
 }));
 
+vi.mock('../../../team/monitor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../team/monitor.js')>();
+  return {
+    ...actual,
+    readTeamConfig: monitorMocks.readTeamConfig,
+  };
+});
+
 describe('teamCommand role-only shorthand', () => {
   const originalCwd = process.cwd();
   let logSpy: ReturnType<typeof vi.spyOn>;
@@ -37,10 +51,16 @@ describe('teamCommand role-only shorthand', () => {
     runtimeV2Mocks.startTeamV2.mockResolvedValue({
       teamName: 'fix-the-bug',
       sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       config: { worker_count: 2 },
+      startupFailures: [],
     });
     runtimeV2Mocks.monitorTeamV2.mockResolvedValue({
-      tasks: { total: 2, pending: 0, in_progress: 2, completed: 0, failed: 0 },
+      teamName: 'fix-the-bug',
+      phase: 'team-exec',
+      workers: [],
+      nonReportingWorkers: [],
+      tasks: { total: 2, pending: 0, blocked: 0, in_progress: 2, completed: 0, failed: 0 },
     });
     agentUtilsMocks.loadAgentPrompt.mockImplementation((role: string) => `prompt:${role}`);
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
@@ -77,6 +97,107 @@ describe('teamCommand role-only shorthand', () => {
     }));
     expect(logSpy).toHaveBeenCalledWith('Team started: fix-the-bug');
     expect(logSpy.mock.calls.flat().join('\n')).not.toContain('Usage: omc team');
+  });
+
+  it('loads per-role prompts for mixed worker specs', async () => {
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor,1:claude:architect', 'fix the bug']);
+
+    expect(agentUtilsMocks.loadAgentPrompt).toHaveBeenCalledWith('executor');
+    expect(agentUtilsMocks.loadAgentPrompt).toHaveBeenCalledWith('architect');
+    expect(runtimeV2Mocks.startTeamV2).toHaveBeenCalledWith(expect.objectContaining({
+      workerCount: 2,
+      agentTypes: ['claude', 'claude'],
+      workerRoles: ['executor', 'architect'],
+      rolePromptByRole: {
+        executor: 'prompt:executor',
+        architect: 'prompt:architect',
+      },
+    }));
+    const startArgs = runtimeV2Mocks.startTeamV2.mock.calls[0]?.[0] as {
+      roleName?: string;
+      rolePrompt?: string;
+    };
+    expect(startArgs.roleName).toBeUndefined();
+    expect(startArgs.rolePrompt).toBeUndefined();
+  });
+
+  it('refuses a success line when workers fail startup evidence', async () => {
+    runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
+      teamName: 'fix-the-bug',
+      sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      config: { worker_count: 1 },
+      startupFailures: [{ worker: 'worker-1', reason: 'worker_startup_evidence_missing' }],
+    });
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor', 'reply with exactly: PONG']);
+
+    expect(logSpy.mock.calls.flat().join('\n')).not.toContain('Team started:');
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain('Team start incomplete: fix-the-bug');
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      'startup_failure worker=worker-1 reason=worker_startup_evidence_missing',
+    );
+    expect(logSpy.mock.calls.flat().join('\n')).not.toContain('Usage: omc team');
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('prints a claim error line beside a pane-busy startup failure', async () => {
+    runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
+      teamName: 'fix-the-bug',
+      sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      config: { worker_count: 1 },
+      startupFailures: [{
+        worker: 'worker-1',
+        reason: 'worker_startup_evidence_missing_pane_busy',
+        claimError: '{"ok":false,"error":"claim_conflict"}',
+      }],
+    });
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor', 'reply with exactly: PONG']);
+
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      'startup_failure worker=worker-1 reason=worker_startup_evidence_missing_pane_busy claim_error={"ok":false,"error":"claim_conflict"}',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('reports startup failures in the JSON start envelope', async () => {
+    runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
+      teamName: 'fix-the-bug',
+      sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      config: { worker_count: 1 },
+      startupFailures: [{ worker: 'worker-1', reason: 'worker_startup_evidence_missing' }],
+    });
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor', '--json', 'reply with exactly: PONG']);
+
+    const payload = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+      ok: boolean;
+      startupFailures: Array<{ worker: string; reason: string }>;
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.startupFailures).toEqual([
+      { worker: 'worker-1', reason: 'worker_startup_evidence_missing' },
+    ]);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('prints observed instance_id on name-only status', async () => {
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['status', 'fix-the-bug']);
+
+    expect(runtimeV2Mocks.monitorTeamV2).toHaveBeenCalledWith('fix-the-bug', process.cwd());
+    expect(logSpy.mock.calls.flat().join('\n')).toContain(
+      'team=fix-the-bug instance_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa phase=team-exec',
+    );
   });
 
   it('surfaces startup failures without appending the generic team usage block', async () => {

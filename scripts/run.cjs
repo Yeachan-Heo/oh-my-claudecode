@@ -887,6 +887,49 @@ function runGenericChild(targetPath, extraArgs, timeoutMs, manifestHook, options
   });
 }
 
+// A Worker created with `stdin: true` owns a stdio MessagePort that stays
+// referenced until its stdin reaches EOF, and the parent cannot release it from
+// the outside: ending or destroying `worker.stdin` leaves the worker-side
+// readable open, so the worker never exits. A hook that returns before touching
+// stdin — every `OMC_SKIP_HOOKS` / `DISABLE_OMC=1` early return — therefore
+// idled until the manifest budget expired and was reported as a bogus timeout
+// while the payload sat unread (#4086).
+//
+// This bootstrap runs the hook unchanged and, once its module evaluation has
+// settled, resumes stdin only when the hook provably never looked at it: not
+// flowing and no reader attached. Resuming drains the already-delivered payload
+// to EOF, which releases the port; destroying the stream instead would break
+// the EOF path and pin the worker forever. A hook that does read stdin attaches
+// its listeners synchronously inside `main()` before its first await, so it is
+// always observed as a consumer and keeps the untouched behaviour. Only
+// 'data'/'readable' count as a reader: Node attaches its own internal 'end'
+// listener to a worker stdin.
+//
+// `process.argv[1]` is restored to the hook path so entry guards of the form
+// `import.meta.url === pathToFileURL(process.argv[1]).href` still fire.
+const WORKER_STDIN_BOOTSTRAP = `
+const { workerData } = require('node:worker_threads');
+const { fileURLToPath } = require('node:url');
+const targetUrl = workerData.omcWorkerTarget;
+process.argv[1] = fileURLToPath(targetUrl);
+function drainUnreadStdin() {
+  const stdin = process.stdin;
+  if (!stdin || stdin.destroyed || stdin.readableEnded) return;
+  if (stdin.readableFlowing === true) return;
+  if (stdin.listenerCount('data') > 0 || stdin.listenerCount('readable') > 0) return;
+  try { stdin.resume(); } catch { /* already closed */ }
+}
+import(targetUrl).then(
+  () => { setImmediate(drainUnreadStdin); },
+  (error) => {
+    setImmediate(() => {
+      drainUnreadStdin();
+      throw error;
+    });
+  },
+);
+`;
+
 async function runWorker(targetPath, manifestHook, timeoutMs) {
   let worker;
   let terminal = false;
@@ -947,11 +990,13 @@ async function runWorker(targetPath, manifestHook, timeoutMs) {
       }, timeoutMs);
 
       try {
-        worker = new Worker(pathToFileURL(targetPath), {
+        worker = new Worker(WORKER_STDIN_BOOTSTRAP, {
+          eval: true,
           stdin: true,
           stdout: true,
           stderr: true,
           env: process.env,
+          workerData: { omcWorkerTarget: pathToFileURL(targetPath).href },
         });
         if (process.stdin.readableEnded) worker.stdin.end();
         else process.stdin.pipe(worker.stdin);

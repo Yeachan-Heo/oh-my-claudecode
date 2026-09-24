@@ -2299,6 +2299,22 @@ function syncBundledSkillDefinitions(log: (msg: string) => void, options?: { saf
 
     const relativePath = join(targetDirName, 'SKILL.md');
     const targetDir = join(SKILLS_DIR, targetDirName);
+
+    let targetStat: ReturnType<typeof lstatSync> | null = null;
+    try {
+      targetStat = lstatSync(targetDir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        log(`  Warning: Could not safely inspect ${targetDir}; treating it as a user-managed entry, so the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+        continue;
+      }
+    }
+
+    if (targetStat && (targetStat.isSymbolicLink() || !targetStat.isDirectory())) {
+      log(`  Warning: ${targetDir} is a user-managed entry; the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+      continue;
+    }
+
     cpSync(sourceDir, targetDir, { recursive: true, force: true });
     markSkillAsOmcManaged(targetDir);
     installedSkills.push(relativePath.replace(/\\/g, '/'));

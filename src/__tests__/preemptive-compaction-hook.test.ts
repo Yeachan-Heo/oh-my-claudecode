@@ -1,4 +1,5 @@
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -224,6 +225,48 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
 
     expect(first.hookSpecificOutput).toBeDefined();
     expect(second.hookSpecificOutput).toBeDefined();
+  });
+
+  it('honors the default cooldown when OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS is malformed', () => {
+    // A bare parseInt() turned a malformed override into NaN, and
+    // `now - lastWarningTime >= NaN` is false, so the cooldown never expired
+    // and preemptive warnings stayed suppressed for the whole session.
+    const dir = makeTempDir();
+    const sessionId = 'preemptive-malformed-cooldown-test';
+    const transcriptPath = writeTranscript(dir, 72, 100);
+    const env = {
+      OMC_QUIET: '2',
+      OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '70',
+      OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '90',
+      OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS: 'abc',
+    };
+    const input = {
+      cwd: dir,
+      transcript_path: transcriptPath,
+      tool_name: 'Read',
+      session_id: sessionId,
+      tool_response: 'read output',
+    };
+
+    const first = runPostToolVerifier(input, env);
+    expect(first.hookSpecificOutput).toBeDefined();
+
+    // Age the recorded warning well past the documented 60s default.
+    const hash = createHash('sha1').update(`${dir}::${sessionId}`).digest('hex');
+    const statePath = join(tmpdir(), 'omc-preemptive-compaction', `${hash}.json`);
+    const state = JSON.parse(readFileSync(statePath, 'utf-8')) as Record<string, unknown>;
+    writeFileSync(statePath, JSON.stringify({ ...state, lastWarningTime: Date.now() - 600_000 }));
+
+    const afterCooldown = runPostToolVerifier(input, env);
+
+    expect(afterCooldown).toEqual({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext:
+          '[OMC WARNING] Context at 72% (warning threshold: 70%). Plan a /compact soon to preserve room for the next large tool output.',
+      },
+    });
   });
 
   it('escalates to a critical warning even when a warning cooldown is active', () => {

@@ -52,7 +52,7 @@ function stubFetch(noul = false): { fetchFn: typeof fetch; calls: Array<{ body: 
       status: 200,
       json: async () => ({
         answers: {
-          extractable_moment: { type: 'Noul', noul, confidence: 0.8 },
+          extractable_moment: { type: 'noul', noul, confidence: 0.8 },
         },
       }),
     } as unknown as Response;
@@ -99,7 +99,7 @@ describe('learner-extraction shadow judgment point', () => {
     expect(entry.point).toBe('learner-extraction');
     expect(entry.mode).toBe('shadow');
     expect(entry.heuristic.detected).toBe(true);
-    expect(entry.jev?.type).toBe('Noul');
+    expect(entry.jev?.type).toBe('noul');
     expect(entry.state).toMatchObject({
       assistant_message: EXTRACTABLE,
       user_message: 'fix the auth bug',

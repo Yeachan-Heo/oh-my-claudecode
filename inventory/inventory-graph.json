@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "573b484663b4ad65511073b78f6492cd58754e0a",
-    "sourceSha256": "3c7d0bdb67a825dba12d3726f1e96f9f02e666aeaa4d2a7b1c19e161f24e70d2",
+    "head": "69f49b46a96c42bd30c5c64e2f54f8ae864fa203",
+    "sourceSha256": "1368c21c945eb3952bc1a5f4f43712fb8dbfc30f214fd0558668691e7ac61704",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "573b484663b4ad65511073b78f6492cd58754e0a",
-  "sourceSha256": "3c7d0bdb67a825dba12d3726f1e96f9f02e666aeaa4d2a7b1c19e161f24e70d2",
+  "head": "69f49b46a96c42bd30c5c64e2f54f8ae864fa203",
+  "sourceSha256": "1368c21c945eb3952bc1a5f4f43712fb8dbfc30f214fd0558668691e7ac61704",
   "counts": {
     "public": {
       "skills": 43,
@@ -23,13 +23,13 @@
       "total": 92
     },
     "internal": {
-      "hookFiles": 318,
+      "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1384,
-      "total": 1406
+      "srcFiles": 1390,
+      "total": 1412
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 43,
     "commands": 21,
-    "hookFiles": 318,
+    "hookFiles": 319,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -244,6 +244,7 @@
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/points-wire-shape.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -783,6 +784,7 @@
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
+      "scripts/jev-resolve.mjs",
       "scripts/keyword-detector.mjs",
       "scripts/lib/agent-model-config.mjs",
       "scripts/lib/atomic-write.mjs",
@@ -6041,6 +6043,7 @@
       "src/hooks/factcheck/types.ts",
       "src/hooks/index.ts",
       "src/hooks/jev/__tests__/client.test.ts",
+      "src/hooks/jev/__tests__/points-wire-shape.test.ts",
       "src/hooks/jev/__tests__/resolver.test.ts",
       "src/hooks/jev/client.ts",
       "src/hooks/jev/config.ts",
@@ -32837,6 +32840,11 @@
         "path": "docs/adr/03671-script-side-judgment-channel.md"
       },
       {
+        "id": "docs/adr/03672-env-activated-active-mode.md",
+        "kind": "other",
+        "path": "docs/adr/03672-env-activated-active-mode.md"
+      },
+      {
         "id": "docs/agent-templates/README.md",
         "kind": "other",
         "path": "docs/agent-templates/README.md"
@@ -33665,6 +33673,11 @@
         "id": "scripts/jev-eval.mjs",
         "kind": "script",
         "path": "scripts/jev-eval.mjs"
+      },
+      {
+        "id": "scripts/jev-resolve.mjs",
+        "kind": "script",
+        "path": "scripts/jev-resolve.mjs"
       },
       {
         "id": "scripts/keyword-detector.mjs",
@@ -35177,6 +35190,11 @@
         "path": "src/__tests__/jev-eval-script.test.mjs"
       },
       {
+        "id": "src/__tests__/jev-resolve-script.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-resolve-script.test.mjs"
+      },
+      {
         "id": "src/__tests__/job-management-sqlite.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-management-sqlite.test.ts"
@@ -35437,6 +35455,11 @@
         "path": "src/__tests__/pre-compact-cwd.test.ts"
       },
       {
+        "id": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts"
+      },
+      {
         "id": "src/__tests__/pre-tool-enforcer.test.ts",
         "kind": "src",
         "path": "src/__tests__/pre-tool-enforcer.test.ts"
@@ -35655,6 +35678,11 @@
         "id": "src/__tests__/run-cjs-windows-stdio-contract.test.ts",
         "kind": "src",
         "path": "src/__tests__/run-cjs-windows-stdio-contract.test.ts"
+      },
+      {
+        "id": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/run-cjs-worker-skip-guard.test.ts"
       },
       {
         "id": "src/__tests__/runtime-guidance-plan-ralph.test.ts",
@@ -37692,6 +37720,11 @@
         "path": "src/hooks/jev/__tests__/client.test.ts"
       },
       {
+        "id": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/jev/__tests__/points-wire-shape.test.ts"
+      },
+      {
         "id": "src/hooks/jev/__tests__/resolver.test.ts",
         "kind": "hook",
         "path": "src/hooks/jev/__tests__/resolver.test.ts"
@@ -39067,6 +39100,11 @@
         "path": "src/index.ts"
       },
       {
+        "id": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "kind": "src",
+        "path": "src/installer/__tests__/bundled-skill-sync.test.ts"
+      },
+      {
         "id": "src/installer/__tests__/claude-md-analysis.test.ts",
         "kind": "src",
         "path": "src/installer/__tests__/claude-md-analysis.test.ts"
@@ -40410,6 +40448,11 @@
         "id": "src/team/__tests__/stage-router.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/stage-router.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/startup-claim-error.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/startup-claim-error.test.ts"
       },
       {
         "id": "src/team/__tests__/state-paths.test.ts",
@@ -42740,6 +42783,31 @@
       },
       {
         "from": "scripts/jev-eval.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -47174,6 +47242,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/job-management-sqlite.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -48334,6 +48442,36 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/pre-tool-enforcer-jev-wiring.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/pre-tool-enforcer.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -48371,6 +48509,11 @@
       {
         "from": "src/__tests__/preemptive-compaction-hook.test.ts",
         "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/preemptive-compaction-hook.test.ts",
+        "to": "external:crypto",
         "kind": "imports"
       },
       {
@@ -49451,6 +49594,26 @@
       {
         "from": "src/__tests__/run-cjs-windows-stdio-contract.test.ts",
         "to": "scripts/run.cjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/run-cjs-worker-skip-guard.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -59389,6 +59552,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/config.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/points.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/jev/__tests__/points-wire-shape.test.ts",
+        "to": "src/hooks/jev/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/jev/__tests__/resolver.test.ts",
         "to": "external:node:fs/promises",
         "kind": "imports"
@@ -66272,6 +66460,31 @@
         "from": "src/index.ts",
         "to": "src/tools/index.ts",
         "kind": "exports"
+      },
+      {
+        "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
       },
       {
         "from": "src/installer/__tests__/claude-md-analysis.test.ts",
@@ -73239,6 +73452,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/startup-claim-error.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/startup-claim-error.test.ts",
+        "to": "src/team/runtime-v2.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/state-paths.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -74347,6 +74570,11 @@
         "from": "src/team/__tests__/worker-launch-ack.test.ts",
         "to": "src/team/worker-launch-ack.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-ack.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/team/__tests__/worker-launch-posix-transport.test.ts",
@@ -80885,12 +81113,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7063,
-      "edgeCount": 7815,
-      "importEdgeCount": 6430,
+      "nodeCount": 7071,
+      "edgeCount": 7852,
+      "importEdgeCount": 6465,
       "registerEdgeCount": 64
     }
   },
-  "inventorySha256": "71947a21e024d853dfa5c8c677e9b84cba8dcdf468aaacee2e4fe82b66404d7c",
-  "manifestSha256": "47814a278301bd58981f03baacd644c1d740844580d057c3a8f18ac3ab1f8c85"
+  "inventorySha256": "a1e433f9e8d6370b9779a4ebd1316a671fc774c1b3c5aa251cb16781fbc9c7aa",
+  "manifestSha256": "ca07827ccde3891e62f6c1cee07c0de5dc31724e47d4916bd51f360012e4758b"
 }

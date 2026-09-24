@@ -2855,17 +2855,21 @@ async function capturePaneAsync(
 
 export async function captureTeamPane(
   paneId: string,
-  options: { tmuxServerIdentity?: TmuxServerIdentity } = {},
+  options: { joinWrappedLines?: boolean; tmuxServerIdentity?: TmuxServerIdentity } = {},
 ): Promise<string> {
   return capturePaneAsync(paneId, options);
 }
 
 /** Capture an owned pane only while the original tmux incarnation matches. */
-export async function captureOwnedTeamPane(ownership: WorkerPaneOwnership): Promise<string> {
-  if (ownership.provider === 'cmux') return captureTeamPane(ownership.paneId);
+export async function captureOwnedTeamPane(
+  ownership: WorkerPaneOwnership,
+  options: { joinWrappedLines?: boolean } = {},
+): Promise<string> {
+  if (ownership.provider === 'cmux') return captureTeamPane(ownership.paneId, options);
   if (!isValidTmuxServerIdentity(ownership.tmuxServerIdentity)
     || !TMUX_MAILBOX_PANE_ID.test(ownership.paneId)) return '';
   return captureTeamPane(ownership.paneId, {
+    ...options,
     tmuxServerIdentity: ownership.tmuxServerIdentity,
   });
 }

@@ -25,11 +25,35 @@ const HOOK_DISABLED =
   process.env.DISABLE_OMC === 'true' ||
   SKIP_HOOKS.includes('post-tool-use');
 
-const AGENT_OUTPUT_ANALYSIS_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_ANALYSIS_LIMIT || '12000', 10);
-const AGENT_OUTPUT_SUMMARY_LIMIT = parseInt(process.env.OMC_AGENT_OUTPUT_SUMMARY_LIMIT || '360', 10);
+const DEFAULT_AGENT_OUTPUT_ANALYSIS_LIMIT = 12_000;
+const DEFAULT_AGENT_OUTPUT_SUMMARY_LIMIT = 360;
+const DEFAULT_PREEMPTIVE_COOLDOWN_MS = 60_000;
+
+function readPositiveIntegerEnv(name, fallback) {
+  const raw = process.env[name];
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return fallback;
+
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
+const AGENT_OUTPUT_ANALYSIS_LIMIT = readPositiveIntegerEnv(
+  'OMC_AGENT_OUTPUT_ANALYSIS_LIMIT',
+  DEFAULT_AGENT_OUTPUT_ANALYSIS_LIMIT,
+);
+const AGENT_OUTPUT_SUMMARY_LIMIT = readPositiveIntegerEnv(
+  'OMC_AGENT_OUTPUT_SUMMARY_LIMIT',
+  DEFAULT_AGENT_OUTPUT_SUMMARY_LIMIT,
+);
 const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
 const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT || '90', 10);
-const PREEMPTIVE_COOLDOWN_MS = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS || '60000', 10);
+// Unlike the two percent thresholds above, this value has no clamp downstream:
+// `now - lastWarningTime >= NaN` is false, so a malformed override made the
+// cooldown never expire and suppressed preemptive warnings for the session.
+const PREEMPTIVE_COOLDOWN_MS = readPositiveIntegerEnv(
+  'OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS',
+  DEFAULT_PREEMPTIVE_COOLDOWN_MS,
+);
 const PREEMPTIVE_LARGE_OUTPUT_TOOLS = new Set(['read', 'grep', 'glob', 'bash', 'webfetch', 'task', 'taskcreate', 'taskupdate', 'taskoutput']);
 const QUIET_LEVEL = getQuietLevel();
 const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;

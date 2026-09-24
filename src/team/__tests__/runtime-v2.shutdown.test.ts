@@ -458,8 +458,8 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       instanceId: TEAM_INSTANCE_ID,
     });
     const { shutdownTeamV2 } = await import('../runtime-v2.js');
-    await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 })).resolves.toEqual({
-      outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: ['worker-unknown'],
+    await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force: true })).resolves.toEqual({
+      outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: ['worker-unknown'],
     });
 
     expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
