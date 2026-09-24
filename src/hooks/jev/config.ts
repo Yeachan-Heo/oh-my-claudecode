@@ -12,6 +12,8 @@
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
+ * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
+ *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
  * Per-point activation defaults to shadow. A point runs active when listed in
  * the compile-time ACTIVATED_POINTS, activated via env (point:active suffix,

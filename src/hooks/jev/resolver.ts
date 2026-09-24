@@ -17,7 +17,7 @@ import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
 import { ACTIVATED_POINTS, boundExcerpts, parseJevConfig, pointState } from './config.js';
-import type { JevAnswer, JevQuestions, JevResponse, ResolveMode, ResolveResult } from './types.js';
+import type { JevAnswer, JevQuestions, JevResponse, JevUsage, ResolveMode, ResolveResult } from './types.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 
@@ -82,6 +82,17 @@ interface ShadowLogEntry {
   jev: unknown;
   confidence?: number;
   durationMs: number;
+  /** Jev-reported token usage; absent on degraded lines. */
+  usage?: JevUsage;
+}
+
+/** Keep only finite, non-negative token counts; the client does not validate `usage`. */
+function sanitizeUsage(usage: unknown): JevUsage | undefined {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return undefined;
+  const { input_tokens, output_tokens } = usage as Record<string, unknown>;
+  const isCount = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : undefined;
 }
 
 function firstAnswer(response: JevResponse): JevAnswer {
@@ -119,7 +130,10 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
 
   // One stderr line when env activation makes Jev decide (warn once per
   // point per process; code-activated and caller-forced stay silent).
+  // OMC_JEV_QUIET=1 silences the line: hook processes are one-shot, so
+  // per-process once is per-call in practice.
   if (
+    process.env.OMC_JEV_QUIET !== '1' &&
     mode === 'active' &&
     !args.mode &&
     !ACTIVATED_POINTS.has(args.point) &&
@@ -167,7 +181,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     void attempt.then((outcome) => {
       if (outcome.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', heuristic, firstAnswer(outcome.response)), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', heuristic, firstAnswer(outcome.response), outcome.response.usage), config.logDir);
       } else {
         recordFailure(args.point);
         void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', heuristic, null), config.logDir);
@@ -190,7 +204,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   recordSuccess(args.point);
   const heuristic = twinAnswer();
   const jevAnswer = firstAnswer(outcome.response);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', heuristic, jevAnswer), config.logDir);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', heuristic, jevAnswer, outcome.response.usage), config.logDir);
   if (mode === 'active') {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
@@ -206,7 +220,9 @@ function buildLogEntry(
   entryMode: ShadowLogEntry['mode'],
   heuristic: unknown,
   jev: JevAnswer | null,
+  usage?: unknown,
 ): ShadowLogEntry {
+  const safeUsage = sanitizeUsage(usage);
   return {
     ts: new Date().toISOString(),
     point,
@@ -216,5 +232,6 @@ function buildLogEntry(
     jev,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
+    ...(safeUsage ? { usage: safeUsage } : {}),
   };
 }
