@@ -116,6 +116,61 @@ describe('cli-detection', () => {
     expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'C:\\Tools\\codex.cmd', ['--version'], expect.objectContaining({ shell: false }));
   });
 
+  it('prefers the first where.exe candidate whose extension is in PATHEXT', () => {
+    restorePlatform = setProcessPlatform('win32');
+    vi.stubEnv('PATHEXT', '.EXE;.CMD');
+    mockSpawnSync
+      .mockReturnValueOnce(
+        spawnResult({
+          status: 0,
+          stdout: 'C:\\Tools\\codex\r\nC:\\Tools\\codex.CmD\r\nC:\\Tools\\codex.exe\r\n',
+        }),
+      )
+      .mockReturnValueOnce(spawnResult({ status: 0, stdout: 'codex 2.1.0\r\n' }));
+
+    expect(probeCli('codex')).toMatchObject({ found: true, path: 'C:\\Tools\\codex.CmD' });
+    expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'C:\\Tools\\codex.CmD', ['--version'], expect.any(Object));
+  });
+
+  it('keeps where.exe order among candidates with extensions in PATHEXT', () => {
+    restorePlatform = setProcessPlatform('win32');
+    vi.stubEnv('PATHEXT', '.CMD;.EXE');
+    mockSpawnSync
+      .mockReturnValueOnce(
+        spawnResult({ status: 0, stdout: 'C:\\First\\codex.exe\r\nC:\\Second\\codex.cmd\r\n' }),
+      )
+      .mockReturnValueOnce(spawnResult({ status: 0, stdout: 'codex 2.2.0\r\n' }));
+
+    expect(probeCli('codex')).toMatchObject({ found: true, path: 'C:\\First\\codex.exe' });
+  });
+
+  it('uses default PATHEXT extensions when PATHEXT is unset', () => {
+    restorePlatform = setProcessPlatform('win32');
+    vi.stubEnv('PATHEXT', undefined);
+    mockSpawnSync
+      .mockReturnValueOnce(
+        spawnResult({ status: 0, stdout: 'C:\\Tools\\codex\r\nC:\\Tools\\codex.cmd\r\n' }),
+      )
+      .mockReturnValueOnce(spawnResult({ status: 0, stdout: 'codex 2.3.0\r\n' }));
+
+    expect(probeCli('codex')).toMatchObject({ found: true, path: 'C:\\Tools\\codex.cmd' });
+  });
+
+  it('falls back to the first absolute where.exe candidate when PATHEXT has no match', () => {
+    restorePlatform = setProcessPlatform('win32');
+    vi.stubEnv('PATHEXT', '.PS1');
+    mockSpawnSync
+      .mockReturnValueOnce(
+        spawnResult({
+          status: 0,
+          stdout: 'C:\\Tools\\codex\r\nC:\\Tools\\codex.cmd\r\nC:\\Other\\codex.exe\r\n',
+        }),
+      )
+      .mockReturnValueOnce(spawnResult({ status: 0, stdout: 'codex 2.4.0\r\n' }));
+
+    expect(probeCli('codex')).toMatchObject({ found: true, path: 'C:\\Tools\\codex' });
+  });
+
   it('uses POSIX path semantics when the host is modeled as POSIX', () => {
     restorePlatform = setProcessPlatform('darwin');
     mockSpawnSync
