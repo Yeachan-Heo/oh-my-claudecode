@@ -1,6 +1,6 @@
 ---
 name: pr
-description: Draft a PR body from OMC's existing paper trail — the change claim gets the smallest visual that proves the point, evidence is consumed from the verify protocol (never re-collected), and reversibility comes from running the ADR test on the diff itself. Glossary language throughout.
+description: Draft a PR body from OMC's paper trail — the smallest visual that proves the change, evidence consumed from the verify protocol (never re-collected), reversibility from the ADR test on the diff, glossary language throughout.
 metadata:
   credits:
     summary-visuals: show-me
