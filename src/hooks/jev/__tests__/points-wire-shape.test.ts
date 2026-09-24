@@ -52,4 +52,32 @@ describe('judgment point wire shape (#4091)', () => {
     expect(parseJevConfig({}).timeoutMs).toBeGreaterThanOrEqual(1000);
     expect(parseJevConfig({ OMC_JEV_TIMEOUT_MS: '8000' }).timeoutMs).toBe(8000);
   });
+
+  it.each(['1e3', '1.5', '2000ms', ' 2000 ', '01', '9007199254740993'])(
+    'falls back for malformed numeric env overrides (%s)',
+    value => {
+      const config = parseJevConfig({
+        OMC_JEV_TIMEOUT_MS: value,
+        OMC_JEV_MAX_REQUESTS: value,
+        OMC_JEV_EXCERPT_CHARS: value,
+      });
+      expect(config.timeoutMs).toBe(2000);
+      expect(config.maxRequests).toBe(0);
+      expect(config.excerptChars).toBe(200);
+    },
+  );
+
+  it('accepts canonical positive integer overrides and keeps zero as an unlimited request cap', () => {
+    expect(parseJevConfig({
+      OMC_JEV_TIMEOUT_MS: '2500',
+      OMC_JEV_MAX_REQUESTS: '12',
+      OMC_JEV_EXCERPT_CHARS: '512',
+    })).toMatchObject({ timeoutMs: 2500, maxRequests: 12, excerptChars: 512 });
+    expect(parseJevConfig({ OMC_JEV_MAX_REQUESTS: '0' }).maxRequests).toBe(0);
+  });
+
+  it('keeps the timeout inside the Node timer range', () => {
+    expect(parseJevConfig({ OMC_JEV_TIMEOUT_MS: '2147483647' }).timeoutMs).toBe(2_147_483_647);
+    expect(parseJevConfig({ OMC_JEV_TIMEOUT_MS: '2147483648' }).timeoutMs).toBe(2000);
+  });
 });

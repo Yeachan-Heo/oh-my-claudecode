@@ -1,4 +1,4 @@
-/* global process */
+/* global process, setTimeout */
 /**
  * Tests for scripts/jev-resolve.mjs (script-side judgment channel, ticket 15).
  *
@@ -151,6 +151,30 @@ describe('resolveRequest', () => {
     await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(50);
   });
+
+  it('falls back to the safe excerpt default for a truncated numeric override', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(200);
+  });
+
+  it.each(['1e3', '2147483648'])(
+    'does not turn an invalid timeout into a 1ms deadline (%s)',
+    async timeout => {
+      const fetchFn = async () => {
+        await new Promise(resolve => setTimeout(resolve, 25));
+        return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) };
+      };
+      const result = await resolveRequest(
+        { point: 'model-routing', state: {}, questions: QUESTIONS },
+        baseEnv({ OMC_JEV_TIMEOUT_MS: timeout }),
+        fetchFn,
+      );
+      expect(result.mode).toBe('shadow');
+      expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+    },
+  );
 });
 
 describe('end-to-end child process', () => {

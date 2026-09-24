@@ -34,7 +34,14 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 const DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 const JEV_MODEL = 'jev-latest';
+
+function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
+}
 
 /**
  * Mirror of serializeQuestions in src/hooks/jev/client.ts. `score` questions
@@ -141,15 +148,13 @@ export async function resolveRequest(request, env = process.env, fetchFn = fetch
   if (mode === 'off') {
     return { mode, answer: null, confidence: undefined, durationMs: 0 };
   }
-  const max = Number.parseInt(env.OMC_JEV_EXCERPT_CHARS || '', 10);
   const bound = boundExcerpts(
     { state: request.state, questions: request.questions },
-    Number.isFinite(max) && max > 0 ? max : DEFAULT_EXCERPT_CHARS,
+    positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
   );
   const controller = new AbortController();
   let timer;
-  const timeoutMsRaw = Number.parseInt(env.OMC_JEV_TIMEOUT_MS || '', 10);
-  const timeoutMs = Number.isFinite(timeoutMsRaw) && timeoutMsRaw > 0 ? timeoutMsRaw : DEFAULT_TIMEOUT_MS;
+  const timeoutMs = positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS);
   const timeoutPromise = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
