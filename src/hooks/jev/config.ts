@@ -35,6 +35,7 @@ export const JEV_DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
 const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 /** Points currently promoted to active. Empty until the promotion ticket (07). */
 export const ACTIVATED_POINTS: ReadonlySet<string> = new Set<string>();
@@ -88,7 +89,7 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     allPoints,
     activatedPoints,
     activateAll,
-    timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
+    timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
@@ -141,7 +142,12 @@ export function boundExcerpts(value: unknown, max: number): unknown {
   return value;
 }
 
-function positiveInt(raw: string | undefined, fallback: number): number {
-  const parsed = Number.parseInt(raw ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function positiveInt(
+  raw: string | undefined,
+  fallback: number,
+  max: number = Number.MAX_SAFE_INTEGER,
+): number {
+  if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
 }
