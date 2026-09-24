@@ -797,7 +797,8 @@ async function handleTeamStart(parsed: ParsedTeamArgs, cwd: string): Promise<voi
     console.error(`workers: ${runtime.config.worker_count}`);
     console.error(`agent_type: ${uniqueTypes}`);
     for (const failure of startupFailures) {
-      console.error(`startup_failure worker=${failure.worker} reason=${failure.reason}`);
+      const claimError = failure.claimError ? ` claim_error=${failure.claimError}` : '';
+      console.error(`startup_failure worker=${failure.worker} reason=${failure.reason}${claimError}`);
     }
     return;
   }

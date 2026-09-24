@@ -562,6 +562,8 @@ export { isRuntimeV2Enabled } from './runtime-flags.js';
 export interface TeamStartupFailure {
   worker: string;
   reason: string;
+  /** One claim-task error line from the owned pane. Set only for a pane-busy evidence miss. */
+  claimError?: string;
 }
 
 export interface TeamRuntimeV2 {
@@ -1066,6 +1068,7 @@ interface SpawnV2WorkerResult {
   paneId: string | null;
   startupAssigned: boolean;
   startupFailureReason?: string;
+  claimError?: string;
   launchAttemptId?: string;
   /**
    * Set when the CLI-worker output contract (AC-7) was injected. The
@@ -1302,6 +1305,49 @@ export async function settleStartupEvidence(
 function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentType): string {
   const base = agentType ? `${agentType}_startup_evidence_missing` : 'worker_startup_evidence_missing';
   return paneBusy ? `${base}_pane_busy` : base;
+}
+
+const CLAIM_ERROR_LINE_MAX = 240;
+
+function normalizePaneLine(line: string): string {
+  return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+
+function singleLineClaimFailure(line: string): string | undefined {
+  if (/error operation=claim-task\b/.test(line)) return line;
+  if (line.includes('claim-task') && /"ok"\s*:\s*false/.test(line)) return line;
+  return undefined;
+}
+
+/** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
+function textModeClaimFailure(lines: string[], index: number): string | undefined {
+  if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{') return undefined;
+  let depth = 0;
+  const collected: string[] = [];
+  for (const line of lines.slice(index + 1)) {
+    collected.push(line);
+    for (const char of line) {
+      if (char === '{') depth += 1;
+      else if (char === '}') depth -= 1;
+    }
+    if (depth <= 0) break;
+  }
+  try {
+    const parsed = JSON.parse(collected.join('')) as { ok?: unknown };
+    return parsed.ok === false ? JSON.stringify(parsed) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
+export function claimErrorLineFromPane(captured: string): string | undefined {
+  const lines = captured.split(/\r?\n/).map(normalizePaneLine);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const failure = textModeClaimFailure(lines, index) ?? singleLineClaimFailure(lines[index] ?? '');
+    if (failure) return failure.slice(0, CLAIM_ERROR_LINE_MAX);
+  }
+  return undefined;
 }
 
 export function promptModeRecoveryRequiresProgressEvidence(
@@ -1614,6 +1660,9 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? fencedDispatch.value
     : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
   if (!dispatchOutcome.ok) {
+    const claimError = dispatchOutcome.reason.endsWith('_startup_evidence_missing_pane_busy')
+      ? claimErrorLineFromPane(await captureOwnedTeamPane(ownership, { joinWrappedLines: true }))
+      : undefined;
     try {
       await cleanupStartedLaunch('startup_dispatch_failed');
     } catch (error) {
@@ -1632,6 +1681,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       paneId,
       startupAssigned: false,
       startupFailureReason: dispatchOutcome.reason,
+      ...(claimError ? { claimError } : {}),
       launchAttemptId: startupContext.attempt.attempt_id,
     };
   }
@@ -4362,7 +4412,11 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     }
 
     if (workerLaunch.startupFailureReason) {
-      startupFailures.push({ worker: wName, reason: workerLaunch.startupFailureReason });
+      startupFailures.push({
+        worker: wName,
+        reason: workerLaunch.startupFailureReason,
+        ...(workerLaunch.claimError ? { claimError: workerLaunch.claimError } : {}),
+      });
       const logEventFailure = createSwallowedErrorLogger(
         'team.runtime-v2.startTeamV2 appendTeamEvent failed',
       );

@@ -144,6 +144,28 @@ describe('teamCommand role-only shorthand', () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it('prints a claim error line beside a pane-busy startup failure', async () => {
+    runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
+      teamName: 'fix-the-bug',
+      sessionName: 'team-session',
+      instanceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      config: { worker_count: 1 },
+      startupFailures: [{
+        worker: 'worker-1',
+        reason: 'worker_startup_evidence_missing_pane_busy',
+        claimError: '{"ok":false,"error":"claim_conflict"}',
+      }],
+    });
+    const { teamCommand } = await import('../team.js');
+
+    await teamCommand(['1:claude:executor', 'reply with exactly: PONG']);
+
+    expect(errorSpy.mock.calls.flat().join('\n')).toContain(
+      'startup_failure worker=worker-1 reason=worker_startup_evidence_missing_pane_busy claim_error={"ok":false,"error":"claim_conflict"}',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it('reports startup failures in the JSON start envelope', async () => {
     runtimeV2Mocks.startTeamV2.mockResolvedValueOnce({
       teamName: 'fix-the-bug',
