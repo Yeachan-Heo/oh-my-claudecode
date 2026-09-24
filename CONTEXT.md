@@ -21,6 +21,21 @@ One entry per term: definition, boundaries, resolved ambiguity. Vocabulary here 
 - Boundary: (graded by "can the spec still be approved without answering it", not by the asker's preference)
 - Resolved ambiguity: the drafting agent suggests a grade; the product owner has final say at spec approval.
 
+## Refit
+- Definition: The user-invoked, cross-session environment retrospective that reads OMC's instruments (trace timeline, friction report, logs, plan notepads) and lands each user-approved finding on one of four fix-owner surfaces: deterministic check, steering volume, tooling, or information access.
+- Boundary: (improves the environment, not the code — code defects belong to review; a single launch run's lessons belong to that run's sediment pass)
+- Resolved ambiguity: refit writes nothing without user approval; a declined finding is declined explicitly with its reason, and "no findings" is a stated outcome, never a silent one.
+
+## Scout
+- Definition: The single pre-dispatch exploration pass in launch Phase 4 that resolves questions shared by two or more tickets, writing notes to `.omc/specs/<feature-slug>/notes/` for workers to consume by pointer.
+- Boundary: (covers shared questions only — a question one ticket needs stays in that ticket; the scout writes notes, never code)
+- Resolved ambiguity: the pass runs once per launch run, before the frontier opens — not per ticket, and not per worker.
+
+## Integration branch
+- Definition: The single merge target created at launch Phase 4 start that outlives the workers; worker branches merge into it only after the two-axis review gate passes, and C5 verify runs against it.
+- Boundary: (branch topology realized through team's merge coordination APIs — a launch topology, not a launch state machine)
+- Resolved ambiguity: on a PR platform it opens as a draft PR referencing the spec and every ticket; on a patch-only platform it is a plain branch.
+
 ## Jev integration
 - **Jev**: TypeSafe's System One decision model: send state plus typed questions (Choice/Score/Noul), receive structured judgments with calibrated probabilities. Not a text generator; external dependency at `api.typesafe.ai`, authenticated by `TYPESAFE_API_KEY`.
 - **Judgment point**: A narrow, bounded decision inside OMC's orchestration currently made by keywords, rules, or prompt instructions. Enumerated set: mode/skill trigger, intent detection, model-tier routing, loop continuation, context pruning, ralph completion verdict, task-size classification, fact-forcing gate. Each judgment point is implemented twice: a heuristic twin and a Jev implementation.
