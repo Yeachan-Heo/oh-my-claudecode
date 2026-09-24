@@ -209,6 +209,8 @@ Workflow Skills:
 - `loft`: Shipyard shape-before-steel discipline — answers a design question prose cannot settle with a throwaway artifact (pure logic module or structurally different UI variants); model-invoked; opt-in
 - `harbor`: Shipyard intake gate — sweeps external issues and PRs, verifies every claim, hands the maintainer a signature docket; agent handles facts, human signs dispositions; opt-in
 - `drydock`: Shipyard harness scaffold — 4-pillar shared environment (Context/Rules/Tools/Standards) across 5 surfaces, with --check drift audit; opt-in
+- `refit`: Cross-session environment retrospective — reads OMC instrumentation (trace, friction report, logs, plan notepads) and lands user-approved findings on deterministic checks, steering volumes, tooling, or information surfaces; opt-in
+- `pr`: PR body assembly from OMC's paper trail — smallest-visual summary (credited to show-me), evidence consumed from the verify protocol, reversibility from the ADR test, glossary language
 
 Agent Shortcuts:
 - `analyze` -> debugger: Investigation and root-cause analysis
