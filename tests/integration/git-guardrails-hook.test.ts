@@ -1,12 +1,59 @@
-import { readFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
-import { join } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
+import { resolveSessionStatePathsForHook } from '../../scripts/lib/state-root.mjs';
 
 const root = process.cwd();
 const script = join(root, 'scripts', 'git-guardrails.mjs');
 const runner = join(root, 'scripts', 'run.cjs');
+const modeStateDirs: string[] = [];
+
+afterAll(() => {
+  for (const dir of modeStateDirs)
+    rmSync(dir, { recursive: true, force: true });
+});
+
+// State resolution falls back to the home .omc root outside a Git worktree,
+// so each fixture is a Git repository and the hook reads only fixture state.
+function gitInit(dir: string): void {
+  execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
+}
+
+function freshGitDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'omc-guardrails-'));
+  modeStateDirs.push(dir);
+  gitInit(dir);
+  return dir;
+}
+
+async function dirWithActiveMode(
+  mode: string,
+  active: boolean,
+  sessionId = 'guardrail-test',
+  sessionScoped = false,
+): Promise<string> {
+  const dir = freshGitDir();
+  const { writePath } = await resolveSessionStatePathsForHook(
+    dir,
+    mode,
+    sessionScoped ? sessionId : undefined,
+  );
+  mkdirSync(dirname(writePath), { recursive: true });
+  writeFileSync(
+    writePath,
+    JSON.stringify({ active, session_id: sessionId }, null, 2),
+  );
+  return dir;
+}
 
 interface RunResult {
   code: number | null;
@@ -23,10 +70,11 @@ function childEnvironment(env: Record<string, string>): NodeJS.ProcessEnv {
 function runHookInput(
   input: string,
   env: Record<string, string>,
+  cwd = root,
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('node', [script], {
-      cwd: root,
+      cwd,
       env: childEnvironment(env),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -44,10 +92,18 @@ function runHookInput(
 function runHook(
   command: string,
   env: Record<string, string>,
+  cwd = root,
+  sessionId?: string,
 ): Promise<RunResult> {
   return runHookInput(
-    JSON.stringify({ tool_name: 'Bash', tool_input: { command } }),
+    JSON.stringify({
+      tool_name: 'Bash',
+      tool_input: { command },
+      cwd,
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }),
     env,
+    cwd,
   );
 }
 
@@ -194,9 +250,61 @@ describe('git-guardrails hook', () => {
     );
   });
 
-  it('is disabled by default and exits promptly while stdin remains open', async () => {
+  it('is disabled by default when there is no active mode state', async () => {
+    const dir = freshGitDir();
+    const result = await runHook('git push origin main', {}, dir);
+    expect(result.code).toBe(0);
+  });
+
+  it('OMC_GIT_GUARDRAILS=0 exits promptly while stdin remains open', async () => {
     const child = spawn('node', [runner, script], {
       cwd: root,
+      env: childEnvironment({ OMC_GIT_GUARDRAILS: '0' }),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    const startedAt = performance.now();
+    const exit = new Promise<RunResult & { elapsedMs: number }>(
+      (resolve, reject) => {
+        child.on('error', reject);
+        child.on('close', (code) =>
+          resolve({ code, stderr, elapsedMs: performance.now() - startedAt }),
+        );
+      },
+    );
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        child.kill();
+        reject(new Error('explicit opt-out waited for stdin to close'));
+      }, 1000);
+    });
+
+    child.stdin.write(
+      JSON.stringify({
+        tool_name: 'Bash',
+        tool_input: { command: 'git push origin main' },
+      }),
+    );
+    let result: RunResult & { elapsedMs: number };
+    try {
+      result = await Promise.race([exit, timeout]);
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    }
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.elapsedMs).toBeLessThan(1000);
+  });
+
+  it('fails open within the hook deadline when no mode is active and stdin stays open', async () => {
+    const dir = freshGitDir();
+    const child = spawn('node', [runner, script], {
+      cwd: dir,
       env: childEnvironment({}),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -218,14 +326,17 @@ describe('git-guardrails hook', () => {
     const timeout = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
         child.kill();
-        reject(new Error('default-off hook waited for stdin to close'));
-      }, 1000);
+        reject(
+          new Error('default inactive-mode path exceeded the hook deadline'),
+        );
+      }, 4500);
     });
 
     child.stdin.write(
       JSON.stringify({
         tool_name: 'Bash',
-        tool_input: { command: 'git push origin main' },
+        tool_input: { command: 'git status' },
+        cwd: dir,
       }),
     );
     let result: RunResult & { elapsedMs: number };
@@ -236,8 +347,8 @@ describe('git-guardrails hook', () => {
     }
     expect(result.code).toBe(0);
     expect(result.stderr).toBe('');
-    expect(result.elapsedMs).toBeLessThan(1000);
-  });
+    expect(result.elapsedMs).toBeLessThan(4500);
+  }, 6000);
 
   it('OMC_GIT_GUARDRAILS=0 disables the guard', async () => {
     const result = await runHook('git push origin main', {
@@ -251,7 +362,7 @@ describe('git-guardrails hook', () => {
     expect(result.code).toBe(0);
   });
 
-  it.each(['not json at all', ''])(
+  it.each(['not json at all', '', 'null'])(
     'fails open for malformed or absent payloads (%j)',
     async (input) => {
       const result = await runHookInput(input, enabled);
@@ -259,4 +370,86 @@ describe('git-guardrails hook', () => {
       expect(result.stderr).toBe('');
     },
   );
+
+  describe('unattended-mode auto-enable', () => {
+    it('blocks destructive git while an active legacy mode state exists', async () => {
+      const dir = await dirWithActiveMode('ralph', true);
+      const result = await runHook(
+        'git push origin main',
+        {},
+        dir,
+        'guardrail-test',
+      );
+      expect(result.code).toBe(2);
+      expect(result.stderr).toContain('unattended ralph run is active');
+    });
+
+    it('auto-enable covers each guarded mode', async () => {
+      for (const mode of ['autopilot', 'team', 'ultragoal']) {
+        const dir = await dirWithActiveMode(mode, true);
+        const result = await runHook(
+          'git reset --hard',
+          {},
+          dir,
+          'guardrail-test',
+        );
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain(`unattended ${mode} run is active`);
+      }
+    });
+
+    it('enables a session-scoped state only for its owning session', async () => {
+      const dir = await dirWithActiveMode('ralph', true, 'session-a', true);
+      const owner = await runHook('git push origin main', {}, dir, 'session-a');
+      const other = await runHook('git push origin main', {}, dir, 'session-b');
+      expect(owner.code).toBe(2);
+      expect(other.code).toBe(0);
+    });
+
+    it('does not use a legacy active state owned by another session', async () => {
+      const dir = await dirWithActiveMode('ralph', true, 'session-a');
+      const result = await runHook(
+        'git push origin main',
+        {},
+        dir,
+        'session-b',
+      );
+      expect(result.code).toBe(0);
+    });
+
+    it('does not auto-enable without a session identity', async () => {
+      const dir = await dirWithActiveMode('ralph', true);
+      const result = await runHook('git push origin main', {}, dir);
+      expect(result.code).toBe(0);
+    });
+
+    it('OMC_GIT_GUARDRAILS=0 wins over an active mode state', async () => {
+      const dir = await dirWithActiveMode('ralph', true);
+      const result = await runHook(
+        'git push origin main',
+        { OMC_GIT_GUARDRAILS: '0' },
+        dir,
+        'guardrail-test',
+      );
+      expect(result.code).toBe(0);
+    });
+
+    it('an inactive mode state does not enable the guard', async () => {
+      const dir = await dirWithActiveMode('ralph', false);
+      const result = await runHook(
+        'git push origin main',
+        {},
+        dir,
+        'guardrail-test',
+      );
+      expect(result.code).toBe(0);
+    });
+
+    it('an active mode state still allows safe commands', async () => {
+      const dir = await dirWithActiveMode('autopilot', true);
+      const result = await runHook('git status', {}, dir, 'guardrail-test');
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe('');
+    });
+  });
 });

@@ -9,7 +9,10 @@ import {
   parseEntrypointCommand,
   type HooksJson,
 } from '../index.js';
-import { failModeForRisk, HARD_RISK_CLASSES } from '../../../workflow/registry.js';
+import {
+  failModeForRisk,
+  HARD_RISK_CLASSES,
+} from '../../../workflow/registry.js';
 
 function loadInstalledHooksJson(): HooksJson {
   const raw = JSON.parse(
@@ -30,7 +33,9 @@ describe('hook registry — derivation from installed hooks.json (#3707)', () =>
           installedCount += 1;
           const matches = registry.filter(
             (e) =>
-              e.event === event && e.matcher === group.matcher && e.order === order,
+              e.event === event &&
+              e.matcher === group.matcher &&
+              e.order === order,
           );
           expect(matches).toHaveLength(1);
         });
@@ -78,7 +83,9 @@ describe('hook registry — derivation from installed hooks.json (#3707)', () =>
         group.hooks.forEach((hook, order) => {
           const entry = registry.find(
             (e) =>
-              e.event === event && e.matcher === group.matcher && e.order === order,
+              e.event === event &&
+              e.matcher === group.matcher &&
+              e.order === order,
           );
           expect(entry?.timeoutMs).toBe((hook.timeout ?? 0) * 1000);
         });
@@ -97,7 +104,9 @@ describe('hook registry — derivation from installed hooks.json (#3707)', () =>
 
 describe('hook registry — registration drift guard (#3707)', () => {
   it('reports zero drift against the installed hooks.json', () => {
-    expect(validateRegistryAgainstHooksJson(loadInstalledHooksJson())).toEqual([]);
+    expect(validateRegistryAgainstHooksJson(loadInstalledHooksJson())).toEqual(
+      [],
+    );
   });
 
   it('detects unparseable commands', () => {
@@ -165,17 +174,38 @@ describe('hook registry — selection and ordering', () => {
   });
 
   it('selects applicable entries in execution order, honoring matchers', () => {
-    const sessionStartAll = selectApplicableEntries(registry, 'SessionStart', undefined);
+    const sessionStartAll = selectApplicableEntries(
+      registry,
+      'SessionStart',
+      undefined,
+    );
     expect(sessionStartAll.map((e) => e.entrypoint)).toEqual([
       'session-start.mjs',
       'project-memory-session.mjs',
       'wiki-session-start.mjs',
+      'stale-run-reporter.mjs',
     ]);
-    const sessionStartInit = selectApplicableEntries(registry, 'SessionStart', 'init');
-    expect(sessionStartInit.some((e) => e.entrypoint === 'setup-init.mjs')).toBe(true);
-    expect(sessionStartInit.some((e) => e.entrypoint === 'setup-maintenance.mjs')).toBe(false);
-    const bashPermission = selectApplicableEntries(registry, 'PermissionRequest', 'Bash');
-    expect(bashPermission.map((e) => e.entrypoint)).toEqual(['permission-handler.mjs']);
-    expect(selectApplicableEntries(registry, 'PermissionRequest', 'Edit')).toEqual([]);
+    const sessionStartInit = selectApplicableEntries(
+      registry,
+      'SessionStart',
+      'init',
+    );
+    expect(
+      sessionStartInit.some((e) => e.entrypoint === 'setup-init.mjs'),
+    ).toBe(true);
+    expect(
+      sessionStartInit.some((e) => e.entrypoint === 'setup-maintenance.mjs'),
+    ).toBe(false);
+    const bashPermission = selectApplicableEntries(
+      registry,
+      'PermissionRequest',
+      'Bash',
+    );
+    expect(bashPermission.map((e) => e.entrypoint)).toEqual([
+      'permission-handler.mjs',
+    ]);
+    expect(
+      selectApplicableEntries(registry, 'PermissionRequest', 'Edit'),
+    ).toEqual([]);
   });
 });

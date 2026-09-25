@@ -167,11 +167,13 @@ Rules:
 - If regression fails, roll back the cleaner changes or fix the regression, then rerun the verification loop until it passes.
 - Only proceed to completion after the post-deslop regression run passes (or `--no-deslop` was explicitly specified).
 
-8. **On approval, terminal closeout and cleanup**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run the closeout below before `/oh-my-claudecode:cancel` cleans up state. Before any other terminal `/cancel` or state cleanup, including user-requested cancellation, run the same closeout first.
+8. **On approval, terminal closeout and cleanup**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run the closeout below and any applicable Step 10 incident work item before PR creation or `/oh-my-claudecode:cancel` state cleanup. When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report. Before any other terminal `/cancel` or state cleanup, including user-requested cancellation, run the same closeout first.
 
-   Append at most three factual lines to `.omc/notepads/ralph/problems.md` — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction); blockers additionally go in `issues.md`. Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
+   Append at most three factual lines to `.omc/notepads/ralph/problems.md` — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction); blockers additionally go in `.omc/notepads/ralph/issues.md`. Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
 
 9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete. A reviewer rejection inside this loop is not a terminal outcome and does not trigger closeout; record any such observations during the eventual terminal closeout.
+
+10. **Terminal incident work item**: For a stop-and-report escalation (three-strike halt or verification that cannot pass), draft a one-line failure signature, evidence pointers (state file, notepad lines, verification output), and reopen path. Append it to `.omc/notepads/ralph/issues.md`; post it to a tracker only when the user or mode invocation explicitly authorizes that external action.
    </Steps>
 
 <Tool_Usage>

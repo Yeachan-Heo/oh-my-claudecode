@@ -34,7 +34,7 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 - QA cycles repeat up to 5 times; if the same error persists 3 times, stop and report the fundamental issue
 - Validation requires approval from all reviewers; rejected items get fixed and re-validated
 - Budget stop (opt-in): when `OMC_RUN_BUDGET_TOKENS` is set, compare session token spend against it at each phase boundary — the `trace_summary` MCP tool reports token usage. At 90% of budget, finish the current phase; at 100%, stop with a budget report, state preserved for resume. Budget exhaustion is a stop condition, not a failure.
-- Cancel with `/oh-my-claudecode:cancel` at any time; progress is preserved for resume
+- Cancel with `/oh-my-claudecode:cancel` at any time; before terminal state cleanup, run the Phase 5 closeout, and preserve resumable progress artifacts
 </Execution_Policy>
 
 <Workflow_Profiles>
@@ -113,7 +113,8 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - All must approve; fix and re-validate on rejection
 
 6. **Phase 5 - Closeout and Cleanup**:
-   - **Run closeout (before state cleanup)**: Append at most three factual lines to `.omc/notepads/autopilot/problems.md` (blockers additionally in `issues.md`) — what broke (3-strike QA errors, validation rejections) and what dragged (missing checks, unreachable information, environment friction). Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” Observations only — landing them on repo surfaces is `refit`'s job, with the user's approval.
+   - **Run closeout (before state cleanup)**: Append at most three factual lines to `.omc/notepads/autopilot/problems.md` (blockers additionally in `.omc/notepads/autopilot/issues.md`) — what broke (3-strike QA errors, validation rejections) and what dragged (missing checks, unreachable information, environment friction). Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” Observations only — landing them on repo surfaces is `refit`'s job, with the user's approval. When the run ends in a stop-and-report escalation, also draft an incident work item with the failure signature, evidence pointers, and reopen path. Post it to a tracker only with explicit user or mode authorization; otherwise append it to `.omc/notepads/autopilot/issues.md`.
+   - When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` (verification evidence and Open Assumptions) and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report.
    - Delete all state files on successful completion
    - Remove `.omc/state/autopilot-state.json`, `ralph-state.json` (plus stale retired `ultraqa-state.json`/`ultrawork-state.json` if legacy copies exist)
    - Run `/oh-my-claudecode:cancel` for clean exit

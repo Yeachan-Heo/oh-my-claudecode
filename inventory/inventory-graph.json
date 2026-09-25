@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b07bd38ae599959e4446f009b1a78672c5367770",
-    "sourceSha256": "cbe39711b06f97be88cfda4327cf6aef844570f71178f5ca2a1699141fb146de",
+    "head": "de3c6f1b595a651e7a49e622adaaf994894698af",
+    "sourceSha256": "66a84c68d2b8d0320b38a443920c6cb7ed788e3a07cc45e84db167714fd5f7f9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b07bd38ae599959e4446f009b1a78672c5367770",
-  "sourceSha256": "cbe39711b06f97be88cfda4327cf6aef844570f71178f5ca2a1699141fb146de",
+  "head": "de3c6f1b595a651e7a49e622adaaf994894698af",
+  "sourceSha256": "66a84c68d2b8d0320b38a443920c6cb7ed788e3a07cc45e84db167714fd5f7f9",
   "counts": {
     "public": {
       "skills": 46,
@@ -809,6 +809,7 @@
       "scripts/lib/precompact-publisher.mjs",
       "scripts/lib/precompact-restore.mjs",
       "scripts/lib/read-budget-preflight.mjs",
+      "scripts/lib/run-reaper.mjs",
       "scripts/lib/skill-entitlements.mjs",
       "scripts/lib/state-lock.mjs",
       "scripts/lib/state-root.cjs",
@@ -850,6 +851,7 @@
       "scripts/shipyard-audit.mjs",
       "scripts/skill-injector.mjs",
       "scripts/smoke-multirepo.mjs",
+      "scripts/stale-run-reporter.mjs",
       "scripts/status.mjs",
       "scripts/subagent-tracker.mjs",
       "scripts/sync-metadata.ts",
@@ -33794,6 +33796,11 @@
         "path": "scripts/lib/read-budget-preflight.mjs"
       },
       {
+        "id": "scripts/lib/run-reaper.mjs",
+        "kind": "script",
+        "path": "scripts/lib/run-reaper.mjs"
+      },
+      {
         "id": "scripts/lib/skill-entitlements.mjs",
         "kind": "script",
         "path": "scripts/lib/skill-entitlements.mjs"
@@ -33997,6 +34004,11 @@
         "id": "scripts/smoke-multirepo.mjs",
         "kind": "script",
         "path": "scripts/smoke-multirepo.mjs"
+      },
+      {
+        "id": "scripts/stale-run-reporter.mjs",
+        "kind": "script",
+        "path": "scripts/stale-run-reporter.mjs"
       },
       {
         "id": "scripts/status.mjs",
@@ -41769,6 +41781,11 @@
         "path": "tests/integration/multirepo-workspace.test.ts"
       },
       {
+        "id": "tests/integration/stale-run-reporter.test.ts",
+        "kind": "other",
+        "path": "tests/integration/stale-run-reporter.test.ts"
+      },
+      {
         "id": "tests/integration/task-list-identity-stop.test.ts",
         "kind": "other",
         "path": "tests/integration/task-list-identity-stop.test.ts"
@@ -42767,6 +42784,16 @@
       },
       {
         "from": "scripts/git-guardrails.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/git-guardrails.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/git-guardrails.mjs",
         "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
@@ -43077,6 +43104,16 @@
       },
       {
         "from": "scripts/lib/read-budget-preflight.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/run-reaper.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/run-reaper.mjs",
         "to": "external:path",
         "kind": "imports"
       },
@@ -44048,6 +44085,21 @@
       {
         "from": "scripts/smoke-multirepo.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/stale-run-reporter.mjs",
+        "to": "scripts/lib/run-reaper.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/stale-run-reporter.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/stale-run-reporter.mjs",
+        "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
       {
@@ -80717,6 +80769,11 @@
       },
       {
         "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
         "to": "external:node:path",
         "kind": "imports"
       },
@@ -80728,6 +80785,11 @@
       {
         "from": "tests/integration/git-guardrails-hook.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -80753,6 +80815,36 @@
       {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/stale-run-reporter.test.ts",
+        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -81192,12 +81284,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7077,
-      "edgeCount": 7861,
-      "importEdgeCount": 6471,
+      "nodeCount": 7080,
+      "edgeCount": 7876,
+      "importEdgeCount": 6486,
       "registerEdgeCount": 67
     }
   },
-  "inventorySha256": "9939e123ac47e361880bb51faba195ee38baece1073ca8708af2a35cd18365c9",
-  "manifestSha256": "a4fb85a71f5ba59de303ba1bb55f53db5d9e7d9426c697547e422d356029a636"
+  "inventorySha256": "261fbed91e930f2a86d67041a3173b492fe1e20d4d457773b8f3ddbaa1b8ef5c",
+  "manifestSha256": "0a137446c782cdee0139a4e053ea70c0a5ccf12a30842b9ee614bb54b1d21a8d"
 }
