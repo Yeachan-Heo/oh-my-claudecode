@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8b5dc5d615d5071cf9036257c14a3d5191aff495",
-    "sourceSha256": "0a7b1ccda93ce3347bdb140e630bcd6e9a60f93bdb8011481a0bc44d64f5b5bb",
+    "head": "322c235e383e06bb9b1e45042301071976a5065a",
+    "sourceSha256": "317397f6f46f726447a578b5aa0767491b493c55a6d772bffca78269714df752",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8b5dc5d615d5071cf9036257c14a3d5191aff495",
-  "sourceSha256": "0a7b1ccda93ce3347bdb140e630bcd6e9a60f93bdb8011481a0bc44d64f5b5bb",
+  "head": "322c235e383e06bb9b1e45042301071976a5065a",
+  "sourceSha256": "317397f6f46f726447a578b5aa0767491b493c55a6d772bffca78269714df752",
   "counts": {
     "public": {
       "skills": 46,
@@ -41753,6 +41753,11 @@
         "path": "tests/integration/multirepo-workspace.test.ts"
       },
       {
+        "id": "tests/integration/state-root-fs-probe.test.ts",
+        "kind": "other",
+        "path": "tests/integration/state-root-fs-probe.test.ts"
+      },
+      {
         "id": "tests/integration/task-list-identity-stop.test.ts",
         "kind": "other",
         "path": "tests/integration/task-list-identity-stop.test.ts"
@@ -80710,6 +80715,41 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "templates/hooks/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/task-list-identity-stop.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -81146,12 +81186,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7074,
-      "edgeCount": 7855,
-      "importEdgeCount": 6465,
+      "nodeCount": 7075,
+      "edgeCount": 7862,
+      "importEdgeCount": 6472,
       "registerEdgeCount": 67
     }
   },
-  "inventorySha256": "755b7134c6af2bcb95980d0111c15bc0b1fa277ed37b7841f16b934848e28333",
-  "manifestSha256": "9eca6933d0a725526e0bb9276f910ac83e7e50e6c4dc46345deedcaa6cd933e6"
+  "inventorySha256": "64515550260d8a72618ad3ffbf0a1516209cc1add4cdea2217ad7cf15b54e83c",
+  "manifestSha256": "0c14b2c83a71e456e4f1004d46c5756bc02996a71e2e07027a603a0a53c9cff8"
 }
