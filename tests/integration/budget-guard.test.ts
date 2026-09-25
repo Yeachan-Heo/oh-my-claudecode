@@ -19,7 +19,13 @@ interface Fixture {
   transcript: string;
 }
 
-function makeFixture(options: { active: boolean; usage: Array<Record<string, number>> }): Fixture {
+function makeFixture(options: {
+  active: boolean;
+  usage: Array<Record<string, number>>;
+  messageIds?: Array<string | undefined>;
+  requestIds?: Array<string | undefined>;
+  recordTypes?: Array<string | undefined>;
+}): Fixture {
   const dir = mkdtempSync(join(tmpdir(), 'omc-budget-guard-'));
   fixtures.push(dir);
   const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
@@ -28,8 +34,13 @@ function makeFixture(options: { active: boolean; usage: Array<Record<string, num
   mkdirSync(join(statePath, '..'), { recursive: true });
   writeFileSync(statePath, JSON.stringify({ active: options.active, session_id: 'budget-test' }, null, 2));
   const transcript = join(dir, 'transcript.jsonl');
-  const lines = options.usage.map((u, i) =>
-    JSON.stringify({ type: 'assistant', message: { role: 'assistant', usage: u }, seq: i }),
+  const lines = options.usage.map((usage, i) =>
+    JSON.stringify({
+      type: options.recordTypes?.[i] ?? 'assistant',
+      message: { role: 'assistant', id: options.messageIds?.[i], usage },
+      requestId: options.requestIds?.[i],
+      seq: i,
+    }),
   );
   writeFileSync(transcript, `${lines.join('\n')}\n`);
   return { dir, transcript };
@@ -106,6 +117,75 @@ describe('budget-guard hook', () => {
     });
     const result = await runHook(payload(fx), { OMC_RUN_BUDGET_TOKENS: '1000', OMC_BUDGET_ENFORCE: 'active' });
     expect(result.code).toBe(2);
+  });
+
+  it('counts repeated assistant message IDs once and ignores non-assistant records', async () => {
+    const fx = makeFixture({
+      active: true,
+      usage: [
+        { input_tokens: 500, output_tokens: 0 },
+        { input_tokens: 500, output_tokens: 0 },
+        { input_tokens: 5000, output_tokens: 0 },
+      ],
+      messageIds: ['message-1', 'message-1', 'message-2'],
+      recordTypes: ['assistant', 'assistant', 'user'],
+    });
+    const result = await runHook(payload(fx), { OMC_RUN_BUDGET_TOKENS: '1000', OMC_BUDGET_ENFORCE: 'active' });
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(shadowLog(fx).at(-1)?.detail).toContain('~500/1000');
+  });
+
+  it('uses the latest usage snapshot for a repeated assistant message', async () => {
+    const fx = makeFixture({
+      active: true,
+      usage: [
+        { input_tokens: 100, output_tokens: 100 },
+        { input_tokens: 100, output_tokens: 900 },
+      ],
+      messageIds: ['message-2', 'message-2'],
+    });
+    const result = await runHook(payload(fx), { OMC_RUN_BUDGET_TOKENS: '1000', OMC_BUDGET_ENFORCE: 'active' });
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('~1000 of 1000 tokens');
+    expect(shadowLog(fx).at(-1)?.detail).toContain('~1000/1000');
+  });
+
+  it('falls back to request IDs and keeps unidentified records separate', async () => {
+    const duplicateRequest = makeFixture({
+      active: true,
+      usage: [{ input_tokens: 400, output_tokens: 0 }, { input_tokens: 400, output_tokens: 0 }],
+      requestIds: ['request-1', 'request-1'],
+    });
+    const requestResult = await runHook(payload(duplicateRequest), {
+      OMC_RUN_BUDGET_TOKENS: '1000',
+      OMC_BUDGET_ENFORCE: 'active',
+    });
+    expect(requestResult.code).toBe(0);
+    expect(shadowLog(duplicateRequest).at(-1)?.detail).toContain('~400/1000');
+
+    const unidentified = makeFixture({
+      active: true,
+      usage: [{ input_tokens: 500, output_tokens: 0 }, { input_tokens: 500, output_tokens: 0 }],
+    });
+    const unidentifiedResult = await runHook(payload(unidentified), {
+      OMC_RUN_BUDGET_TOKENS: '1000',
+      OMC_BUDGET_ENFORCE: 'active',
+    });
+    expect(unidentifiedResult.code).toBe(2);
+    expect(unidentifiedResult.stderr).toContain('~1000 of 1000 tokens');
+  });
+
+  it.each(['stop_hook_active', 'stopHookActive'])('passes on Stop re-entry via %s', async (flag) => {
+    const fx = makeFixture({ active: true, usage: [{ input_tokens: 700, output_tokens: 500 }] });
+    const result = await runHook(payload(fx, { [flag]: true }), {
+      OMC_RUN_BUDGET_TOKENS: '1000',
+      OMC_BUDGET_ENFORCE: 'active',
+    });
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(shadowLog(fx).at(-1)?.outcome).toBe('pass');
+    expect(shadowLog(fx).at(-1)?.detail).toContain('re-entry');
   });
 
   it('stays silent in shadow mode while logging the judgment', async () => {

@@ -14,11 +14,12 @@
  *                                log, never block or warn (default)
  *   OMC_BUDGET_ENFORCE=active  — warn at 90%, block at 100%
  *
- * Token accounting reads the session transcript (bounded tail) and sums
- * assistant-message usage. The bounded tail can undercount a long session;
- * undercounting is conservative — it can only delay a block, never cause
- * one. A missing/unreadable transcript degrades to a pass with a `degraded`
- * log line: this hook must never block on absent evidence.
+ * Token accounting reads assistant-message usage from a bounded transcript
+ * tail. Repeated records for the same message/request use the latest usage
+ * snapshot, so content-block records are not counted multiple times. The tail
+ * can undercount a long session. A missing/unreadable transcript degrades to
+ * a pass with a `degraded` log line: this hook must never block on absent
+ * evidence.
  */
 
 import { existsSync, readFileSync, statSync } from 'fs';
@@ -78,21 +79,38 @@ function transcriptTokenSpend(transcriptPath) {
     const firstNewline = text.indexOf('\n');
     if (firstNewline !== -1) text = text.slice(firstNewline + 1);
   }
-  let total = 0;
+  const usageByMessage = new Map();
+  let lineNumber = 0;
   for (const line of text.split('\n')) {
+    lineNumber += 1;
     if (!line.trim()) continue;
     try {
       const record = JSON.parse(line);
+      if (record?.type !== 'assistant') continue;
       const usage = record?.message?.usage;
       if (!usage) continue;
-      total +=
-        (usage.input_tokens ?? 0) +
-        (usage.output_tokens ?? 0) +
-        (usage.cache_read_input_tokens ?? 0) +
-        (usage.cache_creation_input_tokens ?? 0);
+      const messageId = record?.message?.id;
+      const requestId = record?.requestId;
+      const key =
+        typeof messageId === 'string' && messageId
+          ? `message:${messageId}`
+          : typeof requestId === 'string' && requestId
+            ? `request:${requestId}`
+            : `line:${lineNumber}`;
+      // Claude Code can append multiple usage snapshots for one message.
+      // Keep the latest snapshot rather than summing duplicate content blocks.
+      usageByMessage.set(key, usage);
     } catch {
       // non-JSON lines contribute nothing
     }
+  }
+  let total = 0;
+  for (const usage of usageByMessage.values()) {
+    total +=
+      (usage.input_tokens ?? 0) +
+      (usage.output_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0);
   }
   return total;
 }
@@ -137,6 +155,18 @@ async function main() {
 
   const mode = await activeUnattendedMode(stateRoot, sessionId);
   if (!mode) process.exit(0);
+
+  if (payload?.stop_hook_active === true || payload?.stopHookActive === true) {
+    logEnforcement({
+      stateRoot,
+      rule: 'budget-stop',
+      mode,
+      outcome: 'pass',
+      detail: 'Stop hook re-entry; budget check skipped to avoid a blocking loop',
+      latencyMs: Date.now() - started,
+    });
+    process.exit(0);
+  }
 
   const spend = transcriptTokenSpend(payload?.transcript_path);
   const detail = spend === null ? 'transcript unavailable; no estimate attempted' : `~${spend}/${budget} tokens (${Math.round((spend / budget) * 100)}%)`;
