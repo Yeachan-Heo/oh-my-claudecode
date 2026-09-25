@@ -70,6 +70,16 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}\"/scripts/run.cjs \"${CLAUDE_PLUGIN_ROOT}\"/scripts/git-guardrails.mjs",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "PermissionRequest": [

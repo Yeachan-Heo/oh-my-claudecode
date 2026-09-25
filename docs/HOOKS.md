@@ -322,6 +322,15 @@ or
 
 `cancel` removes state files for all active modes: ralph, autopilot, team, and any others; it also clears legacy/retired `ultrawork` state.
 
+#### Git Guardrails (`git-guardrails.mjs`)
+
+An **opt-in** PreToolUse hook (matcher: `Bash`) that blocks destructive git operations from agent-driven Bash calls with an authority message.
+
+- **Enable**: set `OMC_GIT_GUARDRAILS=1` in the session environment. Disabled by default; `OMC_GIT_GUARDRAILS=0` always wins.
+- **Blocked operations**: `git push`, `git reset --hard`, `git clean -f/--force`, `git branch -D`, `git checkout .` / `git checkout -- .`, `git restore .` (working-tree discard). Normal path checkouts (`git checkout .github/workflows/ci.yml`), soft resets, dry-runs (`git clean -n`), and safe branch deletes (`-d`) pass.
+- **Message**: the hook refuses with "You do not have authority for this operation" and names the two legitimate exits — the user runs it themselves, or explicitly approves by setting `OMC_GIT_GUARDRAILS=0` for the session.
+- **Prove it bites**: before trusting the guardrail in a session, feed it a planted violation once and watch it block (see the `refit` skill's landing rule). An installed guardrail nobody has seen fire is decoration, not protection.
+
 
 ---
 
