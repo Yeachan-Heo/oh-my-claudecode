@@ -28,6 +28,15 @@ Find what is actually wrong, ranked by severity, with enough detail to act on.
 - **Simplification** — code that could be deleted or collapsed
 - **Coverage** — behavior that ships untested
 
+## Two axes, run apart
+
+A substantial diff is reviewed as two parallel sub-agent passes, reported separately — never merged or cross-ranked, because a change can pass one axis and fail the other (standards-conforming but wrong behavior; faithful but convention-breaking):
+
+- **Standards axis** — the diff against the repo's documented standards (CLAUDE.md/AGENTS.md, `docs/standards/` volumes where they exist) plus a judgement-call-only smell baseline; anything tooling already enforces is skipped.
+- **Intent axis** — the diff against what the work was meant to do — the task, spec, or ticket acceptance criteria: requirements missing or partial, behavior nobody asked for, each finding quoting its source line.
+
+Keep each sub-agent brief under ~400 words and pointed at one axis. Aggregate without picking a single winner across axes — that reranking is what the separation exists to prevent; state each axis's verdict on its own. A small diff stays one pass.
+
 ## Rules
 - Separate lanes: the reviewer must not be the author's same active context.
 - Verify before reporting. A plausible-sounding finding that does not reproduce is noise.

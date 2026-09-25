@@ -188,6 +188,7 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'project-session-manager', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Utility only; workflow-gate behavior removed per plan.' }),
   entry({ name: 'pr', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Advisory PR-body assembly from existing verify evidence; never recollects evidence or gates delivery.' }),
   entry({ name: 'refit', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'User-invoked retrospective; only lands findings approved by the user.' }),
+  entry({ name: 'tdd', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Test-first discipline at pre-agreed seams; opt-in, never a default gate.' }),
   entry({ name: 'ai-slop-cleaner', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review tool; never a default gate.' }),
   entry({ name: 'minimal-code-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline; never a default gate.' }),
   entry({ name: 'agent-doc-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline for agent-facing documents; mandatory at drydock seed generation and launch C5 sediment; never a default gate.' }),
