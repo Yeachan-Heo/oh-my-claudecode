@@ -170,6 +170,8 @@ Rules:
 8. **On approval**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
 
 9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete
+
+10. **Run closeout (before state cleanup)**: Append at most three factual lines to the run notepad so this run's friction outlives the session — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction) — into `.omc/notepads/ralph/problems.md` (blockers additionally in `issues.md`). An empty closeout is valid: write "no lessons" rather than inventing one. These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
    </Steps>
 
 <Tool_Usage>
@@ -285,6 +287,7 @@ Why good: The falsified criterion stops governing, the measurement is preserved 
 - Continue working when the hook system sends "The boulder never stops" -- this means the iteration continues
 - If the selected reviewer rejects verification, fix the issues and re-verify (do not stop)
 - If the same issue recurs across 3+ iterations, report it as a potential fundamental problem
+- **Budget stop (opt-in)**: when `OMC_RUN_BUDGET_TOKENS` is set, compare session token spend against it at each iteration boundary — the `trace_summary` MCP tool reports token usage. At 90% of budget, finish the current story and stop starting new ones. At 100%, stop with a budget report: state preserved (progress.txt and state files), resumable with a later ralph invocation. Budget exhaustion is a stop condition, not a failure.
 - **Do NOT stop after Step 7 approval.** The boulder continues through 7 → 7.5 → 7.6 → 8 in the same turn as a single chain. Step 7 is a checkpoint inside the loop, not a reporting moment. Treating an architect/critic APPROVED verdict as "time to summarise and wait for user acknowledgment" is a polite-stop anti-pattern — the only reporting moments in Ralph are Step 8 (successful cancel) or Step 9 (rejection).
 </Escalation_And_Stop_Conditions>
 

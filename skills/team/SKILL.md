@@ -150,6 +150,8 @@ Continue `team-exec -> team-verify -> team-fix` until:
 
 `team-fix` is bounded by max attempts. If fix attempts exceed the configured limit, transition to terminal `failed` (no infinite loop).
 
+**Run closeout (either terminal outcome).** Before `/oh-my-claudecode:cancel` state cleanup, append at most three factual lines to `.omc/notepads/team/problems.md` (blockers additionally in `issues.md`) — what broke (defects that survived a fix round, three-strike halts) and what dragged (worker environment friction, missing checks, unreachable information). An empty closeout is valid: write "no lessons" rather than inventing one. Observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
+
 ### Stage Handoff Convention
 
 When transitioning between stages, important context — decisions made, alternatives rejected, risks identified — lives only in the lead's conversation history. If the lead's context compacts or agents restart, this knowledge is lost.
