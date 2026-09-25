@@ -324,11 +324,12 @@ or
 
 #### Git Guardrails (`git-guardrails.mjs`)
 
-An **opt-in** PreToolUse hook (matcher: `Bash`) that blocks destructive git operations from agent-driven Bash calls with an authority message.
+An **opt-in** PreToolUse hook (matcher: `Bash`) that checks shell command positions and blocks destructive Git operations from agent-driven Bash calls with an authority message. It scans commands separated by shell chains and newlines, so a destructive command is still blocked when it follows a safe command. Quoted arguments and ordinary text commands such as `echo git push` are not mistaken for Git invocations. Git's global `-C <dir>` and `-c key=value` options are recognized before the guarded subcommands.
 
 - **Enable**: set `OMC_GIT_GUARDRAILS=1` in the session environment. Disabled by default; `OMC_GIT_GUARDRAILS=0` always wins.
-- **Blocked operations**: `git push`, `git reset --hard`, `git clean -f/--force`, `git branch -D`, `git checkout .` / `git checkout -- .`, `git restore .` (working-tree discard). Normal path checkouts (`git checkout .github/workflows/ci.yml`), soft resets, dry-runs (`git clean -n`), and safe branch deletes (`-d`) pass.
-- **Message**: the hook refuses with "You do not have authority for this operation" and names the two legitimate exits — the user runs it themselves, or explicitly approves by setting `OMC_GIT_GUARDRAILS=0` for the session.
+- **Blocked operations**: non-dry-run `git push`, `git reset --hard`, non-dry-run `git clean -f/--force`, forced branch deletion (`git branch -D`, `-d --force`, or `--force --delete` in either order), and `git checkout .` / `git checkout -- .` or `git restore .` (working-tree discard). The hook ignores Git option-looking arguments after `--`; those are refspecs or pathspecs, not options.
+- **Safe operations**: `git push --dry-run` / `git push -n`, clean dry-runs (`git clean -n`, including `git clean -n -- -f`), soft resets, non-forced branch deletes (`-d`), and path-specific checkout/restore commands such as `git checkout ./path` and `git restore ./file` pass. Malformed, absent, or command-less hook payloads fail open; when disabled by default, the hook exits without waiting for stdin.
+- **Message**: the hook refuses with "You do not have authority for this operation" and names the two legitimate exits — the user runs it themselves, or explicitly approves it by setting `OMC_GIT_GUARDRAILS=0` for the session.
 - **Prove it bites**: before trusting the guardrail in a session, feed it a planted violation once and watch it block (see the `refit` skill's landing rule). An installed guardrail nobody has seen fire is decoration, not protection.
 
 

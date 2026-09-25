@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d3b85b73917dbfc06b36c331bf7c11fbed5838d8",
-    "sourceSha256": "92416aabfe251545c17fe50df658266222415ff2494111acd0c081309074a461",
+    "head": "b07bd38ae599959e4446f009b1a78672c5367770",
+    "sourceSha256": "cbe39711b06f97be88cfda4327cf6aef844570f71178f5ca2a1699141fb146de",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d3b85b73917dbfc06b36c331bf7c11fbed5838d8",
-  "sourceSha256": "92416aabfe251545c17fe50df658266222415ff2494111acd0c081309074a461",
+  "head": "b07bd38ae599959e4446f009b1a78672c5367770",
+  "sourceSha256": "cbe39711b06f97be88cfda4327cf6aef844570f71178f5ca2a1699141fb146de",
   "counts": {
     "public": {
       "skills": 46,
@@ -784,6 +784,7 @@
       "scripts/generate-inventory-graph.mjs",
       "scripts/generate-prompt-projections.mjs",
       "scripts/generate-skill-entitlements.mjs",
+      "scripts/git-guardrails.mjs",
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
@@ -33228,6 +33229,11 @@
         "path": "node:path/win32"
       },
       {
+        "id": "external:node:perf_hooks",
+        "kind": "external",
+        "path": "node:perf_hooks"
+      },
+      {
         "id": "external:node:process",
         "kind": "external",
         "path": "node:process"
@@ -33661,6 +33667,11 @@
         "id": "scripts/generate-skill-entitlements.mjs",
         "kind": "script",
         "path": "scripts/generate-skill-entitlements.mjs"
+      },
+      {
+        "id": "scripts/git-guardrails.mjs",
+        "kind": "script",
+        "path": "scripts/git-guardrails.mjs"
       },
       {
         "id": "scripts/graph-agent-demo.mjs",
@@ -41748,6 +41759,11 @@
         "path": "tests/integration/epic-3698-closure-verifier.test.ts"
       },
       {
+        "id": "tests/integration/git-guardrails-hook.test.ts",
+        "kind": "other",
+        "path": "tests/integration/git-guardrails-hook.test.ts"
+      },
+      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -42747,6 +42763,11 @@
       {
         "from": "scripts/generate-skill-entitlements.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/git-guardrails.mjs",
+        "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
       {
@@ -80685,6 +80706,31 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:node:perf_hooks",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/git-guardrails-hook.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -81146,12 +81192,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7074,
-      "edgeCount": 7855,
-      "importEdgeCount": 6465,
+      "nodeCount": 7077,
+      "edgeCount": 7861,
+      "importEdgeCount": 6471,
       "registerEdgeCount": 67
     }
   },
-  "inventorySha256": "755b7134c6af2bcb95980d0111c15bc0b1fa277ed37b7841f16b934848e28333",
-  "manifestSha256": "bef573ad534cbe60add27894e0104d8311eeb65fd005f5ccd937880c9abf3224"
+  "inventorySha256": "9939e123ac47e361880bb51faba195ee38baece1073ca8708af2a35cd18365c9",
+  "manifestSha256": "a4fb85a71f5ba59de303ba1bb55f53db5d9e7d9426c697547e422d356029a636"
 }

@@ -113,7 +113,7 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - All must approve; fix and re-validate on rejection
 
 6. **Phase 5 - Closeout and Cleanup**:
-   - **Run closeout (before state cleanup)**: Append at most three factual lines to `.omc/notepads/autopilot/problems.md` (blockers additionally in `issues.md`) — what broke (3-strike QA errors, validation rejections) and what dragged (missing checks, unreachable information, environment friction). An empty closeout is valid: write "no lessons" rather than inventing one. Observations only — landing them on repo surfaces is `refit`'s job, with the user's approval.
+   - **Run closeout (before state cleanup)**: Append at most three factual lines to `.omc/notepads/autopilot/problems.md` (blockers additionally in `issues.md`) — what broke (3-strike QA errors, validation rejections) and what dragged (missing checks, unreachable information, environment friction). Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” Observations only — landing them on repo surfaces is `refit`'s job, with the user's approval.
    - Delete all state files on successful completion
    - Remove `.omc/state/autopilot-state.json`, `ralph-state.json` (plus stale retired `ultraqa-state.json`/`ultrawork-state.json` if legacy copies exist)
    - Run `/oh-my-claudecode:cancel` for clean exit
