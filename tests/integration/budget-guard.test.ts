@@ -25,6 +25,7 @@ function makeFixture(options: {
   messageIds?: Array<string | undefined>;
   requestIds?: Array<string | undefined>;
   recordTypes?: Array<string | undefined>;
+  transcriptPrefix?: string;
 }): Fixture {
   const dir = mkdtempSync(join(tmpdir(), 'omc-budget-guard-'));
   fixtures.push(dir);
@@ -42,7 +43,7 @@ function makeFixture(options: {
       seq: i,
     }),
   );
-  writeFileSync(transcript, `${lines.join('\n')}\n`);
+  writeFileSync(transcript, `${options.transcriptPrefix ?? ''}${lines.join('\n')}\n`);
   return { dir, transcript };
 }
 
@@ -117,6 +118,17 @@ describe('budget-guard hook', () => {
     });
     const result = await runHook(payload(fx), { OMC_RUN_BUDGET_TOKENS: '1000', OMC_BUDGET_ENFORCE: 'active' });
     expect(result.code).toBe(2);
+  });
+
+  it('keeps parsing the complete records after a bounded tail starts mid-line', async () => {
+    const fx = makeFixture({
+      active: true,
+      usage: [{ input_tokens: 600, output_tokens: 0 }],
+      transcriptPrefix: `{"type":"user","padding":"${'x'.repeat(2 * 1024 * 1024)}"}\n`,
+    });
+    const result = await runHook(payload(fx), { OMC_RUN_BUDGET_TOKENS: '1000', OMC_BUDGET_ENFORCE: 'active' });
+    expect(result.code).toBe(0);
+    expect(shadowLog(fx).at(-1)?.detail).toContain('~600/1000');
   });
 
   it('counts repeated assistant message IDs once and ignores non-assistant records', async () => {

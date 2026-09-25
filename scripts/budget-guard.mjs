@@ -22,7 +22,7 @@
  * evidence.
  */
 
-import { existsSync, readFileSync, statSync } from 'fs';
+import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } from 'fs';
 import { join } from 'path';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
@@ -59,20 +59,32 @@ async function activeUnattendedMode(stateRoot, sessionId) {
  */
 function transcriptTokenSpend(transcriptPath) {
   if (!transcriptPath || !existsSync(transcriptPath)) return null;
-  let size;
-  try {
-    size = statSync(transcriptPath).size;
-  } catch {
-    return null;
-  }
   let text;
   let start = 0;
+  let fd;
   try {
-    const buffer = readFileSync(transcriptPath);
-    start = Math.max(0, buffer.length - TRANSCRIPT_TAIL_BYTES);
-    text = buffer.subarray(start).toString('utf8');
+    fd = openSync(transcriptPath, 'r');
+    const size = fstatSync(fd).size;
+    start = Math.max(0, size - TRANSCRIPT_TAIL_BYTES);
+    const length = size - start;
+    const buffer = Buffer.allocUnsafe(length);
+    let offset = 0;
+    while (offset < length) {
+      const bytesRead = readSync(fd, buffer, offset, length - offset, start + offset);
+      if (bytesRead === 0) return null;
+      offset += bytesRead;
+    }
+    text = buffer.toString('utf8');
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // A close failure does not change the transcript-read outcome.
+      }
+    }
   }
   // Drop the first partial line when the tail cut mid-record.
   if (start > 0) {
