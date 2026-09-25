@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: Test-first discipline at pre-agreed seams — one test, one implementation, tracer-bullet steps; expected values from an independent source of truth; substitutes only at the seam's declared boundary; refactoring kept out of the loop. The discipline launch Phase 4 refers to when workers implement at the seams approved in C2.
+description: Test-first at pre-agreed seams — one test, one implementation, tracer-bullet red/green; independent expected values; substitutions only at the seam's boundary class; launch Phase 4 reference.
 ---
 
 # TDD

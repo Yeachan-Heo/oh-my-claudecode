@@ -3,7 +3,7 @@
 
 # skills
 
-45 skill directories for workflow automation and specialized behaviors.
+46 skill directories for workflow automation and specialized behaviors.
 
 ## Purpose
 
