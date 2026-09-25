@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5d765a83b7abbe0aae8c673ce7cbdf0e22299412",
-    "sourceSha256": "42dcd28f0e85068c32cd437dfaa34dc28b67c4cf341ed2ded38e25a63c23ba46",
+    "head": "925615fde2a66e1088e66bfb3a3371b59a059340",
+    "sourceSha256": "986ed692a7948af14062768ae1df3073a057d36d3cb8eed320866469c8ed7d4b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5d765a83b7abbe0aae8c673ce7cbdf0e22299412",
-  "sourceSha256": "42dcd28f0e85068c32cd437dfaa34dc28b67c4cf341ed2ded38e25a63c23ba46",
+  "head": "925615fde2a66e1088e66bfb3a3371b59a059340",
+  "sourceSha256": "986ed692a7948af14062768ae1df3073a057d36d3cb8eed320866469c8ed7d4b",
   "counts": {
     "public": {
       "skills": 47,
@@ -757,6 +757,7 @@
     ],
     "scriptFiles": [
       "scripts/audit-multirepo-e2e.mjs",
+      "scripts/budget-guard.mjs",
       "scripts/build-bridge-entry.mjs",
       "scripts/build-claude-md-coordinator.mjs",
       "scripts/build-cli.mjs",
@@ -800,6 +801,7 @@
       "scripts/lib/config-dir.sh",
       "scripts/lib/context-usage.mjs",
       "scripts/lib/encode-project-path.mjs",
+      "scripts/lib/enforcement-log.mjs",
       "scripts/lib/force-agent-delegation-preflight.mjs",
       "scripts/lib/hook-command-normalizer.mjs",
       "scripts/lib/hud-cache-wrapper.sh",
@@ -33532,6 +33534,11 @@
         "path": "scripts/audit-multirepo-e2e.mjs"
       },
       {
+        "id": "scripts/budget-guard.mjs",
+        "kind": "script",
+        "path": "scripts/budget-guard.mjs"
+      },
+      {
         "id": "scripts/build-bridge-entry.mjs",
         "kind": "script",
         "path": "scripts/build-bridge-entry.mjs"
@@ -33745,6 +33752,11 @@
         "id": "scripts/lib/encode-project-path.mjs",
         "kind": "script",
         "path": "scripts/lib/encode-project-path.mjs"
+      },
+      {
+        "id": "scripts/lib/enforcement-log.mjs",
+        "kind": "script",
+        "path": "scripts/lib/enforcement-log.mjs"
       },
       {
         "id": "scripts/lib/force-agent-delegation-preflight.mjs",
@@ -41762,6 +41774,11 @@
         "path": "tests/harbor-scenarios.test.ts"
       },
       {
+        "id": "tests/integration/budget-guard.test.ts",
+        "kind": "other",
+        "path": "tests/integration/budget-guard.test.ts"
+      },
+      {
         "id": "tests/integration/concurrent-project-memory.test.ts",
         "kind": "other",
         "path": "tests/integration/concurrent-project-memory.test.ts"
@@ -42381,6 +42398,31 @@
       {
         "from": "scripts/audit-multirepo-e2e.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/budget-guard.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/budget-guard.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/budget-guard.mjs",
+        "to": "scripts/lib/enforcement-log.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/budget-guard.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/budget-guard.mjs",
+        "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
       {
@@ -43041,6 +43083,16 @@
       {
         "from": "scripts/lib/context-usage.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/enforcement-log.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/enforcement-log.mjs",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -80694,6 +80746,31 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/budget-guard.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/budget-guard.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/budget-guard.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/budget-guard.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/budget-guard.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/concurrent-project-memory.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -81355,12 +81432,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7083,
-      "edgeCount": 7887,
-      "importEdgeCount": 6496,
+      "nodeCount": 7086,
+      "edgeCount": 7899,
+      "importEdgeCount": 6508,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "f7b5ce4c5a22bca4cfd46db280d4abda7181cd9e8358775f9d542a2f519049a4",
-  "manifestSha256": "6263726ef6f2b153853bcb3ed7f3b028edf6fab312aaaca759c4667d0377ca71"
+  "inventorySha256": "c3341e455bf90dd3789004870ce698a2dc9813899c15ff9000d48f4f532c44cb",
+  "manifestSha256": "a5c53a9970c5f8acf555e736eaac09b0f6d8bd762f85698879dceb8c72ca2f19"
 }

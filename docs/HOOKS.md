@@ -275,6 +275,17 @@ Enforces continuation when an execution mode is active. This is the hook that ke
 
 > **Note**: autopilot, ralph, and team are **skills** (invoked through their current skill surfaces), not hooks. Legacy/retired `ultrawork` and `pipeline` state is cleanup-only and must never be invoked or reactivated. The persistent-mode hook enforces continuation by blocking the Stop event.
 
+#### budget-guard (`budget-guard.mjs`)
+
+Enforces `OMC_RUN_BUDGET_TOKENS` for unattended sessions: when an active unattended mode (ralph, autopilot, team, ultragoal) is running and the session's token spend crosses the budget, the hook blocks the Stop event and sends the model back to finish with a resumable budget report.
+
+On a Stop re-entry (`stop_hook_active` or `stopHookActive`), it records a pass and never blocks again, avoiding a self-reinforcing loop.
+
+- **Event**: Stop
+- **Token accounting**: sums the latest usage snapshot for each assistant message in a bounded tail (2 MB) of the session transcript, including cache tokens. Repeated records are deduplicated by `message.id`, falling back to `requestId`; records without either ID are counted individually. The bounded tail can undercount a long session. A missing or unreadable transcript degrades to a logged pass; the hook never blocks on absent evidence.
+- **Rollout (tri-state, mirrors the jev off/shadow/active protocol)**: `OMC_BUDGET_ENFORCE=off` does nothing; `shadow` (default) logs judgments to `.omc/state/enforcement/shadow.jsonl` and never blocks or warns; `active` warns at 90% (system message) and blocks at 100% (exit 2, budget-report contract in the refusal).
+- **Evidence**: every judgment is appended to the shadow log (`{ts, rule, mode, outcome, detail, latencyMs}`) — the promotion evidence for moving the default from shadow to active. A rule promotes only after enough samples with zero false blocks.
+
 ### Mode State Management
 
 Execution mode hooks manage state files in the `.omc/state/` directory.
