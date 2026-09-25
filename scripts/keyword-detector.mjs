@@ -151,6 +151,7 @@ ANALYSIS MODE. Gather context before diving deep:
 const TDD_MESSAGE = `<tdd-mode>
 [TDD MODE ACTIVATED]
 Write or update tests first when practical, confirm they fail for the right reason, then implement the minimal fix and re-run verification.
+Call the Skill tool with "tdd" for the full discipline at pre-agreed seams.
 </tdd-mode>
 
 ---

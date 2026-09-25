@@ -36,7 +36,7 @@ The split rests on where enforcement pressure lives: implementation contexts car
 
 1. Present findings ranked by severity, each as `finding → surface → intended change`, with one line of instrument evidence (which instrument, what it showed).
 2. Stop for user approval. Each line is individually approvable or vetoable.
-3. Write approved findings to their surfaces. Before writing any steering prose, call the Skill tool with `agent-doc-discipline` and pass its verification checklist.
+3. Write approved findings to their surfaces. Before writing any steering prose, call the Skill tool with `agent-doc-discipline` and pass its verification checklist. A newly installed deterministic check must be proven to bite before it counts as landed: run it clean once, then demonstrate it failing on a deliberately introduced violation, then revert the violation. A check that cannot be shown failing goes back to the proposal — a guardrail nobody has seen fire is decoration, not protection.
 4. Record where each finding landed — one file location per line — so the next refit starts from the record, not from memory. A refit on a launch-run session starts from that run's sediment list; a launch run may defer a lesson to a later refit by naming it.
 
 ## Output

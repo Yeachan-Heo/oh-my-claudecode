@@ -26,6 +26,9 @@ Find the real failure signal quickly and explain the next corrective step.
 - Use the trace/state surfaces when the issue involves orchestration, hooks, or agent flow.
 - If the issue is actually a product/runtime bug rather than app code, say so plainly.
 - Do not prescribe broad rewrites before isolating the failure.
+- Tag temporary debug output `[DEBUG-<4hex>]`; cleanup is then a single grep.
+- Redact secrets from logs and traces before they leave the session.
+- If the failure traces to a missing or wrong seam, say so as the finding and point at `refit` or `architecture-survey` — the environment lesson outlives the fix.
 
 ## Output
 - Observed failure
