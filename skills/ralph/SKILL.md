@@ -167,7 +167,7 @@ Rules:
 - If regression fails, roll back the cleaner changes or fix the regression, then rerun the verification loop until it passes.
 - Only proceed to completion after the post-deslop regression run passes (or `--no-deslop` was explicitly specified).
 
-8. **On approval**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
+8. **On approval**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), complete the run closeout (Step 10), then — when the remote reviews through PRs and the work sits on a non-default branch — open a **draft PR** with the body drafted per `/oh-my-claudecode:pr` (evidence from the fresh verification runs; PRD acceptance criteria linked). Mark it ready only after the user accepts the completion report. Finally run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
 
 9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete
 
