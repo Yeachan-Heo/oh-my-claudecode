@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * PreToolUse Hook: git guardrails (opt-in).
+ * PreToolUse Hook: git guardrails.
  *
  * Blocks destructive git operations from agent-driven Bash calls with an
- * authority message. Disabled by default; enable with OMC_GIT_GUARDRAILS=1
- * (OMC_GIT_GUARDRAILS=0 always wins, even over =1 from a parent scope).
+ * authority message. Two ways on:
+ *   - OMC_GIT_GUARDRAILS=1                    (always on, any session)
+ *   - an active unattended mode (ralph, autopilot, team, ultragoal)
+ *     discovered from the mode state files    (dark-run default)
+ * OMC_GIT_GUARDRAILS=0 always wins over both. Without either, the hook
+ * exits silently.
  *
  * Blocked operations (exit code 2, stderr shown to the model):
  *   git push                      - publishing history is not an agent decision
@@ -18,7 +22,9 @@
  * block before trusting it in a session (see refit's landing rule).
  */
 
+import { existsSync, readFileSync } from 'fs';
 import { readStdin } from './lib/stdin.mjs';
+import { resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 
 const GUARDS = [
   { pattern: /\bgit\s+push\b/, label: 'git push' },
@@ -29,12 +35,16 @@ const GUARDS = [
   { pattern: /\bgit\s+restore\s+(\.(\s|$)|--\s+\.(\s|$))/, label: 'git restore . (working-tree discard)' },
 ];
 
-function guardMessage(label) {
-  return [
-    `Git guardrail: blocked "${label}".`,
-    'You do not have authority for this operation - it destroys or publishes state the user owns.',
-    'Ask the user to run it themselves, or to explicitly approve it by setting OMC_GIT_GUARDRAILS=0 for this session.',
-  ].join('\n');
+const GUARDED_MODES = ['ralph', 'autopilot', 'team', 'ultragoal'];
+
+function guardMessage(label, activeMode) {
+  const lines = [`Git guardrail: blocked "${label}".`, 'You do not have authority for this operation - it destroys or publishes state the user owns.'];
+  if (activeMode) {
+    lines.push(`Guardrails are on by default while an unattended ${activeMode} run is active; set OMC_GIT_GUARDRAILS=0 to opt out, or ask the user to run this command.`);
+  } else {
+    lines.push('Ask the user to run it themselves, or to explicitly approve it by setting OMC_GIT_GUARDRAILS=0 for this session.');
+  }
+  return lines.join('\n');
 }
 
 function commandFromPayload(payload) {
@@ -44,9 +54,22 @@ function commandFromPayload(payload) {
   return typeof toolInput.command === 'string' ? toolInput.command : '';
 }
 
+async function activeUnattendedMode(directory, sessionId) {
+  for (const mode of GUARDED_MODES) {
+    try {
+      const { readPath } = await resolveSessionStatePathsForHook(directory, mode, sessionId);
+      if (!readPath || !existsSync(readPath)) continue;
+      const state = JSON.parse(readFileSync(readPath, 'utf8'));
+      if (state && state.active === true) return mode;
+    } catch {
+      // unreadable state files never block the hook path; the next mode is probed
+    }
+  }
+  return null;
+}
+
 async function main() {
   if (process.env.OMC_GIT_GUARDRAILS === '0') process.exit(0);
-  if (process.env.OMC_GIT_GUARDRAILS !== '1') process.exit(0);
 
   const raw = await readStdin(3000);
   let payload = null;
@@ -56,12 +79,21 @@ async function main() {
     process.exit(0);
   }
 
+  const explicit = process.env.OMC_GIT_GUARDRAILS === '1';
+  let activeMode = null;
+  if (!explicit) {
+    const directory = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
+    const sessionId = typeof payload.session_id === 'string' ? payload.session_id : undefined;
+    activeMode = await activeUnattendedMode(directory, sessionId);
+    if (!activeMode) process.exit(0);
+  }
+
   const command = commandFromPayload(payload);
   if (!command) process.exit(0);
 
   for (const guard of GUARDS) {
     if (guard.pattern.test(command)) {
-      process.stderr.write(`${guardMessage(guard.label)}\n`);
+      process.stderr.write(`${guardMessage(guard.label, activeMode)}\n`);
       process.exit(2);
     }
   }

@@ -326,9 +326,9 @@ or
 
 An **opt-in** PreToolUse hook (matcher: `Bash`) that blocks destructive git operations from agent-driven Bash calls with an authority message.
 
-- **Enable**: set `OMC_GIT_GUARDRAILS=1` in the session environment. Disabled by default; `OMC_GIT_GUARDRAILS=0` always wins.
+- **Enable (either way)**: set `OMC_GIT_GUARDRAILS=1` in the session environment, **or** run inside an active unattended mode — ralph, autopilot, team, or ultragoal state files with `active: true` enable the guard automatically, because a dark run is exactly where destructive git operations must not pass silently. `OMC_GIT_GUARDRAILS=0` always wins over both. Without either, the hook exits silently.
 - **Blocked operations**: `git push`, `git reset --hard`, `git clean -f/--force`, `git branch -D`, `git checkout .` / `git checkout -- .`, `git restore .` (working-tree discard). Normal path checkouts (`git checkout .github/workflows/ci.yml`), soft resets, dry-runs (`git clean -n`), and safe branch deletes (`-d`) pass.
-- **Message**: the hook refuses with "You do not have authority for this operation" and names the two legitimate exits — the user runs it themselves, or explicitly approves by setting `OMC_GIT_GUARDRAILS=0` for the session.
+- **Message**: the hook refuses with "You do not have authority for this operation" and names the two legitimate exits — the user runs it themselves, or explicitly approves by setting `OMC_GIT_GUARDRAILS=0` for the session. When auto-enabled by an active mode, the message names the mode.
 - **Prove it bites**: before trusting the guardrail in a session, feed it a planted violation once and watch it block (see the `refit` skill's landing rule). An installed guardrail nobody has seen fire is decoration, not protection.
 
 
