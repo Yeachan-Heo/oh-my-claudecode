@@ -150,7 +150,7 @@ Continue `team-exec -> team-verify -> team-fix` until:
 
 `team-fix` is bounded by max attempts. If fix attempts exceed the configured limit, transition to terminal `failed` (no infinite loop).
 
-**Run closeout (either terminal outcome).** Before `/oh-my-claudecode:cancel` state cleanup, append at most three factual lines to `.omc/notepads/team/problems.md` (blockers additionally in `issues.md`) — what broke (defects that survived a fix round, three-strike halts) and what dragged (worker environment friction, missing checks, unreachable information). An empty closeout is valid: write "no lessons" rather than inventing one. Observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
+**Run closeout (either terminal outcome).** Before `/oh-my-claudecode:cancel` state cleanup, append at most three factual lines to `.omc/notepads/team/problems.md` (blockers additionally in `issues.md`) — what broke (defects that survived a fix round, three-strike halts) and what dragged (worker environment friction, missing checks, unreachable information). An empty closeout is valid: write "no lessons" rather than inventing one. Observations only; landing them on repo surfaces is `refit`'s job, with the user's approval. When the outcome is terminal `failed` (max fix attempts exhausted, or an explicit blocked/failed outcome with evidence), the closeout also drafts the run's **incident work item** — failure signature, evidence pointers (failed task, verification output), and the reopen path — posted to the tracker when one exists (harbor's intake labels make it routable), else appended to `.omc/notepads/team/issues.md`. A failed run leaves a work item, not just a memory.
 
 ### Stage Handoff Convention
 

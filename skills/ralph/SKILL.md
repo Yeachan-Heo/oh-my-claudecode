@@ -171,7 +171,7 @@ Rules:
 
 9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete
 
-10. **Run closeout (before state cleanup)**: Append at most three factual lines to the run notepad so this run's friction outlives the session — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction) — into `.omc/notepads/ralph/problems.md` (blockers additionally in `issues.md`). An empty closeout is valid: write "no lessons" rather than inventing one. These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
+10. **Run closeout (before state cleanup)**: Append at most three factual lines to the run notepad so this run's friction outlives the session — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction) — into `.omc/notepads/ralph/problems.md` (blockers additionally in `issues.md`). An empty closeout is valid: write "no lessons" rather than inventing one. These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval. When the run ends in a stop-and-report escalation (the three-strike halt, verification that cannot pass), the closeout also drafts the run's **incident work item** — one-line failure signature, evidence pointers (state file, notepad lines, verification output), and the reopen path — posted to the tracker when one exists (harbor's intake labels make it routable), else appended to `.omc/notepads/ralph/issues.md`. A failed run leaves a work item, not just a memory.
    </Steps>
 
 <Tool_Usage>
