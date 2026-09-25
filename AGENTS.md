@@ -212,6 +212,7 @@ Workflow Skills:
 - `refit`: Cross-session environment retrospective — reads OMC instrumentation (trace, friction report, logs, plan notepads) and lands user-approved findings on deterministic checks, steering volumes, tooling, or information surfaces; opt-in
 - `pr`: PR body assembly from OMC's paper trail — smallest-visual summary (credited to show-me), evidence consumed from the verify protocol, reversibility from the ADR test, glossary language
 - `tdd`: Test-first discipline at pre-agreed seams — one test, one implementation, tracer-bullet steps; the test-time sibling of minimal-code-discipline; model-invoked
+- `map`: The yard's skill map — which skill owns which job, in delivery-loop order; routes, never executes
 
 Agent Shortcuts:
 - `analyze` -> debugger: Investigation and root-cause analysis

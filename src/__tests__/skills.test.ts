@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (46 canonical + 2 aliases)', () => {
+    it('should return correct number of skills (47 canonical + 2 aliases)', () => {
       const skills = createBuiltinSkills();
-      // 48 entries: 46 canonical skills + 2 aliases (cancel-ralph, psm)
-      expect(skills).toHaveLength(48);
+      // 49 entries: 47 canonical skills + 2 aliases (cancel-ralph, psm)
+      expect(skills).toHaveLength(49);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -148,6 +148,7 @@ describe('Builtin Skills', () => {
         'minimal-prose-discipline',
         'launch',
         'loft',
+        'map',
         'drydock',
         'omc-doctor',
         'omc-plan',
@@ -689,7 +690,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(46);
+      expect(names).toHaveLength(47);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('minimal-code-discipline');
       expect(names).toContain('launch');
@@ -730,7 +731,7 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131; learner retired in 5.0.0; cancel-ralph and psm remain
-      expect(names).toHaveLength(48);
+      expect(names).toHaveLength(49);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('autoresearch');
       expect(names).toContain('self-improve');
