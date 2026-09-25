@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "8465d7a4381b9f68dfef185e0cc4e2c401d9907c",
-    "sourceSha256": "e172e33d83fb1bf412a5b7abb46b5404da8983dc88df08c4f1ccfa43d9003259",
+    "head": "b13170481ca57fc73b989c208ee34ace0dcc4d0d",
+    "sourceSha256": "3972e437f75cbc8f760cc01bada25269284dbdebbf3cf2cd1862e7c190973750",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "8465d7a4381b9f68dfef185e0cc4e2c401d9907c",
-  "sourceSha256": "e172e33d83fb1bf412a5b7abb46b5404da8983dc88df08c4f1ccfa43d9003259",
+  "head": "b13170481ca57fc73b989c208ee34ace0dcc4d0d",
+  "sourceSha256": "3972e437f75cbc8f760cc01bada25269284dbdebbf3cf2cd1862e7c190973750",
   "counts": {
     "public": {
       "skills": 47,
@@ -41764,6 +41764,11 @@
         "path": "tests/integration/skill-map-references.test.ts"
       },
       {
+        "id": "tests/integration/state-root-fs-probe.test.ts",
+        "kind": "other",
+        "path": "tests/integration/state-root-fs-probe.test.ts"
+      },
+      {
         "id": "tests/integration/task-list-identity-stop.test.ts",
         "kind": "other",
         "path": "tests/integration/task-list-identity-stop.test.ts"
@@ -80741,6 +80746,41 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-root-fs-probe.test.ts",
+        "to": "templates/hooks/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/task-list-identity-stop.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -81177,12 +81217,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7076,
-      "edgeCount": 7859,
-      "importEdgeCount": 6468,
+      "nodeCount": 7077,
+      "edgeCount": 7866,
+      "importEdgeCount": 6475,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "3cb5e8919c200947893f3bdd704c7eccb944a652266f5ac0d1a74ec4081a80aa",
-  "manifestSha256": "7b3deae53fd7cf34a3018ef8001a318a9e20bbfd5a385c9144dd95a1256060d7"
+  "inventorySha256": "0f9f3664718b1e587aba535d52cf9e1e93f65b7b48ae3740acfed6bf0ee51afe",
+  "manifestSha256": "8b0bc919f614e3478ec040cba1233897d231c3326adad69ec7996d9b011d0665"
 }
