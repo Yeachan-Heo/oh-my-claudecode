@@ -64,9 +64,33 @@ function primaryGitRoot(gitRoot) {
   return gitRoot;
 }
 
+function findGitRootFs(directory) {
+  // PATH-independent git-root discovery: walk up for a `.git` entry (a
+  // directory for normal repos, a file for linked worktrees/submodules).
+  // Mirrors `git rev-parse --show-toplevel` for every layout a hook can
+  // realistically run in, without ever spawning git.
+  let cursor = resolve(directory);
+  while (true) {
+    if (existsSync(join(cursor, '.git'))) return cursor;
+    const parent = dirname(cursor);
+    if (parent === cursor) return null;
+    cursor = parent;
+  }
+}
+
 function probeGitRoot(directory) {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || null; }
-  catch (error) { if (error?.code === 'ENOENT' || (error?.status === 128 && /not a git repository/i.test(String(error?.stderr ?? '')))) return null; throw error; }
+  // The filesystem walk is the primary probe. The git spawn is a refinement
+  // for exotic layouts only, and its failure must NEVER degrade the answer
+  // to a HOME fallback: when git is absent from PATH, ENOENT used to be
+  // swallowed as "not a repository" here, silently re-aiming every state
+  // consumer (guardrails, watchdog, session restore) at ~/.omc.
+  const fsRoot = findGitRootFs(directory);
+  if (!fsRoot) return null;
+  try {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: directory, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || fsRoot;
+  } catch {
+    return fsRoot;
+  }
 }
 
 function isSafeWorkspaceRoot(workspaceRoot) {
