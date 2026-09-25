@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5e5916a3e832ec9e88e60046336d17347526e59f",
-    "sourceSha256": "845ee6bfbe626aaa8cf3950d601e2997ffe7d48a662bc2e12cc8a6a588ade7e6",
+    "head": "5d765a83b7abbe0aae8c673ce7cbdf0e22299412",
+    "sourceSha256": "42dcd28f0e85068c32cd437dfaa34dc28b67c4cf341ed2ded38e25a63c23ba46",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5e5916a3e832ec9e88e60046336d17347526e59f",
-  "sourceSha256": "845ee6bfbe626aaa8cf3950d601e2997ffe7d48a662bc2e12cc8a6a588ade7e6",
+  "head": "5d765a83b7abbe0aae8c673ce7cbdf0e22299412",
+  "sourceSha256": "42dcd28f0e85068c32cd437dfaa34dc28b67c4cf341ed2ded38e25a63c23ba46",
   "counts": {
     "public": {
-      "skills": 46,
+      "skills": 47,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 95
+      "total": 96
     },
     "internal": {
       "hookFiles": 319,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 61
     },
-    "skills": 46,
+    "skills": 47,
     "commands": 21,
     "hookFiles": 319,
     "workflows": 8,
@@ -70,6 +70,7 @@
       "intent",
       "launch",
       "loft",
+      "map",
       "minimal-code-discipline",
       "minimal-prose-discipline",
       "omc-doctor",
@@ -34306,6 +34307,11 @@
         "path": "skills/loft/SKILL.md"
       },
       {
+        "id": "skills/map/SKILL.md",
+        "kind": "skill",
+        "path": "skills/map/SKILL.md"
+      },
+      {
         "id": "skills/minimal-code-discipline/SKILL.md",
         "kind": "skill",
         "path": "skills/minimal-code-discipline/SKILL.md"
@@ -41781,6 +41787,11 @@
         "path": "tests/integration/multirepo-workspace.test.ts"
       },
       {
+        "id": "tests/integration/skill-map-references.test.ts",
+        "kind": "other",
+        "path": "tests/integration/skill-map-references.test.ts"
+      },
+      {
         "id": "tests/integration/stale-run-reporter.test.ts",
         "kind": "other",
         "path": "tests/integration/stale-run-reporter.test.ts"
@@ -44469,6 +44480,11 @@
       },
       {
         "from": "skills/loft/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/map/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -80823,6 +80839,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/skill-map-references.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/skill-map-references.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/skill-map-references.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/stale-run-reporter.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -81324,12 +81355,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7081,
-      "edgeCount": 7883,
-      "importEdgeCount": 6493,
-      "registerEdgeCount": 67
+      "nodeCount": 7083,
+      "edgeCount": 7887,
+      "importEdgeCount": 6496,
+      "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "ef721b89e69590f17163a06d2af7d045e4cd8d079a75fe9585fe99243c65835c",
-  "manifestSha256": "ba3e79a1789b4343df4f48ebaadb10580c22abe0a544cea43168df8a33694179"
+  "inventorySha256": "f7b5ce4c5a22bca4cfd46db280d4abda7181cd9e8358775f9d542a2f519049a4",
+  "manifestSha256": "6263726ef6f2b153853bcb3ed7f3b028edf6fab312aaaca759c4667d0377ca71"
 }

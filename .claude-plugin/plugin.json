@@ -38,6 +38,7 @@
     "./skills/hud/",
     "./skills/launch/",
     "./skills/loft/",
+    "./skills/map/",
     "./skills/minimal-code-discipline/",
     "./skills/minimal-prose-discipline/",
     "./skills/omc-doctor/",
