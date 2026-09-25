@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (45 Total)](#skills-45-total)
+- [Skills (46 Total)](#skills-46-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -913,7 +913,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (45 Total)
+## Skills (46 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -964,6 +964,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                              | `/oh-my-claudecode:skill`                   |
 | `skillify`                | Extract a reusable skill from the current session                              | `/oh-my-claudecode:skillify`                |
 | `team`                    | Coordinated multi-agent workflow                                               | `/oh-my-claudecode:team`                    |
+| `tdd`                     | Test-first discipline at pre-agreed seams                                     | `/oh-my-claudecode:tdd`                     |
 | `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses                   | `/oh-my-claudecode:trace`                  |
 | `ultragoal`               | Durable multi-goal workflow with checkpointed artifacts                        | `/oh-my-claudecode:ultragoal`              |
 | `verify`                  | Verify that a change really works before claiming completion                    | `/oh-my-claudecode:verify`                 |
@@ -975,7 +976,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 
 ## Slash Commands
 
-Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The plugin ships 21 command files alongside the 44 skill entrypoints listed above; the commands below list both surfaces. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
+Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The plugin ships 21 command files alongside the 45 skill entrypoints listed above; the commands below list both surfaces. Compatibility keyword modes like `deep-analyze` and `tdd` are prompt-triggered behaviors, not standalone slash commands. OMC's manual compaction helper is plugin-scoped as `/oh-my-claudecode:compact`; bare `/compact` remains Claude Code's native command and is not shadowed by OMC. The helper preserves the user's note and instructs them to run bare `/compact`; OMC does not invoke native compaction itself because Claude Code's built-in `/compact` is not a prompt skill.
 
 | Command                                                  | Description                                                                                   |
 | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -1020,6 +1021,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:skill <action>`                       | Manage local skills                                                                           |
 | `/oh-my-claudecode:skillify`                             | Extract a reusable skill from the current session                                             |
 | `/oh-my-claudecode:team <N>:<agent> <task>`               | Coordinated native team workflow                                                              |
+| `/oh-my-claudecode:tdd`                                  | Test-first discipline at pre-agreed seams                                                     |
 | `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane                                                                  |
 | `/oh-my-claudecode:ultragoal <condition>`                | Track a durable multi-goal workflow                                                           |
 | `/oh-my-claudecode:verify <target>`                      | Verify that a change really works before claiming completion                                  |
