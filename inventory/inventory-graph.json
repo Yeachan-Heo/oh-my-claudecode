@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a1caeb3dddd4b77ffc28b2df04708f80124885bb",
-    "sourceSha256": "7e0f10b0b3f4a6a956bf286cea20d288bfdf38a09d1e3ec5a223545bd875a692",
+    "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
+    "sourceSha256": "bac17a0bbabf9d682b9c31684c1fa6d946094d48ae03ad9f52e46e3511c566ff",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a1caeb3dddd4b77ffc28b2df04708f80124885bb",
-  "sourceSha256": "7e0f10b0b3f4a6a956bf286cea20d288bfdf38a09d1e3ec5a223545bd875a692",
+  "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
+  "sourceSha256": "bac17a0bbabf9d682b9c31684c1fa6d946094d48ae03ad9f52e46e3511c566ff",
   "counts": {
     "public": {
       "skills": 47,
@@ -42624,6 +42624,11 @@
       },
       {
         "from": "scripts/code-simplifier.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/code-simplifier.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -42894,6 +42899,11 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
+        "to": "dist/hooks/task-size-detector/index.js",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
         "to": "dist/planning/artifacts.js",
         "kind": "imports"
       },
@@ -42930,6 +42940,11 @@
       {
         "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -43378,6 +43393,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/persistent-mode.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/plugin-setup.mjs",
         "to": "external:better-sqlite3",
         "kind": "imports"
@@ -43569,6 +43589,11 @@
       },
       {
         "from": "scripts/post-tool-verifier.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-verifier.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -43650,6 +43675,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "scripts/lib/force-agent-delegation-preflight.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -81295,11 +81325,11 @@
     ],
     "stats": {
       "nodeCount": 7080,
-      "edgeCount": 7878,
-      "importEdgeCount": 6487,
+      "edgeCount": 7884,
+      "importEdgeCount": 6493,
       "registerEdgeCount": 68
     }
   },
   "inventorySha256": "5234e2bd1bb9358cbf239732a6f89fa5d11674618bb82abb7b77af8d87c6f0db",
-  "manifestSha256": "c217f327e862d73bbc3c0a137564ceeb980898276e9eb34cea7b02478ca8f2b9"
+  "manifestSha256": "b2cb71021e853f833c12064399fef4a649cbe803097f4564657e40296a8999e6"
 }
