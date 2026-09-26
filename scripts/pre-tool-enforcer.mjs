@@ -6,11 +6,11 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, writeFileSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname, join, resolve, basename } from 'path';
-import { homedir, tmpdir } from 'os';
-import { execFileSync, spawn } from 'child_process';
+import { homedir } from 'os';
+import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
@@ -22,6 +22,7 @@ import { readStdin } from './lib/stdin.mjs';
 import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
+import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -553,10 +554,7 @@ function shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText) {
   return hasSlopFallbackActionShape(inspectedText);
 }
 
-// --- Jev slop-warning shadow point (ticket 16) ---
-// The channel is scripts/jev-resolve.mjs (ADR 03671, script-side judgment
-// channel). Inline env precheck mirrors the config contract's opt-in
-// semantics (all wildcard, :active suffix); no spawn without key + opt-in.
+// --- Jev script-side shadow points ---
 
 const SLOP_WARNING_QUESTIONS = {
   slop_advisory: {
@@ -569,42 +567,65 @@ const SLOP_WARNING_QUESTIONS = {
   },
 };
 
-function jevSlopWarningOptedIn() {
-  const raw = (process.env.OMC_JEV || '').trim();
-  if (!process.env.TYPESAFE_API_KEY || raw === 'off') return false;
-  for (const entry of raw.split(',')) {
-    const token = entry.trim();
-    if (!token) continue;
-    const colon = token.lastIndexOf(':');
-    const name = colon === -1 ? token : token.slice(0, colon);
-    if (name === 'all' || name === 'slop-warning') return true;
-  }
-  return false;
-}
+const MODEL_ROUTING_QUESTIONS = {
+  'model-tier': {
+    type: 'choice',
+    instructions: 'Which model tier should this delegated task use?',
+    criteria: {
+      haiku: 'Quick lookups and lightweight, mechanical work',
+      sonnet: 'Standard coding and orchestration work',
+      opus: 'Complex architecture and deep analysis',
+    },
+  },
+};
 
 function recordSlopWarningShadow(toolName, toolInput, warned) {
-  if (!jevSlopWarningOptedIn()) return;
-  try {
-    const request = JSON.stringify({
-      point: 'slop-warning',
-      state: { toolName, toolInput },
-      questions: SLOP_WARNING_QUESTIONS,
-      heuristic: warned,
-    });
-    // The request carries raw tool input, so it goes through a 0600 temp file,
-    // never argv: /proc/<pid>/cmdline is readable by every local user. The
-    // child deletes the file after reading it.
-    const requestFile = join(mkdtempSync(join(tmpdir(), 'omc-jev-')), 'request.json');
-    writeFileSync(requestFile, request, { encoding: 'utf8', mode: 0o600 });
-    const child = spawn(process.execPath, [fileURLToPath(new URL('./jev-resolve.mjs', import.meta.url)), '--request-file', requestFile], {
-      stdio: ['ignore', 'ignore', 'ignore'],
-      env: process.env,
-    });
-    child.on('error', () => {});
-    child.unref();
-  } catch {
-    // Fire-and-record: any spawn failure must never affect the tool path.
+  recordJevShadow({
+    point: 'slop-warning',
+    state: { toolName, toolInput },
+    questions: SLOP_WARNING_QUESTIONS,
+    heuristic: warned,
+  });
+}
+
+const MODEL_ROUTING_METADATA_MAX_CHARS = 500;
+
+function boundModelRoutingInput(toolInput) {
+  const bounded = {};
+  for (const key of ['description', 'prompt', 'subagent_type', 'model', 'resume']) {
+    if (typeof toolInput[key] === 'string') {
+      bounded[key] = toolInput[key].slice(0, MODEL_ROUTING_METADATA_MAX_CHARS);
+    }
   }
+  if (typeof toolInput.run_in_background === 'boolean') {
+    bounded.run_in_background = toolInput.run_in_background;
+  }
+  return bounded;
+}
+
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput) {
+  if (!isJevShadowOptedIn('model-routing')) return;
+
+  const originalInput = boundModelRoutingInput(toolInput);
+  const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
+  const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
+  const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
+  if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
+  recordJevShadow({
+    point: 'model-routing',
+    state: {
+      tool_name: toolName,
+      subagent_type: originalInput.subagent_type || '',
+      task: originalInput.prompt || '',
+    },
+    questions: MODEL_ROUTING_QUESTIONS,
+    heuristic: {
+      originalInput,
+      modifiedInput,
+      injected: Boolean(updatedToolInput),
+      model,
+    },
+  });
 }
 
 function generateSlopWarning(data, toolName) {
@@ -1908,6 +1929,11 @@ async function main() {
           }
         }
       }
+    }
+
+    if (toolName === 'Task' || toolName === 'Agent') {
+      const toolInput = data.toolInput || data.tool_input || {};
+      recordModelRoutingShadow(toolName, toolInput, updatedToolInput);
     }
 
     // Send notification when AskUserQuestion is about to execute (user input needed)

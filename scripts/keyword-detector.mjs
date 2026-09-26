@@ -30,6 +30,7 @@ import { atomicWriteFileSync, getStateFileLockFailureMessage, recoverEmergencySt
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot, resolveSessionStatePathsForHook } from './lib/state-root.mjs';
 import { parseWorkflowInvocation, selectWorkflowProfile, createWorkflowState, isValidWorkflowTrackingState, isWorkflowRuntimeSupported, resolveWorkflowStagePrompt, takeWorkflowTranscriptFailure } from './lib/workflow-profile-runtime.mjs';
+import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
 
 // Resolve OMC package root: CLAUDE_PLUGIN_ROOT (plugin system) or derive from this script's location
 const _omcRoot = process.env.CLAUDE_PLUGIN_ROOT ||
@@ -1651,6 +1652,54 @@ function createHookOutput(additionalContext) {
   };
 }
 
+const SKILL_TRIGGER_QUESTIONS = {
+  'skill-trigger': {
+    type: 'choice',
+    instructions: 'Which skill or mode should this user prompt trigger?',
+    criteria: {
+      cancel: 'The prompt explicitly invokes the cancel trigger.',
+      ralph: 'The prompt explicitly invokes the ralph trigger.',
+      autopilot: 'The prompt explicitly invokes the autopilot trigger.',
+      ralplan: 'The prompt explicitly invokes the ralplan trigger.',
+      tdd: 'The prompt explicitly invokes the tdd trigger.',
+      'code-review': 'The prompt explicitly invokes the code-review trigger.',
+      'security-review': 'The prompt explicitly invokes the security-review trigger.',
+      ultrathink: 'The prompt explicitly invokes the ultrathink trigger.',
+      deepsearch: 'The prompt explicitly invokes the deepsearch trigger.',
+      analyze: 'The prompt explicitly invokes the analyze trigger.',
+      'deep-interview': 'The prompt explicitly invokes the deep-interview trigger.',
+      codex: 'The prompt explicitly invokes the codex trigger.',
+      none: 'No trigger fires; handle the prompt without a mode or skill.',
+    },
+  },
+};
+
+const INTENT_QUESTIONS = {
+  intent: {
+    type: 'noul',
+    instructions:
+      'Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?',
+    criteria: {
+      true: 'The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake — a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.',
+      false: 'Everything else: solution or engineering work, informational questions, or an existing workflow. Not an Intent-intake request.',
+    },
+  },
+};
+
+const TASK_SIZE_QUESTIONS = {
+  'task-size': {
+    type: 'choice',
+    instructions: 'What size is this task — how much orchestration does it warrant?',
+    criteria: {
+      small: 'Single-file or few-line change; run directly without heavy modes',
+      medium: 'Multi-file but single-area change; standard delegation',
+      large: 'Multi-area or architectural change; heavy orchestration (ralph/autopilot/team) is warranted',
+    },
+  },
+};
+
+const INTENT_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?intent(?=\s|$|[?!.,;:])/i;
+
 // Main
 async function main() {
   // Skip guard: check OMC_SKIP_HOOKS env var (see issue #838)
@@ -1873,6 +1922,36 @@ async function main() {
 
     // Resolve conflicts
     const resolved = resolveConflicts(uniqueMatches);
+
+    if (isJevShadowOptedIn('skill-trigger')) {
+      recordJevShadow({
+        point: 'skill-trigger',
+        state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
+        questions: SKILL_TRIGGER_QUESTIONS,
+        heuristic: resolved.map((match) => match.name),
+      });
+    }
+    if (isJevShadowOptedIn('intent')) {
+      recordJevShadow({
+        point: 'intent',
+        state: { prompt: cleanPrompt, mode_name: 'intent' },
+        questions: INTENT_QUESTIONS,
+        heuristic: INTENT_SLASH_PATTERN.test(cleanPrompt),
+      });
+    }
+    if (isJevShadowOptedIn('task-size')) {
+      try {
+        const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
+        recordJevShadow({
+          point: 'task-size',
+          state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
+          questions: TASK_SIZE_QUESTIONS,
+          heuristic: classifyTaskSize(cleanPrompt),
+        });
+      } catch {
+        // The compiled twin is optional for script-only installs; never affect prompt handling.
+      }
+    }
 
     // Import flow tracer once (best-effort)
     let tracer = null;

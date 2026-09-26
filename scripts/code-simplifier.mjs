@@ -23,10 +23,21 @@ import { execFileSync } from 'child_process';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
+import { recordJevShadow } from './lib/jev-shadow.mjs';
 
 const DEFAULT_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.py', '.go', '.rs'];
 const DEFAULT_MAX_FILES = 10;
 const MARKER_FILENAME = 'code-simplifier-triggered.marker';
+const SIMPLIFIER_TRIGGER_QUESTIONS = {
+  simplification_worthy: {
+    type: 'noul',
+    instructions: 'Is this change simplification-worthy enough to inject the simplifier delegation?',
+    criteria: {
+      true: 'The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)',
+      false: 'Change is already minimal or not code',
+    },
+  },
+};
 
 function readJsonFile(filePath) {
   try {
@@ -120,6 +131,13 @@ async function main() {
       process.stdout.write(JSON.stringify({ continue: true }) + '\n');
       return;
     }
+
+    recordJevShadow({
+      point: 'simplifier-trigger',
+      state: { cwd, files, source: 'code-simplifier-stop' },
+      questions: SIMPLIFIER_TRIGGER_QUESTIONS,
+      heuristic: true,
+    });
 
     // Write trigger marker to prevent re-triggering within this turn cycle
     try {
