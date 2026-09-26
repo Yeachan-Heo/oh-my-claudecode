@@ -121300,6 +121300,9 @@ function getSetupFallbackCanonicalSkillPaths(baseName) {
   });
 }
 function isSupportedSetupFallbackSkill(legacySkillsDir, entry2, baseName) {
+  if (hasActiveOmcPluginForDiagnostics()) {
+    return false;
+  }
   if (!SETUP_FALLBACK_SKILL_NAMES.has(baseName)) {
     return false;
   }
@@ -121311,8 +121314,8 @@ function isSupportedSetupFallbackSkill(legacySkillsDir, entry2, baseName) {
     return false;
   }
   try {
-    const installedContent = (0, import_fs123.readFileSync)(installedSkillPath);
-    return getSetupFallbackCanonicalSkillPaths(baseName).some((canonicalSkillPath) => (0, import_fs123.existsSync)(canonicalSkillPath) && installedContent.equals((0, import_fs123.readFileSync)(canonicalSkillPath)));
+    const installedContent = (0, import_fs123.readFileSync)(installedSkillPath, "utf-8");
+    return getSetupFallbackCanonicalSkillPaths(baseName).some((canonicalSkillPath) => (0, import_fs123.existsSync)(canonicalSkillPath) && installedContent === (0, import_fs123.readFileSync)(canonicalSkillPath, "utf-8"));
   } catch {
     return false;
   }
