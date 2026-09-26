@@ -798,6 +798,21 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
     expect(collisions).toHaveLength(0);
   });
 
+  it('does not flag an exact setup-installed wiki fallback while the plugin is active (issue #4118)', () => {
+    const canonicalContent = '# Canonical wiki skill\n';
+    const canonicalPath = join(TEST_DIRS.builtinSkillsDir, 'wiki', 'SKILL.md');
+    mkdirSync(join(TEST_DIRS.builtinSkillsDir, 'wiki'), { recursive: true });
+    writeFileSync(canonicalPath, canonicalContent);
+    writeFileSync(join(TEST_CLAUDE_DIR, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode@omc': true },
+    }));
+    const installedPath = join(TEST_CLAUDE_DIR, 'skills', 'wiki');
+    mkdirSync(installedPath, { recursive: true });
+    writeFileSync(join(installedPath, 'SKILL.md'), canonicalContent);
+
+    expect(checkLegacySkills()).toEqual([]);
+  });
+
   it('does NOT flag setup-installed omc-reference fallback when setup resolved a newer active cache root (issue #2992)', () => {
     const oldContent = '# Old omc-reference skill\n';
     const newerContent = '# Newer setup-installed omc-reference skill\n';
@@ -819,31 +834,41 @@ describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => 
     expect(collisions).toHaveLength(0);
   });
 
-  it('flags setup-installed omc-reference fallback when an active plugin root is present', () => {
+  it('does not flag an exact setup-installed omc-reference fallback when a plugin is active', () => {
     const currentContent = '# Current omc-reference skill\n';
     const sessionContent = '# Session root omc-reference skill\n';
     const sessionPluginRoot = join(TEST_PROJECT_DIR, 'session-plugin-root');
     writeCanonicalOmcReferenceSkill(currentContent);
     writePluginRoot(sessionPluginRoot, sessionContent);
     process.env.CLAUDE_PLUGIN_ROOT = sessionPluginRoot;
+    writeFileSync(join(TEST_CLAUDE_DIR, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode@omc': true },
+    }));
     const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
     mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
     const installedPath = join(skillsDir, 'omc-reference');
     writeFileSync(join(installedPath, 'SKILL.md'), sessionContent);
 
     const collisions = checkLegacySkills();
-    expect(collisions).toEqual([{ name: 'omc-reference', path: installedPath }]);
+    expect(collisions).toEqual([]);
   });
 
-  it('flags user-modified omc-reference fallback content as a real collision (issue #2992)', () => {
-    writeCanonicalOmcReferenceSkill('# Canonical omc-reference skill\n');
+  it('flags user-modified omc-reference fallback content with an active plugin (issue #2992)', () => {
+    const canonicalContent = '# Canonical omc-reference skill\n';
+    const sessionPluginRoot = join(TEST_PROJECT_DIR, 'session-plugin-root');
+    writeCanonicalOmcReferenceSkill(canonicalContent);
+    writePluginRoot(sessionPluginRoot, canonicalContent);
+    process.env.CLAUDE_PLUGIN_ROOT = sessionPluginRoot;
+    writeFileSync(join(TEST_CLAUDE_DIR, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode@omc': true },
+    }));
     const skillsDir = join(TEST_CLAUDE_DIR, 'skills');
     mkdirSync(join(skillsDir, 'omc-reference'), { recursive: true });
-    writeFileSync(join(skillsDir, 'omc-reference', 'SKILL.md'), '# Modified omc-reference skill\n');
+    const installedPath = join(skillsDir, 'omc-reference');
+    writeFileSync(join(installedPath, 'SKILL.md'), '# Modified omc-reference skill\n');
 
     const collisions = checkLegacySkills();
-    expect(collisions).toHaveLength(1);
-    expect(collisions[0].name).toBe('omc-reference');
+    expect(collisions).toEqual([{ name: 'omc-reference', path: installedPath }]);
   });
 
   it('still flags non-contract omc-reference.md legacy files (issue #2992)', () => {

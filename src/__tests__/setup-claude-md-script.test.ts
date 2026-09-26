@@ -673,7 +673,7 @@ Use the real docs file.
     expect(readFileSync(targetPath, 'utf-8')).toBe(installed);
   });
 
-  it('uses CLAUDE_CONFIG_DIR for global setup targets and plugin verification', () => {
+  it('uses CLAUDE_CONFIG_DIR and skips the wiki fallback when the OMC plugin is active', () => {
     const fixture = createPluginFixture(`<!-- OMC:START -->
 <!-- OMC:VERSION:9.9.9 -->
 
@@ -685,7 +685,9 @@ Use the real docs file.
     const configDir = join(fixture.homeRoot, 'custom-profile');
     mkdirSync(join(configDir, 'hooks'), { recursive: true });
     writeFileSync(join(configDir, 'hooks', 'keyword-detector.sh'), 'legacy');
-    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode@omc': true },
+    }));
 
     const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
       cwd: fixture.projectRoot,
@@ -699,10 +701,51 @@ Use the real docs file.
 
     expect(result.status).toBe(0);
     expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(true);
-    expect(existsSync(join(configDir, 'skills', 'wiki', 'SKILL.md'))).toBe(true);
+    const installedSkillPath = join(configDir, 'skills', 'wiki', 'SKILL.md');
+    expect(existsSync(installedSkillPath)).toBe(false);
     expect(existsSync(join(configDir, 'hooks', 'keyword-detector.sh'))).toBe(true);
     expect(`${result.stdout}\n${result.stderr}`).toContain('Plugin verified');
     expect(`${result.stdout}\n${result.stderr}`).toContain('Preserved unverified legacy hook');
+
+    mkdirSync(join(configDir, 'skills', 'wiki'), { recursive: true });
+    writeFileSync(installedSkillPath, '# User-managed wiki skill\n');
+    const rerun = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: {
+        ...process.env,
+        HOME: fixture.homeRoot,
+        CLAUDE_CONFIG_DIR: configDir,
+      },
+      encoding: 'utf-8',
+    });
+
+    expect(rerun.status).toBe(0);
+    expect(readFileSync(installedSkillPath, 'utf-8')).toBe('# User-managed wiki skill\n');
+  });
+
+  it('installs the wiki fallback when the OMC plugin is explicitly disabled', () => {
+    const fixture = createPluginFixture(`<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`);
+    const configDir = join(fixture.homeRoot, '.claude');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'oh-my-claudecode@omc': false },
+    }));
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(configDir, 'skills', 'wiki', 'SKILL.md'), 'utf-8'))
+      .toBe(readFileSync(join(fixture.pluginRoot, 'skills', 'wiki', 'SKILL.md'), 'utf-8'));
   });
 
   it('does not warn for third-party-only settings hooks', () => {
