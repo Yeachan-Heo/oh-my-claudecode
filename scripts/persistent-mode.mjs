@@ -40,28 +40,6 @@ const LOOP_CONTINUATION_NOUL_QUESTIONS = {
     criteria: {},
   },
 };
-const LOOP_CONTINUATION_SCORE_QUESTIONS = {
-  iteration_progress: {
-    type: "score",
-    instructions: "How much substantive progress did the current iteration make?",
-    criteria: {
-      no_progress: "No progress",
-      minor_progress: "Minor progress",
-      moderate_progress: "Moderate progress",
-      substantial_progress: "Substantial progress",
-    },
-  },
-};
-const RALPH_VERDICT_QUESTIONS = {
-  completion_criteria_met: {
-    type: "noul",
-    instructions: "Does the completion claim satisfy the PRD acceptance criteria for this mode?",
-    criteria: {
-      true: "All acceptance criteria are demonstrably satisfied by the evidence",
-      false: "At least one criterion is unmet or evidence is missing",
-    },
-  },
-};
 const LEARNER_EXTRACTION_QUESTIONS = {
   extractable_moment: {
     type: "noul",
@@ -79,27 +57,6 @@ function recordLoopContinuationShadow(state, heuristic) {
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
     heuristic,
-  });
-  recordJevShadow({
-    point: "loop-continuation",
-    state,
-    questions: LOOP_CONTINUATION_SCORE_QUESTIONS,
-    heuristic,
-  });
-}
-
-function recordRalphVerdictShadow(data, ralphState) {
-  if (typeof data.last_assistant_message !== "string" || !data.last_assistant_message.trim()) return;
-  recordJevShadow({
-    point: "ralph-verdict",
-    state: {
-      mode_name: "ralph",
-      completion_claim: typeof data.last_assistant_message === "string" ? data.last_assistant_message : null,
-      task_excerpt: typeof ralphState.prompt === "string" ? ralphState.prompt : null,
-      verification_available: false,
-    },
-    questions: RALPH_VERDICT_QUESTIONS,
-    heuristic: false,
   });
 }
 
@@ -1391,7 +1348,6 @@ async function main() {
             continuation_excerpt: reason,
           };
           recordLoopContinuationShadow(judgmentState, heuristic);
-          recordRalphVerdictShadow(data, ralph.state);
 
           console.log(
             JSON.stringify({
@@ -1445,7 +1401,6 @@ async function main() {
           iteration: ralph.state.iteration,
           maxIterations: ralph.state.max_iterations,
         });
-        recordRalphVerdictShadow(data, ralph.state);
         console.log(
           JSON.stringify({
             decision: "block",

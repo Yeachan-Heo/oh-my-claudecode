@@ -608,7 +608,9 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput) {
 
   const originalInput = boundModelRoutingInput(toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
-  const model = modifiedInput.model || 'inherit';
+  const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
+  const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
+  if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
   recordJevShadow({
     point: 'model-routing',
     state: {

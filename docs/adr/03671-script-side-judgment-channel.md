@@ -12,16 +12,23 @@ these existing event/twin sites:
 - `intent`, `skill-trigger`, and `task-size`: `scripts/keyword-detector.mjs`
   (`UserPromptSubmit`)
 - `model-routing` and `slop-warning`: `scripts/pre-tool-enforcer.mjs`
-  (`PreToolUse`)
-- `loop-continuation`, `ralph-verdict`, and `learner-extraction`:
+  (`PreToolUse`). Model-routing is recorded only when the actual explicit,
+  configured, or agent-definition model maps to a declared `haiku`, `sonnet`,
+  or `opus` tier.
+- `loop-continuation` (Noul only) and `learner-extraction`:
   `scripts/persistent-mode.mjs` (`Stop`); learner detection uses the event's
-  `last_assistant_message`. The plugin's minimal Ralph Stop hook has no PRD
-  verifier, so its verdict twin is conservatively false and is marked
-  `verification_available: false` in the recorded state.
+  `last_assistant_message`.
 - `context-pruning`: `scripts/post-tool-verifier.mjs` (`PostToolUse`), where the
   existing context-usage threshold and tool-result candidate are available;
   `PreCompact` only preserves state and has no pruning candidate/twin.
 - `simplifier-trigger`: `scripts/code-simplifier.mjs` (`Stop`)
+
+The plugin's minimal `persistent-mode.mjs` has no PRD verifier or reviewer
+verdict result. `ralph-verdict` therefore remains unwired for plugin installs;
+do not infer a negative completion verdict from a generic Stop or a continuation
+block. Its `loop-continuation` path likewise has no substantive-progress Score
+twin, so it records only the existing completion Noul rather than inventing a
+score from the iteration counter or block decision.
 
 These calls are fire-and-record, matching the slop-warning integration. The
 script hooks do not consume the resolver's child-process result: the existing

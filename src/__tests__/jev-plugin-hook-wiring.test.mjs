@@ -163,6 +163,21 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     });
   });
 
+  it('does not guess a model tier when the PreToolUse route is unresolved', () => {
+    const context = makeContext();
+    runHook(context, 'pre-tool-enforcer.mjs', {
+      cwd: context.cwd,
+      tool_name: 'Task',
+      tool_input: {
+        subagent_type: 'custom-unmapped-agent',
+        description: 'Run a custom agent',
+        prompt: 'Handle this task.',
+      },
+    }, 'model-routing');
+
+    expect(existsSync(join(context.logDir, 'shadow.jsonl'))).toBe(false);
+  });
+
   it('records loop-continuation for an active Ralph Stop hook', () => {
     const context = makeContext();
     const sessionId = createRalphState(context);
@@ -172,14 +187,21 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       last_assistant_message: 'The task is not complete yet.',
     }, 'loop-continuation');
 
-    expect(readPoint(context, 'loop-continuation')).toMatchObject({
+    const entry = readPoint(context, 'loop-continuation');
+    expect(entry).toMatchObject({
       point: 'loop-continuation',
       state: { mode_name: 'ralph', should_block: true },
       heuristic: { mode: 'ralph', shouldBlock: true },
     });
+    const logEntries = readFileSync(join(context.logDir, 'shadow.jsonl'), 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    expect(logEntries.filter((candidate) => candidate.point === 'loop-continuation')).toHaveLength(1);
   });
 
-  it('records the current conservative Ralph verdict for a Stop completion claim', () => {
+  it('does not fabricate a Ralph verdict when the plugin Stop hook has no verifier', () => {
     const context = makeContext();
     const sessionId = createRalphState(context);
     runHook(context, 'persistent-mode.mjs', {
@@ -188,15 +210,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       last_assistant_message: 'The task is complete.',
     }, 'ralph-verdict');
 
-    expect(readPoint(context, 'ralph-verdict')).toMatchObject({
-      point: 'ralph-verdict',
-      state: {
-        mode_name: 'ralph',
-        completion_claim: 'The task is complete.',
-        verification_available: false,
-      },
-      heuristic: false,
-    });
+    expect(existsSync(join(context.logDir, 'shadow.jsonl'))).toBe(false);
   });
 
   it('records learner-extraction from the Stop hook assistant message', () => {
