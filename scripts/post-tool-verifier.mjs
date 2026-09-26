@@ -18,6 +18,7 @@ import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
+import { recordJevShadow } from './lib/jev-shadow.mjs';
 
 const SKIP_HOOKS = (process.env.OMC_SKIP_HOOKS || '').split(',').map(s => s.trim());
 const HOOK_DISABLED =
@@ -28,6 +29,19 @@ const HOOK_DISABLED =
 const DEFAULT_AGENT_OUTPUT_ANALYSIS_LIMIT = 12_000;
 const DEFAULT_AGENT_OUTPUT_SUMMARY_LIMIT = 360;
 const DEFAULT_PREEMPTIVE_COOLDOWN_MS = 60_000;
+
+const CONTEXT_PRUNING_QUESTIONS = {
+  staleness: {
+    type: 'score',
+    instructions: 'How stale is this context candidate?',
+    criteria: {
+      fresh: 'Fresh — keep',
+      recent: 'Recent',
+      aging: 'Aging',
+      stale: 'Stale — prune candidate',
+    },
+  },
+};
 
 function readPositiveIntegerEnv(name, fallback) {
   const raw = process.env[name];
@@ -536,6 +550,26 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   if (percentUsed === null || percentUsed < warningThreshold) {
     return '';
   }
+
+  const action = percentUsed >= criticalThreshold ? 'compact' : 'warn';
+  const rawResponse = data.tool_response || data.toolOutput || '';
+  const toolResponse = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse);
+  const firstLine = toolResponse.split(/\r?\n/, 1)[0] || '';
+  recordJevShadow({
+    point: 'context-pruning',
+    state: {
+      action,
+      context_percent: percentUsed,
+      candidateCount: 1,
+      candidates: [{
+        tool: String(toolName || '').toLowerCase(),
+        tokens: Math.ceil(toolResponse.length / 4),
+        excerpt: firstLine,
+      }],
+    },
+    questions: CONTEXT_PRUNING_QUESTIONS,
+    heuristic: action,
+  });
 
   const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
   const now = Date.now();

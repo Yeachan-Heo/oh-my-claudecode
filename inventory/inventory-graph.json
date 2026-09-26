@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5b90a0ab667ea1b54ff98066e212cdbb1e5ea7d4",
-    "sourceSha256": "f66fa18eff5d06d20a2be521507599ea8ab3aab7cba48bfd985539f5b19833b7",
+    "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
+    "sourceSha256": "696020d2e665d710e6b658aa5f9f79dce1e4ce7b3e1b2c148ca4c8806c4f9b6c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5b90a0ab667ea1b54ff98066e212cdbb1e5ea7d4",
-  "sourceSha256": "f66fa18eff5d06d20a2be521507599ea8ab3aab7cba48bfd985539f5b19833b7",
+  "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
+  "sourceSha256": "696020d2e665d710e6b658aa5f9f79dce1e4ce7b3e1b2c148ca4c8806c4f9b6c",
   "counts": {
     "public": {
       "skills": 47,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 43,
       "templateHooks": 22,
-      "srcFiles": 1390,
-      "total": 1412
+      "srcFiles": 1391,
+      "total": 1413
     },
     "generated": {
       "distFiles": 5066,
@@ -807,6 +807,7 @@
       "scripts/lib/hud-cache-wrapper.sh",
       "scripts/lib/hud-wrapper-template.mjs",
       "scripts/lib/hud-wrapper-template.txt",
+      "scripts/lib/jev-shadow.mjs",
       "scripts/lib/model-routing-override-message.mjs",
       "scripts/lib/pre-tool-enforcer-preflight.mjs",
       "scripts/lib/precompact-publisher.mjs",
@@ -33784,6 +33785,11 @@
         "path": "scripts/lib/hud-wrapper-template.txt"
       },
       {
+        "id": "scripts/lib/jev-shadow.mjs",
+        "kind": "script",
+        "path": "scripts/lib/jev-shadow.mjs"
+      },
+      {
         "id": "scripts/lib/model-routing-override-message.mjs",
         "kind": "script",
         "path": "scripts/lib/model-routing-override-message.mjs"
@@ -35247,6 +35253,11 @@
         "id": "src/__tests__/jev-eval-script.test.mjs",
         "kind": "src",
         "path": "src/__tests__/jev-eval-script.test.mjs"
+      },
+      {
+        "id": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "kind": "src",
+        "path": "src/__tests__/jev-plugin-hook-wiring.test.mjs"
       },
       {
         "id": "src/__tests__/jev-resolve-script.test.mjs",
@@ -42657,6 +42668,11 @@
       },
       {
         "from": "scripts/code-simplifier.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/code-simplifier.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -42942,6 +42958,11 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
+        "to": "dist/hooks/task-size-detector/index.js",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
         "to": "dist/planning/artifacts.js",
         "kind": "imports"
       },
@@ -42978,6 +42999,11 @@
       {
         "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/config-dir.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -43117,6 +43143,31 @@
       },
       {
         "from": "scripts/lib/hud-wrapper-template.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
         "to": "external:node:url",
         "kind": "imports"
       },
@@ -43436,6 +43487,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/persistent-mode.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/plugin-setup.mjs",
         "to": "external:better-sqlite3",
         "kind": "imports"
@@ -43627,6 +43683,11 @@
       },
       {
         "from": "scripts/post-tool-verifier.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/post-tool-verifier.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -43708,6 +43769,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "scripts/lib/force-agent-delegation-preflight.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/jev-shadow.mjs",
         "kind": "imports"
       },
       {
@@ -47418,6 +47484,41 @@
       {
         "from": "src/__tests__/jev-eval-script.test.mjs",
         "to": "scripts/jev-eval.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-plugin-hook-wiring.test.mjs",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -81432,12 +81533,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7086,
-      "edgeCount": 7899,
-      "importEdgeCount": 6508,
+      "nodeCount": 7088,
+      "edgeCount": 7917,
+      "importEdgeCount": 6526,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "c3341e455bf90dd3789004870ce698a2dc9813899c15ff9000d48f4f532c44cb",
-  "manifestSha256": "0936035388cc1553a3e2cec5217af5b0c45ba3357732c5050f9d865de9a72317"
+  "inventorySha256": "2233c0b9e544ceadbfce14d44ac75e630bafa747b0a863dd045d31e120042bd6",
+  "manifestSha256": "cdbb9a90511cd4137f49bc88108f2ba24716bec3222394b319345c22fe82dd12"
 }

@@ -118,8 +118,10 @@ describe('pre-tool-enforcer slop-warning judgment wiring (ticket 16)', () => {
     let line = '';
     for (let i = 0; i < 120 && !line; i++) {
       if (existsSync(logPath)) {
-        const content = readFileSync(logPath, 'utf8').trim();
-        if (content) line = content.split('\n').pop() ?? '';
+        const lines = readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean);
+        line = lines.find((entry) => {
+          try { return JSON.parse(entry).point === 'slop-warning'; } catch { return false; }
+        }) ?? '';
       }
       if (!line) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
     }

@@ -25,6 +25,7 @@ import { spawn } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
+import { isJevShadowOptedIn, recordJevShadow } from "./lib/jev-shadow.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -32,6 +33,54 @@ const __dirname = dirname(__filename);
 const SAFE_CONTINUE = { continue: true, suppressOutput: true };
 const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
 const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
+const LOOP_CONTINUATION_NOUL_QUESTIONS = {
+  task_complete: {
+    type: "noul",
+    instructions: "Is the task complete — is there no substantive work left for this mode?",
+    criteria: {},
+  },
+};
+const LEARNER_EXTRACTION_QUESTIONS = {
+  extractable_moment: {
+    type: "noul",
+    instructions: "Does this assistant message contain an extractable memory-worthy moment?",
+    criteria: {
+      true: "Contains a reusable pattern, decision, or correction worth persisting",
+      false: "Routine work with nothing worth extracting",
+    },
+  },
+};
+
+function recordLoopContinuationShadow(state, heuristic) {
+  recordJevShadow({
+    point: "loop-continuation",
+    state,
+    questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
+    heuristic,
+  });
+}
+
+async function recordLearnerExtractionShadow(data) {
+  const assistantMessage = data.last_assistant_message;
+  if (typeof assistantMessage !== "string" || !assistantMessage.trim() || !isJevShadowOptedIn("learner-extraction")) {
+    return;
+  }
+
+  try {
+    const detectorPath = join(__dirname, "..", "dist", "hooks", "learner", "detector.js");
+    if (!existsSync(detectorPath)) return;
+    const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
+    const heuristic = detectExtractableMoment(assistantMessage);
+    recordJevShadow({
+      point: "learner-extraction",
+      state: { assistant_message: assistantMessage, user_message: null },
+      questions: LEARNER_EXTRACTION_QUESTIONS,
+      heuristic,
+    });
+  } catch {
+    // Missing optional detector output or resolver plumbing must not affect Stop.
+  }
+}
 
 
 function getSafetyTimeoutMs() {
@@ -1134,6 +1183,10 @@ async function main() {
       return;
     }
 
+    // Stop supplies the assistant response text directly; only load the
+    // existing detector when this advisory point is explicitly enabled.
+    await recordLearnerExtractionShadow(data);
+
     const directory = data.cwd || data.directory || process.cwd();
     const sessionIdRaw = data.sessionId || data.session_id || data.sessionid || "";
     const sessionId = sanitizeSessionId(sessionIdRaw);
@@ -1280,6 +1333,22 @@ async function main() {
             reason = errorGuidance + reason;
           }
 
+          const heuristic = {
+            mode: "ralph",
+            shouldBlock: true,
+            iteration: ralph.state.iteration,
+            maxIterations: maxIter,
+          };
+          const judgmentState = {
+            mode_name: "ralph",
+            session_id: sessionId || null,
+            iteration: ralph.state.iteration,
+            phase: null,
+            should_block: true,
+            continuation_excerpt: reason,
+          };
+          recordLoopContinuationShadow(judgmentState, heuristic);
+
           console.log(
             JSON.stringify({
               decision: "block",
@@ -1319,6 +1388,19 @@ async function main() {
         writeJsonFile(ralph.path, ralph.state);
 
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
+        recordLoopContinuationShadow({
+          mode_name: "ralph",
+          session_id: sessionId || null,
+          iteration: ralph.state.iteration,
+          phase: null,
+          should_block: true,
+          continuation_excerpt: ralphExtendedReason,
+        }, {
+          mode: "ralph",
+          shouldBlock: true,
+          iteration: ralph.state.iteration,
+          maxIterations: ralph.state.max_iterations,
+        });
         console.log(
           JSON.stringify({
             decision: "block",
@@ -1472,6 +1554,20 @@ async function main() {
             if (errorGuidance) {
               reason = errorGuidance + reason;
             }
+
+            recordLoopContinuationShadow({
+              mode_name: "autopilot",
+              session_id: sessionId || null,
+              iteration: newCount,
+              phase,
+              should_block: true,
+              continuation_excerpt: reason,
+            }, {
+              mode: "autopilot",
+              shouldBlock: true,
+              iteration: newCount,
+              phase,
+            });
 
             console.log(
               JSON.stringify({
