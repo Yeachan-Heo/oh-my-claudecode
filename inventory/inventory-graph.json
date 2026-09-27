@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "73c352884d50c4f9a032fc7ae6cc734b8caf8771",
-    "sourceSha256": "ca6d30a568b500bfb9f01c6eb2f691508a69a8f4c1d079cce4cba14671ca2dad",
+    "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
+    "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "73c352884d50c4f9a032fc7ae6cc734b8caf8771",
-  "sourceSha256": "ca6d30a568b500bfb9f01c6eb2f691508a69a8f4c1d079cce4cba14671ca2dad",
+  "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
+  "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
   "counts": {
     "public": {
       "skills": 47,
@@ -26,10 +26,10 @@
       "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
-      "libFiles": 47,
+      "libFiles": 45,
       "templateHooks": 22,
-      "srcFiles": 1398,
-      "total": 1420
+      "srcFiles": 1396,
+      "total": 1418
     },
     "generated": {
       "distFiles": 5066,
@@ -625,7 +625,6 @@
     ],
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
-      "src/lib/__tests__/host-load-gate.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
       "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
@@ -651,7 +650,6 @@
       "src/lib/env-vars.ts",
       "src/lib/featured-contributors.ts",
       "src/lib/file-lock.ts",
-      "src/lib/host-load-gate.ts",
       "src/lib/hud-wrapper-template.ts",
       "src/lib/job-state-db.ts",
       "src/lib/mode-names.ts",
@@ -39410,11 +39408,6 @@
         "path": "src/lib/__tests__/atomic-write.test.ts"
       },
       {
-        "id": "src/lib/__tests__/host-load-gate.test.ts",
-        "kind": "lib",
-        "path": "src/lib/__tests__/host-load-gate.test.ts"
-      },
-      {
         "id": "src/lib/__tests__/mode-state-io.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/mode-state-io.test.ts"
@@ -39538,11 +39531,6 @@
         "id": "src/lib/file-lock.ts",
         "kind": "lib",
         "path": "src/lib/file-lock.ts"
-      },
-      {
-        "id": "src/lib/host-load-gate.ts",
-        "kind": "lib",
-        "path": "src/lib/host-load-gate.ts"
       },
       {
         "id": "src/lib/hud-wrapper-template.ts",
@@ -41878,6 +41866,11 @@
         "id": "tests/integration/stale-run-reporter.test.ts",
         "kind": "other",
         "path": "tests/integration/stale-run-reporter.test.ts"
+      },
+      {
+        "id": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "kind": "other",
+        "path": "tests/integration/state-lock-owner-reclaim.test.ts"
       },
       {
         "id": "tests/integration/state-root-fs-probe.test.ts",
@@ -67882,21 +67875,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "src/lib/host-load-gate.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -68509,26 +68487,6 @@
       {
         "from": "src/lib/file-lock.ts",
         "to": "src/platform/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "src/utils/paths.ts",
         "kind": "imports"
       },
       {
@@ -78323,11 +78281,6 @@
       },
       {
         "from": "src/team/worker-launch-ack.ts",
-        "to": "src/lib/host-load-gate.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/worker-launch-ack.ts",
         "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
@@ -81332,6 +81285,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/state-root-fs-probe.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -81803,12 +81786,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7098,
-      "edgeCount": 7960,
-      "importEdgeCount": 6568,
+      "nodeCount": 7097,
+      "edgeCount": 7958,
+      "importEdgeCount": 6566,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "35f59ea3aaef8a64c9fae82c16dd8a4fe765c9b35f17c5964986c069dc03dd2d",
-  "manifestSha256": "5e3af3ced8e38c3ab565c89b8ee2c7e29988d0ce474ec2a0692f199170d40d0e"
+  "inventorySha256": "f65f3330a094734e15b124e248422628a88d0ceb295f7071a8d644f6c23112d0",
+  "manifestSha256": "fa1965a1f3443e768900f3d76ef5aeff3b9a29b9282b2288a30b3ebd69e57f4e"
 }

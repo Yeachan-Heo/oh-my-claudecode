@@ -204,6 +204,12 @@ function reclaimDeadLockOwner(
   observedIdentity: LockArtifactIdentity,
 ): 'removed' | 'changed' | 'failed' {
   const quarantinePath = `${path}.reclaim.${process.pid}.${randomUUID()}`;
+  // Verify the file at path still has the expected identity before renaming.
+  // If it has changed, another process has published a replacement and we must not remove it.
+  const current = lockArtifactIdentity(path);
+  if (!current || current.dev !== observedIdentity.dev || current.ino !== observedIdentity.ino) {
+    return 'changed';
+  }
   try {
     renameSync(path, quarantinePath);
   } catch (error) {
@@ -371,12 +377,19 @@ function acquireFileLockAt(path: string, attempts: number): MutationLock | null 
         return null;
       }
 
+      // Capture the file identity before the probe. If it changes during the probe,
+      // another process has published a replacement lock and we must skip reclamation.
+      const observedIdentity = lockArtifactIdentity(path);
+      if (observedIdentity === null) continue;
       const existing = readLockOwner(path);
       if (existing === 'absent') continue;
       if (!existing) {
         lastMutationLockFailure = 'unverifiable';
         return null;
       }
+      // Re-verify the identity hasn't changed before probing liveness.
+      const recheck = lockArtifactIdentity(path);
+      if (!recheck || recheck.dev !== observedIdentity.dev || recheck.ino !== observedIdentity.ino) continue;
       const live = ownerLive(existing);
       if (live === null) {
         lastMutationLockFailure = 'unverifiable';
@@ -388,11 +401,6 @@ function acquireFileLockAt(path: string, attempts: number): MutationLock | null 
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
           continue;
         }
-        return null;
-      }
-      const observedIdentity = lockArtifactIdentity(path);
-      if (observedIdentity === null) {
-        lastMutationLockFailure = 'unverifiable';
         return null;
       }
       const reclaimed = reclaimDeadLockOwner(path, existing, observedIdentity);
