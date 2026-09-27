@@ -6196,7 +6196,8 @@ export async function shutdownTeamV2(
         if (lastLiveness === 'alive') paneCleanupAlive.push(worker.name);
         else paneCleanupUnknown.push(worker.name);
         return false;
-      } catch {
+      } catch (err) {
+        process.stderr.write(`[team/runtime-v2] worker pane cleanup failed for ${worker.name}: ${err instanceof Error ? err.message : String(err)}\n`);
         paneCleanupUnknown.push(worker.name);
         return false;
       }

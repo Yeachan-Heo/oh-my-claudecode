@@ -1143,6 +1143,10 @@ Usage:
 Worktrees:
   Native per-worker git worktree mode is opt-in/config-gated with team.ops.worktreeMode or OMC_TEAM_WORKTREE_MODE=detached|named.
   Status JSON includes workspace_mode, worktree_mode, team_state_root, and per-worker worktree metadata.
+  --force skips the task-status gate and graceful waits; it does not bypass ownership or cleanup verification.
+  Unverified worker/provider cleanup preserves worktrees and team state. Errors report the outcome and reason/detail; preserved outcomes name affected workers.
+  Some failures also write details to stderr.
+  Retained paths need later operator or janitor cleanup.
 
 Auto-merge (v2-only):
   --auto-merge          Enable per-commit auto-merge to leader and auto-rebase fanout.

@@ -101,5 +101,9 @@ describe('team CLI worktree status contract', () => {
     expect(TEAM_USAGE).toContain('worktree mode is opt-in/config-gated');
     expect(TEAM_USAGE).toContain('team status');
     expect(TEAM_USAGE).toContain('worktree metadata');
+    expect(TEAM_USAGE).toContain('--force skips the task-status gate and graceful waits');
+    expect(TEAM_USAGE).toContain('Unverified worker/provider cleanup preserves worktrees and team state');
+    expect(TEAM_USAGE).toContain('Errors report the outcome and reason/detail');
+    expect(TEAM_USAGE).toContain('Some failures also write details to stderr');
   });
 });

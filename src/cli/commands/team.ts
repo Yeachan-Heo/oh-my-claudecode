@@ -63,6 +63,10 @@ Runtime safety:
   OMC_RUNTIME_V2=0|false|no|off is rejected before any native effects.
   This command reports only the tmux runtime-v2 outcome. An implicit team
   finishing does not make it succeed, and it does not finish an implicit team.
+  --force skips the task-status gate and graceful waits; it does not bypass ownership or cleanup verification.
+  Unverified worker/provider cleanup preserves worktrees and team state. Errors report the outcome and reason/detail; preserved outcomes name affected workers.
+  Some failures also write details to stderr.
+  Retained paths need later operator or janitor cleanup.
 
 Roles (optional): architect, executor, planner, analyst, critic, debugger, verifier,
   code-reviewer, security-reviewer, test-engineer, designer, writer, scientist

@@ -40,6 +40,11 @@ describe('teamCommand help output', () => {
   it('prints team help for --help', async () => {
     const logs = await captureLog(() => teamCommand(['--help']));
     expect(logs[0]).toContain('omc team api <operation>');
+    expect(logs[0]).toContain('--force skips the task-status gate and graceful waits');
+    expect(logs[0]).toContain('Unverified worker/provider cleanup preserves worktrees and team state');
+    expect(logs[0]).toContain('Errors report the outcome and reason/detail');
+    expect(logs[0]).toContain('preserved outcomes name affected workers');
+    expect(logs[0]).toContain('Some failures also write details to stderr');
   });
 
   it('prints team help for help alias', async () => {
