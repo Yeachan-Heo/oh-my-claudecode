@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
-    "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
+    "head": "6e42c94c53794cf8c7838d85da19785c17965444",
+    "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
-  "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
+  "head": "6e42c94c53794cf8c7838d85da19785c17965444",
+  "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
   "counts": {
     "public": {
       "skills": 47,
@@ -41928,6 +41928,11 @@
         "path": "tests/lint/issue-3996-ruby-false-positive.test.ts"
       },
       {
+        "id": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "kind": "other",
+        "path": "tests/lint/issue-4147-processStart-encoding.test.ts"
+      },
+      {
         "id": "tests/lint/setup-phases-drift.test.ts",
         "kind": "other",
         "path": "tests/lint/setup-phases-drift.test.ts"
@@ -81615,6 +81620,26 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/setup-phases-drift.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -81786,12 +81811,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7097,
-      "edgeCount": 7958,
-      "importEdgeCount": 6566,
+      "nodeCount": 7098,
+      "edgeCount": 7962,
+      "importEdgeCount": 6570,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "f65f3330a094734e15b124e248422628a88d0ceb295f7071a8d644f6c23112d0",
-  "manifestSha256": "fa1965a1f3443e768900f3d76ef5aeff3b9a29b9282b2288a30b3ebd69e57f4e"
+  "inventorySha256": "2502f8de9f67debf314b52048b6c87a13f8a5bfe2ffb4306dd4041530b6cfa1b",
+  "manifestSha256": "792a17848b3061689950dbde80897b1837df09a7c60ac501c6803dabd37c2439"
 }
