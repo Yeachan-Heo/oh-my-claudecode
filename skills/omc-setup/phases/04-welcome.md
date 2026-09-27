@@ -176,7 +176,7 @@ Use AskUserQuestion:
 If user chooses "Yes, star it!":
 
 ```bash
-gh api -X PUT /user/starred/Yeachan-Heo/oh-my-claudecode 2>/dev/null && echo "Thanks for starring!" || true
+gh api -X PUT user/starred/Yeachan-Heo/oh-my-claudecode 2>/dev/null && echo "Thanks for starring!" || true
 ```
 
 **Note:** Fail silently if the API call doesn't work - never block setup completion.
