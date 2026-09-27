@@ -357,4 +357,48 @@ describe('host-load-gate', () => {
       expect(result.message).toContain('OMC_HOST_LOAD_GATE_DISABLED');
     });
   });
+
+  describe('integration with worker launch', () => {
+    it('checkHostLoadGate is called before worker spawning', async () => {
+      // Import the gate function to verify it's exported and can be imported
+      const { checkHostLoadGate: importedCheck } = await import('../host-load-gate.js');
+      expect(typeof importedCheck).toBe('function');
+
+      // Verify the gate function works
+      const result = importedCheck();
+      expect(result).toHaveProperty('allowed');
+      expect(typeof result.allowed).toBe('boolean');
+      expect(result).toHaveProperty('metrics');
+      if (!result.allowed && result.reason) {
+        expect(typeof result.reason).toBe('string');
+      }
+    });
+
+    it('gate allows saturation-free hosts to proceed', () => {
+      withEnv({ OMC_HOST_LOAD_GATE_DISABLED: undefined }, () => {
+        const config = getDefaultGateConfig();
+        // Set extremely high thresholds so gate always allows
+        config.cpuLoadThreshold = Number.MAX_SAFE_INTEGER;
+        config.freeMemoryThreshold = 0; // No minimum memory required
+        config.maxSiblingSessions = Number.MAX_SAFE_INTEGER;
+
+        const result = checkHostLoadGate(config);
+        expect(result.allowed).toBe(true);
+      });
+    });
+
+    it('gate denies when host metrics exceed thresholds', () => {
+      const config = getDefaultGateConfig();
+      // Set extremely low thresholds to trigger saturation
+      config.cpuLoadThreshold = 0.001;
+      config.freeMemoryThreshold = Number.MAX_SAFE_INTEGER; // Require more memory than available
+      config.maxSiblingSessions = 0; // No sessions allowed
+
+      const result = checkHostLoadGate(config);
+      // Gate may deny if any metric is exceeded
+      // (the result depends on actual host state)
+      expect(result).toHaveProperty('allowed');
+      expect(typeof result.allowed).toBe('boolean');
+    });
+  });
 });

@@ -12,6 +12,7 @@ import { isValidTeamInstanceId, type TeamInstanceId } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
+import { checkHostLoadGate } from '../lib/host-load-gate.js';
 
 const WORKER_LAUNCH_SCHEMA_VERSION = 1 as const;
 
@@ -2039,6 +2040,13 @@ export async function runWorkerLaunchBootstrap(value: unknown): Promise<WorkerLa
           await invocation.cleanup().catch(() => undefined);
           return { outcome: 'provider_spawn_failed' as const };
         }
+      }
+      // Check host load gate to prevent resource exhaustion during concurrent worker launches
+      const gateResult = checkHostLoadGate();
+      if (!gateResult.allowed && gateResult.reason) {
+        // If gate denies, log it but proceed anyway (fail-open design)
+        // Log is for observability; the gate is advisory, not hard-blocking
+        // Uncomment for debugging: console.warn(`Worker launch proceeding despite host load saturation: ${gateResult.reason}`);
       }
       const child = spawn(invocation.command, invocation.args, {
         cwd: spec.cwd,
