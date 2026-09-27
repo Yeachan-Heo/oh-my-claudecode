@@ -24,6 +24,7 @@ import { tmuxExec } from '../tmux-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 const HELP_TOKENS = new Set(['--help', '-h', 'help']);
+const RESERVED_TEAM_SUBCOMMANDS = new Set(['list', 'ls', 'resume', 'logs', 'attach']);
 const MIN_WORKER_COUNT = 1;
 const MAX_WORKER_COUNT = 20;
 const VALID_TEAM_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'grok', 'cursor', 'antigravity']);
@@ -31,6 +32,7 @@ const DEFAULT_TEAM_CLI_AGENT_TYPE: CliAgentType = 'claude';
 
 const TEAM_HELP = `
 Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decompose] "<task description>"
+       omc team [N:agent-type[:role]] --task "<task description>"
        omc team status <team-name>
        omc team shutdown <team-name> [--force]
        omc team api <operation> [--input <json>] [--json]
@@ -38,6 +40,7 @@ Usage: omc team [N:agent-type[:role]] [--new-window] [--auto-merge] [--no-decomp
 
 Examples:
   omc team 3:claude "fix failing tests"
+  omc team --task "review auth flow"
   omc team 2:codex:architect "design auth system"
   omc team 1:gemini:executor "implement feature"
   omc team 1:codex,1:gemini "compare approaches"
@@ -47,6 +50,8 @@ Examples:
   omc team status fix-failing-tests
   omc team shutdown fix-failing-tests
   omc team api send-message --input '{"team_name":"my-team","from_worker":"worker-1","to_worker":"leader-fixed","body":"ACK"}' --json
+
+Without a worker spec, quote a multi-word positional task as one shell argument. Use --task for single-word tasks.
 
 Worktrees (opt-in): set team.ops.worktreeMode or OMC_TEAM_WORKTREE_MODE=detached|branch to launch workers from .omc/team/<team>/worktrees/<worker>. Status includes workspace/worktree metadata.
 
@@ -406,13 +411,15 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
   let newWindow = false;
   let autoMerge: boolean = process.env.OMC_TEAMS_AUTO_MERGE === '1';
   let noDecompose = false;
+  let taskFromFlag: string | undefined;
   const normalizedDefaultAgentType = VALID_TEAM_CLI_AGENT_TYPES.has(defaultAgentType as CliAgentType)
     ? defaultAgentType
     : DEFAULT_TEAM_CLI_AGENT_TYPE;
 
   // Extract supported flags before parsing positional args
   const filteredArgs: string[] = [];
-  for (const arg of args) {
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
     if (arg === '--json') {
       json = true;
     } else if (arg === '--new-window') {
@@ -421,6 +428,11 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
       autoMerge = true;
     } else if (arg === '--no-decompose' || arg === '--fixed-workers' || arg === '--preformed-plan') {
       noDecompose = true;
+    } else if (arg === '--task') {
+      if (taskFromFlag !== undefined || args[index + 1] === undefined) {
+        throw new Error('Usage: omc team [N:agent-type[:role]] --task "<task description>"');
+      }
+      taskFromFlag = args[++index];
     } else {
       filteredArgs.push(arg);
     }
@@ -500,9 +512,24 @@ export function parseTeamArgs(tokens: string[], defaultAgentType: string = 'clau
     workerSpecs = Array.from({ length: workerCount }, () => ({ agentType: normalizedDefaultAgentType }));
   }
 
-  const task = filteredArgs.join(' ').trim();
+  let task: string;
+  if (taskFromFlag !== undefined) {
+    if (filteredArgs.length > 0) {
+      throw new Error('Usage: omc team [N:agent-type[:role]] --task "<task description>"');
+    }
+    task = taskFromFlag.trim();
+  } else {
+    const positionalTask = filteredArgs[0] || '';
+    if (!explicitWorkerSpec && filteredArgs.length === 1 && !/\s/.test(positionalTask)) {
+      throw new Error(
+        'Usage: omc team [N:agent-type[:role]] "<task description>" (or use --task "<task description>")',
+      );
+    }
+    task = filteredArgs.join(' ').trim();
+  }
+
   if (!task) {
-    throw new Error('Usage: omc team [N:agent-type] "<task description>"');
+    throw new Error('Usage: omc team [N:agent-type[:role]] "<task description>" (or use --task "<task description>")');
   }
 
   const teamName = slugifyTask(task);
@@ -1003,6 +1030,18 @@ export async function teamCommand(args: string[]): Promise<void> {
   // omc team api <operation> ...
   if (subcommand === 'api') {
     await handleTeamApi(args.slice(1), cwd);
+    return;
+  }
+
+  if (args.slice(1).some((arg) => arg === '--help' || arg === '-h')) {
+    console.log(TEAM_HELP.trim());
+    return;
+  }
+
+  if (RESERVED_TEAM_SUBCOMMANDS.has(subcommand)) {
+    console.error(`Unsupported team command "${subcommand}".`);
+    console.log(TEAM_HELP.trim());
+    process.exitCode = 1;
     return;
   }
 

@@ -1171,10 +1171,11 @@ const WORKER_STARTUP_EVIDENCE_POLICIES: Readonly<Record<CliAgentType, WorkerStar
   // bounded resubmit behavior and its effective 6 + (4 * 12) poll windows.
   // An engaged pane (issue #3849: WSL2 cold starts publish first-turn claim
   // evidence well after the initial budget) gets one bounded read-only recheck
-  // before teardown; idle, wrong, or dead panes keep the fast fail-closed path.
+  // before teardown. Unengaged panes also receive a bounded final evidence
+  // recheck and still fail closed when no worker evidence appears.
   claude: {
     initialBudgetMs: 1_250,
-    finalRecheckBudgetMs: 0,
+    finalRecheckBudgetMs: 30_000,
     resubmitAttempts: 4,
     resubmitBudgetMs: 2_750,
     engagedPaneRecheckBudgetMs: 30_000,
