@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "7f20df2e5e9af5116bcc97e4c9501f154b913de7",
-    "sourceSha256": "daf1f1dc8bdee8c4d237eb7bb4a976f335eab3b3a70e71ca4dd0c0cd1e37d04e",
+    "head": "839b3a5e03d1cea4024f57e4a5848a77dc0d21e0",
+    "sourceSha256": "b1bf07adb11ef3e87d3de7709322f029a91dc96e26a179953cf2bcae8b66bb7f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "7f20df2e5e9af5116bcc97e4c9501f154b913de7",
-  "sourceSha256": "daf1f1dc8bdee8c4d237eb7bb4a976f335eab3b3a70e71ca4dd0c0cd1e37d04e",
+  "head": "839b3a5e03d1cea4024f57e4a5848a77dc0d21e0",
+  "sourceSha256": "b1bf07adb11ef3e87d3de7709322f029a91dc96e26a179953cf2bcae8b66bb7f",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 321,
+      "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 45,
       "templateHooks": 22,
-      "srcFiles": 1396,
-      "total": 1418
+      "srcFiles": 1394,
+      "total": 1416
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 321,
+    "hookFiles": 319,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -373,8 +373,6 @@
       "src/hooks/recovery/types.ts",
       "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
-      "src/hooks/registry/__tests__/registry.test.ts",
-      "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
       "src/hooks/registry/cutover.ts",
@@ -6183,8 +6181,6 @@
       "src/hooks/recovery/types.ts",
       "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
-      "src/hooks/registry/__tests__/registry.test.ts",
-      "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
       "src/hooks/registry/cutover.ts",
@@ -81706,6 +81702,6 @@
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "c7cee4a32ca7a6c0bf1636e25e1291099c81d08bfa46703aa74453dcc36c381f",
-  "manifestSha256": "f179017f469a9e93d11b6cabe2de53d34d2636304d00f7aad5c94f17b8833dc2"
+  "inventorySha256": "efab9d044ab1db998144d7e871f278134a3e1eb96e24882fae28370451bbe2e1",
+  "manifestSha256": "f30160ab7b231fff4a7847c96412ab7b483c824262774d25f515044f2cb33b56"
 }
