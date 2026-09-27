@@ -157,6 +157,12 @@ function ownerArtifactIdentity(path) {
 /** Remove only the exact dead publication that was inspected. */
 function reclaimDeadOwner(path, observed, identity) {
   const quarantinePath = `${path}.reclaim.${process.pid}.${randomUUID()}`;
+  // Verify the file at path still has the expected identity before renaming.
+  // If it has changed, another process has published a replacement and we must not remove it.
+  const current = ownerArtifactIdentity(path);
+  if (!current || current.dev !== identity.dev || current.ino !== identity.ino) {
+    return 'changed';
+  }
   try {
     renameSync(path, quarantinePath);
   } catch (error) {
@@ -335,6 +341,10 @@ function acquireFileLock(lockPath, attempts) {
         return null;
       }
 
+      // Capture the file identity before the probe. If it changes during the probe,
+      // another process has published a replacement lock and we must skip reclamation.
+      const identity = ownerArtifactIdentity(lockPath);
+      if (!identity) continue;
       const existing = readOwner(lockPath);
       if (existing === 'absent') continue;
       if (!existing) {
@@ -342,6 +352,9 @@ function acquireFileLock(lockPath, attempts) {
         console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
         return null;
       }
+      // Re-verify the identity hasn't changed before probing liveness.
+      const recheck = ownerArtifactIdentity(lockPath);
+      if (!recheck || recheck.dev !== identity.dev || recheck.ino !== identity.ino) continue;
       const live = ownerLive(existing);
       if (live === null) {
         recordFailure('unverifiable');
@@ -353,11 +366,6 @@ function acquireFileLock(lockPath, attempts) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
           continue;
         }
-        return null;
-      }
-      const identity = ownerArtifactIdentity(lockPath);
-      if (!identity) {
-        recordFailure('unverifiable');
         return null;
       }
       const reclaimed = reclaimDeadOwner(lockPath, existing, identity);
