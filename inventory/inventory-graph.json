@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6e42c94c53794cf8c7838d85da19785c17965444",
-    "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
+    "head": "3dd2d2783e19e49d49e7e74266ed40e5d4130f01",
+    "sourceSha256": "13069d51b1f86a89a50f44bb9d49416c7e937aa256219cea30279c7c907b5074",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6e42c94c53794cf8c7838d85da19785c17965444",
-  "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
+  "head": "3dd2d2783e19e49d49e7e74266ed40e5d4130f01",
+  "sourceSha256": "13069d51b1f86a89a50f44bb9d49416c7e937aa256219cea30279c7c907b5074",
   "counts": {
     "public": {
       "skills": 47,
@@ -26,10 +26,10 @@
       "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
-      "libFiles": 45,
+      "libFiles": 47,
       "templateHooks": 22,
-      "srcFiles": 1396,
-      "total": 1418
+      "srcFiles": 1398,
+      "total": 1420
     },
     "generated": {
       "distFiles": 5066,
@@ -625,6 +625,7 @@
     ],
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
+      "src/lib/__tests__/host-load-gate.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
       "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
@@ -650,6 +651,7 @@
       "src/lib/env-vars.ts",
       "src/lib/featured-contributors.ts",
       "src/lib/file-lock.ts",
+      "src/lib/host-load-gate.ts",
       "src/lib/hud-wrapper-template.ts",
       "src/lib/job-state-db.ts",
       "src/lib/mode-names.ts",
@@ -39408,6 +39410,11 @@
         "path": "src/lib/__tests__/atomic-write.test.ts"
       },
       {
+        "id": "src/lib/__tests__/host-load-gate.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/host-load-gate.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/mode-state-io.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/mode-state-io.test.ts"
@@ -39531,6 +39538,11 @@
         "id": "src/lib/file-lock.ts",
         "kind": "lib",
         "path": "src/lib/file-lock.ts"
+      },
+      {
+        "id": "src/lib/host-load-gate.ts",
+        "kind": "lib",
+        "path": "src/lib/host-load-gate.ts"
       },
       {
         "id": "src/lib/hud-wrapper-template.ts",
@@ -67880,6 +67892,21 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/host-load-gate.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/host-load-gate.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/host-load-gate.test.ts",
+        "to": "src/lib/host-load-gate.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -68492,6 +68519,26 @@
       {
         "from": "src/lib/file-lock.ts",
         "to": "src/platform/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/host-load-gate.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/host-load-gate.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/host-load-gate.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/host-load-gate.ts",
+        "to": "src/utils/paths.ts",
         "kind": "imports"
       },
       {
@@ -78286,6 +78333,11 @@
       },
       {
         "from": "src/team/worker-launch-ack.ts",
+        "to": "src/lib/host-load-gate.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/worker-launch-ack.ts",
         "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
@@ -81811,12 +81863,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7098,
-      "edgeCount": 7962,
-      "importEdgeCount": 6570,
+      "nodeCount": 7100,
+      "edgeCount": 7970,
+      "importEdgeCount": 6578,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "2502f8de9f67debf314b52048b6c87a13f8a5bfe2ffb4306dd4041530b6cfa1b",
-  "manifestSha256": "792a17848b3061689950dbde80897b1837df09a7c60ac501c6803dabd37c2439"
+  "inventorySha256": "5011152512e7a2aca4a45ee6066813d13a614ba1851bf58d61760a6177f7b0d1",
+  "manifestSha256": "b72e6033f459c3b9d5d097227416541499b3561315565916d1bf17c26a62f5bf"
 }
