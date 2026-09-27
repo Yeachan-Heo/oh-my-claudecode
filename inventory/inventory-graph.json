@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e9c5ae60555a7b4be33a038a920e465fd03e40b2",
-    "sourceSha256": "f159b1f00554664dca57e3c978f745ecd024a909fee4b65a0d2c8b3b6c073d2f",
+    "head": "6e42c94c53794cf8c7838d85da19785c17965444",
+    "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e9c5ae60555a7b4be33a038a920e465fd03e40b2",
-  "sourceSha256": "f159b1f00554664dca57e3c978f745ecd024a909fee4b65a0d2c8b3b6c073d2f",
+  "head": "6e42c94c53794cf8c7838d85da19785c17965444",
+  "sourceSha256": "79f6c34af1d0003126448a4ae1343d2cc11fdf3f703f926a249c888d7190bc43",
   "counts": {
     "public": {
       "skills": 47,
@@ -26,10 +26,10 @@
       "hookFiles": 319,
       "featureFiles": 84,
       "toolFiles": 61,
-      "libFiles": 47,
+      "libFiles": 45,
       "templateHooks": 22,
-      "srcFiles": 1398,
-      "total": 1420
+      "srcFiles": 1396,
+      "total": 1418
     },
     "generated": {
       "distFiles": 5066,
@@ -625,7 +625,6 @@
     ],
     "libFiles": [
       "src/lib/__tests__/atomic-write.test.ts",
-      "src/lib/__tests__/host-load-gate.test.ts",
       "src/lib/__tests__/mode-state-io.test.ts",
       "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
@@ -651,7 +650,6 @@
       "src/lib/env-vars.ts",
       "src/lib/featured-contributors.ts",
       "src/lib/file-lock.ts",
-      "src/lib/host-load-gate.ts",
       "src/lib/hud-wrapper-template.ts",
       "src/lib/job-state-db.ts",
       "src/lib/mode-names.ts",
@@ -39410,11 +39408,6 @@
         "path": "src/lib/__tests__/atomic-write.test.ts"
       },
       {
-        "id": "src/lib/__tests__/host-load-gate.test.ts",
-        "kind": "lib",
-        "path": "src/lib/__tests__/host-load-gate.test.ts"
-      },
-      {
         "id": "src/lib/__tests__/mode-state-io.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/mode-state-io.test.ts"
@@ -39538,11 +39531,6 @@
         "id": "src/lib/file-lock.ts",
         "kind": "lib",
         "path": "src/lib/file-lock.ts"
-      },
-      {
-        "id": "src/lib/host-load-gate.ts",
-        "kind": "lib",
-        "path": "src/lib/host-load-gate.ts"
       },
       {
         "id": "src/lib/hud-wrapper-template.ts",
@@ -41938,6 +41926,11 @@
         "id": "tests/lint/issue-3996-ruby-false-positive.test.ts",
         "kind": "other",
         "path": "tests/lint/issue-3996-ruby-false-positive.test.ts"
+      },
+      {
+        "id": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "kind": "other",
+        "path": "tests/lint/issue-4147-processStart-encoding.test.ts"
       },
       {
         "id": "tests/lint/setup-phases-drift.test.ts",
@@ -67887,21 +67880,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/__tests__/host-load-gate.test.ts",
-        "to": "src/lib/host-load-gate.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/lib/__tests__/mode-state-io.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -68514,26 +68492,6 @@
       {
         "from": "src/lib/file-lock.ts",
         "to": "src/platform/index.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/lib/host-load-gate.ts",
-        "to": "src/utils/paths.ts",
         "kind": "imports"
       },
       {
@@ -78328,11 +78286,6 @@
       },
       {
         "from": "src/team/worker-launch-ack.ts",
-        "to": "src/lib/host-load-gate.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/worker-launch-ack.ts",
         "to": "src/platform/process-utils.ts",
         "kind": "imports"
       },
@@ -81667,6 +81620,26 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4147-processStart-encoding.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/setup-phases-drift.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -81838,12 +81811,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7099,
-      "edgeCount": 7966,
-      "importEdgeCount": 6574,
+      "nodeCount": 7098,
+      "edgeCount": 7962,
+      "importEdgeCount": 6570,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "24048310e76ed92819003e27c7b188fdbee82fb1d2832be5fe39c4a03fc362af",
-  "manifestSha256": "2aff0a88823a766e7c175748960276935dc228a6ffc037b44e31a30ab362d1fc"
+  "inventorySha256": "2502f8de9f67debf314b52048b6c87a13f8a5bfe2ffb4306dd4041530b6cfa1b",
+  "manifestSha256": "792a17848b3061689950dbde80897b1837df09a7c60ac501c6803dabd37c2439"
 }
