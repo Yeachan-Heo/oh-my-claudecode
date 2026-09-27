@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e49b4e1ceea5f054acbea2bc8157943a80fc15c3",
-    "sourceSha256": "3eed83906d22e64c8839e485e3f1d0e48323bcb0feaedb1981b733f42052fb59",
+    "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
+    "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e49b4e1ceea5f054acbea2bc8157943a80fc15c3",
-  "sourceSha256": "3eed83906d22e64c8839e485e3f1d0e48323bcb0feaedb1981b733f42052fb59",
+  "head": "ed495e6431b0ee210945904f79f00fc168e1427f",
+  "sourceSha256": "e69a0ad0c5446ab30d5c2fa1074340433d3a447010eec78fc9ba6a33ecb4c420",
   "counts": {
     "public": {
       "skills": 47,
@@ -41868,6 +41868,11 @@
         "path": "tests/integration/stale-run-reporter.test.ts"
       },
       {
+        "id": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "kind": "other",
+        "path": "tests/integration/state-lock-owner-reclaim.test.ts"
+      },
+      {
         "id": "tests/integration/state-root-fs-probe.test.ts",
         "kind": "other",
         "path": "tests/integration/state-root-fs-probe.test.ts"
@@ -81280,6 +81285,36 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/state-lock-owner-reclaim.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/state-root-fs-probe.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -81751,12 +81786,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7096,
-      "edgeCount": 7952,
-      "importEdgeCount": 6560,
+      "nodeCount": 7097,
+      "edgeCount": 7958,
+      "importEdgeCount": 6566,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "c382c559e8d82b0ea79b854b013cb25d058f73aa5b7944242de7b7a42831ea14",
-  "manifestSha256": "746f8ab41a7404e760721020ffbf4cc5e16db1ce6b1a46fe07e7bef6b6526c41"
+  "inventorySha256": "f65f3330a094734e15b124e248422628a88d0ceb295f7071a8d644f6c23112d0",
+  "manifestSha256": "fa1965a1f3443e768900f3d76ef5aeff3b9a29b9282b2288a30b3ebd69e57f4e"
 }
