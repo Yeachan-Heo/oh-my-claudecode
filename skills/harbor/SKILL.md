@@ -157,6 +157,14 @@ Verdict emojis: 🟢 accepted · 🟡 need-decision · 🔵 need-info · ⚪ rej
 
 The docket is **one persistent issue, refreshed in place** — never a new issue per sweep. First screen, in order: risks and authority actions needing immediate attention; unresolved judgments; a short count of rule-processed items; links to the rest. Group by the **same decision**, not by issue count — one scope rule may cover many reports, with the exact object set and evidence listed; never one vague "approve all". Counts distinguish this-round activity from current stock.
 
+## Headless sweep (unattended invocation)
+
+Harbor itself runs no daemons and keeps no timers — but the sweep does not need a human at the keyboard to start. A host scheduler (cron, CI timer, an automation tool) may start a headless agent session that invokes this skill with `sweep`; the sweep then runs to its natural boundary under the same contracts as any other sweep:
+
+- The authority contract is unchanged. Facts and standing-authorizations execute autonomously; every new judgment waits on the docket, and the desk signs when the captain next shows up. A headless sweep never creates a new standing rule and never widens the communication scope — no new third-party contact; those wait for a signed session.
+- The deliverables are the refreshed docket and the coverage report (inspected / not-inspected / blocked, each locatable on the tracker). If a notification channel is configured (`configure-notifications`), post the docket link there so the captain learns the desk has pending boxes without opening the session.
+- Partial-completion, retry, and budget rules apply unchanged. A headless sweep that runs out of budget posts what is accurate and leaves a remaining-queue index — never "all complete".
+
 ## Scope and non-goals
 
 - V1 tracker: remote GitHub only. No daemons, no auto-classification on creation, no label sync, no cross-repo aggregation, no SLA timers, no merger, no state database, no confidence-to-authority algorithm.

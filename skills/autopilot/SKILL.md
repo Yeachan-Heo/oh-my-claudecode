@@ -33,7 +33,8 @@ Most non-trivial software tasks require coordinated phases: understanding requir
 - Parallel execution is used within phases where possible (Phase 2 and Phase 4)
 - QA cycles repeat up to 5 times; if the same error persists 3 times, stop and report the fundamental issue
 - Validation requires approval from all reviewers; rejected items get fixed and re-validated
-- Cancel with `/oh-my-claudecode:cancel` at any time; progress is preserved for resume
+- Budget stop (opt-in): when `OMC_RUN_BUDGET_TOKENS` is set, compare session token spend against it at each phase boundary — the `trace_summary` MCP tool reports token usage. At 90% of budget, finish the current phase; at 100%, stop with a budget report, state preserved for resume. Budget exhaustion is a stop condition, not a failure.
+- Cancel with `/oh-my-claudecode:cancel` at any time; before terminal state cleanup, run the Phase 5 closeout, and preserve resumable progress artifacts
 </Execution_Policy>
 
 <Workflow_Profiles>
@@ -84,6 +85,7 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - **If ralplan consensus plan exists** (`.omc/plans/ralplan-*.md` or `.omc/plans/consensus-*.md` from the 3-stage pipeline): Skip BOTH Phase 0 and Phase 1 — jump directly to Phase 2 (Execution). The plan has already been Planner/Architect/Critic validated.
    - **If deep-interview spec exists** (`.omc/specs/deep-interview-*.md`): Skip analyst+architect expansion, use the pre-validated spec directly as Phase 0 output. Continue to Phase 1 (Planning).
    - **If input is vague** (no file paths, function names, or concrete anchors): Offer redirect to `/deep-interview` for Socratic clarification before expanding
+   - **If the redirect cannot be answered** (headless/AFK invocation, an unanswered offer, or the user choosing to expand directly): proceed under the **AFK assumption protocol** — never stall on a missing human and never guess silently (see Escalation_And_Stop_Conditions)
    - **Otherwise**: Analyst (Opus) extracts requirements, Architect (Opus) creates technical specification
    - Output: `.omc/autopilot/spec.md`
 
@@ -110,7 +112,10 @@ V1 does not support `stageModels`, model routing, provider or role selection; in
    - Code-reviewer: Quality review
    - All must approve; fix and re-validate on rejection
 
-6. **Phase 5 - Cleanup**: Delete all state files on successful completion
+6. **Phase 5 - Closeout and Cleanup**:
+   - **Run closeout (before state cleanup)**: Append at most three factual lines to `.omc/notepads/autopilot/problems.md` (blockers additionally in `.omc/notepads/autopilot/issues.md`) — what broke (3-strike QA errors, validation rejections) and what dragged (missing checks, unreachable information, environment friction). Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” Observations only — landing them on repo surfaces is `refit`'s job, with the user's approval. When the run ends in a stop-and-report escalation, also draft an incident work item with the failure signature, evidence pointers, and reopen path. Post it to a tracker only with explicit user or mode authorization; otherwise append it to `.omc/notepads/autopilot/issues.md`.
+   - When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` (verification evidence and Open Assumptions) and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report.
+   - Delete all state files on successful completion
    - Remove `.omc/state/autopilot-state.json`, `ralph-state.json` (plus stale retired `ultraqa-state.json`/`ultrawork-state.json` if legacy copies exist)
    - Run `/oh-my-claudecode:cancel` for clean exit
 </Steps>
@@ -150,6 +155,7 @@ Why bad: This is an exploration/brainstorming request. Respond conversationally 
 - Stop and report when validation keeps failing after 3 re-validation rounds
 - Stop when the user says "stop", "cancel", or "abort"
 - If requirements were too vague and expansion produces an unclear spec, offer redirect to `/deep-interview` for Socratic clarification, or pause and ask the user for clarification before proceeding
+- **AFK assumption protocol** (when no answer is available — headless run, unanswered redirect offer, or the user choosing to expand anyway): proceed, but never silently. Every guess that would have been an interview question is recorded as an assumption — statement, basis, reversibility — in the spec's `## Assumptions` section. A guess that passes the ADR test (hard to reverse, surprising without context, a real trade-off) is NOT assumed: it lands in `.omc/autopilot/decisions-pending.md` (options, recommendation, reversibility note) and the affected scope is implemented only in its reversible direction, or deferred. The completion report leads with the Open Assumptions ranked by how much a returning human would want to veto them.
 </Escalation_And_Stop_Conditions>
 
 <Final_Checklist>
@@ -245,6 +251,8 @@ Autopilot: "Your request is open-ended. Would you like to run a deep interview f
 ```
 
 If a deep-interview spec already exists at `.omc/specs/deep-interview-*.md`, autopilot uses it directly as Phase 0 output (the spec has already been mathematically validated for clarity).
+
+When no interview can happen (headless/AFK run, unanswered offer, expand-anyway), the AFK assumption protocol in Escalation_And_Stop_Conditions governs: assumptions are recorded in the spec, irreversible-direction guesses become pending decisions, and the completion report leads with the Open Assumptions.
 
 ### 3-Stage Pipeline: deep-interview → ralplan → autopilot
 

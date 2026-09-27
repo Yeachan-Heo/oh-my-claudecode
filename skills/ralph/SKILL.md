@@ -152,7 +152,7 @@ Rules:
      4. The list of files changed during the ralph session for context
    - Ralph floor: always at least STANDARD, even for small changes
    - The selected reviewer verifies against the SPECIFIC acceptance criteria from prd.json, not vague "is it done?"
-   - **On APPROVAL: immediately proceed to Step 7.5 in the same turn. Do NOT pause to report the verdict to the user — reporting happens only at Step 8 (`/oh-my-claudecode:cancel`) or on rejection (Step 9). Treating an approved verdict as a reporting checkpoint is a polite-stop anti-pattern.**
+   - **On APPROVAL: immediately proceed to Step 7.5 in the same turn. Do NOT pause to report the verdict to the user — reporting happens only at Step 8 (terminal closeout and `/oh-my-claudecode:cancel`) or on rejection (Step 9). Treating an approved verdict as a reporting checkpoint is a polite-stop anti-pattern.**
 
 7.5 **Mandatory Deslop Pass** (runs unconditionally after Step 7 approval, unless `{{PROMPT}}` contains `--no-deslop`):
 
@@ -167,9 +167,13 @@ Rules:
 - If regression fails, roll back the cleaner changes or fix the regression, then rerun the verification loop until it passes.
 - Only proceed to completion after the post-deslop regression run passes (or `--no-deslop` was explicitly specified).
 
-8. **On approval**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run `/oh-my-claudecode:cancel` to cleanly exit and clean up all state files
+8. **On approval, terminal closeout and cleanup**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run the closeout below and any applicable Step 10 incident work item before PR creation or `/oh-my-claudecode:cancel` state cleanup. When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report. Before any other terminal `/cancel` or state cleanup, including user-requested cancellation, run the same closeout first.
 
-9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete
+   Append at most three factual lines to `.omc/notepads/ralph/problems.md` — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction); blockers additionally go in `.omc/notepads/ralph/issues.md`. Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
+
+9. **On rejection**: Fix the issues raised, re-verify with the same reviewer, then loop back to check if the story needs to be marked incomplete. A reviewer rejection inside this loop is not a terminal outcome and does not trigger closeout; record any such observations during the eventual terminal closeout.
+
+10. **Terminal incident work item**: For a stop-and-report escalation (three-strike halt or verification that cannot pass), draft a one-line failure signature, evidence pointers (state file, notepad lines, verification output), and reopen path. Append it to `.omc/notepads/ralph/issues.md`; post it to a tracker only when the user or mode invocation explicitly authorizes that external action.
    </Steps>
 
 <Tool_Usage>
@@ -281,11 +285,12 @@ Why good: The falsified criterion stops governing, the measurement is preserved 
 
 <Escalation_And_Stop_Conditions>
 - Stop and report when a fundamental blocker requires user input (missing credentials, unclear requirements, external service down)
-- Stop when the user says "stop", "cancel", or "abort" -- run `/oh-my-claudecode:cancel`
+- Stop when the user says "stop", "cancel", or "abort" -- run the terminal closeout in Step 8 before `/oh-my-claudecode:cancel`
 - Continue working when the hook system sends "The boulder never stops" -- this means the iteration continues
 - If the selected reviewer rejects verification, fix the issues and re-verify (do not stop)
 - If the same issue recurs across 3+ iterations, report it as a potential fundamental problem
-- **Do NOT stop after Step 7 approval.** The boulder continues through 7 → 7.5 → 7.6 → 8 in the same turn as a single chain. Step 7 is a checkpoint inside the loop, not a reporting moment. Treating an architect/critic APPROVED verdict as "time to summarise and wait for user acknowledgment" is a polite-stop anti-pattern — the only reporting moments in Ralph are Step 8 (successful cancel) or Step 9 (rejection).
+- **Budget stop (opt-in)**: when `OMC_RUN_BUDGET_TOKENS` is set, compare session token spend against it at each iteration boundary — the `trace_summary` MCP tool reports token usage. At 90% of budget, finish the current story and stop starting new ones. At 100%, stop with a budget report: state preserved (progress.txt and state files), resumable with a later ralph invocation. Budget exhaustion is a stop condition, not a failure.
+- **Do NOT stop after Step 7 approval.** The boulder continues through 7 → 7.5 → 7.6 → 8 in the same turn as a single chain. Step 7 is a checkpoint inside the loop, not a reporting moment. Treating an architect/critic APPROVED verdict as "time to summarise and wait for user acknowledgment" is a polite-stop anti-pattern — the only reporting moments in Ralph are Step 8 (terminal closeout and successful cancel) or Step 9 (rejection).
 </Escalation_And_Stop_Conditions>
 
 <Final_Checklist>

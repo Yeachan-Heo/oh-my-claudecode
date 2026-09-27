@@ -39,6 +39,14 @@ The split rests on where enforcement pressure lives: implementation contexts car
 3. Write approved findings to their surfaces. Before writing any steering prose, call the Skill tool with `agent-doc-discipline` and pass its verification checklist. A newly installed deterministic check must be proven to bite before it counts as landed: run it clean once, then demonstrate it failing on a deliberately introduced violation, then revert the violation. A check that cannot be shown failing goes back to the proposal — a guardrail nobody has seen fire is decoration, not protection.
 4. Record where each finding landed — one file location per line — so the next refit starts from the record, not from memory. A refit on a launch-run session starts from that run's sediment list; a launch run may defer a lesson to a later refit by naming it.
 
+## Headless refit (unattended invocation)
+
+Refit is user-invoked, but its survey does not need the user at the keyboard to run — only to dispose. A host scheduler (cron, CI timer, an automation tool) may start a headless agent session that invokes this skill; the survey runs to its natural boundary under the same contract:
+
+- The survey reads the same instruments and lands nothing anywhere: headless refit produces the proposal list only — `finding → surface → intended change`, each with one line of instrument evidence — written to `.omc/refit/pending-proposals.md` and, when a notification channel is configured (`configure-notifications`), summarized there so the user learns a survey is waiting.
+- Nothing reaches a surface without the user's approval, exactly as in an interactive refit: proposals wait ranked, each independently vetoable, and the next interactive refit starts from the pending list instead of re-running the survey.
+- An empty survey is stated plainly ("no findings"), never padded — inventing findings is the same violation as skipping the survey.
+
 ## Output
 
 - Findings ranked by severity, each with evidence, surface, and intended change — every line independently decidable
