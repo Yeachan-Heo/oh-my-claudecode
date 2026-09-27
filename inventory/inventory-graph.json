@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d7ca3f77d7a41d5879f81d00ea0a0e1f9c5216da",
-    "sourceSha256": "0ca3ac4576c6e739605d5771ea6eacd2aec9d8eb286016dd65abaafdb7cc1964",
+    "head": "7f20df2e5e9af5116bcc97e4c9501f154b913de7",
+    "sourceSha256": "daf1f1dc8bdee8c4d237eb7bb4a976f335eab3b3a70e71ca4dd0c0cd1e37d04e",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d7ca3f77d7a41d5879f81d00ea0a0e1f9c5216da",
-  "sourceSha256": "0ca3ac4576c6e739605d5771ea6eacd2aec9d8eb286016dd65abaafdb7cc1964",
+  "head": "7f20df2e5e9af5116bcc97e4c9501f154b913de7",
+  "sourceSha256": "daf1f1dc8bdee8c4d237eb7bb4a976f335eab3b3a70e71ca4dd0c0cd1e37d04e",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 319,
+      "hookFiles": 321,
       "featureFiles": 84,
       "toolFiles": 61,
-      "libFiles": 43,
+      "libFiles": 45,
       "templateHooks": 22,
-      "srcFiles": 1392,
-      "total": 1414
+      "srcFiles": 1396,
+      "total": 1418
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 319,
+    "hookFiles": 321,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -374,6 +374,8 @@
       "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
       "src/hooks/registry/cutover.ts",
       "src/hooks/registry/dispatcher.ts",
@@ -629,6 +631,7 @@
       "src/lib/__tests__/mode-state-lock.test.ts",
       "src/lib/__tests__/payload-limits.test.ts",
       "src/lib/__tests__/plugin-dir.test.ts",
+      "src/lib/__tests__/runs-ledger.test.ts",
       "src/lib/__tests__/session-id.test.ts",
       "src/lib/__tests__/session-state-paths.type-test.ts",
       "src/lib/__tests__/swallowed-error.test.ts",
@@ -658,6 +661,7 @@
       "src/lib/plugin-dir.ts",
       "src/lib/project-memory-merge.ts",
       "src/lib/release-generation.ts",
+      "src/lib/runs-ledger.ts",
       "src/lib/security-config.ts",
       "src/lib/session-id.ts",
       "src/lib/session-isolation.ts",
@@ -845,6 +849,7 @@
       "scripts/risk-assess.mjs",
       "scripts/run-provider-advisor.js",
       "scripts/run.cjs",
+      "scripts/runs-reconciler.mjs",
       "scripts/session-end.mjs",
       "scripts/session-start.mjs",
       "scripts/session-summary.mjs",
@@ -6178,6 +6183,8 @@
       "src/hooks/recovery/types.ts",
       "src/hooks/registry/__tests__/cutover.test.ts",
       "src/hooks/registry/__tests__/dispatcher.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
+      "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/registry.test.ts",
       "src/hooks/registry/__tests__/shadow.test.ts",
       "src/hooks/registry/cutover.ts",
@@ -33980,6 +33987,11 @@
         "path": "scripts/run.cjs"
       },
       {
+        "id": "scripts/runs-reconciler.mjs",
+        "kind": "script",
+        "path": "scripts/runs-reconciler.mjs"
+      },
+      {
         "id": "scripts/session-end.mjs",
         "kind": "script",
         "path": "scripts/session-end.mjs"
@@ -39410,6 +39422,11 @@
         "path": "src/lib/__tests__/plugin-dir.test.ts"
       },
       {
+        "id": "src/lib/__tests__/runs-ledger.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/runs-ledger.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/session-id.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/session-id.test.ts"
@@ -39553,6 +39570,11 @@
         "id": "src/lib/release-generation.ts",
         "kind": "lib",
         "path": "src/lib/release-generation.ts"
+      },
+      {
+        "id": "src/lib/runs-ledger.ts",
+        "kind": "lib",
+        "path": "src/lib/runs-ledger.ts"
       },
       {
         "id": "src/lib/security-config.ts",
@@ -41825,6 +41847,11 @@
         "path": "tests/integration/multirepo-workspace.test.ts"
       },
       {
+        "id": "tests/integration/runs-reconciler.test.ts",
+        "kind": "other",
+        "path": "tests/integration/runs-reconciler.test.ts"
+      },
+      {
         "id": "tests/integration/skill-map-references.test.ts",
         "kind": "other",
         "path": "tests/integration/skill-map-references.test.ts"
@@ -44019,6 +44046,26 @@
       {
         "from": "scripts/run.cjs",
         "to": "external:worker_threads",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/runs-reconciler.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/runs-reconciler.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/runs-reconciler.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/runs-reconciler.mjs",
+        "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
       {
@@ -67897,6 +67944,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/runs-ledger.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/runs-ledger.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/runs-ledger.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/runs-ledger.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/runs-ledger.test.ts",
+        "to": "src/lib/runs-ledger.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/session-id.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -68433,6 +68505,11 @@
       },
       {
         "from": "src/lib/mode-state-io.ts",
+        "to": "src/lib/runs-ledger.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/mode-state-io.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -68454,6 +68531,16 @@
       {
         "from": "src/lib/release-generation.ts",
         "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/runs-ledger.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/runs-ledger.ts",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -81072,6 +81159,31 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/runs-reconciler.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/runs-reconciler.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/runs-reconciler.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/runs-reconciler.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/runs-reconciler.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/skill-map-references.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -81588,12 +81700,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7090,
-      "edgeCount": 7926,
-      "importEdgeCount": 6535,
+      "nodeCount": 7094,
+      "edgeCount": 7943,
+      "importEdgeCount": 6552,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "c3555baad58ef5cb17cd39b77522b67a7be62a67a042bcdfd7cdf5802f371a74",
-  "manifestSha256": "ba5ccb44d61527adb961e5cee5a9200f87825fd46593e1ee00755d82b35afa3c"
+  "inventorySha256": "c7cee4a32ca7a6c0bf1636e25e1291099c81d08bfa46703aa74453dcc36c381f",
+  "manifestSha256": "f179017f469a9e93d11b6cabe2de53d34d2636304d00f7aad5c94f17b8833dc2"
 }

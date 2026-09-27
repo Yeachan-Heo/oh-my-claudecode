@@ -184,6 +184,7 @@ describe('hook registry — selection and ordering', () => {
       'project-memory-session.mjs',
       'wiki-session-start.mjs',
       'stale-run-reporter.mjs',
+      'runs-reconciler.mjs',
     ]);
     const sessionStartInit = selectApplicableEntries(
       registry,

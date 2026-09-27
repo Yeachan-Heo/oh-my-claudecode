@@ -21,6 +21,20 @@ import {
 } from './worktree-paths.js';
 import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { atomicWriteJsonSync } from './atomic-write.js';
+import { observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
+
+/**
+ * Derive the .omc root from a state file path itself: state files always
+ * live under `<omcRoot>/state/...`, so the last `/state/` boundary is the
+ * anchor. Deterministic — unlike getOmcRoot() with no argument, which falls
+ * back to process.cwd() and is unreliable inside MCP/server processes.
+ */
+function omcRootFromStatePath(filePath: string): string | null {
+  const normalized = filePath.replaceAll('\\', '/');
+  const idx = normalized.lastIndexOf('/state/');
+  if (idx === -1) return null;
+  return normalized.slice(0, idx);
+}
 
 type MutationLockOwner = { version: 1; pid: number; processStart: string; createdAt: string; nonce: string };
 type BetterSqlite3 = import('better-sqlite3').Database;
@@ -629,6 +643,10 @@ export function writeStateFileLocked(filePath: string, state: Record<string, unk
   } catch {
     success = false;
   }
+  if (success) {
+    const omcRoot = omcRootFromStatePath(filePath);
+    if (omcRoot) observeModeStateWrite(omcRoot, filePath, state);
+  }
   return releaseMutationLock(lock) && success;
 }
 
@@ -636,6 +654,12 @@ export function clearStateFileLocked(filePath: string, expectedGeneration?: Stat
   if (!recoverEmergencyStateFile(filePath)) return false;
   const lock = acquireMutationLock(filePath);
   if (!lock) return false;
+  let previousState: Record<string, unknown> | null = null;
+  try {
+    if (existsSync(filePath)) previousState = JSON.parse(readFileSync(filePath, 'utf8')) as Record<string, unknown>;
+  } catch {
+    previousState = null;
+  }
   let success = false;
   try {
     if (existsSync(filePath)) {
@@ -655,6 +679,10 @@ export function clearStateFileLocked(filePath: string, expectedGeneration?: Stat
     }
   } catch {
     success = false;
+  }
+  if (success) {
+    const omcRoot = omcRootFromStatePath(filePath);
+    if (omcRoot) observeModeStateClear(omcRoot, filePath, previousState);
   }
   return releaseMutationLock(lock) && success;
 }
@@ -713,6 +741,8 @@ export function clearStateFileLockedIf(
         } else {
           unlinkSync(filePath);
           result = 'cleared';
+          const omcRoot = omcRootFromStatePath(filePath);
+          if (omcRoot) observeModeStateClear(omcRoot, filePath, current);
         }
       }
     }
