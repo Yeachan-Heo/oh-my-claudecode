@@ -33,6 +33,7 @@ import { paneLineLooksLikeIdlePrompt } from './pane-readiness.js';
 import {
   awaitWorkerLaunchAcknowledgement,
   awaitWorkerLaunchProviderStarted,
+  buildProviderEnvironment,
   cleanupWorkerLaunchTransport,
   isWorkerLaunchAttemptAccepted,
   isWorkerLaunchAttemptCurrent,
@@ -1379,7 +1380,24 @@ function workerPaneShellCommand(): string[] {
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     return [getDefaultShell()];
   }
-  return [];
+  if (process.platform === 'win32') return [];
+
+  // tmux can retain the full environment from when its server was started.
+  // Start pane shells from the worker-launch baseline while preserving the
+  // terminal and pane identity needed by interactive and nested team commands.
+  const shell = getDefaultShell();
+  const baseline = buildProviderEnvironment({ SHELL: shell });
+  const inheritedPaneEnvironment = ['TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE']
+    .map(key => `${key}="$${key}"`);
+  const command = [
+    '/usr/bin/env',
+    '-i',
+    ...Object.entries(baseline).map(([key, value]) => `${key}=${shellQuote(value)}`),
+    ...inheritedPaneEnvironment,
+    shellQuote(shell),
+    '-l',
+  ].join(' ');
+  return [command];
 }
 
 function escapeForCmdSet(value: string): string {
@@ -2223,6 +2241,7 @@ export async function createTeamSession(
       '-t', `=${targetSession}`,
       '-n', windowName,
       '-c', cwd,
+      ...workerPaneShellCommand(),
     ];
     let newWindowResult: Awaited<ReturnType<typeof runGuardedNativeTmuxCommand>>;
     try {
@@ -2964,7 +2983,7 @@ export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promi
   }
 }
 
-type PaneTrustPromptKind = 'directory' | 'codex_hooks' | 'cursor_workspace_trust';
+type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_hooks' | 'cursor_workspace_trust';
 
 function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
@@ -2975,6 +2994,16 @@ function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): P
   if ((provider === undefined || provider === 'cursor')
     && hasCursorTrustBanner && (hasCursorTrustHint || tail.some(l => /Do you trust the contents of this directory\?/i.test(l)))) {
     return 'cursor_workspace_trust';
+  }
+
+  const hasClaudeDirectoryQuestion = tail.some(l =>
+    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l),
+  );
+  const hasClaudeDirectoryNoChoice = tail.some(l => /\bNo,\s*exit\b/i.test(l));
+  const hasClaudeDirectoryYesChoice = tail.some(l => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
+  if (provider === 'claude' && hasClaudeDirectoryQuestion
+    && hasClaudeDirectoryNoChoice && hasClaudeDirectoryYesChoice) {
+    return 'claude_directory';
   }
 
   const hasDirectoryQuestion = tail.some(l => /Do you trust the contents of this directory\?/i.test(l));
@@ -3044,7 +3073,7 @@ export function paneHasActiveTask(captured: string, provider?: CliAgentType): bo
   if (tail.some(l => /\b\d+\s+background terminal running\b/i.test(l))) return true;
   if (tail.some(l => /esc to interrupt/i.test(l))) return true;
   if (tail.some(l => /\bbackground terminal running\b/i.test(l))) return true;
-  if (tail.some(l => /^[·✻]\s+[A-Za-z][A-Za-z0-9''-]*(?:\s+[A-Za-z][A-Za-z0-9''-]*){0,3}(?:…|\.{3})$/u.test(l))) return true;
+  if (tail.some(l => /^[·✻✢✳✶✽✺✹✸✷*]\s+[A-Za-z][A-Za-z0-9''-]*(?:\s+[A-Za-z][A-Za-z0-9''-]*){0,3}(?:…|\.{3})(?:\s*\(.*\))?$/u.test(l))) return true;
   return false;
 }
 
@@ -3212,14 +3241,25 @@ export async function waitForStartupPaneReady(
       }
       const providerSupportsSelector = selector === 'codex_hooks'
         ? context.provider === 'codex'
-        : context.provider === 'codex' || context.provider === 'claude';
+        : selector === 'claude_directory'
+          ? context.provider === 'claude'
+          : context.provider === 'codex' || context.provider === 'claude';
       if (!providerSupportsSelector) return { ok: false, reason: 'selector_unsupported' };
       if (handledSelectors.has(selector)) return { ok: false, reason: 'selector_persistent' };
-      await sendLiteralPaneText(
-        context.ownership.paneId,
-        selector === 'directory' ? '1' : '3',
-        context.ownership.tmuxServerIdentity,
-      );
+      if (selector === 'claude_directory') {
+        // This Claude Code dialog focuses "No, exit" by default; move to the affirmative choice.
+        await sendTeamPaneKey(
+          context.ownership.paneId,
+          'Down',
+          context.ownership.tmuxServerIdentity,
+        );
+      } else {
+        await sendLiteralPaneText(
+          context.ownership.paneId,
+          selector === 'directory' ? '1' : '3',
+          context.ownership.tmuxServerIdentity,
+        );
+      }
       await sendTeamPaneKey(
         context.ownership.paneId,
         'Enter',

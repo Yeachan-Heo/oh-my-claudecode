@@ -667,6 +667,35 @@ describe('worker pane startup safety', () => {
       .toBeLessThan(tmuxState.args.findIndex(args => args.at(-1) === 'Read inbox.md, execute now.'));
   });
 
+  strictTmuxIt.each([
+    ['Do you trust the files in this folder?', 'Yes, proceed'],
+    ['Quick safety check: Is this a project you created or one you trust?', 'Yes, I trust this folder'],
+  ] as const)(
+    'selects Yes in Claude Code’s new directory trust dialog before delivering the inbox (%s)',
+    async (question, affirmativeChoice) => {
+      const context = await acceptedContext('claude');
+      tmuxState.captures = [
+        `${question}\n❯ No, exit\n  ${affirmativeChoice}\n`,
+        '❯ ready\n',
+      ];
+
+      await expect(deliverStartupInbox(context, 'Read inbox.md, execute now.')).resolves.toEqual({
+        ok: true,
+        kind: 'attempted_unconfirmed',
+      });
+
+      const selectYesIndex = tmuxState.args.findIndex(args => args[0] === 'send-keys' && args.at(-1) === 'Down');
+      const confirmYesIndex = tmuxState.args.findIndex((args, index) =>
+        index > selectYesIndex && args[0] === 'send-keys' && args.at(-1) === 'Enter');
+      const inboxIndex = tmuxState.args.findIndex(args =>
+        args[0] === 'send-keys' && args.includes('-l') && args.at(-1) === 'Read inbox.md, execute now.');
+
+      expect(selectYesIndex).toBeGreaterThanOrEqual(0);
+      expect(confirmYesIndex).toBeGreaterThan(selectYesIndex);
+      expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
+    },
+  );
+
   strictTmuxIt('handles the exact Codex directory and hooks selectors in order before delivery', async () => {
     const context = await acceptedContext('codex');
     tmuxState.captures = [

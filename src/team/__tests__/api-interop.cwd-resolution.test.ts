@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -115,6 +116,7 @@ describe('team api working-directory resolution', () => {
     restoreFixtureEnv?.();
     restoreFixtureEnv = undefined;
     delete process.env.OMC_TEAM_STATE_ROOT;
+    delete process.env.OMC_TEAM_LEADER_CWD;
     delete process.env.OMC_TEAM_WORKER;
     await rm(cwd, { recursive: true, force: true });
   });
@@ -155,6 +157,34 @@ describe('team api working-directory resolution', () => {
     expect(claimResult.ok).toBe(true);
     if (!claimResult.ok) return;
     expect(typeof (claimResult.data as { claimToken?: string }).claimToken).toBe('string');
+  });
+
+  it('resolves centralized team state from the leader cwd when a worker uses OMC_STATE_DIR', async () => {
+    const centralStateDir = await mkdtemp(join(tmpdir(), 'omc-team-api-central-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd });
+      execFileSync('git', ['remote', 'add', 'origin', 'https://example.com/omc/team-api.git'], { cwd });
+      process.env.OMC_STATE_DIR = centralStateDir;
+      const seeded = await seedTeamState();
+      process.env.OMC_TEAM_STATE_ROOT = seeded.root;
+      process.env.OMC_TEAM_LEADER_CWD = cwd;
+      process.env.OMC_TEAM_WORKER = `${teamName}/worker-1`;
+
+      const workerCwd = join(cwd, 'nested', 'worker');
+      await mkdir(workerCwd, { recursive: true });
+      const claimResult = await executeTeamApiOperation('claim-task', {
+        team_name: teamName,
+        task_id: '1',
+        worker: 'worker-1',
+      }, workerCwd);
+
+      expect(claimResult.ok).toBe(true);
+      if (!claimResult.ok) return;
+      expect((claimResult.data as { ok?: boolean }).ok).toBe(true);
+      expect(typeof (claimResult.data as { claimToken?: string }).claimToken).toBe('string');
+    } finally {
+      await rm(centralStateDir, { recursive: true, force: true });
+    }
   });
 
   it('reads recovery results from canonical leader state rather than a colliding foreign worker cwd', async () => {
