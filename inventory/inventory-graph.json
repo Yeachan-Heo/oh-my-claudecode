@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "839b3a5e03d1cea4024f57e4a5848a77dc0d21e0",
-    "sourceSha256": "b1bf07adb11ef3e87d3de7709322f029a91dc96e26a179953cf2bcae8b66bb7f",
+    "head": "130f6009bccd22eade8ebb0985ee31a24c849d52",
+    "sourceSha256": "767608d190bda83b6093689fe7fc9fdf381a3e1fc4753cd1e51a71888b4c9844",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "839b3a5e03d1cea4024f57e4a5848a77dc0d21e0",
-  "sourceSha256": "b1bf07adb11ef3e87d3de7709322f029a91dc96e26a179953cf2bcae8b66bb7f",
+  "head": "130f6009bccd22eade8ebb0985ee31a24c849d52",
+  "sourceSha256": "767608d190bda83b6093689fe7fc9fdf381a3e1fc4753cd1e51a71888b4c9844",
   "counts": {
     "public": {
       "skills": 47,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 45,
       "templateHooks": 22,
-      "srcFiles": 1394,
-      "total": 1416
+      "srcFiles": 1396,
+      "total": 1418
     },
     "generated": {
       "distFiles": 5066,
@@ -788,7 +788,6 @@
       "scripts/generate-inventory-graph.mjs",
       "scripts/generate-prompt-projections.mjs",
       "scripts/generate-skill-entitlements.mjs",
-      "scripts/git-guardrails.mjs",
       "scripts/graph-agent-demo.mjs",
       "scripts/inventory-issue-3698.mjs",
       "scripts/jev-eval.mjs",
@@ -815,7 +814,6 @@
       "scripts/lib/precompact-publisher.mjs",
       "scripts/lib/precompact-restore.mjs",
       "scripts/lib/read-budget-preflight.mjs",
-      "scripts/lib/run-reaper.mjs",
       "scripts/lib/skill-entitlements.mjs",
       "scripts/lib/state-lock.mjs",
       "scripts/lib/state-root.cjs",
@@ -858,7 +856,6 @@
       "scripts/shipyard-audit.mjs",
       "scripts/skill-injector.mjs",
       "scripts/smoke-multirepo.mjs",
-      "scripts/stale-run-reporter.mjs",
       "scripts/status.mjs",
       "scripts/subagent-tracker.mjs",
       "scripts/sync-metadata.ts",
@@ -33243,11 +33240,6 @@
         "path": "node:path/win32"
       },
       {
-        "id": "external:node:perf_hooks",
-        "kind": "external",
-        "path": "node:perf_hooks"
-      },
-      {
         "id": "external:node:process",
         "kind": "external",
         "path": "node:process"
@@ -33688,11 +33680,6 @@
         "path": "scripts/generate-skill-entitlements.mjs"
       },
       {
-        "id": "scripts/git-guardrails.mjs",
-        "kind": "script",
-        "path": "scripts/git-guardrails.mjs"
-      },
-      {
         "id": "scripts/graph-agent-demo.mjs",
         "kind": "script",
         "path": "scripts/graph-agent-demo.mjs"
@@ -33821,11 +33808,6 @@
         "id": "scripts/lib/read-budget-preflight.mjs",
         "kind": "script",
         "path": "scripts/lib/read-budget-preflight.mjs"
-      },
-      {
-        "id": "scripts/lib/run-reaper.mjs",
-        "kind": "script",
-        "path": "scripts/lib/run-reaper.mjs"
       },
       {
         "id": "scripts/lib/skill-entitlements.mjs",
@@ -34036,11 +34018,6 @@
         "id": "scripts/smoke-multirepo.mjs",
         "kind": "script",
         "path": "scripts/smoke-multirepo.mjs"
-      },
-      {
-        "id": "scripts/stale-run-reporter.mjs",
-        "kind": "script",
-        "path": "scripts/stale-run-reporter.mjs"
       },
       {
         "id": "scripts/status.mjs",
@@ -36503,6 +36480,11 @@
         "path": "src/cli/commands/__tests__/doctor-team-routing.test.ts"
       },
       {
+        "id": "src/cli/commands/__tests__/intake.test.ts",
+        "kind": "src",
+        "path": "src/cli/commands/__tests__/intake.test.ts"
+      },
+      {
         "id": "src/cli/commands/__tests__/team-role-shorthand.test.ts",
         "kind": "src",
         "path": "src/cli/commands/__tests__/team-role-shorthand.test.ts"
@@ -36541,6 +36523,11 @@
         "id": "src/cli/commands/doctor-team-routing.ts",
         "kind": "src",
         "path": "src/cli/commands/doctor-team-routing.ts"
+      },
+      {
+        "id": "src/cli/commands/intake.ts",
+        "kind": "src",
+        "path": "src/cli/commands/intake.ts"
       },
       {
         "id": "src/cli/commands/ralphthon.ts",
@@ -41833,11 +41820,6 @@
         "path": "tests/integration/epic-3698-closure-verifier.test.ts"
       },
       {
-        "id": "tests/integration/git-guardrails-hook.test.ts",
-        "kind": "other",
-        "path": "tests/integration/git-guardrails-hook.test.ts"
-      },
-      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -41851,11 +41833,6 @@
         "id": "tests/integration/skill-map-references.test.ts",
         "kind": "other",
         "path": "tests/integration/skill-map-references.test.ts"
-      },
-      {
-        "id": "tests/integration/stale-run-reporter.test.ts",
-        "kind": "other",
-        "path": "tests/integration/stale-run-reporter.test.ts"
       },
       {
         "id": "tests/integration/state-root-fs-probe.test.ts",
@@ -42890,21 +42867,6 @@
         "kind": "imports"
       },
       {
-        "from": "scripts/git-guardrails.mjs",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/git-guardrails.mjs",
-        "to": "scripts/lib/state-root.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/git-guardrails.mjs",
-        "to": "scripts/lib/stdin.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "scripts/graph-agent-demo.mjs",
         "to": "external:node:fs/promises",
         "kind": "imports"
@@ -43256,16 +43218,6 @@
       },
       {
         "from": "scripts/lib/read-budget-preflight.mjs",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/run-reaper.mjs",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/lib/run-reaper.mjs",
         "to": "external:path",
         "kind": "imports"
       },
@@ -44272,21 +44224,6 @@
       {
         "from": "scripts/smoke-multirepo.mjs",
         "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/stale-run-reporter.mjs",
-        "to": "scripts/lib/run-reaper.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/stale-run-reporter.mjs",
-        "to": "scripts/lib/state-root.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/stale-run-reporter.mjs",
-        "to": "scripts/lib/stdin.mjs",
         "kind": "imports"
       },
       {
@@ -53375,6 +53312,21 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/cli/commands/__tests__/intake.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/intake.test.ts",
+        "to": "src/cli/commands/intake.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/intake.test.ts",
+        "to": "src/cli/commands/intake.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/cli/commands/__tests__/team-role-shorthand.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -53602,6 +53554,31 @@
       {
         "from": "src/cli/commands/doctor-team-routing.ts",
         "to": "src/team/cli-detection.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/intake.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/intake.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/intake.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/intake.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/intake.ts",
+        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -53997,6 +53974,11 @@
       {
         "from": "src/cli/index.ts",
         "to": "src/cli/commands/doctor-team-routing.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/index.ts",
+        "to": "src/cli/commands/intake.ts",
         "kind": "imports"
       },
       {
@@ -81095,41 +81077,6 @@
         "kind": "imports"
       },
       {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:node:perf_hooks",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/git-guardrails-hook.test.ts",
-        "to": "scripts/lib/state-root.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -81192,36 +81139,6 @@
       {
         "from": "tests/integration/skill-map-references.test.ts",
         "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "tests/integration/stale-run-reporter.test.ts",
-        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -81696,12 +81613,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7094,
-      "edgeCount": 7943,
-      "importEdgeCount": 6552,
+      "nodeCount": 7090,
+      "edgeCount": 7931,
+      "importEdgeCount": 6539,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "efab9d044ab1db998144d7e871f278134a3e1eb96e24882fae28370451bbe2e1",
-  "manifestSha256": "f30160ab7b231fff4a7847c96412ab7b483c824262774d25f515044f2cb33b56"
+  "inventorySha256": "32dd486da1c9f6cb2de16f352bf101dd7a3cf07c905415cedcc9e632a379d602",
+  "manifestSha256": "b209bde1c68e87b357ba61bc074ac6a469890cef304137bc3672bb4c34451b6b"
 }

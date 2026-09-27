@@ -66,6 +66,7 @@ import { askCommand, ASK_USAGE } from './ask.js';
 import { graphCommand } from './graph.js';
 import { checkpointCommand } from './checkpoint.js';
 import { lookoutCommand } from './lookout.js';
+import { intakeCommand } from './commands/intake.js';
 import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
 import { parseHudWatchInterval, runHudWatchLoop } from './hud-watch.js';
@@ -1556,6 +1557,7 @@ program
 program.addCommand(graphCommand());
 program.addCommand(checkpointCommand());
 program.addCommand(lookoutCommand());
+program.addCommand(intakeCommand());
 
 /**
  * Returns the fully-configured commander program.
