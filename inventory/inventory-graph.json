@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
-    "sourceSha256": "2bb180f52170e0bb35c20c247f7de1ac9e69e712450a8f374f3b509eb9f251a2",
+    "head": "8699679c4908efb8124db22e433351c73be21626",
+    "sourceSha256": "81ef850c26717e9ecd815c5de89f7f4f1f87c918adbb828dfce1459bd932158b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "19c16dd02ccf6066798c8fc405f370e112c35ea6",
-  "sourceSha256": "2bb180f52170e0bb35c20c247f7de1ac9e69e712450a8f374f3b509eb9f251a2",
+  "head": "8699679c4908efb8124db22e433351c73be21626",
+  "sourceSha256": "81ef850c26717e9ecd815c5de89f7f4f1f87c918adbb828dfce1459bd932158b",
   "counts": {
     "public": {
       "skills": 47,
@@ -32915,6 +32915,11 @@
         "id": "docs/design/ISSUE-3712-RELEASE-VERIFICATION.md",
         "kind": "other",
         "path": "docs/design/ISSUE-3712-RELEASE-VERIFICATION.md"
+      },
+      {
+        "id": "docs/design/P2-RUN-LEDGER-AND-INTAKE-PLAN.md",
+        "kind": "other",
+        "path": "docs/design/P2-RUN-LEDGER-AND-INTAKE-PLAN.md"
       },
       {
         "id": "docs/design/SKILLS_2_0_ADAPTATION.md",
@@ -81395,12 +81400,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7082,
+      "nodeCount": 7083,
       "edgeCount": 7896,
       "importEdgeCount": 6505,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "e447d888aa777e81c9228fff90d9b35e079ea709637ca39c75e486592cb487fb",
-  "manifestSha256": "621ee1cabde15c393e9f2b92802058808b0f128e4e893eb1b7340c1ff9985c75"
+  "inventorySha256": "6b795a400020264e83f4e114a1dac9229d8623ae09c9943383770e6c9306bfec",
+  "manifestSha256": "438dbca1f435cadf45d81ace608677f117cf2c099857ebae91b6b6c34df8afbe"
 }
