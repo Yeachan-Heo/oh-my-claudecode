@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from 'vitest';
+import { describe, expect, it, afterEach, beforeEach } from 'vitest';
 import { createHmac } from 'crypto';
 import fs, { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -21,6 +21,15 @@ const SECRET = 'test-secret';
 const WHITELIST = ['pangpang778/factory-demo'];
 
 const tempCwds: string[] = [];
+let previousOmcStateDir: string | undefined;
+let stateRoot: string;
+
+beforeEach(() => {
+  previousOmcStateDir = process.env.OMC_STATE_DIR;
+  stateRoot = mkdtempSync(join(tmpdir(), 'omc-factory-state-'));
+  tempCwds.push(stateRoot);
+  process.env.OMC_STATE_DIR = stateRoot;
+});
 
 function tempCwd(): string {
   const dir = mkdtempSync(join(tmpdir(), 'omc-listener-'));
@@ -33,6 +42,8 @@ function config(overrides: Partial<ListenerConfig> = {}): ListenerConfig {
 }
 
 afterEach(() => {
+  if (previousOmcStateDir === undefined) delete process.env.OMC_STATE_DIR;
+  else process.env.OMC_STATE_DIR = previousOmcStateDir;
   for (const dir of tempCwds) rmSync(dir, { recursive: true, force: true });
   tempCwds.length = 0;
 });

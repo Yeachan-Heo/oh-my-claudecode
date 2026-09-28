@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "23ec3293b6097c34b6c565df458046ec3bb36fe7",
-    "sourceSha256": "13b15929ba424a1c7fb7502f1ef85c496750da7ec269e0faab1c9a70a80b5e0e",
+    "head": "d1d48681db11b2f9b4735c62477d9014c020af74",
+    "sourceSha256": "624f08351d445aedfa9237c39bc71022c601db973fef0fa1c86e392fc5327cdf",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "23ec3293b6097c34b6c565df458046ec3bb36fe7",
-  "sourceSha256": "13b15929ba424a1c7fb7502f1ef85c496750da7ec269e0faab1c9a70a80b5e0e",
+  "head": "d1d48681db11b2f9b4735c62477d9014c020af74",
+  "sourceSha256": "624f08351d445aedfa9237c39bc71022c601db973fef0fa1c86e392fc5327cdf",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 325,
+      "hookFiles": 327,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 22,
-      "srcFiles": 1407,
-      "total": 1429
+      "srcFiles": 1409,
+      "total": 1431
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 325,
+    "hookFiles": 327,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -393,6 +393,7 @@
       "src/hooks/self-improve/__tests__/session-isolation.test.ts",
       "src/hooks/session-end/__tests__/action-runner.test.ts",
       "src/hooks/session-end/__tests__/callbacks.test.ts",
+      "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
@@ -410,6 +411,7 @@
       "src/hooks/session-end/action-runner.ts",
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
+      "src/hooks/session-end/chain-enqueuer.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -6209,6 +6211,7 @@
       "src/hooks/self-improve/__tests__/session-isolation.test.ts",
       "src/hooks/session-end/__tests__/action-runner.test.ts",
       "src/hooks/session-end/__tests__/callbacks.test.ts",
+      "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
@@ -6226,6 +6229,7 @@
       "src/hooks/session-end/action-runner.ts",
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
+      "src/hooks/session-end/chain-enqueuer.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -38572,6 +38576,11 @@
         "path": "src/hooks/session-end/__tests__/callbacks.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts"
@@ -38655,6 +38664,11 @@
         "id": "src/hooks/session-end/callbacks.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/callbacks.ts"
+      },
+      {
+        "id": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/chain-enqueuer.ts"
       },
       {
         "id": "src/hooks/session-end/cleanup-manifest.ts",
@@ -63704,6 +63718,46 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "src/hooks/session-end/guardrails.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+        "to": "src/hooks/session-end/guardrails.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -64254,6 +64308,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/guardrails.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/routing.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/routing.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/cleanup-manifest.ts",
         "to": "external:crypto",
         "kind": "imports"
@@ -64350,6 +64444,11 @@
       },
       {
         "from": "src/hooks/session-end/index.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/index.ts",
         "to": "src/hooks/session-end/cleanup-manifest.ts",
         "kind": "imports"
       },
@@ -64421,6 +64520,11 @@
       {
         "from": "src/hooks/session-end/spawn-next.ts",
         "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/spawn-next.ts",
+        "to": "external:crypto",
         "kind": "imports"
       },
       {
@@ -82200,12 +82304,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7110,
-      "edgeCount": 8025,
-      "importEdgeCount": 6623,
+      "nodeCount": 7112,
+      "edgeCount": 8043,
+      "importEdgeCount": 6638,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "536de6d39902cac716118db56e83e7493436a3975340552182b851db12f17965",
-  "manifestSha256": "0bf46a284f91277404d4369b9c6c6302c95fe2477d8c0e3c6c80ca37df39a590"
+  "inventorySha256": "a90d755eba81051c16d5a253f9376793cdbfe4565876f781527b98984e7acd45",
+  "manifestSha256": "b17136610c821713ea9c772fa3898e099d2fe68492d6094c23344a8437d9a72e"
 }
