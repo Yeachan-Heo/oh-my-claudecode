@@ -987,12 +987,6 @@ describe('pane readiness startup banners', () => {
         expect(paneLooksReady(capture)).toBe(true);
         expect(paneHasActiveTask(capture)).toBe(true);
     });
-    it.each(['✢', '✳', '✶', '✽', '✺', '✹', '✸', '✷', '*'])('treats Claude Code spinner glyph %s as an active task', (glyph) => {
-        expect(paneHasActiveTask(`${glyph} Compacting…`)).toBe(true);
-    });
-    it('treats a Claude Code spinner status suffix as an active task', () => {
-        expect(paneHasActiveTask('✻ Compacting… (12 tokens, 3s)')).toBe(true);
-    });
 });
 describe('sendToWorker implementation guards', () => {
     const source = readFileSync(join(__dirname, '..', 'tmux-session.ts'), 'utf-8');

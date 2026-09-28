@@ -391,13 +391,17 @@ function getSetupFallbackCanonicalSkillPaths(baseName) {
     });
 }
 function isSupportedSetupFallbackSkill(legacySkillsDir, entry, baseName) {
+    if (hasActiveOmcPluginForDiagnostics()) {
+        return false;
+    }
     if (!SETUP_FALLBACK_SKILL_NAMES.has(baseName)) {
         return false;
     }
-    // setup-claude-md.sh may sync the raw bundled wiki skill as a CLI fallback.
-    // Keep the retired omc-reference fallback for already-installed 4.x upgrades.
-    // Suppress only an exact byte-for-byte copy so real legacy collisions and
-    // user-edited fallback copies still surface, even with the plugin active.
+    // scripts/setup-claude-md.sh intentionally syncs the raw bundled
+    // skills/wiki/SKILL.md file into ~/.claude/skills/wiki/SKILL.md. Keep the
+    // retired omc-reference fallback for already-installed 4.x upgrades.
+    // as a Claude CLI fallback. Suppress only that exact, unmodified sync so real
+    // legacy collisions and user-edited fallback copies still surface.
     if (entry.toLowerCase() !== baseName) {
         return false;
     }
@@ -406,9 +410,9 @@ function isSupportedSetupFallbackSkill(legacySkillsDir, entry, baseName) {
         return false;
     }
     try {
-        const installedContent = readFileSync(installedSkillPath);
+        const installedContent = readFileSync(installedSkillPath, 'utf-8');
         return getSetupFallbackCanonicalSkillPaths(baseName).some(canonicalSkillPath => (existsSync(canonicalSkillPath)
-            && installedContent.equals(readFileSync(canonicalSkillPath))));
+            && installedContent === readFileSync(canonicalSkillPath, 'utf-8')));
     }
     catch {
         return false;

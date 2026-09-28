@@ -19,7 +19,7 @@ function withOpenClawRouting(payload) {
 }
 const ACTIONS = [
     ['foreground-cleanup', 'required'], ['wiki-capture', 'required'], ['team-cleanup', 'required'], ['python-cleanup', 'required'], ['reply-cleanup', 'required'],
-    ['callback', 'best-effort'], ['notification', 'best-effort'], ['openclaw', 'best-effort'], ['spawn-next', 'best-effort'],
+    ['callback', 'best-effort'], ['notification', 'best-effort'], ['openclaw', 'best-effort'],
 ];
 const TEST_PRODUCER_GRACE_ENV = 'OMC_SESSION_END_TEST_PRODUCER_GRACE_MS';
 const PRODUCER_GRACE_MS = process.env.NODE_ENV === 'test' && /^\d+$/.test(process.env[TEST_PRODUCER_GRACE_ENV] ?? '')

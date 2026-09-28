@@ -12,20 +12,6 @@ import { createRequire } from 'module';
 import { getOmcRoot, probeGitTopLevel, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, } from './worktree-paths.js';
 import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { atomicWriteJsonSync } from './atomic-write.js';
-import { observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
-/**
- * Derive the .omc root from a state file path itself: state files always
- * live under `<omcRoot>/state/...`, so the last `/state/` boundary is the
- * anchor. Deterministic — unlike getOmcRoot() with no argument, which falls
- * back to process.cwd() and is unreliable inside MCP/server processes.
- */
-function omcRootFromStatePath(filePath) {
-    const normalized = filePath.replaceAll('\\', '/');
-    const idx = normalized.lastIndexOf('/state/');
-    if (idx === -1)
-        return null;
-    return normalized.slice(0, idx);
-}
 // better-sqlite3 is externalized from plugin bundles and its native install
 // script may not have run in a Claude Code plugin cache. Keep loading optional
 // so mode state can use the owner-file lock fallback instead of failing import.
@@ -171,12 +157,6 @@ function lockArtifactIdentity(path) {
  */
 function reclaimDeadLockOwner(path, observedOwner, observedIdentity) {
     const quarantinePath = `${path}.reclaim.${process.pid}.${randomUUID()}`;
-    // Verify the file at path still has the expected identity before renaming.
-    // If it has changed, another process has published a replacement and we must not remove it.
-    const current = lockArtifactIdentity(path);
-    if (!current || current.dev !== observedIdentity.dev || current.ino !== observedIdentity.ino) {
-        return 'changed';
-    }
     try {
         renameSync(path, quarantinePath);
     }
@@ -376,11 +356,6 @@ function acquireFileLockAt(path, attempts) {
                 lastMutationLockFailure = 'unverifiable';
                 return null;
             }
-            // Capture the file identity before the probe. If it changes during the probe,
-            // another process has published a replacement lock and we must skip reclamation.
-            const observedIdentity = lockArtifactIdentity(path);
-            if (observedIdentity === null)
-                continue;
             const existing = readLockOwner(path);
             if (existing === 'absent')
                 continue;
@@ -388,10 +363,6 @@ function acquireFileLockAt(path, attempts) {
                 lastMutationLockFailure = 'unverifiable';
                 return null;
             }
-            // Re-verify the identity hasn't changed before probing liveness.
-            const recheck = lockArtifactIdentity(path);
-            if (!recheck || recheck.dev !== observedIdentity.dev || recheck.ino !== observedIdentity.ino)
-                continue;
             const live = ownerLive(existing);
             if (live === null) {
                 lastMutationLockFailure = 'unverifiable';
@@ -403,6 +374,11 @@ function acquireFileLockAt(path, attempts) {
                     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
                     continue;
                 }
+                return null;
+            }
+            const observedIdentity = lockArtifactIdentity(path);
+            if (observedIdentity === null) {
+                lastMutationLockFailure = 'unverifiable';
                 return null;
             }
             const reclaimed = reclaimDeadLockOwner(path, existing, observedIdentity);
@@ -694,11 +670,6 @@ export function writeStateFileLocked(filePath, state) {
     catch {
         success = false;
     }
-    if (success) {
-        const omcRoot = omcRootFromStatePath(filePath);
-        if (omcRoot)
-            observeModeStateWrite(omcRoot, filePath, state);
-    }
     return releaseMutationLock(lock) && success;
 }
 export function clearStateFileLocked(filePath, expectedGeneration) {
@@ -707,14 +678,6 @@ export function clearStateFileLocked(filePath, expectedGeneration) {
     const lock = acquireMutationLock(filePath);
     if (!lock)
         return false;
-    let previousState = null;
-    try {
-        if (existsSync(filePath))
-            previousState = JSON.parse(readFileSync(filePath, 'utf8'));
-    }
-    catch {
-        previousState = null;
-    }
     let success = false;
     try {
         if (existsSync(filePath)) {
@@ -737,11 +700,6 @@ export function clearStateFileLocked(filePath, expectedGeneration) {
     }
     catch {
         success = false;
-    }
-    if (success) {
-        const omcRoot = omcRootFromStatePath(filePath);
-        if (omcRoot)
-            observeModeStateClear(omcRoot, filePath, previousState);
     }
     return releaseMutationLock(lock) && success;
 }
@@ -794,9 +752,6 @@ export function clearStateFileLockedIf(filePath, predicate, recoveryOptions, exp
                 else {
                     unlinkSync(filePath);
                     result = 'cleared';
-                    const omcRoot = omcRootFromStatePath(filePath);
-                    if (omcRoot)
-                        observeModeStateClear(omcRoot, filePath, current);
                 }
             }
         }

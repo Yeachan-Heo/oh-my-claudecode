@@ -117,13 +117,6 @@ export declare const HOOKS_SETTINGS_CONFIG_NODE: {
                 command: string;
             }[];
         }[];
-        SessionEnd: {
-            hooks: {
-                type: "command";
-                command: string;
-                async: true;
-            }[];
-        }[];
     };
 };
 /**
