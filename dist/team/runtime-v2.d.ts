@@ -51,6 +51,12 @@ export declare function readRecoverDeadWorkerV2Result(requestId: string, cwd?: s
 export declare function readRecoverDeadWorkerV2Outcome(cwd: string, requestId: string): RecoveryDurableOutcome | null;
 export declare function reconcileCommittedTeamServices(config: TeamConfig, cwd: string): Promise<'synced' | 'repair_required'>;
 export { isRuntimeV2Enabled } from './runtime-flags.js';
+export interface TeamStartupFailure {
+    worker: string;
+    reason: string;
+    /** One claim-task error line from the owned pane. Set only for a pane-busy evidence miss. */
+    claimError?: string;
+}
 export interface TeamRuntimeV2 {
     teamName: string;
     sanitizedName: string;
@@ -60,6 +66,8 @@ export interface TeamRuntimeV2 {
     config: TeamConfig;
     cwd: string;
     ownsWindow: boolean;
+    /** Workers that launched without startup evidence. Set by startTeamV2. */
+    startupFailures?: TeamStartupFailure[];
 }
 export interface TeamSnapshotV2 {
     teamName: string;
@@ -113,7 +121,7 @@ export type ShutdownTeamV2Result = {
     outcome: 'cleaned';
 } | {
     outcome: 'preserved';
-    reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worktrees_preserved';
+    reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worker_process_reaped_pane_unconfirmed' | 'worktrees_preserved';
     workers: string[];
 } | {
     outcome: 'failed';
@@ -165,6 +173,8 @@ export interface StartTeamV2Config {
     workerRoles?: string[];
     roleName?: string;
     rolePrompt?: string;
+    /** Per-role overlay prompts. Mixed-role launches look up by worker role. */
+    rolePromptByRole?: Record<string, string>;
     /**
      * Optional pre-loaded plugin config. When omitted, `loadConfig()` is called
      * at startup. Exposed so callers (tests, bridges) can inject a config.
@@ -201,10 +211,16 @@ export declare function waitForStartupEvidenceBudget(hasEvidence: () => Promise<
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
  * the caller's fail-closed teardown. Interactive providers may also supply a
- * read-only activity probe when resubmission is disabled. Panes that are idle,
- * wrong, or dead never earn that recheck and keep the existing fast failure path.
+ * read-only activity probe when resubmission is disabled. `paneBusy` records
+ * that observation and is not startup success. Panes that are idle, wrong, or
+ * dead never earn that recheck and keep the existing fast failure path.
  */
-export declare function settleStartupEvidence(policy: WorkerStartupEvidencePolicy, waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>, resubmit?: () => Promise<StartupInboxResubmitOutcome>, probeActivity?: () => Promise<StartupPaneActivity>): Promise<boolean>;
+export declare function settleStartupEvidence(policy: WorkerStartupEvidencePolicy, waitForCurrentEvidence: (budgetMs: number) => Promise<boolean>, resubmit?: () => Promise<StartupInboxResubmitOutcome>, probeActivity?: () => Promise<StartupPaneActivity>): Promise<{
+    settled: boolean;
+    paneBusy: boolean;
+}>;
+/** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
+export declare function claimErrorLineFromPane(captured: string): string | undefined;
 export declare function promptModeRecoveryRequiresProgressEvidence(promptMode: boolean, continuationCount: number): boolean;
 interface RecoveryOwnerFinalizationDeps {
     readRevisionedConfig: (teamName: string, cwd: string) => Promise<{

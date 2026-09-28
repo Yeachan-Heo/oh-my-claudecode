@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { HOOK_EVENTS, buildHookRegistry, validateRegistryAgainstHooksJson, selectApplicableEntries, parseEntrypointCommand, } from '../index.js';
-import { failModeForRisk, HARD_RISK_CLASSES } from '../../../workflow/registry.js';
+import { failModeForRisk, HARD_RISK_CLASSES, } from '../../../workflow/registry.js';
 function loadInstalledHooksJson() {
     const raw = JSON.parse(readFileSync(join(process.cwd(), 'hooks', 'hooks.json'), 'utf-8'));
     return raw.hooks;
@@ -16,7 +16,9 @@ describe('hook registry — derivation from installed hooks.json (#3707)', () =>
             for (const group of groups) {
                 group.hooks.forEach((_, order) => {
                     installedCount += 1;
-                    const matches = registry.filter((e) => e.event === event && e.matcher === group.matcher && e.order === order);
+                    const matches = registry.filter((e) => e.event === event &&
+                        e.matcher === group.matcher &&
+                        e.order === order);
                     expect(matches).toHaveLength(1);
                 });
             }
@@ -56,7 +58,9 @@ describe('hook registry — derivation from installed hooks.json (#3707)', () =>
         for (const [event, groups] of Object.entries(hooksJson)) {
             for (const group of groups) {
                 group.hooks.forEach((hook, order) => {
-                    const entry = registry.find((e) => e.event === event && e.matcher === group.matcher && e.order === order);
+                    const entry = registry.find((e) => e.event === event &&
+                        e.matcher === group.matcher &&
+                        e.order === order);
                     expect(entry?.timeoutMs).toBe((hook.timeout ?? 0) * 1000);
                 });
             }
@@ -137,12 +141,16 @@ describe('hook registry — selection and ordering', () => {
             'session-start.mjs',
             'project-memory-session.mjs',
             'wiki-session-start.mjs',
+            'stale-run-reporter.mjs',
+            'runs-reconciler.mjs',
         ]);
         const sessionStartInit = selectApplicableEntries(registry, 'SessionStart', 'init');
         expect(sessionStartInit.some((e) => e.entrypoint === 'setup-init.mjs')).toBe(true);
         expect(sessionStartInit.some((e) => e.entrypoint === 'setup-maintenance.mjs')).toBe(false);
         const bashPermission = selectApplicableEntries(registry, 'PermissionRequest', 'Bash');
-        expect(bashPermission.map((e) => e.entrypoint)).toEqual(['permission-handler.mjs']);
+        expect(bashPermission.map((e) => e.entrypoint)).toEqual([
+            'permission-handler.mjs',
+        ]);
         expect(selectApplicableEntries(registry, 'PermissionRequest', 'Edit')).toEqual([]);
     });
 });

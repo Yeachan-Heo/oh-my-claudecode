@@ -15,18 +15,28 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
-import { boundExcerpts, parseJevConfig, pointState } from './config.js';
+import { ACTIVATED_POINTS, boundExcerpts, parseJevConfig, pointState } from './config.js';
 const CIRCUIT_FAILURE_THRESHOLD = 3;
 const runtime = {
     requestCount: 0,
     consecutiveFailures: new Map(),
     openCircuits: new Set(),
+    envWarned: new Set(),
 };
-/** Reset in-process resolver state (request cap, circuit breaker). Test hook. */
+/** Reset in-process resolver state (request cap, circuit breaker, warnings). Test hook. */
 export function resetJevResolverState() {
     runtime.requestCount = 0;
     runtime.consecutiveFailures.clear();
     runtime.openCircuits.clear();
+    runtime.envWarned.clear();
+}
+/** Keep only finite, non-negative token counts; the client does not validate `usage`. */
+function sanitizeUsage(usage) {
+    if (!usage || typeof usage !== 'object' || Array.isArray(usage))
+        return undefined;
+    const { input_tokens, output_tokens } = usage;
+    const isCount = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+    return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : undefined;
 }
 function firstAnswer(response) {
     return Object.values(response.answers)[0];
@@ -52,11 +62,25 @@ function recordFailure(point) {
         console.error('[jev] ' + point + ': circuit open after ' + count + ' consecutive failures');
     }
 }
-export async function resolveJudgment(args) {
+export async function resolveJudgment(resolveJudgmentArgs) {
+    const args = resolveJudgmentArgs;
     const config = parseJevConfig();
     let mode = pointState(args.point, config);
     if (args.mode && mode !== 'off')
         mode = args.mode;
+    // One stderr line when env activation makes Jev decide (warn once per
+    // point per process; code-activated and caller-forced stay silent).
+    // OMC_JEV_QUIET=1 silences the line: hook processes are one-shot, so
+    // per-process once is per-call in practice.
+    if (process.env.OMC_JEV_QUIET !== '1' &&
+        mode === 'active' &&
+        !args.mode &&
+        !ACTIVATED_POINTS.has(args.point) &&
+        (config.activateAll || config.activatedPoints.has(args.point)) &&
+        !runtime.envWarned.has(args.point)) {
+        runtime.envWarned.add(args.point);
+        console.error('[jev] ' + args.point + ': ACTIVE via env — Jev decides');
+    }
     const twinAnswer = () => args.twin();
     // Twin-decided, no-fetch paths. twin() errors propagate by design.
     if (mode === 'off') {
@@ -91,7 +115,7 @@ export async function resolveJudgment(args) {
         void attempt.then((outcome) => {
             if (outcome.ok) {
                 recordSuccess(args.point);
-                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', heuristic, firstAnswer(outcome.response)), config.logDir);
+                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', heuristic, firstAnswer(outcome.response), outcome.response.usage), config.logDir);
             }
             else {
                 recordFailure(args.point);
@@ -113,7 +137,7 @@ export async function resolveJudgment(args) {
     recordSuccess(args.point);
     const heuristic = twinAnswer();
     const jevAnswer = firstAnswer(outcome.response);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', heuristic, jevAnswer), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', heuristic, jevAnswer, outcome.response.usage), config.logDir);
     if (mode === 'active') {
         const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
         return { answer, source: 'jev', mode: 'active' };
@@ -121,7 +145,8 @@ export async function resolveJudgment(args) {
     return { answer: heuristic, source: 'twin', mode: 'shadow' };
 }
 /** Build one shadow-log comparison line. */
-function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev) {
+function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev, usage) {
+    const safeUsage = sanitizeUsage(usage);
     return {
         ts: new Date().toISOString(),
         point,
@@ -131,6 +156,7 @@ function buildLogEntry(point, boundedState, startedAt, entryMode, heuristic, jev
         jev,
         confidence: jev?.confidence,
         durationMs: Date.now() - startedAt,
+        ...(safeUsage ? { usage: safeUsage } : {}),
     };
 }
 //# sourceMappingURL=resolver.js.map

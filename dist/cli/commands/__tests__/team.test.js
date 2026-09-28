@@ -38,6 +38,11 @@ describe('teamCommand help output', () => {
     it('prints team help for --help', async () => {
         const logs = await captureLog(() => teamCommand(['--help']));
         expect(logs[0]).toContain('omc team api <operation>');
+        expect(logs[0]).toContain('--force skips the task-status gate and graceful waits');
+        expect(logs[0]).toContain('Unverified worker/provider cleanup preserves worktrees and team state');
+        expect(logs[0]).toContain('Errors report the outcome and reason/detail');
+        expect(logs[0]).toContain('preserved outcomes name affected workers');
+        expect(logs[0]).toContain('Some failures also write details to stderr');
     });
     it('prints team help for help alias', async () => {
         const logs = await captureLog(() => teamCommand(['help']));
@@ -315,6 +320,29 @@ describe('teamCommand api operations', () => {
         }
     });
 });
+describe('parseTeamArgs explicit task syntax', () => {
+    it('accepts a quoted positional task with the configured default workers', () => {
+        const parsed = parseTeamArgs(['review auth flow']);
+        expect(parsed.task).toBe('review auth flow');
+        expect(parsed.workerCount).toBe(3);
+        expect(parsed.explicitWorkerSpec).toBe(false);
+    });
+    it('accepts --task for a single-word task without a worker spec', () => {
+        const parsed = parseTeamArgs(['--task', 'list']);
+        expect(parsed.task).toBe('list');
+        expect(parsed.workerCount).toBe(3);
+        expect(parsed.explicitWorkerSpec).toBe(false);
+    });
+    it('rejects a single bare word without --task or an explicit worker spec', () => {
+        expect(() => parseTeamArgs(['unknown-word'])).toThrow(/Usage: omc team/);
+    });
+    it('joins an unquoted multi-token task without a worker spec', () => {
+        const parsed = parseTeamArgs(['fix', 'the', 'login', 'bug']);
+        expect(parsed.task).toBe('fix the login bug');
+        expect(parsed.workerCount).toBe(3);
+        expect(parsed.explicitWorkerSpec).toBe(false);
+    });
+});
 describe('parseTeamArgs comma-separated multi-type specs', () => {
     it('honors N multipliers and duplicate agent entries in comma specs', () => {
         const mixed = parseTeamArgs(['1:claude,2:codex', 'execute fixed plan']);
@@ -416,7 +444,7 @@ describe('parseTeamArgs comma-separated multi-type specs', () => {
         expect(tasks.map((task) => task.description)).toEqual([parsed.task, parsed.task, parsed.task]);
     });
     it('trims slugs after length clipping and suffixes stale launch state', async () => {
-        const parsed = parseTeamArgs(['abcdefghijklmnopqrstuvwxyz abc', 'task body']);
+        const parsed = parseTeamArgs(['--task', 'abcdefghijklmnopqrstuvwxyz abc task body']);
         expect(parsed.teamName.endsWith('-')).toBe(false);
         const slugWd = await mkdtemp(join(tmpdir(), 'omc-team-slug-'));
         const originalHome = process.env.HOME;

@@ -13,7 +13,7 @@
  * are existing repo code whose bugs must not be masked.
  */
 import type { JevAnswer, JevQuestions, ResolveResult } from './types.js';
-/** Reset in-process resolver state (request cap, circuit breaker). Test hook. */
+/** Reset in-process resolver state (request cap, circuit breaker, warnings). Test hook. */
 export declare function resetJevResolverState(): void;
 export interface ResolveJudgmentArgs<T> {
     /** Judgment point name, e.g. "intent" or "model-routing". */
@@ -43,5 +43,5 @@ export interface ResolveJudgmentArgs<T> {
     /** Test hook: injected transport. */
     fetchFn?: typeof fetch;
 }
-export declare function resolveJudgment<T>(args: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>>;
+export declare function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>>;
 //# sourceMappingURL=resolver.d.ts.map
