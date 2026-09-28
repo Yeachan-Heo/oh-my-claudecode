@@ -371,20 +371,32 @@ function commandStart(tokens) {
   return null;
 }
 
+// Git global options that take their value as the next word. Every other
+// word before the subcommand that starts with "-" is a global option too
+// (--no-pager, -P, --bare, --git-dir=<path>, -C<path>, ...), so it is
+// skipped rather than taken for the subcommand.
+const GIT_GLOBAL_VALUE_OPTIONS = new Set([
+  '-C',
+  '-c',
+  '--git-dir',
+  '--work-tree',
+  '--namespace',
+  '--config-env',
+  '--attr-source',
+  '--shallow-file',
+]);
+
 function gitInvocation(tokens) {
   const command = commandStart(tokens);
   if (!command || command.executable !== 'git') return null;
   let index = command.index + 1;
 
-  while (index < tokens.length) {
-    const option = tokens[index];
-    if (option === '-C' || option === '-c') {
+  while (index < tokens.length && tokens[index].startsWith('-')) {
+    if (GIT_GLOBAL_VALUE_OPTIONS.has(tokens[index])) {
       if (index + 1 >= tokens.length) return null;
       index += 2;
-    } else if (/^-C.+/.test(option) || /^-c.+/.test(option)) {
-      index += 1;
     } else {
-      break;
+      index += 1;
     }
   }
 

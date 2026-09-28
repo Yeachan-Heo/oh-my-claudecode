@@ -170,6 +170,26 @@ describe('git-guardrails hook', () => {
       'git -C /tmp -c user.name=agent restore .',
       'git restore . (working-tree discard)',
     ],
+    // Git global options other than -C and -c, before the subcommand.
+    ['git --no-pager push origin main', 'git push'],
+    ['git -P push origin main', 'git push'],
+    ['git --git-dir=.git push origin main', 'git push'],
+    ['git --git-dir .git push origin main', 'git push'],
+    ['git --config-env user.name=USER push', 'git push'],
+    ['git --namespace ns push origin main', 'git push'],
+    ['git --attr-source HEAD push origin main', 'git push'],
+    ['git --shallow-file shallow push origin main', 'git push'],
+    [
+      'git --git-dir .git --work-tree . reset --hard HEAD~1',
+      'git reset --hard',
+    ],
+    ['git --work-tree=. clean -fd', 'git clean -f'],
+    ['git --no-optional-locks branch -D feature/x', 'git branch -D'],
+    [
+      'git --literal-pathspecs checkout .',
+      'git checkout . (working-tree discard)',
+    ],
+    ['git --no-pager restore .', 'git restore . (working-tree discard)'],
   ];
 
   it.each(destructive)('blocks %s', async (command, label) => {
@@ -214,6 +234,9 @@ describe('git-guardrails hook', () => {
     'git restore src/foo.ts',
     'git restore ./file',
     'git restore -- ./file',
+    'git --no-pager log --oneline -5',
+    'git --no-pager push --dry-run origin main',
+    'git --git-dir push status',
     'ls -la',
   ];
 
