@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4befb73d1d442f299855d206ade862f727787d2c",
-    "sourceSha256": "87eac3533b8bcde4bc03a50034281d13835834cf73673cc08612d0355bb183d7",
+    "head": "8ea03fac5f818dc3982dbbe6d02df6bf9bafa45e",
+    "sourceSha256": "c1765f918fff4f7207bca95b1336d548a06ba261832f91460700757f12a4f8c2",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4befb73d1d442f299855d206ade862f727787d2c",
-  "sourceSha256": "87eac3533b8bcde4bc03a50034281d13835834cf73673cc08612d0355bb183d7",
+  "head": "8ea03fac5f818dc3982dbbe6d02df6bf9bafa45e",
+  "sourceSha256": "c1765f918fff4f7207bca95b1336d548a06ba261832f91460700757f12a4f8c2",
   "counts": {
     "public": {
       "skills": 47,
@@ -33475,11 +33475,6 @@
         "id": "package.json",
         "kind": "other",
         "path": "package.json"
-      },
-      {
-        "id": "pnpm-lock.yaml",
-        "kind": "other",
-        "path": "pnpm-lock.yaml"
       },
       {
         "id": "receipts/epic-3698/README.md",
@@ -82510,12 +82505,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7118,
+      "nodeCount": 7117,
       "edgeCount": 8078,
       "importEdgeCount": 6666,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "08dbb1461b6c02dc967d185d242ecf9daabc5a9fa6566810d98ca1ca6fe23ae5",
-  "manifestSha256": "059c841808316f13872f39e0eecefe213dda24ad9ed37e81a1ef692e5e7e190c"
+  "inventorySha256": "c512535bb1c6ee1bdf65dba107f77677686f86920ec13b1ec8d9c8ea641b61ab",
+  "manifestSha256": "2e8d0a3cc8bd6411746912be09c9f0cd25292322f2de6318a9e1b0daab76dcb4"
 }
