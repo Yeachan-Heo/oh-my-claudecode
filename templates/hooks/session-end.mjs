@@ -11,13 +11,28 @@
 // Best-effort by design: any delegation failure exits 0 so a broken forward
 // can never block Claude Code shutdown.
 
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+
+/**
+ * Check if any factory chain ledger exists in the project.
+ * Fast no-op for non-factory sessions (the common case).
+ */
+function hasFactoryChainLedger(cwd) {
+  try {
+    const factoryDir = join(cwd, '.omc', 'state', 'factory');
+    if (!existsSync(factoryDir)) return false;
+    const files = readdirSync(factoryDir);
+    return files.some((f) => f.startsWith('chain-') && f.endsWith('.json'));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolve the bridge invocation.
@@ -38,6 +53,19 @@ function resolveBridgeInvocation() {
 
 try {
   const stdin = await readStdin();
+  let cwd = process.cwd();
+  try {
+    const payload = JSON.parse(stdin.toString('utf8'));
+    if (payload && typeof payload.cwd === 'string') {
+      cwd = payload.cwd;
+    }
+  } catch {
+    // use default cwd
+  }
+  // Fast no-op for non-factory sessions (no chain ledger exists)
+  if (!hasFactoryChainLedger(cwd)) {
+    process.exit(0);
+  }
   const bridge = resolveBridgeInvocation();
   spawnSync(bridge.command, bridge.args, {
     input: stdin,

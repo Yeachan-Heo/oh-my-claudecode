@@ -52,7 +52,6 @@ export const AFK_ALLOWED_TOOLS = [
   'Bash(gh pr view:*)',
   'Bash(gh pr list:*)',
   'Bash(gh label list:*)',
-  'Bash(gh api repos/*)',
   'Read',
   'Glob',
   'Grep',
