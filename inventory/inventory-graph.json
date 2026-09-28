@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d9ca653941ba3bb5c915f432e8986b9a4ac9db79",
-    "sourceSha256": "2c9e35da6cba8552a99268941b20322c1febc661fc585fc3653ec0fd35f37139",
+    "head": "54814f18bac8fef5c659ea59a67cc527ffd33efb",
+    "sourceSha256": "02d8d53d9686e3faef9bced96102dfcba4f62bbb59ab27b1006997d3e21be44c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d9ca653941ba3bb5c915f432e8986b9a4ac9db79",
-  "sourceSha256": "2c9e35da6cba8552a99268941b20322c1febc661fc585fc3653ec0fd35f37139",
+  "head": "54814f18bac8fef5c659ea59a67cc527ffd33efb",
+  "sourceSha256": "02d8d53d9686e3faef9bced96102dfcba4f62bbb59ab27b1006997d3e21be44c",
   "counts": {
     "public": {
       "skills": 47,
@@ -42042,6 +42042,11 @@
         "path": "tests/lint/issue-4147-processStart-encoding.test.ts"
       },
       {
+        "id": "tests/lint/issue-4154-windows-claude-invocation.test.ts",
+        "kind": "other",
+        "path": "tests/lint/issue-4154-windows-claude-invocation.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -53462,6 +53467,11 @@
         "from": "src/cli/autoresearch-setup-session.ts",
         "to": "src/autoresearch/setup-contract.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/cli/autoresearch-setup-session.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
       },
       {
         "from": "src/cli/checkpoint.ts",
@@ -82314,6 +82324,26 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/issue-4154-windows-claude-invocation.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4154-windows-claude-invocation.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4154-windows-claude-invocation.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4154-windows-claude-invocation.test.ts",
+        "to": "src/cli/tmux-utils.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -82505,12 +82535,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7117,
-      "edgeCount": 8078,
-      "importEdgeCount": 6666,
+      "nodeCount": 7118,
+      "edgeCount": 8083,
+      "importEdgeCount": 6671,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "c512535bb1c6ee1bdf65dba107f77677686f86920ec13b1ec8d9c8ea641b61ab",
-  "manifestSha256": "04e78b929f35257441211cf0d52ea002dd63afec0292c106a7b34e245a74c3f4"
+  "inventorySha256": "5f46e3e85b93cb1b134f20f227ed76e17faefdef6ecce1a91395a64baee5b0eb",
+  "manifestSha256": "5700de8c5ede8bdeb351ec2134f81fbd10fe06874cde43204c3aa8632f025ef1"
 }
