@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2db40c80e02d39fe9365568851043dfff5f2083f",
-    "sourceSha256": "4e24d88cc7f778089b277daac340426ec1c303d6953030fff25426fb1db96e2e",
+    "head": "f03d2f1bc34c026e35d38376c2dd7aa09688c43d",
+    "sourceSha256": "87eac3533b8bcde4bc03a50034281d13835834cf73673cc08612d0355bb183d7",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2db40c80e02d39fe9365568851043dfff5f2083f",
-  "sourceSha256": "4e24d88cc7f778089b277daac340426ec1c303d6953030fff25426fb1db96e2e",
+  "head": "f03d2f1bc34c026e35d38376c2dd7aa09688c43d",
+  "sourceSha256": "87eac3533b8bcde4bc03a50034281d13835834cf73673cc08612d0355bb183d7",
   "counts": {
     "public": {
       "skills": 47,
@@ -33477,6 +33477,11 @@
         "path": "package.json"
       },
       {
+        "id": "pnpm-lock.yaml",
+        "kind": "other",
+        "path": "pnpm-lock.yaml"
+      },
+      {
         "id": "receipts/epic-3698/README.md",
         "kind": "other",
         "path": "receipts/epic-3698/README.md"
@@ -42040,6 +42045,11 @@
         "id": "tests/lint/issue-4147-processStart-encoding.test.ts",
         "kind": "other",
         "path": "tests/lint/issue-4147-processStart-encoding.test.ts"
+      },
+      {
+        "id": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "kind": "other",
+        "path": "tests/lint/session-end-forwarder-no-op.test.ts"
       },
       {
         "id": "tests/lint/setup-phases-drift.test.ts",
@@ -82309,6 +82319,26 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/setup-phases-drift.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -82480,12 +82510,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7116,
-      "edgeCount": 8074,
-      "importEdgeCount": 6662,
+      "nodeCount": 7118,
+      "edgeCount": 8078,
+      "importEdgeCount": 6666,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "d4793871f7b60dfae09354eaea3d2296b9fc443880f62c1ed66b6db643333c5c",
-  "manifestSha256": "210b59525cc444567566883df86126cdad582b36d2c5c3be3cc125c6b13850ef"
+  "inventorySha256": "08dbb1461b6c02dc967d185d242ecf9daabc5a9fa6566810d98ca1ca6fe23ae5",
+  "manifestSha256": "ed9868bf73cbcb42869655274bb2eb08100b484aef09e013edd7d3a7209f4448"
 }
