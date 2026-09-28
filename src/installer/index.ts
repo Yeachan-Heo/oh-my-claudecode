@@ -364,6 +364,7 @@ export function isOmcStatusLine(statusLine: unknown): boolean {
 const OMC_HOOK_FILENAMES = new Set([
   'keyword-detector.mjs',
   'session-start.mjs',
+  'session-end.mjs',
   'pre-tool-use.mjs',
   'post-tool-use.mjs',
   'post-tool-use-failure.mjs',
@@ -590,8 +591,8 @@ export function isProjectScopedPlugin(): boolean {
   return !normalizedPluginRoot.startsWith(normalizedGlobalBase);
 }
 
-type HookEntry = { type: string; command: string };
-type HookGroup = { hooks: HookEntry[] };
+export type HookEntry = { type: string; command: string };
+export type HookGroup = { hooks: HookEntry[] };
 
 type SettingsHookEntry = { type?: unknown; command?: unknown; [key: string]: unknown };
 type SettingsHookGroup = { hooks?: unknown; [key: string]: unknown };
@@ -884,6 +885,7 @@ function configureInstallerSettings(
 const STANDALONE_HOOK_TEMPLATE_FILES = [
   'keyword-detector.mjs',
   'session-start.mjs',
+  'session-end.mjs',
   'pre-tool-use.mjs',
   'post-tool-use.mjs',
   'post-tool-use-failure.mjs',
@@ -1041,7 +1043,7 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
   log('  Installed standalone hook scripts');
 }
 
-function mergeHookGroups(
+export function mergeHookGroups(
   eventType: string,
   existingGroups: HookGroup[],
   newOmcGroups: HookGroup[],
