@@ -9,6 +9,7 @@ import { isValidTeamInstanceId } from './types.js';
 import { absPath, TeamPaths } from './state-paths.js';
 import { atomicWriteJson } from '../lib/atomic-write.js';
 import { lockPathFor, withFileLock } from '../lib/file-lock.js';
+import { checkHostLoadGate } from '../lib/host-load-gate.js';
 const WORKER_LAUNCH_SCHEMA_VERSION = 1;
 const DEFAULT_ACK_TIMEOUT_MS = 8_000;
 const DEFAULT_POLL_INTERVAL_MS = 25;
@@ -52,7 +53,7 @@ function encodePowerShell(source) {
     return Buffer.from(source, 'utf16le').toString('base64');
 }
 const WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, 'SystemRoot'].map(key => key.toUpperCase()));
-const SAFE_BASELINE_ENV_KEYS = ['PATH', 'SystemRoot', 'SYSTEMROOT', 'TEMP', 'TMP'];
+const SAFE_BASELINE_ENV_KEYS = ['PATH', 'TEMP', 'TMP'];
 function canonicalAuthorityDigest(input) {
     const env = Object.fromEntries(Object.entries(input.providerEnv).sort(([a], [b]) => a.localeCompare(b)));
     const payload = JSON.stringify({ protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL, nonce: input.containmentNonce ?? '', supervisor_source_sha256: input.supervisorSourceSha256 ?? '', identity: identityOf(input.identity), provider_argv: [...input.providerArgv], provider_env: env, cwd: resolve(input.cwd) });
@@ -107,15 +108,22 @@ export function buildProviderEnvironment(providerEnv, sourceEnv = process.env, p
         if (typeof value === 'string' && value.length > 0)
             baseline[key] = value;
     }
+    if (platform === 'win32') {
+        const systemRoot = [sourceEnv.SystemRoot, sourceEnv.SYSTEMROOT]
+            .find(value => typeof value === 'string' && /^[A-Za-z]:\\/.test(value));
+        if (typeof systemRoot === 'string')
+            baseline.SystemRoot = systemRoot;
+    }
     const homeKey = platform === 'win32' ? 'USERPROFILE' : 'HOME';
     const home = sourceEnv[homeKey];
-    const hasExplicitHome = Object.keys(normalized).some(key => (platform === 'win32' ? key.toUpperCase() === homeKey : key === homeKey));
-    if (!hasExplicitHome && typeof home === 'string' && home.length > 0)
+    if (typeof home === 'string' && home.length > 0)
         baseline[homeKey] = home;
     if (platform === 'win32') {
-        const systemRoot = sourceEnv.SystemRoot ?? sourceEnv.SYSTEMROOT;
-        if (typeof systemRoot === 'string' && /^[A-Za-z]:\\/.test(systemRoot))
-            baseline.SystemRoot = systemRoot;
+        for (const key of Object.keys(normalized)) {
+            const baselineKey = Object.keys(baseline).find(candidate => candidate.toUpperCase() === key.toUpperCase());
+            if (baselineKey)
+                delete baseline[baselineKey];
+        }
     }
     return { ...baseline, ...normalized };
 }
@@ -420,7 +428,7 @@ export async function loadCurrentWorkerLaunchAttempt(input) {
 export function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd, options = {}) {
     if (!isValidIdentity(attempt))
         throw new Error('worker_launch_attempt_identity_invalid');
-    const providerEnv = buildProviderEnvironment(options.providerEnv);
+    const providerEnv = normalizeProviderEnvironment(options.providerEnv, options.platform ?? process.platform);
     const absoluteCwd = resolve(cwd);
     const containmentNonce = randomUUID();
     const supervisorSourceSha256 = createHash('sha256').update(buildWindowsSupervisorSource(), 'utf8').digest('hex');
@@ -517,6 +525,7 @@ export async function materializeWorkerLaunchTransport(input) {
     const spec = buildWorkerLaunchBootstrapSpec(attempt, input.providerArgv, input.cwd, {
         providerEnv: input.providerEnv,
         releaseAfterSpawn: input.releaseAfterSpawn,
+        platform: input.platform,
     });
     const windowsDelivery = input.windowsDelivery !== false;
     const owner = {
@@ -527,7 +536,7 @@ export async function materializeWorkerLaunchTransport(input) {
     const wrapperRelativePath = windowsDelivery
         ? windowsWrapperRelativePath(input.cwd, attempt.wrapperPath)
         : '';
-    const wrapper = buildWorkerLaunchWrapper(attempt, windowsDelivery ? 'win32' : process.platform);
+    const wrapper = buildWorkerLaunchWrapper(attempt, windowsDelivery ? 'win32' : input.platform ?? process.platform);
     let ownerCreated = false;
     let descriptorCreated = false;
     let wrapperCreated = false;
@@ -627,7 +636,7 @@ export async function cleanupWorkerLaunchTransport(attempt, reason = 'transport_
         return false;
     }
 }
-export async function readAndConsumeWorkerLaunchDescriptor(descriptorPath) {
+export async function readAndConsumeWorkerLaunchDescriptor(descriptorPath, platform = process.platform) {
     let parsed;
     let handle;
     try {
@@ -645,7 +654,7 @@ export async function readAndConsumeWorkerLaunchDescriptor(descriptorPath) {
     finally {
         await handle?.close().catch(() => undefined);
     }
-    if (!isValidBootstrapSpec(parsed))
+    if (!isValidBootstrapSpec(parsed, platform))
         throw new Error('worker_launch_descriptor_invalid');
     const spec = parsed;
     if (resolve(descriptorPath) !== resolve(spec.bootstrap_descriptor_path))
@@ -1513,7 +1522,7 @@ function isDeterministicTransportPath(expectedPath, candidate, fileName) {
     return isExactText(candidate)
         && resolve(candidate) === resolve(join(dirname(expectedPath), fileName));
 }
-function isValidBootstrapSpec(value) {
+function isValidBootstrapSpec(value, platform = process.platform) {
     if (!isValidIdentity(value))
         return false;
     const spec = value;
@@ -1530,7 +1539,7 @@ function isValidBootstrapSpec(value) {
         && spec.provider_argv.length > 0
         && isExactText(spec.provider_argv[0])
         && spec.provider_argv.slice(1).every(argument => typeof argument === 'string')
-        && isValidProviderEnvironment(spec.provider_env)
+        && isValidProviderEnvironment(spec.provider_env, platform)
         && typeof spec.cwd === 'string'
         && spec.cwd.length > 0
         && Number.isSafeInteger(spec.decision_timeout_ms)
@@ -1581,15 +1590,25 @@ async function waitForBootstrapDecision(spec) {
     }
     return 'timeout';
 }
-function buildWindowsSupervisorInvocation(spec) {
-    const env = Object.fromEntries(Object.entries(spec.provider_env).sort(([a], [b]) => a.localeCompare(b)));
+function buildBootstrapProviderEnvironment(spec, sourceEnv, platform) {
+    return {
+        ...buildProviderEnvironment(spec.provider_env, sourceEnv, platform),
+        ...(typeof spec.provider_env.OMC_RECOVERY_GATE_SPEC === 'string'
+            || typeof spec.provider_env.OMC_RECOVERY_GATE_SPEC_B64 === 'string'
+            ? { [WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV]: '1' }
+            : {}),
+    };
+}
+export function buildWindowsSupervisorInvocation(spec, sourceEnv = process.env) {
+    const authorityEnv = Object.fromEntries(Object.entries(spec.provider_env).sort(([a], [b]) => a.localeCompare(b)));
+    const env = Object.fromEntries(Object.entries(buildBootstrapProviderEnvironment(spec, sourceEnv, 'win32')).sort(([a], [b]) => a.localeCompare(b)));
     const canonical_json = JSON.stringify({
         protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL,
         nonce: spec.containment_nonce,
         supervisor_source_sha256: spec.supervisor_source_sha256,
         identity: identityOf(spec),
         provider_argv: [...spec.provider_argv],
-        provider_env: env,
+        provider_env: authorityEnv,
         cwd: resolve(spec.cwd),
     });
     const payload = Buffer.from(JSON.stringify({
@@ -1602,7 +1621,7 @@ function buildWindowsSupervisorInvocation(spec) {
         provider_env: env,
         cwd: resolve(spec.cwd),
     }), 'utf8').toString('base64');
-    const systemRoot = spec.provider_env.SystemRoot ?? spec.provider_env.SYSTEMROOT;
+    const systemRoot = env.SystemRoot;
     if (!systemRoot || !/^[A-Za-z]:\\/.test(systemRoot))
         throw new Error('worker_launch_powershell_authority_missing');
     return {
@@ -1777,13 +1796,7 @@ export async function runWorkerLaunchBootstrap(value) {
     // process group already captured and proven by this bootstrap. The marker
     // is injected after authority validation and is stripped by the gate before
     // the actual provider receives its environment.
-    const providerEnv = {
-        ...spec.provider_env,
-        ...(typeof spec.provider_env.OMC_RECOVERY_GATE_SPEC === 'string'
-            || typeof spec.provider_env.OMC_RECOVERY_GATE_SPEC_B64 === 'string'
-            ? { [WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV]: '1' }
-            : {}),
-    };
+    const providerEnv = buildBootstrapProviderEnvironment(spec, process.env, process.platform);
     try {
         const launched = await withFileLock(lockPathFor(spec.current_path), async () => {
             if (!await isCurrentLaunchIdentity(spec.current_path, spec)
@@ -1818,6 +1831,13 @@ export async function runWorkerLaunchBootstrap(value) {
                     await invocation.cleanup().catch(() => undefined);
                     return { outcome: 'provider_spawn_failed' };
                 }
+            }
+            // Check host load gate to prevent resource exhaustion during concurrent worker launches
+            const gateResult = checkHostLoadGate();
+            if (!gateResult.allowed && gateResult.reason) {
+                // If gate denies, log it but proceed anyway (fail-open design)
+                // Log is for observability; the gate is advisory, not hard-blocking
+                // Uncomment for debugging: console.warn(`Worker launch proceeding despite host load saturation: ${gateResult.reason}`);
             }
             const child = spawn(invocation.command, invocation.args, {
                 cwd: spec.cwd,

@@ -6,12 +6,19 @@
  */
 /** The five judgment points, in delivery order. */
 export type JudgmentPointName = 'intent' | 'loop-continuation' | 'skill-trigger' | 'model-routing' | 'context-pruning' | 'task-size' | 'ralph-verdict' | 'learner-extraction' | 'slop-warning' | 'simplifier-trigger';
-/** TypeSafe question shapes. */
-export type JevQuestionType = 'Choice' | 'Score' | 'Noul';
+/**
+ * TypeSafe question shapes. The API rejects any other casing with HTTP 400,
+ * so these literals are the wire values.
+ */
+export type JevQuestionType = 'choice' | 'score' | 'noul';
 export interface JevQuestionDef {
     type: JevQuestionType;
     instructions?: string;
-    /** criterion name -> description */
+    /**
+     * Criterion name -> description, in declaration order. `choice`/`noul` send
+     * this map as-is; `score` is serialized to the ordered description list the
+     * API requires (see serializeQuestions in client.ts).
+     */
     criteria: Record<string, string>;
 }
 /** Questions dict: name -> definition. */

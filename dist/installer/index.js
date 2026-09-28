@@ -287,6 +287,7 @@ export function isOmcStatusLine(statusLine) {
 const OMC_HOOK_FILENAMES = new Set([
     'keyword-detector.mjs',
     'session-start.mjs',
+    'session-end.mjs',
     'pre-tool-use.mjs',
     'post-tool-use.mjs',
     'post-tool-use-failure.mjs',
@@ -730,6 +731,7 @@ function configureInstallerSettings(baseSettings, context) {
 const STANDALONE_HOOK_TEMPLATE_FILES = [
     'keyword-detector.mjs',
     'session-start.mjs',
+    'session-end.mjs',
     'pre-tool-use.mjs',
     'post-tool-use.mjs',
     'post-tool-use-failure.mjs',
@@ -774,16 +776,19 @@ function readStandalonePackageIdentity(packageDir) {
 function standaloneStateLockBridge(packageDir) {
     const identity = readStandalonePackageIdentity(packageDir);
     return `import { lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { relative, isAbsolute, sep } from 'node:path';
+import { join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const PACKAGE_ROOT = ${JSON.stringify(identity.root)};
 const EXPECTED_PACKAGE_NAME = ${JSON.stringify(identity.name)};
 const EXPECTED_PACKAGE_VERSION = ${JSON.stringify(identity.version)};
-const PACKAGE_JSON = PACKAGE_ROOT + '/package.json';
-const HELPER_PATH = PACKAGE_ROOT + '/scripts/lib/state-lock.mjs';
+const PACKAGE_JSON = join(PACKAGE_ROOT, 'package.json');
+const HELPER_PATH = join(PACKAGE_ROOT, 'scripts', 'lib', 'state-lock.mjs');
+function samePath(left, right) {
+  return resolve(left) === resolve(right);
+}
 function validatePackageOwnedHelper() {
-  if (!lstatSync(PACKAGE_ROOT).isDirectory() || realpathSync(PACKAGE_ROOT) !== PACKAGE_ROOT || !lstatSync(PACKAGE_JSON).isFile() || !lstatSync(HELPER_PATH).isFile()) throw new Error('OMC state-lock bridge package root is unavailable');
-  if (realpathSync(PACKAGE_JSON) !== PACKAGE_JSON) throw new Error('OMC state-lock bridge manifest identity changed');
+  if (!lstatSync(PACKAGE_ROOT).isDirectory() || !samePath(realpathSync(PACKAGE_ROOT), PACKAGE_ROOT) || !lstatSync(PACKAGE_JSON).isFile() || !lstatSync(HELPER_PATH).isFile()) throw new Error('OMC state-lock bridge package root is unavailable');
+  if (!samePath(realpathSync(PACKAGE_JSON), PACKAGE_JSON)) throw new Error('OMC state-lock bridge manifest identity changed');
   const helperReal = realpathSync(HELPER_PATH);
   const helperRelative = relative(PACKAGE_ROOT, helperReal);
   if (isAbsolute(helperRelative) || helperRelative === '..' || helperRelative.startsWith('..' + sep)) throw new Error('OMC state-lock bridge helper escapes package root');
@@ -893,7 +898,7 @@ function ensureStandaloneHookScripts(log) {
     }
     log('  Installed standalone hook scripts');
 }
-function mergeHookGroups(eventType, existingGroups, newOmcGroups, options, log, result) {
+export function mergeHookGroups(eventType, existingGroups, newOmcGroups, options, log, result) {
     const nonOmcGroups = existingGroups.filter(group => group.hooks.some(h => h.type === 'command' && !isOmcHook(h.command)));
     const hasNonOmcHook = nonOmcGroups.length > 0;
     const nonOmcCommand = hasNonOmcHook
@@ -1981,6 +1986,20 @@ function syncBundledSkillDefinitions(log, options) {
         seenTargetDirs.add(dedupeKey);
         const relativePath = join(targetDirName, 'SKILL.md');
         const targetDir = join(SKILLS_DIR, targetDirName);
+        let targetStat = null;
+        try {
+            targetStat = lstatSync(targetDir);
+        }
+        catch (error) {
+            if (error.code !== 'ENOENT') {
+                log(`  Warning: Could not safely inspect ${targetDir}; treating it as a user-managed entry, so the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+                continue;
+            }
+        }
+        if (targetStat && (targetStat.isSymbolicLink() || !targetStat.isDirectory())) {
+            log(`  Warning: ${targetDir} is a user-managed entry; the bundled skill was not installed. Remove or rename it to enable OMC's version.`);
+            continue;
+        }
         cpSync(sourceDir, targetDir, { recursive: true, force: true });
         markSkillAsOmcManaged(targetDir);
         installedSkills.push(relativePath.replace(/\\/g, '/'));

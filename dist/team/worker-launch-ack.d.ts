@@ -126,6 +126,7 @@ export declare function loadCurrentWorkerLaunchAttempt(input: {
 export declare function buildWorkerLaunchBootstrapSpec(attempt: WorkerLaunchAttempt, providerArgv: string[], cwd: string, options?: {
     releaseAfterSpawn?: boolean;
     providerEnv?: NodeJS.ProcessEnv | Record<string, string>;
+    platform?: NodeJS.Platform;
 }): WorkerLaunchBootstrapSpec;
 export declare function buildWorkerLaunchWrapper(attempt: WorkerLaunchAttempt, platform?: NodeJS.Platform): string;
 export declare function quotePosixShellArgument(value: string): string;
@@ -135,13 +136,14 @@ export declare function materializeWorkerLaunchTransport(input: {
     cwd: string;
     providerEnv?: NodeJS.ProcessEnv | Record<string, string>;
     releaseAfterSpawn?: boolean;
+    platform?: NodeJS.Platform;
     /** Native-Windows delivery resolves a cwd-relative wrapper command. POSIX
      *  delivery launches the runtime CLI with OMC_WORKER_LAUNCH_SPEC_FILE, so
      *  the wrapper relative path is neither computed nor returned. */
     windowsDelivery?: boolean;
 }): Promise<MaterializedWorkerLaunchTransport>;
 export declare function cleanupWorkerLaunchTransport(attempt: WorkerLaunchAttempt, reason?: string): Promise<boolean>;
-export declare function readAndConsumeWorkerLaunchDescriptor(descriptorPath: string): Promise<unknown>;
+export declare function readAndConsumeWorkerLaunchDescriptor(descriptorPath: string, platform?: NodeJS.Platform): Promise<unknown>;
 export declare function revokeWorkerLaunchAttempt(attempt: WorkerLaunchAttempt, reason: string): Promise<boolean>;
 export declare function awaitWorkerLaunchAcknowledgement(attempt: WorkerLaunchAttempt, options?: {
     timeoutMs?: number;
@@ -172,6 +174,7 @@ export declare function awaitWorkerLaunchProviderStarted(attempt: WorkerLaunchAt
     pollIntervalMs?: number;
 }): Promise<boolean>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
+export declare function buildWindowsSupervisorInvocation(spec: WorkerLaunchBootstrapSpec, sourceEnv?: NodeJS.ProcessEnv): MaterializedProviderSpawnInvocation;
 export declare function quoteWindowsCreateProcessArgument(value: string): string;
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation, options?: {

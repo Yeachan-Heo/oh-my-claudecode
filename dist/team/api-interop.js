@@ -341,6 +341,15 @@ function resolveTeamWorkingDirectory(teamName, preferredCwd) {
         return preferredCwd;
     const envTeamStateRoot = readTeamStateRootFromEnv();
     if (typeof envTeamStateRoot === 'string' && envTeamStateRoot.trim() !== '') {
+        const leaderCwd = process.env.OMC_TEAM_LEADER_CWD?.trim();
+        // Centralized state roots do not encode their originating workspace path.
+        // The worker launch env carries both values, so trust the cwd only when it
+        // resolves to the exact team root advertised to this worker.
+        if (leaderCwd
+            && teamStateExists(normalizedTeamName, leaderCwd)
+            && resolvePath(teamStateRoot(leaderCwd, normalizedTeamName)) === resolvePath(envTeamStateRoot)) {
+            return resolvePath(leaderCwd);
+        }
         const envWorkingDirectory = stateRootToWorkingDirectory(envTeamStateRoot.trim());
         if (teamStateExists(normalizedTeamName, envWorkingDirectory)) {
             return envWorkingDirectory;

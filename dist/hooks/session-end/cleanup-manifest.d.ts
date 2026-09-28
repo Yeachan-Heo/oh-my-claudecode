@@ -1,4 +1,4 @@
-export type SessionEndActionName = 'foreground-cleanup' | 'wiki-capture' | 'team-cleanup' | 'python-cleanup' | 'reply-cleanup' | 'callback' | 'notification' | 'openclaw';
+export type SessionEndActionName = 'foreground-cleanup' | 'wiki-capture' | 'team-cleanup' | 'python-cleanup' | 'reply-cleanup' | 'callback' | 'notification' | 'openclaw' | 'spawn-next';
 export type ActionStatus = 'pending' | 'claimed' | 'retryable' | 'completed' | 'expired';
 export interface SessionEndActionState {
     class: 'required' | 'best-effort';

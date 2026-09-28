@@ -34,6 +34,8 @@ export interface RecoveryContinuationInstruction {
 }
 /** Render owner-adopted continuation data only after the activation gate opens. */
 export declare function renderRecoveryContinuationInstruction(instruction: RecoveryContinuationInstruction): string;
+/** Exit sentence shared by the worker overlay and the initial task inbox. */
+export declare function renderWorkerExitContract(agentType: CliAgentType, reviewerRole?: boolean): string;
 export declare function renderCursorWorkerGuidance(reviewerRole?: boolean): string;
 /**
  * Generate the worker overlay markdown.

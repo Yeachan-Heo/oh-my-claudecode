@@ -392,9 +392,72 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
             instanceId: TEAM_INSTANCE_ID,
         });
         const { shutdownTeamV2 } = await import('../runtime-v2.js');
-        await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0 })).resolves.toEqual({
-            outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: ['worker-unknown'],
+        await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force: true })).resolves.toEqual({
+            outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: ['worker-unknown'],
         });
+        expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
+        expect(existsSync(worktree.path)).toBe(true);
+        expect(existsSync(teamRoot)).toBe(true);
+        expect(existsSync(absPath(repoDir, TeamPaths.teamInstanceReservation(binding.workspace_hash, teamName)))).toBe(true);
+        expect(existsSync(absPath(repoDir, TeamPaths.teamInstanceCleanupReceipt(binding.workspace_hash, teamName, TEAM_INSTANCE_ID)))).toBe(false);
+    });
+    it('logs pane cleanup errors while keeping worktrees and team state', async () => {
+        const teamName = 'shutdown-kill-error-team';
+        await reserveFixtureInstance(teamName, repoDir);
+        const teamRoot = fixtureTeamRoot(repoDir, teamName);
+        mkdirSync(teamRoot, { recursive: true });
+        const worktree = createWorkerWorktree(teamName, 'worker-kill-error', repoDir);
+        const launchAttempt = await prepareAcceptedLaunch(repoDir, teamName, 'worker-kill-error', '%45');
+        writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+            name: teamName,
+            instance_id: TEAM_INSTANCE_ID,
+            tmux_server_identity: tmuxMocks.tmuxServerIdentity,
+            task: 'demo',
+            agent_type: 'claude',
+            worker_launch_mode: 'interactive',
+            worker_count: 1,
+            max_workers: 20,
+            workers: [{
+                    name: 'worker-kill-error',
+                    index: 1,
+                    role: 'executor',
+                    assigned_tasks: [],
+                    pane_id: '%45',
+                    worker_cli: 'claude',
+                    launch_attempt_id: launchAttempt.attempt_id,
+                    launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/bin/echo', args: [] },
+                    working_dir: worktree.path,
+                    team_state_root: teamRoot,
+                    worktree_path: worktree.path,
+                    worktree_created: true,
+                }],
+            created_at: new Date().toISOString(),
+            tmux_session: `${teamName}:0`,
+            leader_pane_id: null,
+            hud_pane_id: null,
+            resize_hook_name: null,
+            resize_hook_target: null,
+            next_task_id: 1,
+        }, null, 2), 'utf-8');
+        tmuxMocks.getWorkerLiveness.mockResolvedValue('alive');
+        tmuxMocks.killOwnedWorkerPane.mockRejectedValueOnce(new Error('pane kill failed'));
+        const binding = createTeamInstanceBinding({
+            teamName,
+            cwd: repoDir,
+            instanceId: TEAM_INSTANCE_ID,
+        });
+        const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        const { shutdownTeamV2 } = await import('../runtime-v2.js');
+        try {
+            await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 0, force: true })).resolves.toEqual({
+                outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: ['worker-kill-error'],
+            });
+            expect(stderr.mock.calls.map(([chunk]) => String(chunk)).join(''))
+                .toContain('worker pane cleanup failed for worker-kill-error: pane kill failed');
+        }
+        finally {
+            stderr.mockRestore();
+        }
         expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
         expect(existsSync(worktree.path)).toBe(true);
         expect(existsSync(teamRoot)).toBe(true);
