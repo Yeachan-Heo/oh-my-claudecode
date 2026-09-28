@@ -18,14 +18,16 @@ import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
+const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, 'lib', 'state-root.mjs')).href);
 
 /**
  * Check if any factory chain ledger exists in the project.
- * Fast no-op for non-factory sessions (the common case).
+ * Fast no-op for non-factory sessions (the common case). Resolves the state
+ * root the same way the enqueuer does (getOmcRoot / OMC_STATE_DIR).
  */
-function hasFactoryChainLedger(cwd) {
+async function hasFactoryChainLedger(cwd) {
   try {
-    const factoryDir = join(cwd, '.omc', 'state', 'factory');
+    const factoryDir = join(await resolveOmcStateRoot(cwd), 'state', 'factory');
     if (!existsSync(factoryDir)) return false;
     const files = readdirSync(factoryDir);
     return files.some((f) => f.startsWith('chain-') && f.endsWith('.json'));
@@ -63,7 +65,7 @@ try {
     // use default cwd
   }
   // Fast no-op for non-factory sessions (no chain ledger exists)
-  if (!hasFactoryChainLedger(cwd)) {
+  if (!(await hasFactoryChainLedger(cwd))) {
     process.exit(0);
   }
   const bridge = resolveBridgeInvocation();

@@ -29,13 +29,13 @@ describe('session-end.mjs forwarder fast no-op (issue #4153)', () => {
     // Must call hasFactoryChainLedger before spawnSync
     // The guard call site must precede the spawnSync call site (the import of
     // spawnSync at the top of the file is not a call and is ignored).
-    const guardIdx = source.indexOf('if (!hasFactoryChainLedger(cwd))');
+    const guardIdx = source.indexOf('if (!(await hasFactoryChainLedger(cwd)))');
     const spawnCallIdx = source.indexOf('spawnSync(');
     expect(guardIdx).toBeGreaterThan(0);
     expect(spawnCallIdx).toBeGreaterThan(guardIdx);
     
     // The check must exit early if no ledger exists
-    expect(source).toContain('if (!hasFactoryChainLedger(cwd))');
+    expect(source).toContain('if (!(await hasFactoryChainLedger(cwd)))');
     expect(source).toContain('process.exit(0)');
   });
 
@@ -54,13 +54,15 @@ describe('session-end.mjs forwarder fast no-op (issue #4153)', () => {
     const source = readFileSync(FORWARDER, 'utf8');
     
     const hasFactoryMatch = source.match(
-      /function hasFactoryChainLedger[\s\S]*?^}/m
+      /async function hasFactoryChainLedger[\s\S]*?^}/m
     );
     expect(hasFactoryMatch).toBeDefined();
     const hasFactoryFn = hasFactoryMatch![0];
     
-    // Must check the factory directory
-    expect(hasFactoryFn).toContain('.omc');
+    // Must resolve the state root like the enqueuer (getOmcRoot / OMC_STATE_DIR),
+    // never a raw <cwd>/.omc path (multirepo-paths gate).
+    expect(hasFactoryFn).toContain('resolveOmcStateRoot');
+    expect(hasFactoryFn).not.toContain("'.omc'");
     expect(hasFactoryFn).toContain('factory');
     
     // Must look for chain-*.json files
