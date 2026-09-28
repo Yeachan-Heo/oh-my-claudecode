@@ -1389,11 +1389,8 @@ function runClaudeDirect(cwd: string, args: string[]): void {
         windowsVerbatimArguments: true,
       });
       // Handle cmd.exe not found (ENOENT) or command not recognized (exit 9009)
-      if (result.error && result.error.code === 'ENOENT') {
-        console.error('[omc] Error: claude CLI not found in PATH.');
-        process.exit(1);
-      }
-      if (result.status === 9009) {
+      const spawnError = result.error as NodeJS.ErrnoException | undefined;
+      if (spawnError?.code === 'ENOENT' || result.status === 9009) {
         console.error('[omc] Error: claude CLI not found in PATH.');
         process.exit(1);
       }

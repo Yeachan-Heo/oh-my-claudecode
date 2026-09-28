@@ -1,14 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 // Test fix for issue #4154: Windows no-tmux fallback should not use shell:true
 // with args array, which triggers DEP0190 and breaks with Volta shims.
 // Instead, use COMSPEC /d /s /c with properly quoted command line (via spawnSync)
 // and windowsVerbatimArguments: true to prevent libuv re-quoting.
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe('issue #4154 - Windows claude invocation fixes', () => {
   it('quoteForCmd should properly escape arguments with spaces and quotes', async () => {
@@ -235,7 +232,7 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     // Should handle status 9009
     expect(code).toContain('result.status === 9009');
     // Should handle ENOENT
-    expect(code).toContain("result.error && result.error.code === 'ENOENT'");
+    expect(code).toMatch(/\.code === 'ENOENT'/);
     // Should print the same error message
     expect(code).toContain('[omc] Error: claude CLI not found in PATH.');
   });

@@ -88,9 +88,11 @@ describe('runAutoresearchSetupSession', () => {
     expect(() => runAutoresearchSetupSession({ repoRoot: '/repo', missionText: 'Improve launch flow' })).toThrow(/claude_autoresearch_setup_failed:2/);
   });
 
-  it('uses shell:true on win32 so claude.cmd can run in print mode', () => {
+  it('runs claude -p via COMSPEC on win32 with the multi-line prompt on stdin (#4154)', () => {
     const originalPlatform = process.platform;
+    const originalComspec = process.env.COMSPEC;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    process.env.COMSPEC = 'C:\\Windows\\System32\\cmd.exe';
     vi.mocked(spawnSync).mockReturnValue({
       status: 0,
       stdout: '{"missionText":"Improve launch flow","evaluatorCommand":"npm run test:run -- launch","evaluatorSource":"inferred","confidence":0.86,"slug":"launch-flow","readyToLaunch":true}',
@@ -102,12 +104,19 @@ describe('runAutoresearchSetupSession', () => {
 
     runAutoresearchSetupSession({ repoRoot: '/repo', missionText: 'Improve launch flow' });
 
-    expect(vi.mocked(spawnSync)).toHaveBeenCalledWith('claude', ['-p', expect.any(String)], expect.objectContaining({
+    const [file, args, options] = vi.mocked(spawnSync).mock.calls.at(-1)!;
+    expect(file).toBe('C:\\Windows\\System32\\cmd.exe');
+    expect(args).toEqual(['/d', '/s', '/c', 'claude -p']);
+    expect(options).toEqual(expect.objectContaining({
       cwd: '/repo',
       encoding: 'utf-8',
-      shell: true,
+      windowsVerbatimArguments: true,
+      input: expect.stringContaining('\n'),
     }));
+    expect(options).not.toHaveProperty('shell');
 
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+    if (originalComspec === undefined) delete process.env.COMSPEC;
+    else process.env.COMSPEC = originalComspec;
   });
 });

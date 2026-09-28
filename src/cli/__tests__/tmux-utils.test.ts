@@ -193,18 +193,31 @@ describe('resolveLaunchPolicy', () => {
 });
 
 describe('isClaudeAvailable', () => {
-  it('uses shell:true on win32 so npm .cmd wrappers resolve', () => {
+  it('probes claude via COMSPEC with verbatim args on win32 so npm .cmd wrappers resolve (#4154)', () => {
     const originalPlatform = process.platform;
+    const originalComspec = process.env.COMSPEC;
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    mockedExecFileSync.mockReturnValue(Buffer.from('2.1.116'));
+    process.env.COMSPEC = 'C:\\Windows\\System32\\cmd.exe';
+    try {
+      mockedSpawnSync.mockClear();
+      mockedExecFileSync.mockClear();
+      mockedSpawnSync.mockReturnValueOnce({ status: 0 } as ReturnType<typeof spawnSync>);
 
-    expect(isClaudeAvailable()).toBe(true);
-    expect(mockedExecFileSync).toHaveBeenCalledWith('claude', ['--version'], {
-      stdio: 'ignore',
-      shell: true,
-    });
+      expect(isClaudeAvailable()).toBe(true);
+      expect(mockedExecFileSync).not.toHaveBeenCalled();
+      expect(mockedSpawnSync).toHaveBeenCalledWith(
+        'C:\\Windows\\System32\\cmd.exe',
+        ['/d', '/s', '/c', 'claude --version'],
+        { stdio: 'ignore', windowsVerbatimArguments: true },
+      );
 
-    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      mockedSpawnSync.mockReturnValueOnce({ status: 9009 } as ReturnType<typeof spawnSync>);
+      expect(isClaudeAvailable()).toBe(false);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (originalComspec === undefined) delete process.env.COMSPEC;
+      else process.env.COMSPEC = originalComspec;
+    }
   });
 });
 
