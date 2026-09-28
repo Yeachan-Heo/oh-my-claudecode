@@ -11,10 +11,9 @@
  */
 
 import { readFileSync } from 'fs';
-import { join, relative } from 'path';
+import { join, dirname } from 'path';
 import { describe, it, expect } from 'vitest';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(__dirname, '..', '..');
