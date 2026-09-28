@@ -179,7 +179,12 @@ describe('factoryLinkArgv', () => {
 describe('AFK_ALLOWED_TOOLS security', () => {
   it('does not allow arbitrary gh api calls (privilege escalation vector)', () => {
     const tools = AFK_SPAWN_FLAGS[AFK_SPAWN_FLAGS.indexOf('--allowedTools') + 1];
+    const entries = tools.split(',');
     expect(tools).not.toContain('gh api');
-    expect(tools).not.toMatch(/Bash\([^)]*\)/);
+    // No unrestricted shell: every Bash entry must be scoped to a gh subcommand.
+    expect(entries).not.toContain('Bash');
+    for (const entry of entries.filter((e) => e.startsWith('Bash'))) {
+      expect(entry).toMatch(/^Bash\(gh (issue|pr|label) [a-z]+:\*\)$/);
+    }
   });
 });

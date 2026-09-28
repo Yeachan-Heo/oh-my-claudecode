@@ -27,10 +27,12 @@ describe('session-end.mjs forwarder fast no-op (issue #4153)', () => {
     expect(source).toContain('hasFactoryChainLedger');
     
     // Must call hasFactoryChainLedger before spawnSync
-    const hasFactoryCheckIdx = source.indexOf('hasFactoryChainLedger');
-    const spawnSyncIdx = source.indexOf('spawnSync');
-    expect(hasFactoryCheckIdx).toBeGreaterThan(0);
-    expect(spawnSyncIdx).toBeGreaterThan(hasFactoryCheckIdx);
+    // The guard call site must precede the spawnSync call site (the import of
+    // spawnSync at the top of the file is not a call and is ignored).
+    const guardIdx = source.indexOf('if (!hasFactoryChainLedger(cwd))');
+    const spawnCallIdx = source.indexOf('spawnSync(');
+    expect(guardIdx).toBeGreaterThan(0);
+    expect(spawnCallIdx).toBeGreaterThan(guardIdx);
     
     // The check must exit early if no ledger exists
     expect(source).toContain('if (!hasFactoryChainLedger(cwd))');
