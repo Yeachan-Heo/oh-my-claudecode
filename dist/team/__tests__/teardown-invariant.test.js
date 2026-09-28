@@ -2,7 +2,8 @@
 //
 // Integration tests for Acceptance #2: drainAndStop invariants.
 // Uses real git via git-fixture helper.
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createGitFixture, orchestratorEventLogPath, readEventLog, waitForEventInLog, } from './helpers/git-fixture.js';
@@ -57,7 +58,14 @@ describe('drainAndStop — clean + conflicting work', () => {
         // Wait a moment for orchestrator to observe worker-2's commit and detect conflict
         await new Promise((r) => setTimeout(r, 500));
         // Drain and stop
-        const result = await handle.drainAndStop();
+        const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+        let result;
+        try {
+            result = await handle.drainAndStop();
+        }
+        finally {
+            stderrWrite.mockRestore();
+        }
         // Worker-1 should have merged cleanly (already done above).
         // Worker-2 may be unmerged due to conflict.
         // The important assertion: drainAndStop returns structured results.
@@ -65,6 +73,7 @@ describe('drainAndStop — clean + conflicting work', () => {
         // Teardown audit file should exist if there were unmerged workers.
         const auditPath = join(fixture.repoRoot, '.omc', 'state', 'team', fixture.teamName, 'teardown-audit.jsonl');
         if (result.unmerged.length > 0) {
+            expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining('[team/merge-orchestrator] WARNING: auto-merge left worker commits unmerged at shutdown:'));
             expect(existsSync(auditPath)).toBe(true);
             const auditContent = readFileSync(auditPath, 'utf-8');
             expect(auditContent).toContain('"type":"unmerged_at_shutdown"');
@@ -96,6 +105,15 @@ describe('drainAndStop — drain timeout', () => {
     });
     afterEach(async () => {
         await fixture.cleanup();
+    });
+    it('merges a worker commit made after the last poll before shutdown', async () => {
+        const config = makeConfig(fixture, { pollIntervalMs: 60_000 });
+        const handle = await startMergeOrchestrator(config);
+        await handle.registerWorker('worker-1');
+        const workerCommitSha = await fixture.commitFile('worker-1', 'worker-1/final.ts', '// final work\n');
+        const result = await handle.drainAndStop();
+        expect(result.unmerged).toEqual([]);
+        expect(() => execFileSync('git', ['merge-base', '--is-ancestor', workerCommitSha, `refs/heads/${fixture.leaderBranch}`], { cwd: fixture.repoRoot, stdio: 'pipe' })).not.toThrow();
     });
     it('audit row has reason drain-timeout when drainTimeoutMs is very short', async () => {
         // Use a very short drain timeout to force the drain to time out

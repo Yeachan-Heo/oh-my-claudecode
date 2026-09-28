@@ -336,6 +336,25 @@ describe('runtime v2 startup inbox dispatch', () => {
             }),
         ]);
     }
+    async function runThroughClaudeFinalStartupRecheck(start) {
+        const deliveryGate = deferred();
+        const finalRecheckGate = deferred();
+        startupDeliveryGate = deliveryGate;
+        mocks.retryStartupInboxSubmit.mockImplementationOnce(async () => {
+            finalRecheckGate.resolve();
+            return 'unavailable';
+        });
+        const startup = start();
+        await awaitGateOrRecoveryFailure(deliveryGate.promise, startup, 'startup delivery');
+        await awaitGateOrRecoveryFailure(finalRecheckGate.promise, startup, 'final startup recheck');
+        vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+        await flushRealIo();
+        const policy = getWorkerStartupEvidencePolicy('claude');
+        vi.setSystemTime(Date.now() + policy.finalRecheckBudgetMs);
+        await vi.advanceTimersByTimeAsync(250);
+        await flushRealIo();
+        return startup;
+    }
     async function configureRealUnresolvedStartupLaunch(options) {
         const launchActual = await vi.importActual('../worker-launch-ack.js');
         let attempt;
@@ -2066,6 +2085,32 @@ describe('runtime v2 startup inbox dispatch', () => {
         const persisted = JSON.parse(await readFile(configPath, 'utf-8'));
         expect(persisted.workers.map((worker) => worker.role)).toEqual(['architect', 'writer']);
     });
+    it('writes per-worker role prompts into mixed-role overlays', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-mixed-role-overlay-');
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 2,
+            agentTypes: ['codex', 'gemini'],
+            workerRoles: ['architect', 'writer'],
+            rolePromptByRole: {
+                architect: 'ARCHITECT_ROLE_PROMPT_UNIQUE',
+                writer: 'WRITER_ROLE_PROMPT_UNIQUE',
+            },
+            tasks: [
+                { subject: 'Worker 1 (architect): draft launch plan', description: 'draft launch plan', owner: 'worker-1', role: 'architect' },
+                { subject: 'Worker 2 (writer): draft launch plan', description: 'draft launch plan', owner: 'worker-2', role: 'writer' },
+            ],
+            cwd,
+        });
+        expect(runtime.startupFailures).toEqual([]);
+        const overlay1 = await readFile(absPath(cwd, TeamPaths.overlay('dispatch-team', 'worker-1')), 'utf-8');
+        const overlay2 = await readFile(absPath(cwd, TeamPaths.overlay('dispatch-team', 'worker-2')), 'utf-8');
+        expect(overlay1).toContain('ARCHITECT_ROLE_PROMPT_UNIQUE');
+        expect(overlay1).not.toContain('WRITER_ROLE_PROMPT_UNIQUE');
+        expect(overlay2).toContain('WRITER_ROLE_PROMPT_UNIQUE');
+        expect(overlay2).not.toContain('ARCHITECT_ROLE_PROMPT_UNIQUE');
+    });
     it('routes inferred review work through alias-keyed resolved snapshot entries', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-alias-routing-');
         await mkdir(join(cwd, '.claude'), { recursive: true });
@@ -2416,15 +2461,18 @@ describe('runtime v2 startup inbox dispatch', () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-evidence-missing-');
         mocks.autoStartupEvidence = false;
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify Claude startup evidence gate' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.pane_id).toBe('%2');
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(runtime.startupFailures).toEqual([
+            { worker: 'worker-1', reason: 'worker_startup_evidence_missing' },
+        ]);
         expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests).toHaveLength(1);
@@ -2508,7 +2556,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(20_249);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(true);
+        await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: true });
         expect(Date.now() - startedAt).toBe(20_250);
         expect(policy.engagedPaneRecheckBudgetMs).toBe(30_000);
     });
@@ -2532,7 +2580,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(31_499);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(true);
+        await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: true });
         expect(Date.now() - startedAt).toBe(31_500);
         expect(probeCalls).toBe(1);
         expect(retryCalls).toBe(0);
@@ -2560,7 +2608,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(59_999);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(false);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
         expect(Date.now() - startedAt).toBe(60_000);
         expect(probeCalls).toBe(1);
         expect(retryCalls).toBe(0);
@@ -2574,7 +2622,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(30_999);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(false);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
     });
     it('times out engaged Claude evidence at exactly 31.25s (initial budget plus engaged recheck)', async () => {
         vi.useFakeTimers();
@@ -2586,21 +2634,37 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(31_249);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(false);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
         expect(Date.now() - startedAt).toBe(31_250);
     });
-    it('still fails an unengaged Claude pane at the fast 1.25s boundary', async () => {
+    it('accepts delayed evidence for an unengaged Claude pane during the final recheck', async () => {
+        vi.useFakeTimers();
+        const policy = getWorkerStartupEvidencePolicy('claude');
+        const startedAt = Date.now();
+        let hasEvidence = false;
+        setTimeout(() => { hasEvidence = true; }, 20_000);
+        const evidencePromise = settleStartupEvidence(policy, budgetMs => waitForStartupEvidenceBudget(async () => hasEvidence, budgetMs), async () => 'unavailable');
+        let settled = false;
+        void evidencePromise.finally(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(19_999);
+        expect(settled).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: false });
+        expect(Date.now() - startedAt).toBe(20_000);
+        expect(policy.finalRecheckBudgetMs).toBe(30_000);
+    });
+    it('fails an unengaged Claude pane after its bounded final recheck', async () => {
         vi.useFakeTimers();
         const policy = getWorkerStartupEvidencePolicy('claude');
         const startedAt = Date.now();
         const evidencePromise = settleStartupEvidence(policy, budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs), async () => 'unavailable');
         let settled = false;
         void evidencePromise.finally(() => { settled = true; });
-        await vi.advanceTimersByTimeAsync(1_249);
+        await vi.advanceTimersByTimeAsync(31_249);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(false);
-        expect(Date.now() - startedAt).toBe(1_250);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
+        expect(Date.now() - startedAt).toBe(31_250);
     });
     it('honors OMC_TEAM_ENGAGED_PANE_RECHECK_MS when bounding the engaged recheck', async () => {
         vi.useFakeTimers();
@@ -2610,7 +2674,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(policy.engagedPaneRecheckBudgetMs).toBe(500);
         const evidencePromise = settleStartupEvidence(policy, budgetMs => waitForStartupEvidenceBudget(async () => false, budgetMs), async () => 'pane_busy');
         await vi.advanceTimersByTimeAsync(1_750);
-        await expect(evidencePromise).resolves.toBe(false);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: true });
         expect(Date.now() - startedAt).toBe(1_750);
     });
     it('accepts evidence published by the unavailable probe itself through the terminal budget-0 check', async () => {
@@ -2620,7 +2684,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         let hasEvidence = false;
         const evidencePromise = settleStartupEvidence(policy, budgetMs => waitForStartupEvidenceBudget(async () => hasEvidence, budgetMs), async () => {
             // The pane is not engaged, but the worker publishes status evidence at
-            // the exact moment the probe runs; the terminal read-only check must
+            // the exact moment the probe runs; the final read-only check must
             // observe it instead of discarding a healthy launch.
             hasEvidence = true;
             return 'unavailable';
@@ -2630,7 +2694,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(1_249);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(true);
+        await expect(evidencePromise).resolves.toEqual({ settled: true, paneBusy: false });
         expect(Date.now() - startedAt).toBe(1_250);
     });
     it('clamps OMC_TEAM_ENGAGED_PANE_RECHECK_MS and rejects non-numeric overrides', async () => {
@@ -2658,7 +2722,7 @@ describe('runtime v2 startup inbox dispatch', () => {
         await vi.advanceTimersByTimeAsync(30_999);
         expect(settled).toBe(false);
         await vi.advanceTimersByTimeAsync(1);
-        await expect(evidencePromise).resolves.toBe(false);
+        await expect(evidencePromise).resolves.toEqual({ settled: false, paneBusy: false });
         expect(Date.now() - startedAt).toBe(31_000);
     });
     it.each(['codex', 'cursor'])('keeps a busy %s worker alive for current attempt evidence at 31.5s without retry or teardown', async (provider) => {
@@ -2773,7 +2837,10 @@ describe('runtime v2 startup inbox dispatch', () => {
             expect(mocks.retryStartupInboxSubmit).not.toHaveBeenCalled();
             expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
             const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-            expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+            expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
+            expect(runtime.startupFailures).toEqual([
+                { worker: 'worker-1', reason: 'worker_startup_evidence_missing_pane_busy' },
+            ]);
         }
         finally {
             if (startPromise)
@@ -3031,7 +3098,9 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(requests).toHaveLength(1);
         expect(requests[0]).toMatchObject({
             status: 'failed',
-            last_reason: 'worker_startup_evidence_missing',
+            last_reason: mode === 'probe-throw'
+                ? 'worker_startup_evidence_missing'
+                : 'worker_startup_evidence_missing_pane_busy',
         });
         const persistedConfig = JSON.parse(await readFile(absPath(cwd, TeamPaths.config(fixture.teamName)), 'utf8'));
         expect(persistedConfig.active_recovery?.recovery_id).toBe(fixture.recoveryId);
@@ -3138,7 +3207,7 @@ describe('runtime v2 startup inbox dispatch', () => {
                 committed: false,
                 error: 'runtime_owner_unavailable',
             });
-            expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+            expect(requests[1]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
             expect(readRecoveryOutcome(cwd, fixture.requestId)).not.toMatchObject({
                 kind: 'final',
                 outcome: 'succeeded',
@@ -3165,13 +3234,13 @@ describe('runtime v2 startup inbox dispatch', () => {
             };
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Reject stale status evidence' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
@@ -3200,13 +3269,13 @@ describe('runtime v2 startup inbox dispatch', () => {
             };
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Reject stale claim evidence' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
@@ -3239,13 +3308,13 @@ describe('runtime v2 startup inbox dispatch', () => {
             };
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Already owned', description: 'Preserve the existing owner.' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         expect(JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile('dispatch-team', 'task-1')), 'utf8'))).toMatchObject({
             status: 'in_progress',
@@ -3274,13 +3343,13 @@ describe('runtime v2 startup inbox dispatch', () => {
             return true;
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Verify Claude mailbox ack evidence' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         expect(mocks.sendToWorker).toHaveBeenCalledTimes(1);
     });
@@ -3316,13 +3385,13 @@ describe('runtime v2 startup inbox dispatch', () => {
             return true;
         });
         const { startTeamV2 } = await import('../runtime-v2.js');
-        const runtime = await startTeamV2({
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
             tasks: [{ subject: 'Dispatch test', description: 'Reject wrong-attempt evidence' }],
             cwd,
-        });
+        }));
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
         expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
@@ -3429,29 +3498,66 @@ describe('runtime v2 startup inbox dispatch', () => {
         });
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
         const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing_pane_busy' });
+        expect(runtime.startupFailures).toEqual([
+            { worker: 'worker-1', reason: 'worker_startup_evidence_missing_pane_busy' },
+        ]);
         expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
         expect(launchMocks.retireAndCleanupCurrentWorkerLaunchAttempt).toHaveBeenCalledWith(expect.objectContaining({ attempt_id: 'attempt-worker-1' }), 'startup_dispatch_failed', expect.any(Function));
     });
-    it('breaks the resubmit loop immediately and fails fast when the pane is not engaged', async () => {
+    it('fails closed after the final evidence recheck when the pane is not engaged', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-claude-unengaged-');
         mocks.autoStartupEvidence = false;
         mocks.retryStartupInboxSubmit.mockImplementation(async () => 'unavailable');
         const startedAt = Date.now();
         const { startTeamV2 } = await import('../runtime-v2.js');
+        const runtime = await runThroughClaudeFinalStartupRecheck(() => startTeamV2({
+            teamName: 'dispatch-team',
+            workerCount: 1,
+            agentTypes: ['claude'],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify unengaged pane fails closed' }],
+            cwd,
+        }));
+        expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
+        expect(runtime.startupFailures).toEqual([
+            { worker: 'worker-1', reason: 'worker_startup_evidence_missing' },
+        ]);
+        expect(mocks.captureOwnedTeamPane).not.toHaveBeenCalled();
+        expect(mocks.retryStartupInboxSubmit).toHaveBeenCalledTimes(1);
+        expect(Date.now() - startedAt).toBeGreaterThanOrEqual(31_250);
+        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
+        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
+        expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+    });
+    it('keeps one claim-task error line on a busy evidence miss and ignores other pane text', async () => {
+        cwd = await mkdtempFixture('omc-runtime-v2-claude-claim-error-');
+        mocks.autoStartupEvidence = false;
+        process.env.OMC_TEAM_ENGAGED_PANE_RECHECK_MS = '250';
+        mocks.retryStartupInboxSubmit.mockImplementation(async () => 'pane_busy');
+        const claimLine = JSON.stringify({ schema_version: '1.0', timestamp: '2026-09-06T00:00:00.000Z', command: 'omc team api claim-task', ok: true, operation: 'claim-task', data: { ok: false, error: 'claim_conflict' } });
+        mocks.captureOwnedTeamPane.mockImplementation(async () => [
+            'team api claim-task --input "{\\"team_name\\":\\"dispatch-team\\"}" --json',
+            claimLine,
+        ].join('\n'));
+        const { startTeamV2 } = await import('../runtime-v2.js');
         const runtime = await startTeamV2({
             teamName: 'dispatch-team',
             workerCount: 1,
             agentTypes: ['claude'],
-            tasks: [{ subject: 'Dispatch test', description: 'Verify unengaged pane fails fast' }],
+            tasks: [{ subject: 'Dispatch test', description: 'Verify claim error line is kept' }],
             cwd,
         });
+        expect(runtime.startupFailures).toEqual([
+            {
+                worker: 'worker-1',
+                reason: 'worker_startup_evidence_missing_pane_busy',
+                claimError: '{"ok":false,"error":"claim_conflict"}',
+            },
+        ]);
         expect(runtime.config.workers[0]?.assigned_tasks).toEqual([]);
-        expect(mocks.retryStartupInboxSubmit).toHaveBeenCalledTimes(1);
-        expect(Date.now() - startedAt).toBeLessThan(5_000);
-        const requests = await listDispatchRequests('dispatch-team', cwd, { kind: 'inbox' });
-        expect(requests[0]).toMatchObject({ status: 'failed', last_reason: 'worker_startup_evidence_missing' });
-        expect(mocks.killOwnedWorkerPane).toHaveBeenCalledWith(expect.objectContaining({ paneId: '%2' }));
+        expect(mocks.captureOwnedTeamPane).toHaveBeenCalledTimes(1);
+        expect(mocks.captureOwnedTeamPane).toHaveBeenCalledWith(expect.anything(), { joinWrappedLines: true });
+        expect(mocks.captureOwnedTeamPane.mock.invocationCallOrder[0]).toBeLessThan(mocks.killOwnedWorkerPane.mock.invocationCallOrder[0]);
     });
     it('direct grok launch resolves model from grok env vars and never calls resolveClaudeWorkerModel', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-grok-direct-');

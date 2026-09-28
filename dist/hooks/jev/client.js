@@ -28,7 +28,7 @@ export async function queryJev(state, questions, options) {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${options.apiKey}`,
                 },
-                body: JSON.stringify({ state, questions, model: JEV_MODEL }),
+                body: JSON.stringify({ state, questions: serializeQuestions(questions), model: JEV_MODEL }),
                 signal: controller.signal,
             }), timeoutPromise]);
         if (!response.ok) {
@@ -49,6 +49,22 @@ export async function queryJev(state, questions, options) {
     }
 }
 export const JEV_MODEL = 'jev-latest';
+/**
+ * Map authored questions onto the wire schema. Criteria are authored as a
+ * named map for readability, but `score` questions are rejected with HTTP 422
+ * (`Input should be a valid list`) unless the criteria are an ordered list of
+ * descriptions from low to high; the answer legend then comes back keyed by
+ * index. `choice` and `noul` take the map unchanged.
+ */
+export function serializeQuestions(questions) {
+    const out = {};
+    for (const [name, question] of Object.entries(questions)) {
+        out[name] = question.type === 'score'
+            ? { ...question, criteria: Object.values(question.criteria) }
+            : question;
+    }
+    return out;
+}
 /**
  * Minimal response validation: object with a non-empty `answers` dict whose
  * entries are objects with a string `type`. Throws JevClientError otherwise.

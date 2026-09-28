@@ -299,10 +299,13 @@ export type PaneCaptureObservation = {
     error: string;
 };
 export declare function captureTeamPane(paneId: string, options?: {
+    joinWrappedLines?: boolean;
     tmuxServerIdentity?: TmuxServerIdentity;
 }): Promise<string>;
 /** Capture an owned pane only while the original tmux incarnation matches. */
-export declare function captureOwnedTeamPane(ownership: WorkerPaneOwnership): Promise<string>;
+export declare function captureOwnedTeamPane(ownership: WorkerPaneOwnership, options?: {
+    joinWrappedLines?: boolean;
+}): Promise<string>;
 export declare function sendTeamPaneKey(paneId: string, key: string, tmuxServerIdentity?: TmuxServerIdentity): Promise<void>;
 export declare function killTeamPane(paneId: string): Promise<void>;
 export declare function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promise<void>;

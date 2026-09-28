@@ -1135,7 +1135,7 @@ function buildTmuxClaudeLaunch(args, options) {
                 ? transport.prefix
                 : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
         const missingBinaryGuard = nativeWindows
-            ? 'where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1) && '
+            ? '(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && '
             : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
         const command = wrapWithLoginShell(`${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? 'exec ' : ''}${rawClaudeCmd}`);
         return { command, cleanup: transport.cleanup };

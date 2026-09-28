@@ -32,7 +32,7 @@ function skillTriggerCriteria() {
 function skillTriggerQuestions() {
     return {
         'skill-trigger': {
-            type: 'Choice',
+            type: 'choice',
             instructions: 'Which skill or mode should this user prompt trigger?',
             criteria: skillTriggerCriteria(),
         },
@@ -41,7 +41,7 @@ function skillTriggerQuestions() {
 /** Point "intent" (ticket 02): Noul over Intent-intake requests. */
 const INTENT_QUESTIONS = {
     intent: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Does this user prompt start an Intent-intake request (a non-engineer contributor stating a problem/goal/constraints to start the requirements intake flow)?',
         criteria: {
             true: 'The prompt states a problem, goal, or constraints from a contributor and starts the Intent intake — a goal-level intent.md with problem/goal/users-and-systems/constraints/open-questions, not a solution design.',
@@ -56,14 +56,14 @@ const INTENT_QUESTIONS = {
  */
 const NOUL_QUESTIONS = {
     task_complete: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Is the task complete — is there no substantive work left for this mode?',
         criteria: {},
     },
 };
 const SCORE_QUESTIONS = {
     iteration_progress: {
-        type: 'Score',
+        type: 'score',
         instructions: 'How much substantive progress did the current iteration make?',
         criteria: {
             no_progress: 'No progress',
@@ -80,7 +80,7 @@ const SCORE_QUESTIONS = {
  */
 const MODEL_ROUTING_QUESTIONS = {
     'model-tier': {
-        type: 'Choice',
+        type: 'choice',
         instructions: 'Which model tier should this delegated task use?',
         criteria: {
             haiku: 'Quick lookups and lightweight, mechanical work',
@@ -96,7 +96,7 @@ const MODEL_ROUTING_QUESTIONS = {
  */
 const STALENESS_QUESTIONS = {
     staleness: {
-        type: 'Score',
+        type: 'score',
         instructions: 'How stale is this context candidate?',
         criteria: {
             fresh: 'Fresh — keep',
@@ -109,7 +109,7 @@ const STALENESS_QUESTIONS = {
 /** Point "ralph-verdict" (ticket 08): Noul over the completion claim. */
 const VERDICT_QUESTIONS = {
     completion_criteria_met: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Does the completion claim satisfy the PRD acceptance criteria for this mode?',
         criteria: {
             true: 'All acceptance criteria are demonstrably satisfied by the evidence',
@@ -120,7 +120,7 @@ const VERDICT_QUESTIONS = {
 /** Point "task-size" (ticket 09): Choice over small/medium/large. */
 const TASK_SIZE_QUESTIONS = {
     'task-size': {
-        type: 'Choice',
+        type: 'choice',
         instructions: 'What size is this task — how much orchestration does it warrant?',
         criteria: {
             small: 'Single-file or few-line change; run directly without heavy modes',
@@ -136,7 +136,7 @@ const TASK_SIZE_QUESTIONS = {
 /** Point "learner-extraction" (ticket 12): Noul over one assistant message. */
 const LEARNER_EXTRACTION_QUESTIONS = {
     extractable_moment: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Does this assistant message contain an extractable memory-worthy moment?',
         criteria: {
             true: 'Contains a reusable pattern, decision, or correction worth persisting',
@@ -147,7 +147,7 @@ const LEARNER_EXTRACTION_QUESTIONS = {
 /** Point "slop-warning" (ticket 12): Noul over one tool input. */
 const SLOP_WARNING_QUESTIONS = {
     slop_advisory: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Does this tool input contain fallback/workaround language worth an advisory warning?',
         criteria: {
             true: 'Contains fallback/workaround phrasing outside doc or self-referential context',
@@ -158,7 +158,7 @@ const SLOP_WARNING_QUESTIONS = {
 /** Point "simplifier-trigger" (ticket 12): Noul over one change. */
 const SIMPLIFIER_TRIGGER_QUESTIONS = {
     simplification_worthy: {
-        type: 'Noul',
+        type: 'noul',
         instructions: 'Is this change simplification-worthy enough to inject the simplifier delegation?',
         criteria: {
             true: 'The change would benefit from a simplification pass (duplication, speculative flexibility, over-abstraction)',

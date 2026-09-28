@@ -901,6 +901,10 @@ Usage:
 Worktrees:
   Native per-worker git worktree mode is opt-in/config-gated with team.ops.worktreeMode or OMC_TEAM_WORKTREE_MODE=detached|named.
   Status JSON includes workspace_mode, worktree_mode, team_state_root, and per-worker worktree metadata.
+  --force skips the task-status gate and graceful waits; it does not bypass ownership or cleanup verification.
+  Unverified worker/provider cleanup preserves worktrees and team state. Errors report the outcome and reason/detail; preserved outcomes name affected workers.
+  Some failures also write details to stderr.
+  Retained paths need later operator or janitor cleanup.
 
 Auto-merge (v2-only):
   --auto-merge          Enable per-commit auto-merge to leader and auto-rebase fanout.
@@ -908,6 +912,10 @@ Auto-merge (v2-only):
                         Bursts of rapid worker commits coalesce to a single merge of HEAD.
                         Requires OMC_RUNTIME_V2=1. Leader branch must not be 'main' or 'master'.
                         Equivalent to OMC_TEAMS_AUTO_MERGE=1.
+
+Runtime safety:
+  This command reports only the tmux runtime-v2 outcome. An implicit team
+  finishing does not make it succeed, and it does not finish an implicit team.
 
 Examples:
   omc team start --agent codex --count 2 --task "review auth flow" --new-window

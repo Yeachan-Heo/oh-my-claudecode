@@ -6,36 +6,69 @@
  * - OMC_JEV=<point[,point...]>: explicit per-point opt-in; only these points
  *   run. Unset = no points enabled — a key alone sends nothing anywhere
  *   (zero egress by default, per the owner's data-egress review of #4058)
- * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 250
+ * - OMC_JEV_TIMEOUT_MS: per-call timeout, default 2000 (measured single-question
+ *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
+ * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
+ *   processes are one-shot, so warn-once-per-process degrades to warn-every)
  *
- * There is no active-by-env syntax. Per-point activation defaults to shadow;
- * a point runs active only when listed in ACTIVATED_POINTS or when the caller
- * forces mode: 'active' on a single resolveJudgment call. Promotion
- * (ticket 07) flips entries in that set.
+ * Per-point activation defaults to shadow. A point runs active when listed in
+ * the compile-time ACTIVATED_POINTS, activated via env (point:active suffix,
+ * or the `all` wildcard — see below), or when the caller forces mode: 'active'
+ * on a single resolveJudgment call. Promotion (ticket 07) flips entries in
+ * ACTIVATED_POINTS; env activation is the user-facing one-line experiment
+ * channel (ADR 03672).
+ *
+ * OMC_JEV entry syntax: `point` (shadow) | `point:active` (active) | `all`
+ * (every registered point, shadow) | `all:active` (every point, active).
+ * Unknown point names are ignored.
  */
 import { join } from 'node:path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 export const JEV_DEFAULT_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
-const DEFAULT_TIMEOUT_MS = 250;
+const DEFAULT_TIMEOUT_MS = 2000;
 const DEFAULT_EXCERPT_CHARS = 200;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 /** Points currently promoted to active. Empty until the promotion ticket (07). */
 export const ACTIVATED_POINTS = new Set();
 export function parseJevConfig(env = process.env) {
     const raw = env.OMC_JEV?.trim();
     const masterOff = raw === 'off';
-    let points = new Set();
+    const points = new Set();
+    const activatedPoints = new Set();
+    let allPoints = false;
+    let activateAll = false;
     if (raw && raw !== 'off') {
-        points = new Set(raw.split(',').map((p) => p.trim()).filter(Boolean));
+        for (const entry of raw.split(',')) {
+            const token = entry.trim();
+            if (!token)
+                continue;
+            const colon = token.lastIndexOf(':');
+            const name = colon === -1 ? token : token.slice(0, colon);
+            const isActive = colon !== -1 && token.slice(colon + 1) === 'active';
+            if (name === 'all') {
+                allPoints = true;
+                if (isActive)
+                    activateAll = true;
+            }
+            else {
+                points.add(name);
+                if (isActive)
+                    activatedPoints.add(name);
+            }
+        }
     }
     return {
         apiKey: env.TYPESAFE_API_KEY || null,
         masterOff,
         points,
-        timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS),
+        allPoints,
+        activatedPoints,
+        activateAll,
+        timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
         maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
         excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
         endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
@@ -48,15 +81,18 @@ export function isJevEnabled(config) {
 }
 /**
  * Tri-state for one point: off | shadow | active.
- * Config gates first (key presence, master off, per-point opt-in); an enabled
- * point is active only when code-activated, otherwise shadow.
+ * Config gates first (key presence, master off, opt-in incl. the `all`
+ * wildcard); an enabled point is active when code-activated, env-activated
+ * (union semantics: either source suffices), otherwise shadow.
  */
 export function pointState(point, config, activated = ACTIVATED_POINTS) {
     if (!isJevEnabled(config))
         return 'off';
-    if (!config.points.has(point))
+    if (!config.allPoints && !config.points.has(point))
         return 'off';
-    return activated.has(point) ? 'active' : 'shadow';
+    return (activated.has(point) || config.activateAll || config.activatedPoints.has(point))
+        ? 'active'
+        : 'shadow';
 }
 /**
  * Recursively bound every string value to `max` chars. Applied to the state
@@ -79,8 +115,10 @@ export function boundExcerpts(value, max) {
     }
     return value;
 }
-function positiveInt(raw, fallback) {
-    const parsed = Number.parseInt(raw ?? '', 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
+    if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw))
+        return fallback;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed <= max ? parsed : fallback;
 }
 //# sourceMappingURL=config.js.map
