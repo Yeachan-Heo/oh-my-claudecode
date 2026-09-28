@@ -161,7 +161,7 @@ describe('install() standalone hook reconciliation', () => {
             expect(existsSync(join(testClaudeDir, 'hooks', 'lib', 'state-lock.mjs'))).toBe(true);
             const bridge = readFileSync(join(testClaudeDir, 'hooks', 'lib', 'state-lock.mjs'), 'utf-8');
             expect(bridge).toContain('EXPECTED_PACKAGE_NAME');
-            expect(bridge).toContain('scripts/lib/state-lock.mjs');
+            expect(bridge).toContain("join(PACKAGE_ROOT, 'scripts', 'lib', 'state-lock.mjs')");
             const hookInputs = [
                 {
                     file: 'session-start.mjs',

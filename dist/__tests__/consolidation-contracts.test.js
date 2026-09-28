@@ -41,9 +41,15 @@ describe('Consolidation contracts', () => {
             const names = listBuiltinSkillNames();
             expect(names).not.toContain('analyze');
             expect(names).not.toContain('build-fix');
-            expect(names).not.toContain('tdd');
             expect(names).not.toContain('code-review');
             expect(names).not.toContain('omc-security-review');
+        });
+        it('registers tdd as a canonical skill', () => {
+            const names = listBuiltinSkillNames();
+            const tdd = getBuiltinSkill('tdd');
+            expect(names).toContain('tdd');
+            expect(tdd).toBeDefined();
+            expect(tdd?.aliasOf).toBeUndefined();
         });
         it('hides deprecated compatibility aliases from default listings', () => {
             const names = listBuiltinSkillNames();

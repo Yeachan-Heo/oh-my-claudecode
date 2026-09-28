@@ -329,6 +329,21 @@ export const HOOKS_SETTINGS_CONFIG_NODE = {
                 ],
             },
         ],
+        // SessionEnd chain enqueuer (software factory third link). Must delegate to
+        // the bridge (--hook=session-end) — the only entry that runs
+        // processSessionEnd → planChainEnqueue. async:true per issue #3240
+        // (Windows shutdown kills synchronous SessionEnd hooks).
+        SessionEnd: [
+            {
+                hooks: [
+                    {
+                        type: "command",
+                        command: buildHookCommand('session-end.mjs'),
+                        async: true,
+                    },
+                ],
+            },
+        ],
     },
 };
 /**

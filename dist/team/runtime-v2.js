@@ -31,7 +31,7 @@ import { validateTeamName } from './team-name.js';
 import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveDefaultWorkerModel, resolveExternalModelsDefaults, assertHeadlessSupported, } from './model-contract.js';
 import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, probeStartupPaneActivity, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, getOwnedWorkerLiveness, captureOwnedTeamPane, workerPaneBelongsToOwnedProviderTarget, observeTmuxServerIdentity, killOwnedWorkerPane, verifyTeamTargetOwnership, observeTeamSessionTargetPresence, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, splitTeamWorkerPaneWithEvidence, TeamSessionCreationError, } from './tmux-session.js';
-import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, renderCursorWorkerGuidance, } from './worker-bootstrap.js';
+import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, renderCursorWorkerGuidance, renderWorkerExitContract, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
 import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
@@ -630,11 +630,12 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, c
     const claimTaskCommand = formatOmcCliInvocation(`team api claim-task --input '${JSON.stringify({ team_name: teamName, task_id: taskId, worker: workerName })}' --json`, {});
     const completeTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'completed', claim_token: '<claim_token>', result: 'Summary: <what changed>\\nVerification: <tests/checks run>\\nSubagent skip reason: worker protocol forbids nested subagents; completed focused probe in-session' })}' --json`);
     const failTaskCommand = formatOmcCliInvocation(`team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'failed', claim_token: '<claim_token>' })}' --json`);
-    const cursorReviewer = agentType === 'cursor' && Boolean(cliOutputContract);
+    const persistentCursor = agentType === 'cursor';
+    const cursorReviewer = persistentCursor && Boolean(cliOutputContract);
     const lifecycleInstructions = cursorReviewer
         ? [
             `3. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
-            `4. ACK/progress replies are not a stop signal. Keep the Cursor session alive for further mailbox instructions; the leader transitions this task after consuming the verdict.`,
+            `4. ${renderWorkerExitContract(agentType, true)}`,
         ]
         : [
             `3. On completion (use claim_token from step 1):`,
@@ -642,7 +643,9 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, c
             `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
             `4. On failure (use claim_token from step 1):`,
             `   ${failTaskCommand}`,
-            `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
+            persistentCursor
+                ? `5. ${renderWorkerExitContract(agentType, false)}`
+                : `5. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
         ];
     return [
         `## REQUIRED: Task Lifecycle Commands`,
@@ -662,8 +665,8 @@ function buildV2TaskInstruction(teamName, workerName, task, taskId, agentType, c
         task.description,
         ``,
         cursorReviewer
-            ? `REMINDER: Write the verdict before yielding the review turn. Do NOT run transition-task-status or write done.json; the leader owns the terminal transition.`
-            : `REMINDER: You MUST run transition-task-status before exiting. Do NOT write done.json or edit task files directly.`,
+            ? `REMINDER: ${renderWorkerExitContract(agentType, true)} Do NOT write done.json; the leader owns the terminal transition.`
+            : `REMINDER: ${renderWorkerExitContract(agentType, false)} Do NOT write done.json or edit task files directly.`,
         ...(agentType === 'cursor' ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))] : []),
         ...(cliOutputContract ? [cliOutputContract] : []),
     ].join('\n');
@@ -732,10 +735,11 @@ const WORKER_STARTUP_EVIDENCE_POLICIES = {
     // bounded resubmit behavior and its effective 6 + (4 * 12) poll windows.
     // An engaged pane (issue #3849: WSL2 cold starts publish first-turn claim
     // evidence well after the initial budget) gets one bounded read-only recheck
-    // before teardown; idle, wrong, or dead panes keep the fast fail-closed path.
+    // before teardown. Unengaged panes also receive a bounded final evidence
+    // recheck and still fail closed when no worker evidence appears.
     claude: {
         initialBudgetMs: 1_250,
-        finalRecheckBudgetMs: 0,
+        finalRecheckBudgetMs: 30_000,
         resubmitAttempts: 4,
         resubmitBudgetMs: 2_750,
         engagedPaneRecheckBudgetMs: 30_000,
@@ -798,8 +802,9 @@ async function waitForWorkerStatusTransition(teamName, workerName, cwd, baseline
  * wait would tear down a healthy provider (issue #3849). In that case the loop
  * stops resubmitting and one bounded read-only engaged-pane recheck runs before
  * the caller's fail-closed teardown. Interactive providers may also supply a
- * read-only activity probe when resubmission is disabled. Panes that are idle,
- * wrong, or dead never earn that recheck and keep the existing fast failure path.
+ * read-only activity probe when resubmission is disabled. `paneBusy` records
+ * that observation and is not startup success. Panes that are idle, wrong, or
+ * dead never earn that recheck and keep the existing fast failure path.
  */
 export async function settleStartupEvidence(policy, waitForCurrentEvidence, resubmit, probeActivity) {
     let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
@@ -828,7 +833,98 @@ export async function settleStartupEvidence(policy, waitForCurrentEvidence, resu
             ? policy.engagedPaneRecheckBudgetMs
             : policy.finalRecheckBudgetMs);
     }
-    return settled;
+    return { settled, paneBusy: engagedPane };
+}
+function startupEvidenceMissingReason(paneBusy, agentType) {
+    const base = agentType ? `${agentType}_startup_evidence_missing` : 'worker_startup_evidence_missing';
+    return paneBusy ? `${base}_pane_busy` : base;
+}
+const CLAIM_ERROR_CAPTURE_MAX = 16_384;
+const CLAIM_ERROR_JSON_LINES_MAX = 80;
+const CLAIM_ERROR_LINE_MAX = 240;
+const CLAIM_ERROR_CODES = new Set([
+    'already_terminal',
+    'blocked_dependency',
+    'claim_conflict',
+    'invalid_input',
+    'operation_failed',
+    'task_not_found',
+    'worker_not_found',
+]);
+function normalizePaneLine(line) {
+    return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+}
+function claimFailureSummary(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+        return undefined;
+    const result = value;
+    if (result.ok !== false)
+        return undefined;
+    const error = result.error;
+    const code = error && typeof error === 'object' && !Array.isArray(error)
+        ? error.code
+        : error;
+    return typeof code === 'string' && CLAIM_ERROR_CODES.has(code)
+        ? JSON.stringify({ ok: false, error: code })
+        : undefined;
+}
+function singleLineClaimFailure(line) {
+    const textError = /^error operation=claim-task code=([a-z][a-z0-9_]{0,63})(?:: .*)?$/.exec(line);
+    if (textError) {
+        const code = textError[1];
+        return code && CLAIM_ERROR_CODES.has(code)
+            ? `error operation=claim-task code=${code}`
+            : undefined;
+    }
+    try {
+        const parsed = JSON.parse(line);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+            return undefined;
+        const envelope = parsed;
+        if (envelope.operation !== 'claim-task' || envelope.command !== 'omc team api claim-task')
+            return undefined;
+        if (envelope.ok === false)
+            return claimFailureSummary(envelope);
+        return envelope.ok === true ? claimFailureSummary(envelope.data) : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+/** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
+function textModeClaimFailure(lines, index) {
+    if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{')
+        return undefined;
+    const collected = [];
+    let collectedLength = 0;
+    const end = Math.min(lines.length, index + 1 + CLAIM_ERROR_JSON_LINES_MAX);
+    for (let lineIndex = index + 1; lineIndex < end; lineIndex += 1) {
+        const line = lines[lineIndex] ?? '';
+        collectedLength += line.length + 1;
+        if (collectedLength > CLAIM_ERROR_CAPTURE_MAX)
+            return undefined;
+        collected.push(line);
+        try {
+            return claimFailureSummary(JSON.parse(collected.join('\n')));
+        }
+        catch {
+            // Ignore malformed or incomplete JSON and continue within the fixed bounds.
+        }
+    }
+    return undefined;
+}
+/** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
+export function claimErrorLineFromPane(captured) {
+    const boundedCapture = captured.length > CLAIM_ERROR_CAPTURE_MAX
+        ? captured.slice(-CLAIM_ERROR_CAPTURE_MAX)
+        : captured;
+    const lines = boundedCapture.split(/\r?\n/).map(normalizePaneLine);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        const failure = textModeClaimFailure(lines, index) ?? singleLineClaimFailure(lines[index] ?? '');
+        if (failure)
+            return failure.slice(0, CLAIM_ERROR_LINE_MAX);
+    }
+    return undefined;
 }
 export function promptModeRecoveryRequiresProgressEvidence(promptMode, continuationCount) {
     return promptMode && continuationCount > 0;
@@ -1030,6 +1126,7 @@ async function spawnV2Worker(opts) {
         ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
         : undefined;
     const waitForBoundedStartupEvidence = (resubmit) => settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
+    let paneBusyEvidenceMiss = false;
     const fencedDispatch = await (async () => {
         try {
             return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
@@ -1054,22 +1151,25 @@ async function spawnV2Worker(opts) {
                     fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
                     inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
                     notify: async (_target, triggerMessage) => {
+                        paneBusyEvidenceMiss = false;
                         if (usePromptMode) {
-                            const settled = await waitForBoundedStartupEvidence();
-                            return settled
+                            const settlement = await waitForBoundedStartupEvidence();
+                            paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
+                            return settlement.settled
                                 ? { ok: true, transport: 'prompt_stdin', reason: 'prompt_mode_worker_confirmed' }
-                                : { ok: false, transport: 'prompt_stdin', reason: `${opts.agentType}_startup_evidence_missing` };
+                                : { ok: false, transport: 'prompt_stdin', reason: startupEvidenceMissingReason(settlement.paneBusy, opts.agentType) };
                         }
                         const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
                         if (!attempted.ok) {
                             return { ok: false, transport: 'tmux_send_keys', reason: `worker_notify_failed:${attempted.reason}` };
                         }
-                        const settled = await waitForBoundedStartupEvidence(opts.agentType === 'cursor' || opts.agentType === 'codex'
+                        const settlement = await waitForBoundedStartupEvidence(opts.agentType === 'cursor' || opts.agentType === 'codex'
                             ? undefined
                             : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
-                        return settled
+                        paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
+                        return settlement.settled
                             ? { ok: true, transport: 'tmux_send_keys', reason: 'worker_startup_confirmed' }
-                            : { ok: false, transport: 'tmux_send_keys', reason: 'worker_startup_evidence_missing' };
+                            : { ok: false, transport: 'tmux_send_keys', reason: startupEvidenceMissingReason(settlement.paneBusy) };
                     },
                     deps: { writeWorkerInbox },
                 });
@@ -1098,6 +1198,10 @@ async function spawnV2Worker(opts) {
         ? fencedDispatch.value
         : { ok: false, reason: 'worker_launch_attempt_superseded' };
     if (!dispatchOutcome.ok) {
+        const paneBusyFailureReason = startupEvidenceMissingReason(true, usePromptMode ? opts.agentType : undefined);
+        const claimError = paneBusyEvidenceMiss && dispatchOutcome.reason === paneBusyFailureReason
+            ? claimErrorLineFromPane(await captureOwnedTeamPane(ownership, { joinWrappedLines: true }))
+            : undefined;
         try {
             await cleanupStartedLaunch('startup_dispatch_failed');
         }
@@ -1117,6 +1221,7 @@ async function spawnV2Worker(opts) {
             paneId,
             startupAssigned: false,
             startupFailureReason: dispatchOutcome.reason,
+            ...(claimError ? { claimError } : {}),
             launchAttemptId: startupContext.attempt.attempt_id,
         };
     }
@@ -2790,8 +2895,9 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                 const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
                     await ensureFence();
                     if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
-                        if (!await waitForBoundedStartupEvidence())
-                            return { ok: false, error: `${pending.agentType}_startup_evidence_missing` };
+                        const settlement = await waitForBoundedStartupEvidence();
+                        if (!settlement.settled)
+                            return { ok: false, error: startupEvidenceMissingReason(settlement.paneBusy, pending.agentType) };
                     }
                     else if (pending.promptMode) {
                         // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
@@ -2818,12 +2924,12 @@ export async function executeRecoverDeadWorkerV2Owner(input) {
                                 if (!attempted.ok) {
                                     return { ok: false, transport: 'tmux_send_keys', reason: `worker_notify_failed:${attempted.reason}` };
                                 }
-                                const settled = await waitForBoundedStartupEvidence(pending.agentType === 'cursor' || pending.agentType === 'codex'
+                                const settlement = await waitForBoundedStartupEvidence(pending.agentType === 'cursor' || pending.agentType === 'codex'
                                     ? undefined
                                     : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }));
-                                return settled
+                                return settlement.settled
                                     ? { ok: true, transport: 'tmux_send_keys', reason: 'worker_startup_confirmed' }
-                                    : { ok: false, transport: 'tmux_send_keys', reason: 'worker_startup_evidence_missing' };
+                                    : { ok: false, transport: 'tmux_send_keys', reason: startupEvidenceMissingReason(settlement.paneBusy) };
                             },
                             deps: { writeWorkerInbox },
                         });
@@ -3094,6 +3200,17 @@ function resolveLeaderClaudeSessionId() {
     }
     return undefined;
 }
+function resolveWorkerBootstrapInstructions(config, workerIndex, preparedRole) {
+    const roles = [preparedRole, config.workerRoles?.[workerIndex]];
+    for (const role of roles) {
+        if (typeof role !== 'string' || role.length === 0)
+            continue;
+        const prompt = config.rolePromptByRole?.[role];
+        if (typeof prompt === 'string' && prompt.length > 0)
+            return prompt;
+    }
+    return config.rolePrompt;
+}
 /**
  * Start a team with the v2 event-driven runtime.
  * Creates state directories, writes config + task files, spawns workers via
@@ -3362,13 +3479,14 @@ export async function startTeamV2(config) {
                 if (!prepared)
                     throw new Error(`Missing prepared launch for ${wName}`);
                 await ensureWorkerStateDir(sanitized, wName, leaderCwd);
+                const bootstrapInstructions = resolveWorkerBootstrapInstructions(config, i, prepared.role);
                 const overlayPath = await writeWorkerOverlay({
                     teamName: sanitized, workerName: wName, agentType: prepared.agentType,
                     tasks: config.tasks.map((t, idx) => ({
                         id: String(idx + 1), subject: t.subject, description: t.description,
                     })),
                     cwd: leaderCwd,
-                    ...(config.rolePrompt ? { bootstrapInstructions: config.rolePrompt } : {}),
+                    ...(bootstrapInstructions ? { bootstrapInstructions } : {}),
                     instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
                     ...(prepared.role && shouldInjectContract(prepared.role, prepared.agentType)
                         ? { reviewerRole: true } : {}),
@@ -3537,6 +3655,7 @@ export async function startTeamV2(config) {
             throw error;
         }
         const launchedWorkers = [];
+        const startupFailures = [];
         try {
             // Reuse the same first-per-worker selection used by assignment and
             // preflight; no second dedupe policy may diverge from startupByWorker.
@@ -3593,6 +3712,11 @@ export async function startTeamV2(config) {
                     }
                 }
                 if (workerLaunch.startupFailureReason) {
+                    startupFailures.push({
+                        worker: wName,
+                        reason: workerLaunch.startupFailureReason,
+                        ...(workerLaunch.claimError ? { claimError: workerLaunch.claimError } : {}),
+                    });
                     const logEventFailure = createSwallowedErrorLogger('team.runtime-v2.startTeamV2 appendTeamEvent failed');
                     appendTeamEvent(sanitized, {
                         type: 'team_leader_nudge',
@@ -3729,6 +3853,7 @@ export async function startTeamV2(config) {
             config: teamConfig,
             cwd: leaderCwd,
             ownsWindow: ownsWindow,
+            startupFailures,
         };
     });
 }
@@ -5156,7 +5281,8 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
                     paneCleanupUnknown.push(worker.name);
                 return false;
             }
-            catch {
+            catch (err) {
+                process.stderr.write(`[team/runtime-v2] worker pane cleanup failed for ${worker.name}: ${err instanceof Error ? err.message : String(err)}\n`);
                 paneCleanupUnknown.push(worker.name);
                 return false;
             }
@@ -5169,9 +5295,10 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
         return { outcome: 'preserved', reason: 'worker_panes_alive', workers: paneCleanupAlive };
     }
     if (paneCleanupUnknown.length > 0) {
+        // Identity-bound process reaping already succeeded. Unknown pane liveness still preserves state, including under --force.
         if (!await rollbackShutdownForRetry())
             await finalizeAutoMerge();
-        return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: paneCleanupUnknown };
+        return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: paneCleanupUnknown };
     }
     if (providerCleanupFailures.length > 0) {
         process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
@@ -5252,11 +5379,11 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
             .filter(([, state]) => state === 'unknown')
             .map(([paneId]) => paneById.get(paneId) ?? paneId);
         if (unknownWorkers.length > 0) {
-            process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane liveness is unknown: ${unknownWorkers.join(', ')}
+            process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker process reaping is verified but pane liveness is unconfirmed: ${unknownWorkers.join(', ')}
 `);
             if (!await rollbackShutdownForRetry())
                 await finalizeAutoMerge();
-            return { outcome: 'preserved', reason: 'worker_pane_liveness_unknown', workers: unknownWorkers };
+            return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: unknownWorkers };
         }
     }
     catch (err) {
