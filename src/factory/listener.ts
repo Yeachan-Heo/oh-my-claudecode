@@ -14,7 +14,8 @@ import { appendFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { decideNextStage, type ChainDirective, type RouteTable } from '../hooks/session-end/routing.js';
 import { acquireChainSlot, releaseChainSlot } from '../hooks/session-end/guardrails.js';
-import { defaultSpawnFn } from '../hooks/session-end/spawn-next.js';
+import { defaultSpawnFn, factoryLinkArgv, type SpawnContext } from '../hooks/session-end/spawn-next.js';
+import { DEFAULT_STALL_THRESHOLD_MS, detectStalledLinks, flagStall } from './watchdog.js';
 import { getOmcRoot } from '../lib/worktree-paths.js';
 
 export const INTAKE_LABEL = 'intake';
@@ -83,8 +84,10 @@ export interface ListenerConfig {
 }
 
 export interface ListenerDeps {
-  spawner?: (cmd: string, args: string[]) => void;
+  spawner?: (cmd: string, args: string[], ctx?: SpawnContext) => void;
   audit?: (record: Record<string, unknown>) => void;
+  /** Test seam: overrides the one-shot stall check scheduling for spawned links. */
+  scheduleStallCheck?: (session: string) => void;
 }
 
 export interface EventResult {
@@ -103,6 +106,29 @@ function defaultAudit(cwd: string): (record: Record<string, unknown>) => void {
       // best-effort audit trail
     }
   };
+}
+
+/**
+ * One-shot stall check for a spawned link: after the stall threshold, if the
+ * pre-written ledger still has no routeTable and no 'enqueued' decision, the
+ * link never made it to a SessionEnd handoff — flag it. Best-effort: watchdog
+ * failures must never break the listener. Test seam via deps.scheduleStallCheck.
+ */
+function scheduleStallCheck(cwd: string, session: string, deps: ListenerDeps): void {
+  if (deps.scheduleStallCheck) {
+    deps.scheduleStallCheck(session);
+    return;
+  }
+  const timer = setTimeout(() => {
+    try {
+      const factoryDir = join(getOmcRoot(cwd), 'state', 'factory');
+      const stall = detectStalledLinks(factoryDir).find((s) => s.session === session);
+      if (stall) flagStall(stall, { cwd });
+    } catch {
+      // watchdog is best-effort
+    }
+  }, DEFAULT_STALL_THRESHOLD_MS);
+  timer.unref();
 }
 
 /** Orchestrates one event: audit rejections, discard noise, spawn routed sessions. */
@@ -133,7 +159,11 @@ export function processEvent(event: TrackerEvent, config: ListenerConfig, deps: 
 
   const prompt = buildIntentPrompt(outcome.directive, outcome.issueNumber, outcome.issueUrl);
   const nextSessionId = randomUUID();
-  const args = ['-p', prompt, '--session-id', nextSessionId];
+  const args = factoryLinkArgv(prompt, nextSessionId);
+  const spawnCtx = { cwd: config.cwd };
+  const tracker = outcome.issueNumber !== undefined
+    ? { repo, issue: outcome.issueNumber, nextLabel: 'needs-review', failedLabel: 'failed' }
+    : undefined;
   try {
     // Pre-write the first chain ledger so the spawned session's SessionEnd
     // finds it (route table falls back to the project's factory-routes.json).
@@ -144,12 +174,14 @@ export function processEvent(event: TrackerEvent, config: ListenerConfig, deps: 
       writeFileSync(join(factoryDir, `chain-${nextSessionId}.json`), JSON.stringify({
         intentId,
         stage: outcome.directive.stage,
+        ...(tracker ? { tracker } : {}),
       }, null, 2), 'utf8');
     } catch (error) {
       audit({ kind: 'discarded', reason: 'ledger write failed', detail: error instanceof Error ? error.message : String(error), session: nextSessionId });
     }
-    if (deps.spawner) deps.spawner('claude', args);
-    else defaultSpawnFn('claude', args);
+    if (deps.spawner) deps.spawner('claude', args, spawnCtx);
+    else defaultSpawnFn('claude', args, spawnCtx);
+    scheduleStallCheck(config.cwd, nextSessionId, deps);
   } finally {
     releaseChainSlot(slot);
   }
