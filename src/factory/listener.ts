@@ -8,7 +8,7 @@
  * routing pure function (T1 seam). v1 processes events serially.
  */
 
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 import { createServer, type Server, type ServerResponse, type IncomingMessage } from 'http';
 import { appendFileSync, mkdirSync, writeFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
@@ -132,14 +132,23 @@ export function processEvent(event: TrackerEvent, config: ListenerConfig, deps: 
   }
 
   const prompt = buildIntentPrompt(outcome.directive, outcome.issueNumber, outcome.issueUrl);
-  const args = ['-p', prompt];
+  const nextSessionId = randomUUID();
+  const args = ['-p', prompt, '--session-id', nextSessionId];
   try {
+    // Pre-write the first chain ledger so the spawned session's SessionEnd
+    // finds it (route table falls back to the project's factory-routes.json).
+    const factoryDir = join(getOmcRoot(config.cwd), 'state', 'factory');
+    mkdirSync(factoryDir, { recursive: true });
+    writeFileSync(join(factoryDir, `chain-${nextSessionId}.json`), JSON.stringify({
+      intentId,
+      stage: outcome.directive.stage,
+    }, null, 2), 'utf8');
     if (deps.spawner) deps.spawner('claude', args);
     else defaultSpawnFn('claude', args);
   } finally {
     releaseChainSlot(slot);
   }
-  audit({ kind: 'routed', stage: outcome.directive.stage, skill: outcome.directive.skill, issue: outcome.issueUrl ?? outcome.issueNumber });
+  audit({ kind: 'routed', stage: outcome.directive.stage, skill: outcome.directive.skill, issue: outcome.issueUrl ?? outcome.issueNumber, session: nextSessionId });
   return { status: 202, kind: 'accepted', detail: `spawned ${outcome.directive.stage} session (${outcome.directive.skill})` };
 }
 

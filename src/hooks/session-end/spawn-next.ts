@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { decideNextStage, type ChainOutcome, type RouteTable } from './routing.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
@@ -17,6 +18,8 @@ export interface SpawnNextChain {
   reason: string;
   routeTable: RouteTable;
   sessionId: string;
+  /** Ledger identity carried through so the next link's ledger keeps it. */
+  intentId?: string;
   handoffContext?: string;
   tracker?: SpawnNextTracker;
 }
@@ -25,6 +28,8 @@ export interface SpawnNextPlan {
   directive: { stage: string; skill: string };
   handoffPath: string;
   spawnArgv: string[];
+  /** Pre-generated id of the next link, passed via --session-id so its SessionEnd finds the ledger. */
+  nextSessionId: string;
   trackerCommands: string[][];
 }
 
@@ -64,17 +69,20 @@ export function planSpawnNext(chain: SpawnNextChain, omcRoot: string): SpawnNext
         ['gh', 'issue', 'comment', String(chain.tracker.issue), '--repo', chain.tracker.repo, '--body', `链已推进到 ${directive.stage}，交接上下文：${path.basename(handoffPath)}`],
       ]
     : [];
+  const nextSessionId = randomUUID();
   return {
     directive,
     handoffPath,
-    spawnArgv: ['claude', '-p', `/${directive.skill} 继续 ${directive.stage} 环；交接上下文：${path.basename(handoffPath)}`],
+    spawnArgv: ['claude', '-p', `/${directive.skill} 继续 ${directive.stage} 环；交接上下文：${path.basename(handoffPath)}`, '--session-id', nextSessionId],
+    nextSessionId,
     trackerCommands,
   };
 }
 
 /** IO orchestration only: the routing decision comes from the T1 pure function via planSpawnNext. */
 export function executeSpawnNext(chain: SpawnNextChain, directory: string, spawnFn: SpawnFn = defaultSpawnFn): void {
-  const plan = planSpawnNext(chain, getOmcRoot(directory));
+  const omcRoot = getOmcRoot(directory);
+  const plan = planSpawnNext(chain, omcRoot);
   if (!plan) return;
   fs.mkdirSync(path.dirname(plan.handoffPath), { recursive: true });
   fs.writeFileSync(plan.handoffPath, JSON.stringify({
@@ -84,6 +92,16 @@ export function executeSpawnNext(chain: SpawnNextChain, directory: string, spawn
     context: chain.handoffContext ?? '',
   }, null, 2), 'utf8');
   try {
+    // The next link's ledger must exist before it ends its session, so the
+    // SessionEnd enqueuer finds it; written under the same failure alerts.
+    const factoryDir = path.join(omcRoot, 'state', 'factory');
+    fs.mkdirSync(factoryDir, { recursive: true });
+    fs.writeFileSync(path.join(factoryDir, `chain-${plan.nextSessionId}.json`), JSON.stringify({
+      intentId: chain.intentId ?? `chain-${chain.sessionId}`,
+      stage: plan.directive.stage,
+      routeTable: chain.routeTable,
+      tracker: chain.tracker,
+    }, null, 2), 'utf8');
     spawnFn(plan.spawnArgv[0], plan.spawnArgv.slice(1));
   } catch (error) {
     if (chain.tracker) {

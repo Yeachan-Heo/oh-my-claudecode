@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest';
 import { createHmac } from 'crypto';
-import { mkdtempSync, rmSync } from 'fs';
+import fs, { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -99,16 +99,28 @@ describe('routeTrackerEvent', () => {
 });
 
 describe('processEvent', () => {
-  it('spawns a headless intent session for a legal event', () => {
+  it('spawns a headless intent session with a pre-written chain ledger', () => {
+    const cfg = config();
     const spawned: Array<[string, string[]]> = [];
     const audits: Record<string, unknown>[] = [];
-    const result = processEvent(event(), config(), {
+    const result = processEvent(event(), cfg, {
       spawner: (cmd, args) => spawned.push([cmd, args]),
       audit: (r) => audits.push(r),
     });
     expect(result.kind).toBe('accepted');
-    expect(spawned).toEqual([['claude', ['-p', buildIntentPrompt({ stage: 'intent', skill: 'intent' }, 7, 'https://github.com/pangpang778/factory-demo/issues/7')]]]);
-    expect(audits[0]).toMatchObject({ kind: 'routed', stage: 'intent', skill: 'intent', issue: 'https://github.com/pangpang778/factory-demo/issues/7' });
+    const prompt = buildIntentPrompt({ stage: 'intent', skill: 'intent' }, 7, 'https://github.com/pangpang778/factory-demo/issues/7');
+    expect(spawned).toHaveLength(1);
+    expect(spawned[0][0]).toBe('claude');
+    expect(spawned[0][1][0]).toBe('-p');
+    expect(spawned[0][1][1]).toBe(prompt);
+    expect(spawned[0][1][2]).toBe('--session-id');
+    const sessionId = spawned[0][1][3];
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    const ledgerPath = join(getOmcRoot(cfg.cwd), 'state', 'factory', `chain-${sessionId}.json`);
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as { intentId: string; stage: string };
+    expect(ledger.intentId).toBe('pangpang778-factory-demo-7');
+    expect(ledger.stage).toBe('intent');
+    expect(audits[0]).toMatchObject({ kind: 'routed', stage: 'intent', skill: 'intent', issue: 'https://github.com/pangpang778/factory-demo/issues/7', session: sessionId });
   });
 
   it('discards label-less events without spawning', () => {

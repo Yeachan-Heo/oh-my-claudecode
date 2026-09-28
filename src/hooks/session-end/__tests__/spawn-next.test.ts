@@ -29,6 +29,8 @@ describe('planSpawnNext', () => {
     expect(plan?.spawnArgv[0]).toBe('claude');
     expect(plan?.spawnArgv.join(' ')).toContain('-p');
     expect(plan?.spawnArgv.join(' ')).toContain('launch');
+    expect(plan?.spawnArgv).toContain('--session-id');
+    expect(plan?.nextSessionId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('falls back to the wildcard key', () => {
@@ -74,7 +76,7 @@ describe('spawnNextAlertComment', () => {
 });
 
 describe('executeSpawnNext', () => {
-  it('writes the handoff file and spawns the next session plus tracker writebacks', () => {
+  it('writes the handoff file, the next-link ledger, and spawns the next session plus tracker writebacks', () => {
     const { spawnFn, calls } = spawnRecording();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
     execFileSync('git', ['init', '--quiet'], { cwd: directory, stdio: 'ignore' });
@@ -85,8 +87,16 @@ describe('executeSpawnNext', () => {
       expect(handoff.sessionId).toBe('sess-1');
       expect(handoff.next).toEqual({ stage: 'launch', skill: 'launch' });
       expect(handoff.context).toBe('context body');
+      const factoryDir = path.join(directory, '.omc', 'state', 'factory');
+      const ledgerFiles = fs.readdirSync(factoryDir).filter((f) => f.startsWith('chain-') && f.endsWith('.json'));
+      expect(ledgerFiles).toHaveLength(1);
+      const ledger = JSON.parse(fs.readFileSync(path.join(factoryDir, ledgerFiles[0]), 'utf8')) as { intentId: string; stage: string; routeTable: unknown };
+      expect(ledger.intentId).toBe('chain-sess-1');
+      expect(ledger.stage).toBe('launch');
+      expect(ledger.routeTable).toEqual(chain.routeTable);
       const claudeCall = calls.find(([command]) => command === 'claude');
       expect(claudeCall).toBeDefined();
+      expect(claudeCall?.[1]).toContain('--session-id');
       expect(calls.filter(([command]) => command === 'gh')).toHaveLength(2);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
@@ -101,6 +111,20 @@ describe('executeSpawnNext', () => {
       executeSpawnNext({ ...chain, outcome: 'failed' as const }, directory, spawnFn);
       expect(fs.existsSync(path.join(directory, '.omc'))).toBe(false);
       expect(calls).toEqual([]);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('carries a chain intentId into the next-link ledger', () => {
+    const { spawnFn } = spawnRecording();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
+    try {
+      executeSpawnNext({ ...chain, intentId: 'demo#7' }, directory, spawnFn);
+      const factoryDir = path.join(directory, '.omc', 'state', 'factory');
+      const ledgerFile = fs.readdirSync(factoryDir).find((f) => f.startsWith('chain-') && f.endsWith('.json'));
+      const ledger = JSON.parse(fs.readFileSync(path.join(factoryDir, ledgerFile!), 'utf8')) as { intentId: string };
+      expect(ledger.intentId).toBe('demo#7');
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

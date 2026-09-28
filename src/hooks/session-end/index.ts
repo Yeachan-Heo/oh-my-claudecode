@@ -10,6 +10,7 @@ import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscript
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { canClearStateForSession, clearModeStateFile, clearStateFileLockedIf, readModeStateWithMeta } from '../../lib/mode-state-io.js';
 import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob, sealWikiManifest } from './cleanup-manifest.js';
+import { planChainEnqueue } from './chain-enqueuer.js';
 import { spawnSessionEndWorker } from './worker.js';
 import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
 import { getSessionEndStalePrdWarning } from '../ralph/stale-prd.js';
@@ -971,7 +972,8 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
 
     const metrics = recordSessionMetrics(directory, input);
     const payload = buildDurableSessionEndPayload(directory, input, metrics);
-    const manifest = prepareCoreManifest(directory, input.session_id, payload);
+    const chain = planChainEnqueue(directory, input.session_id, input.reason);
+    const manifest = prepareCoreManifest(directory, input.session_id, chain ? { ...payload, chain } : payload);
     if (!manifest) return { continue: true };
     exportSessionSummary(directory, metrics);
     let foregroundOutcome: Record<string, unknown>;
