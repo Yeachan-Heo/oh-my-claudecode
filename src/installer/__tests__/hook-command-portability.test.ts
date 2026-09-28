@@ -38,6 +38,10 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
   });
 
   it('default config: commands use ${CLAUDE_CONFIG_DIR:-$HOME/.claude} pattern', async () => {
+    // POSIX expansion is only emitted on non-Windows platforms (Windows emits
+    // concrete paths by design — see the Windows test below). Force a POSIX
+    // platform so this contract holds on Windows dev machines too.
+    Object.defineProperty(process, 'platform', { value: 'linux' });
     delete process.env.CLAUDE_CONFIG_DIR;
     vi.resetModules();
 
@@ -94,6 +98,9 @@ describe('Contract 7: hook command portability (#2084, #2348)', () => {
   });
 
   it('no command contains a hardcoded home directory path', async () => {
+    // Windows emits concrete hook paths by design (see Windows test below), so
+    // the POSIX no-hardcoded-home contract is only asserted for POSIX builds.
+    Object.defineProperty(process, 'platform', { value: 'linux' });
     delete process.env.CLAUDE_CONFIG_DIR;
     vi.resetModules();
 

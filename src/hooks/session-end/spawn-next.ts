@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, type SpawnOptions } from 'child_process';
 import { decideNextStage, type ChainOutcome, type RouteTable } from './routing.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
 
@@ -33,7 +33,39 @@ export interface SpawnNextPlan {
   trackerCommands: string[][];
 }
 
-export type SpawnFn = (command: string, args: string[]) => { unref(): void };
+export type SpawnFn = (command: string, args: string[], ctx?: SpawnContext) => { unref(): void };
+
+/** Factory links spawn headless (AFK): their cwd must match the ledger's state root and their permission profile must be narrow. */
+export interface SpawnContext {
+  cwd?: string;
+}
+
+/**
+ * AFK allowlist for factory-spawned sessions: gh read/comment, file read/write,
+ * and github.com-only WebFetch. Everything else is denied in -p mode and must
+ * fall back to HITL (the session's issue-comment contract), never silent failure.
+ */
+export const AFK_ALLOWED_TOOLS = [
+  'Bash(gh issue view:*)',
+  'Bash(gh issue comment:*)',
+  'Bash(gh issue edit:*)',
+  'Bash(gh pr view:*)',
+  'Bash(gh pr list:*)',
+  'Bash(gh label list:*)',
+  'Read',
+  'Glob',
+  'Grep',
+  'Write',
+  'Edit',
+  'WebFetch(domain:github.com)',
+].join(',');
+
+export const AFK_SPAWN_FLAGS = ['--permission-mode', 'acceptEdits', '--allowedTools', AFK_ALLOWED_TOOLS];
+
+/** Args (command excluded) for one factory chain link: intent prompt + AFK permission profile. */
+export function factoryLinkArgv(prompt: string, sessionId: string): string[] {
+  return ['-p', prompt, '--session-id', sessionId, ...AFK_SPAWN_FLAGS];
+}
 
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 /** Shared label charset (stage/skill/labels): safe for paths and argv. */
@@ -74,7 +106,7 @@ export function planSpawnNext(chain: SpawnNextChain, omcRoot: string): SpawnNext
   return {
     directive,
     handoffPath,
-    spawnArgv: ['claude', '-p', `/${directive.skill} 继续 ${directive.stage} 环；交接上下文：${path.basename(handoffPath)}`, '--session-id', nextSessionId],
+    spawnArgv: ['claude', ...factoryLinkArgv(`/${directive.skill} 继续 ${directive.stage} 环；交接上下文：${path.basename(handoffPath)}`, nextSessionId)],
     nextSessionId,
     trackerCommands,
   };
@@ -104,7 +136,7 @@ export function executeSpawnNext(chain: SpawnNextChain, directory: string, spawn
       routeTable: chain.routeTable,
       tracker: chain.tracker,
     }, null, 2), 'utf8');
-    spawnFn(plan.spawnArgv[0], plan.spawnArgv.slice(1));
+    spawnFn(plan.spawnArgv[0], plan.spawnArgv.slice(1), { cwd: directory });
   } catch (error) {
     // Don't leave a dead ledger pointing at a session that never started.
     try { fs.unlinkSync(ledgerPath); } catch { /* never written */ }
@@ -127,17 +159,36 @@ function quoteForCmd(arg: string): string {
  * `claude` is a .cmd shim on Windows, which CreateProcess cannot exec
  * directly; route that one case through cmd.exe with quoted args. Safe
  * because every dynamic field in the argv was regex-validated upstream.
+ * The -p prompt goes through stdin on Windows: cmd.exe's ANSI codepage
+ * mangles non-ASCII argv (dogfood: Chinese intent prompts mojibake'd),
+ * while the stdin pipe stays UTF-8 end to end.
  */
-export function defaultSpawnFn(command: string, args: string[]): { unref(): void } {
-  const child =
-    process.platform === 'win32' && command === 'claude'
-      ? spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-          windowsVerbatimArguments: true,
-        })
-      : spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+export function defaultSpawnFn(command: string, args: string[], ctx?: SpawnContext): { unref(): void } {
+  const baseOpts: SpawnOptions = { detached: true, windowsHide: true, cwd: ctx?.cwd };
+  if (process.platform === 'win32' && command === 'claude') {
+    const pIdx = args.indexOf('-p');
+    const inlinePrompt = pIdx !== -1 && pIdx + 1 < args.length ? args[pIdx + 1] : undefined;
+    if (inlinePrompt !== undefined && !inlinePrompt.startsWith('--')) {
+      const rest = [...args.slice(0, pIdx + 1), ...args.slice(pIdx + 2)];
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${rest.map(quoteForCmd).join(' ')}"`], {
+        ...baseOpts,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        windowsVerbatimArguments: true,
+      });
+      child.stdin?.write(inlinePrompt, 'utf8');
+      child.stdin?.end();
+      child.unref();
+      return child;
+    }
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
+      ...baseOpts,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true,
+    });
+    child.unref();
+    return child;
+  }
+  const child = spawn(command, args, { ...baseOpts, stdio: 'ignore' });
   child.unref();
   return child;
 }

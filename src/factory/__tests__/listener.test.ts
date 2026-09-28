@@ -128,10 +128,33 @@ describe('processEvent', () => {
     const sessionId = spawned[0][1][3];
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
     const ledgerPath = join(getOmcRoot(cfg.cwd), 'state', 'factory', `chain-${sessionId}.json`);
-    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as { intentId: string; stage: string };
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as { intentId: string; stage: string; tracker?: { repo: string; issue: number; nextLabel: string; failedLabel: string } };
     expect(ledger.intentId).toBe('pangpang778-factory-demo-7');
     expect(ledger.stage).toBe('intent');
+    expect(ledger.tracker).toEqual({ repo: 'pangpang778/factory-demo', issue: 7, nextLabel: 'needs-review', failedLabel: 'failed' });
     expect(audits[0]).toMatchObject({ kind: 'routed', stage: 'intent', skill: 'intent', issue: 'https://github.com/pangpang778/factory-demo/issues/7', session: sessionId });
+  });
+
+  it('omits the tracker from the pre-written ledger when the event has no issue number', () => {
+    const cfg = config();
+    const spawned: Array<[string, string[]]> = [];
+    const result = processEvent(event({ issue: { number: undefined, title: 'x' } }), cfg, { spawner: (cmd, args) => spawned.push([cmd, args]) });
+    expect(result.kind).toBe('accepted');
+    const sessionId = spawned[0][1][3];
+    const ledgerPath = join(getOmcRoot(cfg.cwd), 'state', 'factory', `chain-${sessionId}.json`);
+    const ledger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) as { tracker?: unknown };
+    expect(ledger.tracker).toBeUndefined();
+  });
+
+  it('schedules the one-shot stall check for the spawned session', () => {
+    const scheduled: string[] = [];
+    const spawned: Array<[string, string[]]> = [];
+    const result = processEvent(event(), config(), {
+      spawner: (cmd, args) => spawned.push([cmd, args]),
+      scheduleStallCheck: (session) => scheduled.push(session),
+    });
+    expect(result.kind).toBe('accepted');
+    expect(scheduled).toEqual([spawned[0][1][3]]);
   });
 
   it('discards label-less events without spawning', () => {
@@ -289,6 +312,24 @@ describe('listener server', () => {
       expect(spawned).toHaveLength(1);
       expect(spawned[0][0]).toBe('claude');
       expect(spawned[0][1][0]).toBe('-p');
+    } finally {
+      stopListener(server, cfg.cwd);
+    }
+  });
+
+  it('spawns the intent session with the AFK permission profile and a cwd matching the ledger state root', async () => {
+    const spawned: Array<{ cmd: string; args: string[]; ctx: unknown }> = [];
+    const cfg = config({ port: 0 });
+    const server = await startListener(cfg, { spawner: (cmd, args, ctx) => spawned.push({ cmd, args, ctx }) });
+    try {
+      const { body, signature } = signedBody(event());
+      const res = await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}`, { method: 'POST', headers: { 'x-hub-signature-256': signature }, body });
+      expect(res.status).toBe(202);
+      expect(spawned).toHaveLength(1);
+      expect(spawned[0].args).toContain('--permission-mode');
+      expect(spawned[0].args).toContain('--allowedTools');
+      expect(spawned[0].args.join(' ')).toContain('Bash(gh issue comment:*)');
+      expect(spawned[0].ctx).toEqual({ cwd: cfg.cwd });
     } finally {
       stopListener(server, cfg.cwd);
     }

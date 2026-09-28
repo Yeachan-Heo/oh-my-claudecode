@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { executeSpawnNext, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
+import { AFK_SPAWN_FLAGS, executeSpawnNext, factoryLinkArgv, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
 
 const chain: SpawnNextChain = {
   outcome: 'success',
@@ -15,10 +15,11 @@ const chain: SpawnNextChain = {
 };
 
 const sessions = (): Array<[string, string[]]> => [];
-const spawnRecording = (): { spawnFn: SpawnFn; calls: Array<[string, string[]]> } => {
+const spawnRecording = (): { spawnFn: SpawnFn; calls: Array<[string, string[]]>; ctxs: Array<unknown> } => {
   const calls = sessions();
-  const spawnFn: SpawnFn = (command, args) => { calls.push([command, args]); return { unref() {} }; };
-  return { spawnFn, calls };
+  const ctxs: Array<unknown> = [];
+  const spawnFn: SpawnFn = (command, args, ctx) => { calls.push([command, args]); ctxs.push(ctx); return { unref() {} }; };
+  return { spawnFn, calls, ctxs };
 };
 
 describe('planSpawnNext', () => {
@@ -50,6 +51,13 @@ describe('planSpawnNext', () => {
     expect(withoutTracker?.trackerCommands).toEqual([]);
   });
 
+  it('appends the AFK permission profile to the spawn argv', () => {
+    const plan = planSpawnNext(chain, '/omc-root');
+    for (const flag of AFK_SPAWN_FLAGS) expect(plan?.spawnArgv).toContain(flag);
+    expect(plan?.spawnArgv).toContain('--permission-mode');
+    expect(plan?.spawnArgv).toContain('--allowedTools');
+  });
+
   it('rejects a chain with a path-traversal session id before planning', () => {
     const { spawnFn, calls } = spawnRecording();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
@@ -77,7 +85,7 @@ describe('spawnNextAlertComment', () => {
 
 describe('executeSpawnNext', () => {
   it('writes the handoff file, the next-link ledger, and spawns the next session plus tracker writebacks', () => {
-    const { spawnFn, calls } = spawnRecording();
+    const { spawnFn, calls, ctxs } = spawnRecording();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
     execFileSync('git', ['init', '--quiet'], { cwd: directory, stdio: 'ignore' });
     try {
@@ -97,6 +105,8 @@ describe('executeSpawnNext', () => {
       const claudeCall = calls.find(([command]) => command === 'claude');
       expect(claudeCall).toBeDefined();
       expect(claudeCall?.[1]).toContain('--session-id');
+      const claudeIdx = calls.findIndex(([command]) => command === 'claude');
+      expect(ctxs[claudeIdx]).toEqual({ cwd: directory });
       expect(calls.filter(([command]) => command === 'gh')).toHaveLength(2);
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
@@ -151,6 +161,30 @@ describe('executeSpawnNext', () => {
       expect(label?.[1].join(' ')).toContain('failed');
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('factoryLinkArgv', () => {
+  it('keeps the prompt right after -p and appends the AFK profile at the tail', () => {
+    const argv = factoryLinkArgv('/intent 处理进货：<url>。', 'sess-9');
+    expect(argv[0]).toBe('-p');
+    expect(argv[1]).toBe('/intent 处理进货：<url>。');
+    expect(argv[2]).toBe('--session-id');
+    expect(argv[3]).toBe('sess-9');
+    expect(argv.slice(4)).toEqual(AFK_SPAWN_FLAGS);
+  });
+});
+
+describe('AFK_ALLOWED_TOOLS security', () => {
+  it('does not allow arbitrary gh api calls (privilege escalation vector)', () => {
+    const tools = AFK_SPAWN_FLAGS[AFK_SPAWN_FLAGS.indexOf('--allowedTools') + 1];
+    const entries = tools.split(',');
+    expect(tools).not.toContain('gh api');
+    // No unrestricted shell: every Bash entry must be scoped to a gh subcommand.
+    expect(entries).not.toContain('Bash');
+    for (const entry of entries.filter((e) => e.startsWith('Bash'))) {
+      expect(entry).toMatch(/^Bash\(gh (issue|pr|label) [a-z]+:\*\)$/);
     }
   });
 });

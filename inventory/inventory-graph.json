@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0d58c465bf2b4e075aa4c69c4d99194ac5e7d258",
-    "sourceSha256": "f4db8c6de017dc4c7ba36c3009c5672c192f011676da1f6e9e524291bad61fbe",
+    "head": "d9ca653941ba3bb5c915f432e8986b9a4ac9db79",
+    "sourceSha256": "2c9e35da6cba8552a99268941b20322c1febc661fc585fc3653ec0fd35f37139",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0d58c465bf2b4e075aa4c69c4d99194ac5e7d258",
-  "sourceSha256": "f4db8c6de017dc4c7ba36c3009c5672c192f011676da1f6e9e524291bad61fbe",
+  "head": "d9ca653941ba3bb5c915f432e8986b9a4ac9db79",
+  "sourceSha256": "2c9e35da6cba8552a99268941b20322c1febc661fc585fc3653ec0fd35f37139",
   "counts": {
     "public": {
       "skills": 47,
@@ -27,9 +27,9 @@
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
-      "templateHooks": 22,
-      "srcFiles": 1409,
-      "total": 1431
+      "templateHooks": 23,
+      "srcFiles": 1412,
+      "total": 1435
     },
     "generated": {
       "distFiles": 5066,
@@ -700,6 +700,7 @@
       "templates/hooks/post-tool-use-failure.mjs",
       "templates/hooks/post-tool-use.mjs",
       "templates/hooks/pre-tool-use.mjs",
+      "templates/hooks/session-end.mjs",
       "templates/hooks/session-start.mjs",
       "templates/hooks/stop-continuation.mjs",
       "templates/hooks/workflow-drift-guard.mjs"
@@ -34751,6 +34752,11 @@
         "path": "src/__tests__/bridge-help-question-regex.test.ts"
       },
       {
+        "id": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/chain-enqueuer-registration.test.ts"
+      },
+      {
         "id": "src/__tests__/claude-goal-adapter-doc.test.ts",
         "kind": "src",
         "path": "src/__tests__/claude-goal-adapter-doc.test.ts"
@@ -36739,6 +36745,16 @@
         "id": "src/factory/listener.ts",
         "kind": "src",
         "path": "src/factory/listener.ts"
+      },
+      {
+        "id": "src/factory/watchdog.test.ts",
+        "kind": "src",
+        "path": "src/factory/watchdog.test.ts"
+      },
+      {
+        "id": "src/factory/watchdog.ts",
+        "kind": "src",
+        "path": "src/factory/watchdog.ts"
       },
       {
         "id": "src/features/AGENTS.md",
@@ -41806,6 +41822,11 @@
         "path": "templates/hooks/pre-tool-use.mjs"
       },
       {
+        "id": "templates/hooks/session-end.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/session-end.mjs"
+      },
+      {
         "id": "templates/hooks/session-start.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/session-start.mjs"
@@ -42019,6 +42040,11 @@
         "id": "tests/lint/issue-4147-processStart-encoding.test.ts",
         "kind": "other",
         "path": "tests/lint/issue-4147-processStart-encoding.test.ts"
+      },
+      {
+        "id": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "kind": "other",
+        "path": "tests/lint/session-end-forwarder-no-op.test.ts"
       },
       {
         "id": "tests/lint/setup-phases-drift.test.ts",
@@ -45296,6 +45322,46 @@
         "from": "src/__tests__/bridge-help-question-regex.test.ts",
         "to": "external:vitest",
         "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "src/installer/hooks.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/chain-enqueuer-registration.test.ts",
+        "to": "src/installer/index.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/__tests__/claude-goal-adapter-doc.test.ts",
@@ -54764,6 +54830,11 @@
       },
       {
         "from": "src/factory/listener.ts",
+        "to": "src/factory/watchdog.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/listener.ts",
         "to": "src/hooks/session-end/guardrails.ts",
         "kind": "imports"
       },
@@ -54784,6 +54855,76 @@
       },
       {
         "from": "src/factory/listener.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/factory/listener.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "src/factory/watchdog.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.test.ts",
+        "to": "src/factory/watchdog.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/factory/watchdog.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/watchdog.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/factory/watchdog.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -64521,6 +64662,11 @@
         "from": "src/hooks/session-end/spawn-next.ts",
         "to": "external:child_process",
         "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/spawn-next.ts",
+        "to": "external:child_process",
+        "kind": "type-imports"
       },
       {
         "from": "src/hooks/session-end/spawn-next.ts",
@@ -81403,6 +81549,36 @@
         "kind": "imports"
       },
       {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/session-end.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
         "from": "templates/hooks/session-start.mjs",
         "to": "external:child_process",
         "kind": "imports"
@@ -82138,6 +82314,26 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/session-end-forwarder-no-op.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/setup-phases-drift.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -82309,12 +82505,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7112,
-      "edgeCount": 8044,
-      "importEdgeCount": 6639,
+      "nodeCount": 7117,
+      "edgeCount": 8078,
+      "importEdgeCount": 6666,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "a90d755eba81051c16d5a253f9376793cdbfe4565876f781527b98984e7acd45",
-  "manifestSha256": "8007c38c9a27fca64edf280e347c2d5cdcfb4c8ff83ee99c36a01d39f252b7bd"
+  "inventorySha256": "c512535bb1c6ee1bdf65dba107f77677686f86920ec13b1ec8d9c8ea641b61ab",
+  "manifestSha256": "04e78b929f35257441211cf0d52ea002dd63afec0292c106a7b34e245a74c3f4"
 }
