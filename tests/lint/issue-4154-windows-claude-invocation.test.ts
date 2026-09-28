@@ -5,8 +5,8 @@ import { dirname } from 'path';
 
 // Test fix for issue #4154: Windows no-tmux fallback should not use shell:true
 // with args array, which triggers DEP0190 and breaks with Volta shims.
-// Instead, use COMSPEC /d /s /c with properly quoted command line and
-// windowsVerbatimArguments: true to prevent libuv re-quoting.
+// Instead, use COMSPEC /d /s /c with properly quoted command line (via spawnSync)
+// and windowsVerbatimArguments: true to prevent libuv re-quoting.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -40,20 +40,20 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     expect(() => quoteForCmd('line1\rline2')).toThrow();
   });
 
-  it('runClaudeDirect uses COMSPEC and windowsVerbatimArguments on Windows', async () => {
+  it('runClaudeDirect uses spawnSync with COMSPEC and windowsVerbatimArguments on Windows', async () => {
     const launchPath = fileURLToPath(new URL('../../src/cli/launch.ts', import.meta.url));
     const source = readFileSync(launchPath, 'utf-8');
 
-    // Check for Windows code path in runClaudeDirect
-    expect(source).toContain('function runClaudeDirect');
-
-    // Extract just the runClaudeDirect function
+    // Find the runClaudeDirect function
     const runClaudeDirectStart = source.indexOf('function runClaudeDirect(');
     const nextFunctionStart = source.indexOf('\nfunction ', runClaudeDirectStart + 1);
     const runClaudeDirectCode = source.slice(
       runClaudeDirectStart,
-      nextFunctionStart > 0 ? nextFunctionStart : runClaudeDirectStart + 1500
+      nextFunctionStart > 0 ? nextFunctionStart : runClaudeDirectStart + 2000
     );
+
+    // Should use spawnSync on Windows (not execFileSync)
+    expect(runClaudeDirectCode).toContain('spawnSync(comspec');
 
     // Should use COMSPEC on Windows
     expect(runClaudeDirectCode).toContain('COMSPEC');
@@ -66,13 +66,14 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     // Should have windowsVerbatimArguments: true
     expect(runClaudeDirectCode).toContain('windowsVerbatimArguments: true');
 
-    // Should NOT have the problematic shell: process.platform === 'win32' pattern
-    expect(runClaudeDirectCode).not.toMatch(
-      /execFileSync\s*\(\s*['"]claude['"]\s*,\s*args\s*,\s*{[\s\S]*?shell:/
-    );
+    // Should handle status 9009 (cmd.exe not found)
+    expect(runClaudeDirectCode).toContain('9009');
+
+    // Should NOT have the problematic shell: true pattern
+    expect(runClaudeDirectCode).not.toMatch(/shell:/);
   });
 
-  it('isClaudeAvailable uses COMSPEC and windowsVerbatimArguments on Windows', async () => {
+  it('isClaudeAvailable uses spawnSync with COMSPEC and windowsVerbatimArguments on Windows', async () => {
     const tmuxPath = fileURLToPath(new URL('../../src/cli/tmux-utils.ts', import.meta.url));
     const source = readFileSync(tmuxPath, 'utf-8');
 
@@ -81,8 +82,11 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     const nextExportStart = source.indexOf('\nexport ', isClaudeAvailableStart + 1);
     const isClaudeAvailableCode = source.slice(
       isClaudeAvailableStart,
-      nextExportStart > 0 ? nextExportStart : isClaudeAvailableStart + 1000
+      nextExportStart > 0 ? nextExportStart : isClaudeAvailableStart + 1200
     );
+
+    // Should use spawnSync on Windows (not execFileSync)
+    expect(isClaudeAvailableCode).toContain('spawnSync(comspec');
 
     // Should use COMSPEC on Windows
     expect(isClaudeAvailableCode).toContain('COMSPEC');
@@ -95,11 +99,14 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     // Should have windowsVerbatimArguments: true
     expect(isClaudeAvailableCode).toContain('windowsVerbatimArguments: true');
 
-    // Should NOT have shell: true pattern with args array
-    expect(isClaudeAvailableCode).not.toMatch(/execFileSync\s*\(\s*['"]claude['"]\s*,\s*\[\]/);
+    // Should return result.status === 0
+    expect(isClaudeAvailableCode).toContain('result.status === 0');
+
+    // Should NOT have shell: true pattern
+    expect(isClaudeAvailableCode).not.toMatch(/shell:/);
   });
 
-  it('runAutoresearchSetupSession passes prompt via stdin on Windows (not argv)', async () => {
+  it('runAutoresearchSetupSession uses spawnSync with COMSPEC and stdin on Windows', async () => {
     const autoresearchPath = fileURLToPath(
       new URL('../../src/cli/autoresearch-setup-session.ts', import.meta.url)
     );
@@ -110,10 +117,10 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
 
     // Find the function
     const functionStart = source.indexOf('export function runAutoresearchSetupSession(');
-    const functionCode = source.slice(functionStart, functionStart + 2000);
+    const functionCode = source.slice(functionStart, functionStart + 2200);
 
-    // On Windows, should use COMSPEC
-    expect(functionCode).toContain('COMSPEC');
+    // On Windows, should use spawnSync with COMSPEC
+    expect(functionCode).toContain('spawnSync(comspec');
 
     // Should pass prompt via input (stdin), not as argument
     expect(functionCode).toContain('input: prompt');
@@ -125,7 +132,7 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     expect(functionCode).toContain("const commandLine = ['claude', '-p']");
 
     // Should NOT have shell: true pattern
-    expect(functionCode).not.toMatch(/shell:\s*process\.platform\s*===\s*['"]win32['"]/);
+    expect(functionCode).not.toMatch(/shell:/);
   });
 
   it('verifies no problematic shell:true pattern with args in claude launches', async () => {
@@ -157,10 +164,10 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     const nextFunctionStart = source.indexOf('\nfunction ', runClaudeDirectStart + 1);
     const code = source.slice(
       runClaudeDirectStart,
-      nextFunctionStart > 0 ? nextFunctionStart : runClaudeDirectStart + 1500
+      nextFunctionStart > 0 ? nextFunctionStart : runClaudeDirectStart + 2000
     );
 
-    // Should have windowsVerbatimArguments: true in the execFileSync call
+    // Should have windowsVerbatimArguments: true in the spawnSync call
     expect(code).toContain('windowsVerbatimArguments: true');
   });
 
@@ -172,10 +179,10 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     const nextExportStart = source.indexOf('\nexport ', isClaudeStart + 1);
     const code = source.slice(
       isClaudeStart,
-      nextExportStart > 0 ? nextExportStart : isClaudeStart + 1000
+      nextExportStart > 0 ? nextExportStart : isClaudeStart + 1200
     );
 
-    // Should have windowsVerbatimArguments: true in the execFileSync call
+    // Should have windowsVerbatimArguments: true in the spawnSync call
     expect(code).toContain('windowsVerbatimArguments: true');
   });
 
@@ -186,7 +193,7 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     const source = readFileSync(autoresearchPath, 'utf-8');
 
     const functionStart = source.indexOf('export function runAutoresearchSetupSession(');
-    const code = source.slice(functionStart, functionStart + 2000);
+    const code = source.slice(functionStart, functionStart + 2200);
 
     // Should have windowsVerbatimArguments: true in the spawnSync call
     expect(code).toContain('windowsVerbatimArguments: true');
@@ -212,5 +219,24 @@ describe('issue #4154 - Windows claude invocation fixes', () => {
     );
     expect(winBranch).toContain('input: prompt');
     expect(winBranch).not.toContain("['claude', '-p', prompt]");
+  });
+
+  it('verifies runClaudeDirect handles status 9009 (cmd.exe not found)', async () => {
+    const launchPath = fileURLToPath(new URL('../../src/cli/launch.ts', import.meta.url));
+    const source = readFileSync(launchPath, 'utf-8');
+
+    const runClaudeDirectStart = source.indexOf('function runClaudeDirect(');
+    const nextFunctionStart = source.indexOf('\nfunction ', runClaudeDirectStart + 1);
+    const code = source.slice(
+      runClaudeDirectStart,
+      nextFunctionStart > 0 ? nextFunctionStart : runClaudeDirectStart + 2000
+    );
+
+    // Should handle status 9009
+    expect(code).toContain('result.status === 9009');
+    // Should handle ENOENT
+    expect(code).toContain("result.error && result.error.code === 'ENOENT'");
+    // Should print the same error message
+    expect(code).toContain('[omc] Error: claude CLI not found in PATH.');
   });
 });

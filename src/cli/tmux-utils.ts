@@ -220,10 +220,11 @@ export function isClaudeAvailable(): boolean {
     if (process.platform === 'win32') {
       const comspec = process.env.COMSPEC || 'cmd.exe';
       const commandLine = ['claude', '--version'].map(quoteForCmd).join(' ');
-      execFileSync(comspec, ['/d', '/s', '/c', commandLine], {
+      const result = spawnSync(comspec, ['/d', '/s', '/c', commandLine], {
         stdio: 'ignore',
         windowsVerbatimArguments: true,
       });
+      return result.status === 0;
     } else {
       execFileSync('claude', ['--version'], {
         stdio: 'ignore',

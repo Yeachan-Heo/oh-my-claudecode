@@ -3,7 +3,7 @@
  * Launches Claude Code with tmux session management
  */
 
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import {
   chmodSync,
   cpSync,
@@ -1383,11 +1383,24 @@ function runClaudeDirect(cwd: string, args: string[]): void {
     if (process.platform === 'win32') {
       const comspec = process.env.COMSPEC || 'cmd.exe';
       const commandLine = ['claude', ...args].map(quoteForCmd).join(' ');
-      execFileSync(comspec, ['/d', '/s', '/c', commandLine], {
+      const result = spawnSync(comspec, ['/d', '/s', '/c', commandLine], {
         cwd,
         stdio: 'inherit',
         windowsVerbatimArguments: true,
       });
+      // Handle cmd.exe not found (ENOENT) or command not recognized (exit 9009)
+      if (result.error && result.error.code === 'ENOENT') {
+        console.error('[omc] Error: claude CLI not found in PATH.');
+        process.exit(1);
+      }
+      if (result.status === 9009) {
+        console.error('[omc] Error: claude CLI not found in PATH.');
+        process.exit(1);
+      }
+      // Propagate Claude's exit code so omc does not swallow failures
+      if (result.status !== 0) {
+        process.exit(result.status ?? 1);
+      }
     } else {
       execFileSync('claude', args, {
         cwd,
