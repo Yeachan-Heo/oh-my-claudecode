@@ -217,10 +217,18 @@ export function isTmuxAvailable(): boolean {
  */
 export function isClaudeAvailable(): boolean {
   try {
-    execFileSync('claude', ['--version'], {
-      stdio: 'ignore',
-      shell: process.platform === 'win32',
-    });
+    if (process.platform === 'win32') {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
+      const commandLine = ['claude', '--version'].map(quoteForCmd).join(' ');
+      execFileSync(comspec, ['/d', '/s', '/c', commandLine], {
+        stdio: 'ignore',
+        windowsVerbatimArguments: true,
+      });
+    } else {
+      execFileSync('claude', ['--version'], {
+        stdio: 'ignore',
+      });
+    }
     return true;
   } catch {
     return false;

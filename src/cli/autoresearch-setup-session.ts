@@ -5,6 +5,7 @@ import {
   parseAutoresearchSetupHandoffJson,
   type AutoresearchSetupHandoff,
 } from '../autoresearch/setup-contract.js';
+import { quoteForCmd } from './tmux-utils.js';
 
 const AUTORESEARCH_SETUP_ENTRYPOINT = 'autoresearch-setup';
 
@@ -142,15 +143,32 @@ export function buildAutoresearchSetupPrompt(input: AutoresearchSetupSessionInpu
 
 export function runAutoresearchSetupSession(input: AutoresearchSetupSessionInput): AutoresearchSetupHandoff {
   const prompt = buildAutoresearchSetupPrompt(input);
-  const result = spawnSync('claude', ['-p', prompt], {
-    cwd: input.repoRoot,
-    encoding: 'utf-8',
-    shell: process.platform === 'win32',
-    env: {
-      ...process.env,
-      CLAUDE_CODE_ENTRYPOINT: AUTORESEARCH_SETUP_ENTRYPOINT,
-    },
-  });
+  const result = (() => {
+    if (process.platform === 'win32') {
+      // On Windows: pass prompt via stdin to avoid quoteForCmd issues with multi-line text.
+      // Cmd.exe doesn't understand backslash escapes in arguments, so we use stdin instead.
+      const comspec = process.env.COMSPEC || 'cmd.exe';
+      const commandLine = ['claude', '-p'].map(quoteForCmd).join(' ');
+      return spawnSync(comspec, ['/d', '/s', '/c', commandLine], {
+        cwd: input.repoRoot,
+        encoding: 'utf-8',
+        input: prompt,
+        env: {
+          ...process.env,
+          CLAUDE_CODE_ENTRYPOINT: AUTORESEARCH_SETUP_ENTRYPOINT,
+        },
+        windowsVerbatimArguments: true,
+      });
+    }
+    return spawnSync('claude', ['-p', prompt], {
+      cwd: input.repoRoot,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        CLAUDE_CODE_ENTRYPOINT: AUTORESEARCH_SETUP_ENTRYPOINT,
+      },
+    });
+  })();
 
   if (result.error) {
     throw result.error;

@@ -1380,11 +1380,20 @@ function runClaudeOutsideTmux(
  */
 function runClaudeDirect(cwd: string, args: string[]): void {
   try {
-    execFileSync('claude', args, {
-      cwd,
-      stdio: 'inherit',
-      shell: process.platform === 'win32',
-    });
+    if (process.platform === 'win32') {
+      const comspec = process.env.COMSPEC || 'cmd.exe';
+      const commandLine = ['claude', ...args].map(quoteForCmd).join(' ');
+      execFileSync(comspec, ['/d', '/s', '/c', commandLine], {
+        cwd,
+        stdio: 'inherit',
+        windowsVerbatimArguments: true,
+      });
+    } else {
+      execFileSync('claude', args, {
+        cwd,
+        stdio: 'inherit',
+      });
+    }
   } catch (error) {
     const err = error as NodeJS.ErrnoException & { status?: number | null };
     if (err.code === 'ENOENT') {
