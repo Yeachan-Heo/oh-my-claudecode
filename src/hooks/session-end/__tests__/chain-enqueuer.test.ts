@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import {
   planChainEnqueue,
   readChainLedger,
@@ -16,6 +17,7 @@ const tempRoots: string[] = [];
 function tempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), 'omc-chain-enqueuer-'));
   tempRoots.push(dir);
+  execFileSync('git', ['init', '--quiet'], { cwd: dir, stdio: 'ignore' });
   return dir;
 }
 

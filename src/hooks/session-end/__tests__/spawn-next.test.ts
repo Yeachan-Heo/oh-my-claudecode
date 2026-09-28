@@ -119,6 +119,7 @@ describe('executeSpawnNext', () => {
   it('carries a chain intentId into the next-link ledger', () => {
     const { spawnFn } = spawnRecording();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
+    execFileSync('git', ['init', '--quiet'], { cwd: directory, stdio: 'ignore' });
     try {
       executeSpawnNext({ ...chain, intentId: 'demo#7' }, directory, spawnFn);
       const factoryDir = path.join(directory, '.omc', 'state', 'factory');
