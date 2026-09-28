@@ -175,3 +175,11 @@ describe('factoryLinkArgv', () => {
     expect(argv.slice(4)).toEqual(AFK_SPAWN_FLAGS);
   });
 });
+
+describe('AFK_ALLOWED_TOOLS security', () => {
+  it('does not allow arbitrary gh api calls (privilege escalation vector)', () => {
+    const tools = AFK_SPAWN_FLAGS[AFK_SPAWN_FLAGS.indexOf('--allowedTools') + 1];
+    expect(tools).not.toContain('gh api');
+    expect(tools).not.toMatch(/Bash\([^)]*\)/);
+  });
+});
