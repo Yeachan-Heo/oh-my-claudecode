@@ -482,8 +482,10 @@ describe('model-contract', () => {
       expect(env.OMC_WORKER_AGENT_TYPE).toBe('codex');
     });
 
-    it('propagates allowlisted model selection env vars into worker startup env', () => {
+    it('propagates allowlisted Claude startup env vars into worker startup env', () => {
       const env = getWorkerEnv('my-team', 'worker-1', 'claude', {
+        CLAUDE_CONFIG_DIR: '/home/tester/.claude-third-party',
+        CLAUDE_CODE_EFFORT_LEVEL: 'high',
         ANTHROPIC_MODEL: 'claude-opus-4-1',
         CLAUDE_MODEL: 'claude-sonnet-4-5',
         ANTHROPIC_BASE_URL: 'https://example-gateway.invalid',
@@ -500,8 +502,11 @@ describe('model-contract', () => {
         OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL: 'gpt-5',
         OMC_GEMINI_DEFAULT_MODEL: 'gemini-2.5-pro',
         ANTHROPIC_API_KEY: 'should-not-be-forwarded',
+        ANTHROPIC_AUTH_TOKEN: 'should-not-be-forwarded',
       });
 
+      expect(env.CLAUDE_CONFIG_DIR).toBe('/home/tester/.claude-third-party');
+      expect(env.CLAUDE_CODE_EFFORT_LEVEL).toBe('high');
       expect(env.ANTHROPIC_MODEL).toBe('claude-opus-4-1');
       expect(env.CLAUDE_MODEL).toBe('claude-sonnet-4-5');
       expect(env.ANTHROPIC_BASE_URL).toBe('https://example-gateway.invalid');
@@ -518,6 +523,17 @@ describe('model-contract', () => {
       expect(env.OMC_EXTERNAL_MODELS_DEFAULT_CODEX_MODEL).toBe('gpt-5');
       expect(env.OMC_GEMINI_DEFAULT_MODEL).toBe('gemini-2.5-pro');
       expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    });
+
+    it('does not propagate Claude-only profile env vars to non-Claude workers', () => {
+      const env = getWorkerEnv('my-team', 'worker-1', 'codex', {
+        CLAUDE_CONFIG_DIR: '/home/tester/.claude-third-party',
+        CLAUDE_CODE_EFFORT_LEVEL: 'high',
+      });
+
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+      expect(env.CLAUDE_CODE_EFFORT_LEVEL).toBeUndefined();
     });
 
     it('rejects invalid team names', () => {
