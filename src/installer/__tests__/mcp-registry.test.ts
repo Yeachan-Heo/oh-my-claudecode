@@ -1006,4 +1006,59 @@ describe('unified MCP registry sync', () => {
     expect(status.claudeMissing).toEqual([]);
     expect(status.claudeMismatched).toEqual([]);
   });
+
+  it('round-trips all TOML-forbidden control characters with proper escapes (issue #4157)', () => {
+    // Create a registry with a command that contains all control characters that must be escaped:
+    // - \n (U+000A) newline: \n
+    // - \r (U+000D) carriage return: \r
+    // - \t (U+0009) tab: \t (TOML allows tab in basic strings, but we escape for safety)
+    // - \b (U+0008) backspace: \b
+    // - \f (U+000C) form feed: \f
+    // - \x00 (U+0000) NUL: \u0000
+    // - \x1f (U+001F) unit separator (last control char before space): \u001f
+    // - \x7f (U+007F) DEL: \u007f
+    // - quotes and backslashes
+    const testString = 'test\nnewline\rcarriage\ttab\bbackspace\fformfeed\x00null\x1funit\x7fdel"quote\\backslash';
+    const registry = {
+      'control-test': { command: '/bin/sh', args: [testString] },
+    };
+
+    writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify(registry, null, 2));
+    writeFileSync(getClaudeMcpConfigPath(), JSON.stringify({ mcpServers: registry }, null, 2));
+    syncUnifiedMcpRegistryTargets({});
+
+    // Read the rendered TOML
+    const toml = readFileSync(getCodexConfigPath(), 'utf-8');
+
+    // Verify that the TOML block is present
+    expect(toml).toContain('[mcp_servers.control-test]');
+
+    // Verify that raw control characters are NOT in the TOML output
+    // (except tab, which is allowed but we escape anyway)
+    for (let i = 0; i <= 0x1f; i++) {
+      if (i !== 0x09 && i !== 0x0a && i !== 0x0d) {
+        // Skip the control characters we handle elsewhere
+        const char = String.fromCharCode(i);
+        expect(toml).not.toContain(char);
+      }
+    }
+    expect(toml).not.toContain(String.fromCharCode(0x7f));
+
+    // Verify that the proper escapes are present
+    expect(toml).toContain('\\n'); // newline escape
+    expect(toml).toContain('\\r'); // carriage return escape
+    expect(toml).toContain('\\t'); // tab escape
+    expect(toml).toContain('\\b'); // backspace escape
+    expect(toml).toContain('\\f'); // form feed escape
+    expect(toml).toContain('\\u0000'); // NUL escape
+    expect(toml).toContain('\\u001f'); // unit separator escape
+    expect(toml).toContain('\\u007f'); // DEL escape
+    expect(toml).toContain('\\"'); // quote escape
+    expect(toml).toContain('\\\\'); // backslash escape
+
+    // Verify that the registry is still in sync (no round-trip errors)
+    const status = inspectUnifiedMcpRegistrySync();
+    expect(status.codexMissing).toEqual([]);
+    expect(status.codexMismatched).toEqual([]);
+  });
 });

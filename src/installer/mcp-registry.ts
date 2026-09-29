@@ -342,15 +342,67 @@ function syncClaudeMcpConfig(
 }
 
 function escapeTomlString(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n')
-    .replace(/\r/g, '\\r');
+  // TOML basic strings (double-quoted) forbid all control chars U+0000-U+001F except tab (U+0009),
+  // and also forbid U+007F (DEL).
+  // Escape order: backslash first to avoid re-escaping.
+  let result = value.replace(/\\/g, '\\\\');
+  
+  // Escape other special characters and control codes
+  result = result.replace(/["\n\r\t\b\f\0-\x07\x0b\x0e-\x1f\x7f]/g, (char) => {
+    switch (char) {
+      case '"':
+        return '\\"';
+      case '\n':
+        return '\\n';
+      case '\r':
+        return '\\r';
+      case '\t':
+        return '\\t';
+      case '\b':
+        return '\\b';
+      case '\f':
+        return '\\f';
+      default: {
+        // All other control chars: escape as \uXXXX
+        const code = char.charCodeAt(0);
+        return `\\u${code.toString(16).padStart(4, '0')}`;
+      }
+    }
+  });
+  
+  return result;
 }
 
 function unescapeTomlString(value: string): string {
-  return value.replace(/\\(["\\nr])/g, (_, c: string) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
+  // Handle escape sequences: \uXXXX, and short escapes (\t, \b, \f, \n, \r, \\", \\)
+  // Process \uXXXX first to avoid conflicts
+  let result = value.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => {
+    return String.fromCharCode(parseInt(hex, 16));
+  });
+  
+  // Handle single-character escapes
+  result = result.replace(/\\(["\\nrtbf])/g, (_, c: string) => {
+    switch (c) {
+      case 'n':
+        return '\n';
+      case 'r':
+        return '\r';
+      case 't':
+        return '\t';
+      case 'b':
+        return '\b';
+      case 'f':
+        return '\f';
+      case '"':
+        return '"';
+      case '\\':
+        return '\\';
+      default:
+        return c;
+    }
+  });
+  
+  return result;
 }
 
 function renderTomlString(value: string): string {
