@@ -58,6 +58,16 @@ describe('planSpawnNext', () => {
     expect(plan?.spawnArgv).toContain('--allowedTools');
   });
 
+  it('isolates AFK links from user-level settings via --setting-sources', () => {
+    const plan = planSpawnNext(chain, '/omc-root');
+    const sourcesIdx = plan?.spawnArgv.indexOf('--setting-sources');
+    expect(sourcesIdx).toBeGreaterThan(-1);
+    expect(plan?.spawnArgv[sourcesIdx! + 1]).toBe('project,local');
+    const linkArgv = factoryLinkArgv('prompt', 'sess-9');
+    expect(linkArgv).toContain('--setting-sources');
+    expect(linkArgv[linkArgv.indexOf('--setting-sources') + 1]).toBe('project,local');
+  });
+
   it('rejects a chain with a path-traversal session id before planning', () => {
     const { spawnFn, calls } = spawnRecording();
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
@@ -72,6 +82,12 @@ describe('planSpawnNext', () => {
   it('rejects a chain whose tracker repo or label carries shell metacharacters', () => {
     expect(() => planSpawnNext({ ...chain, tracker: { ...chain.tracker!, repo: 'owner/repo; rm -rf /' } }, '/omc-root')).toThrow(/invalid tracker repo/);
     expect(() => planSpawnNext({ ...chain, tracker: { ...chain.tracker!, nextLabel: 'a b; touch /tmp/x' } }, '/omc-root')).toThrow(/invalid tracker label/);
+  });
+
+  it('rejects a chain whose visits carry an invalid stage or count', () => {
+    expect(() => planSpawnNext({ ...chain, visits: { '../evil': 1 } }, '/omc-root')).toThrow(/invalid visits entry/);
+    expect(() => planSpawnNext({ ...chain, visits: { launch: 1.5 } }, '/omc-root')).toThrow(/invalid visits entry/);
+    expect(() => planSpawnNext({ ...chain, visits: { launch: 100 } }, '/omc-root')).toThrow(/invalid visits entry/);
   });
 });
 
@@ -136,6 +152,21 @@ describe('executeSpawnNext', () => {
       const ledgerFile = fs.readdirSync(factoryDir).find((f) => f.startsWith('chain-') && f.endsWith('.json'));
       const ledger = JSON.parse(fs.readFileSync(path.join(factoryDir, ledgerFile!), 'utf8')) as { intentId: string };
       expect(ledger.intentId).toBe('demo#7');
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('writes incremented stage visits into the next-link ledger', () => {
+    const { spawnFn } = spawnRecording();
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-next-'));
+    execFileSync('git', ['init', '--quiet'], { cwd: directory, stdio: 'ignore' });
+    try {
+      executeSpawnNext({ ...chain, visits: { launch: 1 } }, directory, spawnFn);
+      const factoryDir = path.join(directory, '.omc', 'state', 'factory');
+      const ledgerFile = fs.readdirSync(factoryDir).find((f) => f.startsWith('chain-') && f.endsWith('.json'));
+      const ledger = JSON.parse(fs.readFileSync(path.join(factoryDir, ledgerFile!), 'utf8')) as { visits?: Record<string, number> };
+      expect(ledger.visits).toEqual({ launch: 2 });
     } finally {
       fs.rmSync(directory, { recursive: true, force: true });
     }

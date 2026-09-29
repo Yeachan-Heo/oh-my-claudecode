@@ -24,6 +24,10 @@ export interface ChainLedger {
   tracker?: SpawnNextTracker;
   gate?: GateName;
   gateFacts?: GateFacts;
+  /** Per-stage link counts carried forward; guards against route-table self-loops. */
+  visits?: Record<string, number>;
+  /** Cap on visits to any one stage before the chain halts. Default 2. */
+  maxStageVisits?: number;
 }
 
 /**
@@ -138,6 +142,26 @@ export function planChainEnqueue(directory: string, sessionId: string, reason: s
       return null;
     }
 
+    // Terminal route: the route table declares this stage as the end of the
+    // chain (skill "stop" is reserved). Record and halt — no next link.
+    if (directive.skill === 'stop') {
+      record('chain-terminal', { stage: directive.stage });
+      writeHaltMarker(directory, intentId, `terminal:${directive.stage}`);
+      return null;
+    }
+
+    // Loop cap: this route already visited the next stage too many times
+    // (e.g. failed:other routing back to spec). Halt instead of burning slots.
+    const visits = ledger.visits ?? {};
+    const cap = typeof ledger.maxStageVisits === 'number' && Number.isInteger(ledger.maxStageVisits) && ledger.maxStageVisits >= 1
+      ? ledger.maxStageVisits
+      : 2;
+    if ((visits[directive.stage] ?? 0) >= cap) {
+      record('chain-loop-capped', { stage: directive.stage, visits: visits[directive.stage], cap });
+      writeHaltMarker(directory, intentId, `loop-capped:${directive.stage}`);
+      return null;
+    }
+
     if (ledger.gate) {
       const verdict = gradeGate(ledger.gate, ledger.gateFacts ?? DEFAULT_GATE_FACTS);
       if (verdict.kind === 'human') {
@@ -155,7 +179,7 @@ export function planChainEnqueue(directory: string, sessionId: string, reason: s
       return null;
     }
     try {
-      const chain: SpawnNextChain = { outcome, reason, routeTable, sessionId, intentId, tracker: ledger.tracker };
+      const chain: SpawnNextChain = { outcome, reason, routeTable, sessionId, intentId, tracker: ledger.tracker, visits };
       validateChainFields(chain);
       // ponytail: the serial window closes here, before the worker actually
       // spawns the next link; v1 accepts the small race, same as the listener.

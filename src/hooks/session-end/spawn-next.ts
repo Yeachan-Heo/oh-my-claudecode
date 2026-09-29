@@ -22,6 +22,8 @@ export interface SpawnNextChain {
   intentId?: string;
   handoffContext?: string;
   tracker?: SpawnNextTracker;
+  /** Per-stage link counts carried forward so the enqueuer can cap route loops. */
+  visits?: Record<string, number>;
 }
 
 export interface SpawnNextPlan {
@@ -60,7 +62,13 @@ export const AFK_ALLOWED_TOOLS = [
   'WebFetch(domain:github.com)',
 ].join(',');
 
-export const AFK_SPAWN_FLAGS = ['--permission-mode', 'acceptEdits', '--allowedTools', AFK_ALLOWED_TOOLS];
+export const AFK_SPAWN_FLAGS = [
+  '--permission-mode', 'acceptEdits',
+  '--allowedTools', AFK_ALLOWED_TOOLS,
+  // Isolation: AFK links run with project+local settings only — user-level
+  // hooks/settings must never fire in a headless chain link.
+  '--setting-sources', 'project,local',
+];
 
 /** Args (command excluded) for one factory chain link: intent prompt + AFK permission profile. */
 export function factoryLinkArgv(prompt: string, sessionId: string): string[] {
@@ -83,6 +91,13 @@ export function validateChainFields(chain: SpawnNextChain): void {
     if (!REPO_PATTERN.test(tracker.repo)) throw new Error(`invalid tracker repo: ${tracker.repo}`);
     if (!LABEL_PATTERN.test(tracker.nextLabel) || !LABEL_PATTERN.test(tracker.failedLabel)) {
       throw new Error(`invalid tracker label: ${tracker.nextLabel}/${tracker.failedLabel}`);
+    }
+  }
+  if (chain.visits) {
+    for (const [stage, count] of Object.entries(chain.visits)) {
+      if (!LABEL_PATTERN.test(stage) || !Number.isInteger(count) || count < 0 || count > 99) {
+        throw new Error(`invalid visits entry: ${stage}=${count}`);
+      }
     }
   }
 }
@@ -135,6 +150,7 @@ export function executeSpawnNext(chain: SpawnNextChain, directory: string, spawn
       stage: plan.directive.stage,
       routeTable: chain.routeTable,
       tracker: chain.tracker,
+      visits: { ...(chain.visits ?? {}), [plan.directive.stage]: (chain.visits?.[plan.directive.stage] ?? 0) + 1 },
     }, null, 2), 'utf8');
     spawnFn(plan.spawnArgv[0], plan.spawnArgv.slice(1), { cwd: directory });
   } catch (error) {

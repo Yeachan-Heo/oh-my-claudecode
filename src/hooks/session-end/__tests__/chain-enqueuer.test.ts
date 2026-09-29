@@ -204,4 +204,50 @@ describe('planChainEnqueue', () => {
     // failed outcome leaves a halt marker inside the factory dir only.
     expect(readChainStopMarker('intent-a', factoryStateDir(failedDir))).toMatchObject({ reason: 'invalid-ledger:other' });
   });
+
+  it('a terminal route (skill stop) halts the chain without enqueueing', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { 'success:*': { stage: 'harbor', skill: 'stop' } } });
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')).toBeNull();
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'chain-terminal', stage: 'harbor' });
+    expect(readChainStopMarker('intent-a', factoryStateDir(dir))).toMatchObject({ reason: 'terminal:harbor' });
+  });
+
+  it('halts with chain-loop-capped when the next stage hit its visit cap', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', {
+      intentId: 'intent-a',
+      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      visits: { spec: 2 },
+    });
+    expect(planChainEnqueue(dir, 'sess-a', 'other')).toBeNull();
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'chain-loop-capped', stage: 'spec', visits: 2, cap: 2 });
+    expect(readChainStopMarker('intent-a', factoryStateDir(dir))).toMatchObject({ reason: 'loop-capped:spec' });
+  });
+
+  it('enqueues while visits are under the cap and carries them forward', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', {
+      intentId: 'intent-a',
+      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      visits: { spec: 1 },
+      maxStageVisits: 3,
+    });
+    const chain = planChainEnqueue(dir, 'sess-a', 'other');
+    expect(chain).not.toBeNull();
+    expect(chain?.visits).toEqual({ spec: 1 });
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'enqueued', stage: 'spec' });
+  });
+
+  it('an invalid maxStageVisits falls back to the default cap', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', {
+      intentId: 'intent-a',
+      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      visits: { spec: 2 },
+      maxStageVisits: 0,
+    });
+    expect(planChainEnqueue(dir, 'sess-a', 'other')).toBeNull();
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'chain-loop-capped', cap: 2 });
+  });
 });
