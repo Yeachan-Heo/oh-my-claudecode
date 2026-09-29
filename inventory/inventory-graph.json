@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
-    "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
+    "head": "3371a2c19d46ca3a66a302d0965eb372235401aa",
+    "sourceSha256": "a66d567cefabe1e2b1bc8761bde9ad8fd187818e09bdc2cf1d728ed156393c1d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
-  "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
+  "head": "3371a2c19d46ca3a66a302d0965eb372235401aa",
+  "sourceSha256": "a66d567cefabe1e2b1bc8761bde9ad8fd187818e09bdc2cf1d728ed156393c1d",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 328,
+      "hookFiles": 329,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1413,
-      "total": 1436
+      "srcFiles": 1414,
+      "total": 1437
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 328,
+    "hookFiles": 329,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -222,6 +222,7 @@
       "src/hooks/beads-context/types.ts",
       "src/hooks/bridge-normalize.ts",
       "src/hooks/bridge.ts",
+      "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
       "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
       "src/hooks/code-simplifier/index.ts",
       "src/hooks/code-simplifier/jev-shadow.ts",
@@ -6042,6 +6043,7 @@
       "src/hooks/beads-context/types.ts",
       "src/hooks/bridge-normalize.ts",
       "src/hooks/bridge.ts",
+      "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
       "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
       "src/hooks/code-simplifier/index.ts",
       "src/hooks/code-simplifier/jev-shadow.ts",
@@ -37739,6 +37741,11 @@
         "path": "src/hooks/bridge.ts"
       },
       {
+        "id": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts"
+      },
+      {
         "id": "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
         "kind": "hook",
         "path": "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts"
@@ -59533,6 +59540,31 @@
       {
         "from": "src/hooks/bridge.ts",
         "to": "src/workflow/alias-resolver.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
+        "to": "external:vitest",
         "kind": "imports"
       },
       {
@@ -82572,12 +82604,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7120,
-      "edgeCount": 8088,
-      "importEdgeCount": 6676,
+      "nodeCount": 7121,
+      "edgeCount": 8093,
+      "importEdgeCount": 6681,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "5ef33959a4749836cfea3cda79ea4567a2e19aaf7d451a41ab76d581d9af52c2",
-  "manifestSha256": "ab57357af0e9d4186ec18cf29814b8a72535835b0b51c118e4d059ed8a65cd62"
+  "inventorySha256": "b631163acbd3652003f89ebfcca76c81a69633ffa707d8e3269fd1fe83892a49",
+  "manifestSha256": "e8b08cbce45d3e0b2968bb701bc690ece074bc1ef438e393b7cc7fe55c4bb023"
 }
