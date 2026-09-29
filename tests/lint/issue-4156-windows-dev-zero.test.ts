@@ -189,4 +189,60 @@ describe('issue #4156: Windows file identity comparison (dev=0 from lstat)', () 
     expect(functionBody).toContain('// On POSIX or when both dev values are non-zero, require dev match');
     expect(functionBody).toContain('return a.dev === b.dev');
   });
+
+  it('sameFileIdentity is exported from src/lib/atomic-write.ts', () => {
+    const filePath = join(root, 'src', 'lib', 'atomic-write.ts');
+    const content = readFileSync(filePath, 'utf8');
+
+    // Function must be exported
+    expect(content).toContain('export function sameFileIdentity');
+  });
+
+  it('FileIdentity interface is exported from src/lib/atomic-write.ts', () => {
+    const filePath = join(root, 'src', 'lib', 'atomic-write.ts');
+    const content = readFileSync(filePath, 'utf8');
+
+    // Interface must be exported
+    expect(content).toContain('export interface FileIdentity');
+  });
+
+  it('src/lib/mode-state-io.ts imports and uses sameFileIdentity from atomic-write', () => {
+    const filePath = join(root, 'src', 'lib', 'mode-state-io.ts');
+    const content = readFileSync(filePath, 'utf8');
+
+    // Must import from atomic-write
+    expect(content).toContain("import { atomicWriteJsonSync, sameFileIdentity } from './atomic-write.js'");
+
+    // sameFile function must use the imported sameFileIdentity
+    const samFileStart = content.indexOf('function sameFile(path: string, expected: FileIdentity)');
+    const samFileEnd = content.indexOf('\n}', samFileStart) + 2;
+    const sameFileFunctionBody = content.substring(samFileStart, samFileEnd);
+    expect(sameFileFunctionBody).toContain('sameFileIdentity(actual, expected)');
+  });
+
+  it('templates/hooks/lib/atomic-write.mjs has sameFileIdentity with Windows handling', () => {
+    const filePath = join(root, 'templates', 'hooks', 'lib', 'atomic-write.mjs');
+    const content = readFileSync(filePath, 'utf8');
+
+    const functionStart = content.indexOf('function sameFileIdentity(a, b)');
+    const functionEnd = content.indexOf('\n}', functionStart) + 2;
+    const functionBody = content.substring(functionStart, functionEnd);
+
+    // Must have Windows handling
+    expect(functionBody).toContain("const isWindows = process.platform === 'win32'");
+    expect(functionBody).toContain('if (isWindows && (a.dev === 0 || b.dev === 0))');
+  });
+
+  it('scripts/lib/atomic-write.mjs has sameFileIdentity with Windows handling', () => {
+    const filePath = join(root, 'scripts', 'lib', 'atomic-write.mjs');
+    const content = readFileSync(filePath, 'utf8');
+
+    const functionStart = content.indexOf('function sameFileIdentity(a, b)');
+    const functionEnd = content.indexOf('\n}', functionStart) + 2;
+    const functionBody = content.substring(functionStart, functionEnd);
+
+    // Must have Windows handling
+    expect(functionBody).toContain("const isWindows = process.platform === 'win32'");
+    expect(functionBody).toContain('if (isWindows && (a.dev === 0 || b.dev === 0))');
+  });
 });

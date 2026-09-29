@@ -143,7 +143,7 @@ function preservePriorTarget(filePath: string, operations?: AtomicWriteOperation
 }
 
 /** Restore the prior target without exposing a partially written generation. */
-interface FileIdentity {
+export interface FileIdentity {
   readonly dev: number;
   readonly ino: number;
 }
@@ -154,7 +154,7 @@ interface FileIdentity {
  * so we compare dev only when NOT on Windows OR both dev values are non-zero.
  * Inode comparison is always performed.
  */
-function sameFileIdentity(a: FileIdentity, b: FileIdentity): boolean {
+export function sameFileIdentity(a: FileIdentity, b: FileIdentity): boolean {
   // Always compare inode
   if (a.ino !== b.ino) return false;
   
@@ -474,6 +474,12 @@ export interface AtomicBatchWrite {
 
 const ATOMIC_BATCH_MAX_WRITES = 64;
 const ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
+
+/**
+ * Exported for use in other state management functions.
+ * Shared file identity comparison that handles Windows dev=0 quirk.
+ */
+// Already exported via sameFileIdentity function above
 
 export function atomicWriteBatchSync(
   writes: AtomicBatchWrite[],
