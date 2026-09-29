@@ -212,6 +212,18 @@ export function defaultSpawnFn(command: string, args: string[], ctx?: SpawnConte
     child.unref();
     return child;
   }
+  // gh is a .cmd shim on Windows too (dogfood: tracker writeback via gh
+  // silently failed in worker-spawned sessions while claude links worked —
+  // only claude had the cmd.exe routing). Same validated-argv safety as above.
+  if (process.platform === 'win32' && command === 'gh') {
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
+      ...baseOpts,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true,
+    });
+    child.unref();
+    return child;
+  }
   const child = spawn(command, args, { ...baseOpts, stdio: 'ignore' });
   child.unref();
   return child;

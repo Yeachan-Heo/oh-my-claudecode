@@ -1,9 +1,16 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { AFK_SPAWN_FLAGS, executeSpawnNext, factoryLinkArgv, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
+import { AFK_SPAWN_FLAGS, defaultSpawnFn, executeSpawnNext, factoryLinkArgv, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return { ...actual, spawn: vi.fn(() => ({ unref() {}, stdin: null })) as unknown as typeof actual.spawn };
+});
+
+import * as childProcess from 'child_process';
 
 const chain: SpawnNextChain = {
   outcome: 'success',
@@ -217,5 +224,46 @@ describe('AFK_ALLOWED_TOOLS security', () => {
     for (const entry of entries.filter((e) => e.startsWith('Bash'))) {
       expect(entry).toMatch(/^Bash\(gh (issue|pr|label) [a-z]+:\*\)$/);
     }
+  });
+});
+
+describe('defaultSpawnFn win32 .cmd shim routing', () => {
+  const originalPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform });
+    vi.mocked(childProcess.spawn).mockClear();
+  });
+
+  it('routes gh through cmd.exe on win32 so the .cmd shim resolves (B4: tracker writeback)', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    defaultSpawnFn('gh', ['issue', 'edit', '42', '--repo', 'owner/repo', '--add-label', 'in-launch']);
+    expect(childProcess.spawn).toHaveBeenCalledTimes(1);
+    const [command, argv, opts] = vi.mocked(childProcess.spawn).mock.calls[0];
+    expect(command).toBe('cmd.exe');
+    expect(argv?.[0]).toBe('/d');
+    expect(argv?.[1]).toBe('/s');
+    expect(argv?.[2]).toBe('/c');
+    expect(argv?.[3]).toContain('"gh "issue" "edit" "42"');
+    expect(opts).toMatchObject({ stdio: 'ignore', windowsVerbatimArguments: true });
+  });
+
+  it('routes claude through cmd.exe unchanged (regression guard)', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    defaultSpawnFn('claude', ['-p', '继续 launch 环', '--session-id', 'sess-9']);
+    const [command, , opts] = vi.mocked(childProcess.spawn).mock.calls[0];
+    expect(command).toBe('cmd.exe');
+    expect(opts).toMatchObject({ stdio: ['pipe', 'ignore', 'ignore'], windowsVerbatimArguments: true });
+  });
+
+  it('spawns other commands directly on win32 (no shell wrapping)', () => {
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    defaultSpawnFn('node', ['script.js']);
+    expect(childProcess.spawn).toHaveBeenCalledWith('node', ['script.js'], expect.objectContaining({ stdio: 'ignore' }));
+  });
+
+  it('spawns gh directly off-win32 with detached semantics', () => {
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    defaultSpawnFn('gh', ['issue', 'view', '1']);
+    expect(childProcess.spawn).toHaveBeenCalledWith('gh', ['issue', 'view', '1'], expect.objectContaining({ detached: true, stdio: 'ignore' }));
   });
 });
