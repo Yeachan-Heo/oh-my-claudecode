@@ -31,11 +31,15 @@ export interface ChainLedger {
 }
 
 /**
- * 'clear' wipes the chain session's context and 'other' covers abnormal
- * exits, so both halt the chain; only a clean exit hands off.
+ * Explicit success allowlist, fail-closed for anything else. Headless sessions
+ * that run to completion report 'other' (no failure signal in the SessionEnd
+ * payload), so it counts as a normal exit; 'clear' wipes the chain session's
+ * context and halts the chain; unknown reasons stay failed.
  */
 export function sessionEndOutcome(reason: string): ChainOutcome {
-  return reason === 'prompt_input_exit' || reason === 'logout' ? 'success' : 'failed';
+  return reason === 'prompt_input_exit' || reason === 'logout' || reason === 'other'
+    ? 'success'
+    : 'failed';
 }
 
 export function factoryStateDir(directory: string): string {
@@ -151,7 +155,7 @@ export function planChainEnqueue(directory: string, sessionId: string, reason: s
     }
 
     // Loop cap: this route already visited the next stage too many times
-    // (e.g. failed:other routing back to spec). Halt instead of burning slots.
+    // (e.g. failed:clear routing back to spec). Halt instead of burning slots.
     const visits = ledger.visits ?? {};
     const cap = typeof ledger.maxStageVisits === 'number' && Number.isInteger(ledger.maxStageVisits) && ledger.maxStageVisits >= 1
       ? ledger.maxStageVisits
