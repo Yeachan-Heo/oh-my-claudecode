@@ -1061,4 +1061,47 @@ describe('unified MCP registry sync', () => {
     expect(status.codexMissing).toEqual([]);
     expect(status.codexMismatched).toEqual([]);
   });
+
+  it('round-trips Windows paths with backslash followed by u (not unicode escape) correctly (issue #4157)', () => {
+    // Regression test: C:\users\u0041dir should NOT decode the \u0041 as unicode.
+    // In TOML: the original path is C:\users\u0041dir (literal text, not unicode escape).
+    // Escaped TOML string: "C:\\\\users\\\\u0041dir" (each \ becomes \\\\, and u0041 stays as u0041).
+    // When unescaped, should return to: C:\users\u0041dir
+    const windowsPath = 'C:\\users\\u0041dir';
+    const registry = {
+      'windows-path': { command: windowsPath, args: [] },
+    };
+
+    writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify(registry, null, 2));
+    writeFileSync(getClaudeMcpConfigPath(), JSON.stringify({ mcpServers: registry }, null, 2));
+    syncUnifiedMcpRegistryTargets({});
+
+    const status = inspectUnifiedMcpRegistrySync();
+    expect(status.codexMissing).toEqual([]);
+    expect(status.codexMismatched).toEqual([]);
+  });
+
+  it('round-trips backslash followed by n (not newline escape) correctly (issue #4157)', () => {
+    // Regression test: a literal backslash followed by the letter 'n' should NOT be decoded as newline.
+    // This can occur in Windows paths or other contexts.
+    // Original: "path\\nfile.txt" (backslash-n, not a newline)
+    // Escaped TOML: "path\\\\nfile.txt" (the \\ becomes \\\\ for the backslash)
+    // When unescaped, should return to: "path\\nfile.txt" (backslash followed by n, not a newline)
+    const backslashN = 'path\\nfile.txt';
+    const registry = {
+      'backslash-n': { command: '/bin/sh', args: [backslashN] },
+    };
+
+    writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify(registry, null, 2));
+    writeFileSync(getClaudeMcpConfigPath(), JSON.stringify({ mcpServers: registry }, null, 2));
+    syncUnifiedMcpRegistryTargets({});
+
+    const toml = readFileSync(getCodexConfigPath(), 'utf-8');
+    // The TOML should contain the escaped form: \\n (backslash escape followed by n)
+    expect(toml).toContain('\\\\n');
+
+    const status = inspectUnifiedMcpRegistrySync();
+    expect(status.codexMissing).toEqual([]);
+    expect(status.codexMismatched).toEqual([]);
+  });
 });
