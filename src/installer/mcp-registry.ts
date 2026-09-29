@@ -344,13 +344,13 @@ function syncClaudeMcpConfig(
 function escapeTomlString(value: string): string {
   return value
     .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"');
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
 }
 
 function unescapeTomlString(value: string): string {
-  return value
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, '\\');
+  return value.replace(/\\(["\\nr])/g, (_, c: string) => (c === 'n' ? '\n' : c === 'r' ? '\r' : c));
 }
 
 function renderTomlString(value: string): string {

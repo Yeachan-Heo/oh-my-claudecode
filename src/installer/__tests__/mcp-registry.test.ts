@@ -775,6 +775,24 @@ describe('unified MCP registry sync', () => {
     expect(status.codexMismatched).toEqual([]);
   });
 
+  it('escapes newlines in args so the rendered Codex TOML stays valid and round-trips (issue #4157)', () => {
+    const script = '# ok-mcp-v2\nBUNDLE="$HOME/ok.sh"\r\nexec "$BUNDLE" mcp';
+    const registry = {
+      'open-knowledge': { command: '/bin/sh', args: ['-l', '-c', script] },
+    };
+
+    writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify(registry, null, 2));
+    writeFileSync(getClaudeMcpConfigPath(), JSON.stringify({ mcpServers: registry }, null, 2));
+    syncUnifiedMcpRegistryTargets({});
+
+    const toml = readFileSync(getCodexConfigPath(), 'utf-8');
+    expect(toml).toContain('args = ["-l", "-c", "# ok-mcp-v2\\nBUNDLE=\\"$HOME/ok.sh\\"\\r\\nexec \\"$BUNDLE\\" mcp"]');
+
+    const status = inspectUnifiedMcpRegistrySync();
+    expect(status.codexMissing).toEqual([]);
+    expect(status.codexMismatched).toEqual([]);
+  });
+
   it('parses mixed literal and basic string arrays with delimiters and escapes', () => {
     // Literal token contains comma, bracket, equals, hash, and backslash (delimiter-rich).
     const literalRich = String.raw`C:\data\file,[name]=#.py`;
