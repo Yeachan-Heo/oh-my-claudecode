@@ -3504,14 +3504,20 @@ export function isSameEntryRealpath(
 
 function isMainModule(): boolean {
   try {
+    // First check: must have --hook=<type> argument, otherwise this is not a hook invocation
+    const hasHookArg = process.argv.slice(2).some((a) => a.startsWith("--hook="));
+    if (!hasHookArg) {
+      return false;
+    }
+
     const argvPath = process.argv[1];
     return isSameEntryRealpath(
       argvPath ? pathToFileURL(argvPath).href : undefined,
       import.meta.url,
     );
   } catch {
-    // In CJS bundle, always run main() when loaded directly
-    return true;
+    // In CJS bundle, only run main() when loaded directly AND has hook arguments
+    return false;
   }
 }
 
