@@ -289,6 +289,12 @@ describe('SessionEnd durable worker', () => {
       if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
       else Object.defineProperty(process, 'platform', { value: process.platform === 'win32' ? 'linux' : process.platform, configurable: true });
     }
+
+    // Model provider auth must reach worker-spawned sessions, or they exit "Not logged in"
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'test-token');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://example.invalid');
+    expect(workerEnvironment()).toHaveProperty('ANTHROPIC_AUTH_TOKEN', 'test-token');
+    expect(workerEnvironment()).toHaveProperty('ANTHROPIC_BASE_URL', 'https://example.invalid');
     
     // On POSIX, APPDATA/LOCALAPPDATA should not be forwarded
     if (process.platform !== 'win32') {
