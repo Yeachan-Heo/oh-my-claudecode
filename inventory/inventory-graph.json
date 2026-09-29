@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "909bea004277d49c56fb719d96e7cd6aa0cf3f77",
-    "sourceSha256": "ec79a8ada80faa87d8e8950b12da302c154798f9d78dd7f3a3c813ce4acc9ebd",
+    "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
+    "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "909bea004277d49c56fb719d96e7cd6aa0cf3f77",
-  "sourceSha256": "ec79a8ada80faa87d8e8950b12da302c154798f9d78dd7f3a3c813ce4acc9ebd",
+  "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
+  "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
   "counts": {
     "public": {
       "skills": 47,
@@ -222,7 +222,6 @@
       "src/hooks/beads-context/types.ts",
       "src/hooks/bridge-normalize.ts",
       "src/hooks/bridge.ts",
-      "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
       "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
       "src/hooks/code-simplifier/index.ts",
       "src/hooks/code-simplifier/jev-shadow.ts",
@@ -386,6 +385,7 @@
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
       "src/hooks/rules-injector/index.ts",
+      "src/hooks/rules-injector/matcher.test.ts",
       "src/hooks/rules-injector/matcher.ts",
       "src/hooks/rules-injector/parser.test.ts",
       "src/hooks/rules-injector/parser.ts",
@@ -6042,7 +6042,6 @@
       "src/hooks/beads-context/types.ts",
       "src/hooks/bridge-normalize.ts",
       "src/hooks/bridge.ts",
-      "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
       "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
       "src/hooks/code-simplifier/index.ts",
       "src/hooks/code-simplifier/jev-shadow.ts",
@@ -6206,6 +6205,7 @@
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
       "src/hooks/rules-injector/index.ts",
+      "src/hooks/rules-injector/matcher.test.ts",
       "src/hooks/rules-injector/matcher.ts",
       "src/hooks/rules-injector/parser.test.ts",
       "src/hooks/rules-injector/parser.ts",
@@ -37739,11 +37739,6 @@
         "path": "src/hooks/bridge.ts"
       },
       {
-        "id": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts"
-      },
-      {
         "id": "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
         "kind": "hook",
         "path": "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts"
@@ -38557,6 +38552,11 @@
         "id": "src/hooks/rules-injector/index.ts",
         "kind": "hook",
         "path": "src/hooks/rules-injector/index.ts"
+      },
+      {
+        "id": "src/hooks/rules-injector/matcher.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/rules-injector/matcher.test.ts"
       },
       {
         "id": "src/hooks/rules-injector/matcher.ts",
@@ -59536,31 +59536,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "to": "external:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/code-simplifier/__tests__/global-config-path.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/code-simplifier/__tests__/jev-trigger-shadow.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -63769,6 +63744,16 @@
         "from": "src/hooks/rules-injector/index.ts",
         "to": "src/hooks/rules-injector/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/rules-injector/matcher.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/rules-injector/matcher.test.ts",
+        "to": "src/hooks/rules-injector/matcher.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/rules-injector/matcher.ts",
@@ -82588,11 +82573,11 @@
     ],
     "stats": {
       "nodeCount": 7120,
-      "edgeCount": 8091,
-      "importEdgeCount": 6679,
+      "edgeCount": 8088,
+      "importEdgeCount": 6676,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "f26dff16d8b9c495b6541ffd4540a7792debfcec435563b9cb68e69b15420b36",
-  "manifestSha256": "110e2f5c21c58698e1e525a75435cd3ed94c915d54fe0e68172730d1f27762cf"
+  "inventorySha256": "5ef33959a4749836cfea3cda79ea4567a2e19aaf7d451a41ab76d581d9af52c2",
+  "manifestSha256": "ab57357af0e9d4186ec18cf29814b8a72535835b0b51c118e4d059ed8a65cd62"
 }

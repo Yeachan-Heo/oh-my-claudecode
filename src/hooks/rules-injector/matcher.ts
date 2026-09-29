@@ -13,15 +13,38 @@ import type { RuleMetadata, MatchResult } from './types.js';
 /**
  * Simple glob pattern matcher.
  * Supports basic patterns like *.ts, **\/*.js, src/**\/*.py
+ *
+ * `*` stays within one path segment, `**\/` matches zero or more directories
+ * (so `**\/*.py` also matches `main.py`), and a bare `**` matches anything.
+ * Other regex metacharacters are literal path characters, except `[...]`,
+ * which stays a character class as in other glob dialects, and `\X`, which
+ * is a literal X.
  */
 function matchGlob(pattern: string, filePath: string): boolean {
-  // Convert glob pattern to regex
-  const regexStr = pattern
-    .replace(/\./g, '\\.')           // Escape dots
-    .replace(/\*\*/g, '<<<GLOBSTAR>>>')  // Temporarily replace **
-    .replace(/\*/g, '[^/]*')         // * matches any characters except /
-    .replace(/<<<GLOBSTAR>>>/g, '.*') // ** matches anything including /
-    .replace(/\?/g, '.');            // ? matches single character
+  let regexStr = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const ch = pattern[i];
+    if (ch === '*') {
+      if (pattern[i + 1] === '*') {
+        i++;
+        if (pattern[i + 1] === '/') {
+          i++;
+          regexStr += '(?:.*/)?';  // **/ matches zero or more directories
+        } else {
+          regexStr += '.*';        // ** matches anything including /
+        }
+      } else {
+        regexStr += '[^/]*';       // * matches any characters except /
+      }
+    } else if (ch === '\\' && i + 1 < pattern.length) {
+      i++;                         // \X is a literal X
+      regexStr += pattern[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    } else if (ch === '?') {
+      regexStr += '.';             // ? matches single character
+    } else {
+      regexStr += ch.replace(/[.+$(){}|]/g, '\\$&');
+    }
+  }
 
   const regex = new RegExp(`^${regexStr}$`);
   return regex.test(filePath);
