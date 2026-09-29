@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto';
 import { spawn, type SpawnOptions } from 'child_process';
 import { decideNextStage, type ChainOutcome, type RouteTable } from './routing.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
+import { quoteForCmd, isNativeWindowsShell } from '../../cli/tmux-utils.js';
 
 export interface SpawnNextTracker {
   repo: string;
@@ -167,17 +168,20 @@ export function executeSpawnNext(chain: SpawnNextChain, directory: string, spawn
   }
 }
 
-function quoteForCmd(arg: string): string {
-  return `"${arg.replace(/"/g, '\\"')}"`;
-}
+
 
 /**
- * `claude` is a .cmd shim on Windows, which CreateProcess cannot exec
- * directly; route that one case through cmd.exe with quoted args. Safe
- * because every dynamic field in the argv was regex-validated upstream.
- * The -p prompt goes through stdin on Windows: cmd.exe's ANSI codepage
- * mangles non-ASCII argv (dogfood: Chinese intent prompts mojibake'd),
- * while the stdin pipe stays UTF-8 end to end.
+ * `claude` and `gh` are .cmd shims on Windows, which CreateProcess cannot exec
+ * directly; route those through cmd.exe. The -p prompt for claude and --body
+ * for gh go through stdin on Windows: cmd.exe's ANSI codepage mangles non-ASCII
+ * argv (dogfood: Chinese intent prompts and issue bodies mojibake'd), while the
+ * stdin pipe stays UTF-8 end to end. This prevents cmd.exe's quote handling
+ * from being exploited: backslash-quote is not an escape (unlike POSIX shells),
+ * so embedded quotes would toggle quoting and allow shell metacharacters (&|<>)
+ * to run as commands. Additionally, cmd.exe expands %VAR% inside quotes,
+ * risking env var leaks. Using stdin with --body-file - and stdin with -p
+ * neutralizes both issues while maintaining proper argument escaping via
+ * quoteForCmd (which doubles quotes and percent signs, rejecting CR/LF).
  *
  * detached:true is win32-hostile here (dogfood bisect: cmd.exe children
  * spawned detached exit 1 before writing a transcript), so it is only
@@ -189,7 +193,7 @@ export function defaultSpawnFn(command: string, args: string[], ctx?: SpawnConte
     process.platform === 'win32'
       ? { windowsHide: true, cwd: ctx?.cwd }
       : { detached: true, windowsHide: true, cwd: ctx?.cwd };
-  if (process.platform === 'win32' && command === 'claude') {
+  if (isNativeWindowsShell() && command === 'claude') {
     const pIdx = args.indexOf('-p');
     const inlinePrompt = pIdx !== -1 && pIdx + 1 < args.length ? args[pIdx + 1] : undefined;
     if (inlinePrompt !== undefined && !inlinePrompt.startsWith('--')) {
@@ -200,6 +204,33 @@ export function defaultSpawnFn(command: string, args: string[], ctx?: SpawnConte
         windowsVerbatimArguments: true,
       });
       child.stdin?.write(inlinePrompt, 'utf8');
+      child.stdin?.end();
+      child.unref();
+      return child;
+    }
+    const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${args.map(quoteForCmd).join(' ')}"`], {
+      ...baseOpts,
+      stdio: 'ignore',
+      windowsVerbatimArguments: true,
+    });
+    child.unref();
+    return child;
+  }
+  // gh is a .cmd shim on Windows too. Use --body-file - for comment bodies to
+  // avoid cmd.exe's quote toggle and %VAR% expansion on free-form text; properly
+  // quote remaining argv using quoteForCmd.
+  if (isNativeWindowsShell() && command === 'gh') {
+    const bodyIdx = args.indexOf('--body');
+    if (bodyIdx !== -1 && bodyIdx + 1 < args.length) {
+      const bodyText = args[bodyIdx + 1];
+      // Replace --body <text> with --body-file -
+      const argsWithBodyFile = [...args.slice(0, bodyIdx), '--body-file', '-', ...args.slice(bodyIdx + 2)];
+      const child = spawn('cmd.exe', ['/d', '/s', '/c', `"${command} ${argsWithBodyFile.map(quoteForCmd).join(' ')}"`], {
+        ...baseOpts,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        windowsVerbatimArguments: true,
+      });
+      child.stdin?.write(bodyText, 'utf8');
       child.stdin?.end();
       child.unref();
       return child;
