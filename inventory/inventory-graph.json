@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "fa5de8a56e7fca1c0a4a6c1dd275d7a65146ad15",
-    "sourceSha256": "3c130400374b9aab3f26dc367a8c51cdd0be7e27a9f5a217e2fbac26eaba4c09",
+    "head": "5ce58e58497298b6e99a23c70f311204c40bde5a",
+    "sourceSha256": "61520b8ca140e3673bc6815fb4b32c0f296e0e7898dc6efb7439484c431f1f9c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "fa5de8a56e7fca1c0a4a6c1dd275d7a65146ad15",
-  "sourceSha256": "3c130400374b9aab3f26dc367a8c51cdd0be7e27a9f5a217e2fbac26eaba4c09",
+  "head": "5ce58e58497298b6e99a23c70f311204c40bde5a",
+  "sourceSha256": "61520b8ca140e3673bc6815fb4b32c0f296e0e7898dc6efb7439484c431f1f9c",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 329,
+      "hookFiles": 330,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1414,
-      "total": 1437
+      "srcFiles": 1415,
+      "total": 1438
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 329,
+    "hookFiles": 330,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -398,6 +398,7 @@
       "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
+      "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
@@ -6219,6 +6220,7 @@
       "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
+      "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
@@ -38621,6 +38623,11 @@
         "path": "src/hooks/session-end/__tests__/duplicate-notifications.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/guardrails.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
@@ -64033,6 +64040,51 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "src/hooks/session-end/foreground-bootstrap.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+        "to": "src/hooks/session-end/worker.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/guardrails.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -64579,6 +64631,11 @@
       },
       {
         "from": "src/hooks/session-end/foreground-bootstrap.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/foreground-bootstrap.ts",
         "to": "src/hooks/session-end/cleanup-manifest.ts",
         "kind": "imports"
       },
@@ -64745,11 +64802,6 @@
       {
         "from": "src/hooks/session-end/spawn-next.ts",
         "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/spawn-next.ts",
-        "to": "src/cli/tmux-utils.ts",
         "kind": "imports"
       },
       {
@@ -82609,12 +82661,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7121,
-      "edgeCount": 8094,
-      "importEdgeCount": 6682,
+      "nodeCount": 7122,
+      "edgeCount": 8103,
+      "importEdgeCount": 6691,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "b631163acbd3652003f89ebfcca76c81a69633ffa707d8e3269fd1fe83892a49",
-  "manifestSha256": "2769da3a2e9930d9d9df1657b2adee992d1ccc9db47e78582d4c525d401d3351"
+  "inventorySha256": "ab6da542a11531649af7965ae0b3a575b88ab49eb2c4eb2c865bc6ad97f425b9",
+  "manifestSha256": "5069b758519b84e68cb6ed5ac423646bf28f235be080b29cab0a58bbc09a6788"
 }
