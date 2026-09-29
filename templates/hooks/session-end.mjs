@@ -47,10 +47,13 @@ function resolveBridgeInvocation() {
   if (pluginRoot) {
     const bridgePath = join(pluginRoot, 'bridge', 'cli.cjs');
     if (existsSync(bridgePath)) {
-      return { command: process.execPath, args: [bridgePath, '--hook=session-end'] };
+      // Direct execPath spawn: no shell, so install paths containing spaces
+      // survive on Windows (shell:true would split "D:\Program Files\...").
+      return { command: process.execPath, args: [bridgePath, '--hook=session-end'], shell: false };
     }
   }
-  return { command: 'omc-cli', args: ['--hook=session-end'] };
+  // omc-cli resolves through .cmd shims on Windows; cmd needs shell:true
+  return { command: 'omc-cli', args: ['--hook=session-end'], shell: process.platform === 'win32' };
 }
 
 try {
@@ -69,14 +72,26 @@ try {
     process.exit(0);
   }
   const bridge = resolveBridgeInvocation();
-  spawnSync(bridge.command, bridge.args, {
+  const result = spawnSync(bridge.command, bridge.args, {
     input: stdin,
     stdio: ['pipe', 'inherit', 'inherit'],
-    // omc-cli resolves through .cmd shims on Windows; cmd needs shell:true
-    shell: process.platform === 'win32',
+    shell: bridge.shell,
     timeout: 10000,
     windowsHide: true,
   });
+  // B5: a failed forward must never be silent. The forward stays best-effort
+  // (exit 0, never block shutdown), but the lost chain enqueue is reported
+  // loudly on stderr so resolution problems are diagnosable.
+  const failure = result.error
+    ?? (result.status !== 0 || result.signal !== null
+      ? `exit status ${result.status}${result.signal ? ` (signal ${result.signal})` : ''}`
+      : null);
+  if (failure) {
+    console.error(
+      `[omc session-end] bridge forward FAILED (${failure}); chain enqueue was NOT performed.`
+      + ` command: ${bridge.command} ${bridge.args.join(' ')}`,
+    );
+  }
 } catch {
   // best-effort: chain enqueue is lost for this session, never block shutdown
 }
