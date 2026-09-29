@@ -243,7 +243,13 @@ describe('defaultSpawnFn win32 .cmd shim routing', () => {
     expect(argv?.[0]).toBe('/d');
     expect(argv?.[1]).toBe('/s');
     expect(argv?.[2]).toBe('/c');
-    expect(argv?.[3]).toContain('"gh "issue" "edit" "42"');
+    // quoteForCmd from tmux-utils only quotes args that need it (with special chars).
+    // Arguments like issue, edit, 42, owner/repo, in-launch don't have special chars,
+    // so they appear unquoted in the command line (wrapped in outer quotes for the whole command).
+    expect(argv?.[3]).toContain('gh');
+    expect(argv?.[3]).toContain('issue');
+    expect(argv?.[3]).toContain('edit');
+    expect(argv?.[3]).toContain('42');
     expect(opts).toMatchObject({ stdio: 'ignore', windowsVerbatimArguments: true });
   });
 
@@ -265,5 +271,86 @@ describe('defaultSpawnFn win32 .cmd shim routing', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' });
     defaultSpawnFn('gh', ['issue', 'view', '1']);
     expect(childProcess.spawn).toHaveBeenCalledWith('gh', ['issue', 'view', '1'], expect.objectContaining({ detached: true, stdio: 'ignore' }));
+  });
+
+  describe('gh --body stdin routing (command injection prevention)', () => {
+    it('detects gh --body argument and routes body text through stdin via --body-file -', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      vi.mocked(childProcess.spawn).mockImplementation(() => ({ unref: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() } } as any));
+      defaultSpawnFn('gh', ['issue', 'comment', '42', '--repo', 'owner/repo', '--body', 'comment text']);
+      const [command, cmdArgs] = vi.mocked(childProcess.spawn).mock.calls[0];
+      expect(command).toBe('cmd.exe');
+      // --body should be replaced with --body-file -
+      const cmdLine = cmdArgs?.[3] ?? '';
+      expect(cmdLine).toContain('--body-file');
+      expect(cmdLine).toContain('-');
+      expect(cmdLine).not.toContain('"comment text"');
+      // The spawn should have pipe stdin
+      const opts = vi.mocked(childProcess.spawn).mock.calls[0][2];
+      expect(opts?.stdio).toEqual(['pipe', 'ignore', 'ignore']);
+      // stdin.write should be called with the body text
+      const child = vi.mocked(childProcess.spawn).mock.results[0].value;
+      expect(child.stdin?.write).toHaveBeenCalledWith('comment text', 'utf8');
+      expect(child.stdin?.end).toHaveBeenCalled();
+    });
+
+    it('neutralizes command injection attempt with embedded quotes in an argument', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      defaultSpawnFn('gh', ['issue', 'edit', '42', '--repo', 'owner/repo', '--body', '"&calc&"']);
+      const [, cmdArgs] = vi.mocked(childProcess.spawn).mock.calls[0];
+      const cmdLine = cmdArgs?.[3] ?? '';
+      // The body text should NOT appear in argv at all; only --body-file - should be there
+      expect(cmdLine).not.toContain('calc');
+      expect(cmdLine).toContain('--body-file');
+    });
+
+    it('neutralizes environment variable expansion attempt in --body via stdin routing', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      vi.mocked(childProcess.spawn).mockImplementation(() => ({ unref: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() } } as any));
+      const bodyWithEnvVar = 'secret: %PATH%';
+      defaultSpawnFn('gh', ['issue', 'comment', '1', '--repo', 'o/r', '--body', bodyWithEnvVar]);
+      const cmdArgs = vi.mocked(childProcess.spawn).mock.calls[0][1];
+      const cmdLine = cmdArgs?.[3] ?? '';
+      // %PATH% should not be in the command line; body goes to stdin
+      expect(cmdLine).not.toContain('%PATH%');
+      expect(cmdLine).not.toContain('PATH');
+      // stdin.write should be called with the unmodified body (cmd.exe won't expand it there)
+      const child = vi.mocked(childProcess.spawn).mock.results[0].value;
+      expect(child.stdin?.write).toHaveBeenCalledWith(bodyWithEnvVar, 'utf8');
+    });
+
+    it('handles gh commands with --body in the middle of other arguments', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      vi.mocked(childProcess.spawn).mockImplementation(() => ({ unref: vi.fn(), stdin: { write: vi.fn(), end: vi.fn() } } as any));
+      defaultSpawnFn('gh', ['issue', 'comment', '42', '--body', 'my comment', '--repo', 'owner/repo']);
+      const [, cmdArgs] = vi.mocked(childProcess.spawn).mock.calls[0];
+      const cmdLine = cmdArgs?.[3] ?? '';
+      expect(cmdLine).toContain('--body-file');
+      expect(cmdLine).toContain('owner/repo');
+      expect(cmdLine).not.toContain('my comment');
+    });
+
+    it('handles gh commands without --body normally (no stdin routing)', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      defaultSpawnFn('gh', ['issue', 'view', '42', '--repo', 'owner/repo']);
+      const [, cmdArgs, opts] = vi.mocked(childProcess.spawn).mock.calls[0];
+      const cmdLine = cmdArgs?.[3] ?? '';
+      expect(cmdLine).toContain('issue');
+      expect(cmdLine).toContain('view');
+      // Should not have pipe stdin when there's no --body
+      expect(opts?.stdio).toBe('ignore');
+    });
+
+    it('applies correct cmd.exe quoting to remaining arguments (double quotes and percents)', () => {
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      // An arg with a quote and a percent should be properly quoted with both escaped
+      defaultSpawnFn('gh', ['issue', 'comment', '42', '--body', 'body', '--repo', 'o/"r%e"po']);
+      const [, cmdArgs] = vi.mocked(childProcess.spawn).mock.calls[0];
+      const cmdLine = cmdArgs?.[3] ?? '';
+      // Quotes should be doubled: " -> ""
+      // Percents should be doubled: % -> %%
+      expect(cmdLine).toContain('""');
+      expect(cmdLine).toContain('%%');
+    });
   });
 });
