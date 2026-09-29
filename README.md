@@ -480,6 +480,17 @@ Use the HUD for live observability and the current session/replay artifacts for 
 - Live HUD rendering: `omc hud`
 - Local friction reports: `omc session friction report --since 24h` summarizes context-bloat and operator-friction signals from local session artifacts without printing raw prompts or tool output; add `--json` for automation.
 
+### Jev Judgment Configuration
+
+**Jev** brings calibrated decision-making to OMC's orchestration. Enable it with one environment variable:
+
+```bash
+export TYPESAFE_API_KEY="sk-..."
+export OMC_JEV="all:active"  # All judgment points active
+```
+
+Jev decides skill triggering, model routing, loop continuation, and more. Defaults to zero egress: without configuration, nothing is sent to the API. See **[Jev Judgment Points](docs/HOOKS.md#jev-judgment-points)** in HOOKS.md for the full configuration reference and point registry.
+
 ### Notification Tags (Telegram/Discord/Slack)
 
 You can configure who gets tagged when stop callbacks send session summaries.

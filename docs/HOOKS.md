@@ -545,3 +545,220 @@ stopomc
 ```
 /oh-my-claudecode:team 3:executor "build a fullstack todo app"
 ```
+
+---
+
+## Jev Judgment Points
+
+**Jev** is a System One API (TypeSafe) that provides calibrated decision-making for OMC's orchestration points. It replaces keyword lists and heuristics for critical decisions like skill triggering, model-tier routing, loop continuation, and context pruning.
+
+### Zero Egress by Default
+
+Jev is **zero egress** — nothing is sent anywhere without explicit configuration:
+- No `TYPESAFE_API_KEY` → Jev is disabled; all points run heuristic twins
+- No `OMC_JEV` configuration → no points are opted in; even with a key, zero requests are sent
+- Heuristic fallback → if Jev times out, is unavailable, or over budget, every point runs its heuristic twin and workflows never block on Jev
+
+### Configuration
+
+Enable Jev with two environment variables:
+
+```bash
+# 1. Authenticate to TypeSafe (required, but not sufficient on its own)
+export TYPESAFE_API_KEY="your-api-key"
+
+# 2. Explicitly opt in to judgment points
+export OMC_JEV="point1,point2:active,all"
+```
+
+#### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TYPESAFE_API_KEY` | (absent) | API key for TypeSafe System One. Required to enable Jev; the key alone does not enable any points. |
+| `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
+| `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
+| `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
+| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment payload. |
+| `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
+| `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
+| `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
+| `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
+
+#### Point Activation Syntax
+
+`OMC_JEV` accepts comma-separated entries with three syntax forms:
+
+```bash
+# Shadow mode (Jev runs but decision is not used, heuristic twin is authoritative)
+export OMC_JEV="intent,model-routing,task-size"
+
+# Active mode (Jev decision is used if blocking; non-blocking points fire-and-record)
+export OMC_JEV="intent:active,model-routing:active"
+
+# Wildcard: all registered points in shadow
+export OMC_JEV="all"
+
+# Wildcard: all registered points in active
+export OMC_JEV="all:active"
+
+# Master disable
+export OMC_JEV="off"
+```
+
+Unknown point names are ignored. Activation unions across sources: code-time `ACTIVATED_POINTS` (empty in every release) plus env `:active` suffix; either source activates a point.
+
+### Shadow vs. Active Mode
+
+Each judgment point operates in one of three states:
+
+| State | Behavior | When It Occurs |
+|-------|----------|----------------|
+| **off** | Point does not run; heuristic twin is used | No `TYPESAFE_API_KEY`, `OMC_JEV=off`, or point not opted in |
+| **shadow** | Both Jev and heuristic run; Jev answer is logged but not acted on; heuristic is authoritative | Point is opted in but not activated; Jev unavailable, times out, or over budget |
+| **active** | Jev answer is used (for blocking points, this gates behavior; for advisory points, fire-and-record) | Point is opted in and activated via env `:active` or code-time `ACTIVATED_POINTS` |
+
+Once a point is opted in (e.g., `OMC_JEV="model-routing"`), it automatically degrades to shadow if Jev is unavailable, times out, or exceeds the request budget — no workflow blocks on Jev.
+
+### Shadow Log Location
+
+Every Jev call—whether shadow or active—is recorded in the shadow log:
+
+```
+.omc/state/jev/<point>-shadow.jsonl
+```
+
+Each line is a JSON record with:
+- `ts`: ISO timestamp
+- `point`: judgment-point name
+- `state`: the payload sent to Jev (bounded to `OMC_JEV_EXCERPT_CHARS`)
+- `mode`: `"shadow"` or `"active"`
+- `jev_answer`: Jev's response (if successful)
+- `twin_answer`: the heuristic twin's result
+- `match`: `true` if Jev and twin agree
+- `error`: error message (if the call failed)
+- `latencyMs`: round-trip time
+
+Use shadow logs to collect evidence for promotion decisions (ticket 07) and to debug mismatches.
+
+### Heuristic Fallback on Failure
+
+Jev never blocks the workflow:
+
+- **Timeout**: If a call exceeds `OMC_JEV_TIMEOUT_MS`, the heuristic twin runs immediately.
+- **Over budget**: If `OMC_JEV_MAX_REQUESTS` is reached, all remaining calls use heuristic twins.
+- **Unavailable**: If the API is unreachable or returns an error, heuristic twin is used and the failure is logged.
+- **Blocking points**: Even in active mode, if Jev fails, the heuristic twin's decision is used and the workflow continues.
+
+### Judgment Points Registry
+
+Every registered judgment point with its lifecycle hook, decision type, and blocking behavior:
+
+| Point Name | Event | Hook | Decision | Type | Blocking | Activated* |
+|------------|-------|------|----------|------|----------|------------|
+| `intent` | UserPromptSubmit | keyword-detector | Is this an Intent-intake request? | Noul (yes/no) | No | — |
+| `skill-trigger` | UserPromptSubmit | keyword-detector | Which skill should this prompt trigger? | Choice (cancel/ralph/autopilot/…) | No | — |
+| `task-size` | UserPromptSubmit | task-size-detector | Is this small/medium/large? | Choice (small/medium/large) | No | — |
+| `model-routing` | PreToolUse | delegation-enforcer | Which model tier (haiku/sonnet/opus)? | Choice (haiku/sonnet/opus) | No | — |
+| `slop-warning` | PreToolUse | jev-slop-warning | Does this tool input have advisory language? | Noul (yes/no) | No | — |
+| `context-pruning` | PostToolUse | post-tool-verifier | How stale is this context candidate? | Score (fresh/recent/aging/stale) | No | — |
+| `loop-continuation` | Stop | persistent-mode | Is task complete? + Progress level? | Noul + Score | **Yes** | — |
+| `ralph-verdict` | Stop | ralph | Does completion satisfy PRD criteria? | Noul (yes/no) | **Yes** | — |
+| `learner-extraction` | Stop | learner | Does this message have extractable memory? | Noul (yes/no) | No | — |
+| `simplifier-trigger` | Stop | code-simplifier | Is this change simplification-worthy? | Noul (yes/no) | No | — |
+
+**Activated**: asterisk (`*`) means the point is in `ACTIVATED_POINTS` (empty in all releases; promoted by ticket 07). Use `OMC_JEV=<point>:active` to activate via environment instead.
+
+**Advisory vs. Blocking**:
+- **Advisory points** (Blocking=No): Jev answers are recorded in shadow log but do not affect workflow. Useful for collecting calibration data.
+- **Blocking points** (Blocking=Yes): In active mode, Jev's yes/no answer gates behavior (e.g., ralph stops when `ralph-verdict` decides completion is met). Timeout, unavailability, or budget exhaustion reverts to heuristic twin.
+
+### Request Budget and Latency
+
+Set limits to control cost and latency:
+
+```bash
+# Limit to 100 requests per process
+export OMC_JEV_MAX_REQUESTS=100
+
+# Raise timeout for slow networks
+export OMC_JEV_TIMEOUT_MS=5000
+
+# Truncate large state excerpts
+export OMC_JEV_EXCERPT_CHARS=500
+```
+
+Once the request budget is exhausted, all remaining points run heuristic twins.
+
+### Example Configurations
+
+#### Shadow Mode (Collect Data)
+
+Run every point in shadow to collect calibration evidence:
+
+```bash
+export TYPESAFE_API_KEY="sk-..."
+export OMC_JEV="all"  # All points in shadow; heuristic is authoritative
+```
+
+Review shadow logs at `.omc/state/jev/` to see how well Jev matches your heuristics.
+
+#### Active Model Routing Only
+
+Activate Jev only for model-tier decisions:
+
+```bash
+export TYPESAFE_API_KEY="sk-..."
+export OMC_JEV="model-routing:active"  # Only this point, active
+```
+
+#### Production (All Points Active)
+
+When evidence shows Jev outperforms heuristics on all points:
+
+```bash
+export TYPESAFE_API_KEY="sk-..."
+export OMC_JEV="all:active"  # All points, active; Jev decides
+export OMC_JEV_MAX_REQUESTS=1000  # Cost control
+```
+
+#### Disable Jev Globally
+
+```bash
+export OMC_JEV="off"  # Master switch
+```
+
+Or simply omit `TYPESAFE_API_KEY`.
+
+### Debugging
+
+#### Check What Was Decided
+
+Read the shadow log for a point:
+
+```bash
+cat .omc/state/jev/model-routing-shadow.jsonl | jq '.'
+```
+
+#### Verify Jev is Running
+
+Look for stderr output on point activation:
+
+```
+[jev] model-routing: ACTIVE via env — Jev decides
+```
+
+If this does not appear, the point is not activated or Jev is disabled.
+
+#### Quiet the Warning
+
+```bash
+export OMC_JEV_QUIET=1  # Suppress the activation message
+```
+
+### References
+
+- **Decision Model**: [Jev Issue #3669](https://github.com/Yeachan-Heo/oh-my-claudecode/issues/3669) — user stories and design
+- **Degradation Contract**: [ADR 03665](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03665-jev-degradation-contract.md) — how Jev fails gracefully
+- **Env Activation**: [ADR 03672](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03672-env-activated-active-mode.md) — `:active` syntax and union semantics
+- **Script-Side Points**: [ADR 03671](https://github.com/Yeachan-Heo/oh-my-claudecode/blob/dev/docs/adr/03671-script-side-judgment-channel.md) — hook-script integration points
