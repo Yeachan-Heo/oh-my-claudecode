@@ -976,10 +976,16 @@ export async function processSessionEnd(input: SessionEndInput): Promise<HookOut
     const manifest = prepareCoreManifest(directory, input.session_id, chain ? { ...payload, chain } : payload);
     if (!manifest) return { continue: true };
     exportSessionSummary(directory, metrics);
-    let foregroundOutcome: Record<string, unknown>;
-    try { foregroundOutcome = await runForegroundSessionEndCleanup(directory, input.session_id, false); } catch { return { continue: true }; }
-    const sealed = completeForegroundCleanupAndSealCore(directory, input.session_id, foregroundOutcome);
-    if (sealed) spawnSessionEndWorker({ directory, sessionId: input.session_id });
+    // The manifest already carries the enqueued chain, so the worker must be
+    // launched even when inline cleanup or core sealing fails — the worker's
+    // post-grace path owns deferred foreground cleanup + recovery, and without
+    // a spawn the enqueued chain stalls with no executor at all.
+    let foregroundOutcome: Record<string, unknown> | undefined;
+    try { foregroundOutcome = await runForegroundSessionEndCleanup(directory, input.session_id, false); } catch { /* worker post-grace path recovers */ }
+    if (foregroundOutcome !== undefined) {
+      try { completeForegroundCleanupAndSealCore(directory, input.session_id, foregroundOutcome); } catch { /* another writer holds the lease; it continues */ }
+    }
+    spawnSessionEndWorker({ directory, sessionId: input.session_id });
     return { continue: true };
   });
 }
