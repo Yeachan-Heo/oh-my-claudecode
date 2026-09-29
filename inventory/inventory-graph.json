@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "54ec8b93512bf18583cf49f3f772e05048a7a826",
-    "sourceSha256": "8d1b0005c4f3b9fb84978746d08a74c4c28086e19a215d504554b98d07e06c05",
+    "head": "a8ebc842834a41ee168e46d4dedf222b3d3942b2",
+    "sourceSha256": "d6cb73329540d7074a6e61890e2b11eda22792ae268ae854c9f1e911ef9b72d9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "54ec8b93512bf18583cf49f3f772e05048a7a826",
-  "sourceSha256": "8d1b0005c4f3b9fb84978746d08a74c4c28086e19a215d504554b98d07e06c05",
+  "head": "a8ebc842834a41ee168e46d4dedf222b3d3942b2",
+  "sourceSha256": "d6cb73329540d7074a6e61890e2b11eda22792ae268ae854c9f1e911ef9b72d9",
   "counts": {
     "public": {
       "skills": 47,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1416,
-      "total": 1439
+      "srcFiles": 1418,
+      "total": 1441
     },
     "generated": {
       "distFiles": 5066,
@@ -34955,6 +34955,11 @@
         "path": "src/__tests__/helpers/prompt-test-helpers.ts"
       },
       {
+        "id": "src/__tests__/hook-bridge-main-module.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/hook-bridge-main-module.test.ts"
+      },
+      {
         "id": "src/__tests__/hooks-command-escaping.test.ts",
         "kind": "src",
         "path": "src/__tests__/hooks-command-escaping.test.ts"
@@ -35818,6 +35823,11 @@
         "id": "src/__tests__/session-end-empty-stdin.test.ts",
         "kind": "src",
         "path": "src/__tests__/session-end-empty-stdin.test.ts"
+      },
+      {
+        "id": "src/__tests__/session-end-forwarder-fallback.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-end-forwarder-fallback.test.ts"
       },
       {
         "id": "src/__tests__/session-end-process-exit.test.ts",
@@ -46127,6 +46137,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hook-bridge-main-module.test.ts",
+        "to": "src/hooks/bridge.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/hooks-command-escaping.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -50203,6 +50243,31 @@
       },
       {
         "from": "src/__tests__/session-end-empty-stdin.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-forwarder-fallback.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-forwarder-fallback.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-forwarder-fallback.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-forwarder-fallback.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-end-forwarder-fallback.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -82708,12 +82773,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7123,
-      "edgeCount": 8111,
-      "importEdgeCount": 6699,
+      "nodeCount": 7125,
+      "edgeCount": 8122,
+      "importEdgeCount": 6710,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "6b8af0d09fcdc44f70415fc47573f86b90fe48633a568c545d75cd02e80f9e1c",
-  "manifestSha256": "1bbd333091cf7311286c6f5696629b5d202ebaafbde261a311c75fb7de7c5c0f"
+  "inventorySha256": "0c2f6ff7113e72785fde318cb73f437bae2357143526fa6aa7742eb9673f811b",
+  "manifestSha256": "918bf5dba2a0d31972e2dd1c1f3330c9ca431b787584c0cb1edb6e82df4dda68"
 }
