@@ -72,9 +72,10 @@ describe('chain-enqueuer SessionEnd registration (factory third link)', () => {
     expect(existsSync(templatePath)).toBe(true);
 
     const source = readFileSync(templatePath, 'utf8');
-    // Must delegate to --hook=session-end (bridge), the only entry that runs
-    // processSessionEnd → planChainEnqueue. publishSessionEndBootstrap (the
-    // plugin scripts/session-end.mjs path) does not enqueue chains.
+    // Must delegate to --hook=session-end (bridge), which runs
+    // processSessionEnd → planChainEnqueue. The plugin path
+    // (scripts/session-end.mjs → publishSessionEndBootstrap) enqueues the
+    // chain itself in foreground-bootstrap.ts.
     expect(source).toContain("'--hook=session-end'");
     expect(source).toContain('bridge');
   });
