@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5ce58e58497298b6e99a23c70f311204c40bde5a",
-    "sourceSha256": "61520b8ca140e3673bc6815fb4b32c0f296e0e7898dc6efb7439484c431f1f9c",
+    "head": "08d7761de2d6c5794ac28351c895d332c6fe4aeb",
+    "sourceSha256": "2fb6ce86cc5b1cca26e9d6e44861c2a98e7fbc8a8c69226c39f13b8fc394529a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5ce58e58497298b6e99a23c70f311204c40bde5a",
-  "sourceSha256": "61520b8ca140e3673bc6815fb4b32c0f296e0e7898dc6efb7439484c431f1f9c",
+  "head": "08d7761de2d6c5794ac28351c895d332c6fe4aeb",
+  "sourceSha256": "2fb6ce86cc5b1cca26e9d6e44861c2a98e7fbc8a8c69226c39f13b8fc394529a",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 330,
+      "hookFiles": 331,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1415,
-      "total": 1438
+      "srcFiles": 1416,
+      "total": 1439
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 330,
+    "hookFiles": 331,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -402,6 +402,7 @@
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
+      "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
       "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
       "src/hooks/session-end/__tests__/routing.test.ts",
       "src/hooks/session-end/__tests__/session-duration.test.ts",
@@ -6224,6 +6225,7 @@
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
+      "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
       "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
       "src/hooks/session-end/__tests__/routing.test.ts",
       "src/hooks/session-end/__tests__/session-duration.test.ts",
@@ -38643,6 +38645,11 @@
         "path": "src/hooks/session-end/__tests__/openclaw-session-end.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts"
@@ -64195,6 +64202,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
+        "to": "src/hooks/session-end/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -64447,6 +64484,11 @@
       {
         "from": "src/hooks/session-end/__tests__/worker.test.ts",
         "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/worker.test.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
         "kind": "imports"
       },
       {
@@ -82661,12 +82703,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7122,
-      "edgeCount": 8103,
-      "importEdgeCount": 6691,
+      "nodeCount": 7123,
+      "edgeCount": 8110,
+      "importEdgeCount": 6698,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "ab6da542a11531649af7965ae0b3a575b88ab49eb2c4eb2c865bc6ad97f425b9",
-  "manifestSha256": "5069b758519b84e68cb6ed5ac423646bf28f235be080b29cab0a58bbc09a6788"
+  "inventorySha256": "6b8af0d09fcdc44f70415fc47573f86b90fe48633a568c545d75cd02e80f9e1c",
+  "manifestSha256": "5f0dba441b449037bbb704857abefb1118680e2c85238b83ec8be5b1023dc2a5"
 }
