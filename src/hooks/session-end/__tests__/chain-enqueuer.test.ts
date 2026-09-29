@@ -99,11 +99,48 @@ describe('planChainEnqueue', () => {
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'enqueued', stage: 'spec', intentId: 'intent-a' });
   });
 
-  it('a ledger route table overrides the project file', () => {
+  it('the project file overrides a ledger copy', () => {
     const dir = tempDir();
     writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { 'success:*': { stage: 'ledger', skill: 'ledger' } } });
     writeProjectRoutes(dir, { 'success:*': { stage: 'project', skill: 'project' } });
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')?.routeTable).toEqual({ 'success:*': { stage: 'project', skill: 'project' } });
+  });
+
+  it('falls back to a well-formed ledger copy when there is no project file', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { 'success:*': { stage: 'ledger', skill: 'ledger' } } });
     expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')?.routeTable).toEqual({ 'success:*': { stage: 'ledger', skill: 'ledger' } });
+  });
+
+  it('a nested ledger copy does not shadow the project file', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { success: { stage: 'ledger', skill: 'ledger' } } });
+    writeProjectRoutes(dir, { 'success:*': { stage: 'project', skill: 'project' } });
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')?.routeTable).toEqual({ 'success:*': { stage: 'project', skill: 'project' } });
+  });
+
+  it('a nested ledger copy with no project file halts loudly, not silently', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { success: { stage: 'ledger', skill: 'ledger' } } });
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')).toBeNull();
+    expect(readDecisions(dir).at(-2)).toMatchObject({ decision: 'malformed-route-table', source: 'ledger' });
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'no-route' });
+  });
+
+  it('a nested project file is rejected the same way', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a' });
+    writeProjectRoutes(dir, { success: { stage: 'project', skill: 'project' } });
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')).toBeNull();
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'no-route' });
+  });
+
+  it('a stale ledger copy cannot route a stage the project file retired', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a', routeTable: { 'success:*': { stage: 'ledger', skill: 'ledger' } } });
+    writeProjectRoutes(dir, {});
+    expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')).toBeNull();
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'no-route' });
   });
 
   it('a headless completion (reason other) routes as success and enqueues the chain', () => {

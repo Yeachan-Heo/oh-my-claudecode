@@ -12,7 +12,7 @@
 
 import * as fs from 'fs';
 import { join } from 'path';
-import { decideNextStage, gradeGate, type ChainOutcome, type GateFacts, type GateName, type RouteTable } from './routing.js';
+import { decideNextStage, gradeGate, normalizeRouteTable, type ChainOutcome, type GateFacts, type GateName, type RouteTable } from './routing.js';
 import { acquireChainSlot, releaseChainSlot, INTENT_ID_PATTERN } from './guardrails.js';
 import { validateChainFields, LABEL_PATTERN, type SpawnNextChain, type SpawnNextTracker } from './spawn-next.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
@@ -61,12 +61,11 @@ export function readChainLedger(directory: string, sessionId: string): ChainLedg
   }
 }
 
-/** Project-level route table fallback: `.omc/factory-routes.json`. */
+/** Project-level route table: `.omc/factory-routes.json`. The single source of truth. */
 export function readProjectRoutes(directory: string): RouteTable | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(join(getOmcRoot(directory), 'factory-routes.json'), 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    return parsed as RouteTable;
+    return normalizeRouteTable(parsed);
   } catch {
     return null;
   }
@@ -132,7 +131,15 @@ export function planChainEnqueue(directory: string, sessionId: string, reason: s
       record('invalid-ledger', { error: `invalid intentId: ${intentId}` });
       return null;
     }
-    const routeTable = ledger.routeTable ?? readProjectRoutes(directory) ?? {};
+    // Project file is authoritative. A ledger copy is a spawn-time snapshot kept
+    // for the watchdog's stalled-link detection (watchdog.ts skips ledgers that
+    // carry one), so it survives as a fallback — but never as an override, and
+    // never unvalidated: a nested or stale copy used to halt the chain silently.
+    const ledgerRoutes = ledger.routeTable === undefined ? null : normalizeRouteTable(ledger.routeTable);
+    if (ledger.routeTable !== undefined && !ledgerRoutes) {
+      record('malformed-route-table', { source: 'ledger', keys: Object.keys(ledger.routeTable as object).slice(0, 10) });
+    }
+    const routeTable = readProjectRoutes(directory) ?? ledgerRoutes ?? {};
 
     const directive = decideNextStage(outcome, reason, routeTable);
     if (!directive) {

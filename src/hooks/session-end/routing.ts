@@ -7,6 +7,30 @@ export interface ChainDirective {
 
 export type RouteTable = Readonly<Record<string, ChainDirective>>;
 
+/**
+ * Keep only well-formed `outcome:reason` directives. A table written in the
+ * nested shape (`{ success: { other: {...} } }`) yields no flat key, so
+ * `decideNextStage` returns null and the chain halts as `no-route` — silently,
+ * because a malformed table and a deliberate terminal look identical downstream.
+ * Nested groups (keys without `:`) and non-directive entries are dropped.
+ * Returns null for non-objects; an empty object is a valid, authoritative
+ * empty table.
+ */
+export function normalizeRouteTable(input: unknown): RouteTable | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const entries = Object.entries(input as Record<string, unknown>);
+  if (entries.length === 0) return {};
+  const directives: Record<string, ChainDirective> = {};
+  for (const [key, value] of entries) {
+    if (!key.includes(':')) continue;
+    if (!value || typeof value !== 'object') continue;
+    const { stage, skill } = value as { stage?: unknown; skill?: unknown };
+    if (typeof stage !== 'string' || typeof skill !== 'string') continue;
+    directives[key] = { stage, skill };
+  }
+  return Object.keys(directives).length > 0 ? directives : null;
+}
+
 export function decideNextStage(outcome: ChainOutcome, reason: string, table: RouteTable): ChainDirective | null {
   return table[`${outcome}:${reason}`] ?? table[`${outcome}:*`] ?? null;
 }

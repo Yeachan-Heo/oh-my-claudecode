@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { decideNextStage, gradeGate } from '../routing.js';
+import { decideNextStage, gradeGate, normalizeRouteTable } from '../routing.js';
 import type { RouteTable, GateFacts } from '../routing.js';
 
 const table: RouteTable = {
@@ -69,5 +69,40 @@ describe('gradeGate — tiered gates', () => {
   it('escalates when mechanical checks fail even with no criterion fired', () => {
     expect(gradeGate('spec-approve', { ...allClear, mechanicalChecksPassed: false })).toEqual({ kind: 'human', criterion: expect.stringContaining('机械验证项') });
     expect(gradeGate('harbor-review', { ...allClear, mechanicalChecksPassed: false })).toEqual({ kind: 'human', criterion: expect.stringContaining('机械验证项') });
+  });
+});
+
+describe('normalizeRouteTable', () => {
+  it('keeps well-formed outcome:reason directives', () => {
+    expect(normalizeRouteTable({ 'success:*': { stage: 'launch', skill: 'launch' } }))
+      .toEqual({ 'success:*': { stage: 'launch', skill: 'launch' } });
+  });
+
+  it('rejects a nested group, whose keys carry no colon', () => {
+    const nested = { success: { other: { stage: 'launch', skill: 'launch' } } };
+    expect(normalizeRouteTable(nested)).toBeNull();
+    expect(decideNextStage('success', 'other', nested as unknown as RouteTable)).toBeNull();
+  });
+
+  it('rejects non-object input', () => {
+    expect(normalizeRouteTable(null)).toBeNull();
+    expect(normalizeRouteTable(undefined)).toBeNull();
+    expect(normalizeRouteTable('success:*')).toBeNull();
+    expect(normalizeRouteTable(42)).toBeNull();
+    expect(normalizeRouteTable([{ stage: 'a', skill: 'b' }])).toBeNull();
+  });
+
+  it('returns an authoritative empty table for an empty object', () => {
+    expect(normalizeRouteTable({})).toEqual({});
+  });
+
+  it('drops malformed directives but keeps the valid ones', () => {
+    const mixed = {
+      'success:*': { stage: 'launch', skill: 'launch' },
+      success: { other: { stage: 'x', skill: 'y' } },
+      'failed:*': { stage: 'terminal' },
+      'needs-human:*': 'not-an-object',
+    };
+    expect(normalizeRouteTable(mixed)).toEqual({ 'success:*': { stage: 'launch', skill: 'launch' } });
   });
 });
