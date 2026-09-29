@@ -184,6 +184,39 @@ describe('SessionEnd durable worker', () => {
     });
   });
 
+  it('reschedules a sealed-core manifest with absent wiki through producer grace and completes deferred actions', async () => {
+    vi.useFakeTimers();
+    actionRunner.runSessionEndAction.mockResolvedValue({ code: 'completed', completed: true });
+    const directory = project();
+    const sessionId = 'sealed-core-absent-wiki-grace';
+    expect(prepareCoreManifest(directory, sessionId, {})).not.toBeNull();
+    const initial = readSessionEndJob(directory, sessionId)!;
+    // Simulate the inline foreground path: core sealed by foreground, foreground cleanup completed inline, wiki producer never registered.
+    expect(mutateSessionEndJob(directory, sessionId, initial.revision, (job) => {
+      job.producers.core = { state: 'sealed', intentKey: job.producers.core.intentKey, payloadDigest: job.producers.core.payloadDigest, sealedAt: new Date().toISOString(), sealedBy: 'foreground' };
+      const foreground = job.actions['foreground-cleanup'];
+      foreground.status = 'completed';
+      foreground.completedAt = new Date().toISOString();
+      foreground.lastOutcomeCode = 'completed';
+      job.producerGraceExpiresAt = new Date(Date.now() + 1_000).toISOString();
+    })).not.toBeNull();
+
+    await processSessionEndWorker({ directory, sessionId });
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      producers: { core: { state: 'sealed' }, wiki: { state: 'absent' } },
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.runAllTimersAsync();
+
+    expect(readSessionEndJob(directory, sessionId)).toMatchObject({
+      phase: 'complete',
+      producers: { core: { state: 'sealed' }, wiki: { state: 'no-op', sealedBy: 'recovery' } },
+    });
+    expect(readSessionEndJob(directory, sessionId)!.actions['spawn-next']).toMatchObject({ status: 'completed', attempts: 1 });
+  });
+
   it('fails closed after grace when a wiki-first manifest never receives core, without a 250ms recovery loop', async () => {
     vi.useFakeTimers();
     const directory = project();
@@ -243,6 +276,26 @@ describe('SessionEnd durable worker', () => {
       tmuxPane: '%42',
     });
     expect(JSON.stringify(routing)).not.toContain('original-secret');
+    
+    // On Windows, APPDATA/LOCALAPPDATA should be forwarded for gh auth
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try {
+      vi.stubEnv('APPDATA', 'C:\\Users\\Test\\AppData\\Roaming');
+      vi.stubEnv('LOCALAPPDATA', 'C:\\Users\\Test\\AppData\\Local');
+      expect(workerEnvironment()).toHaveProperty('APPDATA');
+      expect(workerEnvironment()).toHaveProperty('LOCALAPPDATA');
+    } finally {
+      if (originalPlatform) Object.defineProperty(process, 'platform', originalPlatform);
+      else Object.defineProperty(process, 'platform', { value: process.platform === 'win32' ? 'linux' : process.platform, configurable: true });
+    }
+    
+    // On POSIX, APPDATA/LOCALAPPDATA should not be forwarded
+    if (process.platform !== 'win32') {
+      expect(workerEnvironment()).not.toHaveProperty('APPDATA');
+      expect(workerEnvironment()).not.toHaveProperty('LOCALAPPDATA');
+    }
+    
     expect(workerEnvironment()).not.toHaveProperty('OMC_OPENCLAW_CONFIG');
     expect(workerEnvironment()).not.toHaveProperty('OPENCLAW_REPLY_THREAD');
     expect(workerEnvironment()).not.toHaveProperty('TMUX');

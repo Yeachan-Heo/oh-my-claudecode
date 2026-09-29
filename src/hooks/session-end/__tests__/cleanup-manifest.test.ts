@@ -47,10 +47,33 @@ afterEach(() => {
 });
 
 describe('durable SessionEnd cleanup manifest', () => {
+  it('seeds actions missing from an older-build manifest (plugin/standalone coexistence)', () => {
+    const directory = project();
+    const sessionId = 'stale-action-list';
+    const jobPath = join(sessionEndJobsDirectory(directory), `${sessionId}.json`);
+
+    // prepared-core manifest written by an older build that lacks spawn-next
+    expect(prepareCoreManifest(directory, sessionId, { source: 'core' })).not.toBeNull();
+    const stale = JSON.parse(readFileSync(jobPath, 'utf8')) as { actions: Record<string, unknown> };
+    delete stale.actions['spawn-next'];
+    writeFileSync(jobPath, JSON.stringify(stale));
+    expect(prepareCoreManifest(directory, sessionId, { source: 'core', chain: { intentId: 'i-1' } })).not.toBeNull();
+    expect(readSessionEndJob(directory, sessionId)?.actions['spawn-next']?.payload).toMatchObject({ chain: { intentId: 'i-1' } });
+
+    // absent-core manifest from an older build: seed + durable payload merge
+    const absent = JSON.parse(readFileSync(jobPath, 'utf8')) as { actions: Record<string, unknown>; producers: { core: { state: string } } };
+    delete absent.actions['spawn-next'];
+    absent.producers.core.state = 'absent';
+    writeFileSync(jobPath, JSON.stringify(absent));
+    expect(prepareCoreManifest(directory, sessionId, { source: 'core-2', chain: { intentId: 'i-2' } })).not.toBeNull();
+    const job = readSessionEndJob(directory, sessionId);
+    expect(job?.producers.core.state).toBe('prepared');
+    expect(job?.actions['spawn-next']?.payload).toMatchObject({ chain: { intentId: 'i-2' } });
+  });
+
   it('serializes concurrent core/wiki producers and rejects a second worker claim', async () => {
     const directory = project();
     const sessionId = 'concurrent-producers';
-
     await Promise.all([
       Promise.resolve().then(() => prepareCoreManifest(directory, sessionId, { source: 'core', callback: true })),
       Promise.resolve().then(() => sealWikiManifest(directory, sessionId, { source: 'wiki', capture: true })),

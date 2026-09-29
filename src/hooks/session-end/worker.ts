@@ -12,11 +12,18 @@ export interface SessionEndWorkerPayload { directory: string; sessionId: string;
 
 /** Durable OpenClaw routing is supplied from the manifest to the action runner, never from worker ambient state. */
 export function workerEnvironment(): NodeJS.ProcessEnv {
-  const keys = ['PATH', 'HOME', 'USERPROFILE', 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', ...(process.env.NODE_ENV === 'test' ? ['OMC_SESSION_END_TEST_PRODUCER_GRACE_MS'] : [])];
+  // APPDATA/LOCALAPPDATA are required for gh keyring-free auth lookup on Windows
+  // (hosts.yml lives in %AppData%\GitHub CLI); without them every
+  // worker-spawned session sees gh as unauthenticated.
+  const keys = ['PATH', 'HOME', 'USERPROFILE', ...(process.platform === 'win32' ? ['APPDATA', 'LOCALAPPDATA'] : []), 'TMPDIR', 'TEMP', 'TMP', 'SystemRoot', 'COMSPEC', 'LANG', 'LC_ALL', 'NODE_ENV', 'CLAUDE_CONFIG_DIR', 'OMC_STATE_DIR', 'OMC_HOOK_CONFIG', 'OMC_CONFIG_PATH', 'OMC_NOTIFY', 'OMC_NOTIFY_PROFILE', 'OMC_TELEGRAM', 'OMC_DISCORD', 'OMC_SLACK', 'OMC_WEBHOOK', 'OMC_DISCORD_MENTION', 'OMC_DISCORD_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_BOT_TOKEN', 'OMC_TELEGRAM_NOTIFIER_BOT_TOKEN', 'OMC_TELEGRAM_CHAT_ID', 'OMC_TELEGRAM_NOTIFIER_UID', 'OMC_SLACK_WEBHOOK_URL', 'OMC_SLACK_MENTION', 'OMC_SLACK_BOT_TOKEN', 'OMC_SLACK_APP_TOKEN', 'OMC_SLACK_BOT_CHANNEL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE', ...(process.env.NODE_ENV === 'test' ? ['OMC_SESSION_END_TEST_PRODUCER_GRACE_MS'] : [])];
   return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]));
 }
 export function spawnSessionEndWorker(payload: SessionEndWorkerPayload): boolean {
-  try { const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: workerEnvironment(), windowsHide: true }); child.unref(); return true; } catch { return false; }
+  try {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: workerEnvironment(), windowsHide: true });
+    child.unref();
+    return true;
+  } catch { return false; }
 }
 export async function executeSessionEndAction(name: SessionEndActionName, payload: SessionEndWorkerPayload, deadlineAt: number, authority?: SessionEndActionAuthority): Promise<void> {
   const legacy = await import('./index.js');
@@ -67,7 +74,9 @@ export async function executeSessionEndAction(name: SessionEndActionName, payloa
 async function reapIfProvenStale(payload: SessionEndWorkerPayload, deadlineAt: number): Promise<void> {
   const job = readSessionEndJob(payload.directory, payload.sessionId); const owner = job?.owner;
   if (!owner || Date.now() < Date.parse(owner.leaseExpiresAt)) return;
-  const liveness = await isProcessIdentityLive(owner.pid, owner.processStartIdentity, Math.min(deadlineAt, Date.now() + 250));
+  // Windows identity probes shell out to PowerShell (~300-500ms cold); a 250ms
+  // budget made workers silently refuse to start / reap.
+  const liveness = await isProcessIdentityLive(owner.pid, owner.processStartIdentity, Math.min(deadlineAt, Date.now() + 2_500));
   if (liveness === 'dead' || liveness === 'mismatch') reapStaleSessionEndOwner(payload.directory, payload.sessionId, owner.nonce, owner.leaseGeneration, liveness);
 }
 function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnType<typeof readSessionEndJob>): void {
@@ -76,9 +85,15 @@ function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnTy
   const producersReady = ['sealed', 'no-op'].includes(job.producers.core.state)
     && ['sealed', 'no-op'].includes(job.producers.wiki.state);
   const hasPendingAction = producersReady && Object.values(job.actions).some(action => action.status === 'pending');
+  // A manifest with a sealed core but an absent wiki producer (the standalone
+  // hook flow never registers one) must wait out the producer grace instead of
+  // releasing as settled — otherwise the first worker exits, nothing respawns
+  // it after the grace converts absent→no-op, and deferred actions (spawn-next
+  // chain enqueue) stall until an unrelated SessionStart reconcile.
   const awaitingProducerGrace = Date.now() < Date.parse(job.producerGraceExpiresAt)
     && (job.producers.core.state === 'prepared'
-      || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state)));
+      || (job.producers.core.state === 'absent' && ['sealed', 'no-op'].includes(job.producers.wiki.state))
+      || job.producers.wiki.state === 'absent');
   if (!awaitingProducerGrace && retryableAttempts.length === 0 && !hasPendingAction) return;
   const delay = awaitingProducerGrace
     ? Math.max(1, Date.parse(job.producerGraceExpiresAt) - Date.now())
@@ -89,7 +104,7 @@ function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnTy
 }
 
 export async function processSessionEndWorker(payload: SessionEndWorkerPayload): Promise<void> {
-  const deadlineAt = Date.now() + MAX_WORKER_MS; const nonce = randomUUID(); const identity = await getProcessStartIdentity(process.pid, Math.min(deadlineAt, Date.now() + 250));
+  const deadlineAt = Date.now() + MAX_WORKER_MS; const nonce = randomUUID(); const identity = await getProcessStartIdentity(process.pid, Math.min(deadlineAt, Date.now() + 2_500));
   if (!identity) return;
   let claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
   if (!claimed) { await reapIfProvenStale(payload, deadlineAt); claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt); }

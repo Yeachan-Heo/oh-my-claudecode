@@ -162,9 +162,17 @@ function quoteForCmd(arg: string): string {
  * The -p prompt goes through stdin on Windows: cmd.exe's ANSI codepage
  * mangles non-ASCII argv (dogfood: Chinese intent prompts mojibake'd),
  * while the stdin pipe stays UTF-8 end to end.
+ *
+ * detached:true is win32-hostile here (dogfood bisect: cmd.exe children
+ * spawned detached exit 1 before writing a transcript), so it is only
+ * applied off-win32. Orphaning still holds: Windows children survive
+ * parent exit without the detached flag.
  */
 export function defaultSpawnFn(command: string, args: string[], ctx?: SpawnContext): { unref(): void } {
-  const baseOpts: SpawnOptions = { detached: true, windowsHide: true, cwd: ctx?.cwd };
+  const baseOpts: SpawnOptions =
+    process.platform === 'win32'
+      ? { windowsHide: true, cwd: ctx?.cwd }
+      : { detached: true, windowsHide: true, cwd: ctx?.cwd };
   if (process.platform === 'win32' && command === 'claude') {
     const pIdx = args.indexOf('-p');
     const inlinePrompt = pIdx !== -1 && pIdx + 1 < args.length ? args[pIdx + 1] : undefined;

@@ -195,8 +195,21 @@ export function prepareCoreManifest(directory: string, sessionId: string, payloa
     const result = withLock(jobPath, () => {
       const existing = readPath(jobPath);
       if (existing) {
-        if (existing.phase === 'complete' || existing.producers.core.state !== 'absent') return existing;
+        if (existing.phase === 'complete') return existing;
+        // Coexistence: a manifest created by an older OMC build (e.g. a plugin
+        // install predating this version) carries a stale action list. Seed any
+        // actions this build knows that the manifest lacks — otherwise new
+        // deferred actions (spawn-next chain enqueue) are silently dropped and
+        // the chain halts despite a recorded 'enqueued' decision.
+        const missing = ACTIONS.filter(([name]) => !(name in existing.actions));
+        if (existing.producers.core.state !== 'absent') {
+          if (missing.length === 0) return existing;
+          const next: SessionEndJobV1 = { ...existing, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
+          for (const [name, klass] of missing) next.actions[name] = newAction(name, klass, durablePayload);
+          atomicWriteJsonSync(jobPath, next); const reread = readPath(jobPath); if (!reread || reread.revision !== next.revision) throw new Error('session-end-manifest-reread-mismatch'); return reread;
+        }
         const next = { ...existing, producers: { ...existing.producers, core: { state: 'prepared' as const, intentKey: digest(durablePayload), payloadDigest: digest(durablePayload) } }, actions: { ...existing.actions }, revision: existing.revision + 1, updatedAt: nowIso() };
+        for (const [name, klass] of missing) next.actions[name] = newAction(name, klass, durablePayload);
         for (const [name, action] of Object.entries(next.actions)) if (name !== 'wiki-capture') action.payload = durablePayload;
         atomicWriteJsonSync(jobPath, next); const reread = readPath(jobPath); if (!reread || reread.revision !== next.revision) throw new Error('session-end-manifest-reread-mismatch'); return reread;
       }
