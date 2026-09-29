@@ -36,6 +36,9 @@ const WHITELIST_FILES = new Set([
   'scripts/pre-tool-enforcer.mjs',
   'scripts/skill-injector.mjs',
   'scripts/session-start.mjs',
+  'scripts/code-simplifier.mjs',
+  // Hook templates (shipped in distribution, own resolver pre-dist)
+  'templates/hooks/code-simplifier.mjs',
   // Multi-repo test fixtures and audits (construct fake .omc trees)
   'scripts/smoke-multirepo.mjs',
   'scripts/audit-multirepo-e2e.mjs',

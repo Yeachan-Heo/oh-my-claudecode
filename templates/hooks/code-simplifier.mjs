@@ -6,7 +6,9 @@
  * Intercepts Stop events to automatically delegate recently modified source files
  * to the code-simplifier agent for cleanup and simplification.
  *
- * Opt-in via ~/.omc/config.json: { "codeSimplifier": { "enabled": true } }
+ * Opt-in via the global OMC config.json: { "codeSimplifier": { "enabled": true } }
+ * ($OMC_HOME/config.json, else ${XDG_CONFIG_HOME:-~/.config}/omc/config.json on
+ * Linux/Unix, with legacy ~/.omc/config.json as the fallback)
  * Default: disabled (must explicitly opt in)
  */
 
@@ -46,8 +48,28 @@ function readJsonFile(filePath) {
   }
 }
 
+// Mirrors src/utils/paths.ts:getGlobalOmcConfigCandidates('config.json'):
+// OMC_HOME alone when set; otherwise the XDG config root on Linux/Unix, then
+// the legacy ~/.omc fallback. The first file that exists wins.
+function getGlobalOmcConfigCandidates() {
+  const explicitRoot = process.env.OMC_HOME?.trim();
+  if (explicitRoot) return [join(explicitRoot, 'config.json')];
+
+  const home = process.platform === 'win32'
+    ? process.env.USERPROFILE || process.env.HOME || homedir()
+    : process.env.HOME || homedir();
+  const legacy = join(home, '.omc', 'config.json');
+  if (process.platform === 'win32' || process.platform === 'darwin') return [legacy];
+
+  const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+  return [...new Set([join(configHome, 'omc', 'config.json'), legacy])];
+}
+
 function readOmcConfig() {
-  return readJsonFile(join(homedir(), '.omc', 'config.json'));
+  for (const configPath of getGlobalOmcConfigCandidates()) {
+    if (existsSync(configPath)) return readJsonFile(configPath);
+  }
+  return null;
 }
 
 function isEnabled(config) {
