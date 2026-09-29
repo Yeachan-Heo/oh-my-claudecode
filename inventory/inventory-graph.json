@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "9ee6c3bc38d58130b4ec28f35b0087fb1207f026",
-    "sourceSha256": "649631256c4cfb503a37691999106be700bf2f3c56cad7cded0b3081abf7af5a",
+    "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
+    "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "9ee6c3bc38d58130b4ec28f35b0087fb1207f026",
-  "sourceSha256": "649631256c4cfb503a37691999106be700bf2f3c56cad7cded0b3081abf7af5a",
+  "head": "67c0855c553b1cd84973df64a40bbcafcabda641",
+  "sourceSha256": "6fb96ed06584e6ae9e26645473082afa18f0b522549310b86410456503cc8899",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 327,
+      "hookFiles": 328,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1412,
-      "total": 1435
+      "srcFiles": 1413,
+      "total": 1436
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 327,
+    "hookFiles": 328,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -385,6 +385,7 @@
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
       "src/hooks/rules-injector/index.ts",
+      "src/hooks/rules-injector/matcher.test.ts",
       "src/hooks/rules-injector/matcher.ts",
       "src/hooks/rules-injector/parser.test.ts",
       "src/hooks/rules-injector/parser.ts",
@@ -6204,6 +6205,7 @@
       "src/hooks/rules-injector/finder.test.ts",
       "src/hooks/rules-injector/finder.ts",
       "src/hooks/rules-injector/index.ts",
+      "src/hooks/rules-injector/matcher.test.ts",
       "src/hooks/rules-injector/matcher.ts",
       "src/hooks/rules-injector/parser.test.ts",
       "src/hooks/rules-injector/parser.ts",
@@ -38552,6 +38554,11 @@
         "path": "src/hooks/rules-injector/index.ts"
       },
       {
+        "id": "src/hooks/rules-injector/matcher.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/rules-injector/matcher.test.ts"
+      },
+      {
         "id": "src/hooks/rules-injector/matcher.ts",
         "kind": "hook",
         "path": "src/hooks/rules-injector/matcher.ts"
@@ -63739,6 +63746,16 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/rules-injector/matcher.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/rules-injector/matcher.test.ts",
+        "to": "src/hooks/rules-injector/matcher.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/rules-injector/matcher.ts",
         "to": "external:crypto",
         "kind": "imports"
@@ -82555,12 +82572,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7119,
-      "edgeCount": 8086,
-      "importEdgeCount": 6674,
+      "nodeCount": 7120,
+      "edgeCount": 8088,
+      "importEdgeCount": 6676,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "6dfb2a24b1a5bc715dea5fb5b87798745fa02e9ef7c3010ac0a30d1d14c8bdd7",
-  "manifestSha256": "c1b9efbc53c2c82b05006cc912e4b23fc9880c18b6e74b763b876bdb0aefe523"
+  "inventorySha256": "5ef33959a4749836cfea3cda79ea4567a2e19aaf7d451a41ab76d581d9af52c2",
+  "manifestSha256": "ab57357af0e9d4186ec18cf29814b8a72535835b0b51c118e4d059ed8a65cd62"
 }
