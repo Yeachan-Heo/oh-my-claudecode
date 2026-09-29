@@ -13,7 +13,7 @@
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { existsSync, readdirSync } from 'fs';
+import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -222,5 +222,66 @@ describe('Contract 8: hook commands reference existing template files', () => {
         `Ensure all referenced hook scripts exist in templates/hooks/.`
       );
     }
+  });
+});
+
+// ── Contract 9: no cmd-style %VAR% in generated hook commands (B2 hook-template-var)
+//
+// Live-fire evidence (2026-09-29): a hook command using cmd-style
+// `%CLAUDE_PROJECT_DIR%` fired 0/3 while the absolute-path form fired 3/3 —
+// Claude Code does not variable-expand cmd-style %VAR% in hook command
+// strings, so `node "%CLAUDE_PROJECT_DIR%/..."` silently fails to find the
+// script. Generated commands must either use concrete paths (Windows) or
+// POSIX sh-style expansion ($HOME / ${CLAUDE_CONFIG_DIR:-...}) — never %VAR%.
+
+describe('Contract 9: hook commands contain no cmd-style %VAR% (B2 hook-template-var)', () => {
+  const cmdVarPattern = /%[A-Za-z_][A-Za-z0-9_]*%/;
+
+  async function collectCommands(platform: NodeJS.Platform): Promise<string[]> {
+    Object.defineProperty(process, 'platform', { value: platform });
+    delete process.env.CLAUDE_CONFIG_DIR;
+    vi.resetModules();
+
+    const { getHooksSettingsConfig } = await import('../../installer/hooks.js');
+    const config = getHooksSettingsConfig();
+
+    const commands: string[] = [];
+    for (const eventHooks of Object.values(config.hooks)) {
+      for (const hookGroup of eventHooks as Array<{ hooks: Array<{ command: string }> }>) {
+        for (const hook of hookGroup.hooks) {
+          commands.push(hook.command);
+        }
+      }
+    }
+    return commands;
+  }
+
+  function expectNoCmdStyleVars(commands: string[], platform: NodeJS.Platform): void {
+    expect(commands.length).toBeGreaterThan(0);
+    const violations = commands.filter((cmd) => cmdVarPattern.test(cmd));
+    if (violations.length > 0) {
+      expect.fail(
+        `Found cmd-style %VAR% references in ${platform} hook commands:\n` +
+        violations.map(c => `  ${c}`).join('\n') +
+        `\n\nClaude Code does not expand cmd-style %VAR% in hook command strings; ` +
+        `they silently fail. Use concrete paths or POSIX sh-style expansion instead.`
+      );
+    }
+  }
+
+  it('Windows default config: no command contains cmd-style %VAR%', async () => {
+    expectNoCmdStyleVars(await collectCommands('win32'), 'win32');
+  });
+
+  it('POSIX default config: no command contains cmd-style %VAR%', async () => {
+    expectNoCmdStyleVars(await collectCommands('linux'), 'linux');
+  });
+
+  it('standalone forwarder template (templates/hooks/session-end.mjs) contains no cmd-style %VAR%', () => {
+    const templatePath = join(REPO_ROOT, 'templates', 'hooks', 'session-end.mjs');
+    expect(existsSync(templatePath)).toBe(true);
+
+    const source = readFileSync(templatePath, 'utf8');
+    expect(source).not.toMatch(cmdVarPattern);
   });
 });
