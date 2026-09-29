@@ -145,9 +145,30 @@ function fileIdentity(path) {
   } catch { return null; }
 }
 
+/**
+ * Compare two file identities for equality.
+ * On Windows, Node returns real volume serial from fstat but 0 from lstat/stat,
+ * so we compare dev only when NOT on Windows OR both dev values are non-zero.
+ * Inode comparison is always performed.
+ */
+function sameFileIdentity(a, b) {
+  // Always compare inode
+  if (a.ino !== b.ino) return false;
+  
+  // On Windows, lstat returns dev=0, so skip dev comparison when on Windows
+  // unless both are non-zero (indicating a real comparison is possible)
+  const isWindows = process.platform === 'win32';
+  if (isWindows && (a.dev === 0 || b.dev === 0)) {
+    return true; // Skip dev comparison on Windows when either is 0
+  }
+  
+  // On POSIX or when both dev values are non-zero, require dev match
+  return a.dev === b.dev;
+}
+
 function sameFile(path, expected) {
   const actual = fileIdentity(path);
-  return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
+  return actual !== null && sameFileIdentity(actual, expected);
 }
 
 function reconcileEmergencyPublicationTemps(filePath, authorizeState) {

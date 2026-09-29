@@ -20,7 +20,7 @@ import {
   listSessionIds,
 } from './worktree-paths.js';
 import { getProcessStartIdentitySync } from '../platform/process-utils.js';
-import { atomicWriteJsonSync } from './atomic-write.js';
+import { atomicWriteJsonSync, sameFileIdentity } from './atomic-write.js';
 import { observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
 
 /**
@@ -1088,9 +1088,8 @@ function fileIdentity(path: string): FileIdentity | null {
   } catch { return null; }
 }
 
-function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
-  return left.dev === right.dev && left.ino === right.ino;
-}
+// sameFileIdentity is imported from atomic-write.js and handles Windows dev=0 quirk
+// Do not redefine it locally
 
 function captureStateFile(path: string): CapturedStateFile | null {
   try {
@@ -1146,7 +1145,7 @@ function replaceGenerationForTest(path: string): void {
 
 function sameFile(path: string, expected: FileIdentity): boolean {
   const actual = fileIdentity(path);
-  return actual !== null && actual.dev === expected.dev && actual.ino === expected.ino;
+  return actual !== null && sameFileIdentity(actual, expected);
 }
 
 function reconcileEmergencyPublicationTemps(filePath: string, authorizeState?: EmergencyStateAuthorization): boolean {

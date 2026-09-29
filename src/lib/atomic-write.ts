@@ -88,7 +88,7 @@ function verifyPrivateTempFile(
       `${label} temporary file must be a private regular single-link file`,
     );
   }
-  if (fdStats.dev !== pathStats.dev || fdStats.ino !== pathStats.ino) {
+  if (!sameFileIdentity(fdStats as FileIdentity, pathStats as FileIdentity)) {
     throw new Error(`${label} temporary file was replaced before rename`);
   }
 }
@@ -104,8 +104,7 @@ function verifyPublishedFile(fd: number, filePath: string, label: string, operat
   }
   if (
     !pathStats.isFile() ||
-    fdStats.dev !== pathStats.dev ||
-    fdStats.ino !== pathStats.ino
+    !sameFileIdentity(fdStats as FileIdentity, pathStats as FileIdentity)
   ) {
     throw new Error(`${label} target was replaced at publication`);
   }
@@ -144,9 +143,30 @@ function preservePriorTarget(filePath: string, operations?: AtomicWriteOperation
 }
 
 /** Restore the prior target without exposing a partially written generation. */
-interface FileIdentity {
+export interface FileIdentity {
   readonly dev: number;
   readonly ino: number;
+}
+
+/**
+ * Compare two file identities for equality.
+ * On Windows, Node returns real volume serial from fstat but 0 from lstat/stat,
+ * so we compare dev only when NOT on Windows OR both dev values are non-zero.
+ * Inode comparison is always performed.
+ */
+export function sameFileIdentity(a: FileIdentity, b: FileIdentity): boolean {
+  // Always compare inode
+  if (a.ino !== b.ino) return false;
+  
+  // On Windows, lstat returns dev=0, so skip dev comparison when on Windows
+  // unless both are non-zero (indicating a real comparison is possible)
+  const isWindows = process.platform === "win32";
+  if (isWindows && (a.dev === 0 || b.dev === 0)) {
+    return true; // Skip dev comparison on Windows when either is 0
+  }
+  
+  // On POSIX or when both dev values are non-zero, require dev match
+  return a.dev === b.dev;
 }
 
 function currentFileIdentity(filePath: string, operations?: AtomicWriteOperations): FileIdentity | null {
@@ -179,7 +199,7 @@ function rollbackPriorTarget(
   const current = currentFileIdentity(filePath, operations);
   if (current === null) return;
   if (expectedIdentity !== null &&
-    (current.dev !== expectedIdentity.dev || current.ino !== expectedIdentity.ino)) {
+    !sameFileIdentity(current, expectedIdentity)) {
     return;
   }
   try {
@@ -454,6 +474,12 @@ export interface AtomicBatchWrite {
 
 const ATOMIC_BATCH_MAX_WRITES = 64;
 const ATOMIC_BATCH_MAX_CONTENT_BYTES = 1024 * 1024;
+
+/**
+ * Exported for use in other state management functions.
+ * Shared file identity comparison that handles Windows dev=0 quirk.
+ */
+// Already exported via sameFileIdentity function above
 
 export function atomicWriteBatchSync(
   writes: AtomicBatchWrite[],
