@@ -45,11 +45,14 @@ function readDecisions(directory: string): Array<Record<string, unknown>> {
 }
 
 describe('sessionEndOutcome', () => {
-  it('maps a clean exit to success and everything else to failed', () => {
+  it('maps a clean exit or a headless completion to success and everything else to failed', () => {
     expect(sessionEndOutcome('prompt_input_exit')).toBe('success');
     expect(sessionEndOutcome('logout')).toBe('success');
+    // Headless runs that complete normally report 'other'.
+    expect(sessionEndOutcome('other')).toBe('success');
     expect(sessionEndOutcome('clear')).toBe('failed');
-    expect(sessionEndOutcome('other')).toBe('failed');
+    // Fail-closed: unknown reasons halt the chain.
+    expect(sessionEndOutcome('crash')).toBe('failed');
   });
 });
 
@@ -103,12 +106,21 @@ describe('planChainEnqueue', () => {
     expect(planChainEnqueue(dir, 'sess-a', 'prompt_input_exit')?.routeTable).toEqual({ 'success:*': { stage: 'ledger', skill: 'ledger' } });
   });
 
+  it('a headless completion (reason other) routes as success and enqueues the chain', () => {
+    const dir = tempDir();
+    writeLedger(dir, 'sess-a', { intentId: 'intent-a' });
+    writeProjectRoutes(dir, { 'success:*': { stage: 'spec', skill: 'spec' } });
+    const chain = planChainEnqueue(dir, 'sess-a', 'other');
+    expect(chain).toMatchObject({ outcome: 'success', reason: 'other', sessionId: 'sess-a', intentId: 'intent-a' });
+    expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'enqueued', stage: 'spec' });
+  });
+
   it('a failed exit with no route halts the chain and leaves a stop marker', () => {
     const dir = tempDir();
     writeLedger(dir, 'sess-a', { intentId: 'intent-a' });
-    expect(planChainEnqueue(dir, 'sess-a', 'other')).toBeNull();
+    expect(planChainEnqueue(dir, 'sess-a', 'clear')).toBeNull();
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'no-route', outcome: 'failed' });
-    expect(readChainStopMarker('intent-a', factoryStateDir(dir))).toMatchObject({ intentId: 'intent-a', reason: 'session-end:other' });
+    expect(readChainStopMarker('intent-a', factoryStateDir(dir))).toMatchObject({ intentId: 'intent-a', reason: 'session-end:clear' });
   });
 
   it('a clean exit with no route simply ends the chain without a stop marker', () => {
@@ -198,11 +210,11 @@ describe('planChainEnqueue', () => {
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'invalid-ledger' });
 
     const failedDir = tempDir();
-    writeLedger(failedDir, 'sess-a', { intentId: 'intent-a', routeTable: { 'failed:*': { stage: 'spec', skill: 'x".y' } } });
-    expect(planChainEnqueue(failedDir, 'sess-a', 'other')).toBeNull();
+    writeLedger(failedDir, 'sess-a', { intentId: 'intent-a', routeTable: { 'failed:clear': { stage: 'spec', skill: 'x".y' } } });
+    expect(planChainEnqueue(failedDir, 'sess-a', 'clear')).toBeNull();
     expect(readDecisions(failedDir).at(-1)).toMatchObject({ decision: 'invalid-ledger' });
     // failed outcome leaves a halt marker inside the factory dir only.
-    expect(readChainStopMarker('intent-a', factoryStateDir(failedDir))).toMatchObject({ reason: 'invalid-ledger:other' });
+    expect(readChainStopMarker('intent-a', factoryStateDir(failedDir))).toMatchObject({ reason: 'invalid-ledger:clear' });
   });
 
   it('a terminal route (skill stop) halts the chain without enqueueing', () => {
@@ -217,10 +229,10 @@ describe('planChainEnqueue', () => {
     const dir = tempDir();
     writeLedger(dir, 'sess-a', {
       intentId: 'intent-a',
-      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      routeTable: { 'failed:clear': { stage: 'spec', skill: 'spec' } },
       visits: { spec: 2 },
     });
-    expect(planChainEnqueue(dir, 'sess-a', 'other')).toBeNull();
+    expect(planChainEnqueue(dir, 'sess-a', 'clear')).toBeNull();
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'chain-loop-capped', stage: 'spec', visits: 2, cap: 2 });
     expect(readChainStopMarker('intent-a', factoryStateDir(dir))).toMatchObject({ reason: 'loop-capped:spec' });
   });
@@ -229,11 +241,11 @@ describe('planChainEnqueue', () => {
     const dir = tempDir();
     writeLedger(dir, 'sess-a', {
       intentId: 'intent-a',
-      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      routeTable: { 'failed:clear': { stage: 'spec', skill: 'spec' } },
       visits: { spec: 1 },
       maxStageVisits: 3,
     });
-    const chain = planChainEnqueue(dir, 'sess-a', 'other');
+    const chain = planChainEnqueue(dir, 'sess-a', 'clear');
     expect(chain).not.toBeNull();
     expect(chain?.visits).toEqual({ spec: 1 });
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'enqueued', stage: 'spec' });
@@ -243,11 +255,11 @@ describe('planChainEnqueue', () => {
     const dir = tempDir();
     writeLedger(dir, 'sess-a', {
       intentId: 'intent-a',
-      routeTable: { 'failed:other': { stage: 'spec', skill: 'spec' } },
+      routeTable: { 'failed:clear': { stage: 'spec', skill: 'spec' } },
       visits: { spec: 2 },
       maxStageVisits: 0,
     });
-    expect(planChainEnqueue(dir, 'sess-a', 'other')).toBeNull();
+    expect(planChainEnqueue(dir, 'sess-a', 'clear')).toBeNull();
     expect(readDecisions(dir).at(-1)).toMatchObject({ decision: 'chain-loop-capped', cap: 2 });
   });
 });
