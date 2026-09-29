@@ -9,7 +9,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   loadInjectedPaths,
   saveInjectedPaths,
@@ -81,6 +81,16 @@ export function createDirectoryReadmeInjectorHook(workingDirectory: string) {
   }
 
   /**
+   * True when `dir` is the working directory or lies under it. A plain
+   * string-prefix test would also accept a sibling such as `app-legacy`
+   * for a working directory of `app`.
+   */
+  function isWithinWorkingDirectory(dir: string): boolean {
+    const rel = relative(workingDirectory, dir);
+    return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+  }
+
+  /**
    * Find context files (README.md, AGENTS.md) by walking up the directory tree.
    * Returns paths in order from root to leaf.
    */
@@ -103,7 +113,7 @@ export function createDirectoryReadmeInjectorHook(workingDirectory: string) {
       // Stop at filesystem root
       if (parent === current) break;
       // Stop if we've gone outside the working directory
-      if (!parent.startsWith(workingDirectory)) break;
+      if (!isWithinWorkingDirectory(parent)) break;
 
       current = parent;
     }

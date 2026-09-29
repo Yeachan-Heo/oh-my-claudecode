@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, sep } from 'path';
 import { tmpdir } from 'os';
 import { createDirectoryReadmeInjectorHook } from '../hooks/directory-readme-injector/index.js';
 import {
@@ -118,6 +118,58 @@ describe('Directory Context Injector - AGENTS.md support (issue #613)', () => {
       // Root should come before src
       expect(agentsFiles[0]).toContain(join(testDir, 'AGENTS.md'));
       expect(agentsFiles[1]).toContain(join(testDir, 'src', 'AGENTS.md'));
+    });
+  });
+
+  describe('working directory boundary', () => {
+    it('does not walk into a sibling directory that shares the working directory name as a prefix', () => {
+      const cwd = join(testDir, 'app');
+      const sibling = join(testDir, 'app-legacy');
+      mkdirSync(join(cwd, 'src'), { recursive: true });
+      mkdirSync(join(sibling, 'src'), { recursive: true });
+      writeFileSync(join(sibling, 'README.md'), '# Sibling project README');
+      writeFileSync(join(sibling, 'src', 'a.ts'), 'export {};');
+
+      const hook = createDirectoryReadmeInjectorHook(cwd);
+      const filePath = join(sibling, 'src', 'a.ts');
+
+      expect(hook.getContextFilesForFile(filePath)).not.toContain(join(sibling, 'README.md'));
+      expect(hook.processToolExecution('read', filePath, sessionId)).not.toContain('Sibling project README');
+    });
+
+    it('does not walk above the working directory from a file outside it', () => {
+      const cwd = join(testDir, 'app');
+      mkdirSync(cwd, { recursive: true });
+      mkdirSync(join(testDir, 'other'), { recursive: true });
+      writeFileSync(join(testDir, 'README.md'), '# Parent README');
+      writeFileSync(join(testDir, 'other', 'a.ts'), 'export {};');
+
+      const hook = createDirectoryReadmeInjectorHook(cwd);
+      const files = hook.getContextFilesForFile(join(testDir, 'other', 'a.ts'));
+
+      expect(files).not.toContain(join(testDir, 'README.md'));
+    });
+
+    it('still reaches the root when the working directory has a trailing separator', () => {
+      mkdirSync(join(testDir, 'src'), { recursive: true });
+      writeFileSync(join(testDir, 'AGENTS.md'), '# Root');
+      writeFileSync(join(testDir, 'src', 'index.ts'), 'export {};');
+
+      const hook = createDirectoryReadmeInjectorHook(`${testDir}${sep}`);
+      const files = hook.getContextFilesForFile(join(testDir, 'src', 'index.ts'));
+
+      expect(files).toContain(join(testDir, 'AGENTS.md'));
+    });
+
+    it('keeps walking through a directory whose name starts with two dots', () => {
+      mkdirSync(join(testDir, '..cache', 'sub'), { recursive: true });
+      writeFileSync(join(testDir, 'AGENTS.md'), '# Root');
+      writeFileSync(join(testDir, '..cache', 'sub', 'index.ts'), 'export {};');
+
+      const hook = createDirectoryReadmeInjectorHook(testDir);
+      const files = hook.getContextFilesForFile(join(testDir, '..cache', 'sub', 'index.ts'));
+
+      expect(files).toContain(join(testDir, 'AGENTS.md'));
     });
   });
 
