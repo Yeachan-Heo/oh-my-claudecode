@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "506206046ccda9c8ed3e0e2361c6cd6a17845d58",
-    "sourceSha256": "5b626ddcab0b6ec92967a0c5ace6f9755a9bcf3982367af2dfb65e66b25fdf99",
+    "head": "928720086fd4c03ffc51d94f04ab065abba37250",
+    "sourceSha256": "139ee40ef8e80e9f1e3eb08109974d9ec4b6d8bed55a1eb0c540349ed91245ee",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "506206046ccda9c8ed3e0e2361c6cd6a17845d58",
-  "sourceSha256": "5b626ddcab0b6ec92967a0c5ace6f9755a9bcf3982367af2dfb65e66b25fdf99",
+  "head": "928720086fd4c03ffc51d94f04ab065abba37250",
+  "sourceSha256": "139ee40ef8e80e9f1e3eb08109974d9ec4b6d8bed55a1eb0c540349ed91245ee",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 331,
+      "hookFiles": 333,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1418,
-      "total": 1441
+      "srcFiles": 1422,
+      "total": 1445
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 331,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -396,6 +396,7 @@
       "src/hooks/session-end/__tests__/action-runner.test.ts",
       "src/hooks/session-end/__tests__/callbacks.test.ts",
       "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+      "src/hooks/session-end/__tests__/check-evidence.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
@@ -416,6 +417,7 @@
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/chain-enqueuer.ts",
+      "src/hooks/session-end/check-evidence.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -6219,6 +6221,7 @@
       "src/hooks/session-end/__tests__/action-runner.test.ts",
       "src/hooks/session-end/__tests__/callbacks.test.ts",
       "src/hooks/session-end/__tests__/chain-enqueuer.test.ts",
+      "src/hooks/session-end/__tests__/check-evidence.test.ts",
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
@@ -6239,6 +6242,7 @@
       "src/hooks/session-end/action-watchdog.ts",
       "src/hooks/session-end/callbacks.ts",
       "src/hooks/session-end/chain-enqueuer.ts",
+      "src/hooks/session-end/check-evidence.ts",
       "src/hooks/session-end/cleanup-manifest.ts",
       "src/hooks/session-end/foreground-bootstrap.ts",
       "src/hooks/session-end/guardrails.ts",
@@ -36550,6 +36554,11 @@
         "path": "src/cli/commands/__tests__/doctor-team-routing.test.ts"
       },
       {
+        "id": "src/cli/commands/__tests__/factory-init.test.ts",
+        "kind": "src",
+        "path": "src/cli/commands/__tests__/factory-init.test.ts"
+      },
+      {
         "id": "src/cli/commands/__tests__/intake.test.ts",
         "kind": "src",
         "path": "src/cli/commands/__tests__/intake.test.ts"
@@ -36753,6 +36762,11 @@
         "id": "src/constants/names.ts",
         "kind": "src",
         "path": "src/constants/names.ts"
+      },
+      {
+        "id": "src/factory/__tests__/check-run.test.ts",
+        "kind": "src",
+        "path": "src/factory/__tests__/check-run.test.ts"
       },
       {
         "id": "src/factory/__tests__/listener.test.ts",
@@ -38625,6 +38639,11 @@
         "path": "src/hooks/session-end/__tests__/chain-enqueuer.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/check-evidence.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts"
@@ -38723,6 +38742,11 @@
         "id": "src/hooks/session-end/chain-enqueuer.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/chain-enqueuer.ts"
+      },
+      {
+        "id": "src/hooks/session-end/check-evidence.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/check-evidence.ts"
       },
       {
         "id": "src/hooks/session-end/cleanup-manifest.ts",
@@ -53657,6 +53681,41 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "src/cli/commands/factory.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-init.test.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/commands/__tests__/intake.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -53913,12 +53972,27 @@
       },
       {
         "from": "src/cli/commands/factory.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/factory.ts",
         "to": "external:path",
         "kind": "imports"
       },
       {
         "from": "src/cli/commands/factory.ts",
         "to": "src/factory/listener.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/factory.ts",
+        "to": "src/hooks/session-end/routing.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/cli/commands/factory.ts",
+        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -54860,6 +54934,51 @@
         "from": "src/constants/index.ts",
         "to": "src/constants/names.ts",
         "kind": "type-exports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "src/factory/listener.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "src/factory/listener.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/factory/__tests__/check-run.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
       },
       {
         "from": "src/factory/__tests__/listener.test.ts",
@@ -64042,6 +64161,41 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "src/hooks/session-end/chain-enqueuer.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/check-evidence.test.ts",
+        "to": "src/hooks/session-end/check-evidence.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -64683,6 +64837,11 @@
       },
       {
         "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/hooks/session-end/check-evidence.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/chain-enqueuer.ts",
         "to": "src/hooks/session-end/guardrails.ts",
         "kind": "imports"
       },
@@ -64708,6 +64867,21 @@
       },
       {
         "from": "src/hooks/session-end/chain-enqueuer.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/check-evidence.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/check-evidence.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/check-evidence.ts",
         "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
@@ -82773,12 +82947,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7125,
-      "edgeCount": 8122,
-      "importEdgeCount": 6710,
+      "nodeCount": 7129,
+      "edgeCount": 8152,
+      "importEdgeCount": 6738,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "0c2f6ff7113e72785fde318cb73f437bae2357143526fa6aa7742eb9673f811b",
-  "manifestSha256": "980d0bf0c829014ced04c0727780b9eb885807b146a4528b14980d2972a68e48"
+  "inventorySha256": "ee4fe06e5cc373ae59a1fd8c7d9f95ede10aa025b48f3a5dc4a49f40ae136321",
+  "manifestSha256": "271112b726c0df48d91fdacc7da9ecb897d3e0da06a34eaa52a264008785f21a"
 }
