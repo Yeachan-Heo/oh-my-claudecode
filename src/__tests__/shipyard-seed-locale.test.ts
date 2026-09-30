@@ -134,7 +134,7 @@ describe('shipyard document-language behavior contract', () => {
 
   it('infers only from unanimous high-confidence canonical sources', () => {
     const contract = documentLanguageContract();
-    expect(contract.authority).toEqual({ path: 'CONTEXT.md', frontmatterKey: 'documentLanguage' });
+    expect(contract.authority).toEqual({ path: 'GLOSSARY.md', frontmatterKey: 'documentLanguage' });
     expect(contract.canonicalSources).toEqual(['CLAUDE.md', 'README.md']);
     expect(resolveDocumentLanguage({
       sources: {
