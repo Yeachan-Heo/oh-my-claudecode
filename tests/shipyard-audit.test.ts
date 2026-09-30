@@ -46,7 +46,7 @@ function seedCleanYard(root: string): void {
     join(root, 'CLAUDE.md'),
     '# Project\n\n## Project conventions\n\n- conventions\n\n## Standards index\n\n- Architecture: docs/standards/architecture.md\n',
   );
-  writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+  writeFileSync(join(root, 'GLOSSARY.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
   writeFileSync(join(root, '.mcp.json'), '{"mcpServers": {}}\n');
   for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
     mkdirSync(join(root, dir), { recursive: true });
@@ -79,7 +79,7 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(report!.summary.verdict).toBe('review-recommended');
     const ids = report!.findings.map((f) => f.id);
     expect(ids).toContain('shipyard.surface.missing.CLAUDE-md');
-    expect(ids).toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(ids).toContain('shipyard.surface.missing.GLOSSARY-md');
   });
 
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
@@ -94,15 +94,15 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
   });
 
   it('reports a missing documentLanguage tag and an invalid tag distinctly', () => {
-    writeFileSync(join(yard, 'CONTEXT.md'), '# Glossary (no frontmatter)\n');
+    writeFileSync(join(yard, 'GLOSSARY.md'), '# Glossary (no frontmatter)\n');
     const { report } = runAudit(yard);
     expect(report!.findings.some((f) => f.id === 'shipyard.document-language.missing-frontmatter')).toBe(true);
 
-    writeFileSync(join(yard, 'CONTEXT.md'), '---\nnotLanguage: en\n---\n\n# Glossary\n');
+    writeFileSync(join(yard, 'GLOSSARY.md'), '---\nnotLanguage: en\n---\n\n# Glossary\n');
     const second = runAudit(yard);
     expect(second.report!.findings.some((f) => f.id === 'shipyard.document-language.missing-tag')).toBe(true);
 
-    writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
+    writeFileSync(join(yard, 'GLOSSARY.md'), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
     const third = runAudit(yard);
     expect(third.report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
   });

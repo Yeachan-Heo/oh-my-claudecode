@@ -28,7 +28,7 @@ const TAG_PATTERN = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$/
 
 const SURFACES = [
   'CLAUDE.md',
-  'CONTEXT.md',
+  'GLOSSARY.md',
   'docs/adr/',
   'docs/standards/',
   'docs/business/',
@@ -63,7 +63,7 @@ function checkSurfaces(root) {
 }
 
 function checkDocumentLanguage(root) {
-  const contextPath = join(root, 'CONTEXT.md');
+  const contextPath = join(root, 'GLOSSARY.md');
   if (!existsSync(contextPath)) return [];
   const content = readFileSync(contextPath, 'utf-8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -71,11 +71,11 @@ function checkDocumentLanguage(root) {
     return [
       finding(
         'shipyard.document-language.missing-frontmatter',
-        'CONTEXT.md has no YAML frontmatter',
+        'GLOSSARY.md has no YAML frontmatter',
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        ['GLOSSARY.md'],
         'Add frontmatter with a `documentLanguage` tag (see the drydock skill).',
       ),
     ];
@@ -85,11 +85,11 @@ function checkDocumentLanguage(root) {
     return [
       finding(
         'shipyard.document-language.missing-tag',
-        'CONTEXT.md frontmatter lacks a documentLanguage tag',
+        'GLOSSARY.md frontmatter lacks a documentLanguage tag',
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        ['GLOSSARY.md'],
         'Add `documentLanguage: <tag>` to the frontmatter.',
       ),
     ];

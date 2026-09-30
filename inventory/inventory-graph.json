@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "506206046ccda9c8ed3e0e2361c6cd6a17845d58",
-    "sourceSha256": "5b626ddcab0b6ec92967a0c5ace6f9755a9bcf3982367af2dfb65e66b25fdf99",
+    "head": "acae488fcce4870778c018b03e92122c984472c1",
+    "sourceSha256": "30d87b3433e1d4752ab514339da4fd13e84e3f5419c97872adb264442e550d7d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "506206046ccda9c8ed3e0e2361c6cd6a17845d58",
-  "sourceSha256": "5b626ddcab0b6ec92967a0c5ace6f9755a9bcf3982367af2dfb65e66b25fdf99",
+  "head": "acae488fcce4870778c018b03e92122c984472c1",
+  "sourceSha256": "30d87b3433e1d4752ab514339da4fd13e84e3f5419c97872adb264442e550d7d",
   "counts": {
     "public": {
       "skills": 47,
@@ -6685,14 +6685,14 @@
         "path": "CLAUDE.md"
       },
       {
-        "id": "CONTEXT.md",
-        "kind": "other",
-        "path": "CONTEXT.md"
-      },
-      {
         "id": "CONTRIBUTING.md",
         "kind": "other",
         "path": "CONTRIBUTING.md"
+      },
+      {
+        "id": "GLOSSARY.md",
+        "kind": "other",
+        "path": "GLOSSARY.md"
       },
       {
         "id": "LICENSE",
@@ -32928,6 +32928,11 @@
         "id": "docs/design/CONSOLIDATION_PHASE3_ROADMAP.md",
         "kind": "other",
         "path": "docs/design/CONSOLIDATION_PHASE3_ROADMAP.md"
+      },
+      {
+        "id": "docs/design/FACTORY-FINAL-DESIGN.md",
+        "kind": "other",
+        "path": "docs/design/FACTORY-FINAL-DESIGN.md"
       },
       {
         "id": "docs/design/ISSUE-3698-LIGHTWEIGHT-WORKFLOW-PLAN.md",
@@ -82773,12 +82778,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7125,
+      "nodeCount": 7126,
       "edgeCount": 8122,
       "importEdgeCount": 6710,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "0c2f6ff7113e72785fde318cb73f437bae2357143526fa6aa7742eb9673f811b",
-  "manifestSha256": "980d0bf0c829014ced04c0727780b9eb885807b146a4528b14980d2972a68e48"
+  "inventorySha256": "fcf609ab7a430e0fc62b5959afdaf3434c8769703d07e1c1f4f88208c86b313d",
+  "manifestSha256": "7e831364169450dd514aa488622465461f6a0deae587f9fde190ec4678b6cbaa"
 }

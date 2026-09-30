@@ -160,7 +160,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
 
   it('launch carries the round-2 disciplines (comprehension reset, settled-consensus exit, planned handoff)', () => {
     expect(LAUNCH).toContain('**Comprehension reset.**');
-    expect(LAUNCH).toContain('the terms as `CONTEXT.md` defines them');
+    expect(LAUNCH).toContain('the terms as `GLOSSARY.md` defines them');
     expect(LAUNCH).toContain('**Settled-consensus exit.**');
     expect(LAUNCH).toContain('consensus audit');
     expect(LAUNCH).toContain('skipping the interview never skips a signature');
@@ -565,7 +565,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
     // strands lessons in no slot, so the rows are a text contract
     for (const row of [
       '| Lesson kind | Slot |',
-      '| terms and boundaries settled mid-run | `CONTEXT.md` glossary |',
+      '| terms and boundaries settled mid-run | `GLOSSARY.md` glossary |',
       '| checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |',
       '| most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |',
       '| hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |',
@@ -783,7 +783,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   function makeCleanRepo(): string {
     const root = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
     writeFileSync(join(root, 'CLAUDE.md'), '# Project\n');
-    writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    writeFileSync(join(root, 'GLOSSARY.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
     for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
       mkdirSync(join(root, dir), { recursive: true });
     }

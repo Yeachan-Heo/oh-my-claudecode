@@ -13,7 +13,7 @@ The four pillars and where they physically live:
 
 | Pillar | Surfaces |
 |---|---|
-| Context (shared background) | `CONTEXT.md` (glossary) + `docs/business/` + `docs/adr/` + OMC wiki |
+| Context (shared background) | `GLOSSARY.md` (glossary) + `docs/business/` + `docs/adr/` + OMC wiki |
 | Rules (boundaries) | `CLAUDE.md` (thin entry: conventions, principles, index) + `docs/standards/` |
 | Tools (composable capability) | `.omc/skills/` + `.mcp.json` + `scripts/` |
 | Standards (the classification society) | `design-system/` (tokens, components, patterns) + `docs/standards/` |
@@ -38,7 +38,7 @@ Metaphor map: the shipyard is the shared facility; the classification society (`
 Inventory what exists before writing anything:
 
 - `CLAUDE.md` present? `AGENTS.md` present? (rule: if either exists, extend it in place; create the missing one as a one-line pointer to the other; **never create both fresh**)
-- `CONTEXT.md`, `docs/adr/`, `docs/standards/`, `docs/business/`, `design-system/`, `.omc/skills/`, `.mcp.json`, `scripts/`, `.gitattributes` — which exist, which are missing?
+- `GLOSSARY.md`, `docs/adr/`, `docs/standards/`, `docs/business/`, `design-system/`, `.omc/skills/`, `.mcp.json`, `scripts/`, `.gitattributes` — which exist, which are missing?
 - OMC installed? — only worth checking when running inside an OMC session; outside one, skip this check silently (the harness works with or without OMC)
 
 Report the map first, then act.
@@ -51,14 +51,14 @@ The document language for the generated harness files is a file-backed decision,
 ```json
 {
   "schemaVersion": 1,
-  "authority": { "path": "CONTEXT.md", "frontmatterKey": "documentLanguage" },
+  "authority": { "path": "GLOSSARY.md", "frontmatterKey": "documentLanguage" },
   "canonicalSources": ["CLAUDE.md", "README.md"],
   "askOn": ["missing", "mixed", "conflict", "low-confidence", "invalid-explicit", "script-ambiguous"],
   "tagPattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$",
   "scriptVariants": ["zh-Hans", "zh-Hant"],
   "seedCompanionPrefixes": { "en": "en", "zh-Hans": "zh-Hans", "zh-Hant": "zh-Hant" },
   "stableTokens": [
-    "CONTEXT.md", "documentLanguage", "/oh-my-claudecode:launch", "--serial",
+    "GLOSSARY.md", "documentLanguage", "/oh-my-claudecode:launch", "--serial",
     "plan", "execute", "review", "verify", "blockedBy", "blocked_by",
     "pending", "in_progress", "completed", "failed", "ready-for-agent",
     "id", "name", "description", "triggers", "mcpServers", "```",
@@ -71,11 +71,11 @@ The document language for the generated harness files is a file-backed decision,
 Resolution order:
 
 1. An explicit human choice in the current invocation wins when valid. Normalize it to a stable BCP-47-style tag: lowercase language, Title-Case script, uppercase region. Invalid explicit input must be asked once rather than guessed.
-2. Otherwise, read `documentLanguage` from the YAML frontmatter at the top of `CONTEXT.md`. A valid, script-unambiguous tag is authoritative for fresh Drydock and Launch invocations. If the persisted tag is bare or region-only Chinese, ask once at this authority tier; never bypass it with source inference.
+2. Otherwise, read `documentLanguage` from the YAML frontmatter at the top of `GLOSSARY.md`. A valid, script-unambiguous tag is authoritative for fresh Drydock and Launch invocations. If the persisted tag is bare or region-only Chinese, ask once at this authority tier; never bypass it with source inference.
 3. If the marker is absent or invalid, inspect canonical sources in this order: `CLAUDE.md`, then `README.md`. Infer only when every usable source has one unambiguous dominant language and all usable sources agree on the same normalized tag. One unambiguous source is sufficient when the other is missing or empty.
-4. Chinese must resolve to an explicit script-qualified tag: `zh-Hans` or `zh-Hant` (optionally followed by a region). Bare `zh` and region-only Chinese tags are script-ambiguous and must be asked once rather than selecting a companion. Companion selection uses the longest language/script prefix: `zh-Hans-*` selects the `zh-Hans` companion and `zh-Hant-*` selects `zh-Hant`; preserve the full normalized tag (for example `zh-Hans-CN`) in `CONTEXT.md`.
+4. Chinese must resolve to an explicit script-qualified tag: `zh-Hans` or `zh-Hant` (optionally followed by a region). Bare `zh` and region-only Chinese tags are script-ambiguous and must be asked once rather than selecting a companion. Companion selection uses the longest language/script prefix: `zh-Hans-*` selects the `zh-Hans` companion and `zh-Hant-*` selects `zh-Hant`; preserve the full normalized tag (for example `zh-Hans-CN`) in `GLOSSARY.md`.
 5. Missing usable sources, mixed-language content, conflicting tags, low-confidence inference, invalid explicit input, or script-ambiguous Chinese must trigger one batched language question. Do not guess. If no answer is available, stop before writing localized artifacts.
-6. Before scaffolding, write the resolved tag to the exact stable frontmatter key `documentLanguage` in `CONTEXT.md` (creating or extending its frontmatter without translating the key). This visible file is the init report's language authority; no daemon, hidden ledger, or runtime state is created.
+6. Before scaffolding, write the resolved tag to the exact stable frontmatter key `documentLanguage` in `GLOSSARY.md` (creating or extending its frontmatter without translating the key). This visible file is the init report's language authority; no daemon, hidden ledger, or runtime state is created.
 
 Only prose and human-facing labels/localizable values follow the selected language; structural keys stay language-stable. Keep paths, slash commands, flags, code fences, placeholders, frontmatter keys and machine-semantic values, YAML/JSON keys, lifecycle tokens, status enums, IDs, `blockedBy`, public Team `blocked_by`, and parser/control tokens byte-for-byte stable.
 
