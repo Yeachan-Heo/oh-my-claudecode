@@ -27,7 +27,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from '
 import { join } from 'path';
 import type { Command } from 'commander';
 import { getSkillsDir } from '../../features/builtin-skills/skills.js';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
 import {
   baselinePath,
   diffAgainstBaseline,
@@ -38,7 +38,7 @@ import {
 } from '../../hooks/ralph/feedback-baseline.js';
 import { readPrd } from '../../hooks/ralph/prd.js';
 import { defaultSpawnFn, factoryLinkArgv } from '../../hooks/session-end/spawn-next.js';
-import { MAX_VERIFY_COMMANDS } from '../../hooks/session-end/routing.js';
+import { MAX_VERIFY_COMMANDS, MAX_VERIFY_COMMAND_LENGTH, VERIFY_COMMAND_PATTERN } from '../../hooks/session-end/routing.js';
 
 /** Read-only git commands ralph's stale-PRD detection and gitGrep checks need. */
 const RALPH_AFK_READONLY_GIT = ['git status', 'git log', 'git diff', 'git rev-parse', 'git show', 'git merge-base'];
@@ -58,6 +58,23 @@ const RALPH_AFK_READONLY_GIT = ['git status', 'git log', 'git diff', 'git rev-pa
  * attended-only; headless cost control is task sizing.
  */
 export const RALPH_AFK_SESSION_COMMANDS = ['Bash(omc ralph verify:*)'];
+
+/**
+ * Env var carrying the launcher's declared --verify list (JSON array) into the
+ * headless session. When present, `omc ralph verify` runs exactly these
+ * commands and ignores the PRD's feedbackCommands and package.json detection:
+ * the session can edit both with its file tools, so trusting them would turn
+ * the always-granted `omc ralph verify` entry into an arbitrary-shell escape
+ * from the allowlist.
+ */
+export const RALPH_AFK_FEEDBACK_ENV = 'OMC_RALPH_AFK_FEEDBACK';
+
+/** The declared --verify commands that pass the same boundary check as the allowlist. */
+export function afkFeedbackCommands(verifyCommands: readonly string[]): string[] {
+  return verifyCommands
+    .filter((command) => command.length <= MAX_VERIFY_COMMAND_LENGTH && VERIFY_COMMAND_PATTERN.test(command))
+    .slice(0, MAX_VERIFY_COMMANDS);
+}
 
 /** Args (command excluded) for one headless AFK ralph launch. */
 export function ralphAfkArgv(task: string, verifyCommands: readonly string[] = [], sessionId: string = randomUUID()): string[] {
@@ -134,6 +151,7 @@ Examples:
       // session names for the gate command (live smoke). Hand it over: the
       // Bash tool inherits this env, and `omc ralph verify` falls back to it.
       process.env.OMC_SESSION_ID = sessionId;
+      process.env[RALPH_AFK_FEEDBACK_ENV] = JSON.stringify(afkFeedbackCommands(options.verify ?? []));
       const argv = ralphAfkArgv(task, options.verify ?? [], sessionId);
       const child = defaultSpawnFn('claude', argv, { cwd: process.cwd() }) as { pid?: number; on?: (event: string, listener: (error: Error) => void) => void };
       if (typeof child.on === 'function') {
@@ -165,7 +183,8 @@ Examples:
   $ omc ralph verify --json               Machine-readable judgment
   $ omc ralph verify --session <id>       Judge another session's baseline
   Feedback commands come from the PRD's feedbackCommands, falling back to
-  package.json build/lint/test scripts. A missing baseline is not a failure:
+  package.json build/lint/test scripts. Inside an \`omc ralph afk\` session only
+  the launcher's declared --verify commands run. A missing baseline is not a failure:
   verify reports the current signatures as a baseline candidate and exits 0.`)
     .action((options: { json?: boolean; session?: string; writeBaseline?: boolean }) => {
       process.exitCode = ralphVerify(options);
@@ -174,8 +193,21 @@ Examples:
   return cmd;
 }
 
-/** Feedback commands for judgment: the PRD's declared list, else package-script detection. */
+/**
+ * Feedback commands for judgment. Inside an `omc ralph afk` session only the
+ * launcher-declared list counts; otherwise the PRD's declared list, else
+ * package-script detection.
+ */
 export function resolveFeedbackCommands(directory: string, sessionId?: string): string[] {
+  const afk = process.env[RALPH_AFK_FEEDBACK_ENV];
+  if (afk !== undefined) {
+    try {
+      const parsed: unknown = JSON.parse(afk);
+      return Array.isArray(parsed) ? afkFeedbackCommands(parsed.filter((c): c is string => typeof c === 'string')) : [];
+    } catch {
+      return [];
+    }
+  }
   const declared = readPrd(directory, sessionId)?.feedbackCommands;
   if (declared && declared.length > 0) return [...declared];
   try {
@@ -216,6 +248,14 @@ export function runFeedbackCommand(command: string, directory: string): CommandB
 export function ralphVerify(options: { json?: boolean; session?: string; writeBaseline?: boolean }, directory: string = process.cwd(), now: Date = new Date()): number {
   const stateRoot = getOmcRoot(directory);
   let sessionId = options.session ?? process.env.OMC_SESSION_ID ?? '';
+  if (sessionId) {
+    try {
+      validateSessionId(sessionId);
+    } catch (error) {
+      console.error(`omc ralph verify: ${error instanceof Error ? error.message : String(error)}`);
+      return 1;
+    }
+  }
   if (!sessionId) {
     // A run whose baseline was written without a session id is still findable
     // when exactly one exists; ambiguity is an error, not a guess.
