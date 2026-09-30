@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -10,7 +10,7 @@ vi.mock('../../hooks/session-end/spawn-next.js', async (importOriginal) => {
 });
 
 import { AFK_ALLOWED_TOOLS, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
-import { materializeRalphSkill, ralphAfkArgv, ralphCommand } from '../commands/ralph.js';
+import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
 import { Command } from 'commander';
 
 const tempRoots: string[] = [];
@@ -43,10 +43,13 @@ describe('ralphAfkArgv', () => {
   it('extends the AFK allowedTools with the read-only git set plus the declared verify commands', () => {
     const argv = ralphAfkArgv('task', ['npm test'], 'sess-x');
     const tools = argv[argv.indexOf('--allowedTools') + 1];
-    expect(tools).toBe(`${AFK_ALLOWED_TOOLS},Bash(git status),Bash(git log),Bash(git diff),Bash(git rev-parse),Bash(git show),Bash(git merge-base),Bash(npm test)`);
+    expect(tools).toBe(`${AFK_ALLOWED_TOOLS},Bash(git status),Bash(git log),Bash(git diff),Bash(git rev-parse),Bash(git show),Bash(git merge-base),Bash(npm test),${RALPH_AFK_SESSION_COMMANDS.join(',')}`);
     // The allowedTools value is replaced in place — no stray base-profile token.
     expect(argv).toHaveLength(4 + AFK_SPAWN_FLAGS.length);
     expect(argv).not.toContain(AFK_ALLOWED_TOOLS);
+    // The bridge MCP server does not register under isolated settings (verified
+    // live), so no mcp__t__ entries belong in the profile.
+    expect(tools).not.toContain('mcp__t__');
   });
 
   it('drops verify commands that fail the argv-boundary recheck, keeping the git set', () => {
@@ -126,5 +129,59 @@ describe('omc ralph afk command', () => {
       process.exitCode = undefined;
       errorSpy.mockRestore();
     }
+  });
+});
+
+
+describe('omc ralph verify', () => {
+  let dir: string;
+  const previousHome = process.env.HOME;
+  const previousUserProfile = process.env.USERPROFILE;
+
+  function writePackage(testScript: string): void {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fb-fixture', scripts: { test: testScript } }), 'utf8');
+  }
+
+  function writeFailer(body: string): void {
+    writeFileSync(join(dir, 'failer.js'), `console.log(${JSON.stringify(body)});
+process.exit(1);
+`, 'utf8');
+  }
+
+  beforeEach(() => {
+    dir = tempDir();
+    process.env.HOME = dir;
+    process.env.USERPROFILE = dir;
+  });
+
+  afterEach(() => {
+    if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = previousUserProfile;
+  });
+
+  it('detects feedback commands from package scripts when the PRD declares none', () => {
+    writePackage('node failer.js');
+    expect(resolveFeedbackCommands(dir)).toEqual(['npm run test']);
+  });
+
+  it('judges clean against its own baseline and fails on a new signature', () => {
+    writeFailer('FAIL env-specific baseline failure');
+    writePackage('node failer.js');
+    expect(ralphVerify({ session: 'sess-verify', writeBaseline: true }, dir)).toBe(0);
+    // Same failure — environment noise, not a regression.
+    expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(0);
+    writeFailer('FAIL brand new regression');
+    expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(1);
+  });
+
+  it('treats a missing baseline as a candidate, not a failure', () => {
+    writeFailer('FAIL whatever');
+    writePackage('node failer.js');
+    expect(ralphVerify({ session: 'sess-nobase' }, dir)).toBe(0);
+  });
+
+  it('reports no feedback commands as a clean no-op', () => {
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'no-scripts' }), 'utf8');
+    expect(ralphVerify({ session: 'sess-none' }, dir)).toBe(0);
   });
 });

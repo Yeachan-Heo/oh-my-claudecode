@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e703f27566c172cb66a3296352c632869ee218a3",
-    "sourceSha256": "91d4d65056bf40e501550076312f876ca246470521e6de99144171ae7f39a127",
+    "head": "35e4108d965558094d702be1befd4f776e980c2c",
+    "sourceSha256": "c0f0997743974cce58b84bc97a4b2707cdcfc90f2e4c73673cb5cc882f9f41e2",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e703f27566c172cb66a3296352c632869ee218a3",
-  "sourceSha256": "91d4d65056bf40e501550076312f876ca246470521e6de99144171ae7f39a127",
+  "head": "35e4108d965558094d702be1befd4f776e980c2c",
+  "sourceSha256": "c0f0997743974cce58b84bc97a4b2707cdcfc90f2e4c73673cb5cc882f9f41e2",
   "counts": {
     "public": {
       "skills": 47,
@@ -23,13 +23,13 @@
       "total": 96
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 335,
       "featureFiles": 84,
       "toolFiles": 61,
       "libFiles": 47,
       "templateHooks": 23,
-      "srcFiles": 1426,
-      "total": 1449
+      "srcFiles": 1428,
+      "total": 1451
     },
     "generated": {
       "distFiles": 5066,
@@ -41,7 +41,7 @@
     },
     "skills": 47,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 335,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -356,7 +356,9 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+      "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
       "src/hooks/ralph/loop.ts",
@@ -6181,7 +6183,9 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+      "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
       "src/hooks/ralph/loop.ts",
@@ -38464,9 +38468,19 @@
         "path": "src/hooks/prompt-prerequisites/index.ts"
       },
       {
+        "id": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/__tests__/feedback-baseline.test.ts"
+      },
+      {
         "id": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts"
+      },
+      {
+        "id": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/feedback-baseline.ts"
       },
       {
         "id": "src/hooks/ralph/index.ts",
@@ -54092,6 +54106,11 @@
       },
       {
         "from": "src/cli/commands/ralph.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
         "to": "external:commander",
         "kind": "type-imports"
       },
@@ -54117,12 +54136,32 @@
       },
       {
         "from": "src/cli/commands/ralph.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/session-end/routing.ts",
         "kind": "imports"
       },
       {
         "from": "src/cli/commands/ralph.ts",
         "to": "src/hooks/session-end/spawn-next.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/lib/worktree-paths.ts",
         "kind": "imports"
       },
       {
@@ -63361,6 +63400,36 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "src/hooks/ralph/feedback-baseline.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
         "to": "external:node:fs/promises",
         "kind": "imports"
@@ -63388,6 +63457,16 @@
       {
         "from": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
         "to": "src/hooks/ralph/jev-shadow.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/feedback-baseline.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/feedback-baseline.ts",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -83117,12 +83196,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7134,
-      "edgeCount": 8181,
-      "importEdgeCount": 6764,
+      "nodeCount": 7136,
+      "edgeCount": 8194,
+      "importEdgeCount": 6775,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "9c046a19e9dbf07ea7b3cf3b26eeacbf25e4ade47f66fb8286c83165cded0f45",
-  "manifestSha256": "e19741cbdcaf27376bc866a68780a5c22fe975a139824114f532b3328f4874d8"
+  "inventorySha256": "22877059424c133590a79746788b8397ed7349e005a636cd24546faea841ede0",
+  "manifestSha256": "138fb6858a23ae0bfd029ef2e24109b9e0c98fe424ef0675d0c40b0e0a93bd85"
 }

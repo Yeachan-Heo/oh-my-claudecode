@@ -19,6 +19,7 @@ export {
 
   // Loop control
   createRalphLoopHook,
+  ralphFeedbackGateNotice,
 
   // PRD flag helpers
   detectNoPrdFlag,

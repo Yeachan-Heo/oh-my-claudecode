@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, utimesSync } from 'fs';
 import { join } from 'path';
@@ -20,6 +20,7 @@ import {
   getRalphContext,
   writeRalphState,
   createRalphLoopHook,
+  ralphFeedbackGateNotice,
   getSessionPrdPath,
   getStoryGoverningCriteriaRevision,
   getPrdRevision,
@@ -533,6 +534,18 @@ describe('Ralph PRD Stale-State Detection & Reconciliation (#3669)', () => {
 
     const prdAfter = readPrd(testDir, 'session-start');
     expect(prdAfter?.userStories.every(s => s.passes === true)).toBe(true);
+  });
+
+  it('injects the mandatory feedback-gate command at Ralph startup (#45)', () => {
+    // Skill text alone did not make headless executors call the gate (live
+    // smoke evidence), so startLoop surfaces it where the stale warning already
+    // proves reliable. The notice is a pure function so its contract is testable
+    // without state IO (startLoop itself is exercised by the CI suite).
+    const gateLine = ralphFeedbackGateNotice('session-gate');
+    expect(gateLine).toContain('[RALPH FEEDBACK GATE]');
+    expect(gateLine).toContain('omc ralph verify --write-baseline --session session-gate');
+    expect(gateLine).toContain('omc ralph verify --session session-gate');
+    expect(gateLine).toContain('Never hand-roll the diff');
   });
 
   it('reconcileStalePrdForStartup never throws and reports the remaining warning', () => {
