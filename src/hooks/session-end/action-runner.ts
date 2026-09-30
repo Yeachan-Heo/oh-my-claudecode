@@ -39,7 +39,12 @@ function runnerEnvironment(context: ActionRunContext): NodeJS.ProcessEnv {
   // without the passthrough every factory link exits "Not logged in"
   // (dogfood: the chain's first real AFK spawn died exactly there while
   // workerEnvironment() had already been fixed). Mirrors workerEnvironment().
-  const authPassthrough = Object.entries(process.env).filter(([key]) => key.startsWith('ANTHROPIC_'));
+  // Scoped to spawn-next: callback/openclaw/cleanup children never need model
+  // credentials, so they must not inherit them (same least-privilege rule as
+  // notificationKeys above).
+  const authPassthrough = context.actionName === 'spawn-next'
+    ? Object.entries(process.env).filter(([key]) => key.startsWith('ANTHROPIC_'))
+    : [];
   const exact = Object.fromEntries([...keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]]), ...authPassthrough]);
   if (context.actionName !== 'openclaw') return exact;
   const enabled = context.action.payload.openClawEnabled === true ? { OMC_OPENCLAW: '1' } : {};

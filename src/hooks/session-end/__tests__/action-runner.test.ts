@@ -141,6 +141,26 @@ describe('SessionEnd action runner', () => {
     }
   });
 
+  it('does not pass model-provider auth to non spawn-next action children', async () => {
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+    for (const name of ['callback', 'openclaw', 'foreground-cleanup'] as const) {
+      const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-noauth-'));
+      directories.push(directory);
+      const child = Object.assign(new EventEmitter(), { pid: 12351, unref: vi.fn() });
+      childProcess.spawn.mockReset();
+      childProcess.spawn.mockImplementation(() => {
+        queueMicrotask(() => child.emit('exit', 0));
+        return child;
+      });
+      const ctx = context(directory, 'foreground-cleanup');
+      ctx.actionName = name;
+      ctx.action = { ...ctx.action, payload: {} } as typeof ctx.action;
+      await runSessionEndAction(ctx, async () => undefined);
+      const environment = childProcess.spawn.mock.calls[0][2].env as NodeJS.ProcessEnv;
+      expect(environment).not.toHaveProperty('ANTHROPIC_API_KEY');
+    }
+  });
+
   it('passes notification credentials only to notification action children', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'omc-action-runner-'));
     directories.push(directory);
