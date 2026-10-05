@@ -8,10 +8,11 @@
  */
 
 import { existsSync, statSync } from 'fs';
+import { mkdir, writeFile, chmod, rm } from 'fs/promises';
 import { createHash, randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { join, basename, isAbsolute, win32 } from 'path';
+import { join, basename, dirname, isAbsolute, win32 } from 'path';
 import { tmpdir } from 'os';
 import { validateTeamName } from './team-name.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
@@ -1357,6 +1358,94 @@ interface WorkerStartSubmitVerificationOptions {
   tmuxServerIdentity?: TmuxServerIdentity;
 }
 
+/**
+ * Parse OMC_TEAM_WORKER_ENV_PASSTHROUGH to extract passthrough variable keys.
+ * This follows the same logic as worker-launch-ack.ts parseEnvPassthrough.
+ */
+function parsePassthroughKeys(value: string | undefined): string[] {
+  if (!value || value.trim().length === 0) return [];
+  return value.split(',').map(k => k.trim()).filter(k => k.length > 0);
+}
+
+/**
+ * Extract passthrough (secret) environment variables from the source environment.
+ * Returns only the variables listed in OMC_TEAM_WORKER_ENV_PASSTHROUGH.
+ */
+function extractPassthroughVars(
+  sourceEnv: NodeJS.ProcessEnv = process.env,
+  passthroughKeys: string[] = parsePassthroughKeys(process.env.OMC_TEAM_WORKER_ENV_PASSTHROUGH),
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of passthroughKeys) {
+    const value = sourceEnv[key];
+    if (typeof value === 'string') {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * Create a temporary environment file for passing sensitive passthrough variables
+ * to worker panes without exposing them on the command line.
+ * 
+ * The file is created with mode 0600 (owner read/write only) in a private directory,
+ * containing shell export statements for each passthrough variable.
+ * 
+ * @param passthroughVars Object with key-value pairs of passthrough environment variables
+ * @returns Promise resolving to the path of the created env file
+ * @throws If file creation fails
+ */
+async function createPaneEnvFile(passthroughVars: Record<string, string>): Promise<string> {
+  if (Object.keys(passthroughVars).length === 0) {
+    return '';
+  }
+  
+  try {
+    // Create a private directory for the env file (0700 = rwx------)
+    const paneEnvDir = join(tmpdir(), `.omc-pane-env-${randomUUID()}`);
+    await mkdir(paneEnvDir, { mode: 0o700, recursive: true });
+    
+    const paneEnvFilePath = join(paneEnvDir, 'env');
+    
+    // Build shell export statements for each passthrough variable.
+    // Use shell escaping to safely represent values in export statements.
+    const exportLines = Object.entries(passthroughVars)
+      .map(([key, value]) => {
+        // Validate the key is a proper environment variable name
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+          throw new Error(`Invalid environment variable name: ${key}`);
+        }
+        // Use shellEscape to safely quote the value
+        return `export ${key}=${shellEscape(value)}`;
+      })
+      .join('\n');
+    
+    // Write the env file with the export statements
+    await writeFile(paneEnvFilePath, exportLines + '\n', { mode: 0o600 });
+    
+    return paneEnvFilePath;
+  } catch (error) {
+    throw new Error(`Failed to create pane env file: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Clean up a pane environment file if it exists.
+ * This is called when pane creation fails to prevent orphaned secret files.
+ */
+async function cleanupPaneEnvFile(paneEnvFilePath: string): Promise<void> {
+  if (!paneEnvFilePath) return;
+  try {
+    // Remove the env file and its parent directory
+    const paneEnvDir = dirname(paneEnvFilePath);
+    await rm(paneEnvFilePath, { force: true });
+    await rm(paneEnvDir, { force: true, recursive: true });
+  } catch {
+    // Silently ignore cleanup errors; file may already be deleted
+  }
+}
+
 async function verifyWorkerStartCommandSubmitted(
   paneId: string,
   startCmd: string,
@@ -1403,7 +1492,23 @@ async function verifyWorkerStartCommandSubmitted(
   return false;
 }
 
-function workerPaneShellCommand(): string[] {
+/**
+ * Build the pane initialization command for worker shells.
+ * 
+ * SECURITY: Passthrough environment variables (secrets/tokens from
+ * OMC_TEAM_WORKER_ENV_PASSTHROUGH) must NEVER appear on the command line,
+ * as they would be visible via `ps` and in tmux's pane_start_command.
+ * 
+ * On POSIX with passthrough vars: sources an env file with secrets (0600),
+ * removes it after sourcing, and execs the shell.
+ * On POSIX without passthrough: uses /usr/bin/env -i with safe baseline.
+ * On Windows: returns shell invocation only.
+ * 
+ * @param paneEnvFilePath Optional path to a file containing passthrough env exports.
+ *                        If provided, the pane command will source this file before
+ *                        launching the shell, keeping secrets off the command line.
+ */
+function workerPaneShellCommand(paneEnvFilePath?: string): string[] {
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
     return [getDefaultShell()];
   }
@@ -1416,6 +1521,36 @@ function workerPaneShellCommand(): string[] {
   const baseline = buildProviderEnvironment({ SHELL: shell });
   const inheritedPaneEnvironment = ['TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE']
     .map(key => `${key}="$${key}"`);
+  
+  // If a pane env file is provided, source it before launching the shell.
+  // The file contains passthrough secrets (0600 permission) and is removed after sourcing.
+  // This keeps secrets off the command line while ensuring workers receive them.
+  if (paneEnvFilePath) {
+    const sourceAndCleanup = [
+      // Source the pane env file with passthrough secrets
+      `. ${shellQuote(paneEnvFilePath)}`,
+      // Remove the env file after sourcing to prevent lingering secret files
+      `rm -f ${shellQuote(paneEnvFilePath)}`,
+      // Unset the env file variable before exec
+      'unset OMC_PANE_ENV_FILE',
+      // Exec the shell to replace this process
+      `exec ${shellQuote(shell)} -l`,
+    ].join('; ');
+    
+    const command = [
+      '/usr/bin/env',
+      '-i',
+      ...Object.entries(baseline).map(([key, value]) => `${key}=${shellQuote(value)}`),
+      'OMC_PANE_ENV_FILE=' + shellQuote(paneEnvFilePath),
+      ...inheritedPaneEnvironment,
+      shellQuote('/bin/sh'),
+      '-c',
+      shellQuote(sourceAndCleanup),
+    ].join(' ');
+    return [command];
+  }
+  
+  // No pane env file: use standard baseline approach
   const command = [
     '/usr/bin/env',
     '-i',
@@ -1892,38 +2027,55 @@ export async function splitTeamWorkerPaneWithEvidence(
       };
     }
     const splitType = direction === 'right' ? '-h' : '-v';
-    const splitArgs = [
-      'split-window', splitType, '-t', splitTarget,
-      '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
-      '-c', cwd,
-      ...workerPaneShellCommand(),
-    ];
-    const splitResult = await runGuardedNativeTmuxCommand(
-      identity,
-      tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']),
-    );
-    const parsed = splitResult.outcome === 'executed'
-      ? parseTmuxCreationRecord(
-        splitResult.stdout,
-        3,
-        serverIdentityDependencies?.processIdentity ?? currentStrictProcessStartIdentity,
+    
+    // Create pane env file for passthrough secrets if needed
+    const passthroughVars = extractPassthroughVars();
+    const paneEnvFilePath = await createPaneEnvFile(passthroughVars);
+    
+    try {
+      const splitArgs = [
+        'split-window', splitType, '-t', splitTarget,
+        '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
+        '-c', cwd,
+        ...workerPaneShellCommand(paneEnvFilePath),
+      ];
+      const splitResult = await runGuardedNativeTmuxCommand(
         identity,
-      )
-      : null;
-    const associatedIdentity = parsed?.identity;
-    const identityMatches = Boolean(associatedIdentity && sameTmuxServerIdentity(associatedIdentity, identity));
-    const revalidated = identityMatches
-      && await observeTmuxServerIdentity(identity, serverIdentityDependencies) === 'matching';
-    return {
-      commandSucceeded: splitResult.outcome === 'executed' && revalidated,
-      provider,
-      splitTarget,
-      direction,
-      rawOutput: splitResult.stdout,
-      stderr: splitResult.stderr,
-      paneId: revalidated ? parsed!.paneId : null,
-      tmuxServerIdentity: revalidated ? { ...identity } : undefined,
-    };
+        tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']),
+      );
+      const parsed = splitResult.outcome === 'executed'
+        ? parseTmuxCreationRecord(
+          splitResult.stdout,
+          3,
+          serverIdentityDependencies?.processIdentity ?? currentStrictProcessStartIdentity,
+          identity,
+        )
+        : null;
+      const associatedIdentity = parsed?.identity;
+      const identityMatches = Boolean(associatedIdentity && sameTmuxServerIdentity(associatedIdentity, identity));
+      const revalidated = identityMatches
+        && await observeTmuxServerIdentity(identity, serverIdentityDependencies) === 'matching';
+      return {
+        commandSucceeded: splitResult.outcome === 'executed' && revalidated,
+        provider,
+        splitTarget,
+        direction,
+        rawOutput: splitResult.stdout,
+        stderr: splitResult.stderr,
+        paneId: revalidated ? parsed!.paneId : null,
+        tmuxServerIdentity: revalidated ? { ...identity } : undefined,
+      };
+    } catch (error) {
+      const failure = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+      return { commandSucceeded: false, provider, splitTarget, direction,
+        rawOutput: typeof failure.stdout === 'string' ? failure.stdout : '',
+        stderr: typeof failure.stderr === 'string' ? failure.stderr
+          : typeof failure.message === 'string' ? failure.message : String(error),
+        paneId: null };
+    } finally {
+      // Clean up the pane env file on both success and failure
+      await cleanupPaneEnvFile(paneEnvFilePath);
+    }
   } catch (error) {
     const failure = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
     return { commandSucceeded: false, provider, splitTarget, direction,
@@ -2039,11 +2191,15 @@ export async function createTeamSession(
         ? { tmuxServerIdentity: { ...tmuxServerIdentity } }
         : {}),
     });
+    // Create pane env file for passthrough secrets if needed
+    const passthroughVars1 = extractPassthroughVars();
+    const paneEnvFilePath1 = await createPaneEnvFile(passthroughVars1);
+    
     const detachedArgs = [
       'new-session', '-d', '-P', '-F', '#S:#{window_index}\t#{pane_id}\t#{socket_path}\t#{pid}',
       '-s', detachedSessionName,
       '-c', cwd,
-      ...workerPaneShellCommand(),
+      ...workerPaneShellCommand(paneEnvFilePath1),
     ];
     const cleanupFreshDetachedServer = async (): Promise<boolean> => {
       if (!freshDetachedServerIdentity) return false;
@@ -2239,6 +2395,7 @@ export async function createTeamSession(
     if (await observeTmuxServerIdentity(tmuxServerIdentity) !== 'matching') {
       const cleaned = await cleanupDetachedSession();
       if (!cleaned) {
+        await cleanupPaneEnvFile(paneEnvFilePath1);
         throw new TeamSessionCreationError(
           'tmux_creation_cleanup_unverified',
           partialDetachedSession(),
@@ -2252,6 +2409,7 @@ export async function createTeamSession(
           },
         );
       }
+      await cleanupPaneEnvFile(paneEnvFilePath1);
       throw new Error('tmux_server_identity_revalidation_failed');
     }
   }
@@ -2285,12 +2443,17 @@ export async function createTeamSession(
   if (useDedicatedWindow) {
     const targetSession = sessionAndWindow.split(':')[0] ?? sessionAndWindow;
     const windowName = `omc-${sanitizeName(teamName)}`.slice(0, 32);
+    
+    // Create pane env file for passthrough secrets if needed
+    const passthroughVars2 = extractPassthroughVars();
+    const paneEnvFilePath2 = await createPaneEnvFile(passthroughVars2);
+    
     const newWindowArgs = [
       'new-window', '-d', '-P', '-F', '#S:#I\t#{pane_id}\t#{socket_path}\t#{pid}',
       '-t', `=${targetSession}`,
       '-n', windowName,
       '-c', cwd,
-      ...workerPaneShellCommand(),
+      ...workerPaneShellCommand(paneEnvFilePath2),
     ];
     let newWindowResult: Awaited<ReturnType<typeof runGuardedNativeTmuxCommand>>;
     try {
@@ -2299,6 +2462,7 @@ export async function createTeamSession(
         tmuxCommandString(newWindowArgs, ['#S:#I\t#{pane_id}\t#{socket_path}\t#{pid}']),
       );
     } catch (error) {
+      await cleanupPaneEnvFile(paneEnvFilePath2);
       const creationError = new TeamSessionCreationError(
         `Failed to create team tmux window: ${error instanceof Error ? error.message : String(error)}`,
         partialCreationSession(sessionAndWindow, 'dedicated-window'),
@@ -2325,6 +2489,7 @@ export async function createTeamSession(
       )
       : null;
     if (!newWindowRecord || !sameTmuxServerIdentity(newWindowRecord.identity, tmuxServerIdentity)) {
+      await cleanupPaneEnvFile(paneEnvFilePath2);
       const creationError = new TeamSessionCreationError(
         `Failed to create team tmux window: "${newWindowResult.stdout.trim()}"`,
         partialCreationSession(sessionAndWindow, 'dedicated-window'),
@@ -2351,6 +2516,8 @@ export async function createTeamSession(
     leaderPaneId = newWindowRecord.paneId;
     sessionMode = 'dedicated-window';
     createdDedicatedWindow = true;
+    // Cleanup pane env file after successful window creation
+    await cleanupPaneEnvFile(paneEnvFilePath2);
   }
 
   const teamTarget = sessionAndWindow; // "session:window" or "cmux:workspace" form
@@ -2486,61 +2653,71 @@ export async function createTeamSession(
     }
 
     const splitType = i === 0 ? '-h' : '-v';
-    const splitArgs = [
-      'split-window', splitType, '-t', splitTarget,
-      '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
-      '-c', cwd,
-      ...workerPaneShellCommand(),
-    ];
-    const splitResult = await runGuardedNativeTmuxCommand(
-      tmuxServerIdentity!,
-      tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']),
-    );
-    if (splitResult.outcome !== 'executed') {
-      const creationError = new TeamSessionCreationError(
-        `tmux_server_guard_${splitResult.outcome}`,
-        partialSession(),
-        {
-          provider: 'tmux',
-          operation: 'split-window',
-          rawOutput: splitResult.stdout,
-          stderr: splitResult.stderr,
-          tmuxServerIdentity,
-        },
+    
+    // Create pane env file for passthrough secrets if needed
+    const passthroughVars3 = extractPassthroughVars();
+    const paneEnvFilePath3 = await createPaneEnvFile(passthroughVars3);
+    
+    try {
+      const splitArgs = [
+        'split-window', splitType, '-t', splitTarget,
+        '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
+        '-c', cwd,
+        ...workerPaneShellCommand(paneEnvFilePath3),
+      ];
+      const splitResult = await runGuardedNativeTmuxCommand(
+        tmuxServerIdentity!,
+        tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']),
       );
-      if (splitResult.outcome === 'not_executed') {
-        // The explicit false branch proves that the native command was not
-        // entered; previously-known panes may still be cleaned normally.
-        creationError.cleanupStatus = 'verified';
-      } else {
-        // A missing/timeout marker leaves the native allocation untracked.
-        // Shared-window cleanup must not claim success from old pane IDs.
-        untrackedProviderAllocation = true;
+      if (splitResult.outcome !== 'executed') {
+        const creationError = new TeamSessionCreationError(
+          `tmux_server_guard_${splitResult.outcome}`,
+          partialSession(),
+          {
+            provider: 'tmux',
+            operation: 'split-window',
+            rawOutput: splitResult.stdout,
+            stderr: splitResult.stderr,
+            tmuxServerIdentity,
+          },
+        );
+        if (splitResult.outcome === 'not_executed') {
+          // The explicit false branch proves that the native command was not
+          // entered; previously-known panes may still be cleaned normally.
+          creationError.cleanupStatus = 'verified';
+        } else {
+          // A missing/timeout marker leaves the native allocation untracked.
+          // Shared-window cleanup must not claim success from old pane IDs.
+          untrackedProviderAllocation = true;
+        }
+        throw creationError;
       }
-      throw creationError;
-    }
-    const splitRecord = parseTmuxCreationRecord(
-      splitResult.stdout,
-      3,
-      currentStrictProcessStartIdentity,
-      tmuxServerIdentity,
-    );
-    if (!splitRecord || !sameTmuxServerIdentity(splitRecord.identity, tmuxServerIdentity)) {
-      const creationError = new TeamSessionCreationError(
-        `Failed to create team tmux pane: "${splitResult.stdout.trim()}"`,
-        partialSession(),
-        {
-          provider: 'tmux',
-          operation: 'split-window',
-          rawOutput: splitResult.stdout,
-          stderr: splitResult.stderr,
-          tmuxServerIdentity,
-        },
+      const splitRecord = parseTmuxCreationRecord(
+        splitResult.stdout,
+        3,
+        currentStrictProcessStartIdentity,
+        tmuxServerIdentity,
       );
-      untrackedProviderAllocation = true;
-      throw creationError;
+      if (!splitRecord || !sameTmuxServerIdentity(splitRecord.identity, tmuxServerIdentity)) {
+        const creationError = new TeamSessionCreationError(
+          `Failed to create team tmux pane: "${splitResult.stdout.trim()}"`,
+          partialSession(),
+          {
+            provider: 'tmux',
+            operation: 'split-window',
+            rawOutput: splitResult.stdout,
+            stderr: splitResult.stderr,
+            tmuxServerIdentity,
+          },
+        );
+        untrackedProviderAllocation = true;
+        throw creationError;
+      }
+      workerPaneIds.push(splitRecord.paneId);
+    } finally {
+      // Cleanup pane env file after split-window (success or failure)
+      await cleanupPaneEnvFile(paneEnvFilePath3);
     }
-    workerPaneIds.push(splitRecord.paneId);
   }
 
   if (!inCmux) {
