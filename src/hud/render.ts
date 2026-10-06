@@ -38,6 +38,7 @@ import { renderHostname } from "./elements/hostname.js";
 import { renderGitRepo, renderGitBranch, renderGitStatus } from "./elements/git.js";
 import { renderMultiRepo } from "./elements/multi-repo.js";
 import { renderModel } from "./elements/model.js";
+import { renderEffort } from "./elements/effort.js";
 import { renderApiKeySource } from "./elements/api-key-source.js";
 import { renderCallCounts } from "./elements/call-counts.js";
 import {
@@ -295,6 +296,11 @@ export async function render(
       hudLabels,
     );
     if (modelElement) rendered.set("model", modelElement);
+  }
+
+  if (enabledElements.effort) {
+    const effortElement = renderEffort(context.effortLevel);
+    if (effortElement) rendered.set("effort", effortElement);
   }
 
   if (

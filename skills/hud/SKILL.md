@@ -145,6 +145,7 @@ When agents are running, the HUD shows detailed information on separate lines:
 | `ralph:3/10` | Ralph loop iteration/max |
 | `US-002` | Current PRD story ID |
 | `skill:name` | Last activated skill (cyan) |
+| `effort:high` | Effort level from Claude Code (dim low, cyan medium, yellow high/xhigh/max) |
 | `ctx:67%` | Context window usage |
 | `agents:2` | Running subagent count |
 | `bg:3/5` | Background task slots |
@@ -184,6 +185,7 @@ You can manually edit the config file. Each option can be set individually - any
     "todos": true,
     "thinking": true,
     "thinkingFormat": "text",
+    "effort": true,
     "permissionStatus": false,
     "apiKeySource": false,
     "profile": true,

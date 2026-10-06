@@ -19,6 +19,7 @@ export { renderAutopilot, renderAutopilotCompact, type AutopilotStateForHud } fr
 export { renderCwd } from './cwd.js';
 export { renderGitRepo, renderGitBranch, renderGitStatus, getGitRepoName, getGitBranch, getGitStatusCounts } from './git.js';
 export { renderModel, formatModelName } from './model.js';
+export { renderEffort } from './effort.js';
 export { renderPromptTime } from './prompt-time.js';
 export { detectApiKeySource, renderApiKeySource, type ApiKeySource } from './api-key-source.js';
 export { renderMissionBoard } from './mission-board.js';
