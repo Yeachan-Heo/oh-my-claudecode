@@ -279,6 +279,46 @@ describe('keyword-detector.mjs — pasted system-echo re-entry guard', () => {
     expect(state.prompt).not.toContain('[RALPH LOOP');
     expect(state.prompt).not.toBe('(prompt omitted: pasted system echo)');
   });
+
+  // Regression for issue #4250: a pasted autopilot echo prompt with "autopilot"
+  // inside or near pasted content should not create an autopilot state file.
+  it('does NOT create autopilot state when autopilot keyword appears in a pasted system echo', () => {
+    const cwd = makeCwd('kd-echo-autopilot-keyword-in-echo-');
+    const sid = 'sess-echo-autopilot-keyword';
+    // This prompt contains "autopilot" but is entirely a pasted echo, so it
+    // should be detected as an echo and NOT activate autopilot.
+    const prompt = [
+      '[AUTOPILOT - Phase: unspecified] Autopilot not complete. Continue working.',
+      'Task: some previous task with autopilot mentioned',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+
+    expect(output.continue).toBe(true);
+    // The state file must NOT be created for a pasted echo prompt
+    expect(existsSync(stateFile(cwd, sid, 'autopilot'))).toBe(false);
+  });
+});
+
+describe('keyword-detector.mjs — orphaned echo state handling (#4250)', () => {
+  it('does NOT create autopilot state when detected keyword appears only in pasted echo that sanitizes to sentinel', () => {
+    const cwd = makeCwd('kd-issue-4250-');
+    const sid = 'sess-issue-4250';
+    // Construct a prompt where "autopilot" keyword is detected by hasActionableKeyword,
+    // but after echo stripping and sanitization, it becomes the sentinel.
+    // This reproduces the exact issue from #4250.
+    const prompt = [
+      '[AUTOPILOT - Phase: unspecified] Autopilot not complete. Continue working.',
+      'Task: troubleshoot the autopilot issue',
+    ].join('\n');
+
+    const output = runKeywordDetector(prompt, cwd, sid);
+
+    // The issue was that autopilot state WOULD be created with the sentinel,
+    // and persistent-mode wouldn't recognize it as orphaned (before the fix).
+    expect(output.continue).toBe(true);
+    expect(existsSync(stateFile(cwd, sid, 'autopilot'))).toBe(false);
+  });
 });
 
 describe('keyword-detector.mjs — state.prompt sanitization', () => {

@@ -2061,8 +2061,17 @@ async function main() {
     }
 
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
+    // Skip activation if the prompt sanitizes to the pasted-echo sentinel: these are orphaned
+    // states that persistent-mode will clean up later when the TTL expires (#4250).
+    const safePrompt = sanitizePromptForState(prompt);
+    const isOrphanedEchoPrompt = safePrompt === '(prompt omitted: pasted system echo)';
     const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
+      // Do not arm modes when the original prompt is entirely a pasted system echo.
+      // The keyword was detected in the sanitized/cleaned text, not the user's actual request.
+      if (isOrphanedEchoPrompt) {
+        continue;
+      }
       const activationError = await activateState(directory, prompt, mode.name, sessionId);
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));

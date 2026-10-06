@@ -613,8 +613,10 @@ function getAutopilotPhase(state) {
 }
 
 function isAutopilotRoutingEchoPrompt(promptText) {
+  // Recognize: (1) magic keyword tag, (2) bare /autopilot command, (3) sentinel from sanitizePromptForState
   return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText) ||
-    /^\/(?:oh-my-claudecode:|omc:)?autopilot(?:\s+execute)?\s*$/i.test(promptText);
+    /^\/(?:oh-my-claudecode:|omc:)?autopilot(?:\s+execute)?\s*$/i.test(promptText) ||
+    promptText === '(prompt omitted: pasted system echo)';
 }
 
 function isOrphanedAutopilotRoutingEchoState(state) {
