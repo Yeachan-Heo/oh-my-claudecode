@@ -299,6 +299,121 @@ const TEAM_ACTIVE_PHASES = new Set([
 ]);
 
 /**
+ * Get hard max iterations for persistent modes.
+ * Mirrors src/lib/security-config.ts getSecurityConfig(): default 500;
+ * OMC_SECURITY=strict caps at 200 and a config value may only tighten it.
+ * Returns 0 for unlimited (only reachable outside strict mode).
+ */
+function getHardMaxIterations() {
+  const configValue = readSecurityConfigValue("hardMaxIterations");
+  if (process.env.OMC_SECURITY === "strict") {
+    return Math.min(200, typeof configValue === "number" && configValue > 0 ? configValue : 200);
+  }
+  return typeof configValue === "number" ? configValue : 500;
+}
+
+/**
+ * Read a single value from the security section of omc config files.
+ * Mirrors src/lib/security-config.ts loadSecurityFromConfigFiles(): the first
+ * config file with a security section wins.
+ */
+function readSecurityConfigValue(key) {
+  const paths = [
+    join(process.cwd(), ".claude", "omc.jsonc"),
+    join(getOmcUserConfigDir(), "claude-omc", "config.jsonc"),
+  ];
+  for (const p of paths) {
+    try {
+      if (!existsSync(p)) continue;
+      const parsed = JSON.parse(stripJsoncComments(readFileSync(p, "utf-8")));
+      if (parsed?.security && typeof parsed.security === "object") {
+        return parsed.security[key];
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return undefined;
+}
+
+// Inlined so the standalone hook stays build-independent
+// (mirrors scripts/keyword-detector.mjs and src/utils/jsonc.ts).
+function getOmcUserConfigDir() {
+  if (process.platform === 'win32') {
+    return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  }
+  return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips comments AND trailing commas)
+function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+
+function stripComments(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      while (i < content.length && content[i] !== '\n') i++;
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i += 2;
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+// Mirrors src/utils/jsonc.ts:stripTrailingCommas (comma before a closing } or ]).
+function stripTrailingCommas(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) j++;
+      if (content[j] === '}' || content[j] === ']') {
+        i++;
+        continue;
+      }
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+/**
  * Check if a state is stale based on its timestamps.
  * A state is considered stale if it hasn't been updated recently.
  * We check `last_checked_at`, `updated_at`, and `started_at` - using whichever is more recent.
@@ -1034,6 +1149,29 @@ async function main() {
       if (sessionMatches) {
         const iteration = ralph.state.iteration || 1;
         const maxIter = ralph.state.max_iterations || 100;
+
+        // Hard max: check the iteration count directly against the security
+        // limit before continuing or extending, so a high max_iterations value
+        // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
+        const hardMax = getHardMaxIterations();
+        if (hardMax > 0 && iteration >= hardMax) {
+          ralph.state.active = false;
+          ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+          writeJsonFile(ralph.path, ralph.state);
+
+          console.log(
+            JSON.stringify({
+              continue: false,
+              decision: "block",
+              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+            }),
+          );
+          return;
+        }
 
         if (iteration < maxIter) {
           const toolError = readLastToolError(stateDir);
