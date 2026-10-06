@@ -29,10 +29,11 @@ export interface SimplifierTriggerShadowArgs {
  */
 export declare function computeSimplifierTriggerTwin(stateDir: string, files: string[]): boolean;
 /**
- * Record the shadow comparison for one stop event and return the twin
- * decision unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not naming this
- * point) the resolver short-circuits: zero HTTP calls, no logging, same
- * decision.
+ * Record the shadow comparison for one stop event and return the decision
+ * (twin in shadow/off mode, Jev-mapped in active mode). With no
+ * TYPESAFE_API_KEY (or OMC_JEV not naming this point) the resolver
+ * short-circuits: zero HTTP calls, no logging, same decision. Jev errors
+ * degrade inside the resolver and fall back to the twin.
  */
 export declare function recordSimplifierTriggerShadow(args: SimplifierTriggerShadowArgs): Promise<ResolveResult<boolean>>;
 //# sourceMappingURL=jev-shadow.d.ts.map

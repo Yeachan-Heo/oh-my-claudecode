@@ -28,8 +28,8 @@ export declare function writeStateFileLockedIf(filePath: string, predicate: (cur
 export declare function writeStateFileLockedCreateIf(filePath: string, predicate: (current: Record<string, unknown> | null) => boolean, transform: (current: Record<string, unknown> | null) => Record<string, unknown>): ConditionalWriteResult;
 /** A stable file generation used to bind cleanup to one publication. */
 export interface StateFileGeneration {
-    dev: number;
-    ino: number;
+    dev: bigint;
+    ino: bigint;
     digest: string;
 }
 export interface CapturedStateFile {

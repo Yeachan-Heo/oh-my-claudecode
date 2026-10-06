@@ -23,11 +23,12 @@ export interface PruningCandidate {
 /**
  * Record one shadow comparison for the context-pruning point.
  *
- * The twin is the heuristic's own action ('none' | 'warn' | 'compact'); the
- * returned promise resolves with that twin immediately (blocking: false) and
- * the Jev comparison is logged when it settles. Never rejects on the Jev
- * path. One call per compaction run with a summary state — never one call
- * per candidate.
+ * The twin is the heuristic's own action ('none' | 'warn' | 'compact'); in
+ * shadow/off mode the twin is returned immediately (blocking: false) and the
+ * Jev comparison is logged when it settles. In active mode, Jev's Score
+ * answer is mapped to an action and returned immediately. Never rejects on
+ * the Jev path. One call per compaction run with a summary state — never one
+ * call per candidate.
  */
 export declare function recordContextPruningShadow(args: {
     /** Heuristic twin decision for this run. */

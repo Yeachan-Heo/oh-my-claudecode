@@ -789,10 +789,52 @@ export async function teamShutdownByName(teamName, options = {}) {
     validateTeamName(teamName);
     const cwd = options.cwd ?? process.cwd();
     const runtimeV2 = await import('../team/runtime-v2.js');
+    // Attempt to clean up any stale reservations from dead processes first
+    try {
+        await runtimeV2.cleanupStaleReservations(teamName, cwd);
+    }
+    catch {
+        // Best-effort cleanup; proceed with shutdown attempt
+    }
     const config = await readTeamConfig(teamName, cwd);
-    const instanceId = config?.instance_id;
+    // If team doesn't exist, report cleanly without error (like team status)
+    if (!config) {
+        console.log(`No team state found for ${teamName}`);
+        return {
+            teamName,
+            shutdown: false,
+            forced: Boolean(options.force),
+            sessionFound: false,
+        };
+    }
+    const instanceId = config.instance_id;
     if (!instanceId || !isValidTeamInstanceId(instanceId)) {
-        throw new Error('team_shutdown_instance_identity_missing');
+        // Team exists but has no valid instance ID - partial startup failure
+        // Clean up the abandoned state and exit non-zero
+        console.error(`Team ${teamName} has incomplete startup state (config but no valid instance_id); cleaning up...`);
+        try {
+            await runtimeV2.cleanupAbandonedTeamState(teamName, cwd);
+        }
+        catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            console.error(`Failed to clean up abandoned team state: ${detail}`);
+            process.exitCode = 1;
+            return {
+                teamName,
+                shutdown: false,
+                forced: Boolean(options.force),
+                sessionFound: false,
+                error: `cleanup_failed:${detail}`,
+            };
+        }
+        process.exitCode = 1;
+        return {
+            teamName,
+            shutdown: false,
+            forced: Boolean(options.force),
+            sessionFound: false,
+            cleaned: true,
+        };
     }
     const shutdown = await runtimeV2.shutdownTeamV2(teamName, cwd, {
         instanceId,
@@ -1409,11 +1451,23 @@ export async function teamCommand(argv) {
     }
     if (command === 'shutdown') {
         const parsed = parseTeamTargetArgs(rest, 'shutdown');
-        const result = await teamShutdownByName(parsed.teamName, {
-            cwd: parsed.cwd ?? process.cwd(),
-            force: Boolean(parsed.force),
-        });
-        output(result, parsed.json);
+        try {
+            const result = await teamShutdownByName(parsed.teamName, {
+                cwd: parsed.cwd ?? process.cwd(),
+                force: Boolean(parsed.force),
+            });
+            output(result, parsed.json);
+        }
+        catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (!parsed.json) {
+                console.error(message);
+                process.exitCode = 1;
+            }
+            else {
+                output({ ok: false, error: { message } }, parsed.json);
+            }
+        }
         return;
     }
     if (command === 'api') {

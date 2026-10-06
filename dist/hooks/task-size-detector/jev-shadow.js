@@ -20,12 +20,30 @@ import { classifyTaskSize } from './index.js';
 import { recordJudgment } from '../jev/index.js';
 /**
  * Point "task-size" (ticket 09): the detector's word-count/regex
- * classification decides; Jev's Choice is recorded per prompt.
+ * classification decides in shadow/off mode; Jev's Choice is recorded per prompt.
+ * In active mode, Jev's answer is mapped to the TaskSizeResult type.
  */
 export function recordTaskSizeShadow(prompt, fetchFn) {
     return recordJudgment('task-size', {
         state: { prompt, source: 'user-prompt-submit' },
         twin: () => classifyTaskSize(prompt),
+        mapAnswer: (answer) => {
+            // Jev answer is a Choice over { small, medium, large }
+            const choice = answer.choice?.toLowerCase();
+            const sizeMap = {
+                small: 'small',
+                medium: 'medium',
+                large: 'large',
+            };
+            const size = choice && choice in sizeMap ? sizeMap[choice] : 'medium';
+            return {
+                size,
+                reason: `Jev active-mode classification: ${choice}`,
+                wordCount: 0, // Not available from Jev answer
+                hasEscapeHatch: false, // Not available from Jev answer
+                confidence: answer.confidence,
+            };
+        },
         fetchFn,
     });
 }

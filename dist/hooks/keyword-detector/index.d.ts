@@ -96,6 +96,8 @@ export interface TaskSizeFilterOptions {
     largeWordLimit?: number;
     /** Suppress heavy modes for small tasks. Default: true */
     suppressHeavyModesForSmallTasks?: boolean;
+    /** Jev-provided task size result (used in active mode). Overrides heuristic if provided. */
+    jevTaskSizeResult?: TaskSizeResult;
 }
 /**
  * Result of task-size-aware keyword detection

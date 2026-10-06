@@ -712,13 +712,13 @@ export function getAllKeywords(text) {
  * This is the recommended function to use in the bridge hook for keyword detection.
  */
 export function getAllKeywordsWithSizeCheck(text, options = {}) {
-    const { enabled = true, smallWordLimit = 50, largeWordLimit = 200, suppressHeavyModesForSmallTasks = true, } = options;
+    const { enabled = true, smallWordLimit = 50, largeWordLimit = 200, suppressHeavyModesForSmallTasks = true, jevTaskSizeResult, } = options;
     const keywords = getAllKeywords(text);
     if (!enabled || !suppressHeavyModesForSmallTasks || keywords.length === 0) {
-        return { keywords, taskSizeResult: null, suppressedKeywords: [] };
+        return { keywords, taskSizeResult: jevTaskSizeResult ?? null, suppressedKeywords: [] };
     }
     const thresholds = { smallWordLimit, largeWordLimit };
-    const taskSizeResult = classifyTaskSize(text, thresholds);
+    const taskSizeResult = jevTaskSizeResult ?? classifyTaskSize(text, thresholds);
     // Only suppress heavy modes for small tasks
     if (taskSizeResult.size !== 'small') {
         return { keywords, taskSizeResult, suppressedKeywords: [] };

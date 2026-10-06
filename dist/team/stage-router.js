@@ -153,7 +153,8 @@ export function resolveRoleAssignment(role, cfg) {
         ? resolveClaudeModel(canonical, spec?.model, cfg)
         : resolveExternalModel(provider, spec?.model, cfg);
     const agent = spec?.agent ?? ROLE_TO_AGENT[canonical];
-    return { provider, model, agent };
+    const reasoningEffort = spec?.reasoningEffort;
+    return { provider, model, agent, reasoningEffort };
 }
 function isCanonicalRole(value) {
     return CANONICAL_TEAM_ROLES.includes(value);
@@ -186,6 +187,7 @@ export function buildResolvedRoutingSnapshot(cfg) {
             provider: 'claude',
             model: resolveClaudeModel(role, fallbackModelInput, cfg),
             agent: primary.agent,
+            reasoningEffort: spec?.reasoningEffort,
         };
         out[role] = { primary, fallback };
     }

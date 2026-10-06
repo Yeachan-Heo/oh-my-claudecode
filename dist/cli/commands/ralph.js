@@ -28,6 +28,8 @@ import { getSkillsDir } from '../../features/builtin-skills/skills.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
 import { baselinePath, diffAgainstBaseline, readBaseline, signatureLines, writeBaseline, } from '../../hooks/ralph/feedback-baseline.js';
 import { readPrd } from '../../hooks/ralph/prd.js';
+import { executePlanActions, loadMapRecords, parseMapRef, planFromMap, renderActionOutcomes, renderMapPlan } from '../../factory/map-ingest.js';
+import { composeMapPrd, finalizeMapRun, launchGate, mapRunTaskPrompt, readMapRunSidecar } from '../../factory/map-run.js';
 import { defaultSpawnFn, factoryLinkArgv } from '../../hooks/session-end/spawn-next.js';
 import { MAX_VERIFY_COMMANDS, MAX_VERIFY_COMMAND_LENGTH, VERIFY_COMMAND_PATTERN } from '../../hooks/session-end/routing.js';
 /** Read-only git commands ralph's stale-PRD detection and gitGrep checks need. */
@@ -172,6 +174,136 @@ Examples:
   verify reports the current signatures as a baseline candidate and exits 0.`)
         .action((options) => {
         process.exitCode = ralphVerify(options);
+    });
+    cmd
+        .command('from-map')
+        .description('Plan a ralph run from a wayfinder map’s frontier (tracker-only; writes nothing in this mode)')
+        .option('--map <repo#number>', 'Map issue reference, e.g. owner/repo#46 (repo defaults to the current repository)')
+        .option('--repo <name>', 'Repository override when --map carries only a number')
+        .option('--execute', 'Act on the plan: claim auto tickets (with provenance), route human gates, draft criteria for criteria-less tickets and stop for human acceptance')
+        .option('--launch', 'With --execute: compose the PRD from claimed tickets and launch the loop (refuses while drafted criteria await acceptance)')
+        .option('--finalize', 'Write back: close verified source tickets with evidence comments and append the map pointer (needs --session)')
+        .option('--session <id>', 'Session id for --launch/--finalize (defaults to a fresh id for --launch)')
+        .option('--json', 'Output the plan as JSON')
+        .addHelpText('after', `
+Examples:
+  $ omc ralph from-map --map owner/repo#46             Plan the map's frontier (writes nothing)
+  $ omc ralph from-map --map 46 --repo owner/repo --execute --launch   Claim, then launch the loop
+  $ omc ralph from-map --map owner/repo#46 --finalize --session <id>    Write back a finished run
+  Human-gated tickets (grilling, prototype, bare task) are routed to the
+  human and NEVER claimed; a criteria-less ticket stops the run until a
+  human edits and accepts its drafted criteria.`)
+        .action((options) => {
+        if (!options.map) {
+            console.error('omc ralph from-map: --map <repo#number> is required');
+            process.exitCode = 1;
+            return;
+        }
+        const ref = parseMapRef(options.map, options.repo);
+        if (!ref) {
+            console.error(`omc ralph from-map: could not parse map reference "${options.map}"`);
+            process.exitCode = 1;
+            return;
+        }
+        const records = loadMapRecords(ref);
+        const plan = planFromMap(ref, records);
+        if (options.finalize) {
+            const sessionId = options.session ?? process.env.OMC_SESSION_ID;
+            if (!sessionId) {
+                console.error('omc ralph from-map --finalize: --session <id> (or OMC_SESSION_ID) is required');
+                process.exitCode = 1;
+                return;
+            }
+            const prd = readPrd(process.cwd(), sessionId);
+            if (!prd) {
+                console.error(`omc ralph from-map --finalize: no PRD for session ${sessionId} under ${process.cwd()}`);
+                process.exitCode = 1;
+                return;
+            }
+            // The compose-time sidecar is the mapping's home: story notes are
+            // mutable and any reviewer note replaces the source-ticket note.
+            const sidecar = readMapRunSidecar(process.cwd(), sessionId);
+            const stories = prd.userStories
+                .map((story) => ({
+                ticket: sidecar?.stories.find((entry) => entry.id === story.id)?.ticket
+                    ?? Number(/source-ticket: \S*#(\d+)/.exec(story.notes ?? '')?.[1] ?? 0),
+                id: story.id,
+                title: story.title,
+                description: story.description,
+                acceptanceCriteria: story.acceptanceCriteria,
+            }))
+                .filter((story) => story.ticket > 0);
+            const outcomes = finalizeMapRun(ref, stories, prd);
+            console.log(renderActionOutcomes(outcomes));
+            return;
+        }
+        if (!options.execute) {
+            if (options.json)
+                console.log(JSON.stringify(plan, null, 2));
+            else
+                console.log(renderMapPlan(plan));
+            return;
+        }
+        const sessionId = options.session ?? randomUUID();
+        if (options.launch) {
+            // claude rejects a non-UUID --session-id and dies silently (stdio is
+            // ignored on the spawn path) — validate before claiming anything.
+            try {
+                validateSessionId(sessionId);
+            }
+            catch {
+                console.error(`omc ralph from-map --launch: --session must be a UUID (got "${sessionId}")`);
+                process.exitCode = 1;
+                return;
+            }
+        }
+        const outcomes = executePlanActions(plan, {
+            provenance: { sessionId, mode: 'hitl', at: new Date().toISOString() },
+        });
+        const report = (extra) => {
+            if (options.json)
+                console.log(JSON.stringify({ plan, outcomes, ...(extra ? { note: extra } : {}) }, null, 2));
+            else {
+                console.log(renderMapPlan(plan));
+                console.log(renderActionOutcomes(outcomes));
+                if (extra)
+                    console.log(extra);
+            }
+        };
+        if (!options.launch) {
+            report();
+            return;
+        }
+        // The launch gate reads the POST-action truth: a human may have accepted
+        // a drafted ticket's criteria in the meantime.
+        const gate = launchGate(outcomes, loadMapRecords(ref));
+        if (!gate.ok) {
+            report(`launch refused — human acceptance required:\n${gate.blocked.map((b) => `  #${b.ticket}: ${b.reason}`).join('\n')}`);
+            process.exitCode = 1;
+            return;
+        }
+        const feedbackCommands = resolveFeedbackCommands(process.cwd());
+        const composed = composeMapPrd(process.cwd(), sessionId, plan, records, { feedbackCommands });
+        if (!composed.written) {
+            report(`launch refused — PRD not composed: ${composed.error ?? 'unknown'}`);
+            process.exitCode = 1;
+            return;
+        }
+        process.env.OMC_SESSION_ID = sessionId;
+        const argv = ralphAfkArgv(mapRunTaskPrompt(plan, composed.stories), [], sessionId);
+        const child = defaultSpawnFn('claude', argv, { cwd: process.cwd() });
+        if (typeof child.on === 'function') {
+            child.on('error', (error) => {
+                console.error(`map run spawn failed: ${error.message}`);
+                process.exitCode = 1;
+            });
+        }
+        if (child.pid === undefined) {
+            console.error('map run spawn failed: no child process was created — the PRD is composed; re-run with --launch after checking `claude` is on PATH');
+            process.exitCode = 1;
+            return;
+        }
+        report(`launched (session ${sessionId}); PRD at ${composed.prdPath}; finalize with --finalize --session ${sessionId}`);
     });
     return cmd;
 }

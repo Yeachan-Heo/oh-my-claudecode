@@ -22,8 +22,10 @@ const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS = [
     /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
+    /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
+    /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
     /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g,
-    /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\/]+/g,
+    /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\\/]+/g,
     /\/tmp\/[\w.-]+/g,
     /\b[0-9a-f]{8,}\b/gi,
 ];
@@ -32,8 +34,11 @@ const VOLATILE_PATTERNS = [
  * ANSI stripped, volatile fragments normalized, boilerplate dropped,
  * deduplicated, capped, and sorted for a stable diff. Lines that look like
  * progress rather than failure ("Running tests...", spinner frames) are
- * dropped; summary lines are kept — a changed pass/fail count is itself
- * signal that something moved.
+ * dropped. Pass/test count summary lines (e.g., '# pass N', '# tests N') are
+ * excluded but failure count lines (e.g., '# fail N') are kept — a changed
+ * fail count is signal that something moved. Individual passing test results
+ * ("ok N ...") are excluded to prevent false positives when tests are added;
+ * failing results ("not ok ...") are kept.
  */
 export function signatureLines(output) {
     const seen = new Set();
@@ -46,8 +51,23 @@ export function signatureLines(output) {
         line = line.replace(/\s+/g, ' ').trim();
         if (!line || line.length > 500)
             continue;
-        // Pure progress chatter carries no failure signal.
-        if (/^(running|collecting|compiling|building|passing|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line))
+        // Pure progress chatter and test format headers carry no failure signal.
+        if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line))
+            continue;
+        // Exclude pass/test/fail/skipped/cancelled/todo summary counters when 0 or for non-failure types.
+        // These vary as tests are added; only keep failure counter when fail > 0.
+        if (/^#\s*(?:pass|tests?|skipped|cancelled|todo)\s+\d+\s*$/.test(line))
+            continue;
+        if (/^#\s*fail\s+0\s*$/.test(line))
+            continue;
+        // Exclude comments that are just markers or durations (# <v>, # <v> <v>, etc).
+        if (/^#\s*<v>\s*(<v>\s*)*$/.test(line))
+            continue;
+        // Exclude TAP plan lines (e.g., "1..2") which vary as tests are added.
+        if (/^\d+\.\.\d+\s*$/.test(line))
+            continue;
+        // Exclude individual passing test results (ok N) which vary as tests are added; keep failures (not ok).
+        if (/^ok\s+\d+\s+/i.test(line) && !line.includes('not ok'))
             continue;
         seen.add(line);
         if (seen.size >= MAX_SIGNATURES_PER_COMMAND)

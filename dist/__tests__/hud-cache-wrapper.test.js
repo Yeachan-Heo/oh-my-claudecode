@@ -215,7 +215,7 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
         const first = spawnSync('sh', [wrapperPath, hudScript], {
             input: payload,
             encoding: 'utf8',
-            env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+            env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1', OMC_HUD_MIN_REFRESH_SECONDS: '0' },
             timeout: 3000,
         });
         expect(first.stdout).toBe('BASE\n');
@@ -229,7 +229,7 @@ describe('HUD cache wrapper lock ownership (issue #3933 defect 1)', () => {
         const secondWhileLocked = spawnSync('sh', [wrapperPath, hudScript], {
             input: payload,
             encoding: 'utf8',
-            env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1' },
+            env: { ...process.env, OMC_HUD_CACHE_DIR: cacheDir, OMC_HUD_SYNC_REFRESH: '1', OMC_HUD_MIN_REFRESH_SECONDS: '0' },
             timeout: 2000,
         });
         expect(secondWhileLocked.stdout).toBe('RENDER 1\n');

@@ -151,6 +151,7 @@ export declare function resolveTaskAssignment(task: {
 }>, roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined, fallbackAgent: CliAgentType): {
     agentType: CliAgentType;
     model: string;
+    reasoningEffort?: string;
     role: CanonicalTeamRole | null;
 };
 export interface StartTeamV2Config {
@@ -322,6 +323,18 @@ export declare function processCliWorkerVerdicts(teamName: string, cwd: string, 
  * Caller drives the loop (e.g., runtime-cli poll interval or event trigger).
  */
 export declare function monitorTeamV2(teamName: string, cwd: string, expectedInstanceId?: TeamInstanceId): Promise<TeamSnapshotV2 | null>;
+/**
+ * Best-effort cleanup of stale team reservations owned by dead processes.
+ * Acquires the lifecycle lock to ensure race-safe removal.
+ * This allows new teams to be created even if a previous team's reservation
+ * file was left behind due to process death during startup.
+ */
+export declare function cleanupStaleReservations(teamName: string, cwd: string): Promise<void>;
+/**
+ * Clean up abandoned team state when config exists but has no valid instance_id.
+ * This handles partial startup failures and ensures no state is left behind.
+ */
+export declare function cleanupAbandonedTeamState(teamName: string, cwd: string): Promise<void>;
 /**
  * Graceful team shutdown:
  * 1. Shutdown gate check (unless force)

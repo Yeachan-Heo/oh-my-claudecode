@@ -27,9 +27,10 @@ export interface RalphVerdictShadowArgs {
 }
 /**
  * Record the shadow comparison for one completion-claim verdict and return
- * the twin verdict unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not
- * naming this point) the resolver short-circuits: zero HTTP calls, no
- * logging, same verdict.
+ * the result (twin verdict in shadow/off mode, Jev-mapped in active mode).
+ * With no TYPESAFE_API_KEY (or OMC_JEV not naming this point) the resolver
+ * short-circuits: zero HTTP calls, no logging, same verdict. Jev errors
+ * degrade inside the resolver and fall back to the twin.
  */
 export declare function applyRalphVerdictShadow(args: RalphVerdictShadowArgs): Promise<boolean>;
 //# sourceMappingURL=jev-shadow.d.ts.map

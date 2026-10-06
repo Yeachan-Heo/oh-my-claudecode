@@ -441,6 +441,31 @@ describe('model-contract', () => {
             const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', model: 'gpt-4o' });
             expect(args).toContain('gpt-4o');
         });
+        it('claude includes --effort when reasoningEffort is provided', () => {
+            const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp', reasoningEffort: 'high' });
+            expect(args).toContain('--effort');
+            expect(args).toContain('high');
+        });
+        it('codex includes -c model_reasoning_effort when reasoningEffort is provided', () => {
+            const args = buildLaunchArgs('codex', { teamName: 't', workerName: 'w', cwd: '/tmp', reasoningEffort: 'ultra' });
+            expect(args).toContain('-c');
+            expect(args).toContain('model_reasoning_effort="ultra"');
+        });
+        it('antigravity includes --effort when reasoningEffort is provided', () => {
+            const args = buildLaunchArgs('antigravity', { teamName: 't', workerName: 'w', cwd: '/tmp', reasoningEffort: 'medium' });
+            expect(args).toContain('--effort');
+            expect(args).toContain('medium');
+        });
+        it.each(['gemini', 'grok', 'cursor'])('%s ignores reasoningEffort (no verified CLI flag)', (agent) => {
+            const args = buildLaunchArgs(agent, { teamName: 't', workerName: 'w', cwd: '/tmp', reasoningEffort: 'high' });
+            expect(args).not.toContain('--effort');
+            expect(args.some((a) => a.includes('reasoning_effort'))).toBe(false);
+        });
+        it('does not include reasoning effort flags when reasoningEffort is not provided', () => {
+            const args = buildLaunchArgs('claude', { teamName: 't', workerName: 'w', cwd: '/tmp' });
+            expect(args).not.toContain('--effort');
+            expect(args).not.toContain('model_reasoning_effort');
+        });
     });
     describe('getWorkerEnv', () => {
         it('returns correct env vars', () => {
@@ -501,6 +526,21 @@ describe('model-contract', () => {
         });
         it('rejects invalid team names', () => {
             expect(() => getWorkerEnv('Bad-Team', 'worker-1', 'codex')).toThrow('Invalid team name');
+        });
+        it('includes OMC_TEAM_ROLE when role is provided', () => {
+            const env = getWorkerEnv('my-team', 'worker-1', 'claude', process.env, 'executor');
+            expect(env.OMC_TEAM_ROLE).toBe('executor');
+        });
+        it('does not include OMC_TEAM_ROLE when role is not provided', () => {
+            const env = getWorkerEnv('my-team', 'worker-1', 'claude');
+            expect(env.OMC_TEAM_ROLE).toBeUndefined();
+        });
+        it('includes OMC_TEAM_ROLE for any role type', () => {
+            const roles = ['architect', 'code-reviewer', 'orchestrator'];
+            for (const role of roles) {
+                const env = getWorkerEnv('my-team', 'worker-1', 'claude', process.env, role);
+                expect(env.OMC_TEAM_ROLE).toBe(role);
+            }
         });
     });
     describe('buildWorkerArgv', () => {

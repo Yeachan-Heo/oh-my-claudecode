@@ -451,6 +451,12 @@ const KNOWN_AGENT_NAME_SET = new Set(KNOWN_AGENT_NAMES);
 // /team CLI workers — codex/gemini/grok/cursor here are CLI integrations, NOT the deprecated MCP delegationRouting providers.
 const TEAM_ROLE_PROVIDERS = new Set(["claude", "codex", "gemini", "grok", "cursor", "antigravity"]);
 const TEAM_ROLE_TIERS = new Set(["HIGH", "MEDIUM", "LOW"]);
+// Only providers whose CLI has a verified effort flag (see model-contract.ts buildLaunchArgs).
+const REASONING_EFFORT_BY_PROVIDER = {
+    claude: new Set(["low", "medium", "high", "xhigh", "max"]),
+    codex: new Set(["low", "medium", "high", "xhigh", "max", "ultra"]),
+    antigravity: new Set(["low", "medium", "high", "max"]),
+};
 export function validateTeamConfig(config) {
     const team = config.team;
     if (!team || typeof team !== "object")
@@ -494,6 +500,7 @@ export function validateTeamConfig(config) {
             }
             continue;
         }
+        const provider = (spec.provider ?? "claude");
         if (spec.provider !== undefined) {
             if (typeof spec.provider !== "string" || !TEAM_ROLE_PROVIDERS.has(spec.provider)) {
                 throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.provider: invalid value "${String(spec.provider)}". Allowed: ${[...TEAM_ROLE_PROVIDERS].join(", ")}`);
@@ -505,6 +512,16 @@ export function validateTeamConfig(config) {
         if (spec.agent !== undefined) {
             if (typeof spec.agent !== "string" || !KNOWN_AGENT_NAME_SET.has(spec.agent)) {
                 throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.agent: unknown agent "${String(spec.agent)}". Allowed: ${[...KNOWN_AGENT_NAME_SET].join(", ")}`);
+            }
+        }
+        if (spec.reasoningEffort !== undefined) {
+            if (typeof spec.reasoningEffort !== "string") {
+                throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.reasoningEffort: must be a string, got ${typeof spec.reasoningEffort}`);
+            }
+            const allowedForProvider = REASONING_EFFORT_BY_PROVIDER[provider];
+            if (!allowedForProvider || !allowedForProvider.has(spec.reasoningEffort)) {
+                const allowed = allowedForProvider ? [...allowedForProvider].join("|") : "(not supported for this provider)";
+                throw new Error(`[OMC] team.roleRouting.${rawRoleKey}.reasoningEffort: invalid value "${spec.reasoningEffort}" for provider "${provider}". Allowed: ${allowed}`);
             }
         }
     }

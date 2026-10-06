@@ -18608,33 +18608,33 @@ function writeAllSync(fd, content, label) {
   }
 }
 function verifyPrivateTempFile(fd, tempPath, label, operations) {
-  const fdStats = fsSync.fstatSync(fd);
+  const fdStats = descriptorStats(fd, operations);
   let pathStats;
   try {
-    pathStats = (operations?.lstat ?? fsSync.lstatSync)(tempPath);
+    pathStats = pathnameStats(tempPath, operations);
   } catch {
     throw new Error(`${label} temporary file was replaced before rename`);
   }
   const isWindows = process.platform === "win32";
-  const isPrivateRegularSingleLink = (stats) => stats.isFile() && (isWindows ? stats.nlink <= 1 : stats.nlink === 1) && (isWindows || (stats.mode & 511) === 384);
+  const isPrivateRegularSingleLink = (stats) => stats.isFile() && (isWindows ? Number(stats.nlink) <= 1 : Number(stats.nlink) === 1) && (isWindows || (Number(stats.mode) & 511) === 384);
   if (!isPrivateRegularSingleLink(fdStats) || !isPrivateRegularSingleLink(pathStats)) {
     throw new Error(
       `${label} temporary file must be a private regular single-link file`
     );
   }
-  if (!sameFileIdentity(fdStats, pathStats)) {
+  if (!sameFileIdentity(fileIdentityOf(fdStats), fileIdentityOf(pathStats))) {
     throw new Error(`${label} temporary file was replaced before rename`);
   }
 }
 function verifyPublishedFile(fd, filePath, label, operations) {
-  const fdStats = fsSync.fstatSync(fd);
+  const fdStats = descriptorStats(fd, operations);
   let pathStats;
   try {
-    pathStats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
+    pathStats = pathnameStats(filePath, operations);
   } catch {
     throw new Error(`${label} target was replaced at publication`);
   }
-  if (!pathStats.isFile() || !sameFileIdentity(fdStats, pathStats)) {
+  if (!pathStats.isFile() || !sameFileIdentity(fileIdentityOf(fdStats), fileIdentityOf(pathStats))) {
     throw new Error(`${label} target was replaced at publication`);
   }
 }
@@ -18658,26 +18658,33 @@ function preservePriorTarget(filePath, operations) {
     return null;
   }
 }
+function descriptorStats(fd, operations) {
+  return operations ? fsSync.fstatSync(fd) : fsSync.fstatSync(fd, { bigint: true });
+}
+function pathnameStats(filePath, operations) {
+  return operations ? operations.lstat(filePath) : fsSync.lstatSync(filePath, { bigint: true });
+}
+function fileIdentityOf(stats) {
+  return { dev: BigInt(stats.dev), ino: BigInt(stats.ino) };
+}
 function sameFileIdentity(a, b) {
   if (a.ino !== b.ino) return false;
   const isWindows = process.platform === "win32";
-  if (isWindows && (a.dev === 0 || b.dev === 0)) {
+  if (isWindows && (a.dev === 0n || b.dev === 0n)) {
     return true;
   }
   return a.dev === b.dev;
 }
 function currentFileIdentity(filePath, operations) {
   try {
-    const stats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
-    return { dev: stats.dev, ino: stats.ino };
+    return fileIdentityOf(pathnameStats(filePath, operations));
   } catch {
     return null;
   }
 }
-function descriptorIdentity(fd) {
+function descriptorIdentity(fd, operations) {
   try {
-    const stats = fsSync.fstatSync(fd);
-    return { dev: stats.dev, ino: stats.ino };
+    return fileIdentityOf(descriptorStats(fd, operations));
   } catch {
     return null;
   }
@@ -18792,7 +18799,7 @@ function atomicWriteFileSync(filePath, content, hooks, operations) {
     let publishedIdentity = null;
     try {
       verifyPublishedFile(fd, filePath, "atomic write", operations);
-      publishedIdentity = descriptorIdentity(fd);
+      publishedIdentity = descriptorIdentity(fd, operations);
       hooks?.afterRename?.();
       verifyPublishedFile(fd, filePath, "atomic write", operations);
     } catch (error2) {
@@ -25101,7 +25108,7 @@ function sameOwner(left, right) {
 }
 function lockArtifactIdentity(path13) {
   try {
-    const stats = (0, import_fs15.statSync)(path13);
+    const stats = (0, import_fs15.statSync)(path13, { bigint: true });
     return stats.isFile() ? { dev: stats.dev, ino: stats.ino } : null;
   } catch {
     return null;
@@ -25109,8 +25116,10 @@ function lockArtifactIdentity(path13) {
 }
 function reclaimDeadLockOwner(path13, observedOwner, observedIdentity) {
   const quarantinePath = `${path13}.reclaim.${process.pid}.${(0, import_crypto4.randomUUID)()}`;
-  const current = lockArtifactIdentity(path13);
-  if (!current || current.dev !== observedIdentity.dev || current.ino !== observedIdentity.ino) {
+  const before = lockArtifactIdentity(path13);
+  const currentOwner = readLockOwner(path13);
+  const after = lockArtifactIdentity(path13);
+  if (currentOwner === "absent" || currentOwner === null || !sameOwner(currentOwner, observedOwner) || before === null || after === null || !sameFileIdentity(before, observedIdentity) || !sameFileIdentity(after, observedIdentity)) {
     return "changed";
   }
   try {
@@ -25123,7 +25132,7 @@ function reclaimDeadLockOwner(path13, observedOwner, observedIdentity) {
   try {
     movedOwner = readLockOwner(quarantinePath);
     movedIdentity = lockArtifactIdentity(quarantinePath);
-    if (movedOwner !== "absent" && movedOwner !== null && movedIdentity !== null && movedIdentity.dev === observedIdentity.dev && movedIdentity.ino === observedIdentity.ino && sameOwner(movedOwner, observedOwner)) {
+    if (movedOwner !== "absent" && movedOwner !== null && movedIdentity !== null && sameFileIdentity(movedIdentity, observedIdentity) && sameOwner(movedOwner, observedOwner)) {
       try {
         (0, import_fs15.unlinkSync)(quarantinePath);
         return "removed";
@@ -25278,7 +25287,7 @@ function acquireFileLockAt(path13, attempts) {
         return null;
       }
       const recheck = lockArtifactIdentity(path13);
-      if (!recheck || recheck.dev !== observedIdentity.dev || recheck.ino !== observedIdentity.ino) continue;
+      if (!recheck || !sameFileIdentity(recheck, observedIdentity)) continue;
       const live = ownerLive(existing);
       if (live === null) {
         lastMutationLockFailure = "unverifiable";
@@ -25863,7 +25872,7 @@ function readEmergencyJournal(path13) {
 }
 function fileIdentity(path13) {
   try {
-    const stat = (0, import_fs15.statSync)(path13);
+    const stat = (0, import_fs15.statSync)(path13, { bigint: true });
     return { dev: stat.dev, ino: stat.ino };
   } catch {
     return null;
@@ -25872,7 +25881,7 @@ function fileIdentity(path13) {
 function sameStateFileGeneration(path13, expected) {
   try {
     const identity = fileIdentity(path13);
-    if (!identity || identity.dev !== expected.dev || identity.ino !== expected.ino) return false;
+    if (!identity || !sameFileIdentity(identity, expected)) return false;
     return stateDigest((0, import_fs15.readFileSync)(path13, "utf8")) === expected.digest;
   } catch {
     return false;
@@ -27901,14 +27910,13 @@ function probeProcessStartIdentityForPlatform(pid, platform, exec, read, strict)
       return { identity: `linux:${bootId}:${ticks}`, precise: true };
     }
     if (platform === "win32") {
-      if (strict) return { identity: null, precise: false };
       const command = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`;
       const ticks = exec(
         "powershell.exe",
         ["-NoProfile", "-NonInteractive", "-Command", command],
         { encoding: "utf8", windowsHide: true }
       ).trim();
-      return /^\d+$/.test(ticks) ? { identity: `win32:${ticks}`, precise: true } : { identity: null, precise: false };
+      return /^[1-9]\d*$/.test(ticks) ? { identity: `win32:${ticks}`, precise: true } : { identity: null, precise: false };
     }
     if (platform === "darwin") {
       if (strict) {

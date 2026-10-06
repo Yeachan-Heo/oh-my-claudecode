@@ -16,13 +16,14 @@
 import { recordJudgment } from '../jev/index.js';
 /**
  * Record the shadow comparison for one completion-claim verdict and return
- * the twin verdict unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not
- * naming this point) the resolver short-circuits: zero HTTP calls, no
- * logging, same verdict.
+ * the result (twin verdict in shadow/off mode, Jev-mapped in active mode).
+ * With no TYPESAFE_API_KEY (or OMC_JEV not naming this point) the resolver
+ * short-circuits: zero HTTP calls, no logging, same verdict. Jev errors
+ * degrade inside the resolver and fall back to the twin.
  */
 export async function applyRalphVerdictShadow(args) {
     const { verdict } = args;
-    await recordJudgment('ralph-verdict', {
+    const result = await recordJudgment('ralph-verdict', {
         state: {
             verdict,
             prd_criteria: args.prdContext,
@@ -30,8 +31,17 @@ export async function applyRalphVerdictShadow(args) {
             critic_mode: args.criticMode ?? null,
         },
         twin: () => verdict,
+        mapAnswer: (answer) => {
+            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
+            return answer.noul === true;
+        },
         fetchFn: args.fetchFn,
     });
+    // In active mode, use Jev's verdict instead of the heuristic
+    if (result.mode === 'active') {
+        return result.answer;
+    }
+    // Shadow/off/degraded: return the original heuristic verdict
     return verdict;
 }
 //# sourceMappingURL=jev-shadow.js.map

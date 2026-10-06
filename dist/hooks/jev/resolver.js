@@ -109,7 +109,7 @@ export async function resolveJudgment(resolveJudgmentArgs) {
         }
     })();
     runtime.requestCount += 1;
-    // Non-blocking (detector-type): return the twin now; log when Jev settles.
+    // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
     if (mode === 'shadow' && args.blocking === false) {
         const heuristic = twinAnswer();
         void attempt.then((outcome) => {
@@ -125,6 +125,22 @@ export async function resolveJudgment(resolveJudgmentArgs) {
             // unhandled rejection that kills a one-shot hook process.
         }).catch(() => { });
         return { answer: heuristic, source: 'twin', mode: 'shadow' };
+    }
+    // Non-blocking (detector-type) in active mode: wait for Jev (bounded by timeout)
+    // to enable active mode to work with non-blocking points.
+    if (mode === 'active' && args.blocking === false) {
+        const heuristic = twinAnswer();
+        const outcome = await attempt;
+        if (!outcome.ok) {
+            recordFailure(args.point);
+            await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', heuristic, null), config.logDir);
+            return { answer: heuristic, source: 'twin', mode: 'degraded' };
+        }
+        recordSuccess(args.point);
+        const jevAnswer = firstAnswer(outcome.response);
+        await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', heuristic, jevAnswer, outcome.response.usage), config.logDir);
+        const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
+        return { answer, source: 'jev', mode: 'active' };
     }
     const outcome = await attempt;
     if (!outcome.ok) {

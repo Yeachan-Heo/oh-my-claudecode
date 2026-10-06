@@ -5,11 +5,11 @@
  * Create, kill, list, and manage tmux sessions for MCP worker bridge daemons.
  * Sessions are named "omc-team-{teamName}-{workerName}".
  */
-import { existsSync, statSync } from 'fs';
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'fs';
 import { createHash, randomUUID } from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { join, basename, isAbsolute, win32 } from 'path';
+import { join, basename, dirname, isAbsolute, win32 } from 'path';
 import { tmpdir } from 'os';
 import { validateTeamName } from './team-name.js';
 import { tmuxExec, tmuxExecAsync, tmuxShell, tmuxCmdAsync } from '../cli/tmux-utils.js';
@@ -140,6 +140,14 @@ function buildTmuxServerIdentity(socketPath, pid, processIdentity) {
     const processStartedAt = processIdentity(pid);
     if (!processStartedAt || !isValidStrictProcessStartIdentity(processStartedAt))
         return null;
+    if (process.platform === 'win32') {
+        try {
+            process.kill(pid, 0);
+        }
+        catch {
+            return null;
+        }
+    }
     const identity = {
         socket_path: socketPath,
         server_pid: pid,
@@ -219,20 +227,31 @@ export async function observeTmuxServerIdentity(expected, dependencies = {}) {
     if (!isValidTmuxServerIdentity(expected)
         || !isValidStrictProcessStartIdentity(expected.process_started_at))
         return 'unknown';
-    let processState;
-    try {
-        processState = deps.processObservation({
-            server_pid: expected.server_pid,
-            process_started_at: expected.process_started_at,
-        });
+    const singleWindowsProbe = process.platform === 'win32' && dependencies.processObservation === undefined;
+    if (singleWindowsProbe) {
+        try {
+            process.kill(expected.server_pid, 0);
+        }
+        catch (error) {
+            return error.code === 'ESRCH' ? 'dead' : 'unknown';
+        }
     }
-    catch {
-        return 'unknown';
+    else {
+        let processState;
+        try {
+            processState = deps.processObservation({
+                server_pid: expected.server_pid,
+                process_started_at: expected.process_started_at,
+            });
+        }
+        catch {
+            return 'unknown';
+        }
+        if (processState === 'dead')
+            return 'dead';
+        if (processState !== 'matching')
+            return 'unknown';
     }
-    if (processState === 'dead')
-        return 'dead';
-    if (processState !== 'matching')
-        return 'unknown';
     try {
         const result = await deps.tmuxQuery(tmuxArgsForIdentity(expected, ['display-message', '-p', '#{pid}']), { timeout: 2_000, stripTmux: true });
         if (result.stderr.trim())
@@ -244,8 +263,20 @@ export async function observeTmuxServerIdentity(expected, dependencies = {}) {
         if (actualPid !== expected.server_pid)
             return 'unknown';
         const actualStart = deps.processIdentity(actualPid);
+        if (singleWindowsProbe && actualStart
+            && isValidStrictProcessStartIdentity(actualStart)
+            && actualStart !== expected.process_started_at)
+            return 'dead';
         if (!actualStart || actualStart !== expected.process_started_at)
             return 'unknown';
+        if (singleWindowsProbe) {
+            try {
+                process.kill(actualPid, 0);
+            }
+            catch (error) {
+                return error.code === 'ESRCH' ? 'dead' : 'unknown';
+            }
+        }
         return 'matching';
     }
     catch {
@@ -1096,28 +1127,83 @@ async function verifyWorkerStartCommandSubmitted(paneId, startCmd, opts = {}) {
     }
     return false;
 }
-function workerPaneShellCommand() {
+/**
+ * Write passthrough values to a private file (0700 dir, 0600 file) so they never
+ * appear in argv, `ps`, or tmux's pane_start_command (#4230).
+ */
+function writePaneEnvFile(values) {
+    const directory = mkdtempSync(join(tmpdir(), 'omc-pane-env-'));
+    const file = join(directory, 'env');
+    const body = Object.entries(values).map(([key, value]) => `export ${key}=${shellQuote(value)}\n`).join('');
+    writeFileSync(file, body, { mode: 0o600, flag: 'wx' });
+    return file;
+}
+/** Remove a pane env file whose pane was never created. */
+function discardPaneEnvFile(envFile) {
+    if (!envFile)
+        return;
+    rmSync(dirname(envFile), { recursive: true, force: true });
+}
+export function workerPaneShellCommand() {
     if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
-        return [getDefaultShell()];
+        return { args: [getDefaultShell()], envFile: null };
     }
     if (process.platform === 'win32')
-        return [];
+        return { args: [], envFile: null };
     // tmux can retain the full environment from when its server was started.
     // Start pane shells from the worker-launch baseline while preserving the
     // terminal and pane identity needed by interactive and nested team commands.
     const shell = getDefaultShell();
     const baseline = buildProviderEnvironment({ SHELL: shell });
+    // OMC_TEAM_WORKER_ENV_PASSTHROUGH values are often credentials. Only the
+    // fixed baseline goes inline; passthrough values travel through a private
+    // file that the pane shell sources and removes before exec'ing the login shell.
+    const inline = buildProviderEnvironment({ SHELL: shell }, process.env, process.platform, []);
+    const passthrough = Object.fromEntries(Object.entries(baseline).filter(([key, value]) => inline[key] !== value));
     const inheritedPaneEnvironment = ['TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE']
         .map(key => `${key}="$${key}"`);
+    const inlineAssignments = Object.entries(inline).map(([key, value]) => `${key}=${shellQuote(value)}`);
+    if (Object.keys(passthrough).length === 0) {
+        const command = [
+            '/usr/bin/env',
+            '-i',
+            ...inlineAssignments,
+            ...inheritedPaneEnvironment,
+            shellQuote(shell),
+            '-l',
+        ].join(' ');
+        return { args: [command], envFile: null };
+    }
+    const envFile = writePaneEnvFile(passthrough);
+    const bootstrap = '. "$OMC_PANE_ENV_FILE" && rm -rf -- "${OMC_PANE_ENV_FILE%/*}" && unset OMC_PANE_ENV_FILE && exec "$SHELL" -l';
     const command = [
         '/usr/bin/env',
         '-i',
-        ...Object.entries(baseline).map(([key, value]) => `${key}=${shellQuote(value)}`),
+        ...inlineAssignments,
+        `OMC_PANE_ENV_FILE=${shellQuote(envFile)}`,
         ...inheritedPaneEnvironment,
-        shellQuote(shell),
-        '-l',
+        '/bin/sh',
+        '-c',
+        shellQuote(bootstrap),
     ].join(' ');
-    return [command];
+    return { args: [command], envFile };
+}
+/**
+ * Run a pane-creating tmux command. A pane env file is the pane's to consume
+ * once tmux may have created it; only a command known not to have run discards it.
+ */
+async function runPaneCreationCommand(identity, nativeCommand, paneShell) {
+    let result;
+    try {
+        result = await runGuardedNativeTmuxCommand(identity, nativeCommand);
+    }
+    catch (error) {
+        discardPaneEnvFile(paneShell.envFile);
+        throw error;
+    }
+    if (result.outcome === 'not_executed')
+        discardPaneEnvFile(paneShell.envFile);
+    return result;
 }
 function escapeForCmdSet(value) {
     return value.replace(/(["%])/g, '$1$1');
@@ -1468,13 +1554,14 @@ export async function splitTeamWorkerPaneWithEvidence(splitTarget, direction, cw
             };
         }
         const splitType = direction === 'right' ? '-h' : '-v';
+        const splitPaneShell = workerPaneShellCommand();
         const splitArgs = [
             'split-window', splitType, '-t', splitTarget,
             '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
             '-c', cwd,
-            ...workerPaneShellCommand(),
+            ...splitPaneShell.args,
         ];
-        const splitResult = await runGuardedNativeTmuxCommand(identity, tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']));
+        const splitResult = await runPaneCreationCommand(identity, tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']), splitPaneShell);
         const parsed = splitResult.outcome === 'executed'
             ? parseTmuxCreationRecord(splitResult.stdout, 3, serverIdentityDependencies?.processIdentity ?? currentStrictProcessStartIdentity, identity)
             : null;
@@ -1590,11 +1677,12 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
                 ? { tmuxServerIdentity: { ...tmuxServerIdentity } }
                 : {}),
         });
+        const detachedPaneShell = workerPaneShellCommand();
         const detachedArgs = [
             'new-session', '-d', '-P', '-F', '#S:#{window_index}\t#{pane_id}\t#{socket_path}\t#{pid}',
             '-s', detachedSessionName,
             '-c', cwd,
-            ...workerPaneShellCommand(),
+            ...detachedPaneShell.args,
         ];
         const cleanupFreshDetachedServer = async () => {
             if (!freshDetachedServerIdentity)
@@ -1622,7 +1710,7 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
         if (existingDetachedIdentity) {
             tmuxServerIdentity = existingDetachedIdentity;
             try {
-                detachedResult = await runGuardedNativeTmuxCommand(existingDetachedIdentity, tmuxCommandString(detachedArgs, ['#S:0\t#{pane_id}\t#{socket_path}\t#{pid}']));
+                detachedResult = await runPaneCreationCommand(existingDetachedIdentity, tmuxCommandString(detachedArgs, ['#S:0\t#{pane_id}\t#{socket_path}\t#{pid}']), detachedPaneShell);
             }
             catch (error) {
                 const cleaned = await cleanupDetachedSession();
@@ -1661,9 +1749,12 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
                     throw new Error('tmux_server_identity_unavailable');
                 }
                 freshDetachedServerIdentity = tmuxServerIdentity;
-                detachedResult = await runGuardedNativeTmuxCommand(tmuxServerIdentity, tmuxCommandString(detachedArgs, ['#S:0\t#{pane_id}\t#{socket_path}\t#{pid}']));
+                detachedResult = await runPaneCreationCommand(tmuxServerIdentity, tmuxCommandString(detachedArgs, ['#S:0\t#{pane_id}\t#{socket_path}\t#{pid}']), detachedPaneShell);
             }
             catch (error) {
+                // Reached only when bootstrap failed before new-session ran or the
+                // guarded command itself threw; either way no pane will consume the file.
+                discardPaneEnvFile(detachedPaneShell.envFile);
                 const cleaned = await cleanupDetachedSession();
                 if (!cleaned && freshDetachedServerStarted) {
                     throw new TeamSessionCreationError(`tmux_creation_cleanup_unverified:${error instanceof Error ? error.message : String(error)}`, partialDetachedSession(), {
@@ -1788,16 +1879,17 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
     if (useDedicatedWindow) {
         const targetSession = sessionAndWindow.split(':')[0] ?? sessionAndWindow;
         const windowName = `omc-${sanitizeName(teamName)}`.slice(0, 32);
+        const newWindowPaneShell = workerPaneShellCommand();
         const newWindowArgs = [
             'new-window', '-d', '-P', '-F', '#S:#I\t#{pane_id}\t#{socket_path}\t#{pid}',
             '-t', `=${targetSession}`,
             '-n', windowName,
             '-c', cwd,
-            ...workerPaneShellCommand(),
+            ...newWindowPaneShell.args,
         ];
         let newWindowResult;
         try {
-            newWindowResult = await runGuardedNativeTmuxCommand(tmuxServerIdentity, tmuxCommandString(newWindowArgs, ['#S:#I\t#{pane_id}\t#{socket_path}\t#{pid}']));
+            newWindowResult = await runPaneCreationCommand(tmuxServerIdentity, tmuxCommandString(newWindowArgs, ['#S:#I\t#{pane_id}\t#{socket_path}\t#{pid}']), newWindowPaneShell);
         }
         catch (error) {
             const creationError = new TeamSessionCreationError(`Failed to create team tmux window: ${error instanceof Error ? error.message : String(error)}`, partialCreationSession(sessionAndWindow, 'dedicated-window'), {
@@ -1960,13 +2052,14 @@ export async function createTeamSession(teamName, workerCount, cwd, options = {}
                 continue;
             }
             const splitType = i === 0 ? '-h' : '-v';
+            const splitPaneShell = workerPaneShellCommand();
             const splitArgs = [
                 'split-window', splitType, '-t', splitTarget,
                 '-d', '-P', '-F', '#{pane_id}\t#{socket_path}\t#{pid}',
                 '-c', cwd,
-                ...workerPaneShellCommand(),
+                ...splitPaneShell.args,
             ];
-            const splitResult = await runGuardedNativeTmuxCommand(tmuxServerIdentity, tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']));
+            const splitResult = await runPaneCreationCommand(tmuxServerIdentity, tmuxCommandString(splitArgs, ['#{pane_id}\t#{socket_path}\t#{pid}']), splitPaneShell);
             if (splitResult.outcome !== 'executed') {
                 const creationError = new TeamSessionCreationError(`tmux_server_guard_${splitResult.outcome}`, partialSession(), {
                     provider: 'tmux',

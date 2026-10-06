@@ -24,11 +24,21 @@ export interface AtomicWriteHooks {
     readonly beforeRename?: () => void;
     readonly afterRename?: () => void;
 }
-/** Restore the prior target without exposing a partially written generation. */
+/**
+ * Exact file identity. `dev`/`ino` are BigInt because NTFS file IDs are
+ * `(sequence << 48) | mftIndex`: once the sequence number reaches 32 the
+ * value exceeds Number.MAX_SAFE_INTEGER and a Number `ino` rounds away the
+ * low MFT-index bits, so two distinct files can compare equal.
+ */
 export interface FileIdentity {
-    readonly dev: number;
-    readonly ino: number;
+    readonly dev: bigint;
+    readonly ino: bigint;
 }
+/** Normalize a stat result (BigInt or Number) into a comparable identity. */
+export declare function fileIdentityOf(stats: {
+    readonly dev: number | bigint;
+    readonly ino: number | bigint;
+}): FileIdentity;
 /**
  * Compare two file identities for equality.
  * On Windows, Node returns real volume serial from fstat but 0 from lstat/stat,

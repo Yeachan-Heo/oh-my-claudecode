@@ -49,38 +49,38 @@ function writeAllSync(fd, content, label) {
  * attacker that replaced the temporary pathname after creation.
  */
 function verifyPrivateTempFile(fd, tempPath, label, operations) {
-    const fdStats = fsSync.fstatSync(fd);
+    const fdStats = descriptorStats(fd, operations);
     let pathStats;
     try {
-        pathStats = (operations?.lstat ?? fsSync.lstatSync)(tempPath);
+        pathStats = pathnameStats(tempPath, operations);
     }
     catch {
         throw new Error(`${label} temporary file was replaced before rename`);
     }
     const isWindows = process.platform === "win32";
     const isPrivateRegularSingleLink = (stats) => stats.isFile() &&
-        (isWindows ? stats.nlink <= 1 : stats.nlink === 1) &&
-        (isWindows || (stats.mode & 0o777) === 0o600);
+        (isWindows ? Number(stats.nlink) <= 1 : Number(stats.nlink) === 1) &&
+        (isWindows || (Number(stats.mode) & 0o777) === 0o600);
     if (!isPrivateRegularSingleLink(fdStats) ||
         !isPrivateRegularSingleLink(pathStats)) {
         throw new Error(`${label} temporary file must be a private regular single-link file`);
     }
-    if (!sameFileIdentity(fdStats, pathStats)) {
+    if (!sameFileIdentity(fileIdentityOf(fdStats), fileIdentityOf(pathStats))) {
         throw new Error(`${label} temporary file was replaced before rename`);
     }
 }
 /** Verify that publication installed the exact inode we opened and wrote. */
 function verifyPublishedFile(fd, filePath, label, operations) {
-    const fdStats = fsSync.fstatSync(fd);
+    const fdStats = descriptorStats(fd, operations);
     let pathStats;
     try {
-        pathStats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
+        pathStats = pathnameStats(filePath, operations);
     }
     catch {
         throw new Error(`${label} target was replaced at publication`);
     }
     if (!pathStats.isFile() ||
-        !sameFileIdentity(fdStats, pathStats)) {
+        !sameFileIdentity(fileIdentityOf(fdStats), fileIdentityOf(pathStats))) {
         throw new Error(`${label} target was replaced at publication`);
     }
 }
@@ -110,6 +110,21 @@ function preservePriorTarget(filePath, operations) {
     }
 }
 /**
+ * Stat with BigInt ids. A contained backend (`operations`, Linux/macOS only)
+ * reports Number stats, so the descriptor side then uses Number stats too and
+ * both sides of a comparison always carry the same precision.
+ */
+function descriptorStats(fd, operations) {
+    return operations ? fsSync.fstatSync(fd) : fsSync.fstatSync(fd, { bigint: true });
+}
+function pathnameStats(filePath, operations) {
+    return operations ? operations.lstat(filePath) : fsSync.lstatSync(filePath, { bigint: true });
+}
+/** Normalize a stat result (BigInt or Number) into a comparable identity. */
+export function fileIdentityOf(stats) {
+    return { dev: BigInt(stats.dev), ino: BigInt(stats.ino) };
+}
+/**
  * Compare two file identities for equality.
  * On Windows, Node returns real volume serial from fstat but 0 from lstat/stat,
  * so we compare dev only when NOT on Windows OR both dev values are non-zero.
@@ -122,7 +137,7 @@ export function sameFileIdentity(a, b) {
     // On Windows, lstat returns dev=0, so skip dev comparison when on Windows
     // unless both are non-zero (indicating a real comparison is possible)
     const isWindows = process.platform === "win32";
-    if (isWindows && (a.dev === 0 || b.dev === 0)) {
+    if (isWindows && (a.dev === 0n || b.dev === 0n)) {
         return true; // Skip dev comparison on Windows when either is 0
     }
     // On POSIX or when both dev values are non-zero, require dev match
@@ -130,22 +145,21 @@ export function sameFileIdentity(a, b) {
 }
 function currentFileIdentity(filePath, operations) {
     try {
-        const stats = (operations?.lstat ?? fsSync.lstatSync)(filePath);
-        return { dev: stats.dev, ino: stats.ino };
+        return fileIdentityOf(pathnameStats(filePath, operations));
     }
     catch {
         return null;
     }
 }
-function descriptorIdentity(fd) {
+function descriptorIdentity(fd, operations) {
     try {
-        const stats = fsSync.fstatSync(fd);
-        return { dev: stats.dev, ino: stats.ino };
+        return fileIdentityOf(descriptorStats(fd, operations));
     }
     catch {
         return null;
     }
 }
+/** Restore the prior target without exposing a partially written generation. */
 function rollbackPriorTarget(filePath, backupPath, expectedIdentity, operations) {
     // Without a positively identified published inode, the target may be a
     // concurrent foreign replacement. Leave it untouched and fail closed.
@@ -315,7 +329,7 @@ export function atomicWriteFileSync(filePath, content, hooks, operations) {
         let publishedIdentity = null;
         try {
             verifyPublishedFile(fd, filePath, "atomic write", operations);
-            publishedIdentity = descriptorIdentity(fd);
+            publishedIdentity = descriptorIdentity(fd, operations);
             hooks?.afterRename?.();
             verifyPublishedFile(fd, filePath, "atomic write", operations);
         }

@@ -27,7 +27,7 @@ vi.mock('fs/promises', async (importOriginal) => {
         },
     };
 });
-import { atomicWriteBatchSync, atomicWriteFileSync, atomicWriteJson, } from '../atomic-write.js';
+import { atomicWriteBatchSync, atomicWriteFileSync, atomicWriteJson, fileIdentityOf, sameFileIdentity, } from '../atomic-write.js';
 function deferred() {
     let resolve;
     return { promise: new Promise(done => { resolve = done; }), resolve };
@@ -258,6 +258,37 @@ describe('atomicWriteJson', () => {
         writeFileSync(`${filePath}.mutation.lock`, JSON.stringify({ version: 1, pid: process.pid, processStart, createdAt: new Date().toISOString(), nonce: randomUUID() }));
         expect(withStateFileLockSync(filePath, () => 'written')).toEqual({ acquired: false, value: undefined });
         expect(existsSync(`${filePath}.mutation.lock`)).toBe(true);
+    });
+});
+describe('sameFileIdentity (BigInt file ids)', () => {
+    // Real NTFS file ids observed on one volume: sequence 75, MFT index 0x...06 and
+    // 0x...08. Both round to the same Number, so a Number comparison merges them.
+    const dev = 312828405n;
+    const low = 21110623256064774n;
+    const high = 21110623256064776n;
+    it('keeps ids beyond 2^53 that differ only in their low bits distinct', () => {
+        expect(Number(low)).toBe(Number(high));
+        expect(sameFileIdentity({ dev, ino: low }, { dev, ino: high })).toBe(false);
+    });
+    it('matches equal ids beyond 2^53', () => {
+        expect(sameFileIdentity({ dev, ino: high }, { dev, ino: high })).toBe(true);
+    });
+    it('normalizes Number and BigInt stats without losing exact ids', () => {
+        expect(fileIdentityOf({ dev: 7, ino: 9 })).toEqual({ dev: 7n, ino: 9n });
+        expect(fileIdentityOf({ dev, ino: low })).toEqual({ dev, ino: low });
+    });
+    it('keeps the #4156 zero-dev tolerance on win32 only', () => {
+        const originalPlatform = process.platform;
+        try {
+            Object.defineProperty(process, 'platform', { configurable: true, value: 'win32' });
+            expect(sameFileIdentity({ dev: 0n, ino: high }, { dev, ino: high })).toBe(true);
+            expect(sameFileIdentity({ dev: 0n, ino: low }, { dev, ino: high })).toBe(false);
+            Object.defineProperty(process, 'platform', { configurable: true, value: 'linux' });
+            expect(sameFileIdentity({ dev: 0n, ino: high }, { dev, ino: high })).toBe(false);
+        }
+        finally {
+            Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform });
+        }
     });
 });
 //# sourceMappingURL=atomic-write.test.js.map

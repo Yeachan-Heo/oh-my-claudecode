@@ -200,6 +200,28 @@ describe('stage-router resolveRoleAssignment', () => {
             const out = resolveRoleAssignment('critic', cfg);
             expect(out.model).toBe('claude-opus-custom-id');
         });
+        it('resolves reasoningEffort from spec', () => {
+            const cfg = {
+                team: { roleRouting: { executor: { provider: 'claude', reasoningEffort: 'high' } } },
+            };
+            const out = resolveRoleAssignment('executor', cfg);
+            expect(out.reasoningEffort).toBe('high');
+        });
+        it('resolves reasoningEffort for external providers', () => {
+            const cfg = {
+                team: { roleRouting: { critic: { provider: 'codex', reasoningEffort: 'ultra' } } },
+            };
+            const out = resolveRoleAssignment('critic', cfg);
+            expect(out.reasoningEffort).toBe('ultra');
+            expect(out.provider).toBe('codex');
+        });
+        it('does not include reasoningEffort when not specified', () => {
+            const cfg = {
+                team: { roleRouting: { executor: { provider: 'claude' } } },
+            };
+            const out = resolveRoleAssignment('executor', cfg);
+            expect(out.reasoningEffort).toBeUndefined();
+        });
     });
     describe('orchestrator pinning', () => {
         it('orchestrator provider always pinned to claude even when user specifies codex', () => {

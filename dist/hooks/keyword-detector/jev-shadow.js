@@ -15,13 +15,22 @@
 import { getAllKeywords, } from './index.js';
 import { recordJudgment } from '../jev/index.js';
 /**
- * Point "skill-trigger" (ticket 04): the keyword list decides; Jev's Choice
- * over the triggerable skills/modes is recorded per prompt.
+ * Point "skill-trigger" (ticket 04): the keyword list decides in shadow/off
+ * mode; Jev's Choice over the triggerable skills/modes is recorded per
+ * prompt. In active mode, Jev's answer is mapped to a keyword list.
  */
 export function recordSkillTriggerShadow(prompt, fetchFn) {
     return recordJudgment('skill-trigger', {
         state: { prompt, source: 'user-prompt-submit' },
         twin: () => getAllKeywords(prompt),
+        mapAnswer: (answer) => {
+            // Jev Choice answer has { type: 'choice', choice: <keyword> | 'none' }
+            const choice = answer.choice?.toLowerCase();
+            if (choice === 'none' || !choice)
+                return [];
+            // Return the chosen keyword as a single-element array
+            return [choice];
+        },
         fetchFn,
     });
 }
@@ -34,13 +43,18 @@ export function recordSkillTriggerShadow(prompt, fetchFn) {
  */
 const INTENT_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?intent(?=\s|$|[?!.,;:])/i;
 /**
- * Point "intent" (ticket 02): the detector's existing trigger answer decides;
- * Jev's Noul judgment is recorded per prompt.
+ * Point "intent" (ticket 02): the detector's existing trigger answer decides
+ * in shadow/off mode; Jev's Noul judgment is recorded per prompt. In active
+ * mode, Jev's answer is used to decide whether this is an intent request.
  */
 export function recordIntentShadow(prompt, fetchFn) {
     return recordJudgment('intent', {
         state: { prompt, mode_name: 'intent' },
         twin: () => INTENT_SLASH_PATTERN.test(prompt),
+        mapAnswer: (answer) => {
+            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
+            return answer.noul === true;
+        },
         fetchFn,
     });
 }

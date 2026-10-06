@@ -5,7 +5,7 @@ export interface CliAgentContract {
     agentType: CliAgentType;
     binary: string;
     installInstructions: string;
-    buildLaunchArgs(model?: string, extraFlags?: string[]): string[];
+    buildLaunchArgs(model?: string, reasoningEffort?: string, extraFlags?: string[]): string[];
     parseOutput(rawOutput: string): string;
     /** Whether this agent supports a prompt/headless mode that bypasses TUI input */
     supportsPromptMode?: boolean;
@@ -16,6 +16,7 @@ export interface WorkerLaunchConfig {
     teamName: string;
     workerName: string;
     model?: string;
+    reasoningEffort?: string;
     cwd: string;
     extraFlags?: string[];
     /**
@@ -69,7 +70,7 @@ export declare function buildWorkerArgv(agentType: CliAgentType, config: WorkerL
 export declare function validateWorkerLaunchDescriptor(value: unknown): WorkerLaunchDescriptor;
 export declare function buildValidatedWorkerLaunchDescriptor(agentType: CliAgentType, config: WorkerLaunchConfig, appendedArgs?: readonly string[]): WorkerLaunchDescriptor;
 export declare function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunchConfig): string;
-export declare function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType, env?: NodeJS.ProcessEnv): Record<string, string>;
+export declare function getWorkerEnv(teamName: string, workerName: string, agentType: CliAgentType, env?: NodeJS.ProcessEnv, role?: string): Record<string, string>;
 export declare function parseCliOutput(agentType: CliAgentType, rawOutput: string): string;
 /**
  * Check if an agent type supports prompt/headless mode (bypasses TUI).

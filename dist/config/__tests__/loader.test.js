@@ -626,6 +626,144 @@ describe("team.roleRouting (Option E)", () => {
             rmSync(tempDir, { recursive: true, force: true });
         }
     });
+    it("accepts valid reasoningEffort per provider", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-reasoning-effort-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider: "claude", reasoningEffort: "high" },
+                        architect: { provider: "codex", reasoningEffort: "ultra" },
+                        critic: { provider: "antigravity", reasoningEffort: "max" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            const config = loadConfig();
+            expect(config.team?.roleRouting?.executor?.reasoningEffort).toBe("high");
+            expect(config.team?.roleRouting?.architect?.reasoningEffort).toBe("ultra");
+            expect(config.team?.roleRouting?.critic?.reasoningEffort).toBe("max");
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects invalid reasoningEffort for claude provider", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-reasoning-effort-claude-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider: "claude", reasoningEffort: "ultra" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.reasoningEffort.*invalid.*ultra/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects invalid reasoningEffort for codex provider", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-reasoning-effort-codex-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider: "codex", reasoningEffort: "invalid" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.reasoningEffort.*invalid/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects invalid reasoningEffort for antigravity provider", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-bad-reasoning-effort-agy-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider: "antigravity", reasoningEffort: "ultra" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.reasoningEffort.*ultra/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it.each(["gemini", "grok", "cursor"])("rejects reasoningEffort for %s (no verified CLI flag)", (provider) => {
+        const tempDir = mkdtempSync(join(tmpdir(), `omc-team-reasoning-effort-${provider}-`));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider, reasoningEffort: "high" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/reasoningEffort.*not supported for this provider/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects reasoningEffort with non-string value", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-reasoning-effort-non-string-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        executor: { provider: "claude", reasoningEffort: 5 },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/team\.roleRouting\.executor\.reasoningEffort.*string/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+    it("rejects reasoningEffort on orchestrator", () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "omc-team-orchestrator-reasoning-effort-"));
+        try {
+            const claudeDir = join(tempDir, ".claude");
+            require("node:fs").mkdirSync(claudeDir, { recursive: true });
+            writeFileSync(join(claudeDir, "omc.jsonc"), JSON.stringify({
+                team: {
+                    roleRouting: {
+                        orchestrator: { model: "HIGH", reasoningEffort: "high" },
+                    },
+                },
+            }));
+            process.chdir(tempDir);
+            expect(() => loadConfig()).toThrow(/orchestrator: key "reasoningEffort" is not allowed/);
+        }
+        finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
 });
 describe("delegation routing deprecation warnings", () => {
     let saved;

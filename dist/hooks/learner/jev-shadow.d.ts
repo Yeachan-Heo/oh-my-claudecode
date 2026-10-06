@@ -14,9 +14,10 @@ import { type DetectionResult } from './detector.js';
 import type { ResolveResult } from '../jev/index.js';
 /**
  * Record the shadow comparison for one assistant message and return the
- * twin detection unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not
- * naming this point) the resolver short-circuits: zero HTTP calls, no
- * logging, same detection.
+ * detection (twin in shadow/off mode, Jev-mapped in active mode). With no
+ * TYPESAFE_API_KEY (or OMC_JEV not naming this point) the resolver
+ * short-circuits: zero HTTP calls, no logging, same detection. Jev errors
+ * degrade inside the resolver and fall back to the twin.
  */
 export declare function recordLearnerExtractionShadow(assistantMessage: string, userMessage?: string, fetchFn?: typeof fetch): Promise<ResolveResult<DetectionResult>>;
 //# sourceMappingURL=jev-shadow.d.ts.map

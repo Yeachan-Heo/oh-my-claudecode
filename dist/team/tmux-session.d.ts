@@ -176,6 +176,13 @@ export interface WaitForShellReadyOptions {
     pollIntervalMs?: number;
     tmuxServerIdentity?: TmuxServerIdentity;
 }
+export interface WorkerPaneShell {
+    /** Shell command argv appended to new-session/new-window/split-window. */
+    args: string[];
+    /** Private file carrying passthrough values; the pane shell sources and deletes it. */
+    envFile: string | null;
+}
+export declare function workerPaneShellCommand(): WorkerPaneShell;
 export declare function buildWorkerStartCommand(config: WorkerPaneConfig): string;
 /** Validate tmux is available. Throws with install instructions if not. */
 export declare function validateTmux(hasTmuxContext?: boolean): void;

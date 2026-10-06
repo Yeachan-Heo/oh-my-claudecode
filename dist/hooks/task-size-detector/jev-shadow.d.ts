@@ -20,7 +20,8 @@ import { type TaskSizeResult } from './index.js';
 import type { ResolveResult } from '../jev/index.js';
 /**
  * Point "task-size" (ticket 09): the detector's word-count/regex
- * classification decides; Jev's Choice is recorded per prompt.
+ * classification decides in shadow/off mode; Jev's Choice is recorded per prompt.
+ * In active mode, Jev's answer is mapped to the TaskSizeResult type.
  */
 export declare function recordTaskSizeShadow(prompt: string, fetchFn?: typeof fetch): Promise<ResolveResult<TaskSizeResult>>;
 //# sourceMappingURL=jev-shadow.d.ts.map

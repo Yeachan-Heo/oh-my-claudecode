@@ -155,7 +155,7 @@ function sameOwner(left, right) {
 }
 function lockArtifactIdentity(path) {
     try {
-        const stats = statSync(path);
+        const stats = statSync(path, { bigint: true });
         return stats.isFile() ? { dev: stats.dev, ino: stats.ino } : null;
     }
     catch {
@@ -171,10 +171,19 @@ function lockArtifactIdentity(path) {
  */
 function reclaimDeadLockOwner(path, observedOwner, observedIdentity) {
     const quarantinePath = `${path}.reclaim.${process.pid}.${randomUUID()}`;
-    // Verify the file at path still has the expected identity before renaming.
-    // If it has changed, another process has published a replacement and we must not remove it.
-    const current = lockArtifactIdentity(path);
-    if (!current || current.dev !== observedIdentity.dev || current.ino !== observedIdentity.ino) {
+    // The liveness verdict can be seconds old (the win32 probe spawns PowerShell),
+    // and the identity alone cannot tell a replacement apart when its inode reuses
+    // the old one (or when the identity was captured after the probe). Renaming a
+    // live replacement into quarantine opens a window in which a third contender
+    // publishes, leaving two holders. Re-verify the exact artifact, owner record
+    // AND file identity, immediately before the rename. Bracketing the read with
+    // two stats binds the record that was read to the identity that was checked.
+    const before = lockArtifactIdentity(path);
+    const currentOwner = readLockOwner(path);
+    const after = lockArtifactIdentity(path);
+    if (currentOwner === 'absent' || currentOwner === null || !sameOwner(currentOwner, observedOwner) ||
+        before === null || after === null ||
+        !sameFileIdentity(before, observedIdentity) || !sameFileIdentity(after, observedIdentity)) {
         return 'changed';
     }
     try {
@@ -191,8 +200,7 @@ function reclaimDeadLockOwner(path, observedOwner, observedIdentity) {
         if (movedOwner !== 'absent' &&
             movedOwner !== null &&
             movedIdentity !== null &&
-            movedIdentity.dev === observedIdentity.dev &&
-            movedIdentity.ino === observedIdentity.ino &&
+            sameFileIdentity(movedIdentity, observedIdentity) &&
             sameOwner(movedOwner, observedOwner)) {
             try {
                 unlinkSync(quarantinePath);
@@ -390,7 +398,7 @@ function acquireFileLockAt(path, attempts) {
             }
             // Re-verify the identity hasn't changed before probing liveness.
             const recheck = lockArtifactIdentity(path);
-            if (!recheck || recheck.dev !== observedIdentity.dev || recheck.ino !== observedIdentity.ino)
+            if (!recheck || !sameFileIdentity(recheck, observedIdentity))
                 continue;
             const live = ownerLive(existing);
             if (live === null) {
@@ -1139,7 +1147,7 @@ function readEmergencyJournal(path) {
 }
 function fileIdentity(path) {
     try {
-        const stat = statSync(path);
+        const stat = statSync(path, { bigint: true });
         return { dev: stat.dev, ino: stat.ino };
     }
     catch {
@@ -1177,7 +1185,7 @@ export function captureStateFileGeneration(path) {
 function sameStateFileGeneration(path, expected) {
     try {
         const identity = fileIdentity(path);
-        if (!identity || identity.dev !== expected.dev || identity.ino !== expected.ino)
+        if (!identity || !sameFileIdentity(identity, expected))
             return false;
         return stateDigest(readFileSync(path, 'utf8')) === expected.digest;
     }

@@ -241,6 +241,9 @@ export function intakeCommand() {
     cmd
         .command('run')
         .description('Run one headless harbor sweep: preconditions are validated, dispositions stay in the harbor skill')
+        // `--headless` is accepted so the entry written by `intake schedule`
+        // (`omc intake run --headless ...`) starts; the sweep is always headless.
+        .option('--headless', 'run without a human (always the case; accepted for scheduled entries)', false)
         .option('--allow-docket-only', 'confirm the docket is the only signal (no notification channel verified)', false)
         .option('--cwd <dir>', 'repository to sweep (defaults to the working directory)')
         .option('--claude <bin>', 'Claude Code CLI binary to spawn for the headless session', 'claude')

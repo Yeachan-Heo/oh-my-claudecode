@@ -14,11 +14,12 @@ export const CONTEXT_PRUNING_POINT = 'context-pruning';
 /**
  * Record one shadow comparison for the context-pruning point.
  *
- * The twin is the heuristic's own action ('none' | 'warn' | 'compact'); the
- * returned promise resolves with that twin immediately (blocking: false) and
- * the Jev comparison is logged when it settles. Never rejects on the Jev
- * path. One call per compaction run with a summary state — never one call
- * per candidate.
+ * The twin is the heuristic's own action ('none' | 'warn' | 'compact'); in
+ * shadow/off mode the twin is returned immediately (blocking: false) and the
+ * Jev comparison is logged when it settles. In active mode, Jev's Score
+ * answer is mapped to an action and returned immediately. Never rejects on
+ * the Jev path. One call per compaction run with a summary state — never one
+ * call per candidate.
  */
 export function recordContextPruningShadow(args) {
     return recordJudgment(CONTEXT_PRUNING_POINT, {
@@ -33,6 +34,18 @@ export function recordContextPruningShadow(args) {
             })),
         },
         twin: () => args.action,
+        mapAnswer: (answer) => {
+            // Jev Score answer has { type: 'score', choice: 'fresh' | 'recent' | 'aging' | 'stale' }
+            const choice = answer.choice?.toLowerCase();
+            // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
+            if (choice === 'fresh' || choice === 'recent')
+                return 'none';
+            if (choice === 'aging')
+                return 'warn';
+            if (choice === 'stale')
+                return 'compact';
+            return 'none'; // Default fallback
+        },
         fetchFn: args.fetchFn,
     });
 }

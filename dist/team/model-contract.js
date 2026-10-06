@@ -125,7 +125,7 @@ const CONTRACTS = {
         agentType: 'claude',
         binary: 'claude',
         installInstructions: 'Install Claude CLI: https://claude.ai/download',
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             const args = ['--dangerously-skip-permissions'];
             if (shouldUseClaudeBareMode() && !extraFlags.includes('--bare')) {
                 args.push('--bare');
@@ -137,6 +137,9 @@ const CONTRACTS = {
                 // these providers. (issue #1695)
                 const resolved = isProviderSpecificModelId(model) ? model : normalizeToCcAlias(model);
                 args.push('--model', resolved);
+            }
+            if (reasoningEffort) {
+                args.push('--effort', reasoningEffort);
             }
             return [...args, ...extraFlags];
         },
@@ -152,10 +155,13 @@ const CONTRACTS = {
         // or positional prompt mode here; runtime dispatch writes inbox.md and nudges
         // the live Codex TUI with `codex` as the worker process.
         supportsPromptMode: false,
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             const args = ['--dangerously-bypass-approvals-and-sandbox'];
             if (model)
                 args.push('--model', model);
+            if (reasoningEffort) {
+                args.push('-c', `model_reasoning_effort="${reasoningEffort}"`);
+            }
             return [...args, ...extraFlags];
         },
         parseOutput(rawOutput) {
@@ -184,7 +190,7 @@ const CONTRACTS = {
         installInstructions: 'Install Gemini CLI: npm install -g @google/gemini-cli',
         supportsPromptMode: true,
         promptModeFlag: '-p',
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             const args = ['--approval-mode', 'yolo'];
             if (model)
                 args.push('--model', model);
@@ -200,7 +206,7 @@ const CONTRACTS = {
         installInstructions: 'Install Grok Build: https://build.grok.com',
         supportsPromptMode: true,
         promptModeFlag: '-p',
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             const args = ['--always-approve'];
             if (model)
                 args.push('--model', model);
@@ -216,7 +222,7 @@ const CONTRACTS = {
         installInstructions: 'Install the Antigravity CLI (agy) per the official instructions at https://antigravity.google, then verify with `agy --version`.',
         supportsPromptMode: true,
         promptModeFlag: '-p',
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             // agy's `-p`/`--print` is appended by getPromptModeArgs as `-p <instruction>`,
             // where the prompt is the VALUE of `-p` (not a boolean). All other flags
             // MUST precede that `-p`, so buildLaunchArgs returns only the leading flags
@@ -225,6 +231,9 @@ const CONTRACTS = {
             const args = ['--dangerously-skip-permissions'];
             if (model)
                 args.push('--model', model);
+            if (reasoningEffort) {
+                args.push('--effort', reasoningEffort);
+            }
             return [...args, ...extraFlags];
         },
         parseOutput(rawOutput) {
@@ -238,7 +247,7 @@ const CONTRACTS = {
         // Team workers must be persistent interactive panes, so the one-shot
         // `-p/--print` path is deliberately unused here (same stance as codex).
         supportsPromptMode: false,
-        buildLaunchArgs(model, extraFlags = []) {
+        buildLaunchArgs(model, reasoningEffort, extraFlags = []) {
             // `--force` suppresses per-command approval prompts and `--trust` accepts
             // the workspace, which together are cursor-agent's equivalent of the
             // approval bypass every other provider already passes. Without them a
@@ -332,7 +341,7 @@ export function resolveValidatedBinaryPath(agentType) {
     return resolveCliBinaryPath(contract.binary);
 }
 export function buildLaunchArgs(agentType, config) {
-    return getContract(agentType).buildLaunchArgs(config.model, config.extraFlags);
+    return getContract(agentType).buildLaunchArgs(config.model, config.reasoningEffort, config.extraFlags);
 }
 export function buildWorkerArgv(agentType, config) {
     validateTeamName(config.teamName);
@@ -416,13 +425,16 @@ const CLAUDE_WORKER_ENV_ALLOWLIST = [
     'CLAUDE_CONFIG_DIR',
     'CLAUDE_CODE_EFFORT_LEVEL',
 ];
-export function getWorkerEnv(teamName, workerName, agentType, env = process.env) {
+export function getWorkerEnv(teamName, workerName, agentType, env = process.env, role) {
     validateTeamName(teamName);
     const workerEnv = {
         OMC_TEAM_WORKER: `${teamName}/${workerName}`,
         OMC_TEAM_NAME: teamName,
         OMC_WORKER_AGENT_TYPE: agentType,
     };
+    if (role) {
+        workerEnv.OMC_TEAM_ROLE = role;
+    }
     for (const key of WORKER_MODEL_ENV_ALLOWLIST) {
         const value = env[key];
         if (typeof value === 'string' && value.length > 0) {

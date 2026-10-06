@@ -35,15 +35,19 @@ export declare function analyzeContextUsage(content: string, config?: Preemptive
  * when approaching the context limit.
  */
 export declare function createPreemptiveCompactionHook(config?: PreemptiveCompactionConfig): {
+    postToolUse: () => null;
+    stop: () => null;
+} | {
     /**
      * PostToolUse - Check context usage after large tool outputs
+     * Returns Promise<string | null> to support active mode Jev resolution
      */
     postToolUse: (input: {
         tool_name: string;
         session_id: string;
         tool_input: Record<string, unknown>;
         tool_response?: string;
-    }) => string | null;
+    }) => Promise<string | null>;
     /**
      * Stop event - Check context before stopping
      */

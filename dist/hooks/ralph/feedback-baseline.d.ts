@@ -20,8 +20,11 @@ export declare const MAX_SIGNATURES_PER_COMMAND = 200;
  * ANSI stripped, volatile fragments normalized, boilerplate dropped,
  * deduplicated, capped, and sorted for a stable diff. Lines that look like
  * progress rather than failure ("Running tests...", spinner frames) are
- * dropped; summary lines are kept — a changed pass/fail count is itself
- * signal that something moved.
+ * dropped. Pass/test count summary lines (e.g., '# pass N', '# tests N') are
+ * excluded but failure count lines (e.g., '# fail N') are kept — a changed
+ * fail count is signal that something moved. Individual passing test results
+ * ("ok N ...") are excluded to prevent false positives when tests are added;
+ * failing results ("not ok ...") are kept.
  */
 export declare function signatureLines(output: string): string[];
 export interface CommandBaseline {

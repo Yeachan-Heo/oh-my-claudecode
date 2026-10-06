@@ -26,10 +26,11 @@ export function computeSimplifierTriggerTwin(stateDir, files) {
     return files.length > 0;
 }
 /**
- * Record the shadow comparison for one stop event and return the twin
- * decision unchanged. With no TYPESAFE_API_KEY (or OMC_JEV not naming this
- * point) the resolver short-circuits: zero HTTP calls, no logging, same
- * decision.
+ * Record the shadow comparison for one stop event and return the decision
+ * (twin in shadow/off mode, Jev-mapped in active mode). With no
+ * TYPESAFE_API_KEY (or OMC_JEV not naming this point) the resolver
+ * short-circuits: zero HTTP calls, no logging, same decision. Jev errors
+ * degrade inside the resolver and fall back to the twin.
  */
 export function recordSimplifierTriggerShadow(args) {
     return recordJudgment('simplifier-trigger', {
@@ -39,6 +40,10 @@ export function recordSimplifierTriggerShadow(args) {
             source: 'code-simplifier-stop',
         },
         twin: () => computeSimplifierTriggerTwin(args.stateDir, args.files),
+        mapAnswer: (answer) => {
+            // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
+            return answer.noul === true;
+        },
         fetchFn: args.fetchFn,
     });
 }

@@ -193,11 +193,17 @@ describe('tmux server incarnation identity', () => {
     };
     it('captures socket and PID from tmux output, then binds strict process identity', async () => {
         const tmuxQuery = vi.fn(async () => ({ stdout: `${identity.socket_path}\t${identity.server_pid}\n`, stderr: '' }));
-        await expect(captureTmuxServerIdentity(undefined, {
-            tmuxQuery,
-            processIdentity: () => identity.process_started_at,
-        })).resolves.toEqual(identity);
-        expect(tmuxQuery).toHaveBeenCalledWith(['display-message', '-p', '#{socket_path}\t#{pid}'], undefined);
+        const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+        try {
+            await expect(captureTmuxServerIdentity(undefined, {
+                tmuxQuery,
+                processIdentity: () => identity.process_started_at,
+            })).resolves.toEqual(identity);
+            expect(tmuxQuery).toHaveBeenCalledWith(['display-message', '-p', '#{socket_path}\t#{pid}'], undefined);
+        }
+        finally {
+            kill.mockRestore();
+        }
     });
     it.each([
         ['matching', 'matching', 'matching'],
@@ -210,6 +216,111 @@ describe('tmux server incarnation identity', () => {
             processObservation: () => processState,
         });
         expect(actual).toBe(expected);
+    });
+    it('checks the Windows server incarnation once after confirming its PID', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+        const windowsIdentity = {
+            ...identity,
+            process_started_at: 'win32:638878752000000000',
+        };
+        const processIdentity = vi.fn(() => windowsIdentity.process_started_at);
+        const tmuxQuery = vi.fn(async () => ({ stdout: `${windowsIdentity.server_pid}\n`, stderr: '' }));
+        try {
+            await expect(observeTmuxServerIdentity(windowsIdentity, { tmuxQuery, processIdentity }))
+                .resolves.toBe('matching');
+            expect(kill).toHaveBeenNthCalledWith(1, windowsIdentity.server_pid, 0);
+            expect(kill).toHaveBeenNthCalledWith(2, windowsIdentity.server_pid, 0);
+            expect(kill).toHaveBeenCalledTimes(2);
+            expect(processIdentity).toHaveBeenCalledExactlyOnceWith(windowsIdentity.server_pid);
+        }
+        finally {
+            kill.mockRestore();
+            platform.mockRestore();
+        }
+    });
+    it('fails closed when a Windows PID has been reused or its identity probe is invalid', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+        const windowsIdentity = {
+            ...identity,
+            process_started_at: 'win32:638878752000000000',
+        };
+        const tmuxQuery = vi.fn(async () => ({ stdout: `${windowsIdentity.server_pid}\n`, stderr: '' }));
+        const differentIncarnation = vi.fn(() => 'win32:638878752000000001');
+        const emptyProbe = vi.fn(() => null);
+        const malformedProbe = vi.fn(() => 'garbage');
+        try {
+            await expect(observeTmuxServerIdentity(windowsIdentity, {
+                tmuxQuery, processIdentity: differentIncarnation,
+            })).resolves.toBe('dead');
+            await expect(observeTmuxServerIdentity(windowsIdentity, {
+                tmuxQuery, processIdentity: emptyProbe,
+            })).resolves.toBe('unknown');
+            await expect(observeTmuxServerIdentity(windowsIdentity, {
+                tmuxQuery, processIdentity: malformedProbe,
+            })).resolves.toBe('unknown');
+            expect(differentIncarnation).toHaveBeenCalledExactlyOnceWith(windowsIdentity.server_pid);
+            expect(emptyProbe).toHaveBeenCalledExactlyOnceWith(windowsIdentity.server_pid);
+            expect(malformedProbe).toHaveBeenCalledExactlyOnceWith(windowsIdentity.server_pid);
+        }
+        finally {
+            kill.mockRestore();
+            platform.mockRestore();
+        }
+    });
+    it('does not match a Windows process when the post-probe liveness check fails', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        const kill = vi.spyOn(process, 'kill')
+            .mockReturnValueOnce(true)
+            .mockImplementationOnce(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+        const windowsIdentity = {
+            ...identity,
+            process_started_at: 'win32:638878752000000000',
+        };
+        const processIdentity = vi.fn(() => windowsIdentity.process_started_at);
+        try {
+            await expect(observeTmuxServerIdentity(windowsIdentity, {
+                tmuxQuery: vi.fn(async () => ({ stdout: `${windowsIdentity.server_pid}\n`, stderr: '' })),
+                processIdentity,
+            })).resolves.toBe('unknown');
+            expect(processIdentity).toHaveBeenCalledExactlyOnceWith(windowsIdentity.server_pid);
+            expect(kill).toHaveBeenCalledTimes(2);
+        }
+        finally {
+            kill.mockRestore();
+            platform.mockRestore();
+        }
+    });
+    it('probes a Windows server only after reading its PID and checks liveness afterward', async () => {
+        const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+        const calls = [];
+        const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
+            calls.push('alive');
+            return true;
+        });
+        const windowsIdentity = {
+            ...identity,
+            process_started_at: 'win32:638878752000000000',
+        };
+        const processIdentity = vi.fn((pid) => {
+            calls.push(`probe:${pid}`);
+            return windowsIdentity.process_started_at;
+        });
+        try {
+            await expect(captureTmuxServerIdentity(undefined, {
+                tmuxQuery: vi.fn(async () => ({
+                    stdout: `${windowsIdentity.socket_path}\t${windowsIdentity.server_pid}\n`,
+                    stderr: '',
+                })),
+                processIdentity,
+            })).resolves.toEqual(windowsIdentity);
+            expect(calls).toEqual([`probe:${windowsIdentity.server_pid}`, 'alive']);
+        }
+        finally {
+            kill.mockRestore();
+            platform.mockRestore();
+        }
     });
     it('rejects malformed identity before querying and rejects a mismatched server response', async () => {
         expect(isValidTmuxServerIdentity({ socket_path: 'relative', server_pid: 42, process_started_at: startIdentity })).toBe(false);

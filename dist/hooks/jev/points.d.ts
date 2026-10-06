@@ -12,7 +12,7 @@
  * defineJudgmentPoint entry here plus a thin recorder in the owning module -
  * no copied module.
  */
-import type { JevQuestions, JudgmentPointName, ResolveResult } from './types.js';
+import type { JevAnswer, JevQuestions, JudgmentPointName, ResolveResult } from './types.js';
 export interface JudgmentPointDefinition {
     /** Resolver key (the `point` argument) - also the registry key. */
     name: string;
@@ -41,6 +41,8 @@ export interface RecordJudgmentCall<T> {
     state: unknown;
     /** Heuristic twin thunk. Errors propagate (twins must not be masked). */
     twin: () => T;
+    /** Maps Jev's answer onto the result type. Only used in active mode. */
+    mapAnswer?: (answer: JevAnswer) => T;
     /** Index into the point's question sets (loop-continuation's Score call uses 1). */
     questionSet?: number;
     /** Test hook: injected transport. */

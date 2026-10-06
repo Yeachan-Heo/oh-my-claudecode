@@ -23,11 +23,13 @@ export interface LoopContinuationShadowArgs {
 }
 /**
  * Record the shadow comparison for one loop-continuation decision and return
- * the twin unchanged. With no TYPESAFE_API_KEY (or OMC_JEV=off / grayscale
- * exclusion) the resolver short-circuits: zero HTTP calls, no logging, and
- * the result is returned as-is. Jev errors degrade inside the resolver and
- * can never alter the returned decision; the twin returns a captured value
- * so twin errors cannot occur.
+ * the result (twin in shadow/off mode, Jev-modified in active mode). With no
+ * TYPESAFE_API_KEY (or OMC_JEV=off / grayscale exclusion) the resolver
+ * short-circuits: zero HTTP calls, no logging, and the result is returned
+ * as-is. Jev errors degrade inside the resolver and fall back to the twin.
+ *
+ * In active mode, Jev's Noul answer (task complete?) can override the heuristic
+ * continuation decision.
  */
 export declare function applyLoopContinuationShadow(args: LoopContinuationShadowArgs): Promise<PersistentModeResult>;
 //# sourceMappingURL=jev-shadow.d.ts.map
