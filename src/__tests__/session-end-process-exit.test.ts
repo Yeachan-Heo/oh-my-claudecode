@@ -300,6 +300,77 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     expectPromptExit(result);
   });
 
+  it('wiki-session-end loads the lean wiki bootstrap, not the full SessionEnd index graph', () => {
+    const script = readFileSync(join(REPO_ROOT, 'scripts', 'wiki-session-end.mjs'), 'utf-8');
+    // The script may only load lean modules that already ship in the committed
+    // dist closure (a new dist file would need an owner-signed artifact commit).
+    const distImports = [...script.matchAll(/import\('(\.\.\/dist\/[^']+)'\)/g)].map((m) => m[1]).sort();
+    expect(distImports).toEqual([
+      '../dist/hooks/session-end/cleanup-manifest.js',
+      '../dist/hooks/session-end/worker.js',
+      '../dist/hooks/wiki/session-hooks.js',
+      '../dist/lib/worktree-paths.js',
+    ]);
+    expect(script).not.toContain('session-end/index.js');
+    // Worker loads only after the intent is sealed.
+    expect(script.indexOf('sealWikiManifest(directory')).toBeLessThan(script.indexOf("import('../dist/hooks/session-end/worker.js')"));
+    const bootstrap = readFileSync(join(REPO_ROOT, 'src', 'hooks', 'session-end', 'wiki-foreground-bootstrap.ts'), 'utf-8');
+    expect(bootstrap).not.toMatch(/from '\.\/index\.js'|import\('\.\/index\.js'\)/);
+  });
+
+  // End-to-end through run.cjs and the shipped dist: the wiki hook seals its
+  // capture intent and the session-log page gets written. The foreground budget
+  // is widened via the test-only knob so this stays independent of host speed;
+  // the 300ms behaviour itself is pinned by the lean-import guard above and by
+  // the seal-before-worker-load ordering tests in wiki-foreground-bootstrap.test.ts.
+  // If the hook's own worker spawn is missed, the loop drives the recovery pass.
+  it.skipIf(!HAS_GENERATED_DIST)('wiki-session-end seals its capture intent and the session-log page is written', async () => {
+    const distWorker = pathToFileURL(join(REPO_ROOT, 'dist', 'hooks', 'session-end', 'worker.js')).href;
+    const { processSessionEndWorker } = await import(distWorker) as typeof import('../hooks/session-end/worker.js');
+
+    for (let run = 0; run < 3; run += 1) {
+      const cwd = createProject();
+      mkdirSync(join(getOmcRoot(cwd), 'wiki'), { recursive: true });
+      writeFileSync(join(getOmcRoot(cwd), '.omc-config.json'), JSON.stringify({ wiki: { autoCapture: true } }));
+      const sessionId = `wiki-budget-${run}`;
+
+      const result = await runUntilClose(
+        join(REPO_ROOT, 'scripts', 'wiki-session-end.mjs'),
+        cwd,
+        validSessionEndInput(cwd, sessionId),
+        DETACHED_WORKER_CEILING_MS,
+        {
+          NODE_ENV: 'test',
+          OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(DETACHED_WORKER_CEILING_MS - 500),
+          OMC_SESSION_END_TEST_PRODUCER_GRACE_MS: TEST_PRODUCER_GRACE_MS,
+        },
+      );
+      expectPromptExit(result, DETACHED_WORKER_CEILING_MS);
+
+      const manifestPath = join(getOmcRoot(cwd), 'state', 'session-end-jobs', `${sessionId}.json`);
+      type WikiJob = { phase: string; owner: unknown; producerGraceExpiresAt: string; producers: { wiki: { state: string; sealedBy?: string } }; actions: { 'wiki-capture': { status: string; payload: { filename?: string } } } };
+      const readJob = (): WikiJob => JSON.parse(readFileSync(manifestPath, 'utf-8')) as WikiJob;
+      const sealed = readJob();
+      expect(sealed.producers.wiki).toMatchObject({ state: 'sealed', sealedBy: 'wiki-producer' });
+      const filename = sealed.actions['wiki-capture'].payload.filename;
+      expect(filename).toMatch(/^session-log-.*\.md$/);
+
+      // Same hard ceiling as waitForTerminalCallback.
+      const deadline = Date.now() + DETACHED_WORKER_CEILING_MS * 2;
+      let job = readJob();
+      while (!(job.phase === 'complete' && job.owner === null) && Date.now() < deadline) {
+        if (job.owner === null && Date.now() >= Date.parse(job.producerGraceExpiresAt)) {
+          await processSessionEndWorker({ directory: cwd, sessionId });
+        } else {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        try { job = readJob(); } catch { /* concurrent atomic write; retry */ }
+      }
+      expect(job.actions['wiki-capture'], `phase=${job.phase} owner=${job.owner === null ? 'none' : 'held'}`).toMatchObject({ status: 'completed' });
+      expect(existsSync(join(getOmcRoot(cwd), 'wiki', filename!))).toBe(true);
+    }
+  }, IS_CI ? 120_000 : 60_000);
+
   it.skipIf(!HAS_GENERATED_DIST)('runs the SessionEnd pair sequentially within the combined foreground budget', async () => {
     const cwd = createProject();
     configureDeferredAdapters(cwd);

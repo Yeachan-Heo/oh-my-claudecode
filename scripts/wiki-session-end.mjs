@@ -15,9 +15,23 @@ export async function runWikiSessionEndHook() {
   }
 
   try {
-    const { processWikiSessionEnd } = await import('../dist/hooks/session-end/index.js');
-    const result = await processWikiSessionEnd(frame.value);
-    console.log(JSON.stringify(result));
+    // Lean bootstrap, not the full SessionEnd index graph: this hook runs inside
+    // run.cjs's 300ms SessionEnd foreground budget (same split as session-end.mjs).
+    // Import only the lean, already-shipped modules (not the SessionEnd index
+    // graph); mirrors src/hooks/session-end/wiki-foreground-bootstrap.ts.
+    const [{ resolveToWorktreeRoot }, { buildWikiSessionEndCaptureIntent }, { sealWikiManifest }] = await Promise.all([
+      import('../dist/lib/worktree-paths.js'),
+      import('../dist/hooks/wiki/session-hooks.js'),
+      import('../dist/hooks/session-end/cleanup-manifest.js'),
+    ]);
+    const input = frame.value;
+    const directory = resolveToWorktreeRoot(input.cwd);
+    const intent = buildWikiSessionEndCaptureIntent({ cwd: directory, session_id: input.session_id });
+    sealWikiManifest(directory, input.session_id, intent ? { ...intent } : undefined);
+    // Load the worker only after the intent is durable, as foreground-bootstrap does.
+    const { spawnSessionEndWorker } = await import('../dist/hooks/session-end/worker.js');
+    spawnSessionEndWorker({ directory, sessionId: input.session_id });
+    console.log(JSON.stringify({ continue: true }));
   } catch (error) {
     console.error('[wiki-session-end] Error:', error.message);
     console.log(JSON.stringify(fallback));
