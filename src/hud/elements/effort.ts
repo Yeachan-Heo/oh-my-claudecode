@@ -21,6 +21,7 @@ export function renderEffort(level: string | null | undefined): string | null {
     case 'xhigh':
     case 'max':
       return yellow(label);
+    case 'medium':
     default:
       return cyan(label);
   }
