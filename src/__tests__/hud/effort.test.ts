@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cyan, dim, yellow } from '../../hud/colors.js';
+import { bold, cyan, dim, magenta, yellow } from '../../hud/colors.js';
 import { renderEffort } from '../../hud/elements/effort.js';
 import { getEffortLevel } from '../../hud/stdin.js';
 
@@ -19,7 +19,8 @@ describe('effort element', () => {
     expect(renderEffort('low')).toBe(dim('effort:low'));
     expect(renderEffort('medium')).toBe(cyan('effort:medium'));
     expect(renderEffort('high')).toBe(yellow('effort:high'));
-    expect(renderEffort('xhigh')).toBe(yellow('effort:xhigh'));
-    expect(renderEffort('max')).toBe(yellow('effort:max'));
+    expect(renderEffort('xhigh')).toBe(magenta('effort:xhigh'));
+    expect(renderEffort('max')).toBe(bold(magenta('effort:max')));
+    expect(renderEffort('future-level')).toBe(cyan('effort:future-level'));
   });
 });
