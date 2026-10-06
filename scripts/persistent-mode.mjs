@@ -163,37 +163,34 @@ function readJsonFile(path) {
 }
 
 /**
- * Get hard max iterations from OMC_SECURITY / config file.
- * Returns 0 if unlimited (default).
+ * Get hard max iterations for persistent modes.
+ * Mirrors src/lib/security-config.ts getSecurityConfig(): default 500;
+ * OMC_SECURITY=strict caps at 200 and a config value may only tighten it.
+ * Returns 0 for unlimited (only reachable outside strict mode).
  */
 function getHardMaxIterations() {
-  // OMC_SECURITY=strict → default hard max 200
-  if (process.env.OMC_SECURITY === "strict") {
-    // Check config file for override
-    const configOverride = readSecurityConfigValue("hardMaxIterations");
-    return typeof configOverride === "number" ? configOverride : 200;
-  }
-  // Check config file only
   const configValue = readSecurityConfigValue("hardMaxIterations");
-  return typeof configValue === "number" ? configValue : 0;
+  if (process.env.OMC_SECURITY === "strict") {
+    return Math.min(200, typeof configValue === "number" && configValue > 0 ? configValue : 200);
+  }
+  return typeof configValue === "number" ? configValue : 500;
 }
 
 /**
  * Read a single value from the security section of omc config files.
+ * Mirrors src/lib/security-config.ts loadSecurityFromConfigFiles(): the first
+ * config file with a security section wins.
  */
 function readSecurityConfigValue(key) {
   const paths = [
     join(process.cwd(), ".claude", "omc.jsonc"),
-    join(homedir(), ".config", "claude-omc", "config.jsonc"),
+    join(getOmcUserConfigDir(), "claude-omc", "config.jsonc"),
   ];
   for (const p of paths) {
     try {
       if (!existsSync(p)) continue;
-      const raw = readFileSync(p, "utf-8");
-      // Strip JSONC comments (// and /* */)
-      const json = raw.replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-      const parsed = JSON.parse(json);
-      if (parsed?.security && parsed.security[key] !== undefined) {
+      const parsed = JSON.parse(stripJsoncComments(readFileSync(p, "utf-8")));
+      if (parsed?.security && typeof parsed.security === "object") {
         return parsed.security[key];
       }
     } catch {
@@ -201,6 +198,83 @@ function readSecurityConfigValue(key) {
     }
   }
   return undefined;
+}
+
+// Inlined so the standalone hook stays build-independent
+// (mirrors scripts/keyword-detector.mjs and src/utils/jsonc.ts).
+function getOmcUserConfigDir() {
+  if (process.platform === 'win32') {
+    return process.env.APPDATA || join(homedir(), 'AppData', 'Roaming');
+  }
+  return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
+}
+
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips comments AND trailing commas)
+function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+
+function stripComments(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '/' && content[i + 1] === '/') {
+      while (i < content.length && content[i] !== '\n') i++;
+      continue;
+    }
+    if (content[i] === '/' && content[i + 1] === '*') {
+      i += 2;
+      while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    result += content[i++];
+  }
+  return result;
+}
+
+// Mirrors src/utils/jsonc.ts:stripTrailingCommas (comma before a closing } or ]).
+function stripTrailingCommas(content) {
+  let result = '';
+  let i = 0;
+  while (i < content.length) {
+    if (content[i] === '"') {
+      result += content[i++];
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i++];
+          if (i < content.length) result += content[i++];
+          continue;
+        }
+        result += content[i++];
+      }
+      if (i < content.length) result += content[i++];
+      continue;
+    }
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) j++;
+      if (content[j] === '}' || content[j] === ']') {
+        i++;
+        continue;
+      }
+    }
+    result += content[i++];
+  }
+  return result;
 }
 
 function writeJsonFile(path, data) {
@@ -1316,6 +1390,28 @@ async function main() {
         const iteration = ralph.state.iteration || 1;
         const maxIter = ralph.state.max_iterations || 100;
 
+        // Hard max: check the iteration count directly against the security
+        // limit before continuing or extending, so a high max_iterations value
+        // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
+        const hardMax = getHardMaxIterations();
+        if (hardMax > 0 && iteration >= hardMax) {
+          ralph.state.active = false;
+          ralph.state.last_checked_at = new Date().toISOString();
+          if (!shouldWriteStateBack(ralph.path)) {
+            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+            return;
+          }
+          writeJsonFile(ralph.path, ralph.state);
+
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
+            }),
+          );
+          return;
+        }
+
         if (iteration < maxIter) {
           const toolError = readLastToolError(stateDir);
           const errorGuidance = getToolErrorRetryGuidance(toolError);
@@ -1353,26 +1449,6 @@ async function main() {
             JSON.stringify({
               decision: "block",
               reason,
-            }),
-          );
-          return;
-        }
-
-        // Check hard max before extending
-        const hardMax = getHardMaxIterations();
-        if (hardMax > 0 && maxIter >= hardMax) {
-          ralph.state.active = false;
-          ralph.state.last_checked_at = new Date().toISOString();
-          if (!shouldWriteStateBack(ralph.path)) {
-            console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-            return;
-          }
-          writeJsonFile(ralph.path, ralph.state);
-
-          console.log(
-            JSON.stringify({
-              decision: "block",
-              reason: `[RALPH LOOP - HARD LIMIT] Reached hard max iterations (${hardMax}). Mode auto-disabled. Restart with /oh-my-claudecode:ralph if needed.`,
             }),
           );
           return;
