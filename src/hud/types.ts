@@ -65,6 +65,11 @@ export interface StatuslineStdin {
     display_name?: string;
   };
 
+  /** Effort level from Claude Code statusline stdin */
+  effort?: {
+    level?: string;
+  };
+
   /** Context window metrics from Claude Code statusline stdin */
   context_window?: {
     context_window_size?: number;
@@ -373,6 +378,9 @@ export interface HudRenderContext {
   /** Raw model id from Claude Code statusline stdin; used when full model format is requested */
   modelId?: string | null;
 
+  /** Effort level from Claude Code statusline stdin; null when unavailable */
+  effortLevel?: string | null;
+
   /** Ralph loop state */
   ralph: RalphStateForHud | null;
 
@@ -624,6 +632,7 @@ export interface HudElementConfig {
   gitInfoPosition: 'above' | 'below';  // Position of git info relative to main HUD line
   model: boolean;            // Show current model name
   modelFormat: ModelFormat;   // Model name verbosity level
+  effort: boolean;           // Show current effort level (low/medium/high/xhigh/max)
   omcLabel: boolean;
   updateNotification?: boolean; // Show available-update prompt text in the OMC label
   rateLimits: boolean;  // Show 5h and weekly rate limits
@@ -707,7 +716,7 @@ export interface LayoutConfig {
 export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
   line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'profile'],
   main: [
-    'omcLabel', 'model', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
+    'omcLabel', 'model', 'effort', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
     'skills', 'lastSkill', 'contextBar', 'agents', 'background',
     'callCounts', 'lastTool', 'sessionSummary',
@@ -757,6 +766,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     gitInfoPosition: 'above',  // Git info above main HUD line (backward compatible)
     model: true,              // Show only when Claude Code statusline stdin provides a model
     modelFormat: 'versioned', // Preserve model version by default
+    effort: true,             // Show effort level when Claude Code statusline stdin provides one
     omcLabel: true,
     updateNotification: true, // Preserve existing update prompt behavior by default
     rateLimits: true,  // Show rate limits by default
@@ -818,6 +828,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     gitInfoPosition: 'above',
     model: true,
     modelFormat: 'versioned',
+    effort: true,
     omcLabel: true,
     updateNotification: true,
     rateLimits: true,
@@ -861,6 +872,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     gitInfoPosition: 'above',
     model: true,
     modelFormat: 'versioned',
+    effort: true,
     omcLabel: true,
     updateNotification: true,
     rateLimits: true,
@@ -904,6 +916,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     gitInfoPosition: 'above',
     model: true,
     modelFormat: 'versioned',
+    effort: true,
     omcLabel: true,
     updateNotification: true,
     rateLimits: true,
@@ -947,6 +960,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     gitInfoPosition: 'above',
     model: true,
     modelFormat: 'versioned',
+    effort: true,
     omcLabel: true,
     updateNotification: true,
     rateLimits: false,
@@ -990,6 +1004,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     gitInfoPosition: 'above',
     model: true,
     modelFormat: 'versioned',
+    effort: true,
     omcLabel: true,
     updateNotification: true,
     rateLimits: true,

@@ -414,6 +414,10 @@ export function getModelId(stdin: StatuslineStdin): string | null {
   return modelId || null;
 }
 
+export function getEffortLevel(stdin: StatuslineStdin): string | null {
+  return stdin.effort?.level?.trim() || null;
+}
+
 export function getModelName(stdin: StatuslineStdin): string | null {
   const displayName = stdin.model?.display_name?.trim();
   return displayName || getModelId(stdin);
