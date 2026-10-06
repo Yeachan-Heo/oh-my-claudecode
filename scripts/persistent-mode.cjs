@@ -494,11 +494,14 @@ function getAutopilotPhase(state) {
     : "unspecified";
 }
 
+// keyword-detector persists this in place of a prompt that was only a pasted
+// system echo; a state carrying it has no user request to resume (#4250).
+const PASTED_ECHO_PROMPT_SENTINEL = "(prompt omitted: pasted system echo)";
+
 function isAutopilotRoutingEchoPrompt(promptText) {
-  // Recognize: (1) magic keyword tag, (2) bare /autopilot command, (3) sentinel from sanitizePromptForState
   return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText) ||
     /^\/(?:oh-my-claudecode:|omc:)?autopilot(?:\s+execute)?\s*$/i.test(promptText) ||
-    promptText === '(prompt omitted: pasted system echo)';
+    promptText === PASTED_ECHO_PROMPT_SENTINEL;
 }
 
 function isOrphanedAutopilotRoutingEchoState(state) {

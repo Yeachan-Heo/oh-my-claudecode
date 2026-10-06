@@ -10,6 +10,7 @@ import {
 } from "./index.js";
 import { clearModeStateFile, writeModeState } from "../../lib/mode-state-io.js";
 import { getOmcRoot } from "../../lib/worktree-paths.js";
+import { PASTED_ECHO_PROMPT_SENTINEL } from "../autopilot/enforcement.js";
 
 function writeTranscriptWithContext(filePath: string, contextWindow: number, inputTokens: number): void {
   writeFileSync(
@@ -761,6 +762,29 @@ describe("Stop Hook Blocking Contract", () => {
       expect(output.message).toContain("RALPH");
     });
 
+    it("does not block stop for expired autopilot state armed from a sanitized pasted-echo prompt (#4250)", async () => {
+      const sessionId = "test-autopilot-pasted-echo-sentinel";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      mkdirSync(sessionDir, { recursive: true });
+      const armedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      writeFileSync(
+        join(sessionDir, "autopilot-state.json"),
+        JSON.stringify({
+          active: true,
+          original_prompt: PASTED_ECHO_PROMPT_SENTINEL,
+          session_id: sessionId,
+          started_at: armedAt,
+          last_checked_at: armedAt,
+          reinforcement_count: 14,
+          awaiting_confirmation: true,
+          awaiting_confirmation_set_at: armedAt,
+        }),
+      );
+
+      const result = await checkPersistentModes(sessionId, tempDir);
+      expect(result.shouldBlock).toBe(false);
+    });
+
     it("does not reinforce active ralph while an owned background Bash task is pending", async () => {
       const sessionId = "test-ralph-bg-bash-pending";
       writeActiveRalphState(tempDir, sessionId);
@@ -1418,6 +1442,32 @@ describe("Stop Hook Blocking Contract", () => {
       expect(existsSync(autopilotPath)).toBe(false);
     });
 
+    it("cleans expired autopilot state armed from a sanitized pasted-echo prompt in mjs script (#4250)", () => {
+      const sessionId = "autopilot-pasted-echo-sentinel-mjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      const armedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          original_prompt: "(prompt omitted: pasted system echo)",
+          session_id: sessionId,
+          started_at: armedAt,
+          last_checked_at: armedAt,
+          reinforcement_count: 14,
+          awaiting_confirmation: true,
+          awaiting_confirmation_set_at: armedAt,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
+    });
+
     it("does not clear slash autopilot state once a real phase is present in mjs script", () => {
       const sessionId = "autopilot-slash-active-phase-mjs";
       const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
@@ -1902,6 +1952,32 @@ describe("Stop Hook Blocking Contract", () => {
           started_at: new Date().toISOString(),
           last_checked_at: new Date().toISOString(),
           reinforcement_count: 0,
+        }),
+      );
+
+      const output = runScript({ directory: tempDir, sessionId });
+      expect(output.continue).toBe(true);
+      expect(output.decision).toBeUndefined();
+      expect(existsSync(autopilotPath)).toBe(false);
+    });
+
+    it("cleans expired autopilot state armed from a sanitized pasted-echo prompt in cjs script (#4250)", () => {
+      const sessionId = "autopilot-pasted-echo-sentinel-cjs";
+      const sessionDir = join(tempDir, ".omc", "state", "sessions", sessionId);
+      const autopilotPath = join(sessionDir, "autopilot-state.json");
+      mkdirSync(sessionDir, { recursive: true });
+      const armedAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      writeFileSync(
+        autopilotPath,
+        JSON.stringify({
+          active: true,
+          original_prompt: "(prompt omitted: pasted system echo)",
+          session_id: sessionId,
+          started_at: armedAt,
+          last_checked_at: armedAt,
+          reinforcement_count: 14,
+          awaiting_confirmation: true,
+          awaiting_confirmation_set_at: armedAt,
         }),
       );
 

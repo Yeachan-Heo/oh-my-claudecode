@@ -478,6 +478,9 @@ const SYSTEM_ECHO_SIGNATURES = [
 ];
 
 const MAX_STATE_PROMPT_LEN = 500;
+// Must match PASTED_ECHO_PROMPT_SENTINEL in persistent-mode.mjs/.cjs and
+// src/hooks/autopilot/enforcement.ts, which treat it as an orphan marker.
+const PASTED_ECHO_PROMPT_SENTINEL = '(prompt omitted: pasted system echo)';
 
 function stripSystemEchoes(text) {
   if (typeof text !== 'string' || text.length === 0) return '';
@@ -528,7 +531,7 @@ function sanitizePromptForState(prompt) {
   }
 
   if (looksLikeSystemEcho(trimmed)) {
-    return '(prompt omitted: pasted system echo)';
+    return PASTED_ECHO_PROMPT_SENTINEL;
   }
 
   // Fallback (stripping left nothing but original isn't recognizably an echo)
@@ -2061,17 +2064,14 @@ async function main() {
     }
 
     // Activate states for modes that need them (team removed — explicit-only via /team skill)
-    // Skip activation if the prompt sanitizes to the pasted-echo sentinel: these are orphaned
-    // states that persistent-mode will clean up later when the TTL expires (#4250).
-    const safePrompt = sanitizePromptForState(prompt);
-    const isOrphanedEchoPrompt = safePrompt === '(prompt omitted: pasted system echo)';
-    const stateModes = resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
+    // A prompt that sanitizes to the pasted-echo sentinel has no recoverable
+    // user request, so a state armed from it can never be attributed or
+    // confirmed and would block every Stop after the confirmation TTL (#4250).
+    const isPastedEchoPrompt = sanitizePromptForState(prompt) === PASTED_ECHO_PROMPT_SENTINEL;
+    const stateModes = isPastedEchoPrompt
+      ? []
+      : resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
-      // Do not arm modes when the original prompt is entirely a pasted system echo.
-      // The keyword was detected in the sanitized/cleaned text, not the user's actual request.
-      if (isOrphanedEchoPrompt) {
-        continue;
-      }
       const activationError = await activateState(directory, prompt, mode.name, sessionId);
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
