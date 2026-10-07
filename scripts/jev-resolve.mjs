@@ -24,9 +24,9 @@
  * deliberate mirrors; parity with the TS parse is locked by the test suite.
  */
 
-import { readFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, unlinkSync, rmSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
@@ -216,10 +216,12 @@ export async function readStdinJson() {
  */
 export function readRequestFile(path) {
   const raw = readFileSync(path, 'utf8');
+  const dir = dirname(path);
   try {
-    unlinkSync(path);
+    // Remove the entire temp directory (and the file within it)
+    rmSync(dir, { recursive: true, force: true });
   } catch {
-    // Best effort: the caller's temp dir is cleaned up independently.
+    // Best effort: temp dir cleanup is best-effort; never block on it.
   }
   return JSON.parse(raw);
 }
