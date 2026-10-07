@@ -124,8 +124,22 @@ function tmuxFormatEscape(value: string): string {
   return value.replace(/#/g, '##');
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+/**
+ * @internal Exported for testing only.
+ */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+/**
+ * Quote a string for PowerShell invocation using double quotes with proper escaping.
+ * Backticks (`) are PowerShell escape characters and must be escaped.
+ * @internal Exported for testing only.
+ */
+export function powershellQuote(value: string): string {
+  // Escape backticks and double quotes for PowerShell double-quoted strings
+  const escaped = value.replace(/[`"]/g, '`$&');
+  return `"${escaped}"`;
 }
 
 interface TmuxServerGuardRuntime {
@@ -377,18 +391,49 @@ function encodeTmuxServerIdentity(identity: TmuxServerIdentity): string {
   return Buffer.from(JSON.stringify(identity), 'utf8').toString('base64url');
 }
 
-function tmuxServerGuardCondition(identity: TmuxServerIdentity): string {
+/**
+ * Generate the tmux server identity guard condition for the native shell.
+ * On Windows with native PowerShell, generates PowerShell syntax.
+ * On POSIX systems, generates POSIX shell syntax.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardCondition(identity: TmuxServerIdentity): string {
   const runtime = resolveTmuxServerGuardRuntime();
   const runtimePath = tmuxFormatEscape(runtime.runtimePath);
   const nodePath = tmuxFormatEscape(runtime.nodePath);
-  const envPath = process.platform === 'win32' && !isUnixLikeOnWindows()
-    ? 'env'
-    : '/usr/bin/env';
   const encodedIdentity = tmuxFormatEscape(encodeTmuxServerIdentity(identity));
+
+  // Detect native Windows (not MSYS2/Cygwin)
+  if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
+    return tmuxServerGuardConditionPowerShell(
+      nodePath,
+      runtimePath,
+      encodedIdentity,
+    );
+  }
+
+  // POSIX shell syntax
+  return tmuxServerGuardConditionPosix(
+    nodePath,
+    runtimePath,
+    encodedIdentity,
+  );
+}
+
+/**
+ * Generate POSIX shell syntax for the guard condition.
+ * Uses `env -i` to create a clean environment and `< /dev/null` for stdin safety.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardConditionPosix(
+  nodePath: string,
+  runtimePath: string,
+  encodedIdentity: string,
+): string {
   // `#{pid}` is controlled tmux format syntax. All other values are shell
   // quoted after escaping tmux's `#` expansion characters.
   return [
-    shellQuote(envPath),
+    shellQuote('/usr/bin/env'),
     '-i',
     shellQuote(nodePath),
     shellQuote(runtimePath),
@@ -397,6 +442,31 @@ function tmuxServerGuardCondition(identity: TmuxServerIdentity): string {
     shellQuote('#{pid}'),
     '<',
     shellQuote('/dev/null'),
+  ].join(' ');
+}
+
+/**
+ * Generate PowerShell syntax for the guard condition.
+ * Uses the `&` call operator for invocation.
+ * Note: The tmux format expansion placeholder `#{pid}` is preserved as-is
+ * for tmux to expand it before passing to PowerShell.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardConditionPowerShell(
+  nodePath: string,
+  runtimePath: string,
+  encodedIdentity: string,
+): string {
+  // Use the call operator (&) with properly quoted arguments.
+  // Backticks and double-quotes need escaping in PowerShell double-quoted strings.
+  // Note: `#{pid}` is preserved as literal text for tmux format expansion.
+  return [
+    '&',
+    powershellQuote(nodePath),
+    powershellQuote(runtimePath),
+    powershellQuote('--tmux-server-identity-guard'),
+    powershellQuote(encodedIdentity),
+    powershellQuote('#{pid}'),
   ].join(' ');
 }
 
