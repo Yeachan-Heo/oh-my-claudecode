@@ -31,15 +31,18 @@ describe('Issue #4261: cmux team ownership failures', () => {
     delete process.env.CMUX_SURFACE_ID;
   });
   describe('Failure 1: cmux session with tmux-format paneId', () => {
-    it('should reject cmux target with tmux-format paneId (unavailable)', async () => {
-      // This simulates when TMUX is set by cmux's tmux-compat layer
-      // Session: cmux:1, but TMUX_PANE is still %4675534428059654805
-      // Current behavior: returns 'unavailable' because TMUX_MAILBOX_PANE_ID.test returns true
-      // for cmux provider, which is rejected as invalid
+    it('should reject provider mismatch when session is cmux: but paneId is tmux-format', async () => {
+      // This simulates cmux's tmux-compat layer:
+      // - Session name: cmux:1 (from cmux tmux-compat display-message)
+      // - TMUX is set, CMUX_SURFACE_ID is set (tmux-compat mode)
+      // - But paneId is still tmux-format: %4675534428059654805
+      // 
+      // The target incorrectly specifies provider: 'cmux', but it should be 'tmux'
+      // because paneId is tmux-format.
       const target: MailboxNotificationTarget = {
-        provider: 'cmux',
+        provider: 'cmux', // WRONG: should be 'tmux' because paneId is %...
         providerTarget: 'cmux:1',
-        paneId: '%4675534428059654805',
+        paneId: '%4675534428059654805', // tmux-format
         recipient: 'worker',
         recipientRole: 'worker',
       };
@@ -52,10 +55,39 @@ describe('Issue #4261: cmux team ownership failures', () => {
 
       const result = await verifyTeamTargetOwnership(target, dependencies);
 
-      // The issue is that when session is 'cmux:1' but paneId is tmux-format (%...),
-      // the verification fails. This is Failure 1 from issue #4261.
-      expect(result.kind).toBe('unavailable');
+      // Should detect provider mismatch: session is cmux: but paneId is tmux-format
+      expect(result.kind).toBe('provider_mismatch');
       expect(dependencies.cmuxExec).not.toHaveBeenCalled();
+      expect(dependencies.tmuxExec).not.toHaveBeenCalled();
+    });
+
+    it('should correctly determine provider as tmux when paneId is tmux-format despite cmux: session', async () => {
+      // Issue #4261 Failure 1: spawnV2Worker determines provider incorrectly
+      // When session name is 'cmux:1' (from cmux's tmux-compat) but paneId is tmux-format (%...),
+      // the launchProvider should be 'tmux' (based on paneId format), not 'cmux' (based on session name).
+      // 
+      // This test verifies the provider detection logic:
+      // - if session starts with 'cmux:' AND paneId is cmux-format => provider 'cmux'
+      // - if session starts with 'cmux:' BUT paneId is tmux-format (%...) => provider 'tmux'
+      
+      // Test case 1: paneId is tmux-format, session is cmux:X
+      // => Expected provider should be 'tmux', not 'cmux'
+      const target1: MailboxNotificationTarget = {
+        provider: 'cmux', // WRONG: paneId is %..., which is tmux-format
+        providerTarget: 'cmux:1',
+        paneId: '%9',
+        recipient: 'worker',
+        recipientRole: 'worker',
+      };
+
+      const result1 = await verifyTeamTargetOwnership(target1, {
+        tmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        cmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        serverIdentityDependencies: undefined,
+      });
+
+      // Provider mismatch: target says 'cmux' but paneId format indicates 'tmux'
+      expect(result1.kind).toBe('provider_mismatch');
     });
   });
 

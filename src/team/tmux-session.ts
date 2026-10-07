@@ -804,11 +804,13 @@ export async function verifyTeamTargetOwnership(
   target: MailboxNotificationTarget,
   dependencies: MailboxTargetOwnershipDependencies = defaultMailboxTargetOwnershipDependencies,
 ): Promise<MailboxTargetOwnership> {
-  // Issue #4261: When cmux's tmux-compat layer is active, session names like 'cmux:N'
-  // are reported even though we're in a tmux environment. If the session name starts
-  // with 'cmux:' but we're not in a native cmux context, treat it as tmux provider.
+  // Issue #4261: cmux's tmux-compat layer sets session names like 'cmux:N' but paneId
+  // remains tmux-format (%...). Determine provider by both session prefix AND pane id format:
+  // Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format.
+  // If pane id is tmux-format (%...) then use tmux provider even if session is 'cmux:...'.
+  const isNativeCmuxPaneFormat = !TMUX_MAILBOX_PANE_ID.test(target.paneId);
   let expectedProvider: 'tmux' | 'cmux';
-  if (target.providerTarget.startsWith('cmux:') && isCmuxContext()) {
+  if (target.providerTarget.startsWith('cmux:') && isNativeCmuxPaneFormat) {
     expectedProvider = 'cmux';
   } else {
     expectedProvider = 'tmux';
