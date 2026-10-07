@@ -5,15 +5,25 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
     "head": "5c40e04b63577fe7bb3b7173d42cfd17212bfdcd",
     "sourceSha256": "ed08ca4de0396425f225e914f32865d66a1d31966682a6c671373541fd712b8c",
+=======
+    "head": "d2fdbcd3195c990a56f1bc1423040fa8904e9502",
+    "sourceSha256": "12d7f62a0a5a522473adcfb858586ecd9ce3931bbaee0e55bd020d47f20d83fa",
+>>>>>>> a8263ad22 (test(worktree-paths): real-git #4254 subdirectory test on the Windows CI path suite)
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
+<<<<<<< HEAD
   "head": "5c40e04b63577fe7bb3b7173d42cfd17212bfdcd",
   "sourceSha256": "ed08ca4de0396425f225e914f32865d66a1d31966682a6c671373541fd712b8c",
+=======
+  "head": "d2fdbcd3195c990a56f1bc1423040fa8904e9502",
+  "sourceSha256": "12d7f62a0a5a522473adcfb858586ecd9ce3931bbaee0e55bd020d47f20d83fa",
+>>>>>>> a8263ad22 (test(worktree-paths): real-git #4254 subdirectory test on the Windows CI path suite)
   "counts": {
     "public": {
       "skills": 47,
@@ -26,7 +36,7 @@
       "hookFiles": 339,
       "featureFiles": 84,
       "toolFiles": 61,
-      "libFiles": 47,
+      "libFiles": 48,
       "templateHooks": 23,
       "srcFiles": 1444,
       "total": 1467
@@ -662,6 +672,7 @@
       "src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts",
       "src/lib/__tests__/worktree-paths-git-probe-locale.test.ts",
       "src/lib/__tests__/worktree-paths-git-timeout.test.ts",
+      "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
       "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
       "src/lib/__tests__/worktree-paths-split-warning.test.ts",
       "src/lib/__tests__/worktree-paths-superproject-cache.test.ts",
@@ -43058,6 +43069,11 @@
         "path": "src/lib/__tests__/worktree-paths-git-timeout.test.ts"
       },
       {
+        "id": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "kind": "lib",
+        "path": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts"
+      },
+      {
         "id": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
         "kind": "lib",
         "path": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts"
@@ -73455,6 +73471,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/lib/__tests__/worktree-paths-nongit-anchor.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -87212,6 +87258,7 @@
     ],
     "stats": {
       "nodeCount": 7704,
+<<<<<<< HEAD
       "edgeCount": 8318,
       "importEdgeCount": 6883,
       "registerEdgeCount": 68
@@ -87219,4 +87266,13 @@
   },
   "inventorySha256": "4626ebabd8ce2342b3dfc0dd7e723bc5a0091102dad1ff30217bf3847d84b4e1",
   "manifestSha256": "13ee12cf6c794d0bd4b1debfc6c99ecf262ee363061136cc0998a8486c8be11d"
+=======
+      "edgeCount": 8317,
+      "importEdgeCount": 6882,
+      "registerEdgeCount": 68
+    }
+  },
+  "inventorySha256": "fac7add143bcd968486323def8adc7730e58639df0b578c3da0e3318578f8550",
+  "manifestSha256": "e76c06ca4ad0a2c03e73b97bf93e2df244faa897a10ebc8ce590bba94c94edd2"
+>>>>>>> a8263ad22 (test(worktree-paths): real-git #4254 subdirectory test on the Windows CI path suite)
 }

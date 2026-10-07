@@ -107,6 +107,7 @@ jobs:
           src/lib/__tests__/worktree-paths.test.ts
           src/lib/__tests__/worktree-paths-git-probe-failclosed.test.ts
           src/lib/__tests__/worktree-paths-foreign-root.test.ts
+          src/lib/__tests__/worktree-paths-issue-4254-win32.test.ts
           src/tools/__tests__/wiki-tools-git-probe-failclosed.test.ts
           src/tools/__tests__/wiki-tools-direct-dist-failclosed.test.ts
           src/hooks/project-memory/__tests__/hot-path-tracker.test.ts

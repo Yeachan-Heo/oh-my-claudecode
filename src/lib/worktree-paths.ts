@@ -2107,7 +2107,7 @@ export function validateWorkingDirectory(workingDirectory?: string): string {
       throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
     }
 
-    if (providedRootReal !== trustedRootReal) {
+    if (!sameCanonicalPath(providedRootReal, trustedRootReal)) {
       console.error('[worktree] workingDirectory resolved to different git worktree root, using trusted root', {
         workingDirectory: resolved,
         providedRoot: providedRootReal,
@@ -2318,13 +2318,13 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory?: strin
       throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
     }
 
-    if (providedRootReal === trustedRootReal) {
+    if (sameCanonicalPath(providedRootReal, trustedRootReal)) {
       return { status: 'ok', root: providedRoot };
     }
 
     const trustedCommonDir = getGitCommonDir(trustedRoot);
     const providedCommonDir = getGitCommonDir(providedRoot);
-    if (trustedCommonDir && providedCommonDir && providedCommonDir === trustedCommonDir) {
+    if (trustedCommonDir && providedCommonDir && sameCanonicalPath(providedCommonDir, trustedCommonDir)) {
       return { status: 'ok', root: providedRoot };
     }
 
@@ -2359,7 +2359,7 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory?: strin
     } catch {
       gitMetadataReal = gitMetadataDir;
     }
-    if (gitMetadataReal !== trustedRootReal) {
+    if (!sameCanonicalPath(gitMetadataReal, trustedRootReal)) {
       throw new Error(formatGitProbeFailedMessage(workingDirectory));
     }
   }
