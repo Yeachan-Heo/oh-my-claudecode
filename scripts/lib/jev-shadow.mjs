@@ -5,6 +5,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
 
+// Throttle stale directory sweep to at most once per hour per process
+let lastSweepTime = 0;
+const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Get the Jev mode for a point: 'off' | 'shadow' | 'active'.
  * Reuses the script resolver's config gates and union activation semantics.
@@ -64,6 +68,18 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 export function recordJevShadow({ point, state, questions, heuristic }) {
   const mode = jevModeFor(point);
   if (mode === 'off') return undefined;
+
+  // Throttled best-effort sweep of stale temp directories (once per hour)
+  // This cleans up leftovers from killed resolvers that couldn't clean themselves
+  const now = Date.now();
+  if (now - lastSweepTime > SWEEP_THROTTLE_MS) {
+    lastSweepTime = now;
+    try {
+      sweepStaleTempDirs(24 * 60 * 60 * 1000); // Clean dirs older than 24h
+    } catch {
+      // Best effort: sweep failures never affect judgment recording
+    }
+  }
 
   const tempDir = mkdtempSync(join(tmpdir(), 'omc-jev-'));
   const requestFile = join(tempDir, 'request.json');
