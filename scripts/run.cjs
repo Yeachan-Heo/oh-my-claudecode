@@ -62,7 +62,7 @@ function resolveTarget(targetPath) {
     if (!scriptRelative || !existsSync(cacheBase)) return null;
 
     const { readdirSync } = require('fs');
-    const entries = readdirSync(cacheBase).filter(version => /^\d+\.\d+\.\d+/.test(version));
+    const entries = readdirSync(cacheBase).filter(version => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(version));
     entries.sort((a, b) => {
       const pa = a.split('.').map(Number);
       const pb = b.split('.').map(Number);
