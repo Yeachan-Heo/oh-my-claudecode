@@ -349,7 +349,7 @@ export function failClosedExhaustedForegroundCleanup(directory: string, sessionI
     job.producers.core = { ...job.producers.core, state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
     if (job.producers.wiki.state === 'absent') job.producers.wiki = { state: 'no-op', sealedAt: nowIso(), sealedBy: 'recovery' };
     for (const [name, action] of Object.entries(job.actions) as Array<[SessionEndActionName, SessionEndActionState]>) {
-      if (action.status !== 'pending' && action.status !== 'retryable') continue;
+      if (name === 'wiki-capture' || (action.status !== 'pending' && action.status !== 'retryable')) continue;
       action.status = 'expired';
       action.lastOutcomeCode = name === 'foreground-cleanup'
         ? 'required-foreground-cleanup-exhausted'
