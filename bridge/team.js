@@ -9972,12 +9972,13 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       ...tmuxServerIdentity ? { tmuxServerIdentity: { ...tmuxServerIdentity } } : {}
     });
     const detachedPaneShell = workerPaneShellCommand();
+    const detachedFormat = "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}";
     const detachedArgs = [
       "new-session",
       "-d",
       "-P",
       "-F",
-      "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}",
+      detachedFormat,
       "-s",
       detachedSessionName,
       "-c",
@@ -10009,7 +10010,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       try {
         detachedResult = await runPaneCreationCommand(
           existingDetachedIdentity,
-          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
+          tmuxCommandString(detachedArgs, [detachedFormat]),
           detachedPaneShell
         );
       } catch (error) {
@@ -10042,7 +10043,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
         freshDetachedServerIdentity = tmuxServerIdentity;
         detachedResult = await runPaneCreationCommand(
           tmuxServerIdentity,
-          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
+          tmuxCommandString(detachedArgs, [detachedFormat]),
           detachedPaneShell
         );
       } catch (error) {
@@ -14760,10 +14761,7 @@ function resolveExternalModelsDefaults(defaults, env = process.env) {
   }
   return normalized;
 }
-function isHeadlessSupportedOnPlatform(agentType, platform = process.platform) {
-  if (agentType === "antigravity" && platform === "win32") {
-    return false;
-  }
+function isHeadlessSupportedOnPlatform(agentType, _platform = process.platform) {
   return true;
 }
 function assertHeadlessSupported(agentType) {
@@ -22056,6 +22054,7 @@ async function cleanupStaleReservations(teamName, cwd) {
       if (!(owner && typeof owner === "object" && !Array.isArray(owner) && "pid" in owner && "process_started_at" in owner)) {
         return;
       }
+      if (reservation.phase !== "pending") return;
       const ownerRecord = owner;
       if (isProcessIdentityDead(ownerRecord)) {
         await unlink7(reservationPath2);

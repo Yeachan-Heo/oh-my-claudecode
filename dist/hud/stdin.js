@@ -365,6 +365,9 @@ export function getModelId(stdin) {
     const modelId = stdin.model?.id?.trim();
     return modelId || null;
 }
+export function getEffortLevel(stdin) {
+    return stdin.effort?.level?.trim() || null;
+}
 export function getModelName(stdin) {
     const displayName = stdin.model?.display_name?.trim();
     return displayName || getModelId(stdin);

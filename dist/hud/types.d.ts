@@ -46,6 +46,10 @@ export interface StatuslineStdin {
         id?: string;
         display_name?: string;
     };
+    /** Effort level from Claude Code statusline stdin */
+    effort?: {
+        level?: string;
+    };
     /** Context window metrics from Claude Code statusline stdin */
     context_window?: {
         context_window_size?: number;
@@ -303,6 +307,8 @@ export interface HudRenderContext {
     modelName: string | null;
     /** Raw model id from Claude Code statusline stdin; used when full model format is requested */
     modelId?: string | null;
+    /** Effort level from Claude Code statusline stdin; null when unavailable */
+    effortLevel?: string | null;
     /** Ralph loop state */
     ralph: RalphStateForHud | null;
     /** Ultrawork state */
@@ -442,6 +448,7 @@ export interface HudElementConfig {
     gitInfoPosition: 'above' | 'below';
     model: boolean;
     modelFormat: ModelFormat;
+    effort: boolean;
     omcLabel: boolean;
     updateNotification?: boolean;
     rateLimits: boolean;

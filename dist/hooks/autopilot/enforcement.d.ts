@@ -36,6 +36,7 @@ export declare function getExpectedSignalForPhase(phase: string): AutopilotSigna
  * Detect any autopilot signal in transcript (for phase advancement)
  */
 export declare function detectAnySignal(sessionId: string): AutopilotSignal | null;
+export declare const PASTED_ECHO_PROMPT_SENTINEL = "(prompt omitted: pasted system echo)";
 /**
  * Check autopilot state and determine if it should continue
  * This is the main enforcement function called by persistent-mode hook

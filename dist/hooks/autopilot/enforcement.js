@@ -122,6 +122,9 @@ function isAwaitingConfirmation(state) {
     }
     return Date.now() - setAtMs < AWAITING_CONFIRMATION_TTL_MS;
 }
+// keyword-detector persists this in place of a prompt that was only a pasted
+// system echo; a state carrying it has no user request to resume (#4250).
+export const PASTED_ECHO_PROMPT_SENTINEL = "(prompt omitted: pasted system echo)";
 function isOrphanedRoutingEchoState(state) {
     const phase = typeof state.phase === "string" ? state.phase.trim().toLowerCase() : "";
     if (phase && phase !== "unspecified")
@@ -130,13 +133,15 @@ function isOrphanedRoutingEchoState(state) {
     const promptText = [
         stateRecord.originalIdea,
         stateRecord.original_idea,
+        stateRecord.original_prompt,
         stateRecord.prompt,
         stateRecord.task_description,
     ]
         .filter((value) => typeof value === "string")
         .join("\n")
         .trim();
-    return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText);
+    return (/^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText) ||
+        promptText === PASTED_ECHO_PROMPT_SENTINEL);
 }
 /**
  * Get the next phase after current phase

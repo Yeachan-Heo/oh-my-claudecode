@@ -53,5 +53,6 @@ export declare function getRateLimitsFromStdin(stdin: StatuslineStdin): RateLimi
  * omits the model instead of guessing or showing a fake placeholder.
  */
 export declare function getModelId(stdin: StatuslineStdin): string | null;
+export declare function getEffortLevel(stdin: StatuslineStdin): string | null;
 export declare function getModelName(stdin: StatuslineStdin): string | null;
 //# sourceMappingURL=stdin.d.ts.map
