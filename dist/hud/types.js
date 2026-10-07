@@ -69,7 +69,7 @@ export function resolveHudLabels(locale, labels) {
 export const DEFAULT_ELEMENT_ORDER = {
     line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'profile'],
     main: [
-        'omcLabel', 'model', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
+        'omcLabel', 'model', 'effort', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
         'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
         'skills', 'lastSkill', 'contextBar', 'agents', 'background',
         'callCounts', 'lastTool', 'sessionSummary',
@@ -91,6 +91,7 @@ export const DEFAULT_HUD_CONFIG = {
         gitInfoPosition: 'above', // Git info above main HUD line (backward compatible)
         model: true, // Show only when Claude Code statusline stdin provides a model
         modelFormat: 'versioned', // Preserve model version by default
+        effort: true, // Show effort level when Claude Code statusline stdin provides one
         omcLabel: true,
         updateNotification: true, // Preserve existing update prompt behavior by default
         rateLimits: true, // Show rate limits by default
@@ -151,6 +152,7 @@ export const PRESET_CONFIGS = {
         gitInfoPosition: 'above',
         model: true,
         modelFormat: 'versioned',
+        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -194,6 +196,7 @@ export const PRESET_CONFIGS = {
         gitInfoPosition: 'above',
         model: true,
         modelFormat: 'versioned',
+        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -237,6 +240,7 @@ export const PRESET_CONFIGS = {
         gitInfoPosition: 'above',
         model: true,
         modelFormat: 'versioned',
+        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -280,6 +284,7 @@ export const PRESET_CONFIGS = {
         gitInfoPosition: 'above',
         model: true,
         modelFormat: 'versioned',
+        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: false,
@@ -323,6 +328,7 @@ export const PRESET_CONFIGS = {
         gitInfoPosition: 'above',
         model: true,
         modelFormat: 'versioned',
+        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,

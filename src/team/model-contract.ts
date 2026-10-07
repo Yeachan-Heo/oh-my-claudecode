@@ -679,17 +679,15 @@ export function resolveExternalModelsDefaults(
 /**
  * Whether a CLI agent's headless/prompt mode is supported on the given platform.
  * Antigravity (`agy`) `-p`/`--print` takes the prompt as an argv value and cannot
- * read it from stdin; on Windows that argv path is unreliable and `agy` has known
- * upstream Windows `-p` limitations. This centralizes the same platform support
- * decision the advisor (`scripts/run-provider-advisor.js`) enforces for `omc ask`.
+ * read it from stdin. The upstream bug (google-antigravity/antigravity-cli#76) was
+ * fixed in agy 1.0.15/1.1.1, enabling headless mode on Windows as of agy 1.3.0+.
+ * The team path spawns agy without a shell to avoid cmd.exe parsing issues.
  */
 export function isHeadlessSupportedOnPlatform(
   agentType: CliAgentType,
-  platform: NodeJS.Platform = process.platform,
+  _platform: NodeJS.Platform = process.platform,
 ): boolean {
-  if (agentType === 'antigravity' && platform === 'win32') {
-    return false;
-  }
+  // All prompt-mode agents support headless on all platforms (agy 1.3.0+)
   return true;
 }
 

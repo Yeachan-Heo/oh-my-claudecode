@@ -67,6 +67,10 @@ vi.mock('child_process', async (importOriginal) => {
                 mockedCalls.freshServerAlive = true;
                 const session = commandText.match(/'-s'\s+'([^']+)'/)?.[1] ?? 'omc-team-race-team-detached';
                 mockedCalls.freshSessionInventory = [session];
+                // Real tmux prints an escaped (`##`) -F format literally instead of expanding it.
+                if (commandText.includes('##S:')) {
+                    return { stdout: `#S:#{window_index}\t#{pane_id}\t#{socket_path}\t#{pid}\n${marker}\n`, stderr: '' };
+                }
                 return {
                     stdout: `${session}:0\t%91\t${socket ?? mockedCalls.identitySocketPath}\t${process.pid}\n${marker}\n`,
                     stderr: '',
@@ -286,6 +290,9 @@ describe('createTeamSession context resolution', () => {
             '-S', keepaliveCall?.[1],
         ]));
         expect(detachedCreateCall?.find(arg => arg.includes('new-session'))).toContain('OMC_TMUX_GUARD_OK_');
+        const detachedNativeCommand = detachedCreateCall?.find(arg => arg.includes('new-session'));
+        expect(detachedNativeCommand).toContain('#S:#{window_index}\t#{pane_id}\t#{socket_path}\t#{pid}');
+        expect(detachedNativeCommand).not.toContain('##S:');
         expect(mockedCalls.execFileArgs.some((args) => args.includes('if-shell') && args.join(' ').includes('set-clipboard'))).toBe(true);
         expect(mockedCalls.execFileArgs.some((args) => args.includes('if-shell') && /exit-empty(?:['"\\]|\s)+on/.test(args.join(' ')))).toBe(true);
         expect(mockedCalls.execFileArgs.some((args) => args.includes('if-shell')

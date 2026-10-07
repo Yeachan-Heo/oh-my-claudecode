@@ -179,19 +179,12 @@ function buildProviderEnv(provider, env = process.env) {
 }
 
 // Antigravity (`agy`) headless print mode requires the prompt as an argv value
-// (it cannot read the prompt from stdin) and has known upstream `-p`/`--print`
-// stdout issues on Windows. The stdin-pipe path that keeps codex/gemini safe on
-// Windows is therefore unavailable here, and passing a multiline/spaced prompt
-// as argv through cmd.exe (spawn `shell: true`) is not reliably quoted. Rather
-// than emit silently-broken output, guard Windows with a clear, actionable error.
+// (it cannot read the prompt from stdin). To avoid cmd.exe parsing issues on Windows,
+// spawn agy without a shell (shell: false) — agy is a real executable and does not
+// need shell preprocessing. This was fixed in agy 1.0.15/1.1.1 (closed upstream #76).
 function guardProviderPlatform(provider) {
-  if (provider === 'antigravity' && SHOULD_USE_WINDOWS_SHELL) {
-    console.error('[ask-antigravity] Antigravity CLI (agy) headless mode is not supported on Windows yet:');
-    console.error('[ask-antigravity]   agy --print takes the prompt as an argv value (it cannot read stdin),');
-    console.error('[ask-antigravity]   and agy has known Windows -p/--print stdout limitations upstream.');
-    console.error('[ask-antigravity] Run `omc ask antigravity` on macOS/Linux, or use `omc ask gemini` on Windows.');
-    process.exit(1);
-  }
+  // No platform-specific blocks; all providers are supported.
+  // The Windows spawn path uses shell: false for antigravity to pass the prompt safely.
 }
 
 function ensureBinary(provider, binary) {
@@ -319,11 +312,15 @@ async function main() {
 
   const pipePromptViaStdin = shouldPipePromptViaStdin(provider, prompt);
   const providerArgs = buildProviderArgs(provider, prompt, { pipePromptViaStdin });
+  // Antigravity on Windows: spawn without a shell to avoid cmd.exe prompt parsing.
+  // The `-p <prompt>` format is safe as a direct argv value when spawned without
+  // shell preprocessing (agy is a real executable, not a shell function or alias).
+  const useShell = provider === 'antigravity' ? false : SHOULD_USE_WINDOWS_SHELL;
   const run = spawnSync(binary, providerArgs, {
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
     env: buildProviderEnv(provider),
-    shell: SHOULD_USE_WINDOWS_SHELL,
+    shell: useShell,
     // Bound antigravity so an upstream non-TTY hang (#76) fails cleanly instead of
     // blocking forever; agy's own --print-timeout does not work. SIGKILL (not a
     // catchable SIGTERM) guarantees spawnSync returns even if agy traps signals.

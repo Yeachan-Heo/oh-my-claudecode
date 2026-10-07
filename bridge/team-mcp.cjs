@@ -14749,12 +14749,13 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       ...tmuxServerIdentity ? { tmuxServerIdentity: { ...tmuxServerIdentity } } : {}
     });
     const detachedPaneShell = workerPaneShellCommand();
+    const detachedFormat = "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}";
     const detachedArgs = [
       "new-session",
       "-d",
       "-P",
       "-F",
-      "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}",
+      detachedFormat,
       "-s",
       detachedSessionName,
       "-c",
@@ -14786,7 +14787,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
       try {
         detachedResult = await runPaneCreationCommand(
           existingDetachedIdentity,
-          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
+          tmuxCommandString(detachedArgs, [detachedFormat]),
           detachedPaneShell
         );
       } catch (error2) {
@@ -14819,7 +14820,7 @@ async function createTeamSession(teamName, workerCount, cwd, options = {}) {
         freshDetachedServerIdentity = tmuxServerIdentity;
         detachedResult = await runPaneCreationCommand(
           tmuxServerIdentity,
-          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
+          tmuxCommandString(detachedArgs, [detachedFormat]),
           detachedPaneShell
         );
       } catch (error2) {

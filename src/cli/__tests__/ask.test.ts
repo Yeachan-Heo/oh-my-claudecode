@@ -571,9 +571,7 @@ describe('run-provider-advisor script contract', () => {
     ['claude', ['claude', '--prompt', 'nested claude prompt']],
     ['codex', ['codex', '--prompt', 'nested codex prompt']],
     ['gemini', ['gemini', '--prompt', 'nested gemini prompt']],
-    // antigravity is intentionally omitted here: this matrix runs under the win32
-    // capture prelude, and antigravity is guarded (exits early) on Windows. Its
-    // env-stripping on supported platforms is covered by the non-Windows tests.
+    ['antigravity', ['antigravity', '--prompt', 'nested antigravity prompt']],
     ['grok', ['grok', '--prompt', 'nested grok prompt']],
     ['cursor', ['cursor', '--prompt', 'nested cursor prompt']],
   ] as const)('strips Claude session env vars for %s advisor spawns', (provider, args) => {
@@ -765,27 +763,45 @@ describe('run-provider-advisor script contract', () => {
     }
   });
 
-  it('guards antigravity on Windows with a clear error and never spawns agy', () => {
-    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-win32-guard-'));
+  it('spawns antigravity on Windows without shell to safely pass the prompt as argv', () => {
+    const wd = mkdtempSync(join(tmpdir(), 'omc-ask-antigravity-win32-noshell-'));
     try {
       const capturePath = join(wd, 'spawn-sync-calls.json');
       const preludePath = writeSpawnSyncCapturePrelude(wd); // sets process.platform = win32
       const result = runAdvisorScriptWithPrelude(
         preludePath,
-        ['antigravity', '--prompt', 'windows headless attempt'],
+        ['antigravity', '--prompt', 'windows headless prompt 你好'],
         wd,
         { SPAWN_CAPTURE_PATH: capturePath },
       );
 
-      // Guard exits non-zero before any spawnSync, so agy is never launched.
-      expect(result.status).toBe(1);
-      const stderr = `${result.stderr ?? ''}`;
-      expect(stderr).toContain('not supported on Windows');
-      // The capture prelude writes the (empty) call list on exit; assert no agy spawn.
-      if (existsSync(capturePath)) {
-        const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{ command: string }>;
-        expect(calls.some((c) => c.command === 'agy')).toBe(false);
-      }
+      // Fixed: antigravity now works on Windows via shell: false spawn (agy 1.3.0+).
+      // The version probe uses shell:true; the launch uses shell:false to avoid cmd.exe parsing.
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+
+      const calls = JSON.parse(readFileSync(capturePath, 'utf8')) as Array<{
+        command: string;
+        args: string[];
+        options: { shell: boolean; encoding: string | null; stdio: string | null; input: string | null };
+      }>;
+
+      // Version probe (shell: true) + launch (shell: false).
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        command: 'agy',
+        args: ['--version'],
+        options: { shell: true, encoding: 'utf8', stdio: 'ignore', input: null },
+      });
+      expect(calls[1]).toMatchObject({
+        command: 'agy',
+        args: ['--dangerously-skip-permissions', '-p', 'windows headless prompt 你好'],
+        // CRITICAL: shell: false prevents cmd.exe from splitting/parsing the prompt.
+        // stdio is ['ignore', 'pipe', 'pipe'] since agy does not pipe stdin.
+        options: { shell: false, encoding: 'utf8', input: null },
+      });
+      // Verify stdio is configured correctly (not stdin pipe, but stdout/stderr capture).
+      expect(calls[1].options.stdio).toEqual(['ignore', 'pipe', 'pipe']);
     } finally {
       rmSync(wd, { recursive: true, force: true });
     }
