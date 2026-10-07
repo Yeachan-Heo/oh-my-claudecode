@@ -705,8 +705,8 @@ async function cmuxCloseSurface(surfaceId: string): Promise<void> {
   await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
 }
 
-const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
-const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+export const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+export const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
 
 function exactTmuxPaneMembershipTarget(providerTarget: string): {
   target: string;
@@ -804,7 +804,17 @@ export async function verifyTeamTargetOwnership(
   target: MailboxNotificationTarget,
   dependencies: MailboxTargetOwnershipDependencies = defaultMailboxTargetOwnershipDependencies,
 ): Promise<MailboxTargetOwnership> {
-  const expectedProvider = target.providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+  // Issue #4261: cmux's tmux-compat layer sets session names like 'cmux:N' but paneId
+  // remains tmux-format (%...). Determine provider by both session prefix AND pane id format:
+  // Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format.
+  // If pane id is tmux-format (%...) then use tmux provider even if session is 'cmux:...'.
+  const isNativeCmuxPaneFormat = !TMUX_MAILBOX_PANE_ID.test(target.paneId);
+  let expectedProvider: 'tmux' | 'cmux';
+  if (target.providerTarget.startsWith('cmux:') && isNativeCmuxPaneFormat) {
+    expectedProvider = 'cmux';
+  } else {
+    expectedProvider = 'tmux';
+  }
   if (target.provider !== expectedProvider) return { kind: 'provider_mismatch' };
 
   if (target.provider === 'tmux') {
@@ -885,14 +895,41 @@ export async function verifyTeamTargetOwnership(
     if (!panes || panes.length === 0) return { kind: 'unavailable' };
 
     for (const pane of panes) {
-      const surfaces = parseCmuxResourceIds(
-        (await dependencies.cmuxExec([
-          '--json', 'list-pane-surfaces', '--workspace', workspace, '--pane', pane,
-        ])).stdout,
-        'surfaces',
-      );
-      if (!surfaces) return { kind: 'unavailable' };
-      if (surfaces.includes(target.paneId)) {
+      const surfacesOutput = (await dependencies.cmuxExec([
+        '--json', 'list-pane-surfaces', '--workspace', workspace, '--pane', pane,
+      ])).stdout;
+      
+      // Parse surfaces, checking both 'id' (UUID) and 'ref' fields
+      // to handle both UUID and ref format returns from cmux.
+      // Issue #4261: cmux new-split may return surface by ref (e.g., surface:1000060015)
+      // while list-pane-surfaces returns both id (UUID) and ref.
+      let surfaceList: { id: string; ref?: string }[] | null = null;
+      try {
+        const parsed = JSON.parse(surfacesOutput) as unknown;
+        const entries = Array.isArray(parsed)
+          ? parsed
+          : parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).surfaces)
+            ? (parsed as Record<string, unknown>).surfaces as unknown[]
+            : null;
+        if (entries && Array.isArray(entries)) {
+          surfaceList = [];
+          for (const entry of entries) {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+            const id = (entry as Record<string, unknown>).id;
+            const ref = (entry as Record<string, unknown>).ref;
+            if (isExactOpaqueCmuxIdentifier(id)) {
+              surfaceList.push({ id: id as string, ref: isExactOpaqueCmuxIdentifier(ref) ? ref as string : undefined });
+            }
+          }
+        }
+      } catch {
+        // JSON parse error
+      }
+      
+      if (!surfaceList || surfaceList.length === 0) return { kind: 'unavailable' };
+      
+      // Match against both id (UUID) and ref fields
+      if (surfaceList.some(surface => surface.id === target.paneId || surface.ref === target.paneId)) {
         return {
           kind: 'owned',
           provider: 'cmux',

@@ -92,6 +92,7 @@ import {
   paneLooksReady,
   applyMainVerticalLayout,
   splitTeamWorkerPaneWithEvidence,
+  TMUX_MAILBOX_PANE_ID,
   type StartupPaneContext,
   type StartupPaneActivity,
   type StartupInboxResubmitOutcome,
@@ -1484,7 +1485,14 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? opts.leaderPaneId
     : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
-  const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+  // Issue #4261: Determine provider based on both session name and pane id format.
+  // cmux's tmux-compat layer sets both TMUX and CMUX_SURFACE_ID, but the pane id is tmux-format (%...).
+  // Use the same logic as verifyTeamTargetOwnership:
+  // - Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format (not %...).
+  // - Otherwise use 'tmux' provider (including cmux with tmux-compat where paneId is %...).
+  const isTmuxFormatPaneId = TMUX_MAILBOX_PANE_ID.test(opts.leaderPaneId);
+  const isNativeCmuxProvider = opts.sessionName.startsWith('cmux:') && !isTmuxFormatPaneId;
+  const launchProvider = isNativeCmuxProvider ? 'cmux' as const : 'tmux' as const;
   const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
   if (!await workerPaneBelongsToOwnedProviderTarget({
     provider: launchProvider,
@@ -6273,7 +6281,12 @@ export async function shutdownTeamV2(
   const paneCleanupUnknown: string[] = [];
   for (const worker of config.workers) {
     if (!worker.pane_id) {
-      providerCleanupFailures.push(worker.name);
+      // Issue #4261: No pane_id recorded means this worker never got a pane.
+      // When --force is used, allow cleanup to proceed (nothing to verify).
+      // Otherwise, preserve state (pane may have been orphaned).
+      if (!options.force) {
+        providerCleanupFailures.push(worker.name);
+      }
       continue;
     }
     if (!worker.launch_attempt_id) {
@@ -6306,7 +6319,11 @@ export async function shutdownTeamV2(
           : {}),
       });
       if (!ownership.ok) {
-        providerCleanupFailures.push(worker.name);
+        // Issue #4261: When ownership cannot be verified (pane doesn't exist),
+        // allow --force cleanup to proceed. Otherwise preserve state.
+        if (!options.force) {
+          providerCleanupFailures.push(worker.name);
+        }
         continue;
       }
       paneOwnership = ownership.ownership;
