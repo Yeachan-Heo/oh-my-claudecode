@@ -6278,7 +6278,12 @@ export async function shutdownTeamV2(
   const paneCleanupUnknown: string[] = [];
   for (const worker of config.workers) {
     if (!worker.pane_id) {
-      providerCleanupFailures.push(worker.name);
+      // Issue #4261: No pane_id recorded means this worker never got a pane.
+      // When --force is used, allow cleanup to proceed (nothing to verify).
+      // Otherwise, preserve state (pane may have been orphaned).
+      if (!options.force) {
+        providerCleanupFailures.push(worker.name);
+      }
       continue;
     }
     if (!worker.launch_attempt_id) {
@@ -6311,7 +6316,11 @@ export async function shutdownTeamV2(
           : {}),
       });
       if (!ownership.ok) {
-        providerCleanupFailures.push(worker.name);
+        // Issue #4261: When ownership cannot be verified (pane doesn't exist),
+        // allow --force cleanup to proceed. Otherwise preserve state.
+        if (!options.force) {
+          providerCleanupFailures.push(worker.name);
+        }
         continue;
       }
       paneOwnership = ownership.ownership;
