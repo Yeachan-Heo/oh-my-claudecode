@@ -153,20 +153,36 @@ async function waitForTerminalCallback(cwd: string, sessionId: string): Promise<
 
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
   const tempDirs: string[] = [];
+  const savedEnv: Record<string, string | undefined> = {};
 
   afterEach(() => {
     for (const directory of tempDirs.splice(0)) {
       rmSync(directory, { recursive: true, force: true, maxRetries: 40, retryDelay: 25 });
     }
-    vi.unstubAllEnvs();
+    // Restore saved environment variables
+    for (const key of Object.keys(savedEnv)) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key]!;
+      }
+    }
+    Object.keys(savedEnv).length = 0;
   });
 
   function createProject(): string {
     const cwd = mkdtempSync(join(homedir(), 'omc-session-end-process-exit-'));
     tempDirs.push(cwd);
-    vi.stubEnv('HOME', cwd);
-    vi.stubEnv('USERPROFILE', cwd);
-    vi.stubEnv('OMC_STATE_DIR', '');
+    // Save current env values before stubbing
+    if (!savedEnv.hasOwnProperty('HOME')) savedEnv.HOME = process.env.HOME;
+    if (!savedEnv.hasOwnProperty('USERPROFILE')) savedEnv.USERPROFILE = process.env.USERPROFILE;
+    if (!savedEnv.hasOwnProperty('OMC_STATE_DIR')) savedEnv.OMC_STATE_DIR = process.env.OMC_STATE_DIR;
+    // Stub the environment variables
+    process.env.HOME = cwd;
+    process.env.USERPROFILE = cwd;
+    process.env.OMC_STATE_DIR = '';
+    // Create a workspace marker so getOmcRoot uses this directory as the root
+    writeFileSync(join(cwd, '.omc-workspace'), '');
     writeFileSync(join(cwd, 'transcript.jsonl'), '');
     mkdirSync(getOmcRoot(cwd), { recursive: true });
     return cwd;
