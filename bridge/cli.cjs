@@ -32209,7 +32209,7 @@ function validateWorkingDirectory(workingDirectory) {
     } catch {
       throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
     }
-    if (!sameCanonicalPath(providedRootReal, trustedRootReal)) {
+    if (providedRootReal !== trustedRootReal) {
       console.error("[worktree] workingDirectory resolved to different git worktree root, using trusted root", {
         workingDirectory: resolved,
         providedRoot: providedRootReal,
@@ -32308,12 +32308,12 @@ function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory) {
     } catch {
       throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
     }
-    if (sameCanonicalPath(providedRootReal, trustedRootReal)) {
+    if (providedRootReal === trustedRootReal) {
       return { status: "ok", root: providedRoot };
     }
     const trustedCommonDir = getGitCommonDir(trustedRoot);
     const providedCommonDir = getGitCommonDir(providedRoot);
-    if (trustedCommonDir && providedCommonDir && sameCanonicalPath(providedCommonDir, trustedCommonDir)) {
+    if (trustedCommonDir && providedCommonDir && providedCommonDir === trustedCommonDir) {
       return { status: "ok", root: providedRoot };
     }
     return foreignRepositoryResolution(providedRootReal, trustedRootReal, workingDirectory);
@@ -32338,7 +32338,7 @@ function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory) {
     } catch {
       gitMetadataReal = gitMetadataDir;
     }
-    if (!sameCanonicalPath(gitMetadataReal, trustedRootReal)) {
+    if (gitMetadataReal !== trustedRootReal) {
       throw new Error(formatGitProbeFailedMessage(workingDirectory));
     }
   }
@@ -50509,7 +50509,6 @@ var init_types8 = __esm({
       main: [
         "omcLabel",
         "model",
-        "effort",
         "claudeLabel",
         "enterpriseCost",
         "rateLimits",
@@ -50555,8 +50554,6 @@ var init_types8 = __esm({
         // Show only when Claude Code statusline stdin provides a model
         modelFormat: "versioned",
         // Preserve model version by default
-        effort: true,
-        // Show effort level when Claude Code statusline stdin provides one
         omcLabel: true,
         updateNotification: true,
         // Preserve existing update prompt behavior by default
@@ -50632,7 +50629,6 @@ var init_types8 = __esm({
         gitInfoPosition: "above",
         model: true,
         modelFormat: "versioned",
-        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -50676,7 +50672,6 @@ var init_types8 = __esm({
         gitInfoPosition: "above",
         model: true,
         modelFormat: "versioned",
-        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -50721,7 +50716,6 @@ var init_types8 = __esm({
         gitInfoPosition: "above",
         model: true,
         modelFormat: "versioned",
-        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -50766,7 +50760,6 @@ var init_types8 = __esm({
         gitInfoPosition: "above",
         model: true,
         modelFormat: "versioned",
-        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: false,
@@ -50810,7 +50803,6 @@ var init_types8 = __esm({
         gitInfoPosition: "above",
         model: true,
         modelFormat: "versioned",
-        effort: true,
         omcLabel: true,
         updateNotification: true,
         rateLimits: true,
@@ -55920,11 +55912,12 @@ function isOrphanedRoutingEchoState(state) {
   const promptText = [
     stateRecord.originalIdea,
     stateRecord.original_idea,
-    stateRecord.original_prompt,
     stateRecord.prompt,
     stateRecord.task_description
   ].filter((value) => typeof value === "string").join("\n").trim();
-  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(promptText) || promptText === PASTED_ECHO_PROMPT_SENTINEL;
+  return /^\[MAGIC KEYWORDS?(?: DETECTED)?:\s*AUTOPILOT\s*\]\s*$/i.test(
+    promptText
+  );
 }
 function getNextPhase(current) {
   switch (current) {
@@ -56314,7 +56307,7 @@ function detectPipelineSignal(sessionId, signal) {
   }
   return false;
 }
-var import_fs64, import_path75, SIGNAL_PATTERNS, AWAITING_CONFIRMATION_TTL_MS2, PASTED_ECHO_PROMPT_SENTINEL;
+var import_fs64, import_path75, SIGNAL_PATTERNS, AWAITING_CONFIRMATION_TTL_MS2;
 var init_enforcement = __esm({
   "src/hooks/autopilot/enforcement.ts"() {
     "use strict";
@@ -56341,7 +56334,6 @@ var init_enforcement = __esm({
       TRANSITION_TO_VALIDATION: /TRANSITION_TO_VALIDATION/i
     };
     AWAITING_CONFIRMATION_TTL_MS2 = 2 * 60 * 1e3;
-    PASTED_ECHO_PROMPT_SENTINEL = "(prompt omitted: pasted system echo)";
   }
 });
 
@@ -63322,32 +63314,6 @@ var init_chain_enqueuer = __esm({
   }
 });
 
-// src/team/types.ts
-function isAbsoluteTmuxSocketPath(value) {
-  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
-}
-function isValidTmuxServerIdentity(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const candidate = value;
-  return typeof candidate.socket_path === "string" && candidate.socket_path.length > 0 && candidate.socket_path === candidate.socket_path.trim() && !/[\u0000-\u001f\u007f]/.test(candidate.socket_path) && isAbsoluteTmuxSocketPath(candidate.socket_path) && typeof candidate.server_pid === "number" && Number.isSafeInteger(candidate.server_pid) && candidate.server_pid > 0 && typeof candidate.process_started_at === "string" && candidate.process_started_at.length > 0 && candidate.process_started_at.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(candidate.process_started_at);
-}
-function isValidTeamInstanceId(value) {
-  return typeof value === "string" && TEAM_INSTANCE_ID_PATTERN.test(value);
-}
-function isValidLeaderSessionId(value) {
-  return typeof value === "string" && LEADER_SESSION_ID_PATTERN.test(value);
-}
-var TEAM_INSTANCE_ID_PATTERN, LEADER_SESSION_ID_PATTERN, DEFAULT_MAX_WORKERS, ABSOLUTE_MAX_WORKERS;
-var init_types9 = __esm({
-  "src/team/types.ts"() {
-    "use strict";
-    TEAM_INSTANCE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    LEADER_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
-    DEFAULT_MAX_WORKERS = 20;
-    ABSOLUTE_MAX_WORKERS = 20;
-  }
-});
-
 // src/hooks/wiki/session-hooks.ts
 var session_hooks_exports = {};
 __export(session_hooks_exports, {
@@ -63591,21 +63557,29 @@ var init_session_hooks = __esm({
   }
 });
 
-// src/hooks/session-end/wiki-foreground-bootstrap.ts
-async function publishWikiSessionEndBootstrap(input) {
-  const directory = resolveToWorktreeRoot(input.cwd);
-  const intent = buildWikiSessionEndCaptureIntent({ cwd: directory, session_id: input.session_id });
-  sealWikiManifest(directory, input.session_id, intent ? { ...intent } : void 0);
-  const { spawnSessionEndWorker: spawnSessionEndWorker2 } = await Promise.resolve().then(() => (init_worker(), worker_exports));
-  spawnSessionEndWorker2({ directory, sessionId: input.session_id });
-  return { continue: true };
+// src/team/types.ts
+function isAbsoluteTmuxSocketPath(value) {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\");
 }
-var init_wiki_foreground_bootstrap = __esm({
-  "src/hooks/session-end/wiki-foreground-bootstrap.ts"() {
+function isValidTmuxServerIdentity(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value;
+  return typeof candidate.socket_path === "string" && candidate.socket_path.length > 0 && candidate.socket_path === candidate.socket_path.trim() && !/[\u0000-\u001f\u007f]/.test(candidate.socket_path) && isAbsoluteTmuxSocketPath(candidate.socket_path) && typeof candidate.server_pid === "number" && Number.isSafeInteger(candidate.server_pid) && candidate.server_pid > 0 && typeof candidate.process_started_at === "string" && candidate.process_started_at.length > 0 && candidate.process_started_at.length <= 1024 && !/[\u0000-\u001f\u007f]/.test(candidate.process_started_at);
+}
+function isValidTeamInstanceId(value) {
+  return typeof value === "string" && TEAM_INSTANCE_ID_PATTERN.test(value);
+}
+function isValidLeaderSessionId(value) {
+  return typeof value === "string" && LEADER_SESSION_ID_PATTERN.test(value);
+}
+var TEAM_INSTANCE_ID_PATTERN, LEADER_SESSION_ID_PATTERN, DEFAULT_MAX_WORKERS, ABSOLUTE_MAX_WORKERS;
+var init_types9 = __esm({
+  "src/team/types.ts"() {
     "use strict";
-    init_cleanup_manifest();
-    init_session_hooks();
-    init_worktree_paths();
+    TEAM_INSTANCE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    LEADER_SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
+    DEFAULT_MAX_WORKERS = 20;
+    ABSOLUTE_MAX_WORKERS = 20;
   }
 });
 
@@ -67934,7 +67908,10 @@ function resolveExternalModelsDefaults(defaults, env2 = process.env) {
   }
   return normalized;
 }
-function isHeadlessSupportedOnPlatform(agentType, _platform = process.platform) {
+function isHeadlessSupportedOnPlatform(agentType, platform = process.platform) {
+  if (agentType === "antigravity" && platform === "win32") {
+    return false;
+  }
   return true;
 }
 function assertHeadlessSupported(agentType) {
@@ -71632,13 +71609,12 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       ...tmuxServerIdentity ? { tmuxServerIdentity: { ...tmuxServerIdentity } } : {}
     });
     const detachedPaneShell = workerPaneShellCommand();
-    const detachedFormat = "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}";
     const detachedArgs = [
       "new-session",
       "-d",
       "-P",
       "-F",
-      detachedFormat,
+      "#S:#{window_index}	#{pane_id}	#{socket_path}	#{pid}",
       "-s",
       detachedSessionName,
       "-c",
@@ -71670,7 +71646,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
       try {
         detachedResult = await runPaneCreationCommand(
           existingDetachedIdentity,
-          tmuxCommandString(detachedArgs, [detachedFormat]),
+          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
           detachedPaneShell
         );
       } catch (error2) {
@@ -71703,7 +71679,7 @@ async function createTeamSession(teamName, workerCount, cwd2, options = {}) {
         freshDetachedServerIdentity = tmuxServerIdentity;
         detachedResult = await runPaneCreationCommand(
           tmuxServerIdentity,
-          tmuxCommandString(detachedArgs, [detachedFormat]),
+          tmuxCommandString(detachedArgs, ["#S:0	#{pane_id}	#{socket_path}	#{pid}"]),
           detachedPaneShell
         );
       } catch (error2) {
@@ -81287,7 +81263,6 @@ async function cleanupStaleReservations(teamName, cwd2) {
       if (!(owner && typeof owner === "object" && !Array.isArray(owner) && "pid" in owner && "process_started_at" in owner)) {
         return;
       }
-      if (reservation2.phase !== "pending") return;
       const ownerRecord = owner;
       if (isProcessIdentityDead(ownerRecord)) {
         await (0, import_promises25.unlink)(reservationPath2);
@@ -83627,7 +83602,7 @@ __export(session_end_exports, {
   prepareSessionEndWorkerInput: () => prepareSessionEndWorkerInput,
   processSessionEnd: () => processSessionEnd,
   processSessionEndCleanupWorker: () => processSessionEndCleanupWorker,
-  processWikiSessionEnd: () => publishWikiSessionEndBootstrap,
+  processWikiSessionEnd: () => processWikiSessionEnd,
   recordSessionMetrics: () => recordSessionMetrics,
   resolveSessionEndCleanupBudgetMs: () => resolveSessionEndCleanupBudgetMs,
   runForegroundSessionEndCleanup: () => runForegroundSessionEndCleanup,
@@ -84285,6 +84260,13 @@ async function processSessionEnd(input) {
     return { continue: true };
   });
 }
+async function processWikiSessionEnd(input) {
+  const directory = resolveToWorktreeRoot(input.cwd);
+  const intent = buildWikiSessionEndCaptureIntent({ cwd: directory, session_id: input.session_id });
+  sealWikiManifest(directory, input.session_id, intent ? { ...intent } : void 0);
+  spawnSessionEndWorker({ directory, sessionId: input.session_id });
+  return { continue: true };
+}
 async function handleSessionEnd(input) {
   return processSessionEnd(input);
 }
@@ -84305,9 +84287,9 @@ var init_session_end = __esm({
     init_cleanup_manifest();
     init_chain_enqueuer();
     init_worker();
+    init_session_hooks();
     init_stale_prd();
     init_types9();
-    init_wiki_foreground_bootstrap();
     SESSION_STARTED_MARKER_FILE = "session-started.json";
     DEFAULT_SESSION_END_CLEANUP_BUDGET_MS = 2e3;
     MAX_SESSION_END_CLEANUP_BUDGET_MS = 1e4;
@@ -93563,9 +93545,6 @@ function getModelId(stdin) {
   const modelId = stdin.model?.id?.trim();
   return modelId || null;
 }
-function getEffortLevel(stdin) {
-  return stdin.effort?.level?.trim() || null;
-}
 function getModelName(stdin) {
   const displayName = stdin.model?.display_name?.trim();
   return displayName || getModelId(stdin);
@@ -97050,14 +97029,6 @@ var init_agent_kind = __esm({
 });
 
 // src/hud/transcript.ts
-function getTaskToolState(latestTodos) {
-  let state = taskToolStates.get(latestTodos);
-  if (!state) {
-    state = { pendingCreates: /* @__PURE__ */ new Map(), byId: /* @__PURE__ */ new Map() };
-    taskToolStates.set(latestTodos, state);
-  }
-  return state;
-}
 async function parseTranscript(transcriptPath, options) {
   pendingPermissionMap.clear();
   const result = {
@@ -97249,16 +97220,6 @@ function readTailLines(filePath, fileSize, maxBytes) {
   }
   return lines;
 }
-function extractTaskIdFromTaskCreateResult(content) {
-  let text = "";
-  if (typeof content === "string") {
-    text = content;
-  } else if (Array.isArray(content)) {
-    text = content.map((b) => typeof b?.text === "string" ? b.text : "").join("\n");
-  }
-  const match = /Task #([^\s:]+) created/.exec(text);
-  return match ? match[1] : null;
-}
 function extractBackgroundAgentId(content) {
   const text = typeof content === "string" ? content : content.find((c) => c.type === "text")?.text || "";
   const match = text.match(/agentId:\s*([a-zA-Z0-9]+)/);
@@ -97398,7 +97359,6 @@ function processEntry(entry2, agentMap, latestTodos, result, maxAgentMapSize = 5
         const input = block.input;
         if (input?.todos && Array.isArray(input.todos)) {
           latestTodos.length = 0;
-          taskToolStates.get(latestTodos)?.byId.clear();
           latestTodos.push(
             ...input.todos.map((t) => ({
               content: t.content,
@@ -97406,33 +97366,6 @@ function processEntry(entry2, agentMap, latestTodos, result, maxAgentMapSize = 5
               activeForm: t.activeForm
             }))
           );
-        }
-      } else if (block.name === "TaskCreate" || block.name === "proxy_TaskCreate") {
-        const input = block.input;
-        if (block.id && typeof input?.subject === "string" && input.subject) {
-          getTaskToolState(latestTodos).pendingCreates.set(block.id, {
-            content: input.subject,
-            status: "pending",
-            ...input.activeForm ? { activeForm: input.activeForm } : {}
-          });
-        }
-      } else if (block.name === "TaskUpdate" || block.name === "proxy_TaskUpdate") {
-        const input = block.input;
-        const taskId = input?.taskId == null ? "" : String(input.taskId);
-        const state = getTaskToolState(latestTodos);
-        const item = taskId ? state.byId.get(taskId) : void 0;
-        if (input && item) {
-          if (input.status === "deleted") {
-            const idx = latestTodos.indexOf(item);
-            if (idx >= 0) latestTodos.splice(idx, 1);
-            state.byId.delete(taskId);
-          } else {
-            if (input.status && TASK_STATUSES.has(input.status)) {
-              item.status = input.status;
-            }
-            if (typeof input.subject === "string" && input.subject) item.content = input.subject;
-            if (typeof input.activeForm === "string" && input.activeForm) item.activeForm = input.activeForm;
-          }
         }
       } else if (block.name === "Skill" || block.name === "proxy_Skill") {
         result.skillCallCount++;
@@ -97457,19 +97390,6 @@ function processEntry(entry2, agentMap, latestTodos, result, maxAgentMapSize = 5
     }
     if (block.type === "tool_result" && block.tool_use_id) {
       pendingPermissionMap.delete(block.tool_use_id);
-      const taskState = taskToolStates.get(latestTodos);
-      const pendingTask = taskState?.pendingCreates.get(block.tool_use_id);
-      if (taskState && pendingTask) {
-        taskState.pendingCreates.delete(block.tool_use_id);
-        const taskId = block.is_error || !block.content ? null : extractTaskIdFromTaskCreateResult(block.content);
-        if (taskId) {
-          const previous = taskState.byId.get(taskId);
-          const prevIdx = previous ? latestTodos.indexOf(previous) : -1;
-          if (prevIdx >= 0) latestTodos.splice(prevIdx, 1);
-          taskState.byId.set(taskId, pendingTask);
-          latestTodos.push(pendingTask);
-        }
-      }
       const agent = agentMap.get(block.tool_use_id);
       if (agent) {
         const blockContent = block.content;
@@ -97531,7 +97451,7 @@ function extractLastRequestTokenUsage(usage) {
 function getNumericUsageValue(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
-var import_fs141, import_readline5, import_path170, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, taskToolStates, TASK_STATUSES, THINKING_PART_TYPES2, THINKING_RECENCY_MS, transcriptCache, TRANSCRIPT_CACHE_MAX_SIZE;
+var import_fs141, import_readline5, import_path170, MAX_TAIL_BYTES, MAX_AGENT_MAP_SIZE, PERMISSION_TOOLS, PERMISSION_THRESHOLD_MS, pendingPermissionMap, THINKING_PART_TYPES2, THINKING_RECENCY_MS, transcriptCache, TRANSCRIPT_CACHE_MAX_SIZE;
 var init_transcript = __esm({
   "src/hud/transcript.ts"() {
     "use strict";
@@ -97551,8 +97471,6 @@ var init_transcript = __esm({
     ];
     PERMISSION_THRESHOLD_MS = 3e3;
     pendingPermissionMap = /* @__PURE__ */ new Map();
-    taskToolStates = /* @__PURE__ */ new WeakMap();
-    TASK_STATUSES = /* @__PURE__ */ new Set(["pending", "in_progress", "completed"]);
     THINKING_PART_TYPES2 = ["thinking", "reasoning"];
     THINKING_RECENCY_MS = 3e4;
     transcriptCache = /* @__PURE__ */ new Map();
@@ -97906,9 +97824,6 @@ function red(text) {
 }
 function cyan(text) {
   return `${CYAN}${text}${RESET}`;
-}
-function magenta(text) {
-  return `${MAGENTA}${text}${RESET}`;
 }
 function dim(text) {
   return `${DIM}${text}${RESET}`;
@@ -99457,31 +99372,6 @@ var init_model = __esm({
   }
 });
 
-// src/hud/elements/effort.ts
-function renderEffort(level) {
-  if (!level) return null;
-  const label = `effort:${level}`;
-  switch (level) {
-    case "low":
-      return dim(label);
-    case "high":
-      return yellow(label);
-    case "xhigh":
-      return magenta(label);
-    case "max":
-      return bold(magenta(label));
-    case "medium":
-    default:
-      return cyan(label);
-  }
-}
-var init_effort = __esm({
-  "src/hud/elements/effort.ts"() {
-    "use strict";
-    init_colors();
-  }
-});
-
 // src/hud/elements/api-key-source.ts
 function settingsFileHasApiKey(filePath) {
   try {
@@ -99781,10 +99671,6 @@ async function render(context, config2) {
       hudLabels
     );
     if (modelElement) rendered.set("model", modelElement);
-  }
-  if (enabledElements.effort) {
-    const effortElement = renderEffort(context.effortLevel);
-    if (effortElement) rendered.set("effort", effortElement);
   }
   if (enabledElements.updateNotification !== false && context.claudeCodeUpdateAvailable) {
     const versionTag = context.claudeCodeVersion ? `#${context.claudeCodeVersion}` : "";
@@ -100088,7 +99974,6 @@ var init_render = __esm({
     init_git();
     init_multi_repo();
     init_model();
-    init_effort();
     init_api_key_source();
     init_call_counts();
     init_context_warning();
@@ -100555,7 +100440,6 @@ async function mainImpl(watchMode = false, skipInit = false) {
       contextDisplayScope: currentSessionId ?? cwd2,
       modelName: getModelName(stdin),
       modelId: getModelId(stdin),
-      effortLevel: getEffortLevel(stdin),
       ralph,
       ultrawork: null,
       prd,

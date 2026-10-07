@@ -8,9 +8,10 @@ import { cleanupBridgeSessions } from '../../tools/python-repl/bridge-manager.js
 import { resolveToWorktreeRoot, getOmcRoot, validateSessionId, isValidTranscriptPath, resolveSessionStatePath, withProjectIdentifierScope } from '../../lib/worktree-paths.js';
 import { SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES } from '../../lib/mode-names.js';
 import { canClearStateForSession, clearModeStateFile, clearStateFileLockedIf, readModeStateWithMeta } from '../../lib/mode-state-io.js';
-import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob } from './cleanup-manifest.js';
+import { completeForegroundCleanup, completeForegroundCleanupAndSealCore, prepareCoreManifest, readSessionEndJob, sealWikiManifest } from './cleanup-manifest.js';
 import { planChainEnqueue } from './chain-enqueuer.js';
 import { spawnSessionEndWorker } from './worker.js';
+import { buildWikiSessionEndCaptureIntent } from '../wiki/session-hooks.js';
 import { getSessionEndStalePrdWarning } from '../ralph/stale-prd.js';
 import { isValidTeamInstanceId, isValidLeaderSessionId } from '../../team/types.js';
 const SESSION_STARTED_MARKER_FILE = 'session-started.json';
@@ -857,7 +858,13 @@ export async function processSessionEnd(input) {
     });
 }
 /** Wiki producer has no foreground lock or write; it only seals a durable capture/no-op intent. */
-export { publishWikiSessionEndBootstrap as processWikiSessionEnd } from './wiki-foreground-bootstrap.js';
+export async function processWikiSessionEnd(input) {
+    const directory = resolveToWorktreeRoot(input.cwd);
+    const intent = buildWikiSessionEndCaptureIntent({ cwd: directory, session_id: input.session_id });
+    sealWikiManifest(directory, input.session_id, intent ? { ...intent } : undefined);
+    spawnSessionEndWorker({ directory, sessionId: input.session_id });
+    return { continue: true };
+}
 export async function handleSessionEnd(input) {
     return processSessionEnd(input);
 }

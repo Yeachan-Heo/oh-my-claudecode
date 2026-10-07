@@ -1914,7 +1914,7 @@ export function validateWorkingDirectory(workingDirectory) {
         catch {
             throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
         }
-        if (!sameCanonicalPath(providedRootReal, trustedRootReal)) {
+        if (providedRootReal !== trustedRootReal) {
             console.error('[worktree] workingDirectory resolved to different git worktree root, using trusted root', {
                 workingDirectory: resolved,
                 providedRoot: providedRootReal,
@@ -2084,12 +2084,12 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory) {
         catch {
             throw new Error(`workingDirectory '${workingDirectory}' does not exist or is not accessible.`);
         }
-        if (sameCanonicalPath(providedRootReal, trustedRootReal)) {
+        if (providedRootReal === trustedRootReal) {
             return { status: 'ok', root: providedRoot };
         }
         const trustedCommonDir = getGitCommonDir(trustedRoot);
         const providedCommonDir = getGitCommonDir(providedRoot);
-        if (trustedCommonDir && providedCommonDir && sameCanonicalPath(providedCommonDir, trustedCommonDir)) {
+        if (trustedCommonDir && providedCommonDir && providedCommonDir === trustedCommonDir) {
             return { status: 'ok', root: providedRoot };
         }
         // Different repository (#3858): reject visibly instead of silently
@@ -2120,7 +2120,7 @@ export function resolveWorkingDirectoryOrLinkedWorktree(workingDirectory) {
         catch {
             gitMetadataReal = gitMetadataDir;
         }
-        if (!sameCanonicalPath(gitMetadataReal, trustedRootReal)) {
+        if (gitMetadataReal !== trustedRootReal) {
             throw new Error(formatGitProbeFailedMessage(workingDirectory));
         }
     }

@@ -113,6 +113,7 @@ export declare function runForegroundSessionEndCleanup(directory: string, sessio
 export declare function prepareSessionEndWorkerInput(directory: string, input: SessionEndInput): Promise<Record<string, unknown>>;
 export declare function processSessionEnd(input: SessionEndInput): Promise<HookOutput>;
 /** Wiki producer has no foreground lock or write; it only seals a durable capture/no-op intent. */
-export { publishWikiSessionEndBootstrap as processWikiSessionEnd } from './wiki-foreground-bootstrap.js';
+export declare function processWikiSessionEnd(input: SessionEndInput): Promise<HookOutput>;
 export declare function handleSessionEnd(input: SessionEndInput): Promise<HookOutput>;
+export {};
 //# sourceMappingURL=index.d.ts.map
