@@ -1484,7 +1484,13 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ? opts.leaderPaneId
     : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
   const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
-  const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+  // Issue #4261: Determine provider based on actual context, not just session name.
+  // cmux's tmux-compat layer may set session names like 'cmux:N' even though we're
+  // in a tmux environment. Only use 'cmux' provider if we're actually in a native
+  // cmux context (CMUX_SURFACE_ID is set).
+  const launchProvider = opts.sessionName.startsWith('cmux:') && process.env.CMUX_SURFACE_ID
+    ? 'cmux' as const
+    : 'tmux' as const;
   const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
   if (!await workerPaneBelongsToOwnedProviderTarget({
     provider: launchProvider,
