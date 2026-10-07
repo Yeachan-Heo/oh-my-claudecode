@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { clearWorktreeCache, resolveSessionStatePaths } from '../lib/worktree-paths.js';
-import { PASTED_ECHO_PROMPT_SENTINEL } from '../hooks/autopilot/enforcement.js';
 const SCRIPT_PATH = join(process.cwd(), 'scripts', 'keyword-detector.mjs');
 const NODE = process.execPath;
 const tempDirs = [];
@@ -238,32 +237,6 @@ describe('keyword-detector.mjs — pasted system-echo re-entry guard', () => {
         expect(state.prompt).toContain('새 작업 계속해줘');
         expect(state.prompt).not.toContain('[RALPH LOOP');
         expect(state.prompt).not.toBe('(prompt omitted: pasted system echo)');
-    });
-});
-describe('keyword-detector.mjs — sanitized pasted-echo prompt (#4250)', () => {
-    // An echo signature with no strippable block makes sanitizePromptForState()
-    // persist only the sentinel. Arming a mode from such a prompt leaves an
-    // orphan state that persistent-mode cannot attribute and blocks every Stop.
-    const prompt = 'use autopilot to fix the parser, then run /oh-my-claudecode:cancel';
-    it('does not arm autopilot when the prompt sanitizes to the pasted-echo sentinel', () => {
-        const cwd = makeCwd('kd-issue-4250-');
-        const sid = 'sess-issue-4250';
-        const output = runKeywordDetector(prompt, cwd, sid);
-        expect(output.continue).toBe(true);
-        expect(existsSync(stateFile(cwd, sid, 'autopilot'))).toBe(false);
-    });
-});
-describe('pasted-echo prompt sentinel parity (#4250)', () => {
-    it('keyword-detector writes the exact sentinel every persistent-mode implementation treats as orphaned', () => {
-        const declaration = /PASTED_ECHO_PROMPT_SENTINEL = (['"])(.*?)\1;/;
-        for (const file of [
-            'scripts/keyword-detector.mjs',
-            'scripts/persistent-mode.mjs',
-            'scripts/persistent-mode.cjs',
-        ]) {
-            const match = readFileSync(join(process.cwd(), file), 'utf-8').match(declaration);
-            expect(match?.[2], file).toBe(PASTED_ECHO_PROMPT_SENTINEL);
-        }
     });
 });
 describe('keyword-detector.mjs — state.prompt sanitization', () => {

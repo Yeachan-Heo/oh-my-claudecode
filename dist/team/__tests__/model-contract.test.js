@@ -159,30 +159,27 @@ describe('model-contract', () => {
         it('throws for unknown agent type', () => {
             expect(() => getContract('unknown')).toThrow('Unknown agent type');
         });
-        describe('antigravity Windows headless support (omc team)', () => {
-            it('reports antigravity headless supported on all platforms (including Windows)', () => {
-                // Fixed in agy 1.0.15/1.1.1 (google-antigravity/antigravity-cli#76).
-                // Team path spawns without shell to avoid cmd.exe parsing issues.
-                expect(isHeadlessSupportedOnPlatform('antigravity', 'win32')).toBe(true);
+        describe('antigravity Windows headless guard (omc team)', () => {
+            it('reports antigravity headless unsupported on win32, supported elsewhere', () => {
+                expect(isHeadlessSupportedOnPlatform('antigravity', 'win32')).toBe(false);
                 expect(isHeadlessSupportedOnPlatform('antigravity', 'darwin')).toBe(true);
                 expect(isHeadlessSupportedOnPlatform('antigravity', 'linux')).toBe(true);
-                // Other prompt-mode providers also supported on Windows.
+                // Other prompt-mode providers stay supported on Windows.
                 expect(isHeadlessSupportedOnPlatform('gemini', 'win32')).toBe(true);
                 expect(isHeadlessSupportedOnPlatform('grok', 'win32')).toBe(true);
             });
-            it('getPromptModeArgs builds antigravity args on Windows (uses shell: false spawn)', () => {
+            it('getPromptModeArgs throws for an antigravity team worker on Windows', () => {
                 const restore = setProcessPlatform('win32');
                 try {
-                    // Fixed: antigravity now works on Windows when spawned without shell.
-                    expect(getPromptModeArgs('antigravity', '/path/to/inbox.md')).toEqual(['-p', '/path/to/inbox.md']);
-                    // Other providers also work on Windows.
+                    expect(() => getPromptModeArgs('antigravity', '/path/to/inbox.md')).toThrow(/not supported on Windows/);
+                    // Still works for gemini on Windows (uses its own stdin-safe handling elsewhere).
                     expect(getPromptModeArgs('gemini', '/path/to/inbox.md')).toEqual(['-p', '/path/to/inbox.md']);
                 }
                 finally {
                     restore();
                 }
             });
-            it('getPromptModeArgs builds antigravity args on macOS/Linux', () => {
+            it('getPromptModeArgs builds antigravity args normally on non-Windows', () => {
                 const restore = setProcessPlatform('darwin');
                 try {
                     expect(getPromptModeArgs('antigravity', '/path/to/inbox.md')).toEqual(['-p', '/path/to/inbox.md']);
@@ -191,27 +188,10 @@ describe('model-contract', () => {
                     restore();
                 }
             });
-            it('validateCliAvailable accepts antigravity on all platforms', () => {
-                // Since antigravity headless is now supported on Windows, validation should not reject it.
-                // This assumes agy is installed; missing binary is caught separately by ensureBinary().
+            it('validateCliAvailable refuses antigravity on Windows with a clear message', () => {
                 const restore = setProcessPlatform('win32');
                 try {
-                    // We cannot fully test validateCliAvailable here without mocking the binary check,
-                    // but we can confirm that the platform check no longer throws.
-                    // The function itself may throw for other reasons (binary not found), but not
-                    // for platform rejection.
-                    const mockSpawnSync = vi.mocked(spawnSync);
-                    mockSpawnSync.mockReturnValueOnce({ status: 0, stdout: '1.3.0\n', stderr: '' });
-                    try {
-                        validateCliAvailable('antigravity');
-                        // If we reach here, the platform check passed (binary check may still fail).
-                    }
-                    catch (e) {
-                        // Only fail if the error mentions platform unsupported on Windows.
-                        if (e instanceof Error && /not supported on Windows/.test(e.message)) {
-                            throw e;
-                        }
-                    }
+                    expect(() => validateCliAvailable('antigravity')).toThrow(/not supported on Windows/);
                 }
                 finally {
                     restore();

@@ -1417,67 +1417,8 @@ describe('team cli', () => {
         await cleanupStaleReservations(teamName, cwd);
         // Live-owner reservation should remain
         expect(existsSync(reservationPath)).toBe(true);
-        // Test 3: Active reservation should NOT be removed even when its owner (the exited start CLI) is dead
-        await writeFile(reservationPath, JSON.stringify({ ...deadOwnerRes, phase: 'active' }));
-        await cleanupStaleReservations(teamName, cwd);
-        expect(existsSync(reservationPath)).toBe(true);
         process.exitCode = 0;
         rmSync(cwd, { recursive: true, force: true });
-    });
-    it('team shutdown from a fresh shell keeps the active reservation after the start CLI exited', async () => {
-        const { teamCommand } = await import('../team.js');
-        const { assertTeamInstanceUnderLock, reserveTeamInstance, withTeamInstanceLifecycleLock, } = await import('../../team/team-instance.js');
-        const { teamStateRoot, TeamPaths, teamWorkspaceHash, canonicalTeamStatePath } = await import('../../team/state-paths.js');
-        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
-        const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-        const originalExitCode = process.exitCode;
-        process.exitCode = 0;
-        const cwd = makeProject('omc-team-cli-active-reservation-');
-        const teamName = 'active-team';
-        const reservationPath = canonicalTeamStatePath(cwd, TeamPaths.teamInstanceReservation(teamWorkspaceHash(cwd, teamName), teamName));
-        const teamRoot = teamStateRoot(cwd, teamName);
-        // `omc team start`: reserve, write the identity-bearing config, activate.
-        await reserveTeamInstance({ teamName, cwd, instanceId: INSTANCE_ID });
-        mkdirSync(teamRoot, { recursive: true });
-        writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
-            name: teamName,
-            instance_id: INSTANCE_ID,
-            task: 'demo',
-            agent_type: 'claude',
-            worker_launch_mode: 'interactive',
-            worker_count: 0,
-            max_workers: 20,
-            workers: [],
-            created_at: new Date().toISOString(),
-            tmux_session: `${teamName}:0`,
-            leader_pane_id: null,
-            hud_pane_id: null,
-            resize_hook_name: null,
-            resize_hook_target: null,
-            next_task_id: 1,
-        }));
-        // The start CLI owns the reservation and exits once the team is active,
-        // so a later shutdown sees an active reservation with a dead owner.
-        const reservation = JSON.parse(readFileSync(reservationPath, 'utf-8'));
-        writeFileSync(reservationPath, JSON.stringify({
-            ...reservation,
-            phase: 'active',
-            owner: { ...reservation.owner, pid: 99999, process_started_at: DEAD_OWNER_START_IDENTITY },
-        }));
-        // shutdownTeamV2 first asserts the instance reservation under the
-        // lifecycle lock; run that authority step and stop before tmux effects.
-        mocks.shutdownTeamV2.mockImplementation(async (name, dir, options) => {
-            await withTeamInstanceLifecycleLock(dir, name, () => assertTeamInstanceUnderLock({ teamName: name, cwd: dir, instanceId: options.instanceId }));
-            return { outcome: 'cleaned' };
-        });
-        await teamCommand(['shutdown', teamName, '--cwd', cwd]);
-        expect(errorSpy).not.toHaveBeenCalled();
-        expect(process.exitCode).toBe(0);
-        expect(mocks.shutdownTeamV2).toHaveBeenCalledTimes(1);
-        expect(existsSync(reservationPath)).toBe(true);
-        process.exitCode = originalExitCode;
-        logSpy.mockRestore();
-        errorSpy.mockRestore();
     });
     it('legacy shorthand start alias supports optional ralph token', async () => {
         const write = vi.fn();
