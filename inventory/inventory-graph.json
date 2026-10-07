@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e8962549867d9f32f53a2a51103723c0e8070e88",
-    "sourceSha256": "644922be63f397b28cacc3993ccbe8ee2cbd3dff77825bbb8006fc9a2cc01474",
+    "head": "aecb36007fdb8e7a0884a4b1ac3141b8a02c6d71",
+    "sourceSha256": "5978982470844bc219662f78b3802bb03db9ade7592ec152eb3ecfb13a44796d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e8962549867d9f32f53a2a51103723c0e8070e88",
-  "sourceSha256": "644922be63f397b28cacc3993ccbe8ee2cbd3dff77825bbb8006fc9a2cc01474",
+  "head": "aecb36007fdb8e7a0884a4b1ac3141b8a02c6d71",
+  "sourceSha256": "5978982470844bc219662f78b3802bb03db9ade7592ec152eb3ecfb13a44796d",
   "counts": {
     "public": {
       "skills": 47,
@@ -28,8 +28,8 @@
       "toolFiles": 61,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1445,
-      "total": 1468
+      "srcFiles": 1446,
+      "total": 1469
     },
     "generated": {
       "distFiles": 5611,
@@ -43884,6 +43884,11 @@
         "path": "src/team/__tests__/index.compat-exports.test.ts"
       },
       {
+        "id": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts"
+      },
+      {
         "id": "src/team/__tests__/leader-inbox.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/leader-inbox.test.ts"
@@ -77271,6 +77276,26 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts",
+        "to": "src/team/mailbox-notification-guard.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/issue-4261-cmux-team-failures.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/team/__tests__/leader-inbox.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -87252,12 +87277,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7706,
-      "edgeCount": 8324,
-      "importEdgeCount": 6889,
+      "nodeCount": 7707,
+      "edgeCount": 8328,
+      "importEdgeCount": 6891,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "97eaab32e1000ba20c89543047ebcf6434d2dea44b2c4a54baa9fce66123ee68",
-  "manifestSha256": "d0a25ebfc968e66da3607ce4f31ac5caf421a0c9e4a7225294a3af1c02ed2280"
+  "inventorySha256": "68c854b413f1396b5cba321f0de6ac876579513b781bbe60b2ef6895c4a9cdf8",
+  "manifestSha256": "d6a0f56622e8e4f2ec49c7566c6bb6c5ae37d9bd34e18ea268abe9117ac53e8e"
 }

@@ -57,6 +57,8 @@ export declare function applyMainVerticalLayout(teamTarget: string, options?: {
     required?: boolean;
     tmuxServerIdentity?: TmuxServerIdentity;
 }): Promise<void>;
+export declare const TMUX_MAILBOX_PANE_ID: RegExp;
+export declare const TMUX_MAILBOX_TARGET: RegExp;
 type MailboxOwnershipCommand = (args: string[]) => Promise<{
     stdout: string;
     stderr: string;

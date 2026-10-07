@@ -174,9 +174,9 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     const cwd = mkdtempSync(join(homedir(), 'omc-session-end-process-exit-'));
     tempDirs.push(cwd);
     // Save current env values before stubbing
-    if (!savedEnv.hasOwnProperty('HOME')) savedEnv.HOME = process.env.HOME;
-    if (!savedEnv.hasOwnProperty('USERPROFILE')) savedEnv.USERPROFILE = process.env.USERPROFILE;
-    if (!savedEnv.hasOwnProperty('OMC_STATE_DIR')) savedEnv.OMC_STATE_DIR = process.env.OMC_STATE_DIR;
+    if (!Object.prototype.hasOwnProperty.call(savedEnv, 'HOME')) savedEnv.HOME = process.env.HOME;
+    if (!Object.prototype.hasOwnProperty.call(savedEnv, 'USERPROFILE')) savedEnv.USERPROFILE = process.env.USERPROFILE;
+    if (!Object.prototype.hasOwnProperty.call(savedEnv, 'OMC_STATE_DIR')) savedEnv.OMC_STATE_DIR = process.env.OMC_STATE_DIR;
     // Stub the environment variables
     process.env.HOME = cwd;
     process.env.USERPROFILE = cwd;
