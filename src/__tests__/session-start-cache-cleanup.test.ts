@@ -199,6 +199,32 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
     expect(readlinkSync(join(fakeCacheBase, '4.4.0'))).toBe('4.4.3');
   });
 
+  it('ignores orphaned *.tmp~* directories when choosing versions (issue #4263)', () => {
+    createFakeVersion('4.4.1');
+    createFakeVersion('4.4.2');
+    createFakeVersion('4.4.3');
+    // Interrupted updates leave orphans holding only package.json. With several
+    // of them, at most two could be kept by an unfiltered scan, so the rest
+    // would be replaced by symlinks: the regression is observable regardless
+    // of readdir order.
+    const orphans = Array.from({ length: 6 }, (_, i) => `4.4.3.tmp~orphan${i}`);
+    for (const orphan of orphans) {
+      mkdirSync(join(fakeCacheBase, orphan), { recursive: true });
+      writeFileSync(join(fakeCacheBase, orphan, 'package.json'), JSON.stringify({ version: '4.4.3' }));
+    }
+
+    runSessionStart();
+
+    for (const orphan of orphans) {
+      const stat = lstatSync(join(fakeCacheBase, orphan));
+      expect(stat.isSymbolicLink()).toBe(false);
+      expect(stat.isDirectory()).toBe(true);
+    }
+    expect(lstatSync(join(fakeCacheBase, '4.4.1')).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(fakeCacheBase, '4.4.1'))).toBe('4.4.3');
+    expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+  });
+
   it('updates an existing symlink pointing to a non-latest target', () => {
     createFakeVersion('4.4.2');
     createFakeVersion('4.4.3');

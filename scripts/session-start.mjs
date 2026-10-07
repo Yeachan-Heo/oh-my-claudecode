@@ -1278,7 +1278,16 @@ ${cleanContent}
       let versions = [];
       if (existsSync(cacheBase)) {
         versions = readdirSync(cacheBase)
-          .filter(v => /^\d+\.\d+\.\d+/.test(v))
+          .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
+          .filter(v => {
+            const versionPath = join(cacheBase, v);
+            try {
+              if (lstatSync(versionPath).isSymbolicLink()) return true;
+            } catch {
+              return false;
+            }
+            return readJsonFile(join(versionPath, 'package.json'))?.version === v;
+          })
           .sort(semverCompare)
           .reverse();
 
