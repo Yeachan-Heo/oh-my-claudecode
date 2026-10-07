@@ -89,6 +89,63 @@ describe('Issue #4261: cmux team ownership failures', () => {
       // Provider mismatch: target says 'cmux' but paneId format indicates 'tmux'
       expect(result1.kind).toBe('provider_mismatch');
     });
+
+    it('should correctly determine provider for cmux with tmux-compat scenario', async () => {
+      // Issue #4261 detailed scenario: cmux with tmux-compat layer
+      // When TMUX + CMUX_SURFACE_ID are both set:
+      // - Session name is 'cmux:1' (from cmux)
+      // - PaneId is '%4675534428059654805' (tmux-format from tmux-compat)
+      // 
+      // According to the provider detection rule in verifyTeamTargetOwnership:
+      // - paneId format is tmux-format (%...) => provider should be 'tmux'
+      // - NOT 'cmux' just because session is 'cmux:1'
+      // 
+      // This test verifies that passing provider: 'cmux' with tmux-format paneId
+      // correctly returns provider_mismatch (the paneId format takes precedence)
+      
+      process.env.TMUX = '/tmp/tmux-1000/default';
+      process.env.TMUX_PANE = '%4675534428059654805';
+      
+      const targetWithWrongProvider: MailboxNotificationTarget = {
+        provider: 'cmux', // WRONG: paneId is %..., which is tmux-format
+        providerTarget: 'cmux:1',
+        paneId: '%4675534428059654805', // tmux-format pane id
+        recipient: 'worker',
+        recipientRole: 'worker',
+      };
+
+      const resultWrongProvider = await verifyTeamTargetOwnership(targetWithWrongProvider, {
+        tmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        cmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        serverIdentityDependencies: undefined,
+      });
+
+      // Should reject provider: 'cmux' because paneId is tmux-format
+      expect(resultWrongProvider.kind).toBe('provider_mismatch');
+      
+      const targetWithCorrectProvider: MailboxNotificationTarget = {
+        provider: 'tmux', // CORRECT: paneId is %..., which is tmux-format
+        providerTarget: 'cmux:1',
+        paneId: '%4675534428059654805', // tmux-format pane id
+        recipient: 'worker',
+        recipientRole: 'worker',
+      };
+
+      const resultCorrectProvider = await verifyTeamTargetOwnership(targetWithCorrectProvider, {
+        tmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        cmuxExec: vi.fn(async () => ({ stdout: '', stderr: '' })),
+        serverIdentityDependencies: undefined,
+      });
+
+      // Should reject 'unavailable' (due to missing tmuxServerIdentity)
+      // But importantly, it should NOT reject with provider_mismatch
+      // This means the provider detection correctly chose 'tmux'
+      expect(resultCorrectProvider.kind).not.toBe('provider_mismatch');
+      
+      // Clean up env
+      delete process.env.TMUX;
+      delete process.env.TMUX_PANE;
+    });
   });
 
   describe('Failure 2: cmux ref vs UUID mismatch in ownership verification', () => {

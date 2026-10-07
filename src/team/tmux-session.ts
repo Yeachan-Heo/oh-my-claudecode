@@ -705,8 +705,8 @@ async function cmuxCloseSurface(surfaceId: string): Promise<void> {
   await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
 }
 
-const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
-const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+export const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+export const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
 
 function exactTmuxPaneMembershipTarget(providerTarget: string): {
   target: string;
