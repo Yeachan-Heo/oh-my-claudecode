@@ -30,7 +30,7 @@ import { ABSOLUTE_MAX_WORKERS, isValidTeamInstanceId, isValidTmuxServerIdentity 
 import { validateTeamName } from './team-name.js';
 import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
 import { buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath, getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs, resolveDefaultWorkerModel, resolveExternalModelsDefaults, assertHeadlessSupported, } from './model-contract.js';
-import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, probeStartupPaneActivity, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, getOwnedWorkerLiveness, captureOwnedTeamPane, workerPaneBelongsToOwnedProviderTarget, observeTmuxServerIdentity, killOwnedWorkerPane, verifyTeamTargetOwnership, observeTeamSessionTargetPresence, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, splitTeamWorkerPaneWithEvidence, TMUX_MAILBOX_PANE_ID, TeamSessionCreationError, } from './tmux-session.js';
+import { createTeamSession, spawnOwnedWorkerInPane, deliverStartupInbox, probeStartupPaneActivity, retryStartupInboxSubmit, proveWorkerPaneOwnership, adoptWorkerPaneOwnership, getOwnedWorkerLiveness, captureOwnedTeamPane, workerPaneBelongsToOwnedProviderTarget, observeTmuxServerIdentity, killOwnedWorkerPane, verifyTeamTargetOwnership, observeTeamSessionTargetPresence, redactBoundedDiagnostic, killTeamSession, paneHasActiveTask, paneLooksReady, applyMainVerticalLayout, splitTeamWorkerPaneWithEvidence, TeamSessionCreationError, } from './tmux-session.js';
 import { composeInitialInbox, ensureWorkerStateDir, writeWorkerOverlay, generateTriggerMessage, generatePromptModeStartupPrompt, renderRecoveryContinuationInstruction, renderCursorWorkerGuidance, renderWorkerExitContract, } from './worker-bootstrap.js';
 import { queueInboxInstruction } from './mcp-comm.js';
 import { cleanupTeamWorktrees, inspectTeamWorktreeCleanupSafety, ensureWorkerWorktree, installWorktreeRootAgents, normalizeTeamWorktreeMode, } from './git-worktree.js';
@@ -1001,14 +1001,7 @@ async function spawnV2Worker(opts) {
         ? opts.leaderPaneId
         : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1];
     const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
-    // Issue #4261: Determine provider based on both session name and pane id format.
-    // cmux's tmux-compat layer sets both TMUX and CMUX_SURFACE_ID, but the pane id is tmux-format (%...).
-    // Use the same logic as verifyTeamTargetOwnership:
-    // - Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format (not %...).
-    // - Otherwise use 'tmux' provider (including cmux with tmux-compat where paneId is %...).
-    const isTmuxFormatPaneId = TMUX_MAILBOX_PANE_ID.test(opts.leaderPaneId);
-    const isNativeCmuxProvider = opts.sessionName.startsWith('cmux:') && !isTmuxFormatPaneId;
-    const launchProvider = isNativeCmuxProvider ? 'cmux' : 'tmux';
+    const launchProvider = opts.sessionName.startsWith('cmux:') ? 'cmux' : 'tmux';
     const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
     if (!await workerPaneBelongsToOwnedProviderTarget({
         provider: launchProvider,
@@ -5329,12 +5322,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
     const paneCleanupUnknown = [];
     for (const worker of config.workers) {
         if (!worker.pane_id) {
-            // Issue #4261: No pane_id recorded means this worker never got a pane.
-            // When --force is used, allow cleanup to proceed (nothing to verify).
-            // Otherwise, preserve state (pane may have been orphaned).
-            if (!options.force) {
-                providerCleanupFailures.push(worker.name);
-            }
+            providerCleanupFailures.push(worker.name);
             continue;
         }
         if (!worker.launch_attempt_id) {
@@ -5367,11 +5355,7 @@ export async function shutdownTeamV2(teamName, cwd, options = {}) {
                     : {}),
             });
             if (!ownership.ok) {
-                // Issue #4261: When ownership cannot be verified (pane doesn't exist),
-                // allow --force cleanup to proceed. Otherwise preserve state.
-                if (!options.force) {
-                    providerCleanupFailures.push(worker.name);
-                }
+                providerCleanupFailures.push(worker.name);
                 continue;
             }
             paneOwnership = ownership.ownership;
