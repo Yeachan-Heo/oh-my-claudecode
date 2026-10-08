@@ -1,13 +1,61 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readdirSync, statSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJevEnv } from '../jev-resolve.mjs';
+import { resolveOmcStateRoot } from './state-root.mjs';
 
-// Throttle stale directory sweep to at most once per hour per process
-let lastSweepTime = 0;
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+
+/**
+ * Get the cross-process sweep throttle marker path.
+ * Uses a predictable location in tmpdir for marker file persistence.
+ */
+function getSweepThrottleMarkerPath() {
+  return join(tmpdir(), '.omc-jev-sweep-throttle');
+}
+
+/**
+ * Check if sweep should run based on throttle marker mtime.
+ */
+function shouldRunSweep(markerPath) {
+  const now = Date.now();
+  try {
+    if (existsSync(markerPath)) {
+      const stats = statSync(markerPath);
+      if (now - stats.mtimeMs < SWEEP_THROTTLE_MS) {
+        return false; // Too soon, skip
+      }
+    }
+    return true;
+  } catch {
+    // If we can't read marker, allow sweep
+    return true;
+  }
+}
+
+/**
+ * Update sweep throttle marker mtime to now.
+ */
+function updateSweepMarker(markerPath) {
+  try {
+    const now = Date.now();
+    const nowSec = now / 1000;
+    if (existsSync(markerPath)) {
+      utimesSync(markerPath, nowSec, nowSec);
+    } else {
+      // Create marker file if it doesn't exist
+      try {
+        writeFileSync(markerPath, '', { encoding: 'utf8', mode: 0o644 });
+      } catch {
+        // Best effort: can't create marker, but sweep will still run
+      }
+    }
+  } catch {
+    // Best effort: marker update failure doesn't block sweep
+  }
+}
 
 /**
  * Get the Jev mode for a point: 'off' | 'shadow' | 'active'.
@@ -71,20 +119,22 @@ export function recordJevShadow({ point, state, questions, heuristic }) {
 
   // Throttled best-effort sweep of stale temp directories (once per hour)
   // This cleans up leftovers from killed resolvers that couldn't clean themselves
-  const now = Date.now();
-  if (now - lastSweepTime > SWEEP_THROTTLE_MS) {
-    lastSweepTime = now;
+  const markerPath = getSweepThrottleMarkerPath();
+  if (shouldRunSweep(markerPath)) {
     try {
       sweepStaleTempDirs(24 * 60 * 60 * 1000); // Clean dirs older than 24h
+      updateSweepMarker(markerPath);
     } catch {
       // Best effort: sweep failures never affect judgment recording
     }
   }
 
-  const tempDir = mkdtempSync(join(tmpdir(), 'omc-jev-'));
-  const requestFile = join(tempDir, 'request.json');
-  
+  let tempDir;
+  let requestFile;
   try {
+    tempDir = mkdtempSync(join(tmpdir(), 'omc-jev-'));
+    requestFile = join(tempDir, 'request.json');
+    
     writeFileSync(requestFile, JSON.stringify({ point, state, questions, heuristic }), {
       encoding: 'utf8',
       mode: 0o600,
@@ -135,21 +185,25 @@ export function recordJevShadow({ point, state, questions, heuristic }) {
           }
         }
       } finally {
-        // Clean up temp dir after active mode (sync)
-        try {
-          rmSync(tempDir, { recursive: true, force: true });
-        } catch {
-          // Best effort
+        // Always clean up temp dir after active mode
+        if (tempDir) {
+          try {
+            rmSync(tempDir, { recursive: true, force: true });
+          } catch {
+            // Best effort
+          }
         }
       }
     }
   } catch {
     // Jev logging is advisory; temp-file or spawn failures never affect hooks.
     // Clean up temp dir on any exception
-    try {
-      rmSync(tempDir, { recursive: true, force: true });
-    } catch {
-      // Best effort
+    if (tempDir) {
+      try {
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        // Best effort
+      }
     }
   }
   return undefined;

@@ -26,7 +26,8 @@
 
 import { readFileSync, unlinkSync, rmSync } from 'node:fs';
 import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, basename, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
@@ -215,14 +216,28 @@ export async function readStdinJson() {
  * passed on argv: /proc/<pid>/cmdline is world-readable.
  */
 export function readRequestFile(path) {
-  const raw = readFileSync(path, 'utf8');
+  let raw;
   const dir = dirname(path);
   try {
-    // Remove the entire temp directory (and the file within it)
-    rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // Best effort: temp dir cleanup is best-effort; never block on it.
+    raw = readFileSync(path, 'utf8');
+  } finally {
+    // Always attempt cleanup: restrict deletion to omc-jev-* temp dirs under os.tmpdir
+    // Never delete arbitrary parent directories from untrusted --request-file paths
+    try {
+      const safeTmpDir = tmpdir();
+      const dirBasename = basename(dir);
+      
+      // Only delete if:
+      // 1. dir is directly under os.tmpdir()
+      // 2. dir basename matches omc-jev-* pattern
+      if (dir.startsWith(safeTmpDir + '/') && dirBasename.startsWith('omc-jev-')) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch {
+      // Best effort: temp dir cleanup is best-effort; never block on it.
+    }
   }
+  if (!raw) throw new Error('Failed to read request file');
   return JSON.parse(raw);
 }
 

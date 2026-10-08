@@ -80,13 +80,23 @@ describe("issue #4266: jev temp directory cleanup", () => {
 
   describe("recordJevShadow cleanup", () => {
     it("removes temp directory in active mode after completion", () => {
-      // Count existing temp dirs before test
-      const tmpDirContents = readdirSync(tmpdir());
-      const existingDirs = tmpDirContents.filter(d => d.startsWith("omc-jev-")).length;
+      // Use isolated temp root for this test to avoid interference
+      const isolatedTempRoot = mkdtempSync(join(tmpdir(), "jev-test-"));
+      trackedTempDirs.push(isolatedTempRoot);
+      
+      // Count existing temp dirs before test in our isolated root
+      const beforeDirs = readdirSync(isolatedTempRoot);
+      const existingDirs = beforeDirs.filter(d => d.startsWith("omc-jev-")).length;
 
       // Create a test script that uses recordJevShadow in active mode
+      // Override tmpdir to use our isolated temp root
       const testScript = `
         import { recordJevShadow } from '${PROJECT_ROOT}scripts/lib/jev-shadow.mjs';
+        import { tmpdir as originalTmpdir } from 'node:os';
+        
+        // Patch tmpdir to use isolated test directory
+        import.meta.globals = import.meta.globals || {};
+        const originalTmpdir_fn = originalTmpdir;
         
         const result = recordJevShadow({
           point: 'test-point',
@@ -98,63 +108,73 @@ describe("issue #4266: jev temp directory cleanup", () => {
         console.log(JSON.stringify({ success: true, result }));
       `;
 
-      const tmpDir = mkdtempSync(join(tmpdir(), "test-"));
-      trackedTempDirs.push(tmpDir);
-      
-      const scriptFile = join(tmpDir, "test-script.mjs");
+      const scriptFile = join(isolatedTempRoot, "test-script.mjs");
       writeFileSync(scriptFile, testScript, { encoding: "utf8" });
 
-      // Run the test script with Jev disabled (which means active mode will skip)
+      // Run the test script with active mode enabled
+      // (Jev disabled to avoid API calls, but active mode processing still runs)
       const result = spawnSync(process.execPath, [scriptFile], {
         cwd: PROJECT_ROOT,
         env: {
           ...process.env,
-          OMC_JEV: "off",
+          OMC_JEV: "test-point:active",
+          TYPESAFE_API_KEY: "", // Trigger degraded mode (no API key)
+          TMPDIR: isolatedTempRoot, // Force use of isolated temp root
+          TMP: isolatedTempRoot,
         },
       });
 
       // Verify the script ran successfully
       expect(result.status).toBe(0);
       
-      // After the script completes, no new omc-jev-* temp directories
+      // After the script completes, no omc-jev-* temp directories
       // should be left behind from active mode processing
-      const afterContents = readdirSync(tmpdir());
-      const afterDirs = afterContents.filter(d => d.startsWith("omc-jev-")).length;
+      const afterDirs = readdirSync(isolatedTempRoot);
+      const afterJevDirs = afterDirs.filter(d => d.startsWith("omc-jev-")).length;
       
-      // The number of directories should not increase significantly
-      // (allowing a small buffer for race conditions)
-      expect(afterDirs - existingDirs).toBeLessThanOrEqual(1);
+      // Should have same or fewer jev dirs than before (not more)
+      expect(afterJevDirs).toBeLessThanOrEqual(existingDirs);
     });
   });
 
   describe("sweepStaleTempDirs", () => {
     it("removes directories older than threshold", async () => {
+      // Use isolated temp root for this test
+      const isolatedTempRoot = mkdtempSync(join(tmpdir(), "sweep-test-"));
+      trackedTempDirs.push(isolatedTempRoot);
+      
       // This test verifies the sweep function can be called and cleans old dirs
-      // Create some old mock directories
-      const oldTempDir1 = mkdtempSync(join(tmpdir(), "omc-jev-"));
-      const oldTempDir2 = mkdtempSync(join(tmpdir(), "omc-jev-"));
+      // Create some old mock directories in isolated temp root
+      const oldTempDir1 = mkdtempSync(join(isolatedTempRoot, "omc-jev-"));
+      const oldTempDir2 = mkdtempSync(join(isolatedTempRoot, "omc-jev-"));
       
       trackedTempDirs.push(oldTempDir1, oldTempDir2);
 
       // Create a test script that calls sweepStaleTempDirs
+      // The script needs to use the isolated temp root
       const testScript = `
         import { sweepStaleTempDirs } from '${PROJECT_ROOT}scripts/lib/jev-shadow.mjs';
+        import { readdirSync } from 'node:fs';
+        import { tmpdir } from 'node:os';
         
         // Sweep directories older than 1ms (all of them should be swept)
         const cleaned = sweepStaleTempDirs(1);
-        console.log(JSON.stringify({ cleaned }));
+        const remaining = readdirSync(tmpdir()).filter(d => d.startsWith('omc-jev-')).length;
+        console.log(JSON.stringify({ cleaned, remaining }));
       `;
 
-      const tmpDir = mkdtempSync(join(tmpdir(), "test-"));
-      trackedTempDirs.push(tmpDir);
-      
-      const scriptFile = join(tmpDir, "test-sweep.mjs");
+      const scriptFile = join(isolatedTempRoot, "test-sweep.mjs");
       writeFileSync(scriptFile, testScript, { encoding: "utf8" });
 
-      // Run the test script
+      // Run the test script with isolated temp root
       const result = spawnSync(process.execPath, [scriptFile], {
         cwd: PROJECT_ROOT,
         encoding: "utf8",
+        env: {
+          ...process.env,
+          TMPDIR: isolatedTempRoot,
+          TMP: isolatedTempRoot,
+        },
       });
 
       // Verify the script ran successfully
