@@ -94,7 +94,10 @@ describe('wire shape parity with the TS client (#4091)', () => {
 
 describe('readRequestFile', () => {
   it('reads the request and deletes the file so tool input never lingers', () => {
-    const path = join(tmp, 'request.json');
+    // Create temp dir with omc-jev- prefix to match the pattern readRequestFile checks for deletion
+    const jevTmpDir = mkdtempSync(join(tmpdir(), 'omc-jev-'));
+    onExit(() => rmSync(jevTmpDir, { recursive: true, force: true }));
+    const path = join(jevTmpDir, 'request.json');
     writeFileSync(path, JSON.stringify({ point: 'slop-warning', heuristic: true }), 'utf8');
     expect(readRequestFile(path)).toEqual({ point: 'slop-warning', heuristic: true });
     expect(existsSync(path)).toBe(false);
