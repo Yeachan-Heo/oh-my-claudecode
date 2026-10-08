@@ -33,6 +33,9 @@ Do not spin up coordination for work that one focused pass would finish.
 - Prefer deletion over addition when behavior is preserved.
 - Do not add dependencies without an explicit request.
 - Keep diffs small and reversible.
+- Work on two tracks at once: finish the task in front of you, and notice what would make the next task easier or safer — the second track is a proposal, not a detour.
+- No workarounds: a deviation from convention that only unblocks you today (a skipped check, a hard-coded value, a manual step) is fixed or flagged before feature work lands on top of it — it never silently becomes the norm.
+- Before asserting what a skill or protocol does, or skipping one of its steps, read its source — summaries are for finding it, not for standing in for it.
 - Placeholder TODOs, `test.skip`, and stub tests are blockers, not progress.
 - Authoring and approval are separate passes — do not self-approve; hand off to `review` or `verify`.
 

@@ -21,6 +21,7 @@ One test → one implementation → repeat:
 - Substitute at the seam's declared boundary class only — in-process, locally substitutable, owned-remote port, or true-external, the class C2 records for each seam. No substitutes inside the boundary the test is exercising.
 - Refactoring is not part of the loop. It belongs to the review stage; the repair worker owns it. Do not refactor mid-red-green.
 - A bug fix starts with the failing test that reproduces it — reproduction before theory, the debugger's rule.
+- When proposing a seam, say in one line what it catches and what it lets through — a seam choice nobody can price is a guess, not a decision.
 
 ## When no seam fits
 
@@ -28,6 +29,6 @@ If the behavior cannot be tested at any approved seam, stop and say so: report t
 
 ## Output
 
-- The seam list used, with boundary classes
+- The seam list used, with boundary classes and each seam's catch/miss line
 - Red/green evidence — the failing run and the passing run
 - Any seam-absence findings

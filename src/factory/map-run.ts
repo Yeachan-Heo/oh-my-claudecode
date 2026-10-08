@@ -206,6 +206,7 @@ export function mapRunTaskPrompt(plan: MapPlan, stories: readonly MapStory[]): s
     '',
     ...stories.map((story) => `- ${story.id} (from #${story.ticket}): ${story.title}`),
     '',
+    'Before touching any story, restate each story with its source ticket and title as they appear above — if a ticket number resolves to something else in your context, stop and ask rather than guess.',
     'Finish every story with its acceptance criteria verified, then run the terminal closeout.',
   ].join('\n');
 }
