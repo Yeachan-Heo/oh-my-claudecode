@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "1beb8944c82cc9bb4123d124de97004d89fff858",
-    "sourceSha256": "f41f4f55bf5f393a8a96215fbc991d97166647631e21d851cc4ca897187e8f43",
+    "head": "ae7e05dbae197b8aff91e0f5c6e3a1689430dced",
+    "sourceSha256": "120dfca22048c7101c53396d1b26140a13e50e1514ac2fe05c7433752903a2da",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "1beb8944c82cc9bb4123d124de97004d89fff858",
-  "sourceSha256": "f41f4f55bf5f393a8a96215fbc991d97166647631e21d851cc4ca897187e8f43",
+  "head": "ae7e05dbae197b8aff91e0f5c6e3a1689430dced",
+  "sourceSha256": "120dfca22048c7101c53396d1b26140a13e50e1514ac2fe05c7433752903a2da",
   "counts": {
     "public": {
       "skills": 47,
@@ -46662,6 +46662,11 @@
       },
       {
         "from": "scripts/jev-resolve.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/jev-resolve.mjs",
         "to": "external:node:path",
         "kind": "imports"
       },
@@ -46898,6 +46903,11 @@
       {
         "from": "scripts/lib/jev-shadow.mjs",
         "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/jev-shadow.mjs",
+        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -87313,11 +87323,11 @@
     ],
     "stats": {
       "nodeCount": 7708,
-      "edgeCount": 8334,
-      "importEdgeCount": 6897,
+      "edgeCount": 8336,
+      "importEdgeCount": 6899,
       "registerEdgeCount": 68
     }
   },
   "inventorySha256": "6e11f2f68187f7131e84cdaa5d9521dd5e4b83104c742c3327b8402d068cbf31",
-  "manifestSha256": "21342fad0daa3c411271024aee505ddb09ac04802f079694a3219deb9f9e47ef"
+  "manifestSha256": "1cabda466dcdb0587981e4c52db338f5f5fedb5a7da171231e55120faadb52d3"
 }
