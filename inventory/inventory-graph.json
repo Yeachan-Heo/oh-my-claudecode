@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "506b6548d9c392bbd23588e504e1d6a121c25c0d",
-    "sourceSha256": "867e5fb21d87aa2ea9dc365e204c8be250d758297190f38e45d8ab3035b32b0d",
+    "head": "3780c72057be0ece7774980d9808bb7aaac25c60",
+    "sourceSha256": "c331e4d0d23be0fc5fd3ad99bf1315b140edfdc20699415638a98f808c8285a4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "506b6548d9c392bbd23588e504e1d6a121c25c0d",
-  "sourceSha256": "867e5fb21d87aa2ea9dc365e204c8be250d758297190f38e45d8ab3035b32b0d",
+  "head": "3780c72057be0ece7774980d9808bb7aaac25c60",
+  "sourceSha256": "c331e4d0d23be0fc5fd3ad99bf1315b140edfdc20699415638a98f808c8285a4",
   "counts": {
     "public": {
       "skills": 47,
@@ -45564,6 +45564,11 @@
         "path": "tests/lint/issue-4156-windows-dev-zero.test.ts"
       },
       {
+        "id": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts",
+        "kind": "other",
+        "path": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -87086,6 +87091,16 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -87277,12 +87292,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7707,
-      "edgeCount": 8328,
-      "importEdgeCount": 6891,
+      "nodeCount": 7708,
+      "edgeCount": 8330,
+      "importEdgeCount": 6893,
       "registerEdgeCount": 68
     }
   },
-  "inventorySha256": "68c854b413f1396b5cba321f0de6ac876579513b781bbe60b2ef6895c4a9cdf8",
-  "manifestSha256": "4f7475859dd7389c0498f504215edc379ce378ac8b9d3e5776a55ac2b19aaf73"
+  "inventorySha256": "4766b1258ed8587d2ebcc1bd22729782dd2e7fc92eaafede5ece03b98a5a0c05",
+  "manifestSha256": "f9e49c74b144426d3a73b0f49fb27c08ccea9236baa71e3e6a21e017e8fef586"
 }
