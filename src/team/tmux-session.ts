@@ -132,14 +132,15 @@ export function shellQuote(value: string): string {
 }
 
 /**
- * Quote a string for PowerShell invocation using double quotes with proper escaping.
- * Backticks (`) are PowerShell escape characters and must be escaped.
+ * Quote a string for PowerShell invocation using single-quoted literals.
+ * Single quotes in PowerShell prevent variable expansion and subexpression evaluation.
+ * Literal apostrophes are escaped by doubling them.
  * @internal Exported for testing only.
  */
 export function powershellQuote(value: string): string {
-  // Escape backticks and double quotes for PowerShell double-quoted strings
-  const escaped = value.replace(/[`"]/g, '`$&');
-  return `"${escaped}"`;
+  // PowerShell single-quoted strings: apostrophes must be doubled
+  const escaped = value.replace(/'/g, "''");
+  return `'${escaped}'`;
 }
 
 interface TmuxServerGuardRuntime {
@@ -392,9 +393,30 @@ function encodeTmuxServerIdentity(identity: TmuxServerIdentity): string {
 }
 
 /**
+ * Verify if real tmux is running by checking the TMUX environment variable
+ * and attempting to confirm with tmux list-servers.
+ * @internal Exported for testing only.
+ */
+export function isRealTmuxAvailable(): boolean {
+  // TMUX env var is set by real tmux but NOT by PSMUX
+  if (!process.env.TMUX) {
+    return false;
+  }
+  // Verify the tmux socket path is valid
+  try {
+    // Extract socket from TMUX value: typically "/path/to/socket,pid,index"
+    const parts = process.env.TMUX.split(',');
+    return !!(parts.length === 3 && parts[0] && /^[0-9]+$/.test(parts[1]));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Generate the tmux server identity guard condition for the native shell.
  * On Windows with native PowerShell, generates PowerShell syntax.
- * On POSIX systems, generates POSIX shell syntax.
+ * On Windows in Git Bash without real TMUX (likely PSMUX), generates PowerShell syntax.
+ * On POSIX systems or Git Bash with real tmux, generates POSIX shell syntax.
  * @internal Exported for testing only.
  */
 export function tmuxServerGuardCondition(identity: TmuxServerIdentity): string {
@@ -405,6 +427,16 @@ export function tmuxServerGuardCondition(identity: TmuxServerIdentity): string {
 
   // Detect native Windows (not MSYS2/Cygwin)
   if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
+    return tmuxServerGuardConditionPowerShell(
+      nodePath,
+      runtimePath,
+      encodedIdentity,
+    );
+  }
+
+  // On Windows in Git Bash: check if we have real tmux
+  // If TMUX is not set or invalid, likely using PSMUX which needs PowerShell
+  if (process.platform === 'win32' && isUnixLikeOnWindows() && !isRealTmuxAvailable()) {
     return tmuxServerGuardConditionPowerShell(
       nodePath,
       runtimePath,
@@ -447,7 +479,9 @@ export function tmuxServerGuardConditionPosix(
 
 /**
  * Generate PowerShell syntax for the guard condition.
- * Uses the `&` call operator for invocation.
+ * Uses the `&` call operator for invocation in a clean environment.
+ * Clears NODE_OPTIONS and other Node-related startup variables to prevent
+ * unauthorized module loading before the identity guard runs.
  * Note: The tmux format expansion placeholder `#{pid}` is preserved as-is
  * for tmux to expand it before passing to PowerShell.
  * @internal Exported for testing only.
@@ -458,15 +492,23 @@ export function tmuxServerGuardConditionPowerShell(
   encodedIdentity: string,
 ): string {
   // Use the call operator (&) with properly quoted arguments.
-  // Backticks and double-quotes need escaping in PowerShell double-quoted strings.
+  // Wrap in a subshell that clears problematic Node startup variables.
   // Note: `#{pid}` is preserved as literal text for tmux format expansion.
   return [
+    '&',
+    '{',
+    'Remove-Item',
+    '@(\"env:NODE_OPTIONS\",\"env:NODE_PATH\",\"env:NODE_PRESERVE_SYMLINKS\")',
+    '-ErrorAction',
+    'SilentlyContinue',
+    ';',
     '&',
     powershellQuote(nodePath),
     powershellQuote(runtimePath),
     powershellQuote('--tmux-server-identity-guard'),
     powershellQuote(encodedIdentity),
     powershellQuote('#{pid}'),
+    '}',
   ].join(' ');
 }
 

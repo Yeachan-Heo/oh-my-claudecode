@@ -13347,6 +13347,8 @@ var init_runtime_owner_client = __esm({
 // src/team/tmux-session.ts
 var tmux_session_exports = {};
 __export(tmux_session_exports, {
+  TMUX_MAILBOX_PANE_ID: () => TMUX_MAILBOX_PANE_ID,
+  TMUX_MAILBOX_TARGET: () => TMUX_MAILBOX_TARGET,
   TeamSessionCreationError: () => TeamSessionCreationError,
   adoptWorkerPaneOwnership: () => adoptWorkerPaneOwnership,
   applyMainVerticalLayout: () => applyMainVerticalLayout,
@@ -13365,6 +13367,7 @@ __export(tmux_session_exports, {
   getWorkerLiveness: () => getWorkerLiveness,
   injectToLeaderPane: () => injectToLeaderPane,
   invokeDirectMailboxEffect: () => invokeDirectMailboxEffect,
+  isRealTmuxAvailable: () => isRealTmuxAvailable,
   isSessionAlive: () => isSessionAlive,
   isUnixLikeOnWindows: () => isUnixLikeOnWindows2,
   isWorkerAlive: () => isWorkerAlive,
@@ -13379,6 +13382,7 @@ __export(tmux_session_exports, {
   paneHasCursorWorkspaceTrustPrompt: () => paneHasCursorWorkspaceTrustPrompt,
   paneHasTrustPrompt: () => paneHasTrustPrompt,
   paneLooksReady: () => paneLooksReady,
+  powershellQuote: () => powershellQuote,
   probeStartupPaneActivity: () => probeStartupPaneActivity,
   proveWorkerPaneOwnership: () => proveWorkerPaneOwnership,
   redactBoundedDiagnostic: () => redactBoundedDiagnostic,
@@ -13391,12 +13395,16 @@ __export(tmux_session_exports, {
   sendTeamPaneKey: () => sendTeamPaneKey,
   sendToWorker: () => sendToWorker,
   sessionName: () => sessionName,
+  shellQuote: () => shellQuote,
   shouldAttemptAdaptiveRetry: () => shouldAttemptAdaptiveRetry,
   spawnOwnedWorkerInPane: () => spawnOwnedWorkerInPane,
   spawnWorkerInPane: () => spawnWorkerInPane,
   splitTeamWorkerPane: () => splitTeamWorkerPane,
   splitTeamWorkerPaneWithEvidence: () => splitTeamWorkerPaneWithEvidence,
   strictIdentityUnavailableError: () => strictIdentityUnavailableError,
+  tmuxServerGuardCondition: () => tmuxServerGuardCondition,
+  tmuxServerGuardConditionPosix: () => tmuxServerGuardConditionPosix,
+  tmuxServerGuardConditionPowerShell: () => tmuxServerGuardConditionPowerShell,
   validateTmux: () => validateTmux,
   verifyTeamTargetOwnership: () => verifyTeamTargetOwnership,
   waitForPaneReady: () => waitForPaneReady,
@@ -13439,6 +13447,10 @@ function tmuxFormatEscape(value) {
 }
 function shellQuote(value) {
   return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+function powershellQuote(value) {
+  const escaped = value.replace(/'/g, "''");
+  return `'${escaped}'`;
 }
 function resolveTmuxServerGuardRuntime() {
   let runtimePath;
@@ -13612,14 +13624,45 @@ function runTmuxServerIdentityGuard(expected, formattedActualServerPid, formatte
 function encodeTmuxServerIdentity(identity) {
   return Buffer.from(JSON.stringify(identity), "utf8").toString("base64url");
 }
+function isRealTmuxAvailable() {
+  if (!process.env.TMUX) {
+    return false;
+  }
+  try {
+    const parts = process.env.TMUX.split(",");
+    return !!(parts.length === 3 && parts[0] && /^[0-9]+$/.test(parts[1]));
+  } catch {
+    return false;
+  }
+}
 function tmuxServerGuardCondition(identity) {
   const runtime = resolveTmuxServerGuardRuntime();
   const runtimePath = tmuxFormatEscape(runtime.runtimePath);
   const nodePath = tmuxFormatEscape(runtime.nodePath);
-  const envPath = process.platform === "win32" && !isUnixLikeOnWindows2() ? "env" : "/usr/bin/env";
   const encodedIdentity = tmuxFormatEscape(encodeTmuxServerIdentity(identity));
+  if (process.platform === "win32" && !isUnixLikeOnWindows2()) {
+    return tmuxServerGuardConditionPowerShell(
+      nodePath,
+      runtimePath,
+      encodedIdentity
+    );
+  }
+  if (process.platform === "win32" && isUnixLikeOnWindows2() && !isRealTmuxAvailable()) {
+    return tmuxServerGuardConditionPowerShell(
+      nodePath,
+      runtimePath,
+      encodedIdentity
+    );
+  }
+  return tmuxServerGuardConditionPosix(
+    nodePath,
+    runtimePath,
+    encodedIdentity
+  );
+}
+function tmuxServerGuardConditionPosix(nodePath, runtimePath, encodedIdentity) {
   return [
-    shellQuote(envPath),
+    shellQuote("/usr/bin/env"),
     "-i",
     shellQuote(nodePath),
     shellQuote(runtimePath),
@@ -13628,6 +13671,24 @@ function tmuxServerGuardCondition(identity) {
     shellQuote("#{pid}"),
     "<",
     shellQuote("/dev/null")
+  ].join(" ");
+}
+function tmuxServerGuardConditionPowerShell(nodePath, runtimePath, encodedIdentity) {
+  return [
+    "&",
+    "{",
+    "Remove-Item",
+    '@("env:NODE_OPTIONS","env:NODE_PATH","env:NODE_PRESERVE_SYMLINKS")',
+    "-ErrorAction",
+    "SilentlyContinue",
+    ";",
+    "&",
+    powershellQuote(nodePath),
+    powershellQuote(runtimePath),
+    powershellQuote("--tmux-server-identity-guard"),
+    powershellQuote(encodedIdentity),
+    powershellQuote("#{pid}"),
+    "}"
   ].join(" ");
 }
 function tmuxGuardedNativeCommand(identity, nativeCommand) {
@@ -13916,7 +13977,13 @@ function parseCmuxResourceIds(output, collectionName) {
   return ids;
 }
 async function verifyTeamTargetOwnership(target, dependencies = defaultMailboxTargetOwnershipDependencies) {
-  const expectedProvider = target.providerTarget.startsWith("cmux:") ? "cmux" : "tmux";
+  const isNativeCmuxPaneFormat = !TMUX_MAILBOX_PANE_ID.test(target.paneId);
+  let expectedProvider;
+  if (target.providerTarget.startsWith("cmux:") && isNativeCmuxPaneFormat) {
+    expectedProvider = "cmux";
+  } else {
+    expectedProvider = "tmux";
+  }
   if (target.provider !== expectedProvider) return { kind: "provider_mismatch" };
   if (target.provider === "tmux") {
     if (!isValidTmuxServerIdentity(target.tmuxServerIdentity) || typeof target.providerTarget !== "string" || target.providerTarget.length === 0 || target.providerTarget !== target.providerTarget.trim() || !TMUX_MAILBOX_TARGET.test(target.providerTarget) || !TMUX_MAILBOX_PANE_ID.test(target.paneId)) {
@@ -13975,19 +14042,33 @@ async function verifyTeamTargetOwnership(target, dependencies = defaultMailboxTa
     );
     if (!panes || panes.length === 0) return { kind: "unavailable" };
     for (const pane of panes) {
-      const surfaces = parseCmuxResourceIds(
-        (await dependencies.cmuxExec([
-          "--json",
-          "list-pane-surfaces",
-          "--workspace",
-          workspace,
-          "--pane",
-          pane
-        ])).stdout,
-        "surfaces"
-      );
-      if (!surfaces) return { kind: "unavailable" };
-      if (surfaces.includes(target.paneId)) {
+      const surfacesOutput = (await dependencies.cmuxExec([
+        "--json",
+        "list-pane-surfaces",
+        "--workspace",
+        workspace,
+        "--pane",
+        pane
+      ])).stdout;
+      let surfaceList = null;
+      try {
+        const parsed = JSON.parse(surfacesOutput);
+        const entries = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray(parsed.surfaces) ? parsed.surfaces : null;
+        if (entries && Array.isArray(entries)) {
+          surfaceList = [];
+          for (const entry of entries) {
+            if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+            const id = entry.id;
+            const ref = entry.ref;
+            if (isExactOpaqueCmuxIdentifier(id)) {
+              surfaceList.push({ id, ref: isExactOpaqueCmuxIdentifier(ref) ? ref : void 0 });
+            }
+          }
+        }
+      } catch {
+      }
+      if (!surfaceList || surfaceList.length === 0) return { kind: "unavailable" };
+      if (surfaceList.some((surface) => surface.id === target.paneId || surface.ref === target.paneId)) {
         return {
           kind: "owned",
           provider: "cmux",
@@ -17756,7 +17837,9 @@ Then exit your session.
   const paneCleanupUnknown = [];
   for (const worker of config2.workers) {
     if (!worker.pane_id) {
-      providerCleanupFailures.push(worker.name);
+      if (!options.force) {
+        providerCleanupFailures.push(worker.name);
+      }
       continue;
     }
     if (!worker.launch_attempt_id) {
@@ -17781,7 +17864,9 @@ Then exit your session.
         ...config2.tmux_server_identity ? { tmuxServerIdentity: config2.tmux_server_identity } : {}
       });
       if (!ownership.ok) {
-        providerCleanupFailures.push(worker.name);
+        if (!options.force) {
+          providerCleanupFailures.push(worker.name);
+        }
         continue;
       }
       paneOwnership = ownership.ownership;

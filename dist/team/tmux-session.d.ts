@@ -25,6 +25,17 @@ export declare function buildDetachedTmuxServerKeepaliveArgs(socketPath: string)
  */
 export declare function buildPrivateTmuxSocketPath(): string;
 /**
+ * @internal Exported for testing only.
+ */
+export declare function shellQuote(value: string): string;
+/**
+ * Quote a string for PowerShell invocation using single-quoted literals.
+ * Single quotes in PowerShell prevent variable expansion and subexpression evaluation.
+ * Literal apostrophes are escaped by doubling them.
+ * @internal Exported for testing only.
+ */
+export declare function powershellQuote(value: string): string;
+/**
  * Capture the selected tmux server's endpoint and strict process incarnation.
  *
  * With no endpoint argument the ambient tmux context is queried once. When an
@@ -46,6 +57,36 @@ export interface TmuxServerIdentityGuardOptions {
  * condition. Returns a process exit status (0 success, 1 fail closed).
  */
 export declare function runTmuxServerIdentityGuard(expected: TmuxServerIdentity, formattedActualServerPid: string, formattedActualSocket?: string, options?: TmuxServerIdentityGuardOptions): 0 | 1;
+/**
+ * Verify if real tmux is running by checking the TMUX environment variable
+ * and attempting to confirm with tmux list-servers.
+ * @internal Exported for testing only.
+ */
+export declare function isRealTmuxAvailable(): boolean;
+/**
+ * Generate the tmux server identity guard condition for the native shell.
+ * On Windows with native PowerShell, generates PowerShell syntax.
+ * On Windows in Git Bash without real TMUX (likely PSMUX), generates PowerShell syntax.
+ * On POSIX systems or Git Bash with real tmux, generates POSIX shell syntax.
+ * @internal Exported for testing only.
+ */
+export declare function tmuxServerGuardCondition(identity: TmuxServerIdentity): string;
+/**
+ * Generate POSIX shell syntax for the guard condition.
+ * Uses `env -i` to create a clean environment and `< /dev/null` for stdin safety.
+ * @internal Exported for testing only.
+ */
+export declare function tmuxServerGuardConditionPosix(nodePath: string, runtimePath: string, encodedIdentity: string): string;
+/**
+ * Generate PowerShell syntax for the guard condition.
+ * Uses the `&` call operator for invocation in a clean environment.
+ * Clears NODE_OPTIONS and other Node-related startup variables to prevent
+ * unauthorized module loading before the identity guard runs.
+ * Note: The tmux format expansion placeholder `#{pid}` is preserved as-is
+ * for tmux to expand it before passing to PowerShell.
+ * @internal Exported for testing only.
+ */
+export declare function tmuxServerGuardConditionPowerShell(nodePath: string, runtimePath: string, encodedIdentity: string): string;
 export type TeamMultiplexerContext = 'tmux' | 'cmux' | 'none';
 export declare function detectTeamMultiplexerContext(env?: NodeJS.ProcessEnv): TeamMultiplexerContext;
 /**
@@ -57,6 +98,8 @@ export declare function applyMainVerticalLayout(teamTarget: string, options?: {
     required?: boolean;
     tmuxServerIdentity?: TmuxServerIdentity;
 }): Promise<void>;
+export declare const TMUX_MAILBOX_PANE_ID: RegExp;
+export declare const TMUX_MAILBOX_TARGET: RegExp;
 type MailboxOwnershipCommand = (args: string[]) => Promise<{
     stdout: string;
     stderr: string;

@@ -186,13 +186,16 @@ describe('direct mailbox target ownership', () => {
         ]);
         expect(dependencies.tmuxExec).not.toHaveBeenCalled();
     });
-    it('rejects a tmux-shaped cmux surface before any provider query', async () => {
+    it('rejects a tmux-shaped cmux surface as a provider mismatch', async () => {
+        // When a cmux target has a tmux-format paneId (%...), the pane format indicates
+        // it should be a tmux provider, not cmux. This is detected as a provider mismatch
+        // before any provider query (issue #4261: pane-id format is the source of truth).
         const dependencies = ownershipDependencies('', [
             JSON.stringify({ panes: [{ id: 'pane-a' }] }),
             JSON.stringify({ surfaces: [{ id: '%9' }] }),
         ]);
         const result = await verifyTeamTargetOwnership(cmuxWorkerTarget({ paneId: '%9' }), dependencies);
-        expect(result).toEqual({ kind: 'unavailable' });
+        expect(result).toEqual({ kind: 'provider_mismatch' });
         expect(dependencies.tmuxExec).not.toHaveBeenCalled();
         expect(dependencies.cmuxExec).not.toHaveBeenCalled();
     });

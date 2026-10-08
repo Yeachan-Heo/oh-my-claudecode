@@ -73,8 +73,22 @@ export function buildPrivateTmuxSocketPath() {
 function tmuxFormatEscape(value) {
     return value.replace(/#/g, '##');
 }
-function shellQuote(value) {
-    return `'${value.replace(/'/g, `'\"'\"'`)}'`;
+/**
+ * @internal Exported for testing only.
+ */
+export function shellQuote(value) {
+    return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+/**
+ * Quote a string for PowerShell invocation using single-quoted literals.
+ * Single quotes in PowerShell prevent variable expansion and subexpression evaluation.
+ * Literal apostrophes are escaped by doubling them.
+ * @internal Exported for testing only.
+ */
+export function powershellQuote(value) {
+    // PowerShell single-quoted strings: apostrophes must be doubled
+    const escaped = value.replace(/'/g, "''");
+    return `'${escaped}'`;
 }
 /**
  * Resolve the already-built runtime guard before touching a private tmux
@@ -311,18 +325,60 @@ export function runTmuxServerIdentityGuard(expected, formattedActualServerPid, f
 function encodeTmuxServerIdentity(identity) {
     return Buffer.from(JSON.stringify(identity), 'utf8').toString('base64url');
 }
-function tmuxServerGuardCondition(identity) {
+/**
+ * Verify if real tmux is running by checking the TMUX environment variable
+ * and attempting to confirm with tmux list-servers.
+ * @internal Exported for testing only.
+ */
+export function isRealTmuxAvailable() {
+    // TMUX env var is set by real tmux but NOT by PSMUX
+    if (!process.env.TMUX) {
+        return false;
+    }
+    // Verify the tmux socket path is valid
+    try {
+        // Extract socket from TMUX value: typically "/path/to/socket,pid,index"
+        const parts = process.env.TMUX.split(',');
+        return !!(parts.length === 3 && parts[0] && /^[0-9]+$/.test(parts[1]));
+    }
+    catch {
+        return false;
+    }
+}
+/**
+ * Generate the tmux server identity guard condition for the native shell.
+ * On Windows with native PowerShell, generates PowerShell syntax.
+ * On Windows in Git Bash without real TMUX (likely PSMUX), generates PowerShell syntax.
+ * On POSIX systems or Git Bash with real tmux, generates POSIX shell syntax.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardCondition(identity) {
     const runtime = resolveTmuxServerGuardRuntime();
     const runtimePath = tmuxFormatEscape(runtime.runtimePath);
     const nodePath = tmuxFormatEscape(runtime.nodePath);
-    const envPath = process.platform === 'win32' && !isUnixLikeOnWindows()
-        ? 'env'
-        : '/usr/bin/env';
     const encodedIdentity = tmuxFormatEscape(encodeTmuxServerIdentity(identity));
+    // Detect native Windows (not MSYS2/Cygwin)
+    if (process.platform === 'win32' && !isUnixLikeOnWindows()) {
+        return tmuxServerGuardConditionPowerShell(nodePath, runtimePath, encodedIdentity);
+    }
+    // On Windows in Git Bash: check if we have real tmux
+    // If TMUX is not set or invalid, likely using PSMUX which needs PowerShell
+    if (process.platform === 'win32' && isUnixLikeOnWindows() && !isRealTmuxAvailable()) {
+        return tmuxServerGuardConditionPowerShell(nodePath, runtimePath, encodedIdentity);
+    }
+    // POSIX shell syntax
+    return tmuxServerGuardConditionPosix(nodePath, runtimePath, encodedIdentity);
+}
+/**
+ * Generate POSIX shell syntax for the guard condition.
+ * Uses `env -i` to create a clean environment and `< /dev/null` for stdin safety.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardConditionPosix(nodePath, runtimePath, encodedIdentity) {
     // `#{pid}` is controlled tmux format syntax. All other values are shell
     // quoted after escaping tmux's `#` expansion characters.
     return [
-        shellQuote(envPath),
+        shellQuote('/usr/bin/env'),
         '-i',
         shellQuote(nodePath),
         shellQuote(runtimePath),
@@ -331,6 +387,36 @@ function tmuxServerGuardCondition(identity) {
         shellQuote('#{pid}'),
         '<',
         shellQuote('/dev/null'),
+    ].join(' ');
+}
+/**
+ * Generate PowerShell syntax for the guard condition.
+ * Uses the `&` call operator for invocation in a clean environment.
+ * Clears NODE_OPTIONS and other Node-related startup variables to prevent
+ * unauthorized module loading before the identity guard runs.
+ * Note: The tmux format expansion placeholder `#{pid}` is preserved as-is
+ * for tmux to expand it before passing to PowerShell.
+ * @internal Exported for testing only.
+ */
+export function tmuxServerGuardConditionPowerShell(nodePath, runtimePath, encodedIdentity) {
+    // Use the call operator (&) with properly quoted arguments.
+    // Wrap in a subshell that clears problematic Node startup variables.
+    // Note: `#{pid}` is preserved as literal text for tmux format expansion.
+    return [
+        '&',
+        '{',
+        'Remove-Item',
+        '@(\"env:NODE_OPTIONS\",\"env:NODE_PATH\",\"env:NODE_PRESERVE_SYMLINKS\")',
+        '-ErrorAction',
+        'SilentlyContinue',
+        ';',
+        '&',
+        powershellQuote(nodePath),
+        powershellQuote(runtimePath),
+        powershellQuote('--tmux-server-identity-guard'),
+        powershellQuote(encodedIdentity),
+        powershellQuote('#{pid}'),
+        '}',
     ].join(' ');
 }
 function tmuxGuardedNativeCommand(identity, nativeCommand) {
@@ -592,8 +678,8 @@ async function cmuxCaptureSurface(surfaceId) {
 async function cmuxCloseSurface(surfaceId) {
     await cmuxExecAsync(['close-surface', '--surface', surfaceId]);
 }
-const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
-const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
+export const TMUX_MAILBOX_PANE_ID = /^%\d+$/;
+export const TMUX_MAILBOX_TARGET = /^[^\s:]+(?::[^\s:]+)?$/;
 function exactTmuxPaneMembershipTarget(providerTarget) {
     // Native tmux IDs are already exact and must not be passed through the
     // name-matching `=` syntax. Keep the accepted ID shapes narrow so an
@@ -673,7 +759,18 @@ const defaultMailboxTargetOwnershipDependencies = {
  * a candidate pane/surface.
  */
 export async function verifyTeamTargetOwnership(target, dependencies = defaultMailboxTargetOwnershipDependencies) {
-    const expectedProvider = target.providerTarget.startsWith('cmux:') ? 'cmux' : 'tmux';
+    // Issue #4261: cmux's tmux-compat layer sets session names like 'cmux:N' but paneId
+    // remains tmux-format (%...). Determine provider by both session prefix AND pane id format:
+    // Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format.
+    // If pane id is tmux-format (%...) then use tmux provider even if session is 'cmux:...'.
+    const isNativeCmuxPaneFormat = !TMUX_MAILBOX_PANE_ID.test(target.paneId);
+    let expectedProvider;
+    if (target.providerTarget.startsWith('cmux:') && isNativeCmuxPaneFormat) {
+        expectedProvider = 'cmux';
+    }
+    else {
+        expectedProvider = 'tmux';
+    }
     if (target.provider !== expectedProvider)
         return { kind: 'provider_mismatch' };
     if (target.provider === 'tmux') {
@@ -741,12 +838,41 @@ export async function verifyTeamTargetOwnership(target, dependencies = defaultMa
         if (!panes || panes.length === 0)
             return { kind: 'unavailable' };
         for (const pane of panes) {
-            const surfaces = parseCmuxResourceIds((await dependencies.cmuxExec([
+            const surfacesOutput = (await dependencies.cmuxExec([
                 '--json', 'list-pane-surfaces', '--workspace', workspace, '--pane', pane,
-            ])).stdout, 'surfaces');
-            if (!surfaces)
+            ])).stdout;
+            // Parse surfaces, checking both 'id' (UUID) and 'ref' fields
+            // to handle both UUID and ref format returns from cmux.
+            // Issue #4261: cmux new-split may return surface by ref (e.g., surface:1000060015)
+            // while list-pane-surfaces returns both id (UUID) and ref.
+            let surfaceList = null;
+            try {
+                const parsed = JSON.parse(surfacesOutput);
+                const entries = Array.isArray(parsed)
+                    ? parsed
+                    : parsed && typeof parsed === 'object' && Array.isArray(parsed.surfaces)
+                        ? parsed.surfaces
+                        : null;
+                if (entries && Array.isArray(entries)) {
+                    surfaceList = [];
+                    for (const entry of entries) {
+                        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+                            continue;
+                        const id = entry.id;
+                        const ref = entry.ref;
+                        if (isExactOpaqueCmuxIdentifier(id)) {
+                            surfaceList.push({ id: id, ref: isExactOpaqueCmuxIdentifier(ref) ? ref : undefined });
+                        }
+                    }
+                }
+            }
+            catch {
+                // JSON parse error
+            }
+            if (!surfaceList || surfaceList.length === 0)
                 return { kind: 'unavailable' };
-            if (surfaces.includes(target.paneId)) {
+            // Match against both id (UUID) and ref fields
+            if (surfaceList.some(surface => surface.id === target.paneId || surface.ref === target.paneId)) {
                 return {
                     kind: 'owned',
                     provider: 'cmux',
