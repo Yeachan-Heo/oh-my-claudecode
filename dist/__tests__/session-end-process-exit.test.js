@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -130,38 +130,18 @@ async function waitForTerminalCallback(cwd, sessionId) {
 }
 describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     const tempDirs = [];
-    const savedEnv = {};
     afterEach(() => {
         for (const directory of tempDirs.splice(0)) {
             rmSync(directory, { recursive: true, force: true, maxRetries: 40, retryDelay: 25 });
         }
-        // Restore saved environment variables
-        for (const key of Object.keys(savedEnv)) {
-            if (savedEnv[key] === undefined) {
-                delete process.env[key];
-            }
-            else {
-                process.env[key] = savedEnv[key];
-            }
-        }
-        Object.keys(savedEnv).length = 0;
+        vi.unstubAllEnvs();
     });
     function createProject() {
         const cwd = mkdtempSync(join(homedir(), 'omc-session-end-process-exit-'));
         tempDirs.push(cwd);
-        // Save current env values before stubbing
-        if (!Object.prototype.hasOwnProperty.call(savedEnv, 'HOME'))
-            savedEnv.HOME = process.env.HOME;
-        if (!Object.prototype.hasOwnProperty.call(savedEnv, 'USERPROFILE'))
-            savedEnv.USERPROFILE = process.env.USERPROFILE;
-        if (!Object.prototype.hasOwnProperty.call(savedEnv, 'OMC_STATE_DIR'))
-            savedEnv.OMC_STATE_DIR = process.env.OMC_STATE_DIR;
-        // Stub the environment variables
-        process.env.HOME = cwd;
-        process.env.USERPROFILE = cwd;
-        process.env.OMC_STATE_DIR = '';
-        // Create a workspace marker so getOmcRoot uses this directory as the root
-        writeFileSync(join(cwd, '.omc-workspace'), '');
+        vi.stubEnv('HOME', cwd);
+        vi.stubEnv('USERPROFILE', cwd);
+        vi.stubEnv('OMC_STATE_DIR', '');
         writeFileSync(join(cwd, 'transcript.jsonl'), '');
         mkdirSync(getOmcRoot(cwd), { recursive: true });
         return cwd;
