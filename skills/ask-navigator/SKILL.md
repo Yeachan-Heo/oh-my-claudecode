@@ -31,7 +31,7 @@ The map is an **index, not a store**: a decision lives in exactly one place — 
 
 ## Document language
 
-Map and ticket prose follow the same document-language contract as `/oh-my-claudecode:drydock`: read `documentLanguage` from `GLOSSARY.md` frontmatter when present; if the yard is not laid, ask the language question once during charting (W2) and record the resolved tag in the map's Notes so the later launch run inherits it. Paths, labels, slash commands, the `navigator:map` label, ticket-type names (`research`, `loft`, `grilling`, `task`), `HITL`/`AFK`, and `blockedBy` are stable tokens and stay byte-for-byte stable in every language.
+Map and ticket prose follow the same document-language contract as `/oh-my-claudecode:drydock`: read `documentLanguage` from `GLOSSARY.md` frontmatter when present (a legacy yard with only `CONTEXT.md` reads it there and never gets a second glossary; drydock's legacy glossary migration renames it); if the yard is not laid, ask the language question once during charting (W2) and record the resolved tag in the map's Notes so the later launch run inherits it. Paths, labels, slash commands, the `navigator:map` label, ticket-type names (`research`, `loft`, `grilling`, `task`), `HITL`/`AFK`, and `blockedBy` are stable tokens and stay byte-for-byte stable in every language.
 
 ## Chart the map
 
