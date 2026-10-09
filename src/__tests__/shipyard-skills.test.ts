@@ -783,7 +783,8 @@ describe('shipyard skills — behavior & packaging contract', () => {
   it('launch and navigator never create GLOSSARY.md beside a legacy CONTEXT.md before writing the glossary', () => {
     const launchGuard = LAUNCH.indexOf('migrated by the drydock legacy glossary migration');
     expect(launchGuard).toBeGreaterThan(-1);
-    expect(LAUNCH).toContain('never create a second glossary beside it');
+    expect(LAUNCH).toContain('Never create a second glossary beside it');
+    expect(LAUNCH).toContain('only after the brief self-check, fog gate, and map check admit the run and before the first Launch-authored write');
     expect(launchGuard).toBeLessThan(LAUNCH.indexOf('persist the resolved normalized tag back to `GLOSSARY.md`'));
     const navGuard = NAVIGATOR.indexOf('**Legacy yards (CONTEXT.md only)**');
     expect(navGuard).toBeGreaterThan(-1);
