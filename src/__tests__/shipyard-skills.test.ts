@@ -125,6 +125,30 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(NAVIGATOR).toContain('| `task` |');
   });
 
+  it('ask-navigator keeps the map ring in the tracker (map issue, resolution comments, brief in the map body)', () => {
+    // T67: map = tracker issue, decisions = resolution comments on closed tickets,
+    // handoff pointer folded into the map issue body. No local map/decisions/brief trio.
+    expect(NAVIGATOR).not.toContain('.omc/wayfinder');
+    expect(NAVIGATOR).not.toContain('brief.md');
+    expect(NAVIGATOR).not.toContain('decisions/NN-');
+    expect(NAVIGATOR).not.toContain('Local markdown fallback');
+    expect(NAVIGATOR).toContain('navigator:map');
+    expect(NAVIGATOR).toContain('resolution comment');
+    expect(NAVIGATOR).toContain('**Mission brief**');
+    expect(NAVIGATOR).toContain('map issue body');
+    // launch's map check reads the map from the tracker only
+    expect(LAUNCH).not.toContain('.omc/wayfinder');
+  });
+
+  it('ask-navigator research findings never become permanent repo files', () => {
+    // T67: research products live in the session, tracker comments, or a throwaway
+    // branch (never merged) — zero new permanent files.
+    expect(NAVIGATOR).not.toContain('docs/research');
+    expect(NAVIGATOR).toContain('tracker comment');
+    expect(NAVIGATOR).toContain('throwaway branch');
+    expect(NAVIGATOR).toContain('never merges');
+  });
+
   it('ask-navigator defers un-laid-yard sediment instead of skipping it', () => {
     expect(NAVIGATOR).toContain('report-only mode');
     expect(NAVIGATOR).toContain('Deferred sediment');
@@ -486,6 +510,21 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('Team remains authoritative for runtime state');
   });
 
+  it('launch keeps spec and tickets tracker-only (parent spec issue + child ticket sub-issues, no local tree)', () => {
+    // the interview loop's spec and tickets live only in the tracker (harbor-aligned):
+    // spec = parent issue, tickets = native sub-issues; scout notes stay in the session
+    expect(LAUNCH).not.toContain('.omc/specs/');
+    expect(LAUNCH).not.toContain('decisions-pending');
+    expect(LAUNCH).not.toContain('notes/');
+    expect(LAUNCH).toContain('the spec is the parent issue, the tickets are its native sub-issues');
+    expect(LAUNCH).toContain('never creates or writes local spec or ticket files');
+    expect(LAUNCH).toContain('downstream readers take the spec and tickets from the tracker');
+    expect(LAUNCH).toContain('as a **parent tracker issue**');
+    expect(LAUNCH).toContain('**child tracker issues** (native sub-issues of the parent spec issue)');
+    expect(LAUNCH).toContain('notes stay in the conversation, never written to disk');
+    expect(LAUNCH).toContain('as a comment on the parent spec issue');
+  });
+
   it('launch keeps the canonical path canonical and itself opt-in (no seeded default override)', () => {
     // drydock's generated CLAUDE.md must not mandate launch as the default delivery path
     expect(DRYDOCK).not.toContain('交付走 /oh-my-claudecode:launch');
@@ -534,6 +573,24 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(SHIPYARD_DOC).toContain('the structured contract both surfaces share');
     expect(SHIPYARD_DOC).toContain('blocks on high-confidence actionable drydock findings');
     expect(SHIPYARD_DOC).toContain('narrowly, explicitly overridden low-confidence / false-positive / scratch-scope finding — no general bypass');
+  });
+
+  it('yard gate and paper-trail slots speak existence-as-declaration (absent surface is un-adopted, never a finding)', () => {
+    // spec #64: the audit checks only the surfaces the yard has adopted; an
+    // absent surface is un-adopted, not a finding — no "missing surfaces"
+    // wording anywhere in the gate, and the paper-trail slots follow lazy seeding.
+    expect(LAUNCH).not.toContain('missing surfaces');
+    expect(LAUNCH).not.toContain('缺失表面');
+    expect(NAVIGATOR).not.toContain('un-laid surfaces as findings');
+    // the existence-as-declaration gate wording is pinned
+    expect(LAUNCH).toContain('an absent surface is not adopted, never a finding');
+    expect(LAUNCH).toContain('never an absent surface, which is un-adopted, not missing');
+    // the paper-trail slot wording is pinned: CONTEXT.md day one, the rest on first use
+    expect(LAUNCH).toContain('`CONTEXT.md` exists from the day the yard was laid');
+    expect(LAUNCH).toContain('`docs/adr/` and `docs/business/` appear on first use');
+    expect(LAUNCH).toContain('never creates a slot speculatively');
+    // the navigator defers without turning un-adopted surfaces into findings
+    expect(NAVIGATOR).toContain('an un-adopted surface never becomes a finding');
   });
 
   it('launch closeout re-runs the yard audit as yard drift instead of the retired gap list', () => {
@@ -603,6 +660,48 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(DRYDOCK).not.toMatch(/retro/i);
     expect(DRYDOCK).toContain('launch C5 sediment');
     expect(SHIPYARD_DOC).toContain('C5 closeout consumes a structured retro');
+  });
+
+  it('drydock seeds exactly two faces on day one and defers every other surface to first use', () => {
+    // T68 lazy seeding: drydock writes CLAUDE.md + CONTEXT.md and nothing else;
+    // every other surface carries a first-use trigger instead of a scaffold
+    // instruction, so a freshly seeded yard contains only what has a real use.
+    const scaffold = DRYDOCK.match(/### 3\.[\s\S]*?```\n([\s\S]*?)\n```/)?.[1];
+    expect(scaffold).toBeDefined();
+    expect(scaffold).toContain('CLAUDE.md');
+    expect(scaffold).toContain('CONTEXT.md');
+    for (const deferred of [
+      'docs/adr/',
+      'docs/standards/',
+      'docs/business/',
+      'design-system/',
+      '.omc/skills/',
+      '.mcp.json',
+      '.gitattributes',
+      'scripts/',
+    ]) {
+      expect(scaffold).not.toContain(deferred);
+    }
+    // every deferred surface names the moment it first appears
+    expect(DRYDOCK).toContain('| Surface | Appears when |');
+    for (const row of [
+      '| `docs/adr/` |',
+      '| `docs/standards/` |',
+      '| `docs/business/` |',
+      '| `design-system/` |',
+      '| `.omc/skills/` |',
+      '| `scripts/` |',
+      '| `.mcp.json` |',
+      '| `.gitattributes` |',
+    ]) {
+      expect(DRYDOCK).toContain(row);
+    }
+    expect(DRYDOCK).toContain('never speculatively');
+    // the thin entry must not name deferred surface paths: the audit's
+    // dead-path check reads CLAUDE.md, and a pointer at an absent surface is
+    // a high-confidence finding on a freshly seeded yard
+    const seedA = DRYDOCK.match(/<!-- shipyard-seed-a:en:start -->[\s\S]*?<!-- shipyard-seed-a:en:end -->/)?.[1] ?? '';
+    expect(seedA).not.toMatch(/(?:docs|design-system|scripts|\.omc)\/[\w./-]+/);
   });
 
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {
@@ -781,17 +880,16 @@ describe('shipyard audit script — mechanical check classes', () => {
   }
 
   function makeCleanRepo(): string {
+    // Two-face lazy-seeding form (T68): the audit must treat a yard holding
+    // only its two seeded faces as fully clean — every further surface is
+    // adopted by the individual test that creates it.
     const root = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
-    writeFileSync(join(root, 'CLAUDE.md'), '# Project\n');
+    writeFileSync(join(root, 'CLAUDE.md'), '# Project\n\n## Project conventions\n\n- conventions\n');
     writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
-    for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
-      mkdirSync(join(root, dir), { recursive: true });
-    }
-    writeFileSync(join(root, '.mcp.json'), '{"mcpServers": {}}');
     return root;
   }
 
-  it('a fully seeded repo audits clean', () => {
+  it('a two-face lazy-seeded repo audits clean', () => {
     const root = makeCleanRepo();
     try {
       const { status, stdout } = runAudit(root);
@@ -805,6 +903,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   it('a project skill without non-empty triggers is a high-confidence actionable finding', () => {
     const root = makeCleanRepo();
     try {
+      mkdirSync(join(root, '.omc', 'skills'), { recursive: true }); // adopting the skills face creates it
       writeFileSync(
         join(root, '.omc/skills/no-triggers.md'),
         '---\nid: no-triggers\nname: no-triggers\ndescription: A skill that will never load\n---\n\nbody\n',
@@ -821,6 +920,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   it('project skills with block or inline triggers are accepted', () => {
     const root = makeCleanRepo();
     try {
+      mkdirSync(join(root, '.omc', 'skills'), { recursive: true }); // adopting the skills face creates it
       writeFileSync(
         join(root, '.omc/skills/block-triggers.md'),
         '---\nid: block-triggers\nname: block-triggers\ndescription: Block-list triggers\ntriggers:\n  - "project release check"\n---\n\nbody\n',

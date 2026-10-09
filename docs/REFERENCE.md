@@ -1025,7 +1025,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
 | `/oh-my-claudecode:harbor [sweep\|look at #N\|what's ready?]` | Sweep external issues and PRs, verify claims, hand a signature docket                    |
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
-| `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (5 surfaces); --check audits drift                     |
+| `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (two faces seeded day one; every other surface appears on first use); --check audits drift |
 | `/oh-my-claudecode:launch <brief\|spec-path> [--serial]` | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |
 | `/oh-my-claudecode:loft <design-question>`               | Loft the shape before cutting steel: a throwaway artifact answers a design question prose cannot settle |
 | `/oh-my-claudecode:minimal-code-discipline`              | Apply the YAGNI-ladder writing-time discipline while implementing                              |
