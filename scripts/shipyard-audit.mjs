@@ -42,54 +42,114 @@ function finding(id, title, severity, confidence, actionable, evidence, advice) 
   return { id, title, severity, confidence, actionable, evidence, advice };
 }
 
+// The glossary slot is bilingual during the expand phase: GLOSSARY.md is the
+// authority path, legacy CONTEXT.md satisfies the same surface. The surface
+// finding keeps its historical CONTEXT-md id slug so consumers keyed by id
+// stay stable across the rename.
+//
+// A CONTEXT.md only counts as a legacy glossary when it carries a drydock
+// glossary signature: YAML frontmatter with a `documentLanguage` key, or a
+// first H1 matching a drydock glossary seed heading (seeds that predate the
+// language tag). Any other CONTEXT.md is an unrelated agent-context document
+// — the collision this rename exists to avoid — and is ignored.
+// YAML frontmatter, including an empty `---\n---` block.
+const GLOSSARY_FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---/;
+const LEGACY_GLOSSARY_HEADINGS = new Set(['Glossary', '术语表', '詞彙表']);
+
+function isLegacyGlossary(root) {
+  const path = join(root, 'CONTEXT.md');
+  if (!existsSync(path)) return false;
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
+  const frontmatter = content.match(GLOSSARY_FRONTMATTER);
+  if (frontmatter && /^documentLanguage:/m.test(frontmatter[1] ?? '')) return true;
+  // Seeds open with the heading, so only the first visible non-blank line
+  // after the frontmatter counts (BOM and HTML comments are not rendered);
+  // headings inside fences, comments, or later prose never do.
+  const body = (frontmatter ? content.slice(frontmatter[0].length) : content)
+    .replace(/<!--[\s\S]*?-->/g, '');
+  const firstLine = body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
+  const heading = firstLine.match(/^#\s+(.+?)\s*$/);
+  return Boolean(heading && LEGACY_GLOSSARY_HEADINGS.has(heading[1]));
+}
+
+function glossaryPath(root) {
+  if (existsSync(join(root, 'GLOSSARY.md'))) return join(root, 'GLOSSARY.md');
+  return isLegacyGlossary(root) ? join(root, 'CONTEXT.md') : null;
+}
+
+function hasGlossary(root) {
+  return glossaryPath(root) !== null;
+}
+
 function checkSurfaces(root) {
   const findings = [];
   for (const surface of SURFACES) {
-    if (existsSync(join(root, surface))) continue;
+    if (surface === 'CONTEXT.md' ? hasGlossary(root) : existsSync(join(root, surface))) continue;
     const isDir = surface.endsWith('/');
+    // Fresh yards get pointed at the new name; the finding id slug above stays legacy for consumer stability.
+    const displayName = surface === 'CONTEXT.md' ? 'GLOSSARY.md' : surface;
     findings.push(
       finding(
         `shipyard.surface.missing.${surface.replace(/[^a-z0-9]+/gi, '-')}`,
-        `Missing surface: ${surface}`,
+        `Missing surface: ${displayName}`,
         SEVERITY.high,
         'high',
         true,
-        [surface],
-        isDir ? `Create the ${surface} directory (see the drydock skill for the seed).` : `Create ${surface} (see the drydock skill for the seed).`,
+        [displayName],
+        isDir ? `Create the ${displayName} directory (see the drydock skill for the seed).` : `Create ${displayName} (see the drydock skill for the seed).`,
       ),
     );
   }
   return findings;
 }
 
+function checkDuplicateGlossaryAuthority(root) {
+  if (existsSync(join(root, 'GLOSSARY.md')) && isLegacyGlossary(root)) {
+    return [
+      finding(
+        'shipyard.glossary.duplicate-authority',
+        'Both GLOSSARY.md and a legacy CONTEXT.md glossary exist — only one glossary authority is allowed',
+        SEVERITY.high,
+        'high',
+        true,
+        ['GLOSSARY.md', 'CONTEXT.md'],
+        'Merge any terms only in CONTEXT.md into GLOSSARY.md, delete CONTEXT.md, and point CLAUDE.md references at GLOSSARY.md.',
+      ),
+    ];
+  }
+  return [];
+}
+
 function checkDocumentLanguage(root) {
-  const contextPath = join(root, 'CONTEXT.md');
-  if (!existsSync(contextPath)) return [];
-  const content = readFileSync(contextPath, 'utf-8');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  // GLOSSARY.md is the authority; a legacy CONTEXT.md glossary is read only as fallback.
+  const path = glossaryPath(root);
+  if (!path) return [];
+  const glossaryFile = basename(path);
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
+  const match = content.match(GLOSSARY_FRONTMATTER);
   if (!match) {
     return [
       finding(
         'shipyard.document-language.missing-frontmatter',
-        'CONTEXT.md has no YAML frontmatter',
+        `${glossaryFile} has no YAML frontmatter`,
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        [glossaryFile],
         'Add frontmatter with a `documentLanguage` tag (see the drydock skill).',
       ),
     ];
   }
-  const tag = match[1].match(/^documentLanguage:\s*(\S+)\s*$/m);
+  const tag = (match[1] ?? '').match(/^documentLanguage:\s*(\S+)\s*$/m);
   if (!tag) {
     return [
       finding(
         'shipyard.document-language.missing-tag',
-        'CONTEXT.md frontmatter lacks a documentLanguage tag',
+        `${glossaryFile} frontmatter lacks a documentLanguage tag`,
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        [glossaryFile],
         'Add `documentLanguage: <tag>` to the frontmatter.',
       ),
     ];
@@ -273,6 +333,7 @@ function checkIntentStatuses(root) {
 
 export async function auditYard(root) {
   return [
+    ...checkDuplicateGlossaryAuthority(root),
     ...checkSurfaces(root),
     ...checkDocumentLanguage(root),
     ...checkClaudeMdDeadPaths(root),

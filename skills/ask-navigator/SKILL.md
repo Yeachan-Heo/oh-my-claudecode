@@ -31,13 +31,13 @@ The map is an **index, not a store**: a decision lives in exactly one place — 
 
 ## Document language
 
-Map and ticket prose follow the same document-language contract as `/oh-my-claudecode:drydock`: read `documentLanguage` from `CONTEXT.md` frontmatter when present; if the yard is not laid, ask the language question once during charting (W2) and record the resolved tag in the map's Notes so the later launch run inherits it. Paths, labels, slash commands, the `navigator:map` label, ticket-type names (`research`, `loft`, `grilling`, `task`), `HITL`/`AFK`, and `blockedBy` are stable tokens and stay byte-for-byte stable in every language.
+Map and ticket prose follow the same document-language contract as `/oh-my-claudecode:drydock`: read `documentLanguage` from `GLOSSARY.md` frontmatter when present (a legacy yard with only `CONTEXT.md` reads it there and never gets a second glossary; drydock's legacy glossary migration renames it); if the yard is not laid, ask the language question once during charting (W2) and record the resolved tag in the map's Notes so the later launch run inherits it. Paths, labels, slash commands, the `navigator:map` label, ticket-type names (`research`, `loft`, `grilling`, `task`), `HITL`/`AFK`, and `blockedBy` are stable tokens and stay byte-for-byte stable in every language.
 
 ## Chart the map
 
 Invoked with a loose idea (or launch's residual questions). Charting is one session's work; it hand-resolves nothing.
 
-1. **Run the audit, defer the findings.** Run the `/oh-my-claudecode:drydock` `--check` audit in report-only mode — the mechanical subset via `node scripts/shipyard-audit.mjs`, the heuristic classes via the drydock prose audit: findings never block charting (a map produces decisions, not slot landings), but they are recorded verbatim in the map's Notes — launch's yard gate will collect that debt when the effort finally enters delivery. If the yard is not laid at all (no `CONTEXT.md`, no `docs/adr/`), offer `/oh-my-claudecode:drydock` **once**; if the captain declines, proceed in tracker-only mode and defer all sediment (see Sediment).
+1. **Run the audit, defer the findings.** Run the `/oh-my-claudecode:drydock` `--check` audit in report-only mode — the mechanical subset via `node scripts/shipyard-audit.mjs`, the heuristic classes via the drydock prose audit: findings never block charting (a map produces decisions, not slot landings), but they are recorded verbatim in the map's Notes — launch's yard gate will collect that debt when the effort finally enters delivery. If the yard is not laid at all (no `GLOSSARY.md`, no `docs/adr/`), offer `/oh-my-claudecode:drydock` **once**; if the captain declines, proceed in tracker-only mode and defer all sediment (see Sediment).
 2. **W1 — name the destination.** Call the Skill tool with "deep-interview" and pin down what this map is finding its way to: the spec, decision, or change. The destination fixes the scope, so it is settled first. **W1 is a captain signature: present the destination statement and get explicit confirmation.** If the captain cannot state a destination even with the interview's help, that is not an error — present the best candidates ranked and let the captain pick one to chart toward or park the effort.
 3. **Map the frontier.** Grill again with "deep-interview", **breadth-first with frontier rounds** (`--frontier`): fan out across the whole space rather than deep on any one thread — each round asks the whole frontier of decisions whose prerequisites are settled, then recomputes from the answers — surfacing the open decisions and the first steps takeable now. When charting against an existing map (residual questions or a redraw), read its **Out of scope** section before ticketing — ruled-out work never re-enters as a fresh ticket. **If this surfaces no fog** — the way to the destination is already clear and the journey fits one session — no map is needed: stop and recommend `/oh-my-claudecode:launch`.
 4. **W2 — sign the chart.** Present the proposed map: destination, initial tickets with types and blocking edges, and the fog sketch. **W2 is a captain signature**: granularity wrong here wastes every later session. Iterate until signed.
@@ -116,9 +116,11 @@ A `research` file speaks the yard's one evidence format: it opens by restating t
 
 Resolutions land in the shipyard's paper trail the moment they settle — the same slots launch's Phase 1 uses:
 
-- a term the resolutions settled or sharpened → `CONTEXT.md` glossary (one entry: definition, boundary, resolved ambiguity)
+- a term the resolutions settled or sharpened → `GLOSSARY.md` glossary (one entry: definition, boundary, resolved ambiguity)
 - a decision passing the ADR test (hard to reverse, surprising without context, a real tradeoff) → `docs/adr/NNNN-<slug>.md`
 - a business rule or background fact → `docs/business/` (one article per business question)
+
+**Legacy yards (CONTEXT.md only)**: If the yard has only `CONTEXT.md` and no `GLOSSARY.md`, run drydock before writing sediment to migrate the glossary authority to `GLOSSARY.md`. Do not create a fresh `GLOSSARY.md` beside the legacy file; this would split authorities. When drydock's legacy glossary migration completes, glossary writes will target `GLOSSARY.md` automatically. Alternatively, defer this sediment landing in the map's Notes (see below).
 
 When the yard is not laid (the captain declined drydock at charting time), **defer, don't skip**: record each pending landing as one line in the map's Notes under a `Deferred sediment` heading. The later `/oh-my-claudecode:launch` run's yard gate treats the un-laid surfaces as findings, and the deferred lines tell it exactly what to land first.
 

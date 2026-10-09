@@ -53,7 +53,7 @@ Run the ADR test on the diff itself — the same three questions launch applies 
 
 ### Language
 
-Terms come from `CONTEXT.md` where a glossary exists. The PR is read outside the session; the glossary is the only vocabulary the reader shares with it.
+Terms come from `GLOSSARY.md` where a glossary exists (legacy yards not yet migrated keep it in `CONTEXT.md`). The PR is read outside the session; the glossary is the only vocabulary the reader shares with it.
 
 ## Triggers
 

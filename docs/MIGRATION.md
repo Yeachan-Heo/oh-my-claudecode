@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)](#unreleased-glossary-file-rename-contextmd--glossarymd)
 - [Unreleased: Team Instance Ownership](#unreleased-team-instance-ownership)
 - [Unreleased: Cancellation Scope](#unreleased-cancellation-scope)
 - [v4.x → v5.0: Workflow Retirement](#v4x--v50-workflow-retirement)
@@ -19,6 +20,20 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
 
 ---
+
+## Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)
+
+The shipyard glossary surface is now `GLOSSARY.md` at the repository root. It holds the yard's terms and the `documentLanguage` frontmatter tag.
+
+### What changes for existing yards
+
+- **Only `CONTEXT.md` exists:** the yard keeps working. The audit accepts `CONTEXT.md` as the glossary, and the skills read it until it is migrated. The next full `/oh-my-claudecode:drydock` run (not `--check`) renames it to `GLOSSARY.md` with its content and frontmatter unchanged, and rewrites `CONTEXT.md` references in `CLAUDE.md` (for example `Glossary: CONTEXT.md`) to `GLOSSARY.md`. Commit the result.
+- **Both files exist:** `node scripts/shipyard-audit.mjs` reports a high-confidence `shipyard.glossary.duplicate-authority` finding and exits 1, so Launch stays blocked. Drydock does not merge the files for you. Move any terms that exist only in `CONTEXT.md` into `GLOSSARY.md`, delete `CONTEXT.md`, replace remaining `CONTEXT.md` references in `CLAUDE.md` with `GLOSSARY.md`, then commit.
+- **Fresh yards:** no action. Drydock creates `GLOSSARY.md`.
+
+A `CONTEXT.md` counts as a legacy glossary only when its frontmatter has a `documentLanguage` key, or its first visible non-blank line (after the frontmatter, ignoring a BOM and HTML comments) is a drydock glossary seed heading (`# Glossary`, `# 术语表`, `# 詞彙表`) for yards laid before the language tag existed. Any other `CONTEXT.md` (for example an agent-context file) is ignored by the audit and never renamed.
+
+The missing-glossary surface finding keeps its historical `CONTEXT-md` id slug, so consumers keyed by finding id are unaffected.
 
 ## Unreleased: Team Instance Ownership
 

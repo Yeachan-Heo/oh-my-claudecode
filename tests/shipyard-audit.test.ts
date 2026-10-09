@@ -41,12 +41,14 @@ function runAudit(root: string): { status: number; report: AuditReport | null; s
   }
 }
 
-function seedCleanYard(root: string): void {
+// glossaryFile defaults to the legacy name so the pre-rename fixtures keep
+// passing; the bilingual cases pass 'GLOSSARY.md' to lock the expand semantics.
+function seedCleanYard(root: string, glossaryFile: 'GLOSSARY.md' | 'CONTEXT.md' = 'CONTEXT.md'): void {
   writeFileSync(
     join(root, 'CLAUDE.md'),
     '# Project\n\n## Project conventions\n\n- conventions\n\n## Standards index\n\n- Architecture: docs/standards/architecture.md\n',
   );
-  writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+  writeFileSync(join(root, glossaryFile), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
   writeFileSync(join(root, '.mcp.json'), '{"mcpServers": {}}\n');
   for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
     mkdirSync(join(root, dir), { recursive: true });
@@ -82,6 +84,107 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(ids).toContain('shipyard.surface.missing.CONTEXT-md');
   });
 
+  it('exits 0 on a yard with only the new GLOSSARY.md name', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings).toEqual([]);
+    expect(report!.summary.verdict).toBe('clear');
+  });
+
+  it('exits 0 on a yard with only the legacy CONTEXT.md name (expand semantics locked)', () => {
+    seedCleanYard(yard, 'CONTEXT.md');
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings).toEqual([]);
+  });
+
+  it('emits a duplicate-glossary-authority finding when both GLOSSARY.md and CONTEXT.md exist', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    const result = runAudit(yard);
+    expect(result.status).toBe(1);
+    expect(result.report!.findings.some((f) => f.id === 'shipyard.glossary.duplicate-authority')).toBe(true);
+
+    // the duplicate-authority finding is reported even when both files have valid tags
+    const findings = result.report!.findings.filter((f) => f.id === 'shipyard.glossary.duplicate-authority');
+    expect(findings.length).toBe(1);
+    expect(findings[0].evidence).toEqual(['GLOSSARY.md', 'CONTEXT.md']);
+  });
+
+  it('ignores an unrelated CONTEXT.md without the glossary signature', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'CONTEXT.md'), '# Agent context\n\nNotes for coding agents.\n');
+    const beside = runAudit(yard);
+    expect(beside.status).toBe(0);
+    expect(beside.report!.findings).toEqual([]);
+
+    // a lone unrelated CONTEXT.md does not satisfy the glossary surface
+    rmSync(join(yard, 'GLOSSARY.md'));
+    const alone = runAudit(yard);
+    expect(alone.status).toBe(1);
+    const ids = alone.report!.findings.map((f) => f.id);
+    expect(ids).toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(ids.some((id) => id.startsWith('shipyard.document-language.'))).toBe(false);
+  });
+
+  it('recognizes a legacy CONTEXT.md glossary that predates the documentLanguage tag by its seed heading', () => {
+    for (const heading of ['Glossary', '术语表', '詞彙表']) {
+      rmSync(yard, { recursive: true, force: true });
+      yard = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+      writeFileSync(join(yard, 'CONTEXT.md'), `# ${heading}\n\n## term\n`);
+      const alone = runAudit(yard);
+      const ids = alone.report!.findings.map((f) => f.id);
+      expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+      expect(ids).toContain('shipyard.document-language.missing-frontmatter');
+
+      seedCleanYard(yard, 'GLOSSARY.md');
+      writeFileSync(join(yard, 'CONTEXT.md'), `# ${heading}\n\n## term\n`);
+      const beside = runAudit(yard);
+      expect(beside.report!.findings.some((f) => f.id === 'shipyard.glossary.duplicate-authority')).toBe(true);
+    }
+  });
+
+  it('an empty frontmatter block before the seed heading still marks a legacy glossary', () => {
+    writeFileSync(join(yard, 'CONTEXT.md'), '---\n---\n\n# Glossary\n');
+    const ids = runAudit(yard).report!.findings.map((f) => f.id);
+    expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(ids).toContain('shipyard.document-language.missing-tag');
+  });
+
+  it('a BOM before the frontmatter does not hide it', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'GLOSSARY.md'), '\uFEFF---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    expect(runAudit(yard).report!.findings).toEqual([]);
+    rmSync(join(yard, 'GLOSSARY.md'));
+    writeFileSync(join(yard, 'CONTEXT.md'), '\uFEFF---\ndocumentLanguage: en\n---\n\nAgent notes.\n');
+    expect(runAudit(yard).report!.findings).toEqual([]);
+  });
+
+  it('a BOM or leading HTML comment before the seed heading still marks a legacy glossary', () => {
+    for (const content of ['\uFEFF# Glossary\n\n## term\n', '<!-- provenance: drydock -->\n# Glossary\n\n## term\n']) {
+      rmSync(yard, { recursive: true, force: true });
+      yard = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+      writeFileSync(join(yard, 'CONTEXT.md'), content);
+      const ids = runAudit(yard).report!.findings.map((f) => f.id);
+      expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+    }
+  });
+
+  it('only a seed heading on the first non-blank line marks a legacy glossary', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    for (const content of [
+      'Agent notes.\n\n```markdown\n# Glossary\n```\n',
+      '<!--\n# Glossary\n-->\nAgent notes.\n',
+      '# Agent context\n\n# Glossary\n',
+    ]) {
+      writeFileSync(join(yard, 'CONTEXT.md'), content);
+      const { status, report } = runAudit(yard);
+      expect(status).toBe(0);
+      expect(report!.findings).toEqual([]);
+    }
+  });
+
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
     const { report } = runAudit(yard);
     expect(report!.findings.length).toBeGreaterThan(0);
@@ -93,18 +196,31 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
-  it('reports a missing documentLanguage tag and an invalid tag distinctly', () => {
-    writeFileSync(join(yard, 'CONTEXT.md'), '# Glossary (no frontmatter)\n');
-    const { report } = runAudit(yard);
-    expect(report!.findings.some((f) => f.id === 'shipyard.document-language.missing-frontmatter')).toBe(true);
+  it('reports a missing documentLanguage tag and an invalid tag distinctly on GLOSSARY.md', () => {
+    for (const glossaryFile of ['GLOSSARY.md'] as const) {
+      // fresh yard per iteration: a leftover GLOSSARY.md would shadow the
+      // legacy name in the second pass
+      rmSync(yard, { recursive: true, force: true });
+      yard = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+      writeFileSync(join(yard, glossaryFile), '# Glossary (no frontmatter)\n');
+      const { report } = runAudit(yard);
+      expect(report!.findings.some((f) => f.id === 'shipyard.document-language.missing-frontmatter')).toBe(true);
 
-    writeFileSync(join(yard, 'CONTEXT.md'), '---\nnotLanguage: en\n---\n\n# Glossary\n');
-    const second = runAudit(yard);
-    expect(second.report!.findings.some((f) => f.id === 'shipyard.document-language.missing-tag')).toBe(true);
+      writeFileSync(join(yard, glossaryFile), '---\nnotLanguage: en\n---\n\n# Glossary\n');
+      const second = runAudit(yard);
+      expect(second.report!.findings.some((f) => f.id === 'shipyard.document-language.missing-tag')).toBe(true);
 
+      writeFileSync(join(yard, glossaryFile), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
+      const third = runAudit(yard);
+      expect(third.report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
+    }
+  });
+
+  it('reports an invalid documentLanguage tag on a legacy CONTEXT.md glossary', () => {
     writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
-    const third = runAudit(yard);
-    expect(third.report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
+    const { report } = runAudit(yard);
+    expect(report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
+    expect(report!.findings.some((f) => f.id === 'shipyard.surface.missing.CONTEXT-md')).toBe(false);
   });
 
   it('reports dead paths referenced from CLAUDE.md', () => {

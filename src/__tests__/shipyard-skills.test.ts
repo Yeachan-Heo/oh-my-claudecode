@@ -160,7 +160,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
 
   it('launch carries the round-2 disciplines (comprehension reset, settled-consensus exit, planned handoff)', () => {
     expect(LAUNCH).toContain('**Comprehension reset.**');
-    expect(LAUNCH).toContain('the terms as `CONTEXT.md` defines them');
+    expect(LAUNCH).toContain('the terms as `GLOSSARY.md` defines them');
     expect(LAUNCH).toContain('**Settled-consensus exit.**');
     expect(LAUNCH).toContain('consensus audit');
     expect(LAUNCH).toContain('skipping the interview never skips a signature');
@@ -565,7 +565,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
     // strands lessons in no slot, so the rows are a text contract
     for (const row of [
       '| Lesson kind | Slot |',
-      '| terms and boundaries settled mid-run | `CONTEXT.md` glossary |',
+      '| terms and boundaries settled mid-run | `GLOSSARY.md` glossary |',
       '| checkable behavior rules (carry a why) | `docs/standards/` matching volume (architecture / data / process) |',
       '| most-violated conventions (thin-entry grade) | `CLAUDE.md` body — propose only |',
       '| hard-to-reverse decisions | `docs/adr/` (C4 answers already land here) |',
@@ -765,6 +765,36 @@ describe('shipyard skills — behavior & packaging contract', () => {
       expect(ref).toContain(`\`${name}\``);
     }
   });
+
+  it('drydock migrates a legacy CONTEXT.md glossary before language resolution and rewrites CLAUDE.md references', () => {
+    const migration = DRYDOCK.indexOf('Legacy glossary migration (');
+    const resolution = DRYDOCK.indexOf('Resolution order:');
+    expect(migration).toBeGreaterThan(-1);
+    expect(resolution).toBeGreaterThan(migration);
+    expect(DRYDOCK).toContain('If the yard has a legacy glossary `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
+    expect(DRYDOCK).toContain('any other `CONTEXT.md` is an unrelated agent-context document and is left alone');
+    // the migration contract uses the same first-visible-line signature as the audit
+    expect(DRYDOCK).toContain('its first visible non-blank line (after the frontmatter, ignoring a BOM and HTML comments) is a drydock glossary seed heading');
+    expect(DRYDOCK).toContain('preserving its content and frontmatter byte-for-byte');
+    expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside a legacy glossary `CONTEXT.md`');
+    expect(DRYDOCK).toContain('An unrelated `CONTEXT.md` does not block creating `GLOSSARY.md` and is never reported for removal');
+    expect(DRYDOCK).toContain('**CLAUDE.md rewrite during migration**');
+    expect(DRYDOCK).toContain('also when `GLOSSARY.md` and a legacy glossary `CONTEXT.md` both exist');
+    expect(DRYDOCK).not.toContain('launch writes CONTEXT/ADR');
+    expect(DRYDOCK).toContain('Legacy glossary migration (full runs only; `--check` never renames or rewrites anything');
+  });
+
+  it('launch and navigator never create GLOSSARY.md beside a legacy CONTEXT.md before writing the glossary', () => {
+    const launchGuard = LAUNCH.indexOf('migrated by the drydock legacy glossary migration');
+    expect(launchGuard).toBeGreaterThan(-1);
+    expect(LAUNCH).toContain('Never create a second glossary beside it');
+    expect(LAUNCH).toContain('only after the brief self-check, fog gate, and map check admit the run and before the first Launch-authored write');
+    expect(launchGuard).toBeLessThan(LAUNCH.indexOf('persist the resolved normalized tag back to `GLOSSARY.md`'));
+    const navGuard = NAVIGATOR.indexOf('**Legacy yards (CONTEXT.md only)**');
+    expect(navGuard).toBeGreaterThan(-1);
+    expect(NAVIGATOR).toContain('run drydock before writing sediment to migrate the glossary authority to `GLOSSARY.md`');
+    expect(NAVIGATOR).toContain('Do not create a fresh `GLOSSARY.md` beside the legacy file');
+  });
 });
 
 describe('shipyard audit script — mechanical check classes', () => {
@@ -783,7 +813,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   function makeCleanRepo(): string {
     const root = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
     writeFileSync(join(root, 'CLAUDE.md'), '# Project\n');
-    writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    writeFileSync(join(root, 'GLOSSARY.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
     for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
       mkdirSync(join(root, dir), { recursive: true });
     }
