@@ -52,14 +52,16 @@ function finding(id, title, severity, confidence, actionable, evidence, advice) 
 // first H1 matching a drydock glossary seed heading (seeds that predate the
 // language tag). Any other CONTEXT.md is an unrelated agent-context document
 // — the collision this rename exists to avoid — and is ignored.
+// YAML frontmatter, including an empty `---\n---` block.
+const GLOSSARY_FRONTMATTER = /^---\r?\n(?:([\s\S]*?)\r?\n)?---/;
 const LEGACY_GLOSSARY_HEADINGS = new Set(['Glossary', '术语表', '詞彙表']);
 
 function isLegacyGlossary(root) {
   const path = join(root, 'CONTEXT.md');
   if (!existsSync(path)) return false;
   const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
-  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (frontmatter && /^documentLanguage:/m.test(frontmatter[1])) return true;
+  const frontmatter = content.match(GLOSSARY_FRONTMATTER);
+  if (frontmatter && /^documentLanguage:/m.test(frontmatter[1] ?? '')) return true;
   // Seeds open with the heading, so only the first visible non-blank line
   // after the frontmatter counts (BOM and HTML comments are not rendered);
   // headings inside fences, comments, or later prose never do.
@@ -124,7 +126,7 @@ function checkDocumentLanguage(root) {
   if (!path) return [];
   const glossaryFile = basename(path);
   const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const match = content.match(GLOSSARY_FRONTMATTER);
   if (!match) {
     return [
       finding(
@@ -138,7 +140,7 @@ function checkDocumentLanguage(root) {
       ),
     ];
   }
-  const tag = match[1].match(/^documentLanguage:\s*(\S+)\s*$/m);
+  const tag = (match[1] ?? '').match(/^documentLanguage:\s*(\S+)\s*$/m);
   if (!tag) {
     return [
       finding(

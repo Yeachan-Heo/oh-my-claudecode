@@ -145,6 +145,13 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
+  it('an empty frontmatter block before the seed heading still marks a legacy glossary', () => {
+    writeFileSync(join(yard, 'CONTEXT.md'), '---\n---\n\n# Glossary\n');
+    const ids = runAudit(yard).report!.findings.map((f) => f.id);
+    expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(ids).toContain('shipyard.document-language.missing-tag');
+  });
+
   it('a BOM before the frontmatter does not hide it', () => {
     seedCleanYard(yard, 'GLOSSARY.md');
     writeFileSync(join(yard, 'GLOSSARY.md'), '\uFEFF---\ndocumentLanguage: en\n---\n\n# Glossary\n');
