@@ -486,6 +486,21 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('Team remains authoritative for runtime state');
   });
 
+  it('launch keeps spec and tickets tracker-only (parent spec issue + child ticket sub-issues, no local tree)', () => {
+    // the interview loop's spec and tickets live only in the tracker (harbor-aligned):
+    // spec = parent issue, tickets = native sub-issues; scout notes stay in the session
+    expect(LAUNCH).not.toContain('.omc/specs/');
+    expect(LAUNCH).not.toContain('decisions-pending');
+    expect(LAUNCH).not.toContain('notes/');
+    expect(LAUNCH).toContain('the spec is the parent issue, the tickets are its native sub-issues');
+    expect(LAUNCH).toContain('never creates or writes local spec or ticket files');
+    expect(LAUNCH).toContain('downstream readers take the spec and tickets from the tracker');
+    expect(LAUNCH).toContain('as a **parent tracker issue**');
+    expect(LAUNCH).toContain('**child tracker issues** (native sub-issues of the parent spec issue)');
+    expect(LAUNCH).toContain('notes stay in the conversation, never written to disk');
+    expect(LAUNCH).toContain('as a comment on the parent spec issue');
+  });
+
   it('launch keeps the canonical path canonical and itself opt-in (no seeded default override)', () => {
     // drydock's generated CLAUDE.md must not mandate launch as the default delivery path
     expect(DRYDOCK).not.toContain('交付走 /oh-my-claudecode:launch');

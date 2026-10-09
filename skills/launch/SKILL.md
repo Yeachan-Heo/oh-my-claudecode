@@ -39,7 +39,7 @@ Between checkpoints the pipeline never idles: agents keep working every frontier
 Launch is a **stateless composition over OMC's existing lifecycle** — it owns no runtime state machine:
 
 - Team owns task statuses, transitions, cancellation, and runtime cleanup; Launch never mutates them outside Team's contract.
-- The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `.omc/specs/<feature-slug>/`, `CONTEXT.md`, `docs/adr/`, and `docs/business/` — plus, only after C5 approval, the sediment slots named in the Phase 5 table.
+- The canonical `plan` → `execute` → `review` → `verify` surfaces own their existing lifecycle behavior. Launch-authored artifacts are limited to `CONTEXT.md`, `docs/adr/`, and `docs/business/` — plus, only after C5 approval, the sediment slots named in the Phase 5 table. The spec and its tickets live only in the tracker — **the spec is the parent issue, the tickets are its native sub-issues** — and Launch never creates or writes local spec or ticket files; downstream readers take the spec and tickets from the tracker, never from a local tree.
 - Launch has no automatic resume. After interruption, re-read the artifacts and current Team status, but continue only through a new explicit Launch invocation after the owning Team lifecycle has reached a supported terminal/cleanup boundary. Never infer a human approval or replay an `in_progress` task.
 - Foggy efforts are the navigator's jurisdiction: when the fog gate routes to `/oh-my-claudecode:ask-navigator`, the run never started — no artifacts, no partial state. The navigator's map is the only carrier across sessions; launch resumes only from the mission brief it hands back.
 - Launch adds no approval receipt, revision counter, replay log, cancellation path, rollback mechanism, or cleanup lifecycle of its own.
@@ -84,7 +84,7 @@ Non-convergence here is normal work, not a failure: if the frontier will not emp
 
 ## Phase 2 — Spec synthesis (agent drafts → C2 approves)
 
-Synthesize `.omc/specs/<feature-slug>/spec.md`. When the mission is an accepted intent, follow the four-step contract from the intent skill: read the accepted intent (latest round), combine with the existing codebase, follow the Rules pillar (`CLAUDE.md` + `docs/standards/` + `docs/business/`), and list every doubt and rule conflict — graded into the spec's pending-confirmation section; intent open questions carry into the spec verbatim, keeping their pending status:
+Synthesize the spec as a **parent tracker issue**. When the mission is an accepted intent, follow the four-step contract from the intent skill: read the accepted intent (latest round), combine with the existing codebase, follow the Rules pillar (`CLAUDE.md` + `docs/standards/` + `docs/business/`), and list every doubt and rule conflict — graded into the spec's pending-confirmation section; intent open questions carry into the spec verbatim, keeping their pending status:
 
 ```
 # <Feature> Spec
@@ -106,9 +106,7 @@ Testing decisions retire orphans: when a seam is deepened or replaced, the tests
 
 ## Phase 3 — Ticket decomposition (agent drafts → C3 approves)
 
-Split into vertical slices under `.omc/specs/<feature-slug>/tickets/`:
-
-- `NN-slug.md`, one file per ticket, dependency-ordered, each declaring `blockedBy: [ids]`
+Split into vertical slices as **child tracker issues** (native sub-issues of the parent spec issue), dependency-ordered, each declaring `blockedBy: [ids]`:
 - each ticket crosses every layer, is independently demonstrable, and fits one fresh context
 - **blocking edges are load-bearing declarations**: a ticket states what it waits on — which decisions, artifacts (specs, ADRs, loft results), or other tickets — not just which ticket numbers. The declaration is C3's input: granularity wrong here misroutes every dependency, and a ticket whose waits are undeclared cannot be scheduled honestly on the frontier.
 - wide refactors go expand-contract: add the new form, migrate in batches, remove the old — each batch a ticket
@@ -121,7 +119,7 @@ Integration-wiring rule: every vertical slice includes its own wiring and a smok
 
 The frontier is every ticket whose blockers are all complete.
 
-**Scout pass.** Exploration shared by two or more tickets runs once, before dispatch: an explore subagent resolves the shared questions and writes notes under `.omc/specs/<feature-slug>/notes/`. Tickets reference notes by pointer; workers consume pointers and never re-explore what a note already settles. A question only one ticket needs stays in that ticket.
+**Scout pass.** Exploration shared by two or more tickets runs once, before dispatch: an explore subagent resolves the shared questions and reports the findings into the session — notes stay in the conversation, never written to disk. The findings fold into the relevant tracker tickets at dispatch; workers never re-explore what a ticket already settles. A question only one ticket needs stays in that ticket.
 
 **Integration topology.** Worker output converges on one surface that outlives the workers: an integration branch created at Phase 4 start — on a PR platform, opened as a draft PR referencing the spec and every ticket. A worker branch merges through team's merge coordination (`checkMergeConflicts` → `mergeWorkerBranch`) only after the two-axis review gate passes for that ticket, and C5 verify runs against the integration surface. This stays inside Team's contract: the branch is topology, not a new launch state machine.
 
@@ -136,7 +134,7 @@ The frontier is every ticket whose blockers are all complete.
 - **Standards axis** — the diff against the matching `docs/standards/` volume, plus a judgement-call-only smell baseline (a documented repo standard overrides the baseline; anything tooling already enforces is skipped). This is the standing consumer that keeps the standards surfaces referenced.
 - **Spec axis** — the diff against *this ticket's* acceptance criteria (the spec is the total ledger the tickets were decomposed from; it is consulted only to trace where a criterion came from and to rule on smuggled scope — behavior no ticket asked for): requirements missing or partial, behavior nobody asked for, and requirements that look implemented but look wrong — each finding quoting its source line.
 
-**C4 — decisions that emerge mid-run.** When a parallel Team worker hits a decision passing the ADR test, it stops before decision-dependent mutation, records the question (options, recommendation, reversibility note) in the failed transition's `error` field and `.omc/specs/<feature-slug>/decisions-pending.md`, and exits through Team's supported `in_progress` → `failed` transition. This is a terminal Launch outcome: do not reopen the task, create an in-run successor, force cleanup, or start another Team from this invocation. Surface the blocker with pointers to the failed task and decision artifact.
+**C4 — decisions that emerge mid-run.** When a parallel Team worker hits a decision passing the ADR test, it stops before decision-dependent mutation, records the question (options, recommendation, reversibility note) in the failed transition's `error` field and as a comment on the parent spec issue, and exits through Team's supported `in_progress` → `failed` transition. This is a terminal Launch outcome: do not reopen the task, create an in-run successor, force cleanup, or start another Team from this invocation. Surface the blocker with pointers to the failed task and decision artifact.
 
 On a later explicit Launch invocation, first require the owning Team lifecycle to be terminal and cleaned up through its supported owner. Then batch every pending C4 question for the human, record the answers in the decision log/ADRs, and rebuild the ticket frontier before starting execution. All ticket dependencies are declared before dispatch: ticket `blockedBy` metadata maps to the public Team `blocked_by` field with numeric task IDs when tasks are created through the Team task API. Team's existing task-ID dependency resolution rejects early claims and makes dependents eligible only after their predecessors complete. The team lead never claims a task unless it is explicitly registered as a Team worker. Launch never dynamically mutates a claimed task's dependencies and never promises automatic re-dispatch after C4.
 
