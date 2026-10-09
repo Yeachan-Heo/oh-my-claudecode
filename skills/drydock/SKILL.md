@@ -1,13 +1,13 @@
 ---
 name: drydock
-description: Lay the keel of the shipyard harness in any repo — the 4-pillar shared environment (Context, Rules, Tools, Standards) across 5 surfaces (CLAUDE.md, skills, design-system, mcp/cli, shared context) so that every human and agent inherits the same design language and anyone can ship. Run once per repo; re-run with --check to audit drift.
+description: Lay the keel of the shipyard harness in any repo — the 4-pillar shared environment (Context, Rules, Tools, Standards), seeded as two faces on day one (CLAUDE.md + CONTEXT.md) with every other surface appearing on first use, so that every human and agent inherits the same design language and anyone can ship. Run once per repo; re-run with --check to audit drift.
 argument-hint: "[--check]"
 level: 3
 ---
 
 # Drydock
 
-Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill scaffolds the environment that turns "everyone ships" into "everyone ships on the same design language" — it creates the 5 surfaces, seeds them minimally, wires them to the flows that fill them (launch writes CONTEXT/ADR; the launch C5 sediment pass and reviews sediment standards), and reports what exists, what was created, and what stays empty on purpose.
+Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill seeds the environment that turns "everyone ships" into "everyone ships on the same design language" — it writes exactly two faces (CLAUDE.md and CONTEXT.md), defines the first-use moment when every other surface appears, wires the flows that fill them (launch writes CONTEXT/ADR; the launch C5 sediment pass and reviews sediment standards), and reports what was seeded, what is deferred and why, and what was skipped on purpose.
 
 The four pillars and where they physically live:
 
@@ -38,7 +38,7 @@ Metaphor map: the shipyard is the shared facility; the classification society (`
 Inventory what exists before writing anything:
 
 - `CLAUDE.md` present? `AGENTS.md` present? (rule: if either exists, extend it in place; create the missing one as a one-line pointer to the other; **never create both fresh**)
-- `CONTEXT.md`, `docs/adr/`, `docs/standards/`, `docs/business/`, `design-system/`, `.omc/skills/`, `.mcp.json`, `scripts/`, `.gitattributes` — which exist, which are missing?
+- `CONTEXT.md`, `docs/adr/`, `docs/standards/`, `docs/business/`, `design-system/`, `.omc/skills/`, `.mcp.json`, `scripts/`, `.gitattributes` — which exist (adopted — their integrity is audited), which are absent (not adopted — each gets its first-use trigger below, never a speculative creation)?
 - OMC installed? — only worth checking when running inside an OMC session; outside one, skip this check silently (the harness works with or without OMC)
 
 Report the map first, then act.
@@ -85,25 +85,30 @@ Ask the remaining questions only after language is resolved:
 - does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
 - issue tracker location (GitHub / GitLab / local `.scratch/`) — for V1 harbor intake only GitHub is supported; also record the maintainer's communication authority for intake (issue comments, label changes) — consumed by the navigator's map home and the harbor's intake queue
 
-### 3. Scaffold (create missing surfaces — seeds render in the document language)
+### 3. Scaffold (seed the two faces — seeds render in the document language)
+
+Drydock writes exactly two faces on day one:
 
 ```
 CLAUDE.md                      # thin entry — see seed A
-CONTEXT.md                     # glossary — see seed B
-.gitattributes                 # * text=auto eol=lf  (kills CRLF warning noise on Windows)
-docs/adr/0001-adopt-shipyard-harness.md
-docs/standards/architecture.md # seed C
-docs/standards/data.md
-docs/standards/process.md
-docs/business/README.md        # seed D
-design-system/README.md        # seed E (UI repos only; stub otherwise)
-design-system/tokens/README.md
-.omc/skills/README.md          # seed F
-.mcp.json                      # {"mcpServers": {}}
-scripts/README.md
+CONTEXT.md                     # glossary and language authority — see seed B
 ```
 
-Seed exemplars are reference companions, never a combined payload. Select exactly one companion after resolving `documentLanguage`; do not emit duplicate headings or labels from another companion. Use the longest matching language/script prefix: `en-*` uses English, `zh-Hans-*` uses Simplified Chinese, and `zh-Hant-*` uses Traditional Chinese, while Seed B writes the full resolved tag into `documentLanguage`. For any other valid tag, translate the English canonical companion once while preserving every stable token above.
+**Every other surface is deferred: it appears on first use, never speculatively.** A surface exists to hold something; it is created the first time that something actually happens, seeded with the matching exemplar below. A file created with no first use behind it is session content pretending to be a repository surface:
+
+| Surface | Appears when |
+|---|---|
+| `docs/adr/` | the first load-bearing decision settles — write ADR-0001 at that moment (adopting the harness is the natural first entry) |
+| `docs/standards/` | the first checkable rule is sedimented — a launch C5 sediment pass or a review correction that repeats (seeds C / C2) |
+| `docs/business/` | the first business rule or background article must outlive the conversation (seed D) |
+| `design-system/` | the first UI token or component contract is worth reusing — UI repos only (seed E) |
+| `.omc/skills/` | the first reusable capability passes the skillify gate (seed F) |
+| `scripts/` | the first automation is needed more than once |
+| `.mcp.json` | the first tool integration is actually wired (seed: `{"mcpServers": {}}` — servers get added when a tool integration is actually needed, not speculatively) |
+| `.gitattributes` | the repo first hits line-ending churn (seed: `* text=auto eol=lf` — kills CRLF warning noise on Windows) |
+| yard audit script (`scripts/shipyard-audit.mjs`) | the governance loop is first exercised — a launch yard gate or `--check` drift audit needs the mechanical half; seed it at that moment |
+
+Seed exemplars are reference companions, never a combined payload. Select exactly one companion after resolving `documentLanguage`; do not emit duplicate headings or labels from another companion. Use the longest matching language/script prefix: `en-*` uses English, `zh-Hans-*` uses Simplified Chinese, and `zh-Hant-*` uses Traditional Chinese, while Seed B writes the full resolved tag into `documentLanguage`. For any other valid tag, translate the English canonical companion once while preserving every stable token above. Seeds A and B are written now; seeds C–F wait for their surface's first-use trigger and render in the document language when that moment comes.
 
 Before generating seed prose, call the Skill tool with `agent-doc-discipline` and apply its rules; seed prose is ready only when every rule is checkable and carries a why, every surface is self-describing without chat history, and sources are named rather than assumed. A teammate or agent should be able to act on the seed's content by reading alone.
 
@@ -119,21 +124,13 @@ Seed A — CLAUDE.md, en (thin entry; extend in place if the file exists):
 ## Architecture principles
 - <the 3-5 principles most often violated in this project>
 
-## Standards index (full text in docs/standards/)
-- Architecture: docs/standards/architecture.md
-- Data: docs/standards/data.md
-- Process: docs/standards/process.md
-
-## Decision records (full text in docs/adr/; load-bearing ones listed here)
-- ADR-0001: adopt shipyard harness
-
 ## Shared background
-- Glossary: CONTEXT.md ｜ Business knowledge: docs/business/ ｜ Decision context: docs/adr/
+- Glossary: CONTEXT.md
 
 ## Agent guide
 - Delivery follows the canonical workflow plan → execute → review → verify; `/oh-my-claudecode:launch` is an optional governed delivery pipeline (opt-in, invoke explicitly)
 - On term conflicts CONTEXT.md wins; new terms are recorded the moment they settle
-- Reusable capability goes to .omc/skills/; UI patterns go to design-system/
+- When a deferred surface first appears (standards, decision records, business knowledge, project skills, the design system), it gets an index section here at the moment it is created — never before
 ```
 <!-- shipyard-seed-a:en:end -->
 
@@ -149,21 +146,13 @@ Seed A — zh-Hans companion (结构一致，二选一按文档语言渲染):
 ## 架构原则
 - <the 3-5 principles most often violated in this project>
 
-## 规范索引（全文在 docs/standards/）
-- 架构规范: docs/standards/architecture.md
-- 数据规范: docs/standards/data.md
-- 流程规范: docs/standards/process.md
-
-## 决策记录（全文在 docs/adr/，此处只列 load-bearing 的）
-- ADR-0001: adopt shipyard harness
-
 ## 共享背景
-- 术语: CONTEXT.md ｜ 业务知识: docs/business/ ｜ 决策背景: docs/adr/
+- 术语: CONTEXT.md
 
 ## Agent 指南
 - 交付遵循 canonical 工作流 plan → execute → review → verify；`/oh-my-claudecode:launch` 是可选的受治理交付管道（opt-in，需要时显式调用）
 - 术语冲突以 CONTEXT.md 为准；新术语当场补录
-- 可复用能力沉淀到 .omc/skills/；UI 模式沉淀到 design-system/
+- 延后面首次出现时（规范、决策记录、业务知识、项目技能、设计系统），在创建的当下于此补一段索引——绝不提前
 ```
 <!-- shipyard-seed-a:zh-Hans:end -->
 
@@ -179,21 +168,13 @@ Seed A — zh-Hant companion（結構一致，只渲染此版本）:
 ## 架構原則
 - <the 3-5 principles most often violated in this project>
 
-## 規範索引（全文在 docs/standards/）
-- 架構規範: docs/standards/architecture.md
-- 資料規範: docs/standards/data.md
-- 流程規範: docs/standards/process.md
-
-## 決策記錄（全文在 docs/adr/，此處只列 load-bearing 項目）
-- ADR-0001: adopt shipyard harness
-
 ## 共享背景
-- 詞彙: CONTEXT.md ｜ 業務知識: docs/business/ ｜ 決策背景: docs/adr/
+- 詞彙: CONTEXT.md
 
 ## Agent 指南
 - 交付遵循 canonical 工作流 plan → execute → review → verify；`/oh-my-claudecode:launch` 是可選的治理交付管道（opt-in，必須明確呼叫）
 - 術語衝突以 CONTEXT.md 為準；新術語確定時立即補錄
-- 可重用能力沉澱到 .omc/skills/；UI 模式沉澱到 design-system/
+- 延後面首次出現時（規範、決策記錄、業務知識、專案技能、設計系統），在建立時於此補一段索引——絕不提前
 ```
 <!-- shipyard-seed-a:zh-Hant:end -->
 
@@ -334,8 +315,6 @@ Bar for admission matches skillify: if it can be Googled in 5 minutes it is not 
 write "this project's specific decision discipline", not generic tutorials.
 ````
 
-`.mcp.json` seed: `{"mcpServers": {}}` — servers get added when a tool integration is actually needed, not speculatively.
-
 **Destructive-operation guardrail preset.** On request, drydock seeds a hook preset that blocks destructive git operations — push, force-push, hard reset, clean, and branch deletion — behind explicit approval. It is installed as ordinary, inspectable repo config (a hooks entry the repo can read and audit — the same place the repo's other hooks live, e.g. the agent harness's settings hooks or a git pre-push hook), never a hidden enforcement layer: the rules are listed in the report, and removing the entry is an explicit human act. The preset protects the laid harness, not the agent — no agent session can end the repo's history by accident. Seed shape:
 
 ```json
@@ -358,24 +337,24 @@ The matcher and command are the repo's own choice of hook mechanism — drydock 
 
 ### 4. Wire the governance loop (this is what makes it a shipyard, not a folder)
 
-Tell the user, and rely on these flows to fill the skeleton:
+Tell the user, and rely on these flows to fill the faces (each flow also carries the first-use trigger for the surface it fills):
 
-- **launch** writes CONTEXT.md vocabulary, ADRs, and docs/business/ as decisions settle (paper trail)
-- **launch C5 sediment / code-review** sediment recurring corrections into docs/standards/ and CLAUDE.md principles
-- **anyone** can add a project skill to .omc/skills/ — the barrier is the skillify quality gate, not permission
-- **wiki** (OMC) compounds session knowledge; promote anything referenced twice into docs/business/
+- **launch** writes CONTEXT.md vocabulary as terms settle, creates docs/adr/ when the first load-bearing decision lands, and docs/business/ when the first business article must outlive the conversation (paper trail)
+- **launch C5 sediment / code-review** sediment recurring corrections into docs/standards/ (created with the first sedimented rule) and CLAUDE.md principles
+- **anyone** can add a project skill to .omc/skills/ (created with the first skill) — the barrier is the skillify quality gate, not permission
+- **wiki** (OMC) compounds session knowledge; promote anything referenced twice into docs/business/ (created with the first promoted article)
 
 The rule that keeps 先动手 aligned: **starting needs no permission; landing goes into a shipyard slot.** A change that cannot say which slot it lands in (or explicitly none) is the smell.
 
 ### 5. Report
 
-- created / extended / deliberately skipped (each with why)
+- seeded (the two faces) / extended / deferred (each with its first-use trigger) / deliberately skipped (each with why)
 - resolved document language as `CONTEXT.md` frontmatter `documentLanguage: <tag>`, including whether it came from explicit choice, the persisted marker, or unanimous inference
-- the 3 surfaces that most need human content next (usually CLAUDE.md conventions, architecture.md, CONTEXT.md first terms)
+- the next human content the two seeded faces need (usually CLAUDE.md conventions and CONTEXT.md first terms)
 - reminder: re-run with `--check` any time to see drift between filesystem and harness
 
 ## `--check` mode
 
-Diff actual repo state against the shipyard map; report: missing surfaces, a missing or invalid `CONTEXT.md` frontmatter `documentLanguage` tag, CLAUDE.md sections that point at dead paths, CONTEXT.md terms unused in code, and standards never referenced. For each finding, state the confidence (`high` when mechanically checkable, `low` when heuristic) and whether it is actionable after excluding throwaway/scratch repositories explicitly declared by the user. Launch's yard gate treats high-confidence actionable findings as blocking; low-confidence or explicitly-classified false-positive findings, and findings in a user-declared scratch/throwaway scope, may be overridden only with deliberate per-invocation intent (see `/oh-my-claudecode:launch`). `/oh-my-claudecode:ask-navigator` may also run this audit in report-only mode while charting a foggy effort: findings are recorded verbatim in the map's Notes (never swallowed) and remain live findings for the launch yard gate.
+Diff actual repo state against the shipyard map; report integrity findings on adopted surfaces only (an absent surface is not adopted, not missing), a missing or invalid `CONTEXT.md` frontmatter `documentLanguage` tag, CLAUDE.md sections that point at dead paths, CONTEXT.md terms unused in code, and standards never referenced. For each finding, state the confidence (`high` when mechanically checkable, `low` when heuristic) and whether it is actionable after excluding throwaway/scratch repositories explicitly declared by the user. Launch's yard gate treats high-confidence actionable findings as blocking; low-confidence or explicitly-classified false-positive findings, and findings in a user-declared scratch/throwaway scope, may be overridden only with deliberate per-invocation intent (see `/oh-my-claudecode:launch`). `/oh-my-claudecode:ask-navigator` may also run this audit in report-only mode while charting a foggy effort: findings are recorded verbatim in the map's Notes (never swallowed) and remain live findings for the launch yard gate.
 
-**The structured exit contract.** The mechanical subset of this audit is executable: `node scripts/shipyard-audit.mjs [repoRoot]` checks the high-confidence classes only — missing surfaces, a missing/invalid `documentLanguage` tag, dead paths in `CLAUDE.md`, project-skill triggers present, and intent statuses within the documented vocabulary — and emits JSON on stdout (human summary on stderr) in the same finding vocabulary the lookout CLI uses: `severity` (high/medium/low/info), `confidence` (high/low), `actionable`, plus a stable finding id, evidence, and advice. Exit code 0 = clean, 1 = high-confidence actionable findings present, 2 = invocation error. The heuristic classes (terms unused in code, standards never referenced) stay in this prose layer by design — they are `low`-confidence by construction and the script never invents findings it cannot verify mechanically. Read-only.
+**The structured exit contract.** The mechanical subset of this audit is executable: `node scripts/shipyard-audit.mjs [repoRoot]` checks the high-confidence classes only — a missing/invalid `documentLanguage` tag, dead paths in `CLAUDE.md`, project-skill triggers present, and intent statuses within the documented vocabulary — and emits JSON on stdout (human summary on stderr) in the same finding vocabulary the lookout CLI uses: `severity` (high/medium/low/info), `confidence` (high/low), `actionable`, plus a stable finding id, evidence, and advice. Exit code 0 = clean, 1 = high-confidence actionable findings present, 2 = invocation error. The heuristic classes (terms unused in code, standards never referenced) stay in this prose layer by design — they are `low`-confidence by construction and the script never invents findings it cannot verify mechanically. Read-only.

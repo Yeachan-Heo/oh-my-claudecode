@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +78,25 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(status).toBe(0);
     expect(report!.summary.verdict).toBe('clear');
     expect(report!.findings).toEqual([]);
+  });
+
+  it('exits 0 with zero findings on a yard seeded per the drydock two-face form (end-to-end)', () => {
+    // T68 e2e: the fixture is built from drydock's own seed blocks, so the audit
+    // must bless exactly what the skill text's lazy two-face seeding produces —
+    // CLAUDE.md (Seed A) + CONTEXT.md (Seed B) and nothing else.
+    const DRYDOCK = readFileSync(join(REPO, 'skills', 'drydock', 'SKILL.md'), 'utf-8');
+    const seedBlock = (name: string): string => {
+      const pattern = `<!-- shipyard-seed-${name}:en:start -->\\n\`\`\`markdown\\n([\\s\\S]*?)\\n\`\`\`\\n<!-- shipyard-seed-${name}:en:end -->`;
+      const m = DRYDOCK.match(new RegExp(pattern));
+      expect(m, `drydock seed ${name} (en) not found in SKILL.md`).toBeDefined();
+      return m![1];
+    };
+    writeFileSync(join(yard, 'CLAUDE.md'), seedBlock('a'));
+    writeFileSync(join(yard, 'CONTEXT.md'), seedBlock('b'));
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings).toEqual([]);
+    expect(report!.summary.verdict).toBe('clear');
   });
 
   it('exits 0 with no missing-surface findings on a minimal two-surface yard', () => {

@@ -605,6 +605,48 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(SHIPYARD_DOC).toContain('C5 closeout consumes a structured retro');
   });
 
+  it('drydock seeds exactly two faces on day one and defers every other surface to first use', () => {
+    // T68 lazy seeding: drydock writes CLAUDE.md + CONTEXT.md and nothing else;
+    // every other surface carries a first-use trigger instead of a scaffold
+    // instruction, so a freshly seeded yard contains only what has a real use.
+    const scaffold = DRYDOCK.match(/### 3\.[\s\S]*?```\n([\s\S]*?)\n```/)?.[1];
+    expect(scaffold).toBeDefined();
+    expect(scaffold).toContain('CLAUDE.md');
+    expect(scaffold).toContain('CONTEXT.md');
+    for (const deferred of [
+      'docs/adr/',
+      'docs/standards/',
+      'docs/business/',
+      'design-system/',
+      '.omc/skills/',
+      '.mcp.json',
+      '.gitattributes',
+      'scripts/',
+    ]) {
+      expect(scaffold).not.toContain(deferred);
+    }
+    // every deferred surface names the moment it first appears
+    expect(DRYDOCK).toContain('| Surface | Appears when |');
+    for (const row of [
+      '| `docs/adr/` |',
+      '| `docs/standards/` |',
+      '| `docs/business/` |',
+      '| `design-system/` |',
+      '| `.omc/skills/` |',
+      '| `scripts/` |',
+      '| `.mcp.json` |',
+      '| `.gitattributes` |',
+    ]) {
+      expect(DRYDOCK).toContain(row);
+    }
+    expect(DRYDOCK).toContain('never speculatively');
+    // the thin entry must not name deferred surface paths: the audit's
+    // dead-path check reads CLAUDE.md, and a pointer at an absent surface is
+    // a high-confidence finding on a freshly seeded yard
+    const seedA = DRYDOCK.match(/<!-- shipyard-seed-a:en:start -->[\s\S]*?<!-- shipyard-seed-a:en:end -->/)?.[1] ?? '';
+    expect(seedA).not.toMatch(/(?:docs|design-system|scripts|\.omc)\/[\w./-]+/);
+  });
+
   it('drydock seed requires non-empty triggers so generated project skills are loadable', () => {
     const example = DRYDOCK.match(/```markdown\n(---\nid: project-release-check\nname: project-release-check[\s\S]*?)\n```/)?.[1];
     expect(example).toBeDefined();
@@ -781,17 +823,16 @@ describe('shipyard audit script — mechanical check classes', () => {
   }
 
   function makeCleanRepo(): string {
+    // Two-face lazy-seeding form (T68): the audit must treat a yard holding
+    // only its two seeded faces as fully clean — every further surface is
+    // adopted by the individual test that creates it.
     const root = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
-    writeFileSync(join(root, 'CLAUDE.md'), '# Project\n');
+    writeFileSync(join(root, 'CLAUDE.md'), '# Project\n\n## Project conventions\n\n- conventions\n');
     writeFileSync(join(root, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
-    for (const dir of ['docs/adr', 'docs/standards', 'docs/business', 'design-system', '.omc/skills', 'scripts']) {
-      mkdirSync(join(root, dir), { recursive: true });
-    }
-    writeFileSync(join(root, '.mcp.json'), '{"mcpServers": {}}');
     return root;
   }
 
-  it('a fully seeded repo audits clean', () => {
+  it('a two-face lazy-seeded repo audits clean', () => {
     const root = makeCleanRepo();
     try {
       const { status, stdout } = runAudit(root);
@@ -805,6 +846,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   it('a project skill without non-empty triggers is a high-confidence actionable finding', () => {
     const root = makeCleanRepo();
     try {
+      mkdirSync(join(root, '.omc', 'skills'), { recursive: true }); // adopting the skills face creates it
       writeFileSync(
         join(root, '.omc/skills/no-triggers.md'),
         '---\nid: no-triggers\nname: no-triggers\ndescription: A skill that will never load\n---\n\nbody\n',
@@ -821,6 +863,7 @@ describe('shipyard audit script — mechanical check classes', () => {
   it('project skills with block or inline triggers are accepted', () => {
     const root = makeCleanRepo();
     try {
+      mkdirSync(join(root, '.omc', 'skills'), { recursive: true }); // adopting the skills face creates it
       writeFileSync(
         join(root, '.omc/skills/block-triggers.md'),
         '---\nid: block-triggers\nname: block-triggers\ndescription: Block-list triggers\ntriggers:\n  - "project release check"\n---\n\nbody\n',
