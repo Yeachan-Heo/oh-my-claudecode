@@ -145,6 +145,16 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
+  it('a BOM or leading HTML comment before the seed heading still marks a legacy glossary', () => {
+    for (const content of ['\uFEFF# Glossary\n\n## term\n', '<!-- provenance: drydock -->\n# Glossary\n\n## term\n']) {
+      rmSync(yard, { recursive: true, force: true });
+      yard = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+      writeFileSync(join(yard, 'CONTEXT.md'), content);
+      const ids = runAudit(yard).report!.findings.map((f) => f.id);
+      expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+    }
+  });
+
   it('only a seed heading on the first non-blank line marks a legacy glossary', () => {
     seedCleanYard(yard, 'GLOSSARY.md');
     for (const content of [

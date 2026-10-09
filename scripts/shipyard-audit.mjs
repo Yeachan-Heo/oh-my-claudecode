@@ -60,9 +60,12 @@ function isLegacyGlossary(root) {
   const content = readFileSync(path, 'utf-8');
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (frontmatter && /^documentLanguage:/m.test(frontmatter[1])) return true;
-  // Seeds open with the heading, so only the first non-blank line after the
-  // frontmatter counts; headings inside fences, comments, or prose never do.
-  const body = frontmatter ? content.slice(frontmatter[0].length) : content;
+  // Seeds open with the heading, so only the first visible non-blank line
+  // after the frontmatter counts (BOM and HTML comments are not rendered);
+  // headings inside fences, comments, or later prose never do.
+  const body = (frontmatter ? content.slice(frontmatter[0].length) : content)
+    .replace(/^\uFEFF/, '')
+    .replace(/<!--[\s\S]*?-->/g, '');
   const firstLine = body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
   const heading = firstLine.match(/^#\s+(.+?)\s*$/);
   return Boolean(heading && LEGACY_GLOSSARY_HEADINGS.has(heading[1]));
