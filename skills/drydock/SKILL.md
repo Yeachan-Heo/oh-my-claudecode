@@ -82,8 +82,8 @@ Only prose and human-facing labels/localizable values follow the selected langua
 Ask the remaining questions only after language is resolved:
 
 - package/tech stack (for standards and design-system seeds)
-- does this repo have a UI? (no UI → design-system/ is created as a stub with a note, or skipped on request)
-- issue tracker location (GitHub / GitLab / local `.scratch/`) — for V1 harbor intake only GitHub is supported; also record the maintainer's communication authority for intake (issue comments, label changes) — consumed by the navigator's map home and the harbor's intake queue
+- does this repo have a UI? (informational only — `design-system/` follows the same deferred-surface rule as everything else: it is created when the first UI token or component contract is worth reusing, never as a stub)
+- issue tracker location (GitHub — V1 supports GitHub only, no local fallback) — also record the maintainer's communication authority for intake (issue comments, label changes) — consumed by the navigator's map home and the harbor's intake queue
 
 ### 3. Scaffold (seed the two faces — seeds render in the document language)
 

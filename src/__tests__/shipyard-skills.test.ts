@@ -575,6 +575,24 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(SHIPYARD_DOC).toContain('narrowly, explicitly overridden low-confidence / false-positive / scratch-scope finding — no general bypass');
   });
 
+  it('yard gate and paper-trail slots speak existence-as-declaration (absent surface is un-adopted, never a finding)', () => {
+    // spec #64: the audit checks only the surfaces the yard has adopted; an
+    // absent surface is un-adopted, not a finding — no "missing surfaces"
+    // wording anywhere in the gate, and the paper-trail slots follow lazy seeding.
+    expect(LAUNCH).not.toContain('missing surfaces');
+    expect(LAUNCH).not.toContain('缺失表面');
+    expect(NAVIGATOR).not.toContain('un-laid surfaces as findings');
+    // the existence-as-declaration gate wording is pinned
+    expect(LAUNCH).toContain('an absent surface is not adopted, never a finding');
+    expect(LAUNCH).toContain('never an absent surface, which is un-adopted, not missing');
+    // the paper-trail slot wording is pinned: CONTEXT.md day one, the rest on first use
+    expect(LAUNCH).toContain('`CONTEXT.md` exists from the day the yard was laid');
+    expect(LAUNCH).toContain('`docs/adr/` and `docs/business/` appear on first use');
+    expect(LAUNCH).toContain('never creates a slot speculatively');
+    // the navigator defers without turning un-adopted surfaces into findings
+    expect(NAVIGATOR).toContain('an un-adopted surface never becomes a finding');
+  });
+
   it('launch closeout re-runs the yard audit as yard drift instead of the retired gap list', () => {
     expect(LAUNCH).toContain('yard drift');
     expect(LAUNCH).toContain('re-run the drydock `--check` audit');

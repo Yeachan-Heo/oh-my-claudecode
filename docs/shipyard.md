@@ -40,8 +40,8 @@ A repo that humans and agents both build on carries four pillars across five con
 | Shared context | `CONTEXT.md` + `docs/business/` + `docs/adr/` + OMC wiki | Glossary, business knowledge, and decision records; launch writes the file-backed paper trail and wiki compounds session knowledge |
 | Rules | `CLAUDE.md` + `docs/standards/` | Thin conventions/principles/index plus architecture, data, and process standards; drydock seeds them and the launch C5 sediment pass/reviews sediment recurring corrections |
 | Project skills | `.omc/skills/` | Reusable project capabilities and practices; contributors add them through the skillify quality gate |
-| Design system | `design-system/` | Tokens, components, and patterns; drydock seeds it for UI repos and may create a stub or skip it for non-UI repos |
-| MCP / CLI tools | `.mcp.json` + `scripts/` | MCP servers and repository automation; drydock seeds empty tool surfaces and integrations are added only when needed |
+| Design system | `design-system/` | Tokens, components, and patterns; appears on first use — when the first UI token or component contract is worth reusing |
+| MCP / CLI tools | `.mcp.json` + `scripts/` | MCP servers and repository automation; drydock seeds only the two faces (CLAUDE.md + CONTEXT.md) day one, so these surfaces appear on first use and integrations are added only when needed |
 
 ## The metaphor family (for teaching the system)
 

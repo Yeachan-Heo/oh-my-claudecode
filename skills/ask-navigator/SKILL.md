@@ -123,7 +123,7 @@ Resolutions land in the shipyard's paper trail the moment they settle — the sa
 - a decision passing the ADR test (hard to reverse, surprising without context, a real tradeoff) → `docs/adr/NNNN-<slug>.md`
 - a business rule or background fact → `docs/business/` (one article per business question)
 
-When the yard is not laid (the captain declined drydock at charting time), **defer, don't skip**: record each pending landing as one line in the map's Notes under a `Deferred sediment` heading. The later `/oh-my-claudecode:launch` run's yard gate treats the un-laid surfaces as findings, and the deferred lines tell it exactly what to land first.
+When the yard is not laid (the captain declined drydock at charting time), **defer, don't skip**: record each pending landing as one line in the map's Notes under a `Deferred sediment` heading. The later `/oh-my-claudecode:launch` run's yard gate audits only the surfaces the yard has adopted — an un-adopted surface never becomes a finding — and the deferred lines tell the launch run exactly which first-use trigger to fire and what to land there.
 
 ## Exit — hand off, don't build
 
@@ -131,7 +131,7 @@ The map is done when no open tickets remain and **Not yet specified** is empty. 
 
 1. Collapse **Decisions so far** into a **mission brief** — objective, scope boundary, non-goals — and write it into the map issue body under **Mission brief**. The handoff passes one pointer, the map issue itself; no brief file is created.
 2. Recommend: "The way is clear. Run `/oh-my-claudecode:launch` with the map issue as the mission brief — the brief pointer is in the map issue body." The map stays as the effort's logbook; launch's yard gate owns every check from there.
-3. Default entry is launch Phase 1 (the paper trail is already half-full; its frontier clears fast). Only when the decisions already read like a spec may a spec be drafted and launch entered at Phase 2 with the spec path.
+3. Default entry is launch Phase 1 (the paper trail is already half-full; its frontier clears fast). Only when the decisions already read like a spec may a spec be drafted and launch entered at Phase 2, carrying the spec tracker issue reference (the parent spec issue number or link).
 
 ## Scope and non-goals
 
