@@ -6,7 +6,14 @@
 // share one contract. Covers only the high-confidence finding classes; the
 // heuristic classes (glossary terms unused in code, standards never
 // referenced) stay prose-layer in the skill text and are never emitted here.
-// Current classes: missing surfaces, a missing/invalid `documentLanguage`
+//
+// Surfaces follow an existence-as-declaration semantic: a surface's checks run
+// only when that surface already exists in the yard (adoption = the surface is
+// present), and an absent surface is "not adopted", not "missing". There is no
+// declaration syntax, so the former shipyard.surface.missing.* finding class
+// no longer exists.
+//
+// Current classes: a missing/invalid `documentLanguage`
 // tag, dead paths in `CLAUDE.md`, project-skill triggers present, and intent
 // statuses within the documented vocabulary.
 //
@@ -26,40 +33,8 @@ const toPosix = (value) => value.replace(/\\/g, '/');
 const SEVERITY = { high: 'high', medium: 'medium', low: 'low', info: 'info' };
 const TAG_PATTERN = /^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-(?:[A-Z]{2}|[0-9]{3}))?$/;
 
-const SURFACES = [
-  'CLAUDE.md',
-  'CONTEXT.md',
-  'docs/adr/',
-  'docs/standards/',
-  'docs/business/',
-  'design-system/',
-  '.omc/skills/',
-  '.mcp.json',
-  'scripts/',
-];
-
 function finding(id, title, severity, confidence, actionable, evidence, advice) {
   return { id, title, severity, confidence, actionable, evidence, advice };
-}
-
-function checkSurfaces(root) {
-  const findings = [];
-  for (const surface of SURFACES) {
-    if (existsSync(join(root, surface))) continue;
-    const isDir = surface.endsWith('/');
-    findings.push(
-      finding(
-        `shipyard.surface.missing.${surface.replace(/[^a-z0-9]+/gi, '-')}`,
-        `Missing surface: ${surface}`,
-        SEVERITY.high,
-        'high',
-        true,
-        [surface],
-        isDir ? `Create the ${surface} directory (see the drydock skill for the seed).` : `Create ${surface} (see the drydock skill for the seed).`,
-      ),
-    );
-  }
-  return findings;
 }
 
 function checkDocumentLanguage(root) {
@@ -273,7 +248,6 @@ function checkIntentStatuses(root) {
 
 export async function auditYard(root) {
   return [
-    ...checkSurfaces(root),
     ...checkDocumentLanguage(root),
     ...checkClaudeMdDeadPaths(root),
     ...(await checkProjectSkillTriggers(root)),

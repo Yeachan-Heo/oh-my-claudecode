@@ -73,16 +73,64 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(report!.summary.verdict).toBe('clear');
   });
 
-  it('exits 1 and reports missing surfaces on an empty directory', () => {
+  it('exits 0 with no findings on an empty directory (absence is not a claim)', () => {
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.summary.verdict).toBe('clear');
+    expect(report!.findings).toEqual([]);
+  });
+
+  it('exits 0 with no missing-surface findings on a minimal two-surface yard', () => {
+    writeFileSync(
+      join(yard, 'CLAUDE.md'),
+      '# Project\n\n## Project conventions\n\n- conventions\n',
+    );
+    writeFileSync(join(yard, 'GLOSSARY.md'), '# Glossary\n');
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.summary.verdict).toBe('clear');
+    expect(report!.findings.filter((f) => f.id.startsWith('shipyard.surface.missing'))).toEqual([]);
+  });
+
+  it('checks all surfaces of a full nine-surface yard without missing-surface findings', () => {
+    seedCleanYard(yard);
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.summary.verdict).toBe('clear');
+    expect(report!.findings.filter((f) => f.id.startsWith('shipyard.surface.missing'))).toEqual([]);
+  });
+
+  it('on a partially adopted yard, checks only the surfaces that exist', () => {
+    // Adopted: CLAUDE.md + CONTEXT.md + scripts/. Everything else absent —
+    // under adoption-is-declaration, absence means "not adopted", not "missing".
+    writeFileSync(
+      join(yard, 'CLAUDE.md'),
+      '# Project\n\n## Project conventions\n\n- conventions\n',
+    );
+    writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    mkdirSync(join(yard, 'scripts'), { recursive: true });
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings.filter((f) => f.id.startsWith('shipyard.surface.missing'))).toEqual([]);
+  });
+
+  it('still checks the integrity of an adopted surface', () => {
+    // Partial yard, but the adopted CONTEXT.md is malformed: the audit must
+    // still flag it — lazy seeding removes missing-surface noise, not quality
+    // gates on surfaces a yard chose to adopt.
+    writeFileSync(
+      join(yard, 'CLAUDE.md'),
+      '# Project\n\n## Project conventions\n\n- conventions\n',
+    );
+    writeFileSync(join(yard, 'CONTEXT.md'), '# Glossary (no frontmatter)\n');
     const { status, report } = runAudit(yard);
     expect(status).toBe(1);
-    expect(report!.summary.verdict).toBe('review-recommended');
-    const ids = report!.findings.map((f) => f.id);
-    expect(ids).toContain('shipyard.surface.missing.CLAUDE-md');
-    expect(ids).toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(report!.findings.some((f) => f.id === 'shipyard.document-language.missing-frontmatter')).toBe(true);
+    expect(report!.findings.filter((f) => f.id.startsWith('shipyard.surface.missing'))).toEqual([]);
   });
 
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
+    writeFileSync(join(yard, 'CONTEXT.md'), '# Glossary (no frontmatter)\n');
     const { report } = runAudit(yard);
     expect(report!.findings.length).toBeGreaterThan(0);
     for (const f of report!.findings) {
