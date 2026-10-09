@@ -531,6 +531,16 @@ describe('model-contract', () => {
       expect(env.OMC_WORKER_AGENT_TYPE).toBe('codex');
     });
 
+    it.each(['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity'] as const)(
+      'propagates OMC_STATE_DIR to %s workers',
+      (agentType) => {
+        const env = getWorkerEnv('my-team', 'worker-1', agentType, {
+          OMC_STATE_DIR: '/private/tmp/omc-central-state',
+        });
+        expect(env.OMC_STATE_DIR).toBe('/private/tmp/omc-central-state');
+      },
+    );
+
     it('propagates allowlisted Claude startup env vars into worker startup env', () => {
       const env = getWorkerEnv('my-team', 'worker-1', 'claude', {
         CLAUDE_CONFIG_DIR: '/home/tester/.claude-third-party',

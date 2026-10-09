@@ -51,6 +51,8 @@ const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 const execFileAsync = promisify(execFile);
 
 const TMUX_SESSION_PREFIX = 'omc-team';
+const TMUX_LIVENESS_SERVER_RECHECK_ATTEMPTS = 3;
+const TMUX_LIVENESS_SERVER_RECHECK_DELAY_MS = 20;
 
 export type TmuxServerIdentityObservation = 'matching' | 'dead' | 'unknown';
 
@@ -3811,27 +3813,81 @@ export async function getWorkerLiveness(paneId: string): Promise<WorkerPaneLiven
   }
 }
 
+/**
+ * Give a tmux server that is already shutting down a bounded opportunity to
+ * publish its process death. The initial identity probe is the only tmux
+ * query; when it is `unknown`, the short retry polls only process identity.
+ * A matching process observation never promotes the result to `matching`, so
+ * a foreign/replaced server remains fail-closed while an original process
+ * death can still be observed after a detached server is killed.
+ */
+async function observeTmuxServerIdentityWithBoundedRecheck(
+  identity: TmuxServerIdentity,
+  dependencies: TmuxServerIdentityDependencies = {},
+): Promise<TmuxServerIdentityObservation> {
+  if (!isValidTmuxServerIdentity(identity)) return 'unknown';
+  const deps: Required<TmuxServerIdentityDependencies> = {
+    ...defaultTmuxServerIdentityDependencies,
+    ...dependencies,
+  };
+  // Keep the original dependency shape for the initial probe. In particular,
+  // the Windows default path uses its single-process probe when callers did
+  // not inject one; only the bounded follow-up uses the merged dependency.
+  const initialState = await observeTmuxServerIdentity(identity, dependencies);
+  if (initialState !== 'unknown') return initialState;
+
+  for (let attempt = 1; attempt < TMUX_LIVENESS_SERVER_RECHECK_ATTEMPTS; attempt += 1) {
+    await sleep(TMUX_LIVENESS_SERVER_RECHECK_DELAY_MS);
+    let processState: ProcessIdentityObservation;
+    try {
+      processState = deps.processObservation({
+        server_pid: identity.server_pid,
+        process_started_at: identity.process_started_at,
+      });
+    } catch {
+      return 'unknown';
+    }
+    if (processState === 'dead') return 'dead';
+  }
+  return 'unknown';
+}
+
 async function getWorkerLivenessAtTmuxIdentity(
   paneId: string,
   identity: TmuxServerIdentity,
+  dependencies: TmuxServerIdentityDependencies = {},
 ): Promise<WorkerPaneLiveness> {
   if (!isValidTmuxServerIdentity(identity) || !TMUX_MAILBOX_PANE_ID.test(paneId)) return 'unknown';
+  let result: { stdout: string; stderr: string } | undefined;
+  let queryError: unknown;
   try {
-    const result = await tmuxCmdAsync(
+    result = await tmuxCmdAsync(
       tmuxArgsForIdentity(identity, ['display-message', '-t', paneId, '-p', '#{pane_dead}']),
       { timeout: 2_000, stripTmux: true },
     );
-    if (result.stderr.trim()) return 'unknown';
-    const afterState = await observeTmuxServerIdentity(identity);
-    if (afterState === 'dead') return 'dead';
-    if (afterState !== 'matching') return 'unknown';
-    const state = result.stdout.replace(/\r?\n$/, '');
-    if (state === '0') return 'alive';
-    if (state === '1') return 'dead';
-    return getTmuxPaneLivenessFromInventory(paneId, identity);
   } catch (error) {
-    return isTmuxPaneNotFoundError(error) ? 'dead' : 'unknown';
+    queryError = error;
   }
+
+  const afterState = await observeTmuxServerIdentityWithBoundedRecheck(identity, dependencies);
+  if (afterState === 'dead') return 'dead';
+  if (afterState !== 'matching') return 'unknown';
+
+  // A missing-pane response is meaningful only after the original server has
+  // been revalidated. This covers tmux versions which return the diagnostic in
+  // stderr instead of rejecting the command, while keeping foreign/replaced
+  // servers fail-closed.
+  if (queryError !== undefined) {
+    return isTmuxPaneNotFoundError(queryError) ? 'dead' : 'unknown';
+  }
+  if (!result) return 'unknown';
+  if (result.stderr.trim()) {
+    return isTmuxPaneNotFoundError(result) ? 'dead' : 'unknown';
+  }
+  const state = result.stdout.replace(/\r?\n$/, '');
+  if (state === '0') return 'alive';
+  if (state === '1') return 'dead';
+  return getTmuxPaneLivenessFromInventory(paneId, identity, dependencies);
 }
 
 /**
@@ -3840,13 +3896,21 @@ async function getWorkerLivenessAtTmuxIdentity(
  */
 export async function getOwnedWorkerLiveness(
   ownership: WorkerPaneOwnership,
+  dependencies: TmuxServerIdentityDependencies = {},
 ): Promise<WorkerPaneLiveness> {
   if (ownership.provider === 'cmux') return getWorkerLiveness(ownership.paneId);
   if (!isValidTmuxServerIdentity(ownership.tmuxServerIdentity)) return 'unknown';
-  const serverState = await observeTmuxServerIdentity(ownership.tmuxServerIdentity);
+  const serverState = await observeTmuxServerIdentityWithBoundedRecheck(
+    ownership.tmuxServerIdentity,
+    dependencies,
+  );
   if (serverState === 'dead') return 'dead';
   if (serverState !== 'matching') return 'unknown';
-  return getWorkerLivenessAtTmuxIdentity(ownership.paneId, ownership.tmuxServerIdentity);
+  return getWorkerLivenessAtTmuxIdentity(
+    ownership.paneId,
+    ownership.tmuxServerIdentity,
+    dependencies,
+  );
 }
 
 export async function isWorkerAlive(paneId: string): Promise<boolean> {
@@ -3937,40 +4001,49 @@ function parseTmuxPaneRecords(output: string): TmuxPaneRecord[] | null {
 async function getTmuxPaneLivenessFromInventory(
   paneId: string,
   tmuxServerIdentity?: TmuxServerIdentity,
+  dependencies: TmuxServerIdentityDependencies = {},
 ): Promise<WorkerPaneLiveness> {
   if (tmuxServerIdentity) {
-    const beforeState = await observeTmuxServerIdentity(tmuxServerIdentity);
+    const beforeState = await observeTmuxServerIdentityWithBoundedRecheck(
+      tmuxServerIdentity,
+      dependencies,
+    );
     if (beforeState === 'dead') return 'dead';
     if (beforeState !== 'matching') return 'unknown';
   }
+  let result: { stdout: string; stderr: string } | undefined;
+  let queryError: unknown;
   try {
     const args = [
       'list-panes', '-a', '-F', '#{pane_id} #{pane_dead}',
     ];
-    const result = await tmuxCmdAsync(
+    result = await tmuxCmdAsync(
       tmuxServerIdentity ? tmuxArgsForIdentity(tmuxServerIdentity, args) : args,
       tmuxServerIdentity ? { timeout: 2_000, stripTmux: true } : undefined,
     );
-    if (result.stderr.trim()) return 'unknown';
-    if (tmuxServerIdentity) {
-      const afterState = await observeTmuxServerIdentity(tmuxServerIdentity);
-      if (afterState === 'dead') return 'dead';
-      if (afterState !== 'matching') return 'unknown';
-    }
-    const panes = parseTmuxPaneRecords(result.stdout);
-    if (!panes) return 'unknown';
-    const matches = panes.filter(pane => pane.id === paneId);
-    if (matches.length > 1) return 'unknown';
-    const pane = matches[0];
-    if (!pane) {
-      // A valid, complete non-empty inventory proves the exact native pane is
-      // absent. Never infer this from an empty or malformed response.
-      return 'dead';
-    }
-    return pane.dead === '0' ? 'alive' : 'dead';
-  } catch {
-    return 'unknown';
+  } catch (error) {
+    queryError = error;
   }
+  if (tmuxServerIdentity) {
+    const afterState = await observeTmuxServerIdentityWithBoundedRecheck(
+      tmuxServerIdentity,
+      dependencies,
+    );
+    if (afterState === 'dead') return 'dead';
+    if (afterState !== 'matching') return 'unknown';
+  }
+  if (queryError !== undefined || !result || result.stderr.trim()) return 'unknown';
+  const panes = parseTmuxPaneRecords(result.stdout);
+  if (!panes) return 'unknown';
+  const matches = panes.filter(pane => pane.id === paneId);
+  if (matches.length > 1) return 'unknown';
+  const pane = matches[0];
+  if (!pane) {
+    // A valid, complete non-empty inventory proves the exact native pane is
+    // absent. Never infer this from an empty or malformed response.
+    return 'dead';
+  }
+  return pane.dead === '0' ? 'alive' : 'dead';
 }
 
 function parseTmuxWindowRecords(output: string): TmuxWindowRecord[] | null {

@@ -1,7 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { getOmcRoot } from '../lib/worktree-paths.js';
-import { teamStateRoot } from './state-paths.js';
+import {
+  canonicalTeamCwd,
+  canonicalTeamStatePath,
+  canonicalTeamStateRoot,
+  teamStateRoot,
+} from './state-paths.js';
 import {
   TEAM_NAME_SAFE_PATTERN,
   WORKER_NAME_SAFE_PATTERN,
@@ -359,13 +364,23 @@ async function executeTeamCleanupViaRuntime(
   if (shutdown.outcome !== 'cleaned') throw new Error(`team_shutdown_${shutdown.outcome}:${shutdown.reason}`);
 }
 
-function readTeamStateRootFromFile(path: string): string | null {
+interface TeamStateLocationMetadata {
+  leaderCwd: string | null;
+  teamStateRoot: string | null;
+}
+
+function readTeamStateLocationMetadata(path: string): TeamStateLocationMetadata | null {
   if (!existsSync(path)) return null;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { team_state_root?: unknown };
-    return typeof parsed.team_state_root === 'string' && parsed.team_state_root.trim() !== ''
-      ? parsed.team_state_root.trim()
-      : null;
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as { leader_cwd?: unknown; team_state_root?: unknown };
+    return {
+      leaderCwd: typeof parsed.leader_cwd === 'string' && parsed.leader_cwd.trim() !== ''
+        ? parsed.leader_cwd.trim()
+        : null,
+      teamStateRoot: typeof parsed.team_state_root === 'string' && parsed.team_state_root.trim() !== ''
+        ? parsed.team_state_root.trim()
+        : null,
+    };
   } catch {
     return null;
   }
@@ -396,25 +411,48 @@ function stateRootToWorkingDirectory(stateRoot: string): string {
   return dirname(dirname(absolute));
 }
 
+function teamStateRootsMatch(
+  teamName: string,
+  leaderCwd: string,
+  advertisedRoot: string,
+  discoveredRoot: string,
+  discoveredCwd: string,
+): boolean {
+  const expectedCanonicalRoot = resolvePath(canonicalTeamStateRoot(leaderCwd, teamName));
+  const matchesExpectedRoot = (root: string, cwd: string): boolean => {
+    return resolvePath(canonicalTeamStatePath(cwd, root)) === expectedCanonicalRoot;
+  };
+
+  return matchesExpectedRoot(advertisedRoot, leaderCwd)
+    && matchesExpectedRoot(discoveredRoot, discoveredCwd);
+}
+
 function resolveTeamWorkingDirectoryFromMetadata(
   teamName: string,
   candidateCwd: string,
-  workerContext: { teamName: string; workerName: string } | null,
 ): string | null {
   const teamRoot = join(getOmcRoot(candidateCwd), 'state', 'team', teamName);
   if (!existsSync(teamRoot)) return null;
 
-  if (workerContext?.teamName === teamName) {
-    const workerRoot = readTeamStateRootFromFile(join(teamRoot, 'workers', workerContext.workerName, 'identity.json'));
-    if (workerRoot) return stateRootToWorkingDirectory(workerRoot);
-  }
+  const resolveValidatedLeaderCwd = (path: string): string | null => {
+    const metadata = readTeamStateLocationMetadata(path);
+    if (!metadata?.leaderCwd || !metadata.teamStateRoot) return null;
+    try {
+      if (!teamStateRootsMatch(teamName, metadata.leaderCwd, metadata.teamStateRoot, teamRoot, candidateCwd)) return null;
+      return canonicalTeamCwd(metadata.leaderCwd);
+    } catch {
+      return null;
+    }
+  };
 
-  const fromConfig = readTeamStateRootFromFile(join(teamRoot, 'config.json'));
-  if (fromConfig) return stateRootToWorkingDirectory(fromConfig);
-
-  for (const manifestName of ['manifest.json', 'manifest.v2.json']) {
-    const fromManifest = readTeamStateRootFromFile(join(teamRoot, manifestName));
-    if (fromManifest) return stateRootToWorkingDirectory(fromManifest);
+  const metadataPaths = [
+    join(teamRoot, 'config.json'),
+    join(teamRoot, 'manifest.json'),
+    join(teamRoot, 'manifest.v2.json'),
+  ];
+  for (const metadataPath of metadataPaths) {
+    const leaderCwd = resolveValidatedLeaderCwd(metadataPath);
+    if (leaderCwd) return leaderCwd;
   }
 
   return null;
@@ -432,9 +470,15 @@ function resolveTeamWorkingDirectory(teamName: string, preferredCwd: string): st
     if (
       leaderCwd
       && teamStateExists(normalizedTeamName, leaderCwd)
-      && resolvePath(teamStateRoot(leaderCwd, normalizedTeamName)) === resolvePath(envTeamStateRoot)
+      && teamStateRootsMatch(
+        normalizedTeamName,
+        leaderCwd,
+        envTeamStateRoot,
+        join(getOmcRoot(leaderCwd), 'state', 'team', normalizedTeamName),
+        leaderCwd,
+      )
     ) {
-      return resolvePath(leaderCwd);
+      return canonicalTeamCwd(leaderCwd);
     }
 
     const envWorkingDirectory = stateRootToWorkingDirectory(envTeamStateRoot.trim());
@@ -449,12 +493,11 @@ function resolveTeamWorkingDirectory(teamName: string, preferredCwd: string): st
     if (!seeds.includes(seed)) seeds.push(seed);
   }
 
-  const workerContext = parseTeamWorkerContextFromEnv();
   for (const seed of seeds) {
     let cursor = seed;
     while (cursor) {
       if (teamStateExists(normalizedTeamName, cursor)) {
-        return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor, workerContext) ?? cursor;
+        return resolveTeamWorkingDirectoryFromMetadata(normalizedTeamName, cursor) ?? cursor;
       }
       const parent = dirname(cursor);
       if (!parent || parent === cursor) break;

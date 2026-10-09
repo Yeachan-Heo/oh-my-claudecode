@@ -473,6 +473,7 @@ export function buildWorkerCommand(agentType: CliAgentType, config: WorkerLaunch
 }
 
 const WORKER_MODEL_ENV_ALLOWLIST = [
+  'OMC_STATE_DIR',
   'ANTHROPIC_MODEL',
   'CLAUDE_MODEL',
   'ANTHROPIC_BASE_URL',
