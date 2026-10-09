@@ -37,7 +37,7 @@ A repo that humans and agents both build on carries four pillars across five con
 
 | Conceptual surface | Concrete paths | Carries / filled by |
 | --- | --- | --- |
-| Shared context | `CONTEXT.md` + `docs/business/` + `docs/adr/` + OMC wiki | Glossary, business knowledge, and decision records; launch writes the file-backed paper trail and wiki compounds session knowledge |
+| Shared context | `GLOSSARY.md` + `docs/business/` + `docs/adr/` + OMC wiki | Glossary, business knowledge, and decision records; launch writes the file-backed paper trail and wiki compounds session knowledge |
 | Rules | `CLAUDE.md` + `docs/standards/` | Thin conventions/principles/index plus architecture, data, and process standards; drydock seeds them and the launch C5 sediment pass/reviews sediment recurring corrections |
 | Project skills | `.omc/skills/` | Reusable project capabilities and practices; contributors add them through the skillify quality gate |
 | Design system | `design-system/` | Tokens, components, and patterns; drydock seeds it for UI repos and may create a stub or skip it for non-UI repos |
@@ -107,7 +107,7 @@ The gates are not a chain that ends at delivery; they form one **closed circuit*
         │                │                           │         │
         │                ▼                           ▼         │
         │           sediment ◄──── review/verify ◄───┘         │
-        │   decisions land in CONTEXT.md, ADRs,                │
+        │   decisions land in GLOSSARY.md, ADRs,               │
         │   docs/business/, docs/standards/, .omc/skills/      │
         │                │                                     │
         └────────────────┘                                     │

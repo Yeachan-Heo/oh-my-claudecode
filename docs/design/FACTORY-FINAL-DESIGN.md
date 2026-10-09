@@ -89,7 +89,7 @@ Humans sit only at the graded gates; everything between gates runs AFK.
 | Draft PR after first merge (empty branch can't open one) | implement-spec v1.3 | PR timing in the chain |
 | Retro closes the loop | retro graduated + ask-matt placement | chain-termination → refit trigger |
 | pr is model-invoked | pr graduated | our pr skill stays model-invocable |
-| Glossary naming (`GLOSSARY.md`, collision with agent-context) + `GLOSSARY-MAP.md` multi-context map | v1.3 rename | **[OWNER]** breaking rename of `CONTEXT.md` |
+| Glossary naming (`GLOSSARY.md`, collision with agent-context) + `GLOSSARY-MAP.md` multi-context map | v1.3 rename | **[OWNER]** breaking rename — adopted 2026-10-09: follow the upstream v1.3 rename (spec #61) |
 | Start-small narrow loop | software-factory essay | `omc factory init --narrow` default |
 | Retro's environment categories | retro skill | refit (already absorbed, #4110) |
 
