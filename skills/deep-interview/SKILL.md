@@ -37,6 +37,7 @@ Inspired by the [Ouroboros project](https://github.com/Q00/ouroboros) which demo
 
 <Execution_Policy>
 - Default is ONE question at a time -- never batch multiple questions. The only exception is Frontier Rounds Mode (`--frontier`), which asks the whole settled frontier per round (see Frontier Rounds Mode below)
+- Word each question so that answering "yes" accepts the recommended answer -- agreement should never require saying "no" first
 - Target the WEAKEST clarity dimension with each question
 - Before Round 1 ambiguity scoring, run a one-time Round 0 topology enumeration gate that confirms the top-level component list and locks it into state
 - Make weakest-dimension targeting explicit every round: name the weakest dimension, state its score/gap, and explain why the next question is aimed there

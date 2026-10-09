@@ -32,7 +32,7 @@ Find what is actually wrong, ranked by severity, with enough detail to act on.
 
 A substantial diff is reviewed as two parallel sub-agent passes, reported separately — never merged or cross-ranked, because a change can pass one axis and fail the other (standards-conforming but wrong behavior; faithful but convention-breaking):
 
-- **Standards axis** — the diff against the repo's documented standards (CLAUDE.md/AGENTS.md, `docs/standards/` volumes where they exist) plus a judgement-call-only smell baseline; anything tooling already enforces is skipped.
+- **Standards axis** — the diff against the repo's documented standards plus a judgement-call-only smell baseline; anything tooling already enforces is skipped. The standards set is discovered, not assumed: search the repo for standards documents (CLAUDE.md/AGENTS.md, `docs/standards/` volumes, `CONTRIBUTING.md`, `CODING_STANDARDS.md` or equivalents) and review against whatever exists — a standards file you didn't look for is a standard you didn't apply.
 - **Intent axis** — the diff against what the work was meant to do — the task, spec, or ticket acceptance criteria: requirements missing or partial, behavior nobody asked for, each finding quoting its source line.
 
 Keep each sub-agent brief under ~400 words and pointed at one axis. Aggregate without picking a single winner across axes — that reranking is what the separation exists to prevent; state each axis's verdict on its own. A small diff stays one pass.

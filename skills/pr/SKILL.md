@@ -7,6 +7,8 @@ metadata:
     author: Dex Horthy
     organisation: Humanlayer
     url: "https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md"
+    merge-danger: mattpocock/skills
+    merge-danger-url: "https://github.com/mattpocock/skills"
 ---
 
 # PR Body
@@ -49,7 +51,7 @@ Consume the verify protocol's output — BUILD, TEST, LINT, FUNCTIONALITY eviden
 
 ### Reversibility
 
-Run the ADR test on the diff itself — the same three questions launch applies to decisions: hard to reverse? surprising without context? the result of a real trade-off? A no on all three is a cheap rollback: say by what mechanism (revert the merge, toggle the flag). Any yes means an expensive rollback: say why. Link the ADR when the change implements or touches one. Close with the blast radius in one line — what else this change can move.
+Run the ADR test on the diff itself — the same three questions launch applies to decisions: hard to reverse? surprising without context? the result of a real trade-off? A no on all three is a cheap rollback: say by what mechanism (revert the merge, toggle the flag). Any yes means an expensive rollback: say why. Classify the door first: a two-way door (undo is cheap and ordinary) needs no ceremony beyond naming the undo; a one-way door says so explicitly and names what makes the step irreversible. Link the ADR when the change implements or touches one. Close with the blast radius in one line — what else this change can move.
 
 ### Language
 
