@@ -42,10 +42,18 @@ function finding(id, title, severity, confidence, actionable, evidence, advice) 
   return { id, title, severity, confidence, actionable, evidence, advice };
 }
 
+// The glossary slot is bilingual during the expand phase: GLOSSARY.md is the
+// authority path, legacy CONTEXT.md satisfies the same surface. The surface
+// finding keeps its historical CONTEXT-md id slug so consumers keyed by id
+// stay stable across the rename.
+function hasGlossary(root) {
+  return existsSync(join(root, 'GLOSSARY.md')) || existsSync(join(root, 'CONTEXT.md'));
+}
+
 function checkSurfaces(root) {
   const findings = [];
   for (const surface of SURFACES) {
-    if (existsSync(join(root, surface))) continue;
+    if (surface === 'CONTEXT.md' ? hasGlossary(root) : existsSync(join(root, surface))) continue;
     const isDir = surface.endsWith('/');
     findings.push(
       finding(
@@ -63,19 +71,21 @@ function checkSurfaces(root) {
 }
 
 function checkDocumentLanguage(root) {
-  const contextPath = join(root, 'CONTEXT.md');
-  if (!existsSync(contextPath)) return [];
-  const content = readFileSync(contextPath, 'utf-8');
+  // GLOSSARY.md is the authority; the legacy name is read only as fallback.
+  const glossaryPath = existsSync(join(root, 'GLOSSARY.md')) ? join(root, 'GLOSSARY.md') : join(root, 'CONTEXT.md');
+  if (!existsSync(glossaryPath)) return [];
+  const glossaryFile = basename(glossaryPath);
+  const content = readFileSync(glossaryPath, 'utf-8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     return [
       finding(
         'shipyard.document-language.missing-frontmatter',
-        'CONTEXT.md has no YAML frontmatter',
+        `${glossaryFile} has no YAML frontmatter`,
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        [glossaryFile],
         'Add frontmatter with a `documentLanguage` tag (see the drydock skill).',
       ),
     ];
@@ -85,11 +95,11 @@ function checkDocumentLanguage(root) {
     return [
       finding(
         'shipyard.document-language.missing-tag',
-        'CONTEXT.md frontmatter lacks a documentLanguage tag',
+        `${glossaryFile} frontmatter lacks a documentLanguage tag`,
         SEVERITY.high,
         'high',
         true,
-        ['CONTEXT.md'],
+        [glossaryFile],
         'Add `documentLanguage: <tag>` to the frontmatter.',
       ),
     ];
