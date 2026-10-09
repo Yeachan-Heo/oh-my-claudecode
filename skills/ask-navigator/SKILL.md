@@ -22,10 +22,9 @@ Both yes → no map is needed; run `/oh-my-claudecode:launch` (its fog gate send
 
 ## Map home
 
-The map is a **single issue** labelled `navigator:map` on the repo's issue tracker; its decision tickets are child issues of the map. The tracker should have been recorded by `/oh-my-claudecode:drydock`; if none was recorded, ask once (GitHub / GitLab / local markdown) and remember the answer inside the map's Notes.
+The map is a **single issue** labelled `navigator:map` on the repo's issue tracker; its decision tickets are child issues of the map. The tracker should have been recorded by `/oh-my-claudecode:drydock`; if none was recorded, ask once and remember the answer inside the map's Notes.
 
-- **Tracker-backed (GitHub, GitLab, or recorded tracker)**: one map issue, child issues per ticket, native blocking/sub-issue relationships. Concurrent sessions and the tracker's own UI render the frontier — the map lives where humans already look. Create the `navigator:map` label if the tracker doesn't have it yet; ticket types live in the ticket body, not in labels.
-- **Local markdown fallback**: `.omc/wayfinder/<map-slug>/map.md` plus `decisions/NN-<slug>.md`, one file per ticket, numbered in dependency order. Local mode has no concurrent-claim guarantee: it is single-driver by convention, stated once in the map's Notes.
+The tracker is the **only map medium** — there is no local fallback: one map issue, child issues per ticket, native blocking/sub-issue relationships. Concurrent sessions and the tracker's own UI render the frontier — the map lives where humans already look. A map written to local files strands decisions where later sessions, the captain, and launch will never find them; do not fall back to local files. If the tracker is unreachable, stop and report the blocker. Create the `navigator:map` label if the tracker doesn't have it yet; ticket types live in the ticket body, not in labels.
 
 The map is an **index, not a store**: a decision lives in exactly one place — its ticket. The map gists each resolution in one line and links; it never restates the detail.
 
@@ -50,9 +49,9 @@ Invoked with a loose idea (or launch's residual questions). Charting is one sess
 Invoked with a map (link or number) or with no argument (pick up the open map). A ticket is optional: without one, take the next frontier ticket, not one the captain must choose.
 
 1. **Load the map**: the low-res view, never every ticket body. Zoom into a ticket's full body on demand.
-2. **Claim before work**: assign the ticket to the captain (tracker) or set `Claimed-by` (local) **first**, so concurrent sessions skip it. An open, unclaimed ticket is unclaimed. If assignment isn't possible (permissions, no handle), record the claim in a ticket comment instead.
+2. **Claim before work**: assign the ticket to the captain **first**, so concurrent sessions skip it. An open, unclaimed ticket is unclaimed. If assignment isn't possible (permissions, no handle), record the claim in a ticket comment instead.
 3. **Resolve it** according to its type (see Ticket types). Zoom as needed; call the Skill tool with "deep-interview" whenever the resolution needs the captain's input.
-4. **Record the resolution**: post the answer as a resolution comment/section, close the ticket (as completed; a ticket ruled beyond the destination closes as not planned), and append one line to the map's **Decisions so far** — `[<ticket title>](link): <one-line gist>`.
+4. **Record the resolution**: post the answer as a **resolution comment** on the ticket, close the ticket (as completed; a ticket ruled beyond the destination closes as not planned), and append one line to the map issue body's **Decisions so far** — `[<ticket title>](link): <one-line gist>`. The closed ticket's resolution comment is the decision's one home; the map's line is an index into it.
 5. **Advance the frontier**: graduate any fog the answer has made specifiable (remove it from **Not yet specified**, create the new tickets, wire edges); if the answer reveals a ticket sits beyond the destination, **close it** and leave one line in **Out of scope** carrying the concept and the reason (so a later session or a later map can match it); update or delete tickets the decision invalidated.
 6. **Sediment** (see Sediment).
 7. **Stop after one ticket.** One resolution per session is the cadence — it is the context-window budget, not a policy. The session-close pointer names what just resolved and what is now on the frontier. The map issue is the primary source, session memory secondary — every session re-orients from the map, never from the previous session's memory.
@@ -73,7 +72,7 @@ Every ticket is **HITL** (worked with the captain, who speaks for themselves) or
 
 | Type | Mode | Resolved by | Use when |
 |---|---|---|---|
-| `research` | AFK | Background subagent: investigate against primary sources (official docs, source code, specs), leave a cited Markdown file at `docs/research/<ticket-slug>.md` (or the repo's existing notes convention when one exists), link it from the ticket | A decision waits on knowledge outside the current working directory |
+| `research` | AFK | Background subagent: investigate against primary sources (official docs, source code, specs); record the findings as a tracker comment on the ticket — or on a throwaway branch that never merges when an artifact is needed to answer — and link it from the ticket. No permanent research file is created: findings live in the session, tracker comments, or a throwaway branch (never merged), so the repo gains zero new permanent files | A decision waits on knowledge outside the current working directory |
 | `loft` | HITL | Call the Skill tool with "loft": a throwaway artifact answers the ticket's question — a pure logic module in a clickable shell, or structurally different UI variants behind one route; the captain reacts, the answer folds into the resolution, the artifact stays on a `loft/<name>` branch | The question is precise but prose cannot settle it — it needs to be seen or clicked, not described |
 | `grilling` | HITL | Call the Skill tool with "deep-interview"; the captain decides each round | Conversation is the resolution — the default case |
 | `task` | HITL or AFK | The navigator drives it alone where it can; otherwise hands the captain a precise checklist | Manual work that unblocks a decision (sign up for a service, provision access, move data so its shape can be seen) — it earns its place by unblocking a decision, not by delivering the destination |
@@ -82,7 +81,7 @@ The answer is never part of the ticket body; it is recorded on resolution. Asset
 
 A `research` ticket whose knowledge lives in a **person** rather than a document resolves by asking that person directly: one tracker comment naming them (per the granted communication scope), carrying everything they need to answer in one read, and their reply is cited as the primary source — the same standard a document source would meet. No third party is cold-contacted; a person the evidence does not name gets no question. The resolution records who answered and where, so the map's index points at the reply, not at a paraphrase.
 
-A `research` file speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
+A `research` record speaks the yard's one evidence format: it opens by restating the question it answers, every claim links its source, and it closes with an **Unverified** section — what could not be confirmed, and why it matters.
 
 ## Map body
 
@@ -93,7 +92,7 @@ A `research` file speaks the yard's one evidence format: it opens by restating t
 
 ## Notes
 
-<domain; skills every session should consult; standing preferences; deferred drydock --check findings (verbatim); resolved documentLanguage tag; tracker-mode caveats for local mode>
+<domain; skills every session should consult; standing preferences; deferred drydock --check findings (verbatim); resolved documentLanguage tag; tracker caveats>
 
 ## Decisions so far
 
@@ -108,6 +107,10 @@ A `research` file speaks the yard's one evidence format: it opens by restating t
 ## Out of scope
 
 <!-- work ruled beyond the destination; closed, never graduates -->
+
+## Mission brief
+
+<!-- written at exit: objective, scope boundary, non-goals collapsed from Decisions so far; the handoff pointer launch consumes lives here, in the map issue body -->
 ```
 
 **Fog or ticket?** The test is whether you can state the question precisely now, not whether you can answer it now. Ticket when the question is already sharp, even if it is blocked. Not-yet-specified when you cannot phrase it that sharply — do not pre-slice the fog into ticket-sized pieces; one patch may graduate into several tickets, or none. **Out of scope** is a scoping act, not a step on the route: scope, not sharpness, lands work there, and it returns only if the destination is redrawn.
@@ -126,13 +129,13 @@ When the yard is not laid (the captain declined drydock at charting time), **def
 
 The map is done when no open tickets remain and **Not yet specified** is empty. Then:
 
-1. Collapse **Decisions so far** into a **mission brief**: objective, scope boundary, non-goals — writable now because the way is clear. Write it to `.omc/wayfinder/<map-slug>/brief.md` so the handoff passes a pointer, not content.
-2. Recommend: "The way is clear. Run `/oh-my-claudecode:launch` with the brief at `.omc/wayfinder/<map-slug>/brief.md`." The map stays as the effort's logbook; launch's yard gate owns every check from there.
+1. Collapse **Decisions so far** into a **mission brief** — objective, scope boundary, non-goals — and write it into the map issue body under **Mission brief**. The handoff passes one pointer, the map issue itself; no brief file is created.
+2. Recommend: "The way is clear. Run `/oh-my-claudecode:launch` with the map issue as the mission brief — the brief pointer is in the map issue body." The map stays as the effort's logbook; launch's yard gate owns every check from there.
 3. Default entry is launch Phase 1 (the paper trail is already half-full; its frontier clears fast). Only when the decisions already read like a spec may a spec be drafted and launch entered at Phase 2 with the spec path.
 
 ## Scope and non-goals
 
-- No daemon, no mode, no always-on behavior, no runtime state machine: the map is ordinary tracker issues or repo files.
+- No daemon, no mode, no always-on behavior, no runtime state machine: the map is ordinary tracker issues — nothing is written to repo files.
 - Incoming requests that arrive as fog are the harbor's to route: a fuzzy issue handed over by `/oh-my-claudecode:harbor` charts like any loose idea, with the original thread and any signed decision links as material.
 - Never mutates Team lifecycle, task statuses, or runtime state; never publishes delivery tickets — vertical-slice build tickets belong to launch's C3, and the navigator must not pre-slice fog into them.
 - Never executes a decision beyond recording it. The one exception is a `task` ticket, which does only what unblocks a decision.

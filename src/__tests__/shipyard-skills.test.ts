@@ -125,6 +125,30 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(NAVIGATOR).toContain('| `task` |');
   });
 
+  it('ask-navigator keeps the map ring in the tracker (map issue, resolution comments, brief in the map body)', () => {
+    // T67: map = tracker issue, decisions = resolution comments on closed tickets,
+    // handoff pointer folded into the map issue body. No local map/decisions/brief trio.
+    expect(NAVIGATOR).not.toContain('.omc/wayfinder');
+    expect(NAVIGATOR).not.toContain('brief.md');
+    expect(NAVIGATOR).not.toContain('decisions/NN-');
+    expect(NAVIGATOR).not.toContain('Local markdown fallback');
+    expect(NAVIGATOR).toContain('navigator:map');
+    expect(NAVIGATOR).toContain('resolution comment');
+    expect(NAVIGATOR).toContain('**Mission brief**');
+    expect(NAVIGATOR).toContain('map issue body');
+    // launch's map check reads the map from the tracker only
+    expect(LAUNCH).not.toContain('.omc/wayfinder');
+  });
+
+  it('ask-navigator research findings never become permanent repo files', () => {
+    // T67: research products live in the session, tracker comments, or a throwaway
+    // branch (never merged) — zero new permanent files.
+    expect(NAVIGATOR).not.toContain('docs/research');
+    expect(NAVIGATOR).toContain('tracker comment');
+    expect(NAVIGATOR).toContain('throwaway branch');
+    expect(NAVIGATOR).toContain('never merges');
+  });
+
   it('ask-navigator defers un-laid-yard sediment instead of skipping it', () => {
     expect(NAVIGATOR).toContain('report-only mode');
     expect(NAVIGATOR).toContain('Deferred sediment');
@@ -484,6 +508,21 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(LAUNCH).toContain('new explicit Launch invocation after the owning Team lifecycle has reached a supported terminal/cleanup boundary');
     expect(LAUNCH).toContain('Never infer a human approval or replay an `in_progress` task');
     expect(LAUNCH).toContain('Team remains authoritative for runtime state');
+  });
+
+  it('launch keeps spec and tickets tracker-only (parent spec issue + child ticket sub-issues, no local tree)', () => {
+    // the interview loop's spec and tickets live only in the tracker (harbor-aligned):
+    // spec = parent issue, tickets = native sub-issues; scout notes stay in the session
+    expect(LAUNCH).not.toContain('.omc/specs/');
+    expect(LAUNCH).not.toContain('decisions-pending');
+    expect(LAUNCH).not.toContain('notes/');
+    expect(LAUNCH).toContain('the spec is the parent issue, the tickets are its native sub-issues');
+    expect(LAUNCH).toContain('never creates or writes local spec or ticket files');
+    expect(LAUNCH).toContain('downstream readers take the spec and tickets from the tracker');
+    expect(LAUNCH).toContain('as a **parent tracker issue**');
+    expect(LAUNCH).toContain('**child tracker issues** (native sub-issues of the parent spec issue)');
+    expect(LAUNCH).toContain('notes stay in the conversation, never written to disk');
+    expect(LAUNCH).toContain('as a comment on the parent spec issue');
   });
 
   it('launch keeps the canonical path canonical and itself opt-in (no seeded default override)', () => {
