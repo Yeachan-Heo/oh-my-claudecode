@@ -23,82 +23,15 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)
 
-### Overview
+The shipyard glossary surface is now `GLOSSARY.md` at the repository root. It holds the yard's terms and the `documentLanguage` frontmatter tag.
 
-The shipyard's glossary surface is being renamed from `CONTEXT.md` to `GLOSSARY.md` for clarity and consistency with the four-pillar architecture (Context, Rules, Tools, Standards). This is a breaking rename with automatic migration.
+### What changes for existing yards
 
-### What Changed
+- **Only `CONTEXT.md` exists:** the yard keeps working. The audit accepts `CONTEXT.md` as the glossary, and the skills read it until it is migrated. The next full `/oh-my-claudecode:drydock` run (not `--check`) renames it to `GLOSSARY.md` with its content and frontmatter unchanged, and rewrites `CONTEXT.md` references in `CLAUDE.md` (for example `Glossary: CONTEXT.md`) to `GLOSSARY.md`. Commit the result.
+- **Both files exist:** `node scripts/shipyard-audit.mjs` reports a high-confidence `shipyard.glossary.duplicate-authority` finding and exits 1, so Launch stays blocked. Drydock does not merge the files for you. Move any terms that exist only in `CONTEXT.md` into `GLOSSARY.md`, delete `CONTEXT.md`, replace remaining `CONTEXT.md` references in `CLAUDE.md` with `GLOSSARY.md`, then commit.
+- **Fresh yards:** no action. Drydock creates `GLOSSARY.md`.
 
-- **New canonical name**: `GLOSSARY.md` (in `~/`) holds the yard's glossary and `documentLanguage` declaration
-- **Legacy fallback**: Existing yards with only `CONTEXT.md` are automatically migrated during the next drydock run
-- **Duplicate detection**: If both files exist, the audit emits a high-confidence finding and exits 1; merge them manually or run drydock to migrate
-- **Shared documents**: All references in `CLAUDE.md`, ADRs, launch sediment, and navigator decisions use the new name after migration
-
-### Impact by Scenario
-
-#### 1. Fresh Yard (New Drydock Run)
-
-No action needed. Drydock creates `GLOSSARY.md` automatically.
-
-#### 2. Existing Yard with Only `CONTEXT.md`
-
-On the next invocation of drydock (or ask-navigator/launch if laying yard surfaces):
-
-1. Run `drydock --check` to audit the yard
-2. Follow the migration guidance (or run drydock without `--check`)
-3. Drydock will:
-   - Rename `CONTEXT.md` → `GLOSSARY.md` (preserving content and frontmatter byte-for-byte)
-   - Update all references in generated surfaces (`CLAUDE.md` if present) to point to `GLOSSARY.md`
-   - Preserve the `documentLanguage` frontmatter tag
-4. Commit the changes
-
-**Note**: If you use drydock's `--check` audit-only mode, no migration occurs. Run drydock normally (without `--check`) to trigger the migration.
-
-#### 3. Existing Yard with Both `GLOSSARY.md` and `CONTEXT.md`
-
-This state is not allowed. The audit (`shipyard-audit.mjs`) will report a `duplicate-glossary-authority` finding and exit 1. To resolve:
-
-**Option A (Recommended): Drydock Migration**
-
-```bash
-/oh-my-claudecode:drydock
-```
-
-Drydock will detect the legacy file and complete the migration, keeping `GLOSSARY.md` as the authority and removing `CONTEXT.md`.
-
-**Option B (Manual): Merge and Remove**
-
-1. If `CONTEXT.md` contains unique entries not in `GLOSSARY.md`, merge them into `GLOSSARY.md` (preserving the frontmatter)
-2. Delete `CONTEXT.md`
-3. Commit
-
-#### 4. Legacy Yards with Pre-Migration `CLAUDE.md`
-
-If your `CLAUDE.md` contains older references like `Glossary: CONTEXT.md` or `On term conflicts CONTEXT.md wins`, drydock's legacy migration will rewrite these to `GLOSSARY.md` as part of the rename. This occurs automatically during migration and requires no manual action.
-
-### Test Coverage
-
-The audit script now includes a high-confidence test for duplicate glossary authorities:
-
-```bash
-node scripts/shipyard-audit.mjs /path/to/yard
-```
-
-Exit code 0 = clean; exit code 1 = duplicate authority detected.
-
-### Backward Compatibility
-
-- **Read**: Navigator and launch still read `CONTEXT.md` if `GLOSSARY.md` is absent (legacy fallback).
-- **Write**: New writes (sediment, decisions) always target the canonical `GLOSSARY.md`.
-- **Audit**: If both files exist, an actionable finding is reported to prevent split authorities.
-
-### Next Steps
-
-- If you are running drydock on an existing yard, the migration is automatic.
-- If you see a `duplicate-glossary-authority` audit finding, follow the resolution steps above.
-- No changes needed for yards created after this release.
-
----
+The missing-glossary surface finding keeps its historical `CONTEXT-md` id slug, so consumers keyed by finding id are unaffected.
 
 ## Unreleased: Team Instance Ownership
 

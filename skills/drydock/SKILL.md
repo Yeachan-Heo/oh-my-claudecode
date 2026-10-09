@@ -7,7 +7,7 @@ level: 3
 
 # Drydock
 
-Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill scaffolds the environment that turns "everyone ships" into "everyone ships on the same design language" — it creates the 5 surfaces, seeds them minimally, wires them to the flows that fill them (launch writes CONTEXT/ADR; the launch C5 sediment pass and reviews sediment standards), and reports what exists, what was created, and what stays empty on purpose.
+Lay the keel of the **shipyard**: one repo, one shared harness, every contributor inherits it. This skill scaffolds the environment that turns "everyone ships" into "everyone ships on the same design language" — it creates the 5 surfaces, seeds them minimally, wires them to the flows that fill them (launch writes GLOSSARY/ADR; the launch C5 sediment pass and reviews sediment standards), and reports what exists, what was created, and what stays empty on purpose.
 
 The four pillars and where they physically live:
 
@@ -70,7 +70,7 @@ The document language for the generated harness files is a file-backed decision,
 
 Legacy glossary migration: if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md` (`git mv` when tracked) before resolving the language or scaffolding anything, preserving its content and frontmatter byte-for-byte. Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`; one yard has exactly one glossary authority. If both files exist, `GLOSSARY.md` is authoritative and the leftover `CONTEXT.md` is reported for the human to merge or remove.
 
-**CLAUDE.md rewrite during migration**: After renaming the glossary, if `CLAUDE.md` exists and contains legacy references like `Glossary: CONTEXT.md` or `On term conflicts CONTEXT.md wins`, rewrite them to use `GLOSSARY.md` instead. This prevents installed instructions from pointing to a nonexistent file. The rewrite is part of the migration, not the scaffold step, so existing yards automatically get the corrected references.
+**CLAUDE.md rewrite during migration**: Whenever `GLOSSARY.md` is the glossary authority (after the rename above, and also when both files exist), rewrite legacy `CLAUDE.md` references such as `Glossary: CONTEXT.md` or `On term conflicts CONTEXT.md wins` to `GLOSSARY.md`, so installed instructions never point at a file that is renamed or about to be removed. The rewrite belongs to the migration, not the scaffold step.
 
 Resolution order:
 

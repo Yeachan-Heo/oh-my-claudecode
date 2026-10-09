@@ -84,7 +84,7 @@ function checkDuplicateGlossaryAuthority(root) {
         'high',
         true,
         ['GLOSSARY.md', 'CONTEXT.md'],
-        'Run drydock --check and follow the migration guidance, or manually merge CONTEXT.md into GLOSSARY.md and remove CONTEXT.md.',
+        'Merge any terms only in CONTEXT.md into GLOSSARY.md, delete CONTEXT.md, and point CLAUDE.md references at GLOSSARY.md.',
       ),
     ];
   }

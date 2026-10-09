@@ -765,6 +765,19 @@ describe('shipyard skills — behavior & packaging contract', () => {
       expect(ref).toContain(`\`${name}\``);
     }
   });
+
+  it('drydock migrates a legacy CONTEXT.md glossary before language resolution and rewrites CLAUDE.md references', () => {
+    const migration = DRYDOCK.indexOf('Legacy glossary migration:');
+    const resolution = DRYDOCK.indexOf('Resolution order:');
+    expect(migration).toBeGreaterThan(-1);
+    expect(resolution).toBeGreaterThan(migration);
+    expect(DRYDOCK).toContain('if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
+    expect(DRYDOCK).toContain('preserving its content and frontmatter byte-for-byte');
+    expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`');
+    expect(DRYDOCK).toContain('**CLAUDE.md rewrite during migration**');
+    expect(DRYDOCK).toContain('also when both files exist');
+    expect(DRYDOCK).not.toContain('launch writes CONTEXT/ADR');
+  });
 });
 
 describe('shipyard audit script — mechanical check classes', () => {
