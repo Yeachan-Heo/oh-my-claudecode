@@ -31,7 +31,7 @@ The shipyard glossary surface is now `GLOSSARY.md` at the repository root. It ho
 - **Both files exist:** `node scripts/shipyard-audit.mjs` reports a high-confidence `shipyard.glossary.duplicate-authority` finding and exits 1, so Launch stays blocked. Drydock does not merge the files for you. Move any terms that exist only in `CONTEXT.md` into `GLOSSARY.md`, delete `CONTEXT.md`, replace remaining `CONTEXT.md` references in `CLAUDE.md` with `GLOSSARY.md`, then commit.
 - **Fresh yards:** no action. Drydock creates `GLOSSARY.md`.
 
-A `CONTEXT.md` counts as a legacy glossary only when its frontmatter has a `documentLanguage` key, or its first heading is a drydock glossary seed heading (`# Glossary`, `# 术语表`, `# 詞彙表`) for yards laid before the language tag existed. Any other `CONTEXT.md` (for example an agent-context file) is ignored by the audit and never renamed.
+A `CONTEXT.md` counts as a legacy glossary only when its frontmatter has a `documentLanguage` key, or its first visible non-blank line (after the frontmatter, ignoring a BOM and HTML comments) is a drydock glossary seed heading (`# Glossary`, `# 术语表`, `# 詞彙表`) for yards laid before the language tag existed. Any other `CONTEXT.md` (for example an agent-context file) is ignored by the audit and never renamed.
 
 The missing-glossary surface finding keeps its historical `CONTEXT-md` id slug, so consumers keyed by finding id are unaffected.
 

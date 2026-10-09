@@ -57,14 +57,13 @@ const LEGACY_GLOSSARY_HEADINGS = new Set(['Glossary', '术语表', '詞彙表'])
 function isLegacyGlossary(root) {
   const path = join(root, 'CONTEXT.md');
   if (!existsSync(path)) return false;
-  const content = readFileSync(path, 'utf-8');
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (frontmatter && /^documentLanguage:/m.test(frontmatter[1])) return true;
   // Seeds open with the heading, so only the first visible non-blank line
   // after the frontmatter counts (BOM and HTML comments are not rendered);
   // headings inside fences, comments, or later prose never do.
   const body = (frontmatter ? content.slice(frontmatter[0].length) : content)
-    .replace(/^\uFEFF/, '')
     .replace(/<!--[\s\S]*?-->/g, '');
   const firstLine = body.split(/\r?\n/).find((line) => line.trim() !== '') ?? '';
   const heading = firstLine.match(/^#\s+(.+?)\s*$/);
@@ -124,7 +123,7 @@ function checkDocumentLanguage(root) {
   const path = glossaryPath(root);
   if (!path) return [];
   const glossaryFile = basename(path);
-  const content = readFileSync(path, 'utf-8');
+  const content = readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     return [

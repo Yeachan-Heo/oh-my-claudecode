@@ -145,6 +145,15 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
+  it('a BOM before the frontmatter does not hide it', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'GLOSSARY.md'), '\uFEFF---\ndocumentLanguage: en\n---\n\n# Glossary\n');
+    expect(runAudit(yard).report!.findings).toEqual([]);
+    rmSync(join(yard, 'GLOSSARY.md'));
+    writeFileSync(join(yard, 'CONTEXT.md'), '\uFEFF---\ndocumentLanguage: en\n---\n\nAgent notes.\n');
+    expect(runAudit(yard).report!.findings).toEqual([]);
+  });
+
   it('a BOM or leading HTML comment before the seed heading still marks a legacy glossary', () => {
     for (const content of ['\uFEFF# Glossary\n\n## term\n', '<!-- provenance: drydock -->\n# Glossary\n\n## term\n']) {
       rmSync(yard, { recursive: true, force: true });

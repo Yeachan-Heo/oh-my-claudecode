@@ -773,6 +773,8 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(resolution).toBeGreaterThan(migration);
     expect(DRYDOCK).toContain('If the yard has a legacy glossary `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
     expect(DRYDOCK).toContain('any other `CONTEXT.md` is an unrelated agent-context document and is left alone');
+    // the migration contract uses the same first-visible-line signature as the audit
+    expect(DRYDOCK).toContain('its first visible non-blank line (after the frontmatter, ignoring a BOM and HTML comments) is a drydock glossary seed heading');
     expect(DRYDOCK).toContain('preserving its content and frontmatter byte-for-byte');
     expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside a legacy glossary `CONTEXT.md`');
     expect(DRYDOCK).toContain('An unrelated `CONTEXT.md` does not block creating `GLOSSARY.md` and is never reported for removal');
