@@ -767,7 +767,7 @@ describe('shipyard skills — behavior & packaging contract', () => {
   });
 
   it('drydock migrates a legacy CONTEXT.md glossary before language resolution and rewrites CLAUDE.md references', () => {
-    const migration = DRYDOCK.indexOf('Legacy glossary migration:');
+    const migration = DRYDOCK.indexOf('Legacy glossary migration (');
     const resolution = DRYDOCK.indexOf('Resolution order:');
     expect(migration).toBeGreaterThan(-1);
     expect(resolution).toBeGreaterThan(migration);
@@ -777,6 +777,18 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(DRYDOCK).toContain('**CLAUDE.md rewrite during migration**');
     expect(DRYDOCK).toContain('also when both files exist');
     expect(DRYDOCK).not.toContain('launch writes CONTEXT/ADR');
+    expect(DRYDOCK).toContain('Legacy glossary migration (full runs only; `--check` never renames or rewrites anything');
+  });
+
+  it('launch and navigator never create GLOSSARY.md beside a legacy CONTEXT.md before writing the glossary', () => {
+    const launchGuard = LAUNCH.indexOf('migrated by the drydock legacy glossary migration');
+    expect(launchGuard).toBeGreaterThan(-1);
+    expect(LAUNCH).toContain('never create a second glossary beside it');
+    expect(launchGuard).toBeLessThan(LAUNCH.indexOf('persist the resolved normalized tag back to `GLOSSARY.md`'));
+    const navGuard = NAVIGATOR.indexOf('**Legacy yards (CONTEXT.md only)**');
+    expect(navGuard).toBeGreaterThan(-1);
+    expect(NAVIGATOR).toContain('run drydock before writing sediment to migrate the glossary authority to `GLOSSARY.md`');
+    expect(NAVIGATOR).toContain('Do not create a fresh `GLOSSARY.md` beside the legacy file');
   });
 });
 

@@ -68,7 +68,7 @@ The document language for the generated harness files is a file-backed decision,
 ```
 <!-- shipyard-document-language-contract:end -->
 
-Legacy glossary migration: if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md` (`git mv` when tracked) before resolving the language or scaffolding anything, preserving its content and frontmatter byte-for-byte. Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`; one yard has exactly one glossary authority. If both files exist, `GLOSSARY.md` is authoritative and the leftover `CONTEXT.md` is reported for the human to merge or remove.
+Legacy glossary migration (full runs only; `--check` never renames or rewrites anything and just audits the legacy file in place): if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md` (`git mv` when tracked) before resolving the language or scaffolding anything, preserving its content and frontmatter byte-for-byte. Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`; one yard has exactly one glossary authority. If both files exist, `GLOSSARY.md` is authoritative and the leftover `CONTEXT.md` is reported for the human to merge or remove.
 
 **CLAUDE.md rewrite during migration**: Whenever `GLOSSARY.md` is the glossary authority (after the rename above, and also when both files exist), rewrite legacy `CLAUDE.md` references such as `Glossary: CONTEXT.md` or `On term conflicts CONTEXT.md wins` to `GLOSSARY.md`, so installed instructions never point at a file that is renamed or about to be removed. The rewrite belongs to the migration, not the scaffold step.
 
