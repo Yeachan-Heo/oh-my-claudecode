@@ -112,6 +112,22 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(findings[0].evidence).toEqual(['GLOSSARY.md', 'CONTEXT.md']);
   });
 
+  it('ignores an unrelated CONTEXT.md without the glossary signature', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'CONTEXT.md'), '# Agent context\n\nNotes for coding agents.\n');
+    const beside = runAudit(yard);
+    expect(beside.status).toBe(0);
+    expect(beside.report!.findings).toEqual([]);
+
+    // a lone unrelated CONTEXT.md does not satisfy the glossary surface
+    rmSync(join(yard, 'GLOSSARY.md'));
+    const alone = runAudit(yard);
+    expect(alone.status).toBe(1);
+    const ids = alone.report!.findings.map((f) => f.id);
+    expect(ids).toContain('shipyard.surface.missing.CONTEXT-md');
+    expect(ids.some((id) => id.startsWith('shipyard.document-language.'))).toBe(false);
+  });
+
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
     const { report } = runAudit(yard);
     expect(report!.findings.length).toBeGreaterThan(0);
@@ -123,8 +139,8 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
-  it('reports a missing documentLanguage tag and an invalid tag distinctly, under both glossary names', () => {
-    for (const glossaryFile of ['GLOSSARY.md', 'CONTEXT.md'] as const) {
+  it('reports a missing documentLanguage tag and an invalid tag distinctly on GLOSSARY.md', () => {
+    for (const glossaryFile of ['GLOSSARY.md'] as const) {
       // fresh yard per iteration: a leftover GLOSSARY.md would shadow the
       // legacy name in the second pass
       rmSync(yard, { recursive: true, force: true });
@@ -141,6 +157,13 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
       const third = runAudit(yard);
       expect(third.report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
     }
+  });
+
+  it('reports an invalid documentLanguage tag on a legacy CONTEXT.md glossary', () => {
+    writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
+    const { report } = runAudit(yard);
+    expect(report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
+    expect(report!.findings.some((f) => f.id === 'shipyard.surface.missing.CONTEXT-md')).toBe(false);
   });
 
   it('reports dead paths referenced from CLAUDE.md', () => {

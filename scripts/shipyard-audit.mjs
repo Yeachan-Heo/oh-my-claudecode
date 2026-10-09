@@ -46,8 +46,25 @@ function finding(id, title, severity, confidence, actionable, evidence, advice) 
 // authority path, legacy CONTEXT.md satisfies the same surface. The surface
 // finding keeps its historical CONTEXT-md id slug so consumers keyed by id
 // stay stable across the rename.
+//
+// A CONTEXT.md only counts as a legacy glossary when it carries the glossary
+// signature: YAML frontmatter with a `documentLanguage` key, which every yard
+// laid by drydock has. Any other CONTEXT.md is an unrelated agent-context
+// document — the collision this rename exists to avoid — and is ignored.
+function isLegacyGlossary(root) {
+  const path = join(root, 'CONTEXT.md');
+  if (!existsSync(path)) return false;
+  const match = readFileSync(path, 'utf-8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  return Boolean(match && /^documentLanguage:/m.test(match[1]));
+}
+
+function glossaryPath(root) {
+  if (existsSync(join(root, 'GLOSSARY.md'))) return join(root, 'GLOSSARY.md');
+  return isLegacyGlossary(root) ? join(root, 'CONTEXT.md') : null;
+}
+
 function hasGlossary(root) {
-  return existsSync(join(root, 'GLOSSARY.md')) || existsSync(join(root, 'CONTEXT.md'));
+  return glossaryPath(root) !== null;
 }
 
 function checkSurfaces(root) {
@@ -73,13 +90,11 @@ function checkSurfaces(root) {
 }
 
 function checkDuplicateGlossaryAuthority(root) {
-  const glossaryExists = existsSync(join(root, 'GLOSSARY.md'));
-  const contextExists = existsSync(join(root, 'CONTEXT.md'));
-  if (glossaryExists && contextExists) {
+  if (existsSync(join(root, 'GLOSSARY.md')) && isLegacyGlossary(root)) {
     return [
       finding(
         'shipyard.glossary.duplicate-authority',
-        'Both GLOSSARY.md and CONTEXT.md exist — only one glossary authority is allowed',
+        'Both GLOSSARY.md and a legacy CONTEXT.md glossary exist — only one glossary authority is allowed',
         SEVERITY.high,
         'high',
         true,
@@ -92,11 +107,11 @@ function checkDuplicateGlossaryAuthority(root) {
 }
 
 function checkDocumentLanguage(root) {
-  // GLOSSARY.md is the authority; the legacy name is read only as fallback.
-  const glossaryPath = existsSync(join(root, 'GLOSSARY.md')) ? join(root, 'GLOSSARY.md') : join(root, 'CONTEXT.md');
-  if (!existsSync(glossaryPath)) return [];
-  const glossaryFile = basename(glossaryPath);
-  const content = readFileSync(glossaryPath, 'utf-8');
+  // GLOSSARY.md is the authority; a legacy CONTEXT.md glossary is read only as fallback.
+  const path = glossaryPath(root);
+  if (!path) return [];
+  const glossaryFile = basename(path);
+  const content = readFileSync(path, 'utf-8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) {
     return [

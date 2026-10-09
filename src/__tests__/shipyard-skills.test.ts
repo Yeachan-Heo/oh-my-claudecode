@@ -771,7 +771,8 @@ describe('shipyard skills — behavior & packaging contract', () => {
     const resolution = DRYDOCK.indexOf('Resolution order:');
     expect(migration).toBeGreaterThan(-1);
     expect(resolution).toBeGreaterThan(migration);
-    expect(DRYDOCK).toContain('if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
+    expect(DRYDOCK).toContain('If the yard has a legacy glossary `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
+    expect(DRYDOCK).toContain('any other `CONTEXT.md` is an unrelated agent-context document and is left alone');
     expect(DRYDOCK).toContain('preserving its content and frontmatter byte-for-byte');
     expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`');
     expect(DRYDOCK).toContain('**CLAUDE.md rewrite during migration**');
