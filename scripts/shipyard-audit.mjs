@@ -55,15 +55,17 @@ function checkSurfaces(root) {
   for (const surface of SURFACES) {
     if (surface === 'CONTEXT.md' ? hasGlossary(root) : existsSync(join(root, surface))) continue;
     const isDir = surface.endsWith('/');
+    // Fresh yards get pointed at the new name; the finding id slug above stays legacy for consumer stability.
+    const displayName = surface === 'CONTEXT.md' ? 'GLOSSARY.md' : surface;
     findings.push(
       finding(
         `shipyard.surface.missing.${surface.replace(/[^a-z0-9]+/gi, '-')}`,
-        `Missing surface: ${surface}`,
+        `Missing surface: ${displayName}`,
         SEVERITY.high,
         'high',
         true,
-        [surface],
-        isDir ? `Create the ${surface} directory (see the drydock skill for the seed).` : `Create ${surface} (see the drydock skill for the seed).`,
+        [displayName],
+        isDir ? `Create the ${displayName} directory (see the drydock skill for the seed).` : `Create ${displayName} (see the drydock skill for the seed).`,
       ),
     );
   }
