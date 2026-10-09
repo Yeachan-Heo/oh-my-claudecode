@@ -145,12 +145,18 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
-  it('ignores a seed heading inside a fenced example when detecting a legacy glossary', () => {
+  it('only a seed heading on the first non-blank line marks a legacy glossary', () => {
     seedCleanYard(yard, 'GLOSSARY.md');
-    writeFileSync(join(yard, 'CONTEXT.md'), 'Agent notes.\n\n```markdown\n# Glossary\n```\n');
-    const { status, report } = runAudit(yard);
-    expect(status).toBe(0);
-    expect(report!.findings).toEqual([]);
+    for (const content of [
+      'Agent notes.\n\n```markdown\n# Glossary\n```\n',
+      '<!--\n# Glossary\n-->\nAgent notes.\n',
+      '# Agent context\n\n# Glossary\n',
+    ]) {
+      writeFileSync(join(yard, 'CONTEXT.md'), content);
+      const { status, report } = runAudit(yard);
+      expect(status).toBe(0);
+      expect(report!.findings).toEqual([]);
+    }
   });
 
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
