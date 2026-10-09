@@ -774,9 +774,10 @@ describe('shipyard skills — behavior & packaging contract', () => {
     expect(DRYDOCK).toContain('If the yard has a legacy glossary `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md`');
     expect(DRYDOCK).toContain('any other `CONTEXT.md` is an unrelated agent-context document and is left alone');
     expect(DRYDOCK).toContain('preserving its content and frontmatter byte-for-byte');
-    expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`');
+    expect(DRYDOCK).toContain('Never create a fresh `GLOSSARY.md` beside a legacy glossary `CONTEXT.md`');
+    expect(DRYDOCK).toContain('An unrelated `CONTEXT.md` does not block creating `GLOSSARY.md` and is never reported for removal');
     expect(DRYDOCK).toContain('**CLAUDE.md rewrite during migration**');
-    expect(DRYDOCK).toContain('also when both files exist');
+    expect(DRYDOCK).toContain('also when `GLOSSARY.md` and a legacy glossary `CONTEXT.md` both exist');
     expect(DRYDOCK).not.toContain('launch writes CONTEXT/ADR');
     expect(DRYDOCK).toContain('Legacy glossary migration (full runs only; `--check` never renames or rewrites anything');
   });

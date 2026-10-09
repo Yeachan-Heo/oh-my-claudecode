@@ -47,15 +47,22 @@ function finding(id, title, severity, confidence, actionable, evidence, advice) 
 // finding keeps its historical CONTEXT-md id slug so consumers keyed by id
 // stay stable across the rename.
 //
-// A CONTEXT.md only counts as a legacy glossary when it carries the glossary
-// signature: YAML frontmatter with a `documentLanguage` key, which every yard
-// laid by drydock has. Any other CONTEXT.md is an unrelated agent-context
-// document — the collision this rename exists to avoid — and is ignored.
+// A CONTEXT.md only counts as a legacy glossary when it carries a drydock
+// glossary signature: YAML frontmatter with a `documentLanguage` key, or a
+// first H1 matching a drydock glossary seed heading (seeds that predate the
+// language tag). Any other CONTEXT.md is an unrelated agent-context document
+// — the collision this rename exists to avoid — and is ignored.
+const LEGACY_GLOSSARY_HEADINGS = new Set(['Glossary', '术语表', '詞彙表']);
+
 function isLegacyGlossary(root) {
   const path = join(root, 'CONTEXT.md');
   if (!existsSync(path)) return false;
-  const match = readFileSync(path, 'utf-8').match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  return Boolean(match && /^documentLanguage:/m.test(match[1]));
+  const content = readFileSync(path, 'utf-8');
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (frontmatter && /^documentLanguage:/m.test(frontmatter[1])) return true;
+  const body = frontmatter ? content.slice(frontmatter[0].length) : content;
+  const heading = body.match(/^#\s+(.+?)\s*$/m);
+  return Boolean(heading && LEGACY_GLOSSARY_HEADINGS.has(heading[1]));
 }
 
 function glossaryPath(root) {

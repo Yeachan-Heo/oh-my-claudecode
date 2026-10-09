@@ -128,6 +128,23 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(ids.some((id) => id.startsWith('shipyard.document-language.'))).toBe(false);
   });
 
+  it('recognizes a legacy CONTEXT.md glossary that predates the documentLanguage tag by its seed heading', () => {
+    for (const heading of ['Glossary', '术语表', '詞彙表']) {
+      rmSync(yard, { recursive: true, force: true });
+      yard = mkdtempSync(join(tmpdir(), 'shipyard-audit-'));
+      writeFileSync(join(yard, 'CONTEXT.md'), `# ${heading}\n\n## term\n`);
+      const alone = runAudit(yard);
+      const ids = alone.report!.findings.map((f) => f.id);
+      expect(ids).not.toContain('shipyard.surface.missing.CONTEXT-md');
+      expect(ids).toContain('shipyard.document-language.missing-frontmatter');
+
+      seedCleanYard(yard, 'GLOSSARY.md');
+      writeFileSync(join(yard, 'CONTEXT.md'), `# ${heading}\n\n## term\n`);
+      const beside = runAudit(yard);
+      expect(beside.report!.findings.some((f) => f.id === 'shipyard.glossary.duplicate-authority')).toBe(true);
+    }
+  });
+
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
     const { report } = runAudit(yard);
     expect(report!.findings.length).toBeGreaterThan(0);
