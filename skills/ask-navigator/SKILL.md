@@ -120,6 +120,8 @@ Resolutions land in the shipyard's paper trail the moment they settle — the sa
 - a decision passing the ADR test (hard to reverse, surprising without context, a real tradeoff) → `docs/adr/NNNN-<slug>.md`
 - a business rule or background fact → `docs/business/` (one article per business question)
 
+**Legacy yards (CONTEXT.md only)**: If the yard has only `CONTEXT.md` and no `GLOSSARY.md`, run drydock before writing sediment to migrate the glossary authority to `GLOSSARY.md`. Do not create a fresh `GLOSSARY.md` beside the legacy file; this would split authorities. When drydock's legacy glossary migration completes, glossary writes will target `GLOSSARY.md` automatically. Alternatively, defer this sediment landing in the map's Notes (see below).
+
 When the yard is not laid (the captain declined drydock at charting time), **defer, don't skip**: record each pending landing as one line in the map's Notes under a `Deferred sediment` heading. The later `/oh-my-claudecode:launch` run's yard gate treats the un-laid surfaces as findings, and the deferred lines tell it exactly what to land first.
 
 ## Exit — hand off, don't build

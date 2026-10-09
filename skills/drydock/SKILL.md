@@ -70,6 +70,8 @@ The document language for the generated harness files is a file-backed decision,
 
 Legacy glossary migration: if the yard has `CONTEXT.md` but no `GLOSSARY.md`, rename it to `GLOSSARY.md` (`git mv` when tracked) before resolving the language or scaffolding anything, preserving its content and frontmatter byte-for-byte. Never create a fresh `GLOSSARY.md` beside an existing `CONTEXT.md`; one yard has exactly one glossary authority. If both files exist, `GLOSSARY.md` is authoritative and the leftover `CONTEXT.md` is reported for the human to merge or remove.
 
+**CLAUDE.md rewrite during migration**: After renaming the glossary, if `CLAUDE.md` exists and contains legacy references like `Glossary: CONTEXT.md` or `On term conflicts CONTEXT.md wins`, rewrite them to use `GLOSSARY.md` instead. This prevents installed instructions from pointing to a nonexistent file. The rewrite is part of the migration, not the scaffold step, so existing yards automatically get the corrected references.
+
 Resolution order:
 
 1. An explicit human choice in the current invocation wins when valid. Normalize it to a stable BCP-47-style tag: lowercase language, Title-Case script, uppercase region. Invalid explicit input must be asked once rather than guessed.

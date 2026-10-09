@@ -72,6 +72,25 @@ function checkSurfaces(root) {
   return findings;
 }
 
+function checkDuplicateGlossaryAuthority(root) {
+  const glossaryExists = existsSync(join(root, 'GLOSSARY.md'));
+  const contextExists = existsSync(join(root, 'CONTEXT.md'));
+  if (glossaryExists && contextExists) {
+    return [
+      finding(
+        'shipyard.glossary.duplicate-authority',
+        'Both GLOSSARY.md and CONTEXT.md exist — only one glossary authority is allowed',
+        SEVERITY.high,
+        'high',
+        true,
+        ['GLOSSARY.md', 'CONTEXT.md'],
+        'Run drydock --check and follow the migration guidance, or manually merge CONTEXT.md into GLOSSARY.md and remove CONTEXT.md.',
+      ),
+    ];
+  }
+  return [];
+}
+
 function checkDocumentLanguage(root) {
   // GLOSSARY.md is the authority; the legacy name is read only as fallback.
   const glossaryPath = existsSync(join(root, 'GLOSSARY.md')) ? join(root, 'GLOSSARY.md') : join(root, 'CONTEXT.md');
@@ -285,6 +304,7 @@ function checkIntentStatuses(root) {
 
 export async function auditYard(root) {
   return [
+    ...checkDuplicateGlossaryAuthority(root),
     ...checkSurfaces(root),
     ...checkDocumentLanguage(root),
     ...checkClaudeMdDeadPaths(root),

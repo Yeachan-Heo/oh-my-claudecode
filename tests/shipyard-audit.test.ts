@@ -99,16 +99,17 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(report!.findings).toEqual([]);
   });
 
-  it('audits against GLOSSARY.md and ignores legacy CONTEXT.md when both are present', () => {
+  it('emits a duplicate-glossary-authority finding when both GLOSSARY.md and CONTEXT.md exist', () => {
     seedCleanYard(yard, 'GLOSSARY.md');
     writeFileSync(join(yard, 'CONTEXT.md'), '---\ndocumentLanguage: en\n---\n\n# Glossary\n');
-    expect(runAudit(yard).status).toBe(0);
+    const result = runAudit(yard);
+    expect(result.status).toBe(1);
+    expect(result.report!.findings.some((f) => f.id === 'shipyard.glossary.duplicate-authority')).toBe(true);
 
-    // an invalid tag in GLOSSARY.md is still reported even though the legacy
-    // file next to it carries a valid tag
-    writeFileSync(join(yard, 'GLOSSARY.md'), '---\ndocumentLanguage: not-a-tag!\n---\n\n# Glossary\n');
-    const second = runAudit(yard);
-    expect(second.report!.findings.some((f) => f.id === 'shipyard.document-language.invalid-tag')).toBe(true);
+    // the duplicate-authority finding is reported even when both files have valid tags
+    const findings = result.report!.findings.filter((f) => f.id === 'shipyard.glossary.duplicate-authority');
+    expect(findings.length).toBe(1);
+    expect(findings[0].evidence).toEqual(['GLOSSARY.md', 'CONTEXT.md']);
   });
 
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
