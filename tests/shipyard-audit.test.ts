@@ -145,6 +145,14 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     }
   });
 
+  it('ignores a seed heading inside a fenced example when detecting a legacy glossary', () => {
+    seedCleanYard(yard, 'GLOSSARY.md');
+    writeFileSync(join(yard, 'CONTEXT.md'), 'Agent notes.\n\n```markdown\n# Glossary\n```\n');
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings).toEqual([]);
+  });
+
   it('every finding carries the shared severity/confidence/actionable vocabulary', () => {
     const { report } = runAudit(yard);
     expect(report!.findings.length).toBeGreaterThan(0);

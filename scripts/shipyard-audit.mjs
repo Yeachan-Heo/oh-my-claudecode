@@ -60,7 +60,7 @@ function isLegacyGlossary(root) {
   const content = readFileSync(path, 'utf-8');
   const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (frontmatter && /^documentLanguage:/m.test(frontmatter[1])) return true;
-  const body = frontmatter ? content.slice(frontmatter[0].length) : content;
+  const body = stripFencedBlocks(frontmatter ? content.slice(frontmatter[0].length) : content);
   const heading = body.match(/^#\s+(.+?)\s*$/m);
   return Boolean(heading && LEGACY_GLOSSARY_HEADINGS.has(heading[1]));
 }
