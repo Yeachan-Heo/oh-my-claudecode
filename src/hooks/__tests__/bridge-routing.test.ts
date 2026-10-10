@@ -2278,7 +2278,7 @@ $ ultrawork search the codebase`,
       expect(decision.behavior).toBe('allow');
     });
 
-    it('permission-request: camelCase input auto-allows explicitly targeted single-test commands', async () => {
+    it('permission-request: camelCase input leaves targeted tests to normal permission flow', async () => {
       const tempDir = mkdtempSync(join(tmpdir(), 'bridge-858-permission-camel-'));
       try {
         mkdirSync(join(tempDir, 'src', '__tests__'), { recursive: true });
@@ -2295,10 +2295,9 @@ $ ultrawork search the codebase`,
         const result = await processHook('permission-request', input);
         expect(result.continue).toBe(true);
         const out = result as unknown as Record<string, unknown>;
-        expect(out.hookSpecificOutput).toBeDefined();
-        const specific = out.hookSpecificOutput as Record<string, unknown>;
-        const decision = specific.decision as Record<string, unknown>;
-        expect(decision.behavior).toBe('allow');
+        const specific = out.hookSpecificOutput as Record<string, unknown> | undefined;
+        const decision = specific?.decision as Record<string, unknown> | undefined;
+        expect(decision?.behavior).not.toBe('allow');
       } finally {
         rmSync(tempDir, { recursive: true, force: true });
       }

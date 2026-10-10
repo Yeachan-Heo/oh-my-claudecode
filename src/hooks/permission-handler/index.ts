@@ -31,15 +31,8 @@ export interface HookOutput {
 }
 
 const SAFE_PATTERNS = [
-  /^git (status|diff|log|branch|show|fetch)/,
-  /^npm run (lint|build|check|typecheck)/,
-  /^pnpm (lint|build|check|typecheck|run (lint|build|check|typecheck))/,
-  /^yarn (lint|build|check|typecheck|run (lint|build|check|typecheck))/,
-  /^tsc( |$)/,
-  /^gh (issue|pr) (view|list|status)\b/,
-  /^eslint /,
-  /^prettier /,
-  /^cargo (check|clippy|build)/,
+  /^git status$/,
+  /^gh (issue|pr) (view|list|status)(?=$|\s)/,
   /^ls( |$)/,
   // REMOVED: cat, head, tail - they allow reading arbitrary files
 ];
@@ -464,53 +457,6 @@ function isSafeRipgrepInspectionCommand(tokens: string[], cwd: string): boolean 
   return areSafeRepoPaths(cwd, searchPaths, { allowDirectory: false });
 }
 
-function isSafeTargetedVitestCommand(tokens: string[], cwd: string): boolean {
-  const supportedPrefixes: string[][] = [
-    ['vitest', 'run'],
-    ['pnpm', 'vitest', 'run'],
-    ['yarn', 'vitest', 'run'],
-  ];
-
-  const matchedPrefix = supportedPrefixes.find(prefix =>
-    prefix.every((part, index) => tokens[index] === part),
-  );
-
-  if (!matchedPrefix) {
-    return false;
-  }
-
-  const remaining = tokens.slice(matchedPrefix.length);
-  return remaining.length === 1 && isSafeRepoPath(cwd, remaining[0], { allowDirectory: false });
-}
-
-function isSafeTargetedPackageManagerTestCommand(tokens: string[], cwd: string): boolean {
-  const supportedPrefixes: string[][] = [
-    ['npm', 'test', '--', '--run'],
-    ['npm', 'run', 'test', '--', '--run'],
-    ['pnpm', 'test', '--', '--run'],
-    ['pnpm', 'run', 'test', '--', '--run'],
-    ['yarn', 'test', '--run'],
-  ];
-
-  const matchedPrefix = supportedPrefixes.find(prefix =>
-    prefix.every((part, index) => tokens[index] === part),
-  );
-
-  if (!matchedPrefix) {
-    return false;
-  }
-
-  const remaining = tokens.slice(matchedPrefix.length);
-  return remaining.length === 1 && isSafeRepoPath(cwd, remaining[0], { allowDirectory: false });
-}
-
-function isSafeTargetedNodeTestCommand(tokens: string[], cwd: string): boolean {
-  return tokens[0] === 'node'
-    && tokens[1] === '--test'
-    && tokens.length === 3
-    && isSafeRepoPath(cwd, tokens[2], { allowDirectory: false });
-}
-
 export function isSafeRepoInspectionCommand(command: string, cwd: string): boolean {
   const trimmed = command.trim();
   if (!trimmed || DANGEROUS_SHELL_CHARS.test(trimmed)) {
@@ -528,26 +474,9 @@ export function isSafeRepoInspectionCommand(command: string, cwd: string): boole
     || isSafeRipgrepInspectionCommand(tokens, cwd);
 }
 
-export function isSafeTargetedLocalTestCommand(command: string, cwd: string): boolean {
-  const trimmed = command.trim();
-  if (!trimmed || DANGEROUS_SHELL_CHARS.test(trimmed)) {
-    return false;
-  }
-
-  const tokens = tokenizeShellCommand(trimmed);
-  if (!tokens) {
-    return false;
-  }
-
-  return isSafeTargetedVitestCommand(tokens, cwd)
-    || isSafeTargetedPackageManagerTestCommand(tokens, cwd)
-    || isSafeTargetedNodeTestCommand(tokens, cwd);
-}
-
 export function isSafeAutoApprovedCommand(command: string, cwd: string): boolean {
   return isSafeCommand(command)
     || isSafeRepoInspectionCommand(command, cwd)
-    || isSafeTargetedLocalTestCommand(command, cwd)
     || isHeredocWithSafeBase(command);
 }
 
@@ -658,7 +587,7 @@ export function processPermissionRequest(input: PermissionRequestInput): HookOut
   if (!shouldAskBashPermission && isSafeAutoApprovedCommand(command, input.cwd)) {
     const reason = isHeredocWithSafeBase(command)
       ? 'Safe command with heredoc content'
-      : 'Safe read-only or test command';
+      : 'Safe read-only command';
     return {
       continue: true,
       hookSpecificOutput: {
