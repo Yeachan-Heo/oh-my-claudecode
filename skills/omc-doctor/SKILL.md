@@ -32,6 +32,7 @@ Read both `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (profile-level) and `.
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.sh`
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-start.sh`
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stop-continuation.sh`
+- `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/silent-auto-update.sh`
 
 **Diagnosis**:
 - If found: CRITICAL - legacy hooks causing duplicates
@@ -43,7 +44,7 @@ ls -la "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/*.sh 2>/dev/null
 ```
 
 **Diagnosis**:
-- If `keyword-detector.sh`, `persistent-mode.sh`, `session-start.sh`, or `stop-continuation.sh` exist: WARN - legacy scripts (can cause confusion)
+- If `keyword-detector.sh`, `persistent-mode.sh`, `session-start.sh`, `stop-continuation.sh`, or `silent-auto-update.sh` exist: WARN - legacy scripts (can cause confusion)
 
 ### Step 4: Check CLAUDE.md
 
@@ -184,6 +185,7 @@ rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/keyword-detector.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/persistent-mode.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/session-start.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/stop-continuation.sh
+rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/silent-auto-update.sh
 ```
 
 ### Fix: Outdated Plugin

@@ -443,6 +443,9 @@ describe('Builtin Skills', () => {
       expect(raw).toContain('persistent-mode.sh');
       expect(raw).toContain('session-start.sh');
       expect(raw).toContain('stop-continuation.sh');
+      expect(raw).toContain('`bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/silent-auto-update.sh`');
+      expect(raw).toContain('or `silent-auto-update.sh` exist: WARN - legacy scripts');
+      expect(raw).toContain('rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/silent-auto-update.sh');
       expect(raw).toContain('Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays');
       expect(raw).toContain('Preserve every unmatched hook object and every matcher group that still has hooks, including user and third-party hooks');
       expect(raw).toContain('If removing matched objects leaves a matcher group with no hooks, remove that now-empty group');
