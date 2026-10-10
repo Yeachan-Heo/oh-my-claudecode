@@ -431,3 +431,12 @@ describe('mergeProjectMemory', () => {
     expect(merged.build.scripts.build).toBe('tsc');
   });
 });
+
+describe('custom note identity delimiters', () => {
+  it('preserves distinct category/content tuples with embedded delimiters', () => {
+    const first = { category: 'api', content: 'status::failure', timestamp: 1 };
+    const second = { category: 'api::status', content: 'failure', timestamp: 2 };
+    const result = deepMerge({ customNotes: [first] }, { customNotes: [second] });
+    expect(result.customNotes).toEqual([first, second]);
+  });
+});

@@ -95,7 +95,7 @@ function mergeArrays(fieldName: string, base: unknown[], incoming: unknown[]): u
       return mergeByKey(
         base as CustomNote[],
         incoming as CustomNote[],
-        (note: CustomNote) => `${note.category}::${note.content}`,
+        (note: CustomNote) => JSON.stringify([note.category, note.content]),
         (a, b) => (b.timestamp >= a.timestamp ? b : a),
       );
 
