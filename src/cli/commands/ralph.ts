@@ -4,12 +4,13 @@
  *
  * Reuses the factory chain's AFK link profile (scoped allowlist +
  * project,local settings) and its argv builder, so a ralph run spawned here
- * obeys the same isolation contract as a chain link: no user-level hooks or
- * settings, no general Bash — only the gh/file/WebFetch surface, the
- * read-only git commands ralph's own stale-state detection needs, and
- * exactly the declared `--verify` commands.
+ * obeys the same default isolation contract as a chain link: user-level hooks
+ * and settings are excluded unless OMC_AFK_INCLUDE_USER_SETTINGS=1 is set, no
+ * general Bash is allowed, and only the gh/file/WebFetch surface, the
+ * read-only git commands ralph's own stale-state detection needs, and exactly
+ * the declared `--verify` commands are available.
  *
- * Two consequences of that isolation shape the launch:
+ * Two consequences of the default isolation shape the launch:
  * - A session with `--setting-sources project,local` cannot see
  *   plugin-bundled skills, so a `/oh-my-claudecode:ralph` prompt degrades
  *   into a plain one-shot request. The ralph skill is materialized as a
@@ -119,7 +120,7 @@ export function ralphCommand(program: Command): Command {
     .description('Ralph persistence loop launchers and feedback verification');
   cmd
     .command('afk')
-    .description('Launch a headless ralph session with the factory AFK permission profile (scoped allowlist, project,local settings)')
+    .description('Launch a headless ralph session with the factory AFK permission profile (scoped allowlist, project,local settings by default)')
     .argument('<task>', 'task description handed to the ralph loop')
     .option('--verify <command>', 'verification command the session may run (repeatable; validated like route-table verify entries)', (value: string, previous: string[]) => [...previous, value], [] as string[])
     .addHelpText('after', `

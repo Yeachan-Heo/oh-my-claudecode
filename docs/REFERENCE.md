@@ -114,6 +114,7 @@ If both configurations exist, **project-scoped takes precedence** over global:
 | Variable                   | Default              | Description                                                                                                                                                                                                                                                                 |
 | -------------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OMC_STATE_DIR`            | _(unset)_            | Centralized state directory. When set, OMC stores state at `$OMC_STATE_DIR/{project-id}/` instead of `{worktree}/.omc/`. This preserves state across worktree deletions. The project identifier is derived from the git remote URL (or worktree path for local-only repos). |
+| `OMC_AFK_INCLUDE_USER_SETTINGS` | `0` | Set to `1` to load user-level settings and hooks in factory chain links and `omc ralph afk`; see the AFK settings note below. |
 | `OMC_BRIDGE_SCRIPT`        | _(auto-detected)_    | Path to the Python bridge script                                                                                                                                                                                                                                            |
 | `OMC_PARALLEL_EXECUTION`   | `true`               | Enable/disable parallel agent execution                                                                                                                                                                                                                                     |
 | `OMC_CODEX_DEFAULT_MODEL`  | _(provider default)_ | Default model for Codex CLI workers                                                                                                                                                                                                                                         |
@@ -132,6 +133,10 @@ If both configurations exist, **project-scoped takes precedence** over global:
 | `OMC_FREE_MEMORY_THRESHOLD` | `256` | Free memory threshold in MB. Gate blocks operations when free memory falls below this. Set to negative value to disable. |
 | `OMC_MAX_SIBLING_SESSIONS` | `8` | Maximum concurrent OMC sessions before gating expensive operations. Set to negative value to disable. |
 | `OMC_HOST_LOAD_GATE_DISABLED` | _(unset)_ | Set to any value to disable the host load gate entirely. |
+
+#### Headless factory and AFK settings
+
+Factory chain links and `omc ralph afk` use Claude Code's `project,local` setting sources by default, so user-level settings and hooks do not run in these unattended sessions. Set `OMC_AFK_INCLUDE_USER_SETTINGS=1` in the environment that launches OMC to include the `user` source (`user,project,local`). This is opt-in because user-level settings may run arbitrary hooks in unattended sessions; enable it only when those hooks are trusted.
 
 #### Host Load Gate
 

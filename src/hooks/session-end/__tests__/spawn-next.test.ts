@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { AFK_ALLOWED_TOOLS, AFK_SPAWN_FLAGS, defaultSpawnFn, executeSpawnNext, factoryLinkArgv, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
+import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS, defaultSpawnFn, executeSpawnNext, factoryLinkArgv, planSpawnNext, spawnNextAlertComment, type SpawnNextChain, type SpawnFn } from '../spawn-next.js';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -11,6 +11,9 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import * as childProcess from 'child_process';
+
+beforeEach(() => vi.stubEnv(AFK_INCLUDE_USER_SETTINGS_ENV, '0'));
+afterEach(() => vi.unstubAllEnvs());
 
 const chain: SpawnNextChain = {
   outcome: 'success',
@@ -74,7 +77,7 @@ describe('planSpawnNext', () => {
     expect(tools).toBe(`${AFK_ALLOWED_TOOLS},Bash(npm test)`);
   });
 
-  it('isolates AFK links from user-level settings via --setting-sources', () => {
+  it('keeps user-level settings disabled by default', () => {
     const plan = planSpawnNext(chain, '/omc-root');
     const sourcesIdx = plan?.spawnArgv.indexOf('--setting-sources');
     expect(sourcesIdx).toBeGreaterThan(-1);
@@ -237,6 +240,18 @@ describe('factoryLinkArgv', () => {
   it('drops verify commands that fail the argv-boundary recheck, leaving the base profile', () => {
     const argv = factoryLinkArgv('/launch 继续 launch 环', 'sess-9', ['npm test && whoami', 'npm test,Write']);
     expect(argv.slice(4)).toEqual(AFK_SPAWN_FLAGS);
+  });
+
+  it('includes user-level settings only when explicitly opted in', () => {
+    const previous = process.env[AFK_INCLUDE_USER_SETTINGS_ENV];
+    process.env[AFK_INCLUDE_USER_SETTINGS_ENV] = '1';
+    try {
+      const argv = factoryLinkArgv('prompt', 'sess-9');
+      expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('user,project,local');
+    } finally {
+      if (previous === undefined) delete process.env[AFK_INCLUDE_USER_SETTINGS_ENV];
+      else process.env[AFK_INCLUDE_USER_SETTINGS_ENV] = previous;
+    }
   });
 });
 

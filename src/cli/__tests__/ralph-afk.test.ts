@@ -15,7 +15,7 @@ vi.mock('../../factory/map-ingest.js', async (importOriginal) => {
   return { ...actual, loadMapRecords: ingestMock.loadMapRecords };
 });
 
-import { AFK_ALLOWED_TOOLS, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
+import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
 import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
 import { Command } from 'commander';
 
@@ -33,7 +33,10 @@ afterEach(() => {
   // The afk action exports these for the spawned session; keep them out of later tests.
   delete process.env.OMC_SESSION_ID;
   delete process.env[RALPH_AFK_FEEDBACK_ENV];
+  vi.unstubAllEnvs();
 });
+
+beforeEach(() => vi.stubEnv(AFK_INCLUDE_USER_SETTINGS_ENV, '0'));
 
 describe('ralphAfkArgv', () => {
   it('invokes /ralph with --no-deslop, the task, and a fresh session id', () => {
@@ -47,6 +50,12 @@ describe('ralphAfkArgv', () => {
     expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('project,local');
     expect(argv[argv.indexOf('--allowedTools') + 1]).toContain(AFK_ALLOWED_TOOLS);
     expect(argv).toHaveLength(4 + AFK_SPAWN_FLAGS.length);
+  });
+
+  it('includes user-level settings for ralph AFK only when explicitly opted in', () => {
+    vi.stubEnv(AFK_INCLUDE_USER_SETTINGS_ENV, '1');
+    const argv = ralphAfkArgv('task', [], 'sess-opt-in');
+    expect(argv[argv.indexOf('--setting-sources') + 1]).toBe('user,project,local');
   });
 
   it('extends the AFK allowedTools with the read-only git set plus the declared verify commands', () => {
