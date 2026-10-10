@@ -287,6 +287,10 @@ describe('permission-handler', () => {
           cmd: `git commit -m "$(cat <<"EOF"\nMessage body\nEOF\n)"`,
         },
         {
+          desc: 'git commit with whitespace before the quoted delimiter',
+          cmd: `git commit -m "$(cat << 'EOF'\nMessage body\nEOF\n)"`,
+        },
+        {
           desc: 'git commit with long multi-line message',
           cmd: `git commit -m "$(cat <<'EOF'\nfeat: add authentication module\n\nThis adds OAuth2 support with:\n- Google provider\n- GitHub provider\n- Session management\n\nCloses #123\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n)"`,
         },
@@ -697,6 +701,13 @@ describe('permission-handler', () => {
         expect(result.continue).toBe(true);
         expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
         expect(result.hookSpecificOutput?.decision?.reason).toContain('heredoc');
+      });
+
+      it('should auto-allow a quoted heredoc with whitespace before its delimiter', () => {
+        const cmd = `git commit -m "$(cat << 'EOF'\nfeat: add new feature\nEOF\n)"`;
+        const result = processPermissionRequest(createInput(cmd));
+        expect(result.continue).toBe(true);
+        expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
       });
 
       it('should not auto-allow a heredoc commit with a trailing command', () => {

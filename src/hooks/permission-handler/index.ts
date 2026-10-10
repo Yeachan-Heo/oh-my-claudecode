@@ -55,7 +55,7 @@ const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\t\0\\{}\[\]*?~!#]/;
  * supplied by a cat heredoc inside a quoted command substitution.
  */
 const SAFE_HEREDOC_COMMAND_PATTERN =
-  /^(git (?:commit|tag)(?=[ \t])[^\r\n]*)[ \t]+-m[ \t]+"\$\(cat[ \t]+<<(-?)(?:'(\w+)'|"(\w+)")$/;
+  /^(git (?:commit|tag)(?=[ \t])[^\r\n]*)[ \t]+-m[ \t]+"\$\(cat[ \t]+<<(-?)[ \t]*(?:'(\w+)'|"(\w+)")$/;
 
 const SAFE_RIPGREP_FLAGS = new Set([
   '-n',
