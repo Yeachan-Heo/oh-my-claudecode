@@ -341,8 +341,10 @@ describe('SessionEnd durable worker', () => {
     // Model provider auth must reach worker-spawned sessions, or they exit "Not logged in"
     vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'test-token');
     vi.stubEnv('ANTHROPIC_BASE_URL', 'https://example.invalid');
+    vi.stubEnv('OMC_AFK_INCLUDE_USER_SETTINGS', '1');
     expect(workerEnvironment()).toHaveProperty('ANTHROPIC_AUTH_TOKEN', 'test-token');
     expect(workerEnvironment()).toHaveProperty('ANTHROPIC_BASE_URL', 'https://example.invalid');
+    expect(workerEnvironment()).toHaveProperty('OMC_AFK_INCLUDE_USER_SETTINGS', '1');
     
     // On POSIX, APPDATA/LOCALAPPDATA should not be forwarded
     if (process.platform !== 'win32') {

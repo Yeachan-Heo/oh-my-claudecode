@@ -63,13 +63,23 @@ export const AFK_ALLOWED_TOOLS = [
   'WebFetch(domain:github.com)',
 ].join(',');
 
+export const AFK_INCLUDE_USER_SETTINGS_ENV = 'OMC_AFK_INCLUDE_USER_SETTINGS';
+
 export const AFK_SPAWN_FLAGS = [
   '--permission-mode', 'acceptEdits',
   '--allowedTools', AFK_ALLOWED_TOOLS,
-  // Isolation: AFK links run with project+local settings only — user-level
-  // hooks/settings must never fire in a headless chain link.
+  // Default isolation: user-level hooks/settings do not fire in a headless
+  // chain link unless OMC_AFK_INCLUDE_USER_SETTINGS=1 opts them in.
   '--setting-sources', 'project,local',
 ];
+
+function afkSpawnFlags(): string[] {
+  const flags = [...AFK_SPAWN_FLAGS];
+  if (process.env[AFK_INCLUDE_USER_SETTINGS_ENV] === '1') {
+    flags[flags.indexOf('--setting-sources') + 1] = 'user,project,local';
+  }
+  return flags;
+}
 
 /**
  * Args (command excluded) for one factory chain link: intent prompt + AFK
@@ -85,7 +95,7 @@ export function factoryLinkArgv(
   fixedBashCommands: readonly string[] = [],
 ): string[] {
   if (verifyCommands.length === 0 && fixedBashCommands.length === 0) {
-    return ['-p', prompt, '--session-id', sessionId, ...AFK_SPAWN_FLAGS];
+    return ['-p', prompt, '--session-id', sessionId, ...afkSpawnFlags()];
   }
   const isValid = (command: string) => command.length <= MAX_VERIFY_COMMAND_LENGTH && VERIFY_COMMAND_PATTERN.test(command);
   // fixedBashCommands are caller-owned constants (e.g. ralph's read-only git
@@ -98,7 +108,7 @@ export function factoryLinkArgv(
       .slice(0, MAX_VERIFY_COMMANDS)
       .map((command) => `Bash(${command})`),
   ].join(',');
-  const flags = [...AFK_SPAWN_FLAGS];
+  const flags = afkSpawnFlags();
   flags[flags.indexOf('--allowedTools') + 1] = allowedTools;
   return ['-p', prompt, '--session-id', sessionId, ...flags];
 }
