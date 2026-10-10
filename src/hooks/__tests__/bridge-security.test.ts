@@ -20,7 +20,6 @@ import {
 import {
   isSafeCommand,
   isSafeRepoInspectionCommand,
-  isSafeTargetedLocalTestCommand,
   processPermissionRequest,
   PermissionRequestInput,
 } from '../permission-handler/index.js';
@@ -272,15 +271,6 @@ describe('Permission Handler - Dangerous Commands', () => {
     // Safe commands that should be allowed
     it.each([
       'git status',
-      'git diff HEAD',
-      'git log --oneline',
-      'git branch -a',
-      'npm run build',
-      'npm run lint',
-      'tsc',
-      'tsc --noEmit',
-      'eslint src/',
-      'prettier --check .',
       'ls',
       'ls -la',
     ])('should allow safe command: %s', (command) => {
@@ -336,15 +326,14 @@ describe('Permission Handler - Dangerous Commands', () => {
     });
   });
 
-  describe('narrow safe repo inspection and targeted test commands', () => {
+  describe('narrow safe repo inspection commands', () => {
     let testDir: string;
 
     beforeEach(() => {
       testDir = mkdtempSync(join(tmpdir(), 'permission-safe-'));
-      mkdirSync(join(testDir, 'src', '__tests__'), { recursive: true });
+      mkdirSync(join(testDir, 'src'), { recursive: true });
       initializeGitRepo(testDir);
       writeFileSync(join(testDir, 'src', 'sample.ts'), 'export const value = 1;\n');
-      writeFileSync(join(testDir, 'src', '__tests__', 'sample.test.ts'), 'test("x", () => {});\n');
     });
 
     afterEach(() => {
@@ -365,21 +354,14 @@ describe('Permission Handler - Dangerous Commands', () => {
       expect(isSafeRepoInspectionCommand('rg --hidden SECRET .', testDir)).toBe(false);
     });
 
-    it('should allow targeted single-test commands', () => {
-      expect(isSafeTargetedLocalTestCommand('vitest run src/__tests__/sample.test.ts', testDir)).toBe(true);
-      expect(isSafeTargetedLocalTestCommand('npm test -- --run src/__tests__/sample.test.ts', testDir)).toBe(true);
-    });
-
     it('should reject repo-scoped commands from non-git temp dirs', () => {
       const nonGitDir = mkdtempSync(join(tmpdir(), 'permission-safe-non-git-'));
 
       try {
-        mkdirSync(join(nonGitDir, 'src', '__tests__'), { recursive: true });
+        mkdirSync(join(nonGitDir, 'src'), { recursive: true });
         writeFileSync(join(nonGitDir, 'src', 'sample.ts'), 'export const value = 1;\n');
-        writeFileSync(join(nonGitDir, 'src', '__tests__', 'sample.test.ts'), 'test("x", () => {});\n');
 
         expect(isSafeRepoInspectionCommand('cat src/sample.ts', nonGitDir)).toBe(false);
-        expect(isSafeTargetedLocalTestCommand('vitest run src/__tests__/sample.test.ts', nonGitDir)).toBe(false);
       } finally {
         rmSync(nonGitDir, { recursive: true, force: true });
       }
@@ -406,7 +388,7 @@ describe('Permission Handler - Dangerous Commands', () => {
       expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
     });
 
-    it('should auto-allow targeted single-test Bash commands when scoped to one file', () => {
+    it('should not auto-allow a targeted Bash test file from the repository', () => {
       const testDir = mkdtempSync(join(tmpdir(), 'permission-request-safe-test-'));
       try {
         mkdirSync(join(testDir, 'src', '__tests__'), { recursive: true });
@@ -419,7 +401,7 @@ describe('Permission Handler - Dangerous Commands', () => {
         });
 
         expect(result.continue).toBe(true);
-        expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
+        expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
       } finally {
         rmSync(testDir, { recursive: true, force: true });
       }
