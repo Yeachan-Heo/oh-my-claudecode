@@ -128,3 +128,24 @@ describe('SSRF Guard', () => {
     });
   });
 });
+
+describe('IPv6 non-public range coverage', () => {
+  it.each([
+    'fc00::1', 'fc01::1', 'fd00::1', 'fdff:ffff::1',
+    'fe80::1', 'fe90::1', 'febf:ffff::1', '::', 'ff02::1',
+    'FC01:0000:0000:0000:0000:0000:0000:0001', 'FDFF::1', 'FEBF::1',
+  ])('blocks literal %s', (host) => {
+    expect(validateUrlForSSRF(`https://[${host}]/api`).allowed).toBe(false);
+  });
+
+  it.each(['fbff::1', 'fe00::1', 'fec0::1'])(
+    'preserves an address outside the blocked prefixes: %s',
+    (host) => {
+      expect(validateUrlForSSRF(`https://[${host}]/api`).allowed).toBe(true);
+    },
+  );
+
+  it('preserves a public IPv6 endpoint', () => {
+    expect(validateUrlForSSRF('https://[2001:4860:4860::8888]/api').allowed).toBe(true);
+  });
+});
