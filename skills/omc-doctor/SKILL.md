@@ -176,7 +176,7 @@ If yes, apply fixes. For each affected `settings.json`, approval of this general
 ### Fix: Legacy Hooks in settings.json
 For each affected profile-level or project-level settings file:
 1. Match only hook objects with `type: "command"` whose `command` references one of the specific legacy OMC script paths listed in Step 2. Do not match other scripts merely because they are under a `hooks/` directory.
-2. Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays. Preserve every unmatched hook object and every event group, including user and third-party hooks; retain the top-level `"hooks"` object and leave all other settings unchanged.
+2. Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays. Preserve every unmatched hook object and every matcher group that still has hooks, including user and third-party hooks. If removing matched objects leaves a matcher group with no hooks, remove that now-empty group; remove an event key when no groups remain and remove the top-level `"hooks"` key when no events remain. Leave all other settings unchanged.
 
 ### Fix: Legacy Bash Scripts
 ```bash

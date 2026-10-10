@@ -444,7 +444,9 @@ describe('Builtin Skills', () => {
       expect(raw).toContain('session-start.sh');
       expect(raw).toContain('stop-continuation.sh');
       expect(raw).toContain('Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays');
-      expect(raw).toContain('Preserve every unmatched hook object and every event group, including user and third-party hooks');
+      expect(raw).toContain('Preserve every unmatched hook object and every matcher group that still has hooks, including user and third-party hooks');
+      expect(raw).toContain('If removing matched objects leaves a matcher group with no hooks, remove that now-empty group');
+      expect(raw).toContain('remove an event key when no groups remain and remove the top-level `"hooks"` key when no events remain');
       expect(raw).not.toContain('Remove the `"hooks"` section');
     });
 
