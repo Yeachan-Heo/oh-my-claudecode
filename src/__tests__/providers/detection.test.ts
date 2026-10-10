@@ -209,3 +209,14 @@ describe('parseRemoteUrl', () => {
     });
   });
 });
+
+describe('Azure provider hostname identity', () => {
+  it.each([
+    'https://dev.azure.com.evil.invalid/org/proj/_git/repo',
+    'https://notdev.azure.com/org/proj/_git/repo',
+    'git@notssh.dev.azure.com:v3/org/proj/repo',
+  ])('does not classify a lookalike host as Azure DevOps: %s', (url) => {
+    expect(detectProvider(url)).toBe('unknown');
+    expect(parseRemoteUrl(url)?.provider).toBe('unknown');
+  });
+});

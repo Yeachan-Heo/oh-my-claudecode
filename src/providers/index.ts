@@ -10,7 +10,7 @@ import type { ProviderName, RemoteUrlInfo, GitProvider } from './types.js';
 import { GitHubProvider } from './github.js';
 import { GitLabProvider } from './gitlab.js';
 import { BitbucketProvider } from './bitbucket.js';
-import { AzureDevOpsProvider } from './azure-devops.js';
+import { AzureDevOpsProvider, isAzureDevOpsHost } from './azure-devops.js';
 import { GiteaProvider } from './gitea.js';
 
 // Singleton provider registry
@@ -82,7 +82,7 @@ export function detectProvider(remoteUrl: string): ProviderName {
   const host = rawHost.replace(/:\d+$/, ''); // strip port for matching
 
   // Azure DevOps (check before generic patterns)
-  if (host.includes('dev.azure.com') || host.includes('ssh.dev.azure.com') || host.endsWith('.visualstudio.com')) {
+  if (isAzureDevOpsHost(host)) {
     return 'azure-devops';
   }
 
@@ -124,7 +124,7 @@ export function parseRemoteUrl(url: string): RemoteUrlInfo | null {
 
   // Azure DevOps HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
   const azureHttpsMatch = trimmed.match(
-    /https?:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
+    /^https?:\/\/dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
   );
   if (azureHttpsMatch) {
     return {
@@ -137,7 +137,7 @@ export function parseRemoteUrl(url: string): RemoteUrlInfo | null {
 
   // Azure DevOps SSH: git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
   const azureSshMatch = trimmed.match(
-    /git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+?)(?:\.git)?$/
+    /^git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+?)(?:\.git)?$/
   );
   if (azureSshMatch) {
     return {
@@ -150,7 +150,7 @@ export function parseRemoteUrl(url: string): RemoteUrlInfo | null {
 
   // Azure DevOps legacy HTTPS: https://{org}.visualstudio.com/{project}/_git/{repo}
   const azureLegacyMatch = trimmed.match(
-    /https?:\/\/([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
+    /^https?:\/\/([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
   );
   if (azureLegacyMatch) {
     return {
