@@ -1,15 +1,30 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { provisionStandaloneStateLockBridge } from '../installer/index.js';
 
 const NODE = process.execPath;
 const REPO_ROOT = resolve(join(__dirname, '..', '..'));
 const SCRIPT_PATH = join(REPO_ROOT, 'scripts', 'post-tool-use-failure.mjs');
+const TEMPLATE_ROOT = mkdtempSync(join(tmpdir(), 'omc-post-tool-use-failure-template-'));
+const TEMPLATE_HOOKS_ROOT = join(TEMPLATE_ROOT, 'hooks');
+cpSync(join(REPO_ROOT, 'templates', 'hooks'), TEMPLATE_HOOKS_ROOT, { recursive: true });
+provisionStandaloneStateLockBridge(REPO_ROOT, join(TEMPLATE_HOOKS_ROOT, 'lib', 'state-lock.mjs'));
+const TEMPLATE_SCRIPT_PATH = join(TEMPLATE_HOOKS_ROOT, 'post-tool-use-failure.mjs');
 const TEST_TMP_ROOT = join(REPO_ROOT, '.tmp-post-tool-use-failure-tests');
 
-function runHook(input: Record<string, unknown>, extraEnv?: Record<string, string>) {
-  const raw = execFileSync(NODE, [SCRIPT_PATH], {
+afterAll(() => {
+  rmSync(TEMPLATE_ROOT, { recursive: true, force: true });
+});
+
+function runHook(
+  input: Record<string, unknown>,
+  extraEnv?: Record<string, string>,
+  scriptPath = SCRIPT_PATH,
+) {
+  const raw = execFileSync(NODE, [scriptPath], {
     input: JSON.stringify(input),
     encoding: 'utf-8',
     env: {
@@ -87,8 +102,76 @@ describe('post-tool-use-failure.mjs', () => {
       retry_count: number;
     };
     expect(errorState.tool_name).toBe('mcp__omx_state__state_read');
-    expect(errorState.error).toBe('Connection refused');
+    expect(errorState.error).toBe('Tool execution failed (details omitted for privacy).');
     expect(errorState.retry_count).toBe(1);
+  });
+
+  it.each([
+    ['plugin script', SCRIPT_PATH],
+    ['installer template', TEMPLATE_SCRIPT_PATH],
+  ])('does not persist tool input or error text that may contain secrets (%s)', (_surface, scriptPath) => {
+    const cwd = makeRepoLocalTempDir();
+    const inputSecret = 'issue-4278-input-password';
+    const errorSecret = 'issue-4278-error-bearer-token';
+    const errorPath = join(cwd, '.omc', 'state', 'last-tool-error.json');
+
+    const result = runHook(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: `psql postgres://user:${inputSecret}@database.example/app` },
+        error: `Request failed: Authorization: Bearer ${errorSecret}`,
+        cwd,
+      },
+      undefined,
+      scriptPath,
+    );
+
+    const serializedState = readFileSync(errorPath, 'utf-8');
+    const state = JSON.parse(serializedState) as Record<string, unknown>;
+
+    expect(serializedState).not.toContain(inputSecret);
+    expect(serializedState).not.toContain(errorSecret);
+    expect(state).toEqual({
+      tool_name: 'Bash',
+      error: 'Tool execution failed (details omitted for privacy).',
+      timestamp: expect.any(String),
+      retry_count: 1,
+    });
+    expect(JSON.stringify(result)).not.toContain(inputSecret);
+    expect(JSON.stringify(result)).not.toContain(errorSecret);
+  });
+
+  it.each([
+    ['plugin script', SCRIPT_PATH],
+    ['installer template', TEMPLATE_SCRIPT_PATH],
+  ])('continues retry tracking without retaining failure text (%s)', (_surface, scriptPath) => {
+    const cwd = makeRepoLocalTempDir();
+    const errorPath = join(cwd, '.omc', 'state', 'last-tool-error.json');
+
+    for (const error of ['first failure', 'second failure']) {
+      const result = runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'npm test' },
+          error,
+          cwd,
+        },
+        undefined,
+        scriptPath,
+      );
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Tool "Bash" failed.');
+    }
+
+    const state = JSON.parse(readFileSync(errorPath, 'utf-8')) as {
+      tool_name: string;
+      error: string;
+      timestamp: string;
+      retry_count: number;
+    };
+    expect(state.tool_name).toBe('Bash');
+    expect(state.error).toBe('Tool execution failed (details omitted for privacy).');
+    expect(Number.isFinite(Date.parse(state.timestamp))).toBe(true);
+    expect(state.retry_count).toBe(2);
   });
 
   it('suppresses broad AGENTS scan permission-denied noise for Bash', () => {

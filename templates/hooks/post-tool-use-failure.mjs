@@ -222,8 +222,8 @@ function resolveErrorStatePaths(omcRoot, sessionId) {
 
 // Constants
 const RETRY_WINDOW_MS = 60000; // 60 seconds
-const MAX_ERROR_LENGTH = 500;
-const MAX_INPUT_PREVIEW_LENGTH = 200;
+// Do not persist tool input or raw errors: either can contain credentials.
+const GENERIC_ERROR_CLASS = 'Tool execution failed (details omitted for privacy).';
 
 // Validate that targetPath is contained within basePath (prevent path traversal)
 function isPathContained(targetPath, basePath) {
@@ -248,27 +248,6 @@ async function initOmcDir(directory) {
   }
 
   return omcDir;
-}
-
-// Truncate string to max length
-function truncate(str, maxLength) {
-  if (!str) return '';
-  const text = String(str);
-  if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength) + '...';
-}
-
-// Create input preview from tool_input
-function createInputPreview(toolInput) {
-  if (!toolInput) return '';
-
-  try {
-    // If it's an object, stringify it
-    const inputStr = typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput);
-    return truncate(inputStr, MAX_INPUT_PREVIEW_LENGTH);
-  } catch {
-    return truncate(String(toolInput), MAX_INPUT_PREVIEW_LENGTH);
-  }
 }
 
 // Read existing error state
@@ -303,13 +282,12 @@ function calculateRetryCount(existingState, toolName, currentTime) {
 }
 
 // Write error state to a pre-resolved statePath (session-scoped or legacy)
-function writeErrorState(stateDir, toolName, toolInputPreview, error, retryCount, statePath) {
+function writeErrorState(stateDir, toolName, retryCount, statePath) {
   const resolvedPath = statePath || join(stateDir, 'last-tool-error.json');
 
   const errorState = {
     tool_name: toolName,
-    tool_input_preview: toolInputPreview,
-    error: truncate(error, MAX_ERROR_LENGTH),
+    error: GENERIC_ERROR_CLASS,
     timestamp: new Date().toISOString(),
     retry_count: retryCount,
   };
@@ -384,11 +362,8 @@ async function main() {
       const currentTime = Date.now();
       retryCount = calculateRetryCount(existingState, toolName, currentTime);
 
-      // Create input preview
-      const inputPreview = createInputPreview(toolInput);
-
       // Write error state
-      writeErrorState(stateDir, toolName, inputPreview, error, retryCount, statePath);
+      writeErrorState(stateDir, toolName, retryCount, statePath);
     });
 
     // Inject continuation guidance so the model analyzes the error instead of stopping.
