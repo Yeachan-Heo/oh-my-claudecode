@@ -283,10 +283,6 @@ describe('permission-handler', () => {
           cmd: `git commit -m "$(cat <<'EOF'\nCommit message here.\n\nCo-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>\nEOF\n)"`,
         },
         {
-          desc: 'git commit with unquoted EOF delimiter',
-          cmd: `git commit -m "$(cat <<EOF\nSome commit message\nEOF\n)"`,
-        },
-        {
           desc: 'git commit with double-quoted delimiter',
           cmd: `git commit -m "$(cat <<"EOF"\nMessage body\nEOF\n)"`,
         },
@@ -324,6 +320,14 @@ describe('permission-handler', () => {
         {
           desc: 'single-line with << but no newlines',
           cmd: "git commit -m \"$(cat <<'EOF' EOF)\"",
+        },
+        {
+          desc: 'git commit with an unquoted heredoc delimiter',
+          cmd: `git commit -m "$(cat <<EOF\nSome commit message\nEOF\n)"`,
+        },
+        {
+          desc: 'git commit with command substitution in an unquoted heredoc body',
+          cmd: `git commit -m "$(cat <<EOF\n$(printf expanded)\nEOF\n)"`,
         },
         {
           desc: 'git commit with a command after the heredoc terminator',
@@ -697,6 +701,13 @@ describe('permission-handler', () => {
 
       it('should not auto-allow a heredoc commit with a trailing command', () => {
         const cmd = `git commit -m "$(cat <<'EOF'\nfeat: add new feature\nEOF\n)" && git status`;
+        const result = processPermissionRequest(createInput(cmd));
+        expect(result.continue).toBe(true);
+        expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
+      });
+
+      it('should not auto-allow an unquoted heredoc with command substitution', () => {
+        const cmd = `git commit -m "$(cat <<EOF\n$(printf expanded)\nEOF\n)"`;
         const result = processPermissionRequest(createInput(cmd));
         expect(result.continue).toBe(true);
         expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
