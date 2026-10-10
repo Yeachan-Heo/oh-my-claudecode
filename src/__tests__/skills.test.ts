@@ -434,6 +434,20 @@ describe('Builtin Skills', () => {
       expect(t).not.toContain('"ambiguityThreshold": 0.2,');
     });
 
+    it('preserves non-OMC hooks when fixing legacy settings hooks (issue #4277)', () => {
+      const raw = readFileSync(join(originalCwd, 'skills', 'omc-doctor', 'SKILL.md'), 'utf-8');
+      expect(raw).toContain('ask for explicit confirmation of that scoped change');
+      expect(raw).toContain('create a timestamped backup');
+      expect(raw).toContain('Do not match other scripts merely because they are under a `hooks/` directory');
+      expect(raw).toContain('keyword-detector.sh');
+      expect(raw).toContain('persistent-mode.sh');
+      expect(raw).toContain('session-start.sh');
+      expect(raw).toContain('stop-continuation.sh');
+      expect(raw).toContain('Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays');
+      expect(raw).toContain('Preserve every unmatched hook object and every event group, including user and third-party hooks');
+      expect(raw).not.toContain('Remove the `"hooks"` section');
+    });
+
     it('ships a config-aware deep-interview SKILL.md for native skill-loader paths (issues #2723, #3030)', () => {
       const raw = readFileSync(join(originalCwd, 'skills', 'deep-interview', 'SKILL.md'), 'utf-8');
       expect(raw).toContain('Native Plugin Invocation Guard (Issue #3030)');
