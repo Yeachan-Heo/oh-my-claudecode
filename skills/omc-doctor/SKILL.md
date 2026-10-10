@@ -31,6 +31,8 @@ Read both `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (profile-level) and `.
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/keyword-detector.sh`
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/persistent-mode.sh`
 - `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/session-start.sh`
+- `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/stop-continuation.sh`
+- `bash ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/silent-auto-update.sh`
 
 **Diagnosis**:
 - If found: CRITICAL - legacy hooks causing duplicates
@@ -42,7 +44,7 @@ ls -la "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/*.sh 2>/dev/null
 ```
 
 **Diagnosis**:
-- If `keyword-detector.sh`, `persistent-mode.sh`, `session-start.sh`, or `stop-continuation.sh` exist: WARN - legacy scripts (can cause confusion)
+- If `keyword-detector.sh`, `persistent-mode.sh`, `session-start.sh`, `stop-continuation.sh`, or `silent-auto-update.sh` exist: WARN - legacy scripts (can cause confusion)
 
 ### Step 4: Check CLAUDE.md
 
@@ -170,10 +172,12 @@ After running all checks, output a report:
 
 If issues found, ask user: "Would you like me to fix these issues automatically?"
 
-If yes, apply fixes:
+If yes, apply fixes. For each affected `settings.json`, approval of this general question is not enough to authorize removing hooks: show the exact matching hook objects and the non-OMC entries/groups that will remain, then ask for explicit confirmation of that scoped change. Before writing, create a timestamped backup beside the original without overwriting an existing backup. If no legacy entries match, leave the file untouched.
 
 ### Fix: Legacy Hooks in settings.json
-Remove the `"hooks"` section from `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (keep other settings intact)
+For each affected profile-level or project-level settings file:
+1. Match only hook objects with `type: "command"` whose `command` references one of the specific legacy OMC script paths listed in Step 2. Do not match other scripts merely because they are under a `hooks/` directory.
+2. Remove only those matching objects from their `hooks.<event>[].hooks[]` arrays. Preserve every unmatched hook object and every matcher group that still has hooks, including user and third-party hooks. If removing matched objects leaves a matcher group with no hooks, remove that now-empty group; remove an event key when no groups remain and remove the top-level `"hooks"` key when no events remain. Leave all other settings unchanged.
 
 ### Fix: Legacy Bash Scripts
 ```bash
@@ -181,6 +185,7 @@ rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/keyword-detector.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/persistent-mode.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/session-start.sh
 rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/stop-continuation.sh
+rm -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/silent-auto-update.sh
 ```
 
 ### Fix: Outdated Plugin
