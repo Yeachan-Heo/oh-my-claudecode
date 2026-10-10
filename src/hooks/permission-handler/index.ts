@@ -50,18 +50,12 @@ const SAFE_PATTERNS = [
 // and command substitution is already caught by $ detection
 const DANGEROUS_SHELL_CHARS = /[;&|`$()<>\n\r\t\0\\{}\[\]*?~!#]/;
 
-// Heredoc operator detection (<<, <<-, <<~, with optional quoting of delimiter)
-const HEREDOC_PATTERN = /<<[-~]?\s*['"]?\w+['"]?/;
-
 /**
- * Patterns that are safe to auto-allow even when they contain heredoc content.
- * Matched against the first line of the command (before the heredoc body).
- * Issue #608: Prevents full heredoc body from being stored in settings.local.json.
+ * The only heredoc form eligible for auto-approval: a git commit/tag message
+ * supplied by a cat heredoc inside a quoted command substitution.
  */
-const SAFE_HEREDOC_PATTERNS = [
-  /^git commit\b/,
-  /^git tag\b/,
-];
+const SAFE_HEREDOC_COMMAND_PATTERN =
+  /^(git (?:commit|tag)(?=[ \t])[^\r\n]*)[ \t]+-m[ \t]+"\$\(cat[ \t]+<<(-?)[ \t]*(?:'(\w+)'|"(\w+)")$/;
 
 const SAFE_RIPGREP_FLAGS = new Set([
   '-n',
@@ -573,28 +567,39 @@ export function isSafeCommand(command: string): boolean {
  * Code's native permission flow and the user approves "Always allow", the entire
  * heredoc body (potentially hundreds of lines) gets stored in settings.local.json.
  *
- * This function detects heredoc commands and checks whether the base command
- * (first line) matches known-safe patterns, allowing auto-approval without
- * polluting settings.local.json.
+ * This function accepts only a git commit/tag message heredoc with a safe
+ * command prefix, a matching terminator, and no commands after the substitution.
  */
 export function isHeredocWithSafeBase(command: string): boolean {
   const trimmed = command.trim();
 
-  // Heredoc commands from Claude Code are always multi-line
   if (!trimmed.includes('\n')) {
     return false;
   }
 
-  // Must contain a heredoc operator
-  if (!HEREDOC_PATTERN.test(trimmed)) {
+  const lines = trimmed.split(/\r?\n/);
+  const match = lines[0].match(SAFE_HEREDOC_COMMAND_PATTERN);
+  if (!match || DANGEROUS_SHELL_CHARS.test(match[1]) || !tokenizeShellCommand(match[1])) {
     return false;
   }
 
-  // Extract the first line as the base command
-  const firstLine = trimmed.split('\n')[0].trim();
+  const delimiter = match[3] ?? match[4];
+  if (!delimiter) {
+    return false;
+  }
 
-  // Check if the first line starts with a safe pattern
-  return SAFE_HEREDOC_PATTERNS.some(pattern => pattern.test(firstLine));
+  const stripLeadingTabs = match[2] === '-';
+  const terminatorIndex = lines.findIndex((line, index) => {
+    if (index === 0) {
+      return false;
+    }
+
+    const candidate = stripLeadingTabs ? line.replace(/^\t+/, '') : line;
+    return candidate === delimiter;
+  });
+
+  // The only content after the heredoc body may be the substitution's closing syntax.
+  return terminatorIndex === lines.length - 2 && lines[terminatorIndex + 1] === ')"';
 }
 
 /**
