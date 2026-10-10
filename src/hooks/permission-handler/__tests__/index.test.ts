@@ -326,6 +326,30 @@ describe('permission-handler', () => {
           cmd: "git commit -m \"$(cat <<'EOF' EOF)\"",
         },
         {
+          desc: 'git commit with a command after the heredoc terminator',
+          cmd: `git commit -m "$(cat <<'EOF'\nCommit message\nEOF\n)" && git status`,
+        },
+        {
+          desc: 'git commit with an extra command on the heredoc opener line',
+          cmd: `git commit -m "$(cat <<'EOF'; git status\nCommit message\nEOF\n)"`,
+        },
+        {
+          desc: 'git commit with a command in the base options',
+          cmd: `git commit --amend; git status -m "$(cat <<'EOF'\nCommit message\nEOF\n)"`,
+        },
+        {
+          desc: 'git commit with an unbalanced quote in the base options',
+          cmd: `git commit ' --amend -m "$(cat <<'EOF'\nCommit message\nEOF\n)"`,
+        },
+        {
+          desc: 'git commit-tree prefix',
+          cmd: `git commit-tree -m "$(cat <<'EOF'\nCommit message\nEOF\n)"`,
+        },
+        {
+          desc: 'git commit with a here-string',
+          cmd: `git commit -m "$(cat <<<EOF\nCommit message\nEOF\n)"`,
+        },
+        {
           desc: 'curl with heredoc (unsafe base)',
           cmd: `curl -X POST http://example.com << 'EOF'\n{"key":"value"}\nEOF`,
         },
@@ -669,6 +693,13 @@ describe('permission-handler', () => {
         expect(result.continue).toBe(true);
         expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
         expect(result.hookSpecificOutput?.decision?.reason).toContain('heredoc');
+      });
+
+      it('should not auto-allow a heredoc commit with a trailing command', () => {
+        const cmd = `git commit -m "$(cat <<'EOF'\nfeat: add new feature\nEOF\n)" && git status`;
+        const result = processPermissionRequest(createInput(cmd));
+        expect(result.continue).toBe(true);
+        expect(result.hookSpecificOutput?.decision?.behavior).not.toBe('allow');
       });
 
       it('should auto-allow git tag with heredoc annotation', () => {
