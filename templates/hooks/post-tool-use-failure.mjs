@@ -66,8 +66,20 @@ function validateSessionId(sessionId) {
 }
 
 // Use the same process-identity-aware state lock as the cleanup hook.
+// run.cjs gives 3s hooks a 2.5s inner budget; cap the shared SQLite/process
+// deadline at 1.5s and file-lock polling at 500ms to preserve output headroom.
+const POST_TOOL_FAILURE_LOCK_ATTEMPTS = 50;
+const POST_TOOL_FAILURE_LOCK_TIMEOUT_MS = 1500;
+
 function withFileLockSync(filePath, fn) {
-  const result = withStateFileLockAtPathSync(`${filePath}.lock`, fn, true, 200);
+  const result = withStateFileLockAtPathSync(
+    `${filePath}.lock`,
+    fn,
+    true,
+    POST_TOOL_FAILURE_LOCK_ATTEMPTS,
+    POST_TOOL_FAILURE_LOCK_TIMEOUT_MS,
+    POST_TOOL_FAILURE_LOCK_TIMEOUT_MS,
+  );
   return result.acquired || result.callbackRan;
 }
 

@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { provisionStandaloneStateLockBridge } from '../installer/index.js';
 
@@ -195,6 +195,104 @@ describe('post-tool-use-failure.mjs', () => {
     expect(existsSync(errorPath)).toBe(false);
     expect(existsSync(`${errorPath}.lock`)).toBe(true);
   });
+
+  it.skipIf(process.platform !== 'linux')('keeps failure guidance within budget for contended Windows locks', () => {
+    for (const [surface, scriptPath] of [['plugin script', SCRIPT_PATH], ['installer template', TEMPLATE_SCRIPT_PATH]]) {
+      const cwd = makeRepoLocalTempDir();
+      const sessionId = `windows-contention-${surface.replaceAll(' ', '-')}`;
+      const stateRoot = join(cwd, '.omc', 'state');
+      const sessionStateDir = join(stateRoot, 'sessions', sessionId);
+      mkdirSync(sessionStateDir, { recursive: true });
+      const statePath = join(sessionStateDir, 'last-tool-error-state.json');
+      const lockPath = `${statePath}.lock`;
+      const databasePath = join(stateRoot, '.state-mutation-locks.db');
+      const probeDirectory = join(cwd, 'fake-bin');
+      const probeCountPath = join(probeDirectory, 'calls');
+      const slowProbeMarkerPath = join(probeDirectory, 'slow-probe-started');
+      mkdirSync(probeDirectory);
+      const processStart = 'ticks:638933184000000001';
+      const nonce = '123e4567-e89b-12d3-a456-426614174000';
+      const setupScript = `
+        import Database from 'better-sqlite3';
+        import { writeFileSync } from 'node:fs';
+        import { resolve } from 'node:path';
+        const lockPath = process.argv[1];
+        const databasePath = process.argv[2];
+        const ownerPid = Number(process.argv[3]);
+        const processStart = process.argv[4];
+        const nonce = process.argv[5];
+        const createdAt = new Date().toISOString();
+        const database = new Database(databasePath);
+        database.pragma('journal_mode = WAL');
+        database.exec('CREATE TABLE IF NOT EXISTS state_mutation_locks (lock_key TEXT PRIMARY KEY, version INTEGER NOT NULL, pid INTEGER NOT NULL, process_start TEXT NOT NULL, created_at TEXT NOT NULL, nonce TEXT NOT NULL)');
+        database.prepare('INSERT OR REPLACE INTO state_mutation_locks (lock_key, version, pid, process_start, created_at, nonce) VALUES (?, 1, ?, ?, ?, ?)')
+          .run(resolve(lockPath), ownerPid, processStart, createdAt, nonce);
+        writeFileSync(lockPath, JSON.stringify({ version: 1, pid: ownerPid, processStart, createdAt, nonce }));
+        database.close();
+      `;
+      execFileSync(NODE, [
+        '--input-type=module', '-e', setupScript, lockPath, databasePath, String(process.pid), processStart, nonce,
+      ], { encoding: 'utf8', timeout: 10000 });
+
+      const powershellPath = join(probeDirectory, 'powershell');
+      writeFileSync(powershellPath, `#!/bin/sh
+printf x >> '${probeCountPath}'
+if [ ! -f '${slowProbeMarkerPath}' ]; then
+  : > '${slowProbeMarkerPath}'
+  printf '638933184000000001\\n'
+else
+  /usr/bin/sleep 3
+  printf '638933184000000001\\n'
+fi
+`);
+      chmodSync(powershellPath, 0o755);
+
+      const windowsSimulation = `
+        import { createRequire } from 'node:module';
+        import { pathToFileURL } from 'node:url';
+        const require = createRequire(process.argv[1]);
+        require('better-sqlite3');
+        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+        await import(pathToFileURL(process.argv[2]).href);
+      `;
+      const startedAt = Date.now();
+      const raw = execFileSync(NODE, [
+        '--input-type=module', '-e', windowsSimulation, join(REPO_ROOT, 'package.json'), scriptPath,
+      ], {
+        cwd,
+        input: JSON.stringify({
+          tool_name: 'Bash',
+          tool_input: { command: 'false' },
+          error: 'exit code 1',
+          cwd,
+          session_id: sessionId,
+        }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_ROOT: REPO_ROOT,
+          NODE_ENV: 'test',
+          OMC_STATE_DIR: '',
+          OMC_TEST_FLOCK_AVAILABLE: '',
+          OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE: '',
+          PATH: `${probeDirectory}${delimiter}${process.env.PATH ?? ''}`,
+        },
+        timeout: 2500,
+      }).trim();
+      const elapsedMs = Date.now() - startedAt;
+      const result = JSON.parse(raw) as {
+        continue: boolean;
+        hookSpecificOutput?: { hookEventName?: string; additionalContext?: string };
+      };
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.hookEventName).toBe('PostToolUseFailure');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Tool "Bash" failed.');
+      expect(existsSync(statePath)).toBe(false);
+      expect(readFileSync(probeCountPath, 'utf8')).toHaveLength(2);
+      expect(elapsedMs).toBeLessThan(2200);
+    }
+  }, 15000);
 
   it('suppresses broad AGENTS scan permission-denied noise for Bash', () => {
     const cwd = makeRepoLocalTempDir();
