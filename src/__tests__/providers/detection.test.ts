@@ -104,6 +104,17 @@ describe('parseRemoteUrl', () => {
     });
   });
 
+  it('detects and parses Azure DevOps HTTPS URLs with userinfo', () => {
+    const url = 'https://build-user:pat@dev.azure.com/org/project/_git/repo';
+    expect(detectProvider(url)).toBe('azure-devops');
+    expect(parseRemoteUrl(url)).toEqual({
+      provider: 'azure-devops',
+      host: 'dev.azure.com',
+      owner: 'org/project',
+      repo: 'repo',
+    });
+  });
+
   it('parses Azure DevOps SSH URL', () => {
     const result = parseRemoteUrl('git@ssh.dev.azure.com:v3/org/project/repo');
     expect(result).toEqual({

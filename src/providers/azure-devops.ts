@@ -17,7 +17,7 @@ export class AzureDevOpsProvider implements GitProvider {
   readonly prRefspec = null;
 
   detectFromRemote(url: string): boolean {
-    const host = url.match(/^(?:https?:\/\/|ssh:\/\/[^@]*@|[^@]+@)([^/:]+)/i)?.[1];
+    const host = url.match(/^(?:https?:\/\/(?:[^@/]+@)?|ssh:\/\/[^@]*@|[^@]+@)([^/:]+)/i)?.[1];
     return !!host && isAzureDevOpsHost(host);
   }
 

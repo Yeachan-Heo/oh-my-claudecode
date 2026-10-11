@@ -59,6 +59,10 @@ describe('AzureDevOpsProvider', () => {
       expect(provider.detectFromRemote('https://dev.azure.com/org/project/_git/repo')).toBe(true);
     });
 
+    it('returns true for HTTPS URLs with userinfo', () => {
+      expect(provider.detectFromRemote('https://build-user:pat@dev.azure.com/org/project/_git/repo')).toBe(true);
+    });
+
     it('returns true for ssh.dev.azure.com URLs', () => {
       expect(provider.detectFromRemote('git@ssh.dev.azure.com:v3/org/project/repo')).toBe(true);
     });
