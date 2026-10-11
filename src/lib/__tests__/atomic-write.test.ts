@@ -626,6 +626,60 @@ describe('atomicWriteJson', () => {
     expect(existsSync(lockPath)).toBe(false);
   });
 
+  it.skipIf(process.platform !== 'linux')('shares the operation deadline with SQLite lock release', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-shared-deadline-'));
+    directories.push(directory);
+    const stateDirectory = join(directory, 'state');
+    mkdirSync(stateDirectory);
+    const lockPath = join(stateDirectory, 'last-tool-error.json.lock');
+    const databasePath = join(stateDirectory, '.state-mutation-locks.db');
+    const markerPath = join(directory, 'writer-locked');
+    const holderScript = `
+      import Database from 'better-sqlite3';
+      import { writeFileSync } from 'node:fs';
+      const database = new Database(process.argv[1]);
+      database.pragma('journal_mode = WAL');
+      database.exec('CREATE TABLE IF NOT EXISTS state_mutation_locks (lock_key TEXT PRIMARY KEY, version INTEGER NOT NULL, pid INTEGER NOT NULL, process_start TEXT NOT NULL, created_at TEXT NOT NULL, nonce TEXT NOT NULL)');
+      database.exec('BEGIN IMMEDIATE');
+      writeFileSync(process.argv[2], 'locked');
+      setTimeout(() => {
+        database.exec('ROLLBACK');
+        database.close();
+      }, 900);
+    `;
+    let holder: ReturnType<typeof spawn> | undefined;
+    const waitCell = new Int32Array(new SharedArrayBuffer(4));
+
+    try {
+      const startedAt = Date.now();
+      const result = withStateFileLockAtPathSync(lockPath, () => {
+        holder = spawn(process.execPath, ['--input-type=module', '-e', holderScript, databasePath, markerPath], {
+          stdio: ['ignore', 'ignore', 'ignore'],
+        });
+        const waitDeadline = Date.now() + 1000;
+        while (!existsSync(markerPath) && Date.now() < waitDeadline) {
+          Atomics.wait(waitCell, 0, 0, 5);
+        }
+        expect(existsSync(markerPath)).toBe(true);
+        return 'written';
+      }, false, 1, 1000, 1000, 300);
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(result).toEqual({ acquired: false, value: undefined, callbackRan: true });
+      expect(getStateFileLockFailureKind()).toBe('contention');
+      expect(existsSync(lockPath)).toBe(true);
+      expect(elapsedMs).toBeLessThan(600);
+    } finally {
+      if (holder && holder.exitCode === null && holder.signalCode === null) {
+        await new Promise<void>(resolve => holder?.once('exit', () => resolve()));
+      }
+      if (existsSync(lockPath)) {
+        const retainedLock = acquireStateFileLockAtPathSync(lockPath, 1, true, false, 100);
+        if (retainedLock) releaseStateFileLockSync(retainedLock);
+      }
+    }
+  });
+
   it('keeps a live legacy owner lock after thirty seconds', () => {
     const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-legacy-live-'));
     directories.push(directory);

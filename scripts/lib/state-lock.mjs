@@ -391,8 +391,17 @@ export function isExclusiveStateLockingAvailable() {
   return override !== null ? override : true;
 }
 
-function remainingProcessProbeMs(deadline) {
-  return Math.max(0, deadline - Date.now());
+function remainingOperationTimeoutMs(deadline) {
+  return deadline === null ? Infinity : Math.max(0, Number(deadline - process.hrtime.bigint()) / 1_000_000);
+}
+
+function boundedBusyTimeoutMs(timeoutMs, operationDeadline) {
+  const configuredTimeoutMs = Number.isFinite(timeoutMs) ? Math.max(0, Math.floor(timeoutMs)) : 2000;
+  return Math.min(configuredTimeoutMs, Math.floor(remainingOperationTimeoutMs(operationDeadline)));
+}
+
+function remainingProcessProbeMs(deadline, operationDeadline = null) {
+  return Math.max(0, Math.min(deadline - Date.now(), remainingOperationTimeoutMs(operationDeadline)));
 }
 
 function processProbeDeadlineAfter(timeoutMs) {
@@ -400,18 +409,27 @@ function processProbeDeadlineAfter(timeoutMs) {
   return Date.now() + durationMs;
 }
 
-function acquireFileLock(lockPath, attempts, processProbeDeadline) {
+function operationDeadlineAfter(timeoutMs) {
+  if (!Number.isFinite(timeoutMs)) return null;
+  return process.hrtime.bigint() + BigInt(Math.floor(Math.max(0, timeoutMs) * 1_000_000));
+}
+
+function acquireFileLock(lockPath, attempts, processProbeDeadline, operationDeadline) {
   // This publication is also checked by SQLite contenders, so mixed backend
   // processes still serialize on one exact owner artifact.
   lastLockFailureDetail = null;
   const key = canonicalKey(lockPath);
-  const processStart = ownProcessStartIdentity(remainingProcessProbeMs(processProbeDeadline));
+  const processStart = ownProcessStartIdentity(remainingProcessProbeMs(processProbeDeadline, operationDeadline));
   if (!processStart || processStart === 'absent') {
     recordFailure('unverifiable');
     return null;
   }
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (remainingOperationTimeoutMs(operationDeadline) <= 0) {
+      recordFailure('contention');
+      return null;
+    }
     const owner = {
       version: 1,
       pid: process.pid,
@@ -431,7 +449,7 @@ function acquireFileLock(lockPath, attempts, processProbeDeadline) {
       try { unlinkSync(tempPath); } catch (error) {
         if (error?.code !== 'EPERM' && error?.code !== 'EBUSY') throw error;
       }
-      const lock = { backend: 'file', key, path: lockPath, owner, depth: 1 };
+      const lock = { backend: 'file', key, path: lockPath, owner, depth: 1, operationDeadline };
       localLocks.set(key, lock);
       recordFailure(null);
       return lock;
@@ -457,7 +475,7 @@ function acquireFileLock(lockPath, attempts, processProbeDeadline) {
       // Re-verify the identity hasn't changed before probing liveness.
       const recheck = ownerArtifactIdentity(lockPath);
       if (!recheck || !sameArtifactIdentity(recheck, identity)) continue;
-      const live = ownerLive(existing, remainingProcessProbeMs(processProbeDeadline));
+      const live = ownerLive(existing, remainingProcessProbeMs(processProbeDeadline, operationDeadline));
       if (live === null) {
         recordFailure('unverifiable');
         return null;
@@ -465,7 +483,9 @@ function acquireFileLock(lockPath, attempts, processProbeDeadline) {
       if (live) {
         recordFailure('contention');
         if (attempt + 1 < attempts) {
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+          const remainingMs = remainingOperationTimeoutMs(operationDeadline);
+          if (remainingMs <= 0) return null;
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(10, Math.floor(remainingMs)));
           continue;
         }
         return null;
@@ -481,11 +501,11 @@ function acquireFileLock(lockPath, attempts, processProbeDeadline) {
   return null;
 }
 
-export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false, bypassTestOverride = false, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000) {
-  return acquireStateFileLockAtPathSync(`${filePath}.mutation.lock`, attempts, requireExclusive, bypassTestOverride, busyTimeoutMs, processProbeTimeoutMs);
+export function acquireStateFileLockSync(filePath, attempts = 50, requireExclusive = false, bypassTestOverride = false, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000, overallTimeoutMs = Infinity) {
+  return acquireStateFileLockAtPathSync(`${filePath}.mutation.lock`, attempts, requireExclusive, bypassTestOverride, busyTimeoutMs, processProbeTimeoutMs, overallTimeoutMs);
 }
 
-export function acquireStateFileLockAtPathSync(lockPath, attempts = 50, requireExclusive = false, bypassTestOverride = false, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000) {
+export function acquireStateFileLockAtPathSync(lockPath, attempts = 50, requireExclusive = false, bypassTestOverride = false, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000, overallTimeoutMs = Infinity) {
   return acquireStateFileLockAtPathWithDeadline(
     lockPath,
     attempts,
@@ -493,13 +513,18 @@ export function acquireStateFileLockAtPathSync(lockPath, attempts = 50, requireE
     bypassTestOverride,
     busyTimeoutMs,
     processProbeDeadlineAfter(processProbeTimeoutMs),
+    operationDeadlineAfter(overallTimeoutMs),
   );
 }
 
-function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclusive, bypassTestOverride, busyTimeoutMs, processProbeDeadline) {
+function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclusive, bypassTestOverride, busyTimeoutMs, processProbeDeadline, operationDeadline) {
   lastLockFailureDetail = null;
   lastLockFailure = null;
   void requireExclusive;
+  if (remainingOperationTimeoutMs(operationDeadline) <= 0) {
+    recordFailure('contention');
+    return null;
+  }
   mkdirSync(dirname(lockPath), { recursive: true });
   const key = canonicalKey(lockPath);
   const held = localLocks.get(key);
@@ -508,7 +533,12 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
     return held;
   }
   const retryAcquisition = () => {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+    const remainingMs = remainingOperationTimeoutMs(operationDeadline);
+    if (remainingMs <= 0) {
+      recordFailure('contention');
+      return null;
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(10, Math.floor(remainingMs)));
     return acquireStateFileLockAtPathWithDeadline(
       lockPath,
       attempts - 1,
@@ -516,6 +546,7 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
       bypassTestOverride,
       busyTimeoutMs,
       processProbeDeadline,
+      operationDeadline,
     );
   };
 
@@ -523,13 +554,13 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
     if (process.env.OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE === '1') {
       sqliteBindingLoadError = nativeBindingDiagnostic('simulated native binding load failure');
     }
-    return acquireFileLock(lockPath, attempts, processProbeDeadline);
+    return acquireFileLock(lockPath, attempts, processProbeDeadline, operationDeadline);
   }
 
-  const db = openMutationDb(lockPath, bypassTestOverride, busyTimeoutMs);
+  const db = openMutationDb(lockPath, bypassTestOverride, boundedBusyTimeoutMs(busyTimeoutMs, operationDeadline));
   if (!db) {
     if (lastLockFailure === 'contention') return null;
-    if (sqliteBindingLoadError) return acquireFileLock(lockPath, attempts, processProbeDeadline);
+    if (sqliteBindingLoadError) return acquireFileLock(lockPath, attempts, processProbeDeadline, operationDeadline);
     if (attempts <= 1) {
       recordFailure('unverifiable');
       return null;
@@ -537,7 +568,7 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
     return retryAcquisition();
   }
 
-  const processStart = ownProcessStartIdentity(remainingProcessProbeMs(processProbeDeadline));
+  const processStart = ownProcessStartIdentity(remainingProcessProbeMs(processProbeDeadline, operationDeadline));
   if (!processStart || processStart === 'absent') {
     try { db.close(); } catch {}
     if (attempts <= 1) {
@@ -565,7 +596,7 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure('unverifiable');
         return null;
       }
-      const live = ownerLive({ pid: row.pid, processStart: row.process_start }, remainingProcessProbeMs(processProbeDeadline));
+      const live = ownerLive({ pid: row.pid, processStart: row.process_start }, remainingProcessProbeMs(processProbeDeadline, operationDeadline));
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
@@ -587,7 +618,7 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
         return null;
       }
-      const live = ownerLive(artifact, remainingProcessProbeMs(processProbeDeadline));
+      const live = ownerLive(artifact, remainingProcessProbeMs(processProbeDeadline, operationDeadline));
       if (live === null || live) {
         db.exec('ROLLBACK');
         db.close();
@@ -627,7 +658,11 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
       return retryAcquisition();
     }
     db.exec('COMMIT');
-    const lock = { backend: 'sqlite', db, key, path: lockPath, owner, depth: 1 };
+    const lock = {
+      backend: 'sqlite', db, key, path: lockPath, owner, depth: 1,
+      busyTimeoutMs: Number.isFinite(busyTimeoutMs) ? Math.max(0, Math.floor(busyTimeoutMs)) : 2000,
+      operationDeadline,
+    };
     localLocks.set(key, lock);
     recordFailure(null);
     return lock;
@@ -643,8 +678,9 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
   }
 }
 
-export function releaseStateFileLockSync(lock) {
+export function releaseStateFileLockSync(lock, operationDeadline = undefined) {
   if (!lock) return true;
+  if (operationDeadline === undefined) operationDeadline = lock.operationDeadline ?? null;
   if (lock.depth > 1) {
     lock.depth -= 1;
     return true;
@@ -670,6 +706,7 @@ export function releaseStateFileLockSync(lock) {
 
   let retainLockForRetry = false;
   try {
+    lock.db.pragma(`busy_timeout = ${boundedBusyTimeoutMs(lock.busyTimeoutMs ?? 2000, operationDeadline)}`);
     lock.db.exec('BEGIN IMMEDIATE');
     const row = lock.db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(lock.key);
     const current = readOwner(lock.path);
@@ -708,12 +745,12 @@ export function releaseStateFileLockSync(lock) {
   }
 }
 
-export function withStateFileLockSync(filePath, callback, requireExclusive = false, attempts = 50, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000) {
-  return withStateFileLockAtPathSync(`${filePath}.mutation.lock`, callback, requireExclusive, attempts, busyTimeoutMs, processProbeTimeoutMs);
+export function withStateFileLockSync(filePath, callback, requireExclusive = false, attempts = 50, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000, overallTimeoutMs = Infinity) {
+  return withStateFileLockAtPathSync(`${filePath}.mutation.lock`, callback, requireExclusive, attempts, busyTimeoutMs, processProbeTimeoutMs, overallTimeoutMs);
 }
 
-export function withStateFileLockAtPathSync(lockPath, callback, requireExclusive = false, attempts = 50, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000) {
-  const lock = acquireStateFileLockAtPathSync(lockPath, attempts, requireExclusive, false, busyTimeoutMs, processProbeTimeoutMs);
+export function withStateFileLockAtPathSync(lockPath, callback, requireExclusive = false, attempts = 50, busyTimeoutMs = 2000, processProbeTimeoutMs = 3000, overallTimeoutMs = Infinity) {
+  const lock = acquireStateFileLockAtPathSync(lockPath, attempts, requireExclusive, false, busyTimeoutMs, processProbeTimeoutMs, overallTimeoutMs);
   if (!lock) return { acquired: false, value: undefined };
   let value;
   let releaseFailed = false;
