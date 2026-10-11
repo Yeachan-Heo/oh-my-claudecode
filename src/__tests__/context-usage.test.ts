@@ -66,6 +66,28 @@ afterEach(() => {
 });
 
 describe('resolveTranscriptContextPercent', () => {
+  it('uses optional cache tokens from the latest complete usage frame only', () => {
+    const transcriptPath = join(tempDir, 'multiple-frames.jsonl');
+    writeFileSync(transcriptPath, [
+      { context_window: 1000, usage: { input_tokens: 10, cache_read_input_tokens: 800 } },
+      { context_window: 1000, usage: { input_tokens: 20 } },
+    ].map(frame => JSON.stringify(frame)).join('\n') + '\n');
+    expect(resolveTranscriptContextPercent(transcriptPath)).toBe(2);
+  });
+
+  it('does not combine a context window and usage from separate frames', () => {
+    const transcriptPath = join(tempDir, 'incomplete-frames.jsonl');
+    writeFileSync(transcriptPath, '{"context_window":1000}\n{"usage":{"input_tokens":900}}\n');
+    expect(resolveTranscriptContextPercent(transcriptPath)).toBeNull();
+  });
+
+  it('ignores an incomplete trailing frame', () => {
+    const transcriptPath = join(tempDir, 'partial-frame.jsonl');
+    writeFileSync(transcriptPath, '{"context_window":1000,"usage":{"input_tokens":20}}\n' +
+      '{"context_window":1000,"usage":{"input_tokens":900');
+    expect(resolveTranscriptContextPercent(transcriptPath)).toBe(2);
+  });
+
   it('returns null for production-shaped transcripts without context_window', () => {
     const transcriptPath = writeTranscript({
       message: {
