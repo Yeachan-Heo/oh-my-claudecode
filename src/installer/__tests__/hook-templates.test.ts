@@ -351,6 +351,17 @@ OMC Ultrawork = "특수부대 작전 반"
           JSON.stringify(runInDir(scriptPath, 'tdd implement password validation', controlDir)),
         ).toContain('[TDD MODE ACTIVATED]');
       }
+
+      // An unterminated comment makes the config invalid, so it cannot disable TDD.
+      writeFileSync(
+        join(disabledDir, '.claude', 'omc.jsonc'),
+        '{"keywordDetector":{"disabled":["tdd"]}}/*unterminated',
+      );
+      for (const scriptPath of [templatePath, pluginPath]) {
+        expect(
+          JSON.stringify(runInDir(scriptPath, 'tdd implement password validation', disabledDir)),
+        ).toContain('[TDD MODE ACTIVATED]');
+      }
     } finally {
       rmSync(emptyXdg, { recursive: true, force: true });
       rmSync(disabledDir, { recursive: true, force: true });
