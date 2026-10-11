@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
@@ -13,6 +13,14 @@ const TEMPLATE_HOOKS_ROOT = join(TEMPLATE_ROOT, 'hooks');
 cpSync(join(REPO_ROOT, 'templates', 'hooks'), TEMPLATE_HOOKS_ROOT, { recursive: true });
 provisionStandaloneStateLockBridge(REPO_ROOT, join(TEMPLATE_HOOKS_ROOT, 'lib', 'state-lock.mjs'));
 const TEMPLATE_SCRIPT_PATH = join(TEMPLATE_HOOKS_ROOT, 'post-tool-use-failure.mjs');
+const WINDOWS_SIMULATION = `
+  import { createRequire } from 'node:module';
+  import { pathToFileURL } from 'node:url';
+  const require = createRequire(process.argv[1]);
+  require('better-sqlite3');
+  Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+  await import(pathToFileURL(process.argv[2]).href);
+`;
 const TEST_TMP_ROOT = join(REPO_ROOT, '.tmp-post-tool-use-failure-tests');
 
 afterAll(() => {
@@ -247,17 +255,9 @@ fi
 `);
       chmodSync(powershellPath, 0o755);
 
-      const windowsSimulation = `
-        import { createRequire } from 'node:module';
-        import { pathToFileURL } from 'node:url';
-        const require = createRequire(process.argv[1]);
-        require('better-sqlite3');
-        Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-        await import(pathToFileURL(process.argv[2]).href);
-      `;
       const startedAt = Date.now();
       const raw = execFileSync(NODE, [
-        '--input-type=module', '-e', windowsSimulation, join(REPO_ROOT, 'package.json'), scriptPath,
+        '--input-type=module', '-e', WINDOWS_SIMULATION, join(REPO_ROOT, 'package.json'), scriptPath,
       ], {
         cwd,
         input: JSON.stringify({
@@ -291,6 +291,98 @@ fi
       expect(existsSync(statePath)).toBe(false);
       expect(readFileSync(probeCountPath, 'utf8')).toHaveLength(2);
       expect(elapsedMs).toBeLessThan(2200);
+    }
+  }, 15000);
+
+  it.skipIf(process.platform !== 'linux')('keeps failure guidance within budget during SQLite writer contention', async () => {
+    const cwd = makeRepoLocalTempDir();
+    const sessionId = 'windows-contention-sqlite';
+    const stateRoot = join(cwd, '.omc', 'state');
+    const sessionStateDir = join(stateRoot, 'sessions', sessionId);
+    mkdirSync(sessionStateDir, { recursive: true });
+    const statePath = join(sessionStateDir, 'last-tool-error-state.json');
+    const databasePath = join(stateRoot, '.state-mutation-locks.db');
+    const createDatabaseScript = `
+      import Database from 'better-sqlite3';
+      const database = new Database(process.argv[1]);
+      database.pragma('journal_mode = WAL');
+      database.exec('CREATE TABLE IF NOT EXISTS state_mutation_locks (lock_key TEXT PRIMARY KEY, version INTEGER NOT NULL, pid INTEGER NOT NULL, process_start TEXT NOT NULL, created_at TEXT NOT NULL, nonce TEXT NOT NULL)');
+      database.close();
+    `;
+    execFileSync(NODE, ['--input-type=module', '-e', createDatabaseScript, databasePath], {
+      encoding: 'utf8',
+      timeout: 10000,
+    });
+
+    const holderScript = `
+      import Database from 'better-sqlite3';
+      const database = new Database(process.argv[1]);
+      database.pragma('journal_mode = WAL');
+      database.exec('BEGIN IMMEDIATE');
+      process.stdout.write('lock-acquired\\n');
+      process.stdin.resume();
+      process.stdin.once('end', () => {
+        database.exec('ROLLBACK');
+        database.close();
+      });
+    `;
+    const holder = spawn(NODE, ['--input-type=module', '-e', holderScript, databasePath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    const holderExit = new Promise<void>((resolve) => holder.once('exit', () => resolve()));
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('SQLite writer did not acquire its lock')), 5000);
+        holder.once('error', (error) => {
+          clearTimeout(timeout);
+          reject(error);
+        });
+        holder.stdout.on('data', (data) => {
+          if (String(data).includes('lock-acquired')) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        });
+      });
+
+      const startedAt = Date.now();
+      const raw = execFileSync(NODE, [
+        '--input-type=module', '-e', WINDOWS_SIMULATION, join(REPO_ROOT, 'package.json'), SCRIPT_PATH,
+      ], {
+        cwd,
+        input: JSON.stringify({
+          tool_name: 'Bash',
+          tool_input: { command: 'false' },
+          error: 'exit code 1',
+          cwd,
+          session_id: sessionId,
+        }),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_ROOT: REPO_ROOT,
+          NODE_ENV: 'test',
+          OMC_STATE_DIR: '',
+          OMC_TEST_FLOCK_AVAILABLE: '',
+          OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE: '',
+        },
+        timeout: 2500,
+      }).trim();
+      const elapsedMs = Date.now() - startedAt;
+      const result = JSON.parse(raw) as {
+        continue: boolean;
+        hookSpecificOutput?: { hookEventName?: string; additionalContext?: string };
+      };
+
+      expect(result.continue).toBe(true);
+      expect(result.hookSpecificOutput?.hookEventName).toBe('PostToolUseFailure');
+      expect(result.hookSpecificOutput?.additionalContext).toContain('Tool "Bash" failed.');
+      expect(existsSync(statePath)).toBe(false);
+      expect(elapsedMs).toBeLessThan(2200);
+    } finally {
+      holder.stdin.end();
+      await holderExit;
     }
   }, 15000);
 
