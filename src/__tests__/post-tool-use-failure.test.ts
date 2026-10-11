@@ -185,6 +185,50 @@ describe('post-tool-use-failure.mjs', () => {
   it.each([
     ['plugin script', SCRIPT_PATH],
     ['installer template', TEMPLATE_SCRIPT_PATH],
+  ])('reclaims a stale fallback lock and advances retry guidance (%s)', (surface, scriptPath) => {
+    const cwd = makeRepoLocalTempDir();
+    const sessionId = `stale-fallback-${surface.replaceAll(' ', '-')}`;
+    const sessionStateDir = join(cwd, '.omc', 'state', 'sessions', sessionId);
+    const statePath = join(sessionStateDir, 'last-tool-error-state.json');
+    const lockPath = `${statePath}.lock`;
+    mkdirSync(sessionStateDir, { recursive: true });
+    writeFileSync(statePath, JSON.stringify({
+      tool_name: 'Bash',
+      error: 'Tool execution failed (details omitted for privacy).',
+      timestamp: new Date().toISOString(),
+      retry_count: 4,
+    }));
+    writeFileSync(lockPath, JSON.stringify({ pid: 999999999, timestamp: Date.now() }));
+
+    const result = runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'false' },
+      error: 'exit code 1',
+      cwd,
+      session_id: sessionId,
+    }, {
+      OMC_STATE_DIR: '',
+      OMC_TEST_BETTER_SQLITE3_LOAD_FAILURE: '1',
+    }, scriptPath);
+    const state = JSON.parse(readFileSync(statePath, 'utf8')) as {
+      tool_name: string;
+      retry_count: number;
+      error: string;
+    };
+
+    expect(result.hookSpecificOutput?.additionalContext).toContain('Tool "Bash" has failed 5 times. Stop retrying');
+    expect(state).toEqual({
+      tool_name: 'Bash',
+      error: 'Tool execution failed (details omitted for privacy).',
+      timestamp: expect.any(String),
+      retry_count: 5,
+    });
+    expect(existsSync(lockPath)).toBe(false);
+  });
+
+  it.each([
+    ['plugin script', SCRIPT_PATH],
+    ['installer template', TEMPLATE_SCRIPT_PATH],
   ])('does not write failure state without the exclusive lock (%s)', (_surface, scriptPath) => {
     const cwd = makeRepoLocalTempDir();
     const stateDir = join(cwd, '.omc', 'state');
