@@ -21,6 +21,16 @@ describe('payload-limits', () => {
       expect(validatePayload(true).valid).toBe(true);
     });
 
+    it.each([undefined, () => {}, Symbol('payload'), { toJSON: () => undefined }])(
+      'should reject values without a JSON representation: %s',
+      (payload) => {
+        expect(validatePayload(payload)).toEqual({
+          valid: false,
+          error: 'Payload cannot be serialized to JSON',
+        });
+      },
+    );
+
     describe('byte size limit', () => {
       it('should reject payloads exceeding maxPayloadBytes', () => {
         const largeString = 'x'.repeat(2_000_000);
