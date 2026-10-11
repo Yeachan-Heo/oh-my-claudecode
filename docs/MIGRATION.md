@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: SSRF Guard for IPv6 Literals](#unreleased-ssrf-guard-for-ipv6-literals)
 - [Unreleased: Team Instance Ownership](#unreleased-team-instance-ownership)
 - [Unreleased: Cancellation Scope](#unreleased-cancellation-scope)
 - [v4.x → v5.0: Workflow Retirement](#v4x--v50-workflow-retirement)
@@ -17,6 +18,32 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v2.x → v3.0: Package Rename & Auto-Activation](#v2x--v30-package-rename--auto-activation)
 - [v3.0 → v3.1: Notepad Wisdom & Enhanced Features](#v30--v31-notepad-wisdom--enhanced-features)
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
+
+---
+
+## Unreleased: SSRF Guard for IPv6 Literals
+
+OMC's URL guard now rejects literal IPv6 unique-local (`FC00::/7`), link-local
+(`FE80::/10`), unspecified (`::`), and multicast (`FF00::/8`) addresses. This
+affects `GITEA_URL` when OMC uses its direct REST fallback and `ANTHROPIC_BASE_URL`
+for OMC provider detection and HUD usage polling. A blocked Gitea URL disables
+the REST fallback; blocked Anthropic base URLs produce no HUD usage data. The
+guard does not override Claude Code's own model requests.
+
+### Migration
+
+- For self-hosted Gitea on a unique-local address, configure the `tea` CLI for
+  that host; OMC can continue to use the CLI path, while its direct REST fallback
+  intentionally fails closed for blocked literals. If you rely on the REST
+  fallback, expose Gitea through a trusted routable endpoint outside the blocked
+  ranges.
+- For a private Anthropic-compatible endpoint, HUD usage polling is unavailable
+  while `ANTHROPIC_BASE_URL` is a blocked literal. Use a trusted routable
+  endpoint outside the blocked ranges if OMC HUD usage polling is required;
+  otherwise, expect no provider usage data in the HUD.
+- There is no SSRF-guard opt-out. Do not use a hostname that resolves to the same
+  private address as a workaround; DNS resolution and redirect validation are
+  separate protections not provided by this guard.
 
 ---
 
