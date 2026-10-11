@@ -48,7 +48,9 @@ function stripComments(content: string): string {
       while (i < content.length && !(content[i] === '*' && content[i + 1] === '/')) {
         i++;
       }
+      if (i >= content.length) throw new SyntaxError('Unterminated JSONC block comment');
       i += 2;
+      result += ' ';
       continue;
     }
 

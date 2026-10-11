@@ -84,3 +84,23 @@ describe('stripJsoncComments - trailing comma removal', () => {
     expect(stripJsoncComments('[1,2,]')).toBe('[1,2]');
   });
 });
+
+describe('parseJsonc - block comment boundaries', () => {
+  it.each(['[1/*comment*/2]', '{"x":tr/*comment*/ue}', '{"x":1}/*unterminated'])(
+    'rejects invalid JSONC without joining tokens: %s',
+    async (input) => {
+      const runtimePath = '../../../scripts/lib/agent-model-config.mjs';
+      const runtime: { stripJsoncComments(content: string): string } = await import(runtimePath);
+      expect(() => parseJsonc(input)).toThrow(SyntaxError);
+      expect(() => JSON.parse(runtime.stripJsoncComments(input))).toThrow(SyntaxError);
+    },
+  );
+
+  it('preserves comments at valid token boundaries in both implementations', async () => {
+    const runtimePath = '../../../scripts/lib/agent-model-config.mjs';
+    const runtime: { stripJsoncComments(content: string): string } = await import(runtimePath);
+    const input = '{/*comment*/"x":/*comment*/true/*comment*/}';
+    expect(parseJsonc(input)).toEqual({ x: true });
+    expect(JSON.parse(runtime.stripJsoncComments(input))).toEqual({ x: true });
+  });
+});

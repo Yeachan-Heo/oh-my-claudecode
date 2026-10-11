@@ -150,6 +150,28 @@ describe.each([
     expect(state.active).toBe(false);
   });
 
+  it('does not let a block comment join adjacent numeric tokens in config', () => {
+    const { output, state } = runStopHook(hookPath(), {
+      iteration: 500,
+      maxIterations: 1000,
+      userConfig: '{"security":{"hardMaxIterations":2/*comment*/000}}',
+    });
+    expect(output.reason).toContain('HARD LIMIT');
+    expect(output.reason).toContain('(500)');
+    expect(state.active).toBe(false);
+  });
+
+  it('ignores config ending with an unterminated block comment', () => {
+    const { output, state } = runStopHook(hookPath(), {
+      iteration: 50,
+      maxIterations: 50,
+      userConfig: '{"security":{"hardMaxIterations":50}}/*unterminated',
+    });
+    expect(output.reason).toContain('EXTENDED');
+    expect(state.active).toBe(true);
+    expect(state.max_iterations).toBe(60);
+  });
+
   it('still extends max_iterations below the hard max', () => {
     const { output, state } = runStopHook(hookPath(), { iteration: 100, maxIterations: 100 });
     expect(output.decision).toBe('block');
