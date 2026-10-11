@@ -147,6 +147,19 @@ describe('resolveNodeBinary', () => {
     expect(resolveNodeBinary()).toBe('/home/tester/.nvm/versions/node/v22.3.0/bin/node');
   });
 
+  it.each([
+    ['/home/tester/.nvm/versions/node', 'bin/node'],
+    ['/home/tester/.fnm/node-versions', 'installation/bin/node'],
+  ])('skips incomplete newer installations in %s', (baseDir, binarySuffix) => {
+    setExecPath('/opt/hostedtoolcache/node/24.0.0/bin/node');
+    const olderBinary = `${baseDir}/v22.3.0/${binarySuffix}`;
+    mockedExistsSync.mockImplementation(pathLike =>
+      String(pathLike) === baseDir || String(pathLike) === olderBinary);
+    mockedReaddirSync.mockReturnValue(['v20.11.0', 'v24.0.0', 'v22.3.0'] as any);
+
+    expect(resolveNodeBinary()).toBe(olderBinary);
+  });
+
   it('returns bare node as a last resort', () => {
     setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');
 

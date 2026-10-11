@@ -14,11 +14,15 @@ function resolveLatestVersionedNode(baseDir: string, nodeSegments: string[]): st
   if (!existsSync(baseDir)) return undefined;
 
   try {
-    const latest = pickLatestVersion(readdirSync(baseDir));
-    if (!latest) return undefined;
-
-    const nodePath = join(baseDir, latest, ...nodeSegments);
-    return existsSync(nodePath) ? nodePath : undefined;
+    const versions = readdirSync(baseDir);
+    while (versions.length > 0) {
+      const latest = pickLatestVersion(versions);
+      if (!latest) break;
+      const nodePath = join(baseDir, latest, ...nodeSegments);
+      if (existsSync(nodePath)) return nodePath;
+      versions.splice(versions.indexOf(latest), 1);
+    }
+    return undefined;
   } catch {
     return undefined;
   }
