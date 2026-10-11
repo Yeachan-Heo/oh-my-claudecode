@@ -104,6 +104,27 @@ describe('parseRemoteUrl', () => {
     });
   });
 
+  it.each([
+    ['HTTPS://DEV.AZURE.COM/Org/Project/_git/Repo.GIT', 'dev.azure.com'],
+    ['git@SSH.DEV.AZURE.COM:v3/Org/Project/Repo.GIT', 'dev.azure.com'],
+    ['HTTPS://Org.VISUALSTUDIO.COM/Project/_git/Repo.GIT', 'Org.visualstudio.com'],
+  ])('parses Azure host and scheme case without changing path case: %s', (url, host) => {
+    expect(parseRemoteUrl(url)).toEqual({
+      provider: 'azure-devops', host, owner: 'Org/Project', repo: 'Repo.GIT',
+    });
+  });
+
+  it('detects and parses Azure DevOps HTTPS URLs with userinfo', () => {
+    const url = 'https://build-user:pat@dev.azure.com/org/project/_git/repo';
+    expect(detectProvider(url)).toBe('azure-devops');
+    expect(parseRemoteUrl(url)).toEqual({
+      provider: 'azure-devops',
+      host: 'dev.azure.com',
+      owner: 'org/project',
+      repo: 'repo',
+    });
+  });
+
   it('parses Azure DevOps SSH URL', () => {
     const result = parseRemoteUrl('git@ssh.dev.azure.com:v3/org/project/repo');
     expect(result).toEqual({
@@ -207,5 +228,16 @@ describe('parseRemoteUrl', () => {
       owner: 'group/subgroup',
       repo: 'repo',
     });
+  });
+});
+
+describe('Azure provider hostname identity', () => {
+  it.each([
+    'https://dev.azure.com.evil.invalid/org/proj/_git/repo',
+    'https://notdev.azure.com/org/proj/_git/repo',
+    'git@notssh.dev.azure.com:v3/org/proj/repo',
+  ])('does not classify a lookalike host as Azure DevOps: %s', (url) => {
+    expect(detectProvider(url)).toBe('unknown');
+    expect(parseRemoteUrl(url)?.provider).toBe('unknown');
   });
 });

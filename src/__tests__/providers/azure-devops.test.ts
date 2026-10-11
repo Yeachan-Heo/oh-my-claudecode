@@ -39,9 +39,28 @@ describe('AzureDevOpsProvider', () => {
     });
   });
 
+  describe('hostname identity', () => {
+    it.each([
+      'https://dev.azure.com.evil.invalid/org/proj/_git/repo',
+      'https://notdev.azure.com/org/proj/_git/repo',
+      'git@notssh.dev.azure.com:v3/org/proj/repo',
+      'https://visualstudio.com.evil.invalid/project/_git/repo',
+    ])('rejects lookalike host %s', (url) => {
+      expect(provider.detectFromRemote(url)).toBe(false);
+    });
+
+    it('accepts the official hostname case-insensitively', () => {
+      expect(provider.detectFromRemote('https://DEV.AZURE.COM/org/project/_git/repo')).toBe(true);
+    });
+  });
+
   describe('detectFromRemote', () => {
     it('returns true for dev.azure.com URLs', () => {
       expect(provider.detectFromRemote('https://dev.azure.com/org/project/_git/repo')).toBe(true);
+    });
+
+    it('returns true for HTTPS URLs with userinfo', () => {
+      expect(provider.detectFromRemote('https://build-user:pat@dev.azure.com/org/project/_git/repo')).toBe(true);
     });
 
     it('returns true for ssh.dev.azure.com URLs', () => {

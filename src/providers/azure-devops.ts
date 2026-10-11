@@ -5,6 +5,11 @@ function stripRefPrefix(ref: string): string {
   return ref.replace(/^refs\/heads\//, '');
 }
 
+export function isAzureDevOpsHost(host: string): boolean {
+  const normalized = host.toLowerCase();
+  return normalized === 'dev.azure.com' || normalized === 'ssh.dev.azure.com' || normalized.endsWith('.visualstudio.com');
+}
+
 export class AzureDevOpsProvider implements GitProvider {
   readonly name = 'azure-devops' as const;
   readonly displayName = 'Azure DevOps';
@@ -12,11 +17,8 @@ export class AzureDevOpsProvider implements GitProvider {
   readonly prRefspec = null;
 
   detectFromRemote(url: string): boolean {
-    return (
-      url.includes('dev.azure.com') ||
-      url.includes('ssh.dev.azure.com') ||
-      url.includes('visualstudio.com')
-    );
+    const host = url.match(/^(?:https?:\/\/(?:[^@/]+@)?|ssh:\/\/[^@]*@|[^@]+@)([^/:]+)/i)?.[1];
+    return !!host && isAzureDevOpsHost(host);
   }
 
   viewPR(number: number): PRInfo | null {
