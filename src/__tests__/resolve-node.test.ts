@@ -147,6 +147,32 @@ describe('resolveNodeBinary', () => {
     expect(resolveNodeBinary()).toBe('/home/tester/.nvm/versions/node/v22.3.0/bin/node');
   });
 
+  it.each([
+    ['/home/tester/.nvm/versions/node', 'bin/node'],
+    ['/home/tester/.fnm/node-versions', 'installation/bin/node'],
+  ])('skips incomplete newer installations in %s', (baseDir, binarySuffix) => {
+    setExecPath('/opt/hostedtoolcache/node/24.0.0/bin/node');
+    const olderBinary = `${baseDir}/v22.3.0/${binarySuffix}`;
+    mockedExistsSync.mockImplementation(pathLike =>
+      String(pathLike) === baseDir || String(pathLike) === olderBinary);
+    mockedReaddirSync.mockReturnValue(['v20.11.0', 'v24.0.0', 'v22.3.0'] as any);
+
+    expect(resolveNodeBinary()).toBe(olderBinary);
+  });
+
+  it('skips unsupported older installations and continues to system Node', () => {
+    setExecPath('/opt/hostedtoolcache/node/24.0.0/bin/node');
+    const baseDir = '/home/tester/.nvm/versions/node';
+    const unsupportedBinary = `${baseDir}/v18.20.8/bin/node`;
+    mockedExistsSync.mockImplementation(pathLike => {
+      const path = String(pathLike);
+      return path === baseDir || path === unsupportedBinary || path === '/usr/local/bin/node';
+    });
+    mockedReaddirSync.mockReturnValue(['v18.20.8', 'v24.0.0'] as any);
+
+    expect(resolveNodeBinary()).toBe('/usr/local/bin/node');
+  });
+
   it('returns bare node as a last resort', () => {
     setExecPath('/opt/hostedtoolcache/node/20.20.2/x64/bin/node');
 
