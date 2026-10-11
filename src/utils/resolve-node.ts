@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from 'fs';
 import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
+import { MIN_NODE_VERSION } from './node-version.js';
 
 const EPHEMERAL_NODE_PATH_MARKERS = ['hostedtoolcache', '/runner/', '\\runner\\'];
 const SYSTEM_NODE_PATHS = ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
@@ -18,6 +19,8 @@ function resolveLatestVersionedNode(baseDir: string, nodeSegments: string[]): st
     while (versions.length > 0) {
       const latest = pickLatestVersion(versions);
       if (!latest) break;
+      const majorVersion = Number.parseInt(latest.replace(/^v/, ''), 10);
+      if (majorVersion < MIN_NODE_VERSION) break;
       const nodePath = join(baseDir, latest, ...nodeSegments);
       if (existsSync(nodePath)) return nodePath;
       versions.splice(versions.indexOf(latest), 1);

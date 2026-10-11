@@ -61,9 +61,6 @@ function loadTemplate(filename: string): string {
 // CONSTANTS AND UTILITIES
 // =============================================================================
 
-/** Minimum required Node.js version for hooks (must match package.json engines) */
-export const MIN_NODE_VERSION = 20;
-
 /** Check if running on Windows */
 export function isWindows(): boolean {
   return process.platform === "win32";
