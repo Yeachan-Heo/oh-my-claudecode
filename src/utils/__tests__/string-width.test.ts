@@ -221,3 +221,16 @@ describe("sliceByWidth", () => {
     expect(sliceByWidth("", 0, 5)).toBe("");
   });
 });
+
+
+describe("ANSI CSI parameter and intermediate bytes", () => {
+  it.each([
+    ["colon-separated color parameters", "\x1b[38:2::255:0:0mred\x1b[0m"],
+    ["private parameters", "\x1b[?25lred\x1b[?25h"],
+    ["intermediate bytes", "\x1b[2 qred"],
+    ["punctuation final byte", "\x1b[2@red"],
+  ])("does not count terminal controls as visible columns: %s", (_name, text) => {
+    expect(stripAnsi(text)).toBe("red");
+    expect(stringWidth(text)).toBe(3);
+  });
+});
