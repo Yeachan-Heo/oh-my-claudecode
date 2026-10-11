@@ -104,6 +104,16 @@ describe('parseRemoteUrl', () => {
     });
   });
 
+  it.each([
+    ['HTTPS://DEV.AZURE.COM/Org/Project/_git/Repo.GIT', 'dev.azure.com'],
+    ['git@SSH.DEV.AZURE.COM:v3/Org/Project/Repo.GIT', 'dev.azure.com'],
+    ['HTTPS://Org.VISUALSTUDIO.COM/Project/_git/Repo.GIT', 'Org.visualstudio.com'],
+  ])('parses Azure host and scheme case without changing path case: %s', (url, host) => {
+    expect(parseRemoteUrl(url)).toEqual({
+      provider: 'azure-devops', host, owner: 'Org/Project', repo: 'Repo.GIT',
+    });
+  });
+
   it('detects and parses Azure DevOps HTTPS URLs with userinfo', () => {
     const url = 'https://build-user:pat@dev.azure.com/org/project/_git/repo';
     expect(detectProvider(url)).toBe('azure-devops');

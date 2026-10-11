@@ -124,40 +124,40 @@ export function parseRemoteUrl(url: string): RemoteUrlInfo | null {
 
   // Azure DevOps HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
   const azureHttpsMatch = trimmed.match(
-    /^https?:\/\/(?:[^/@]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
+    /^https?:\/\/(?:[^/@]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/\s]+)$/i
   );
   if (azureHttpsMatch) {
     return {
       provider: 'azure-devops',
       host: 'dev.azure.com',
       owner: `${azureHttpsMatch[1]}/${azureHttpsMatch[2]}`,
-      repo: azureHttpsMatch[3],
+      repo: azureHttpsMatch[3].replace(/\.git$/, ''),
     };
   }
 
   // Azure DevOps SSH: git@ssh.dev.azure.com:v3/{org}/{project}/{repo}
   const azureSshMatch = trimmed.match(
-    /^git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+?)(?:\.git)?$/
+    /^git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/([^/\s]+)$/i
   );
   if (azureSshMatch) {
     return {
       provider: 'azure-devops',
       host: 'dev.azure.com',
       owner: `${azureSshMatch[1]}/${azureSshMatch[2]}`,
-      repo: azureSshMatch[3],
+      repo: azureSshMatch[3].replace(/\.git$/, ''),
     };
   }
 
   // Azure DevOps legacy HTTPS: https://{org}.visualstudio.com/{project}/_git/{repo}
   const azureLegacyMatch = trimmed.match(
-    /^https?:\/\/(?:[^/@]+@)?([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+?)(?:\.git)?$/
+    /^https?:\/\/(?:[^/@]+@)?([^.]+)\.visualstudio\.com\/([^/]+)\/_git\/([^/\s]+)$/i
   );
   if (azureLegacyMatch) {
     return {
       provider: 'azure-devops',
       host: `${azureLegacyMatch[1]}.visualstudio.com`,
       owner: `${azureLegacyMatch[1]}/${azureLegacyMatch[2]}`,
-      repo: azureLegacyMatch[3],
+      repo: azureLegacyMatch[3].replace(/\.git$/, ''),
     };
   }
 
