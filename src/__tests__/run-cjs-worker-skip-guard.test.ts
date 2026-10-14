@@ -12,6 +12,7 @@ const WORKER_HOOKS = [
   { script: 'pre-tool-enforcer.mjs', event: 'PreToolUse', skipToken: 'pre-tool-use' },
   { script: 'post-tool-verifier.mjs', event: 'PostToolUse', skipToken: 'post-tool-use' },
   { script: 'post-tool-rules-injector.mjs', event: 'PostToolUse', skipToken: 'post-tool-use' },
+  { script: 'post-tool-directory-context-injector.mjs', event: 'PostToolUse', skipToken: 'post-tool-use' },
   { script: 'project-memory-posttool.mjs', event: 'PostToolUse', skipToken: 'post-tool-use' },
   { script: 'keyword-detector.mjs', event: 'UserPromptSubmit', skipToken: 'keyword-detector' },
 ] as const;

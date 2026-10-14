@@ -502,6 +502,7 @@ describe('run.cjs trusted hook Worker selection', () => {
       'post-tool-verifier.mjs',
       'project-memory-posttool.mjs',
       'post-tool-rules-injector.mjs',
+      'post-tool-directory-context-injector.mjs',
     ]) {
       const expectedPath = join(root, 'scripts', expectedScript);
       if (!existsSync(expectedPath)) writeFileSync(expectedPath, 'process.exit(0);');
@@ -546,6 +547,7 @@ describe('run.cjs trusted hook Worker selection', () => {
     ['post-tool-verifier.mjs', 'PostToolUse'],
     ['project-memory-posttool.mjs', 'PostToolUse'],
     ['post-tool-rules-injector.mjs', 'PostToolUse'],
+    ['post-tool-directory-context-injector.mjs', 'PostToolUse'],
   ])('uses a Worker for exact trusted per-tool hook %s', (script, event) => {
     const root = join(tmpDir, `${script}-root`);
     const target = join(root, 'scripts', script);

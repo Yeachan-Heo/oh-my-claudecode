@@ -11,6 +11,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { TRACKED_TOOLS as DIRECTORY_TRACKED_TOOLS } from '../hooks/directory-readme-injector/constants.js';
+import { TRACKED_TOOLS as RULES_TRACKED_TOOLS } from '../hooks/rules-injector/constants.js';
 
 const REPO_ROOT = resolve(__dirname, '..', '..');
 const SCRIPT_NAME = 'post-tool-directory-context-injector.mjs';
@@ -44,6 +46,25 @@ describe('PostToolUse directory-context injector registration (issue #4006)', ()
   it('registers the wrapper on PostToolUse so nested AGENTS.md is actually delivered', () => {
     const commands = postToolUseCommands();
     expect(commands.some((command) => command.includes(SCRIPT_NAME))).toBe(true);
+  });
+
+  it('scopes the file injectors to the tools they track so other tool calls skip the launch', () => {
+    const config = JSON.parse(readFileSync(join(REPO_ROOT, 'hooks', 'hooks.json'), 'utf-8')) as {
+      hooks: Record<string, HookGroup[]>;
+    };
+    const groups = (script: string) =>
+      (config.hooks.PostToolUse ?? []).filter((group) => group.hooks.some((hook) => hook.command.includes(script)));
+    const matcherTools = (script: string) =>
+      groups(script).flatMap((group) => group.matcher.split('|')).sort();
+    // Claude Code matches a `|` list case-sensitively against tool_name, while the hooks lowercase it.
+    const claudeToolNames: Record<string, string> = { read: 'Read', write: 'Write', edit: 'Edit', multiedit: 'MultiEdit' };
+    const expectedTools = (tracked: readonly string[]) => tracked.map((tool) => claudeToolNames[tool]).sort();
+
+    // A wildcard matcher would launch the hook for tools whose processToolExecution() is a guaranteed no-op.
+    expect(groups(SCRIPT_NAME).map((group) => group.matcher)).not.toContain('*');
+    expect(groups('post-tool-rules-injector.mjs').map((group) => group.matcher)).not.toContain('*');
+    expect(matcherTools(SCRIPT_NAME)).toEqual(expectedTools(DIRECTORY_TRACKED_TOOLS));
+    expect(matcherTools('post-tool-rules-injector.mjs')).toEqual(expectedTools(RULES_TRACKED_TOOLS));
   });
 
   it('loads the hook from the built dist path the build emits', () => {

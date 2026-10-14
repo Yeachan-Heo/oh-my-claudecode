@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f3fdd34496029c0581e92a700e51716dac83010e",
-    "sourceSha256": "5170c81a50f8c30eacbb4b994ef2143358921fd4eedf9e0aaecd52e555740331",
+    "head": "ed74cf4ef71b59450024076c120c75e9c8f1c769",
+    "sourceSha256": "e3e2f2dd6f00c6e879ec3c5679b15c3b516086bd296f3c573735c64dae06f75d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f3fdd34496029c0581e92a700e51716dac83010e",
-  "sourceSha256": "5170c81a50f8c30eacbb4b994ef2143358921fd4eedf9e0aaecd52e555740331",
+  "head": "ed74cf4ef71b59450024076c120c75e9c8f1c769",
+  "sourceSha256": "e3e2f2dd6f00c6e879ec3c5679b15c3b516086bd296f3c573735c64dae06f75d",
   "counts": {
     "public": {
       "skills": 48,
@@ -49655,6 +49655,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "src/hooks/directory-readme-injector/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/directory-context-injector-registration.test.ts",
+        "to": "src/hooks/rules-injector/constants.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/directory-context-injector.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88347,11 +88357,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8509,
-      "importEdgeCount": 7064,
+      "edgeCount": 8511,
+      "importEdgeCount": 7066,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "1d67141bc13a08f85f5cc2a871b2369c3485ea36c9fdd9127ecc1d9d28988342"
+  "manifestSha256": "02a87be25cf979284eb10fab4244fb48a041c64416f160ceefe65bfbb84e3484"
 }

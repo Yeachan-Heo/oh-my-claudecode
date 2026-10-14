@@ -209,4 +209,32 @@ describe('hook registry — selection and ordering', () => {
       selectApplicableEntries(registry, 'PermissionRequest', 'Edit'),
     ).toEqual([]);
   });
+
+  it('treats a pipe-separated matcher as a list of tool names', () => {
+    const postToolUseFor = (tool: string) =>
+      selectApplicableEntries(registry, 'PostToolUse', tool).map(
+        (e) => e.entrypoint,
+      );
+    for (const tool of ['Read', 'Write', 'Edit', 'MultiEdit']) {
+      expect(postToolUseFor(tool)).toEqual(
+        expect.arrayContaining([
+          'post-tool-rules-injector.mjs',
+          'post-tool-directory-context-injector.mjs',
+        ]),
+      );
+    }
+    for (const tool of ['Bash', 'Grep', 'Glob', 'Agent', 'Skill', 'TodoWrite']) {
+      const entrypoints = postToolUseFor(tool);
+      expect(entrypoints).toContain('post-tool-verifier.mjs');
+      expect(entrypoints).not.toContain('post-tool-rules-injector.mjs');
+      expect(entrypoints).not.toContain(
+        'post-tool-directory-context-injector.mjs',
+      );
+    }
+    expect(
+      selectApplicableEntries(registry, 'PostToolUse', undefined).map(
+        (e) => e.entrypoint,
+      ),
+    ).not.toContain('post-tool-rules-injector.mjs');
+  });
 });

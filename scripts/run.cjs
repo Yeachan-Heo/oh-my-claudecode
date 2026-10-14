@@ -171,6 +171,7 @@ const TRUSTED_WORKER_HOOKS = new Map([
   ['post-tool-verifier.mjs', { event: 'PostToolUse' }],
   ['project-memory-posttool.mjs', { event: 'PostToolUse' }],
   ['post-tool-rules-injector.mjs', { event: 'PostToolUse' }],
+  ['post-tool-directory-context-injector.mjs', { event: 'PostToolUse' }],
 ]);
 
 function resolveTrustedWorkerTimeoutMs(targetPath, manifestHook) {
