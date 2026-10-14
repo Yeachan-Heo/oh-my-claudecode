@@ -320,7 +320,13 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
   const activePath = join(configDir, 'CLAUDE-omc.md');
   const genericPaths = genericClaudeMdFiles(configDir);
   const mainExists = pathExistsWithoutFollowingSymlinks(claudeMdPath);
-  if (!mainExists && !pathExistsWithoutFollowingSymlinks(activePath) && genericPaths.length === 0) return null;
+  const managementDisabled = !isClaudeMdEnabledInConfig(configDir);
+  if (!mainExists && !pathExistsWithoutFollowingSymlinks(activePath) && genericPaths.length === 0) {
+    // No guide on disk: stay silent unless the user deliberately opted out, so the opt-out stays visible.
+    return managementDisabled
+      ? { hasMarkers: false, hasUserContent: false, path: claudeMdPath, files: [], dirtyFiles: [], exactLegacyPaths: [], manualReviewPaths: [], managementDisabled }
+      : null;
+  }
 
   const main = mainExists ? inspectClaudeMdFile(claudeMdPath, configDir, true) : null;
   const candidatePaths: string[] = [...(mainExists ? [claudeMdPath] : []), activePath, ...(main?.references ?? []), ...genericPaths];
@@ -346,7 +352,7 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
     dirtyFiles: files.filter(file => file.hasUserContent).map(file => file.path),
     exactLegacyPaths: files.filter(file => file.exactLegacy).map(file => file.path),
     manualReviewPaths: files.filter(file => file.manualReview || file.markerState === 'symlink' || file.markerState === 'unreadable' || file.markerState === 'invalid-utf8').map(file => file.path),
-    managementDisabled: !isClaudeMdEnabledInConfig(configDir)
+    managementDisabled
   };
 }
 

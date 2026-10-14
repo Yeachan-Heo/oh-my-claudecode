@@ -738,6 +738,31 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     expect(JSON.parse(formatReport(report, true)).claudeMdStatus.managementDisabled).toBe(true);
   });
 
+  it('reports the claudeMdEnabled opt-out when no CLAUDE*.md file exists', () => {
+    writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+    const report = runConflictCheck();
+    const output = formatReport(report, false);
+
+    expect(report.claudeMdStatus).not.toBeNull();
+    expect(report.claudeMdStatus!.managementDisabled).toBe(true);
+    expect(report.claudeMdStatus!.files).toEqual([]);
+    expect(report.hasConflicts).toBe(false);
+    expect(output).toContain('claudeMdEnabled is false in .omc-config.json');
+    expect(output).not.toContain('No CLAUDE.md found');
+    expect(output).not.toContain('Run /oh-my-claudecode:omc-setup to add markers');
+    expect(JSON.parse(formatReport(report, true)).claudeMdStatus.managementDisabled).toBe(true);
+  });
+
+  it('keeps reporting no CLAUDE.md when none exists and claudeMdEnabled is not false', () => {
+    expect(checkClaudeMdStatus()).toBeNull();
+    expect(formatReport(runConflictCheck(), false)).toContain('No CLAUDE.md found');
+
+    writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: true }));
+    expect(checkClaudeMdStatus()).toBeNull();
+    expect(formatReport(runConflictCheck(), false)).toContain('No CLAUDE.md found');
+  });
+
 });
 
 describe('doctor-conflicts: legacy skills collision check (issue #1101)', () => {
