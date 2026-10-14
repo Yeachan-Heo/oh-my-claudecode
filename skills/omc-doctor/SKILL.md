@@ -83,8 +83,8 @@ ls -la "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/hooks/*.sh 2>/dev/null
 First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:-~/.claude}/.omc-config.json`; only an explicit `"claudeMdEnabled": false` disables it (missing file, missing key, or any other value means enabled).
 
 ```bash
-# Check if the user opted out of global CLAUDE.md management (cross-platform)
-node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=process.env.CLAUDE_CONFIG_DIR||p.join(h,'.claude');let off=false;try{off=JSON.parse(f.readFileSync(p.join(d,'.omc-config.json'),'utf8')).claudeMdEnabled===false}catch{};console.log(off?'CLAUDE.md management disabled by claudeMdEnabled: false':'CLAUDE.md management enabled')"
+# Check if the user opted out of global CLAUDE.md management (cross-platform; expands ~ in CLAUDE_CONFIG_DIR like getClaudeConfigDir)
+node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c;let off=false;try{off=JSON.parse(f.readFileSync(p.join(d,'.omc-config.json'),'utf8')).claudeMdEnabled===false}catch{};console.log(off?'CLAUDE.md management disabled by claudeMdEnabled: false':'CLAUDE.md management enabled')"
 ```
 
 If it prints `CLAUDE.md management disabled by claudeMdEnabled: false`, report that line as INFO, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`. Otherwise continue:
