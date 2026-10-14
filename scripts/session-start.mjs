@@ -140,6 +140,8 @@ const STABILIZE_TOOL_FAILURE_CLEANUP_FLAG = '--stabilize-legacy-tool-failure-sta
 const TOOL_FAILURE_CLEANUP_STABILIZATION_MS = 30_000;
 const TOOL_FAILURE_CLEANUP_RESCAN_MS = 250;
 const TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS = 5000;
+const TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS = 10;
+const TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS = 60_000;
 let postToolFailureStateLockModule;
 
 async function loadPostToolFailureStateLock() {
@@ -229,6 +231,19 @@ function toolFailureCleanupStabilizationMs() {
     if (Number.isFinite(testWindow) && testWindow > 0) return Math.min(testWindow, 5000);
   }
   return TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
+}
+
+// Hard lifetime of the detached stabilization helper. Sessions on another plugin
+// version can stay open for days, so waiting for them to exit is unbounded. The
+// purge is idempotent and every SessionStart purges again and starts a new
+// helper, so the helper may stop waiting. A caller-supplied cap can only shorten
+// the derived default.
+function toolFailureCleanupMaxLifetimeMs(stabilizationMs, requestedMs) {
+  const defaultMs = Math.max(
+    stabilizationMs * TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS,
+    TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS,
+  );
+  return Number.isFinite(requestedMs) && requestedMs > 0 ? Math.min(requestedMs, defaultMs) : defaultMs;
 }
 
 function shouldStabilizeToolFailureCleanup() {
@@ -326,8 +341,9 @@ function resolveSessionPluginOccupancy(deadline) {
   return occupancy;
 }
 
-async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
+async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLifetimeMs = toolFailureCleanupMaxLifetimeMs(stabilizationMs)) {
   const stateDir = join(omcRoot, 'state');
+  const lifetimeDeadline = Date.now() + maxLifetimeMs;
   let olderPluginActive = hasActiveOlderPluginRoot();
   let quietUntil = Date.now() + stabilizationMs;
   let nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
@@ -340,6 +356,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
     }
 
     const now = Date.now();
+    if (now >= lifetimeDeadline) return;
     if (now >= nextPluginRootCheck) {
       olderPluginActive = hasActiveOlderPluginRoot();
       nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
@@ -369,6 +386,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
   try {
     while (true) {
       const now = Date.now();
+      if (now >= lifetimeDeadline) return;
       if (now >= nextPluginRootCheck) {
         olderPluginActive = hasActiveOlderPluginRoot();
         nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
@@ -1919,7 +1937,7 @@ if (process.argv.includes(REFRESH_UPDATE_CACHE_FLAG)) {
   const stabilizationMs = Number.isFinite(requestedWindow) && requestedWindow > 0
     ? Math.min(requestedWindow, TOOL_FAILURE_CLEANUP_STABILIZATION_MS)
     : TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
-  stabilizeLegacyToolFailureState(omcRoot, stabilizationMs)
+  stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, toolFailureCleanupMaxLifetimeMs(stabilizationMs, Number(process.argv[5])))
     .catch(() => {})
     .finally(() => process.exit(0));
 } else {

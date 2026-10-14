@@ -4,6 +4,8 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, w
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
+import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 const SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'session-start.mjs');
 const NODE = process.execPath;
@@ -458,6 +460,104 @@ describe('session-start.mjs regression #1386', () => {
       expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
     } finally {
       await sessionStart.output.catch(() => '');
+    }
+  });
+
+  it('stops waiting for other plugin versions once the worker reaches its hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const currentPluginRoot = join(pluginParent, 'current');
+    const olderPluginRoot = join(pluginParent, 'older');
+    const registryDir = join(configDir, '.omc', 'cache-occupancy');
+    const omcRoot = join(fakeProject, '.omc');
+    const workerLockPath = join(omcRoot, 'state', '.legacy-tool-failure-cleanup-worker.lock');
+    expect(publishCacheOccupancy(olderPluginRoot, configDir, process.pid)).toBe(true);
+
+    const startedAt = Date.now();
+    const worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '500', '3000'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: currentPluginRoot,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<number | null>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve(code));
+    });
+
+    try {
+      expect(await waitForFilesToAppear([workerLockPath], 5000)).toBe(true);
+      // Past the 500 ms stabilization window the older version still holds the worker.
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      expect(worker.exitCode).toBeNull();
+
+      const exitCode = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 7000)),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(3000);
+      expect(existsSync(workerLockPath)).toBe(false);
+      // The older version never exited: the worker gave up waiting for it.
+      expect(readdirSync(registryDir)).toHaveLength(1);
+    } finally {
+      rmSync(registryDir, { recursive: true, force: true });
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
+    }
+  });
+
+  it('stops waiting for the state directory once the worker reaches its hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const currentPluginRoot = join(pluginParent, 'current');
+    const olderPluginRoot = join(pluginParent, 'older');
+    const registryDir = join(configDir, '.omc', 'cache-occupancy');
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    rmSync(stateDir, { recursive: true, force: true });
+    expect(publishCacheOccupancy(olderPluginRoot, configDir, process.pid)).toBe(true);
+
+    const startedAt = Date.now();
+    const worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '500', '2000'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: currentPluginRoot,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<number | null>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve(code));
+    });
+
+    try {
+      // Past the 500 ms window the older version still keeps the worker waiting.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(worker.exitCode).toBeNull();
+
+      const exitCode = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 6000)),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2000);
+      expect(existsSync(stateDir)).toBe(false);
+      // The older version never exited: the worker gave up waiting for it.
+      expect(readdirSync(registryDir)).toHaveLength(1);
+    } finally {
+      rmSync(registryDir, { recursive: true, force: true });
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
     }
   });
 
