@@ -291,4 +291,37 @@ describe('installer bundled + standalone skill sync', () => {
       logSpy.mockRestore();
     }
   });
+
+  it('reports an unchanged CLAUDE.md as already up to date on a repeated install', async () => {
+    const claudeMdPath = join(claudeConfigDir, 'CLAUDE.md');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const firstInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+      const firstResult = firstInstaller.install({
+        skipClaudeCheck: true,
+        skipHud: true,
+        verbose: true,
+      });
+
+      expect(firstResult.success).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith('Created CLAUDE.md');
+      const firstContent = readFileSync(claudeMdPath, 'utf-8');
+
+      logSpy.mockClear();
+      const secondInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+      const secondResult = secondInstaller.install({
+        skipClaudeCheck: true,
+        skipHud: true,
+        verbose: true,
+      });
+
+      expect(secondResult.success).toBe(true);
+      expect(logSpy).toHaveBeenCalledWith('CLAUDE.md already up to date');
+      expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+      expect(logSpy).not.toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+      expect(readFileSync(claudeMdPath, 'utf-8')).toBe(firstContent);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
 });
