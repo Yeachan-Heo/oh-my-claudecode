@@ -8,6 +8,7 @@ import { basename, dirname, join } from 'path';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { isOmcHook } from '../../installer/index.js';
 import { analyzeLegacyClaudeMd, decodeClaudeMdUtf8 } from '../../installer/claude-md-analysis.js';
+import { isClaudeMdEnabledInConfig } from '../../installer/claude-md-transaction.js';
 import { colors } from '../utils/formatting.js';
 import { getSkillsDir, listBuiltinSkillNames } from '../../features/builtin-skills/skills.js';
 import { inspectUnifiedMcpRegistrySync } from '../../installer/mcp-registry.js';
@@ -49,6 +50,8 @@ export interface ConflictReport {
     dirtyFiles: string[];
     exactLegacyPaths: string[];
     manualReviewPaths: string[];
+    /** True when .omc-config.json sets claudeMdEnabled to false (OMC does not manage CLAUDE.md). */
+    managementDisabled: boolean;
   } | null;
   legacySkills: { name: string; path: string }[];
   envFlags: { disableOmc: boolean; skipHooks: string[] };
@@ -342,7 +345,8 @@ export function checkClaudeMdStatus(): ConflictReport['claudeMdStatus'] {
     files,
     dirtyFiles: files.filter(file => file.hasUserContent).map(file => file.path),
     exactLegacyPaths: files.filter(file => file.exactLegacy).map(file => file.path),
-    manualReviewPaths: files.filter(file => file.manualReview || file.markerState === 'symlink' || file.markerState === 'unreadable' || file.markerState === 'invalid-utf8').map(file => file.path)
+    manualReviewPaths: files.filter(file => file.manualReview || file.markerState === 'symlink' || file.markerState === 'unreadable' || file.markerState === 'invalid-utf8').map(file => file.path),
+    managementDisabled: !isClaudeMdEnabledInConfig(configDir)
   };
 }
 
@@ -610,6 +614,7 @@ export function checkConfigIssues(): ConflictReport['configIssues'] {
       'notifications',
       'notificationProfiles',
       'hudEnabled',
+      'claudeMdEnabled',
       'autoUpgradePrompt',
       'nodeBinary',
       // Direct config readers / writers outside OMCConfig
@@ -741,6 +746,8 @@ export function formatReport(report: ConflictReport, json: boolean): string {
       if (report.claudeMdStatus.dirtyFiles.length > 0) {
         lines.push(`  ${colors.green('✓')} User content outside managed ranges: ${report.claudeMdStatus.dirtyFiles.join(', ')}`);
       }
+    } else if (report.claudeMdStatus.managementDisabled) {
+      lines.push(`  ${colors.blue('ℹ')} No OMC markers found (claudeMdEnabled is false in .omc-config.json; OMC does not manage CLAUDE.md)`);
     } else {
       lines.push(`  ${colors.yellow('⚠')} No OMC markers found`);
       lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup to add markers to the selected guide')}`);

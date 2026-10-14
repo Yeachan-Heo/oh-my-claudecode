@@ -5,7 +5,7 @@ import * as nodeFs from 'node:fs';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
-import { executeClaudeMdTransaction, isStrictChildPath, type ClaudeMdTransactionFs } from '../claude-md-transaction.js';
+import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig, isStrictChildPath, type ClaudeMdTransactionFs } from '../claude-md-transaction.js';
 import { CLAUDE_MD_COORDINATOR_SCHEMA_VERSION, runClaudeMdCoordinator, runClaudeMdCoordinatorHandshake } from '../../cli/claude-md-coordinator.js';
 import corpus from './fixtures/legacy-guides.json' with { type: 'json' };
 
@@ -405,5 +405,35 @@ describe('CLAUDE.md coordinator protocol', () => {
     expect(response).toMatchObject({ ok: false, exitCode: 3 });
     expect(response.error).toContain('Source must be inside plugin root');
     expect(nodeFs.existsSync(join(root, 'CLAUDE.md'))).toBe(false);
+  });
+});
+
+describe('claudeMdEnabled config switch', () => {
+  function configRoot(config?: string): string {
+    const { root } = fixture();
+    if (config !== undefined) writeFileSync(join(root, '.omc-config.json'), config);
+    return root;
+  }
+
+  it('is enabled when the config file or the key is missing', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot())).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"hudEnabled":false}'))).toBe(true);
+  });
+
+  it('is enabled for an explicit true', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":true}'))).toBe(true);
+  });
+
+  it('is disabled only for an explicit false', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":false}'))).toBe(false);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":"false"}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":0}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":null}'))).toBe(true);
+  });
+
+  it('is enabled when the config is unparsable', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{not json'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('null'))).toBe(true);
   });
 });

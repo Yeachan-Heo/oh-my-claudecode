@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "36dd164b7200d34d31840f9522e3758d2372916b",
-    "sourceSha256": "29c9bef99d25ae952beb32f0b2665eef0290f836d5bfdb15e81e778100eb5b58",
+    "head": "51bec397e7bf52d3e00468ff3abf81a12cc84b33",
+    "sourceSha256": "2867f930063ca42dcb5bc8dbd23f97de34c4c20754e2ecc1ba90453bf81d36e9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "36dd164b7200d34d31840f9522e3758d2372916b",
-  "sourceSha256": "29c9bef99d25ae952beb32f0b2665eef0290f836d5bfdb15e81e778100eb5b58",
+  "head": "51bec397e7bf52d3e00468ff3abf81a12cc84b33",
+  "sourceSha256": "2867f930063ca42dcb5bc8dbd23f97de34c4c20754e2ecc1ba90453bf81d36e9",
   "counts": {
     "public": {
       "skills": 48,
@@ -58076,6 +58076,11 @@
       },
       {
         "from": "src/cli/commands/doctor-conflicts.ts",
+        "to": "src/installer/claude-md-transaction.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/doctor-conflicts.ts",
         "to": "src/installer/index.ts",
         "kind": "imports"
       },
@@ -73225,6 +73230,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/installer/claude-md-transaction.ts",
+        "to": "src/lib/paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/installer/hooks.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88357,11 +88367,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8511,
-      "importEdgeCount": 7066,
+      "edgeCount": 8513,
+      "importEdgeCount": 7068,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "89811521915ee6ac40a8c3315eb97a0dee0c1f187255125c4b23db6488374ce8"
+  "manifestSha256": "2e2e4963522a2a50f131bcf01d754dc2ff5826cbcfc5bf2965772f8a397e59f3"
 }

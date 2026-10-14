@@ -288,6 +288,7 @@ try {
   const print = (label, values) => Array.isArray(values) && values.forEach(value => console.log(`${label}: ${typeof value === 'string' ? value : value.path}`));
   print('Coordinator backup', response.backups);
   print('Coordinator mutated path', response.mutatedPaths);
+  print('Coordinator note', response.warnings);
   if (!response.ok) {
     console.error(`Coordinator failure: ${response.error || 'unspecified failure'}`);
     if (response.failedPath) console.error(`Coordinator failure path: ${response.failedPath}`);
