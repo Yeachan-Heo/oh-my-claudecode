@@ -37,7 +37,7 @@ Replace `<CONFIG_TARGET>` with `local` or `global`. For local installs, omit the
 
 The coordinator exclusively performs all `CLAUDE.md`, `CLAUDE-omc.md`, managed-import, orphan-cleanup, backup, and rollback mutations. Do **not** hand-write, summarize, partially reconstruct, download, or repair either configuration file. It reports only the exact coordinator-created backup, failure, and rollback paths.
 
-After a successful local or global-overwrite install, verify the target file contains both markers. In global preserve mode, verify `CLAUDE-omc.md` contains both markers and the base `CLAUDE.md` contains exactly one managed import block. Stop and report a coordinator failure; never attempt a shell, downloaded-source, or fallback mutation.
+If the coordinator output contains the `Skipped CLAUDE.md (claudeMdEnabled is false ...)` note, the user opted out of global CLAUDE.md management in `.omc-config.json`: skip marker verification and report the skip as success. Otherwise, after a successful local or global-overwrite install, verify the target file contains both markers. In global preserve mode, verify `CLAUDE-omc.md` contains both markers and the base `CLAUDE.md` contains exactly one managed import block. Stop and report a coordinator failure; never attempt a shell, downloaded-source, or fallback mutation.
 
 For `local` installs inside a git repository, the script also seeds `.git/info/exclude` with an OMC block that re-includes `.omc/`, ignores local `.omc/*` artifacts by default, and preserves `.omc/skills/` for project skills you intend to commit.
 
