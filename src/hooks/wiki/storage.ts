@@ -18,7 +18,7 @@ import { join, resolve, sep } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../../lib/file-lock.js';
-import { splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
+import { escapeYamlString, splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
 import {
   type WikiPage,
   type WikiPageFrontmatter,
@@ -161,23 +161,18 @@ function parseYamlArray(value: string | undefined): string[] {
   return trimmed ? [trimmed] : [];
 }
 
-/** Escape a string for use inside YAML double quotes. */
-function escapeYaml(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-}
-
 /**
  * Serialize frontmatter + content to markdown string.
  */
 export function serializePage(page: WikiPage): string {
   const fm = page.frontmatter;
   const yaml = [
-    `title: "${escapeYaml(fm.title)}"`,
-    `tags: [${fm.tags.map(t => `"${escapeYaml(t)}"`).join(', ')}]`,
+    `title: "${escapeYamlString(fm.title)}"`,
+    `tags: [${fm.tags.map(t => `"${escapeYamlString(t)}"`).join(', ')}]`,
     `created: ${fm.created}`,
     `updated: ${fm.updated}`,
-    `sources: [${fm.sources.map(s => `"${escapeYaml(s)}"`).join(', ')}]`,
-    `links: [${fm.links.map(l => `"${escapeYaml(l)}"`).join(', ')}]`,
+    `sources: [${fm.sources.map(s => `"${escapeYamlString(s)}"`).join(', ')}]`,
+    `links: [${fm.links.map(l => `"${escapeYamlString(l)}"`).join(', ')}]`,
     `category: ${fm.category}`,
     `confidence: ${fm.confidence}`,
     `schemaVersion: ${fm.schemaVersion}`,

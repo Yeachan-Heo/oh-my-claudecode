@@ -12,6 +12,11 @@ export function unquoteYamlScalar(value: string): string {
   return value;
 }
 
+/** Escape a string for use inside YAML double quotes. */
+export function escapeYamlString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+
 /** Decode the YAML string escapes supported by the frontmatter parsers. */
 export function unescapeYamlString(value: string): string {
   return value.replace(/\\(\\|"|n|r)/g, (_, ch) => {

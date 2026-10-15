@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T14:49:30.296Z",
+  "generatedAt": "2026-10-15T15:38:16.537Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "9559dba7eb8262c1d1d8f6847b43ad995fb0ae8b",
-    "sourceSha256": "21e3b4650f448fa26dbf519304c9130f404f8e9a9cf6969dbf1778421d271daf",
-    "generatedAt": "2026-10-15T14:49:30.296Z",
+    "head": "ea658dbdf589815025386279d67011d1d785a285",
+    "sourceSha256": "e18b85f515ef70b7e5d0ee645382ac2c8c1f8757eec0924008ecdac174914533",
+    "generatedAt": "2026-10-15T15:38:16.537Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "9559dba7eb8262c1d1d8f6847b43ad995fb0ae8b",
-  "sourceSha256": "21e3b4650f448fa26dbf519304c9130f404f8e9a9cf6969dbf1778421d271daf",
+  "head": "ea658dbdf589815025386279d67011d1d785a285",
+  "sourceSha256": "e18b85f515ef70b7e5d0ee645382ac2c8c1f8757eec0924008ecdac174914533",
   "counts": {
     "public": {
       "skills": 48,
@@ -50086,6 +50086,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/hooks/learner/parser.test.ts",
+        "to": "src/hooks/learner/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/__tests__/hooks/learner/transliteration-map.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -65741,6 +65746,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/learner/parser.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/promotion.ts",
         "to": "src/hooks/learner/types.ts",
         "kind": "type-imports"
@@ -71278,6 +71288,11 @@
       {
         "from": "src/hooks/wiki/storage.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/wiki/storage.ts",
+        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88463,11 +88478,11 @@
     ],
     "stats": {
       "nodeCount": 7740,
-      "edgeCount": 8528,
-      "importEdgeCount": 7081,
+      "edgeCount": 8531,
+      "importEdgeCount": 7083,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "4fbd8bfa15e14f822fb8c89023a43eab48a68a5ab5e89633a171def31f600ac7"
+  "manifestSha256": "b28ae61b060ab0fe530b71ff3a62421da0c7602a5cf7a20925e5725ce772a283"
 }

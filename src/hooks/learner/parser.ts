@@ -5,7 +5,7 @@
  */
 
 import type { SkillMetadata } from './types.js';
-import { splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
+import { escapeYamlString, splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -208,15 +208,15 @@ export function parseArrayValue(
 export function generateSkillFrontmatter(metadata: SkillMetadata): string {
   const lines = [
     '---',
-    `id: "${metadata.id}"`,
-    `name: "${metadata.name}"`,
-    `description: "${metadata.description}"`,
+    `id: "${escapeYamlString(metadata.id)}"`,
+    `name: "${escapeYamlString(metadata.name)}"`,
+    `description: "${escapeYamlString(metadata.description)}"`,
     `source: ${metadata.source}`,
-    `createdAt: "${metadata.createdAt}"`,
+    `createdAt: "${escapeYamlString(metadata.createdAt)}"`,
   ];
 
   if (metadata.sessionId) {
-    lines.push(`sessionId: "${metadata.sessionId}"`);
+    lines.push(`sessionId: "${escapeYamlString(metadata.sessionId)}"`);
   }
 
   if (metadata.quality !== undefined) {
@@ -229,13 +229,13 @@ export function generateSkillFrontmatter(metadata: SkillMetadata): string {
 
   lines.push('triggers:');
   for (const trigger of metadata.triggers) {
-    lines.push(`  - "${trigger}"`);
+    lines.push(`  - "${escapeYamlString(trigger)}"`);
   }
 
   if (metadata.tags && metadata.tags.length > 0) {
     lines.push('tags:');
     for (const tag of metadata.tags) {
-      lines.push(`  - "${tag}"`);
+      lines.push(`  - "${escapeYamlString(tag)}"`);
     }
   }
 
