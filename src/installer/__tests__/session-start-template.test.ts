@@ -550,6 +550,81 @@ describe('session-start template retired-state handling', () => {
     }
   });
 
+  it.skipIf(process.platform === 'win32')('bounds the plugin occupancy probe after the worker lock by the hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    const legacyPath = join(stateDir, 'last-tool-error.json');
+    const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const fakeBin = join(tempDir, 'fake-bin');
+    const psLog = join(tempDir, 'ps.log');
+    const slowMarker = join(tempDir, 'ps-slow-started');
+    const platformPreload = join(tempDir, 'darwin-platform.mjs');
+    const lstart = 'Tue Jan  6 09:00:00 2026';
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(platformPreload, "Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });\n");
+    // The batched occupancy ps hangs once the worker lock exists; every other call answers at once.
+    const ps = join(fakeBin, 'ps');
+    writeFileSync(ps, [
+      '#!/bin/sh',
+      'echo "$@" >> "$PS_LOG"',
+      'case "$4" in',
+      '  pid=,lstart=)',
+      '    if [ -e "$WORKER_LOCK" ]; then : > "$PS_SLOW_MARKER"; exec sleep 10; fi',
+      '    IFS=,; for id in $2; do printf \'%5s %s\\n\' "$id" "$PS_LSTART"; done',
+      '    ;;',
+      '  *) echo "$PS_LSTART" ;;',
+      'esac',
+      '',
+    ].join('\n'));
+    chmodSync(ps, 0o755);
+    const psEnv = { PATH: `${fakeBin}:${process.env.PATH}`, PS_LOG: psLog, PS_SLOW_MARKER: slowMarker, PS_LSTART: lstart, WORKER_LOCK: workerLockPath };
+    // The first exec of a new script can take seconds on a loaded host, longer than the probe cap.
+    spawnSync(ps, ['warmup'], { env: { ...psEnv, PS_LOG: '/dev/null' }, timeout: 30000 });
+    // An older plugin version whose live session the fake ps confirms.
+    expect(publishCacheOccupancy(join(pluginParent, 'older'), configDir, process.pid, String(new Date(lstart).getTime()))).toBe(true);
+    writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'legacy payload that outlives the worker' }));
+
+    const worker = spawn(NODE, ['--import', platformPreload, SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '50', '400'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        ...psEnv,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: join(pluginParent, 'current'),
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<{ code: number | null; at: number }>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve({ code, at: Date.now() }));
+    });
+
+    try {
+      expect(await waitForFilesToAppear([slowMarker], 5000)).toBe(true);
+      const probeStartedAt = Date.now();
+
+      const exit = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 6000)),
+      ]);
+      expect(exit?.code).toBe(0);
+      // The probe is cut off by the 400 ms lifetime, not by the 2 s darwin ps timeout.
+      expect(exit!.at - probeStartedAt).toBeLessThan(1200);
+      expect(existsSync(workerLockPath)).toBe(false);
+      expect(existsSync(legacyPath)).toBe(true);
+      // One batched ps per scan: before the worker lock and after it.
+      const batchedCalls = readFileSync(psLog, 'utf8').split('\n').filter(line => line.endsWith('-o pid=,lstart='));
+      expect(batchedCalls).toHaveLength(2);
+    } finally {
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
+    }
+  });
+
   it('lets stabilization workers exit while sanitized failure records remain', async () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');

@@ -310,13 +310,18 @@ function legacyToolFailureArtifactSnapshot(omcRoot) {
   return artifacts.sort().join('\n');
 }
 
-function hasActiveOlderPluginRoot() {
+// The identity probe may not outlive `lifetimeDeadline`. A probe that times out or
+// has no time left identifies nothing, so every registry record is kept and its
+// root counts as occupied.
+function hasActiveOlderPluginRoot(lifetimeDeadline = Infinity) {
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (!pluginRoot) return false;
   try {
     const currentRoot = pathIdentity(pluginRoot);
     const pluginVersionsDirectory = dirname(currentRoot);
-    const { roots, unavailable } = readOccupiedPluginRoots(configDir);
+    const { roots, unavailable } = readOccupiedPluginRoots(configDir, {
+      probeTimeoutMs: Math.max(0, lifetimeDeadline - Date.now()),
+    });
     if (unavailable) return true;
     return [...roots].some(root => root !== currentRoot && dirname(root) === pluginVersionsDirectory);
   } catch {
@@ -343,7 +348,7 @@ function resolveSessionPluginOccupancy(deadline) {
 async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLifetimeMs = toolFailureCleanupMaxLifetimeMs(stabilizationMs)) {
   const stateDir = join(omcRoot, 'state');
   const lifetimeDeadline = Date.now() + maxLifetimeMs;
-  let olderPluginActive = hasActiveOlderPluginRoot();
+  let olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
   let quietUntil = Date.now() + stabilizationMs;
   let nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
   while (true) {
@@ -357,11 +362,11 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
     }
 
     if (now >= nextPluginRootCheck) {
-      olderPluginActive = hasActiveOlderPluginRoot();
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
       nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     }
     if (now >= quietUntil && !olderPluginActive) {
-      olderPluginActive = hasActiveOlderPluginRoot();
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
       nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
       if (!olderPluginActive) return;
     }
@@ -385,13 +390,13 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
     if (Date.now() >= lifetimeDeadline) return;
     quietUntil = Date.now() + stabilizationMs;
     let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
-    olderPluginActive = hasActiveOlderPluginRoot();
+    olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
     nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     while (true) {
       const now = Date.now();
       if (now >= lifetimeDeadline) return;
       if (now >= nextPluginRootCheck) {
-        olderPluginActive = hasActiveOlderPluginRoot();
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
         nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
       }
       const currentArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
@@ -404,7 +409,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
         if (cleanupPending) quietUntil = Date.now() + stabilizationMs;
       }
       if (Date.now() >= quietUntil && !olderPluginActive) {
-        olderPluginActive = hasActiveOlderPluginRoot();
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
         nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
         if (!olderPluginActive) {
           const finalArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
