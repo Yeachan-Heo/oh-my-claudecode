@@ -59,6 +59,9 @@ export interface StatuslineStdin {
   /** Current working directory */
   cwd?: string;
 
+  /** Session identifier provided by Claude Code for HUD cache scoping */
+  session_id?: string;
+
   /** Model information from Claude Code statusline stdin */
   model?: {
     id?: string;
