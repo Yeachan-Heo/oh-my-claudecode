@@ -5,6 +5,7 @@
  */
 
 import type { SkillMetadata } from './types.js';
+import { splitFlowSequenceItems } from '../../utils/frontmatter.js';
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -171,7 +172,7 @@ export function parseArrayValue(
     const content = rawValue.slice(1, endIdx).trim();
     if (!content) return { value: [], consumed: 1 };
 
-    const items = content.split(',').map(s => parseStringValue(s.trim())).filter(Boolean);
+    const items = splitFlowSequenceItems(content).map(s => parseStringValue(s.trim())).filter(Boolean);
     return { value: items, consumed: 1 };
   }
 

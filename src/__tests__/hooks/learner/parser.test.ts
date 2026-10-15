@@ -297,5 +297,21 @@ Content.`;
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("Missing YAML frontmatter");
     });
+
+    it("should keep commas inside quoted inline list items", () => {
+      const content = `---
+name: Inline Lists
+description: Quoted commas
+triggers: ["fix bug, quickly", retry]
+tags: ["a, b"]
+---
+
+Body.`;
+
+      const result = parseSkillFile(content);
+
+      expect(result.metadata.triggers).toEqual(["fix bug, quickly", "retry"]);
+      expect(result.metadata.tags).toEqual(["a, b"]);
+    });
   });
 });
