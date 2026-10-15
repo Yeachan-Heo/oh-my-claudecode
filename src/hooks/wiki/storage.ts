@@ -153,13 +153,45 @@ function parseYamlArray(value: string | undefined): string[] {
   if (!value) return [];
   const trimmed = value.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed
-      .slice(1, -1)
-      .split(',')
+    return splitYamlFlowItems(trimmed.slice(1, -1))
       .map(s => s.trim().replace(/^["']|["']$/g, '').replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; }))
       .filter(Boolean);
   }
   return trimmed ? [trimmed] : [];
+}
+
+/**
+ * Split the inside of a flow sequence on top-level commas only. Commas inside
+ * a quoted item (e.g. the tag `"a, b"` written by serializePage) are kept, and
+ * a backslash escape inside double quotes never closes the quote. Apostrophes
+ * inside bare items are literal text.
+ */
+function splitYamlFlowItems(inner: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (quote) {
+      current += ch;
+      if (quote === '"' && ch === '\\' && i + 1 < inner.length) {
+        current += inner[++i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+    } else if ((ch === '"' || ch === "'") && current.trim() === '') {
+      // Only an item-leading quote opens a quoted scalar; `don't` stays bare.
+      quote = ch;
+      current += ch;
+    } else if (ch === ',') {
+      items.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  items.push(current);
+  return items;
 }
 
 /** Escape a string for use inside YAML double quotes. */
