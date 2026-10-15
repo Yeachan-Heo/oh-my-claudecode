@@ -127,6 +127,39 @@ export function parseFrontmatterAliases(rawAliases: string | undefined): string[
 }
 
 /**
+ * Split the inside of an inline flow sequence (`[a, "b, c"]` without the
+ * brackets) on top-level commas. A comma inside a quoted item is kept; a quote
+ * only opens at the start of an item, so a bare apostrophe (`don't`) is literal.
+ */
+export function splitFlowSequenceItems(inner: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i];
+    if (quote) {
+      current += char;
+      if (quote === '"' && char === '\\' && i + 1 < inner.length) {
+        current += inner[++i];
+      } else if (char === quote) {
+        quote = null;
+      }
+    } else if ((char === '"' || char === "'") && current.trim() === '') {
+      quote = char;
+      current += char;
+    } else if (char === ',') {
+      items.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  items.push(current);
+  return items;
+}
+
+/**
  * Parse a generic frontmatter list field into an array of strings.
  * Supports inline YAML list syntax: `[foo, bar]` or a single scalar value.
  */
@@ -140,8 +173,7 @@ export function parseFrontmatterList(rawValue: string | undefined): string[] {
     const inner = trimmed.slice(1, -1).trim();
     if (!inner) return [];
 
-    return inner
-      .split(',')
+    return splitFlowSequenceItems(inner)
       .map((item) => stripOptionalQuotes(item))
       .filter((item) => item.length > 0);
   }
