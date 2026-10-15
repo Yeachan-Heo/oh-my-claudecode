@@ -108,6 +108,32 @@ Body`;
     expect(result.body).toBe('Body');
   });
 
+  it('handles mixed LF and CRLF while preserving the body', () => {
+    const body = 'Body\r\nwith mixed\nline endings\r\n';
+    const content = `---\r\nname: mixed\ndescription: Mixed separators\r\n---\n${body}`;
+    const result = parseFrontmatter(content);
+
+    expect(result.metadata).toEqual({
+      name: 'mixed',
+      description: 'Mixed separators'
+    });
+    expect(result.body).toBe(body);
+  });
+
+  it('does not treat a bare carriage return as a frontmatter separator', () => {
+    const partialOpen = '---\rname: test\n---\nBody';
+    const partialClose = '---\nname: test\n---\rBody';
+
+    expect(parseFrontmatter(partialOpen)).toEqual({
+      metadata: {},
+      body: partialOpen
+    });
+    expect(parseFrontmatter(partialClose)).toEqual({
+      metadata: {},
+      body: partialClose
+    });
+  });
+
   it('handles empty body', () => {
     const content = `---
 name: test

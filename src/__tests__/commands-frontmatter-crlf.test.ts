@@ -42,4 +42,28 @@ describe('command file frontmatter line endings', () => {
     expect(command?.template).toBe('Template $ARGUMENTS\r\n');
     expect(command?.template).not.toContain('description:');
   });
+
+  it('parses mixed line endings and preserves the body exactly', () => {
+    const body = 'Template $ARGUMENTS\r\nBody line\n';
+    writeCommand('zz-mixed', `---\r\ndescription: Do the thing\ndisplay: test\r\n---\n${body}`);
+
+    const command = getCommand('zz-mixed');
+    expect(command?.description).toBe('Do the thing');
+    expect(command?.template).toBe(body);
+  });
+
+  it('does not parse partial CRLF separators as frontmatter', () => {
+    const fixtures: Array<[string, string]> = [
+      ['opening', '---\rdescription: Do the thing\n---\nTemplate'],
+      ['closing', '---\ndescription: Do the thing\n---\rTemplate']
+    ];
+
+    for (const [name, content] of fixtures) {
+      writeCommand(`zz-partial-${name}`, content);
+      const command = getCommand(`zz-partial-${name}`);
+
+      expect(command?.description).toBe('');
+      expect(command?.template).toBe(content);
+    }
+  });
 });
