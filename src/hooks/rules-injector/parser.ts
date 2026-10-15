@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's rules-injector hook.
  */
 
-import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
+import type { RuleMetadata, RuleFrontmatterResult } from "./types.js";
 
 /**
  * Parse YAML frontmatter from rule file content.
@@ -50,7 +50,7 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
-    const colonIndex = line.indexOf(':');
+    const colonIndex = line.indexOf(":");
 
     if (colonIndex === -1) {
       i++;
@@ -60,11 +60,11 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
     const key = line.slice(0, colonIndex).trim();
     const rawValue = line.slice(colonIndex + 1).trim();
 
-    if (key === 'description') {
+    if (key === "description") {
       metadata.description = parseStringValue(rawValue);
-    } else if (key === 'alwaysApply') {
-      metadata.alwaysApply = rawValue === 'true';
-    } else if (key === 'globs' || key === 'paths' || key === 'applyTo') {
+    } else if (key === "alwaysApply") {
+      metadata.alwaysApply = rawValue === "true";
+    } else if (key === "globs" || key === "paths" || key === "applyTo") {
       const { value, consumed } = parseArrayOrStringValue(rawValue, lines, i);
       // Merge paths into globs (Claude Code compatibility)
       metadata.globs = mergeGlobs(metadata.globs, value);
@@ -82,7 +82,7 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
  * Parse a string value, removing surrounding quotes.
  */
 function parseStringValue(value: string): string {
-  if (!value) return '';
+  if (!value) return "";
 
   // Remove surrounding quotes
   if (
@@ -102,15 +102,15 @@ function parseStringValue(value: string): string {
 function parseArrayOrStringValue(
   rawValue: string,
   lines: string[],
-  currentIndex: number
+  currentIndex: number,
 ): { value: string | string[]; consumed: number } {
   // Case 1: Inline array ["a", "b", "c"]
-  if (rawValue.startsWith('[')) {
+  if (rawValue.startsWith("[")) {
     return { value: parseInlineArray(rawValue), consumed: 1 };
   }
 
   // Case 2: Multi-line array (value is empty, next lines start with "  - ")
-  if (!rawValue || rawValue === '') {
+  if (!rawValue || rawValue === "") {
     const arrayItems: string[] = [];
     let consumed = 1;
 
@@ -125,7 +125,7 @@ function parseArrayOrStringValue(
           arrayItems.push(itemValue);
         }
         consumed++;
-      } else if (nextLine.trim() === '') {
+      } else if (nextLine.trim() === "") {
         // Skip empty lines within array
         consumed++;
       } else {
@@ -141,7 +141,7 @@ function parseArrayOrStringValue(
 
   // Case 3: Comma-separated patterns in single string
   const stringValue = parseStringValue(rawValue);
-  if (stringValue.includes(',')) {
+  if (stringValue.includes(",")) {
     const items = splitOutsideBraces(stringValue)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
@@ -159,32 +159,44 @@ function parseArrayOrStringValue(
 function splitOutsideBraces(value: string, respectQuotes = false): string[] {
   const { openings, closings } = findBalancedBraceIndices(value, respectQuotes);
   const items: string[] = [];
-  let current = '';
+  let current = "";
   let depth = 0;
-  let quoteChar = '';
+  let quoteChar = "";
+  let canStartQuote = true;
   for (let i = 0; i < value.length; i++) {
     const char = value[i];
-    if (char === '\\' && i + 1 < value.length) {
+    if (char === "\\" && i + 1 < value.length) {
       current += char + value[++i];
+      if (!quoteChar) canStartQuote = false;
       continue;
     }
     if (respectQuotes && quoteChar) {
       current += char;
-      if (char === quoteChar) quoteChar = '';
+      if (char === quoteChar) {
+        quoteChar = "";
+        canStartQuote = false;
+      }
       continue;
     }
-    if (respectQuotes && (char === '"' || char === "'")) {
+    if (respectQuotes && canStartQuote && (char === '"' || char === "'")) {
       quoteChar = char;
       current += char;
       continue;
     }
-    if (openings.has(i)) depth++;
-    else if (closings.has(i)) depth--;
-    if (char === ',' && depth === 0) {
+    if (openings.has(i)) {
+      depth++;
+      canStartQuote = false;
+    } else if (closings.has(i)) {
+      depth--;
+      canStartQuote = false;
+    }
+    if (char === "," && depth === 0) {
       items.push(current);
-      current = '';
+      current = "";
+      canStartQuote = true;
     } else {
       current += char;
+      if (!/\s/.test(char)) canStartQuote = false;
     }
   }
   items.push(current);
@@ -194,30 +206,41 @@ function splitOutsideBraces(value: string, respectQuotes = false): string[] {
 /** Find only balanced, unescaped brace pairs, ignoring brace characters in quotes. */
 function findBalancedBraceIndices(
   value: string,
-  respectQuotes: boolean
+  respectQuotes: boolean,
 ): { openings: Set<number>; closings: Set<number> } {
   const openings = new Set<number>();
   const closings = new Set<number>();
   const stack: number[] = [];
-  let quoteChar = '';
+  let quoteChar = "";
+  let canStartQuote = true;
 
   for (let i = 0; i < value.length; i++) {
     const char = value[i];
-    if (char === '\\' && i + 1 < value.length) {
+    if (char === "\\" && i + 1 < value.length) {
       i++;
+      if (!quoteChar) canStartQuote = false;
       continue;
     }
     if (respectQuotes && quoteChar) {
-      if (char === quoteChar) quoteChar = '';
+      if (char === quoteChar) {
+        quoteChar = "";
+        canStartQuote = false;
+      }
       continue;
     }
-    if (respectQuotes && (char === '"' || char === "'")) {
+    if (respectQuotes && canStartQuote && (char === '"' || char === "'")) {
       quoteChar = char;
-    } else if (char === '{') {
+    } else if (char === "{") {
       stack.push(i);
-    } else if (char === '}' && stack.length > 0) {
+      canStartQuote = false;
+    } else if (char === "}" && stack.length > 0) {
       openings.add(stack.pop()!);
       closings.add(i);
+      canStartQuote = false;
+    } else if (char === "," && stack.length === 0) {
+      canStartQuote = true;
+    } else if (!/\s/.test(char)) {
+      canStartQuote = false;
     }
   }
 
@@ -228,7 +251,7 @@ function findBalancedBraceIndices(
  * Parse inline JSON-like array: ["a", "b", "c"]
  */
 function parseInlineArray(value: string): string[] {
-  const endIdx = value.lastIndexOf(']');
+  const endIdx = value.lastIndexOf("]");
   if (endIdx === -1) return [];
   const content = value.slice(1, endIdx).trim();
   if (!content) return [];
@@ -244,7 +267,7 @@ function parseInlineArray(value: string): string[] {
  */
 function mergeGlobs(
   existing: string | string[] | undefined,
-  newValue: string | string[]
+  newValue: string | string[],
 ): string | string[] {
   if (!existing) return newValue;
 
