@@ -76,7 +76,7 @@ export function parseSkillFile(rawContent: string): SkillParseResult {
  * Parse YAML metadata without external library.
  */
 export function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
-  const lines = yamlContent.split('\n');
+  const lines = yamlContent.split(/\r?\n/);
   const metadata: Partial<SkillMetadata> = {};
 
   let i = 0;

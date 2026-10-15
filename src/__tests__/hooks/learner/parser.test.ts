@@ -297,5 +297,28 @@ Content.`;
       expect(result.valid).toBe(false);
       expect(result.errors).toContain("Missing YAML frontmatter");
     });
+
+    it("should parse multi-line list fields in CRLF (Windows-authored) files", () => {
+      const content = [
+        "---",
+        "name: Windows Skill",
+        "description: Authored on Windows",
+        "triggers:",
+        "  - first",
+        '  - "second"',
+        "tags:",
+        "  - alpha",
+        "---",
+        "",
+        "Body text.",
+      ].join("\r\n");
+
+      const result = parseSkillFile(content);
+
+      expect(result.valid).toBe(true);
+      expect(result.errors).toEqual([]);
+      expect(result.metadata.triggers).toEqual(["first", "second"]);
+      expect(result.metadata.tags).toEqual(["alpha"]);
+    });
   });
 });
