@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T08:14:45.922Z",
+  "generatedAt": "2026-10-15T08:39:53.883Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a9fa682d0f3cc693852a3db527c9b1ca600357d5",
-    "sourceSha256": "48d0bfd012f4e255936db76a9d7370b530d5e0f85d5f72f5703fb8c71cd84549",
-    "generatedAt": "2026-10-15T08:14:45.922Z",
+    "head": "539db0ecea808be59f5bf298b5150ade1688d1eb",
+    "sourceSha256": "dd959967914d696c0dae9457cdb3fa7f241d4080c2d04c383a39ccb7f4d25083",
+    "generatedAt": "2026-10-15T08:39:53.883Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a9fa682d0f3cc693852a3db527c9b1ca600357d5",
-  "sourceSha256": "48d0bfd012f4e255936db76a9d7370b530d5e0f85d5f72f5703fb8c71cd84549",
+  "head": "539db0ecea808be59f5bf298b5150ade1688d1eb",
+  "sourceSha256": "dd959967914d696c0dae9457cdb3fa7f241d4080c2d04c383a39ccb7f4d25083",
   "counts": {
     "public": {
       "skills": 48,
@@ -24,12 +24,12 @@
     },
     "internal": {
       "hookFiles": 339,
-      "featureFiles": 86,
+      "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1466,
-      "total": 1489
+      "srcFiles": 1468,
+      "total": 1491
     },
     "generated": {
       "distFiles": 5613,
@@ -576,6 +576,8 @@
       "src/features/state-manager/__tests__/cache.test.ts",
       "src/features/state-manager/__tests__/glob-patterns.test.ts",
       "src/features/state-manager/index.ts",
+      "src/features/state-manager/list-cleanup.ts",
+      "src/features/state-manager/state-paths.ts",
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
@@ -7037,6 +7039,8 @@
       "src/features/state-manager/__tests__/cache.test.ts",
       "src/features/state-manager/__tests__/glob-patterns.test.ts",
       "src/features/state-manager/index.ts",
+      "src/features/state-manager/list-cleanup.ts",
+      "src/features/state-manager/state-paths.ts",
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
@@ -40660,6 +40664,16 @@
         "path": "src/features/state-manager/index.ts"
       },
       {
+        "id": "src/features/state-manager/list-cleanup.ts",
+        "kind": "feature",
+        "path": "src/features/state-manager/list-cleanup.ts"
+      },
+      {
+        "id": "src/features/state-manager/state-paths.ts",
+        "kind": "feature",
+        "path": "src/features/state-manager/state-paths.ts"
+      },
+      {
         "id": "src/features/state-manager/types.ts",
         "kind": "feature",
         "path": "src/features/state-manager/types.ts"
@@ -61053,6 +61067,16 @@
       },
       {
         "from": "src/features/state-manager/index.ts",
+        "to": "src/features/state-manager/list-cleanup.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/state-manager/index.ts",
+        "to": "src/features/state-manager/state-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/index.ts",
         "to": "src/features/state-manager/types.ts",
         "kind": "exports"
       },
@@ -61073,6 +61097,46 @@
       },
       {
         "from": "src/features/state-manager/index.ts",
+        "to": "src/utils/paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/state-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
         "to": "src/utils/paths.ts",
         "kind": "imports"
       },
@@ -88388,12 +88452,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7738,
-      "edgeCount": 8516,
-      "importEdgeCount": 7071,
+      "nodeCount": 7740,
+      "edgeCount": 8526,
+      "importEdgeCount": 7079,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "e63ee1575fcaa0adb83fcc80ea17ff3d2cd8948a55aae3f6626cbf66da5d3723",
-  "manifestSha256": "67ac2779a70928eb04247bf26b32fd45e5b1108a9d8855a5f0eb8e21622f67e1"
+  "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
+  "manifestSha256": "347ea71587f77c74d0b4d270fad10684e42ac38d9cbc066e694149fe88850d3c"
 }
