@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T15:56:35.316Z",
+  "generatedAt": null,
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "ea658dbdf589815025386279d67011d1d785a285",
-    "sourceSha256": "81649d9fb6b0f3ba5431f497d8f4bce51536b33c6faf56b991f33658571f2747",
-    "generatedAt": "2026-10-15T15:56:35.316Z",
+    "sourceSha256": "5e6d0c5e9fdef0f580751a849e5d8865ad711e46628e820e1a03f10d054fa8b6",
+    "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "ea658dbdf589815025386279d67011d1d785a285",
-  "sourceSha256": "81649d9fb6b0f3ba5431f497d8f4bce51536b33c6faf56b991f33658571f2747",
+  "sourceSha256": "5e6d0c5e9fdef0f580751a849e5d8865ad711e46628e820e1a03f10d054fa8b6",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1468,
-      "total": 1491
+      "srcFiles": 1469,
+      "total": 1492
     },
     "generated": {
       "distFiles": 5613,
@@ -43829,6 +43829,11 @@
         "path": "src/skills/__tests__/omc-doctor-skill.test.ts"
       },
       {
+        "id": "src/skills/__tests__/omc-setup-optout.test.ts",
+        "kind": "src",
+        "path": "src/skills/__tests__/omc-setup-optout.test.ts"
+      },
+      {
         "id": "src/skills/__tests__/skill-config-dir.test.ts",
         "kind": "src",
         "path": "src/skills/__tests__/skill-config-dir.test.ts"
@@ -49002,7 +49007,27 @@
       },
       {
         "from": "src/__tests__/auto-upgrade-prompt.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/auto-upgrade-prompt.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/auto-upgrade-prompt.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/auto-upgrade-prompt.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/auto-upgrade-prompt.test.ts",
+        "to": "src/cli/index.ts",
         "kind": "imports"
       },
       {
@@ -50084,11 +50109,6 @@
         "from": "src/__tests__/hooks/learner/parser.test.ts",
         "to": "src/hooks/learner/parser.ts",
         "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/hooks/learner/parser.test.ts",
-        "to": "src/hooks/learner/types.ts",
-        "kind": "type-imports"
       },
       {
         "from": "src/__tests__/hooks/learner/transliteration-map.test.ts",
@@ -58107,6 +58127,11 @@
       },
       {
         "from": "src/cli/commands/doctor-conflicts.ts",
+        "to": "src/installer/claude-md-transaction.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/doctor-conflicts.ts",
         "to": "src/installer/index.ts",
         "kind": "imports"
       },
@@ -65746,11 +65771,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/learner/parser.ts",
-        "to": "src/utils/frontmatter.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/learner/promotion.ts",
         "to": "src/hooks/learner/types.ts",
         "kind": "type-imports"
@@ -71291,11 +71311,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/wiki/storage.ts",
-        "to": "src/utils/frontmatter.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hud/__tests__/autopilot-profile.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -73338,6 +73353,11 @@
       {
         "from": "src/installer/claude-md-transaction.ts",
         "to": "src/installer/claude-md-analysis.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/claude-md-transaction.ts",
+        "to": "src/lib/paths.ts",
         "kind": "imports"
       },
       {
@@ -77027,7 +77047,17 @@
       },
       {
         "from": "src/skills/__tests__/omc-doctor-skill.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-doctor-skill.test.ts",
         "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-doctor-skill.test.ts",
+        "to": "external:node:os",
         "kind": "imports"
       },
       {
@@ -77037,6 +77067,31 @@
       },
       {
         "from": "src/skills/__tests__/omc-doctor-skill.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-setup-optout.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-setup-optout.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-setup-optout.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-setup-optout.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/skills/__tests__/omc-setup-optout.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -88477,12 +88532,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7740,
-      "edgeCount": 8531,
-      "importEdgeCount": 7083,
+      "nodeCount": 7741,
+      "edgeCount": 8541,
+      "importEdgeCount": 7094,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "ab567bc7060563f07b107b03188238a5ac38ccc933c984d0088d026f48be91e2"
+  "inventorySha256": "3660cf6e00f22f26bc61048038c5826111a6deb57b2bd2704d916919fe098b90",
+  "manifestSha256": "78be6fc5b3b62fe766d3189bd96a105d0c1cf72799c88a061fb1149f71b2435e"
 }

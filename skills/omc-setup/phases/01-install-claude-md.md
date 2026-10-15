@@ -13,9 +13,36 @@ Otherwise (initial setup wizard), use AskUserQuestion to prompt:
 1. **Local (this project)** - Creates `.claude/CLAUDE.md` in current project directory. Best for project-specific configurations.
 2. **Global (all projects)** - Creates `~/.claude/CLAUDE.md` for all Claude Code sessions. Best for consistent behavior everywhere.
 
-Set `CONFIG_TARGET` to `local` or `global` based on user's choice.
+Set `CONFIG_TARGET` to `local` or `global` based on the user's choice.
 
-If `CONFIG_TARGET=global` and `~/.claude/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
+## Check the Global Opt-Out Before Asking About Install Style
+
+Only when `CONFIG_TARGET=global`, run this probe before any overwrite/preserve question. It checks the same `.omc-config.json` used by the installer and respects `CLAUDE_CONFIG_DIR`, including `~`, `~/...`, and `~\...` values:
+
+```bash
+node -e "
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+let configDir = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+if (configDir === '') configDir = path.join(os.homedir(), '.claude');
+if (configDir === '~') configDir = os.homedir();
+else if (configDir.startsWith('~/') || configDir.startsWith('~' + String.fromCharCode(92))) {
+  configDir = path.join(os.homedir(), configDir.slice(2));
+}
+try {
+  const config = JSON.parse(fs.readFileSync(path.join(configDir, '.omc-config.json'), 'utf8'));
+  const disabled = Boolean(config && typeof config === 'object' && config.claudeMdEnabled === false);
+  console.log(disabled ? 'disabled' : 'enabled');
+} catch {
+  console.log('enabled');
+}
+"
+```
+
+If the probe prints `disabled`, do not ask the overwrite/preserve question; set `GLOBAL_INSTALL_STYLE=overwrite` and continue through the coordinator so it can report the skip. If it prints `enabled`, continue below. If the probe fails or prints neither status, stop before asking or running setup; do not assume management is enabled.
+
+If `CONFIG_TARGET=global`, the probe printed `enabled`, and `~/.claude/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
 
 **Question:** "Global setup will change your base Claude config. Which behavior do you want?"
 
@@ -37,7 +64,7 @@ Replace `<CONFIG_TARGET>` with `local` or `global`. For local installs, omit the
 
 The coordinator exclusively performs all `CLAUDE.md`, `CLAUDE-omc.md`, managed-import, orphan-cleanup, backup, and rollback mutations. Do **not** hand-write, summarize, partially reconstruct, download, or repair either configuration file. It reports only the exact coordinator-created backup, failure, and rollback paths.
 
-After a successful local or global-overwrite install, verify the target file contains both markers. In global preserve mode, verify `CLAUDE-omc.md` contains both markers and the base `CLAUDE.md` contains exactly one managed import block. Stop and report a coordinator failure; never attempt a shell, downloaded-source, or fallback mutation.
+If the coordinator output contains the `Skipped CLAUDE.md (claudeMdEnabled is false ...)` note, the user opted out of global CLAUDE.md management in `.omc-config.json`: skip marker verification and report the skip as success. Otherwise, after a successful local or global-overwrite install, verify the target file contains both markers. In global preserve mode, verify `CLAUDE-omc.md` contains both markers and the base `CLAUDE.md` contains exactly one managed import block. Stop and report a coordinator failure; never attempt a shell, downloaded-source, or fallback mutation.
 
 For `local` installs inside a git repository, the script also seeds `.git/info/exclude` with an OMC block that re-includes `.omc/`, ignores local `.omc/*` artifacts by default, and preserves `.omc/skills/` for project skills you intend to commit.
 
@@ -62,6 +89,8 @@ Note: This configuration is project-specific and won't affect other projects or 
 ```
 
 If `CONFIG_TARGET` is `global`:
+If the coordinator reported the `claudeMdEnabled` skip, report `CLAUDE.md: Skipped (claudeMdEnabled is false; existing global files were left untouched)` instead of claiming an update, and omit the Companion line. Otherwise, use the report below.
+
 ```
 OMC Global Configuration Complete
 - CLAUDE.md: Updated at ~/.claude/CLAUDE.md, or preserved with explicit preserve mode

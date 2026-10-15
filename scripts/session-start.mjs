@@ -1166,6 +1166,8 @@ function getNpmVersion() {
 // Get CLAUDE.md version
 function getClaudeMdVersion() {
   try {
+    // claudeMdEnabled=false: the user owns CLAUDE.md, so its OMC version is never drift.
+    if (readJsonFile(join(configDir, '.omc-config.json'))?.claudeMdEnabled === false) return null;
     const claudeMdPath = join(configDir, 'CLAUDE.md');
     if (!existsSync(claudeMdPath)) return null;  // File doesn't exist
     const content = readFileSync(claudeMdPath, 'utf-8');

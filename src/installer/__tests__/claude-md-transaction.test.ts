@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import * as nodeFs from 'node:fs';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
-import { executeClaudeMdTransaction, isStrictChildPath, type ClaudeMdTransactionFs } from '../claude-md-transaction.js';
+import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig, isStrictChildPath, type ClaudeMdTransactionFs } from '../claude-md-transaction.js';
 import { CLAUDE_MD_COORDINATOR_SCHEMA_VERSION, runClaudeMdCoordinator, runClaudeMdCoordinatorHandshake } from '../../cli/claude-md-coordinator.js';
 import corpus from './fixtures/legacy-guides.json' with { type: 'json' };
 
@@ -380,6 +380,57 @@ describe('CLAUDE.md coordinator protocol', () => {
     const outcome = runClaudeMdCoordinator({ schemaVersion: CLAUDE_MD_COORDINATOR_SCHEMA_VERSION });
     expect(outcome).toMatchObject({ exitCode: 2, response: { ok: false, error: 'Invalid coordinator request', schemaVersion: CLAUDE_MD_COORDINATOR_SCHEMA_VERSION } });
   });
+  it('skips disabled global requests while leaving local coordinator writes enabled', async () => {
+    const { root, source } = fixture();
+    const pluginRoot = join(root, 'plugin');
+    const engineVersion = '1.0.0';
+    const sourceSha256 = createHash('sha256').update(readFileSync(source)).digest('hex');
+    writeFileSync(join(root, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+    try {
+      vi.stubGlobal('__OMC_COORDINATOR_ENGINE_VERSION__', engineVersion);
+      vi.stubGlobal('__OMC_COORDINATOR_SOURCE_SHA256__', sourceSha256);
+      vi.resetModules();
+      const { runClaudeMdCoordinator: runBuiltCoordinator } = await import('../../cli/claude-md-coordinator.js');
+      const request = (mode: 'global-overwrite' | 'global-preserve' | 'local') => ({
+        schemaVersion: CLAUDE_MD_COORDINATOR_SCHEMA_VERSION,
+        engineVersion,
+        mode,
+        configRoot: root,
+        pluginRoot,
+        sourcePath: source,
+        sourceSha256,
+        sourceVersion: engineVersion,
+      });
+
+      for (const mode of ['global-overwrite', 'global-preserve'] as const) {
+        const outcome = runBuiltCoordinator(request(mode));
+        expect(outcome).toMatchObject({
+          exitCode: 0,
+          response: {
+            ok: true,
+            mode,
+            operations: [],
+            backups: [],
+            createdPaths: [],
+            deletedPaths: [],
+            mutatedPaths: [],
+            warnings: ['Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)'],
+          },
+        });
+      }
+
+      const localOutcome = runBuiltCoordinator(request('local'));
+      expect(localOutcome).toMatchObject({ exitCode: 0, response: { ok: true, mode: 'local' } });
+      expect(localOutcome.response).toMatchObject({ warnings: [] });
+      const localOutput = readFileSync(join(root, 'CLAUDE.md'), 'utf8');
+      expect(localOutput).toContain('<!-- OMC:VERSION:1.0.0 -->');
+      expect(localOutput).toContain('# canonical');
+    } finally {
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
   it('rejects an escaped built coordinator request before transaction mutation', () => {
     const { root } = fixture();
     const pluginRoot = process.cwd();
@@ -405,5 +456,35 @@ describe('CLAUDE.md coordinator protocol', () => {
     expect(response).toMatchObject({ ok: false, exitCode: 3 });
     expect(response.error).toContain('Source must be inside plugin root');
     expect(nodeFs.existsSync(join(root, 'CLAUDE.md'))).toBe(false);
+  });
+});
+
+describe('claudeMdEnabled config switch', () => {
+  function configRoot(config?: string): string {
+    const { root } = fixture();
+    if (config !== undefined) writeFileSync(join(root, '.omc-config.json'), config);
+    return root;
+  }
+
+  it('is enabled when the config file or the key is missing', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot())).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"hudEnabled":false}'))).toBe(true);
+  });
+
+  it('is enabled for an explicit true', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":true}'))).toBe(true);
+  });
+
+  it('is disabled only for an explicit false', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":false}'))).toBe(false);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":"false"}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":0}'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('{"claudeMdEnabled":null}'))).toBe(true);
+  });
+
+  it('is enabled when the config is unparsable', () => {
+    expect(isClaudeMdEnabledInConfig(configRoot('{not json'))).toBe(true);
+    expect(isClaudeMdEnabledInConfig(configRoot('null'))).toBe(true);
   });
 });

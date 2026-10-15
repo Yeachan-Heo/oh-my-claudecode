@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { isStrictChildPath } from '../installer/claude-md-transaction.js';
-import { executeClaudeMdTransaction, type ClaudeMdTransactionResult } from '../installer/claude-md-transaction.js';
+import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig, type ClaudeMdTransactionResult } from '../installer/claude-md-transaction.js';
 
 export const CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
 /** These literals are replaced in the packed coordinator. Defaults keep the ordinary TS module importable. */
@@ -55,6 +55,10 @@ export function runClaudeMdCoordinator(input: unknown): { exitCode: number; resp
     const { mode } = input;
     if (input.schemaVersion !== CLAUDE_MD_COORDINATOR_SCHEMA_VERSION || input.engineVersion !== COMPILED_ENGINE_VERSION || (mode !== 'local' && mode !== 'global-overwrite' && mode !== 'global-preserve') || typeof input.configRoot !== 'string' || typeof input.pluginRoot !== 'string' || typeof input.sourcePath !== 'string' || typeof input.sourceSha256 !== 'string' || typeof input.sourceVersion !== 'string') return { exitCode: 2, response: coordinatorError(2, 'Invalid coordinator request') };
     if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) return { exitCode: 2, response: coordinatorError(2, 'Coordinator build handshake is unavailable') };
+    // claudeMdEnabled=false in .omc-config.json opts out of every global CLAUDE.md write; local mode is unaffected.
+    if (mode !== 'local' && !isClaudeMdEnabledInConfig(input.configRoot)) {
+      return { exitCode: 0, response: { ok: true, exitCode: 0, mode, operations: [], completedOperations: [], backups: [], createdPaths: [], deletedPaths: [], mutatedPaths: [], removedRanges: [], removedVariants: [], warnings: ['Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)'], rollback: [], tempCleanup: [] } };
+    }
     const source = verifiedSource(input.pluginRoot, input.sourcePath);
     const sourceSha256 = createHash('sha256').update(source.bytes).digest('hex');
     if (sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceVersion !== COMPILED_ENGINE_VERSION) return { exitCode: 2, response: coordinatorError(2, 'Canonical source handshake mismatch') };
