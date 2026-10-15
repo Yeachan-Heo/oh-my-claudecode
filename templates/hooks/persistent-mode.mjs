@@ -328,7 +328,7 @@ function readSecurityConfigValue(key) {
     try {
       if (!existsSync(p)) continue;
       const parsed = JSON.parse(stripJsoncComments(readFileSync(p, "utf-8")));
-      if (parsed?.security && typeof parsed.security === "object") {
+      if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
         return parsed.security[key];
       }
     } catch {

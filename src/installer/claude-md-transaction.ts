@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import * as nodeFs from 'node:fs';
 import * as nativePath from 'node:path';
 import { basename, dirname, resolve } from 'node:path';
+import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
 import { analyzeLegacyClaudeMd, decodeClaudeMdUtf8 as decodeClaudeMdUtf8PreservingBom, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
 
 export const CLAUDE_MD_IMPORT_START = '<!-- OMC:IMPORT:START -->';
@@ -190,6 +191,18 @@ function lstatPresent(path: string, fs: ClaudeMdTransactionFs): boolean {
   }
 }
 
+
+/**
+ * Read claudeMdEnabled from <configRoot>/.omc-config.json. Only an explicit `false`
+ * opts out of OMC writing the global CLAUDE.md; a missing or unreadable config means enabled.
+ */
+export function isClaudeMdEnabledInConfig(configRoot: string, fs: Pick<ClaudeMdTransactionFs, 'existsSync' | 'readFileSync'> = defaultFs): boolean {
+  try {
+    const configPath = resolve(configRoot, OMC_CONFIG_FILE_REL);
+    if (!fs.existsSync(configPath)) return true;
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8')).claudeMdEnabled !== false;
+  } catch { return true; }
+}
 
 export function executeClaudeMdTransaction(request: ClaudeMdTransactionRequest): ClaudeMdTransactionResult {
   const fs = request.fs ?? defaultFs;

@@ -18,6 +18,7 @@ import { join, resolve, sep } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../../lib/file-lock.js';
+import { escapeYamlString, splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
 import {
   type WikiPage,
   type WikiPageFrontmatter,
@@ -139,9 +140,10 @@ function parseSimpleYaml(yaml: string): Record<string, string> {
     const key = line.slice(0, colonIdx).trim();
     let value = line.slice(colonIdx + 1).trim();
     // Strip surrounding quotes and unescape
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1).replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; });
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = unescapeYamlString(unquoteYamlScalar(value));
+    } else if (value.startsWith("'") && value.endsWith("'")) {
+      value = unquoteYamlScalar(value);
     }
     if (key) result[key] = value;
   }
@@ -153,18 +155,17 @@ function parseYamlArray(value: string | undefined): string[] {
   if (!value) return [];
   const trimmed = value.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed
-      .slice(1, -1)
-      .split(',')
-      .map(s => s.trim().replace(/^["']|["']$/g, '').replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; }))
+    return splitFlowSequenceItems(trimmed.slice(1, -1))
+      .map((item) => {
+        const scalar = item.trim();
+        const unquoted = unquoteYamlScalar(scalar);
+        return scalar.startsWith('"') && scalar.endsWith('"')
+          ? unescapeYamlString(unquoted)
+          : unquoted;
+      })
       .filter(Boolean);
   }
   return trimmed ? [trimmed] : [];
-}
-
-/** Escape a string for use inside YAML double quotes. */
-function escapeYaml(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 
 /**
@@ -173,12 +174,12 @@ function escapeYaml(s: string): string {
 export function serializePage(page: WikiPage): string {
   const fm = page.frontmatter;
   const yaml = [
-    `title: "${escapeYaml(fm.title)}"`,
-    `tags: [${fm.tags.map(t => `"${escapeYaml(t)}"`).join(', ')}]`,
+    `title: "${escapeYamlString(fm.title)}"`,
+    `tags: [${fm.tags.map(t => `"${escapeYamlString(t)}"`).join(', ')}]`,
     `created: ${fm.created}`,
     `updated: ${fm.updated}`,
-    `sources: [${fm.sources.map(s => `"${escapeYaml(s)}"`).join(', ')}]`,
-    `links: [${fm.links.map(l => `"${escapeYaml(l)}"`).join(', ')}]`,
+    `sources: [${fm.sources.map(s => `"${escapeYamlString(s)}"`).join(', ')}]`,
+    `links: [${fm.links.map(l => `"${escapeYamlString(l)}"`).join(', ')}]`,
     `category: ${fm.category}`,
     `confidence: ${fm.confidence}`,
     `schemaVersion: ${fm.schemaVersion}`,

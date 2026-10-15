@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripOptionalQuotes, parseFrontmatter, parseFrontmatterAliases } from '../frontmatter.js';
+import { stripOptionalQuotes, parseFrontmatter, parseFrontmatterAliases, parseFrontmatterList, splitFlowSequenceItems } from '../frontmatter.js';
 
 describe('stripOptionalQuotes', () => {
   it('strips double quotes', () => {
@@ -299,5 +299,29 @@ describe('parseFrontmatterAliases', () => {
 
   it('handles list with spaces around items', () => {
     expect(parseFrontmatterAliases('[ foo , bar , baz ]')).toEqual(['foo', 'bar', 'baz']);
+  });
+});
+
+describe('parseFrontmatterList quoted commas', () => {
+  it('keeps commas inside quoted items', () => {
+    expect(parseFrontmatterList('["a, b", plain, \'x, y\']')).toEqual(['a, b', 'plain', 'x, y']);
+  });
+
+  it('does not let an escaped quote end a double-quoted item', () => {
+    expect(parseFrontmatterList('["say \\"hi\\", twice", next]')).toEqual(['say \\"hi\\", twice', 'next']);
+  });
+
+  it('keeps commas inside single-quoted items with escaped apostrophes', () => {
+    expect(splitFlowSequenceItems("'it''s, fine', next")).toEqual(["'it''s, fine'", ' next']);
+    expect(parseFrontmatterList("['it''s, fine', next]")).toEqual(["it's, fine", 'next']);
+  });
+
+  it('treats a bare apostrophe as literal text', () => {
+    expect(parseFrontmatterList("[don't, stop]")).toEqual(["don't", 'stop']);
+  });
+
+  it('still splits simple lists', () => {
+    expect(parseFrontmatterList('[foo, bar,baz]')).toEqual(['foo', 'bar', 'baz']);
+    expect(parseFrontmatterList('[]')).toEqual([]);
   });
 });

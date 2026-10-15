@@ -1523,6 +1523,64 @@ ${'- oversized startup guidance\n'.repeat(700)}
     expect(combined).not.toContain('4.15.5');
   });
 
+  describe('CLAUDE.md version drift and claudeMdEnabled', () => {
+    function runDriftSession(claudeMdEnabled: boolean | undefined): string {
+      const claudeDir = join(fakeHome, '.claude');
+      const pluginRoot = join(tempDir, 'local-plugin-4.15.4');
+      mkdirSync(join(claudeDir, '.omc'), { recursive: true });
+      mkdirSync(join(claudeDir, 'hud'), { recursive: true });
+      mkdirSync(pluginRoot, { recursive: true });
+      writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '4.15.4', type: 'module' }));
+      writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
+      writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
+      writeFileSync(join(claudeDir, 'CLAUDE.md'), '# My own global config without OMC markers\n');
+      if (claudeMdEnabled !== undefined) {
+        writeFileSync(join(claudeDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled }));
+      }
+
+      const result = spawnSync(NODE, [SCRIPT_PATH], {
+        input: JSON.stringify({
+          hook_event_name: 'SessionStart',
+          session_id: `session-claude-md-drift-${String(claudeMdEnabled)}`,
+          cwd: fakeProject,
+        }),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          CLAUDE_PLUGIN_ROOT: pluginRoot,
+          OMC_NOTIFY: '0',
+        },
+        timeout: 15000,
+      });
+
+      expect(result.status).toBe(0);
+      const output = JSON.parse(result.stdout) as {
+        systemMessage?: string;
+        hookSpecificOutput?: { additionalContext?: string };
+      };
+      return `${output.systemMessage ?? ''}\n${output.hookSpecificOutput?.additionalContext ?? ''}`;
+    }
+
+    it('reports CLAUDE.md drift when claudeMdEnabled is absent', () => {
+      const combined = runDriftSession(undefined);
+      expect(combined).toContain('[OMC VERSION DRIFT DETECTED]');
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it('reports CLAUDE.md drift when claudeMdEnabled is true', () => {
+      const combined = runDriftSession(true);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it('does not report CLAUDE.md drift when claudeMdEnabled is false', () => {
+      const combined = runDriftSession(false);
+      expect(combined).not.toContain('CLAUDE.md instructions');
+      expect(combined).not.toContain('[OMC VERSION DRIFT DETECTED]');
+    });
+  });
+
   it('shows an npm update from unmanaged 4.15.7 local plugin roots (#3867)', () => {
     const claudeDir = join(fakeHome, '.claude');
     const pluginRoot = join(tempDir, 'local-plugin-4.15.7');

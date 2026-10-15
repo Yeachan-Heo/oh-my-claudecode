@@ -5,18 +5,38 @@
  * Used by both the builtin-skills loader and the auto-slash-command executor.
  */
 
+/** Remove matching YAML quotes while preserving the scalar's inner whitespace. */
+export function unquoteYamlScalar(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
+/** Escape a string for use inside YAML double quotes. */
+export function escapeYamlString(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+}
+
+/** Escape a string for use inside YAML single quotes. */
+export function escapeYamlSingleQuoted(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+/** Decode the YAML string escapes supported by the frontmatter parsers. */
+export function unescapeYamlString(value: string): string {
+  return value.replace(/\\(\\|"|n|r)/g, (_, ch) => {
+    if (ch === 'n') return '\n';
+    if (ch === 'r') return '\r';
+    return ch;
+  });
+}
+
 /**
  * Remove surrounding single or double quotes from a trimmed value.
  */
 export function stripOptionalQuotes(value: string): string {
   const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
+  return unquoteYamlScalar(trimmed).trim();
 }
 
 /**
@@ -127,6 +147,41 @@ export function parseFrontmatterAliases(rawAliases: string | undefined): string[
 }
 
 /**
+ * Split the inside of an inline flow sequence (`[a, "b, c"]` without the
+ * brackets) on top-level commas. A comma inside a quoted item is kept; a quote
+ * only opens at the start of an item, so a bare apostrophe (`don't`) is literal.
+ */
+export function splitFlowSequenceItems(inner: string): string[] {
+  const items: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i];
+    if (quote) {
+      current += char;
+      if (quote === '"' && char === '\\' && i + 1 < inner.length) {
+        current += inner[++i];
+      } else if (quote === "'" && char === "'" && inner[i + 1] === "'") {
+        current += inner[++i];
+      } else if (char === quote) {
+        quote = null;
+      }
+    } else if ((char === '"' || char === "'") && current.trim() === '') {
+      quote = char;
+      current += char;
+    } else if (char === ',') {
+      items.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  items.push(current);
+  return items;
+}
+
+/**
  * Parse a generic frontmatter list field into an array of strings.
  * Supports inline YAML list syntax: `[foo, bar]` or a single scalar value.
  */
@@ -140,8 +195,7 @@ export function parseFrontmatterList(rawValue: string | undefined): string[] {
     const inner = trimmed.slice(1, -1).trim();
     if (!inner) return [];
 
-    return inner
-      .split(',')
+    return splitFlowSequenceItems(inner)
       .map((item) => stripOptionalQuotes(item))
       .filter((item) => item.length > 0);
   }

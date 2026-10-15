@@ -38,6 +38,7 @@ interface Scenario {
   maxIterations: number;
   strict?: boolean;
   userConfig?: string;
+  projectConfig?: string;
 }
 
 function runStopHook(hookPath: string, scenario: Scenario) {
@@ -53,6 +54,11 @@ function runStopHook(hookPath: string, scenario: Scenario) {
   if (scenario.userConfig !== undefined) {
     mkdirSync(join(xdg, 'claude-omc'), { recursive: true });
     writeFileSync(join(xdg, 'claude-omc', 'config.jsonc'), scenario.userConfig);
+  }
+
+  if (scenario.projectConfig !== undefined) {
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(join(repo, '.claude', 'omc.jsonc'), scenario.projectConfig);
   }
 
   const now = new Date().toISOString();
@@ -137,6 +143,18 @@ describe.each([
       expect(output.reason).toContain('(500)');
       expect(state.active).toBe(false);
     }
+  });
+
+  it('skips an array security section and reads the next config file', () => {
+    const { output, state } = runStopHook(hookPath(), {
+      iteration: 50,
+      maxIterations: 60,
+      projectConfig: '{"security":[]}',
+      userConfig: JSON.stringify({ security: { hardMaxIterations: 50 } }),
+    });
+    expect(output.reason).toContain('HARD LIMIT');
+    expect(output.reason).toContain('(50)');
+    expect(state.active).toBe(false);
   });
 
   it('applies the default hard max of 500 outside strict mode', () => {

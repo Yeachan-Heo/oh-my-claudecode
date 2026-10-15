@@ -237,6 +237,22 @@ else
   SKILL_TARGET_PATH="${CONFIG_ROOT}/skills/wiki/SKILL.md"
   if [ "$INSTALL_STYLE" = "preserve" ]; then COORDINATOR_MODE="global-preserve"; else COORDINATOR_MODE="global-overwrite"; fi
 fi
+
+claude_md_management_is_disabled() {
+  node - "${CONFIG_DIR}/.omc-config.json" <<'NODE'
+const fs = require('node:fs');
+const [configPath] = process.argv.slice(2);
+try {
+  const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  if (config && typeof config === 'object' && !Array.isArray(config) && config.claudeMdEnabled === false) {
+    process.exit(0);
+  }
+} catch {}
+process.exit(1);
+NODE
+  }
+
+run_claude_md_coordinator() {
 # The coordinator owns the build handshake. Independently hashing the canonical
 # source binds its authority to the exact bytes this invocation will request.
 set +e
@@ -288,6 +304,7 @@ try {
   const print = (label, values) => Array.isArray(values) && values.forEach(value => console.log(`${label}: ${typeof value === 'string' ? value : value.path}`));
   print('Coordinator backup', response.backups);
   print('Coordinator mutated path', response.mutatedPaths);
+  print('Coordinator note', response.warnings);
   if (!response.ok) {
     console.error(`Coordinator failure: ${response.error || 'unspecified failure'}`);
     if (response.failedPath) console.error(`Coordinator failure path: ${response.failedPath}`);
@@ -299,12 +316,20 @@ try {
   process.exitCode = 1;
 }
 NODE
-VALIDATOR_STATUS=$?
-set -e
-if [ "$VALIDATOR_STATUS" -ne 0 ]; then
-  exit "$VALIDATOR_STATUS"
+  VALIDATOR_STATUS=$?
+  set -e
+  if [ "$VALIDATOR_STATUS" -ne 0 ]; then
+    exit "$VALIDATOR_STATUS"
 fi
+}
 
+if [ "$MODE" != "local" ] && claude_md_management_is_disabled; then
+  # The tracked bridge can predate the source coordinator's opt-out guard.
+  # Enforce the global opt-out at this shipped entrypoint before invoking it.
+  echo "Coordinator note: Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)"
+else
+  run_claude_md_coordinator
+fi
 if plugin_is_active; then
   echo "Skipped wiki skill install (OMC plugin is active)"
 else

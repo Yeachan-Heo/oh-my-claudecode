@@ -91,6 +91,21 @@ Configure omc for all Claude Code sessions:
 - **Default**: explicitly overwrites existing `~/.claude/CLAUDE.md`
 - **Optional preserve mode**: keeps the base file, writes OMC to `~/.claude/CLAUDE-omc.md`, and lets `omc` force-load that companion config at launch while plain `claude` stays unchanged
 
+#### Opt out of global CLAUDE.md management
+
+If you maintain your own `~/.claude/CLAUDE.md` and do not want installs or updates to merge the OMC block into it, set `claudeMdEnabled` to `false` in `~/.claude/.omc-config.json`:
+
+```json
+{ "claudeMdEnabled": false }
+```
+
+- Default is `true`; only an explicit `false` opts out
+- `omc install`, `omc update` and the global `/oh-my-claudecode:omc-setup` step then leave `~/.claude/CLAUDE.md` and `~/.claude/CLAUDE-omc.md` untouched and log a skip line
+- `omc doctor` reports missing OMC markers as informational (legacy-guide and marker-structure warnings remain); SessionStart omits CLAUDE.md from its drift check, while other component drift notices still apply
+- A `CLAUDE-omc.md` left by an earlier preserve-mode install is still loaded by `omc` launch; delete it if you no longer want it
+- Project-scoped setup (`--local`) is unaffected
+- Removing the key (or setting it to `true`) restores the default merge behavior on the next install, update or setup
+
 ### What Configuration Enables
 
 | Feature           | Without     | With omc Config         |
