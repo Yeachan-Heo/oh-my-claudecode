@@ -305,7 +305,9 @@ const TEAM_ACTIVE_PHASES = new Set([
  * Returns 0 for unlimited (only reachable outside strict mode).
  */
 function getHardMaxIterations() {
-  const configValue = readSecurityConfigValue("hardMaxIterations");
+  const raw = readSecurityConfigValue("hardMaxIterations");
+  // Mirror sanitizeSecurityOverrides(): only non-negative integers are honored.
+  const configValue = typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : undefined;
   if (process.env.OMC_SECURITY === "strict") {
     return Math.min(200, typeof configValue === "number" && configValue > 0 ? configValue : 200);
   }
