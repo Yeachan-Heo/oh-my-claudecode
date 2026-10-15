@@ -5,7 +5,7 @@
  */
 
 import type { SkillMetadata } from './types.js';
-import { escapeYamlString, splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
+import { escapeYamlSingleQuoted, splitFlowSequenceItems, unquoteYamlScalar } from '../../utils/frontmatter.js';
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -149,7 +149,9 @@ export function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
 export function parseStringValue(value: string): string {
   if (!value) return '';
   const unquoted = unquoteYamlScalar(value);
-  return value.startsWith('"') && value.endsWith('"') ? unescapeYamlString(unquoted) : unquoted;
+  // The previous learner writer stored backslashes literally inside double quotes.
+  // Preserve those values while decoding escaped quotes in handwritten YAML.
+  return value.startsWith('"') && value.endsWith('"') ? unquoted.replace(/\\"/g, '"') : unquoted;
 }
 
 function normalizeStringArray(value: string | string[]): string[] {
@@ -208,15 +210,15 @@ export function parseArrayValue(
 export function generateSkillFrontmatter(metadata: SkillMetadata): string {
   const lines = [
     '---',
-    `id: "${escapeYamlString(metadata.id)}"`,
-    `name: "${escapeYamlString(metadata.name)}"`,
-    `description: "${escapeYamlString(metadata.description)}"`,
+    `id: '${escapeYamlSingleQuoted(metadata.id)}'`,
+    `name: '${escapeYamlSingleQuoted(metadata.name)}'`,
+    `description: '${escapeYamlSingleQuoted(metadata.description)}'`,
     `source: ${metadata.source}`,
-    `createdAt: "${escapeYamlString(metadata.createdAt)}"`,
+    `createdAt: '${escapeYamlSingleQuoted(metadata.createdAt)}'`,
   ];
 
   if (metadata.sessionId) {
-    lines.push(`sessionId: "${escapeYamlString(metadata.sessionId)}"`);
+    lines.push(`sessionId: '${escapeYamlSingleQuoted(metadata.sessionId)}'`);
   }
 
   if (metadata.quality !== undefined) {
@@ -229,13 +231,13 @@ export function generateSkillFrontmatter(metadata: SkillMetadata): string {
 
   lines.push('triggers:');
   for (const trigger of metadata.triggers) {
-    lines.push(`  - "${escapeYamlString(trigger)}"`);
+    lines.push(`  - '${escapeYamlSingleQuoted(trigger)}'`);
   }
 
   if (metadata.tags && metadata.tags.length > 0) {
     lines.push('tags:');
     for (const tag of metadata.tags) {
-      lines.push(`  - "${escapeYamlString(tag)}"`);
+      lines.push(`  - '${escapeYamlSingleQuoted(tag)}'`);
     }
   }
 

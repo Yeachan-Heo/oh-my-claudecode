@@ -96,4 +96,21 @@ describe('flow-sequence frontmatter fields with commas', () => {
     expect(parsed!.frontmatter.sources).toEqual(["source's, name"]);
     expect(parsed!.frontmatter.links).toEqual(["link's, title"]);
   });
+
+  it('preserves backslashes in single-quoted scalar and array fields', () => {
+    const raw = [
+      '---',
+      "title: 'C:\\repo\\notes'",
+      "tags: []",
+      "sources: ['C:\\repo\\notes, draft']",
+      "links: []",
+      '---',
+      'body',
+    ].join('\n');
+
+    const parsed = parseFrontmatter(raw);
+
+    expect(parsed!.frontmatter.title).toBe('C:\\repo\\notes');
+    expect(parsed!.frontmatter.sources).toEqual(['C:\\repo\\notes, draft']);
+  });
 });

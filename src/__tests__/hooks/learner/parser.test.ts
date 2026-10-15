@@ -350,6 +350,23 @@ Body.`;
       expect(result.metadata).toMatchObject(metadata);
     });
 
+    it("preserves backslash sequences in legacy double-quoted metadata", () => {
+      const content = `---
+name: Legacy Skill
+description: "Windows path C:\\repo\\notes and literal \\n"
+triggers:
+  - "C:\\repo\\n"
+  - "literal\\n"
+---
+
+Body.`;
+
+      const result = parseSkillFile(content);
+
+      expect(result.metadata.description).toBe("Windows path C:\\repo\\notes and literal \\n");
+      expect(result.metadata.triggers).toEqual(["C:\\repo\\n", "literal\\n"]);
+    });
+
     it("should decode doubled apostrophes in single-quoted inline list items", () => {
       const content = `---
 name: Inline Lists

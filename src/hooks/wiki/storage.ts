@@ -140,9 +140,10 @@ function parseSimpleYaml(yaml: string): Record<string, string> {
     const key = line.slice(0, colonIdx).trim();
     let value = line.slice(colonIdx + 1).trim();
     // Strip surrounding quotes and unescape
-    if ((value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))) {
-      value = unescapeYamlString(value.slice(1, -1));
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = unescapeYamlString(unquoteYamlScalar(value));
+    } else if (value.startsWith("'") && value.endsWith("'")) {
+      value = unquoteYamlScalar(value);
     }
     if (key) result[key] = value;
   }
@@ -155,7 +156,13 @@ function parseYamlArray(value: string | undefined): string[] {
   const trimmed = value.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
     return splitFlowSequenceItems(trimmed.slice(1, -1))
-      .map(s => unescapeYamlString(unquoteYamlScalar(s.trim())))
+      .map((item) => {
+        const scalar = item.trim();
+        const unquoted = unquoteYamlScalar(scalar);
+        return scalar.startsWith('"') && scalar.endsWith('"')
+          ? unescapeYamlString(unquoted)
+          : unquoted;
+      })
       .filter(Boolean);
   }
   return trimmed ? [trimmed] : [];

@@ -17,6 +17,11 @@ export function escapeYamlString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
 }
 
+/** Escape a string for use inside YAML single quotes. */
+export function escapeYamlSingleQuoted(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
 /** Decode the YAML string escapes supported by the frontmatter parsers. */
 export function unescapeYamlString(value: string): string {
   return value.replace(/\\(\\|"|n|r)/g, (_, ch) => {
