@@ -59,8 +59,11 @@ function isValidOmcPluginRoot(root) {
 function latestValidCacheRoot(cacheBase) {
   if (!existsSync(cacheBase)) return null;
   try {
+    // Real directories only: a symlink entry (dangling, or a downgrade link to
+    // an older directory) must never be the link target, or the repair below
+    // would replace that directory with a link that resolves back to itself.
     const versions = readdirSync(cacheBase, { withFileTypes: true })
-      .filter(entry => entry.isDirectory() || entry.isSymbolicLink())
+      .filter(entry => entry.isDirectory())
       .map(entry => entry.name)
       .filter(name => parseVersion(name))
       .sort(compareVersionsDesc);
