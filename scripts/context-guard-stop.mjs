@@ -27,8 +27,19 @@ import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { readStdin } from './lib/stdin.mjs';
 import { resolveContextPercent } from './lib/context-usage.mjs';
 
-const THRESHOLD = parseInt(process.env.OMC_CONTEXT_GUARD_THRESHOLD || '75', 10);
+const DEFAULT_THRESHOLD = 75;
 const CRITICAL_THRESHOLD = 95;
+
+// A malformed override (e.g. "abc") used to parse to NaN, so `pct >= NaN` was
+// never true and the guard silently stopped blocking. Only accept a whole
+// percentage below the critical fail-open point; anything else uses the default.
+function readThresholdEnv(raw) {
+  if (typeof raw !== 'string' || !/^\d{1,3}$/.test(raw.trim())) return DEFAULT_THRESHOLD;
+  const parsed = Number(raw.trim());
+  return parsed >= 1 && parsed < CRITICAL_THRESHOLD ? parsed : DEFAULT_THRESHOLD;
+}
+
+const THRESHOLD = readThresholdEnv(process.env.OMC_CONTEXT_GUARD_THRESHOLD);
 const MAX_BLOCKS = 2;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 const GIT_PROBE_TIMEOUT_MS = 1000;
