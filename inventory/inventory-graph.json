@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T07:33:12.376Z",
+  "generatedAt": null,
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f79ab25dec80bdebbb1333d7c17b7f6e3e937bc0",
-    "sourceSha256": "11580b8a85c22f5bd5ed468e7c2f951efaa4f939ea5a36d855cdb37058d32b68",
-    "generatedAt": "2026-10-15T07:33:12.376Z",
+    "head": "0b07c4d71c4152975c65416c400b3f52e918d9e4",
+    "sourceSha256": "883c4210d2b2bfa07089b5cdd0b316bc675925dcc75e9b15965b9a888ab8858b",
+    "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f79ab25dec80bdebbb1333d7c17b7f6e3e937bc0",
-  "sourceSha256": "11580b8a85c22f5bd5ed468e7c2f951efaa4f939ea5a36d855cdb37058d32b68",
+  "head": "0b07c4d71c4152975c65416c400b3f52e918d9e4",
+  "sourceSha256": "883c4210d2b2bfa07089b5cdd0b316bc675925dcc75e9b15965b9a888ab8858b",
   "counts": {
     "public": {
       "skills": 48,
@@ -79626,11 +79626,6 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
-        "to": "src/team/process-identity-lock.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/runtime-owner-client.ts",
         "kind": "imports"
       },
@@ -88362,11 +88357,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8512,
-      "importEdgeCount": 7067,
+      "edgeCount": 8511,
+      "importEdgeCount": 7066,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "56edd92075aa295373b473da527f5c6dd76ea7913cb2b37a19bf320342d5990f"
+  "manifestSha256": "6d35694ae1d4dc1b76c0ac1ca5f9c54c5785fe52f947269aa885c8bbdbc7a396"
 }
