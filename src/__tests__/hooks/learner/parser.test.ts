@@ -314,6 +314,20 @@ Body.`;
       expect(result.metadata.tags).toEqual(["a, b"]);
     });
 
+    it("should decode escaped quotes in double-quoted inline list items", () => {
+      const content = `---
+name: Inline Lists
+description: Escaped quotes
+triggers: ["say \\"hi\\", twice", next]
+---
+
+Body.`;
+
+      const result = parseSkillFile(content);
+
+      expect(result.metadata.triggers).toEqual(['say "hi", twice', "next"]);
+    });
+
     it("should decode doubled apostrophes in single-quoted inline list items", () => {
       const content = `---
 name: Inline Lists

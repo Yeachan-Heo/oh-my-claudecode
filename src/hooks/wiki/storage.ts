@@ -18,7 +18,7 @@ import { join, resolve, sep } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../../lib/file-lock.js';
-import { splitFlowSequenceItems, unquoteYamlScalar } from '../../utils/frontmatter.js';
+import { splitFlowSequenceItems, unescapeYamlString, unquoteYamlScalar } from '../../utils/frontmatter.js';
 import {
   type WikiPage,
   type WikiPageFrontmatter,
@@ -142,7 +142,7 @@ function parseSimpleYaml(yaml: string): Record<string, string> {
     // Strip surrounding quotes and unescape
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1).replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; });
+      value = unescapeYamlString(value.slice(1, -1));
     }
     if (key) result[key] = value;
   }
@@ -155,7 +155,7 @@ function parseYamlArray(value: string | undefined): string[] {
   const trimmed = value.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
     return splitFlowSequenceItems(trimmed.slice(1, -1))
-      .map(s => unquoteYamlScalar(s.trim()).replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; }))
+      .map(s => unescapeYamlString(unquoteYamlScalar(s.trim())))
       .filter(Boolean);
   }
   return trimmed ? [trimmed] : [];
