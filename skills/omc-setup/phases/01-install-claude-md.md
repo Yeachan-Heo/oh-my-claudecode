@@ -13,9 +13,36 @@ Otherwise (initial setup wizard), use AskUserQuestion to prompt:
 1. **Local (this project)** - Creates `.claude/CLAUDE.md` in current project directory. Best for project-specific configurations.
 2. **Global (all projects)** - Creates `~/.claude/CLAUDE.md` for all Claude Code sessions. Best for consistent behavior everywhere.
 
-Set `CONFIG_TARGET` to `local` or `global` based on user's choice.
+Set `CONFIG_TARGET` to `local` or `global` based on the user's choice.
 
-If `CONFIG_TARGET=global` and `~/.claude/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
+## Check the Global Opt-Out Before Asking About Install Style
+
+Only when `CONFIG_TARGET=global`, run this probe before any overwrite/preserve question. It checks the same `.omc-config.json` used by the installer and respects `CLAUDE_CONFIG_DIR`, including `~`, `~/...`, and `~\...` values:
+
+```bash
+node -e "
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+let configDir = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+if (configDir === '') configDir = path.join(os.homedir(), '.claude');
+if (configDir === '~') configDir = os.homedir();
+else if (configDir.startsWith('~/') || configDir.startsWith('~' + String.fromCharCode(92))) {
+  configDir = path.join(os.homedir(), configDir.slice(2));
+}
+try {
+  const config = JSON.parse(fs.readFileSync(path.join(configDir, '.omc-config.json'), 'utf8'));
+  const disabled = Boolean(config && typeof config === 'object' && config.claudeMdEnabled === false);
+  console.log(disabled ? 'disabled' : 'enabled');
+} catch {
+  console.log('enabled');
+}
+"
+```
+
+If the probe prints `disabled`, do not ask the overwrite/preserve question; set `GLOBAL_INSTALL_STYLE=overwrite` and continue through the coordinator so it can report the skip. If it prints `enabled`, continue below. If the probe fails or prints neither status, stop before asking or running setup; do not assume management is enabled.
+
+If `CONFIG_TARGET=global`, the probe printed `enabled`, and `~/.claude/CLAUDE.md` already exists without OMC markers, ask a second explicit question before running setup:
 
 **Question:** "Global setup will change your base Claude config. Which behavior do you want?"
 
