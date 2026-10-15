@@ -16,7 +16,7 @@ vi.mock('../../factory/map-ingest.js', async (importOriginal) => {
 });
 
 import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
-import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
+import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, runFeedbackCommand, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
 import { Command } from 'commander';
 
 const tempRoots: string[] = [];
@@ -192,6 +192,62 @@ process.exit(1);
     expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(0);
     writeFailer('FAIL brand new regression');
     expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(1);
+  });
+
+  it('reports new test failures even when suite output includes ENOENT', () => {
+    writePackage('node failer.js');
+    writeFailer('Error: ENOENT: no such file or directory: missing.json\nFAIL a.test.js > existing failure');
+    expect(ralphVerify({ session: 'sess-enoent', writeBaseline: true }, dir)).toBe(0);
+
+    writeFailer('Error: ENOENT: no such file or directory: missing.json\nFAIL a.test.js > new failure');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-enoent' }, dir)).toBe(1);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('NEW failure(s) since baseline');
+      expect(output).toContain('new: npm run test: FAIL a.test.js > new failure');
+      expect(output).not.toContain('unrunnable');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('does not classify test output mentioning a missing command as unrunnable', () => {
+    writeFailer('FAIL fixture logs "command not found" while testing error handling');
+    const result = runFeedbackCommand('node failer.js', dir);
+
+    expect(result.unrunnable).toBeUndefined();
+    expect(result.signatures).toContain('FAIL fixture logs "command not found" while testing error handling');
+  });
+
+  it('recognizes a shell missing-command diagnostic with npm wrapper output', () => {
+    writeFailer(`> fb-fixture@1.0.0 test
+> missing-command
+'missing-command' is not recognized as an internal or external command,
+operable program or batch file.`);
+    const result = runFeedbackCommand('node failer.js', dir);
+
+    expect(result).toEqual({ signatures: [], unrunnable: true });
+  });
+
+  it('still detects a missing command and does not call a repeatedly unrunnable check clean', () => {
+    writePackage(`"${join(dir, 'missing-command')}"`);
+    expect(ralphVerify({ session: 'sess-missing-command', writeBaseline: true }, dir)).toBe(0);
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-missing-command' }, dir)).toBe(0);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('unrunnable');
+      expect(output).not.toContain('clean vs baseline');
+
+      logSpy.mockClear();
+      expect(ralphVerify({ session: 'sess-missing-command', json: true }, dir)).toBe(0);
+      const result = JSON.parse(String(logSpy.mock.calls[0][0])) as { unrunnableCommands: string[] };
+      expect(result.unrunnableCommands).toEqual(['npm run test']);
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it('treats a missing baseline as a candidate, not a failure', () => {

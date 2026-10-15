@@ -62,6 +62,37 @@ describe('parseJevEnv tri-state parity', () => {
   });
 });
 
+describe('parseJevEnv plan mode (OMC_JEV_PLAN_MODE)', () => {
+  const active = baseEnv({ OMC_JEV: 'model-routing:active' });
+
+  it('leaves plan mode unchanged when OMC_JEV_PLAN_MODE is unset', () => {
+    expect(parseJevEnv('model-routing', active, 'plan')).toBe('active');
+    expect(parseJevEnv('model-routing', baseEnv(), 'plan')).toBe('shadow');
+  });
+
+  it('shadow: active and shadow points run in shadow, unlisted points stay off', () => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'shadow' }, 'plan')).toBe('shadow');
+    expect(parseJevEnv('model-routing', baseEnv({ OMC_JEV_PLAN_MODE: 'shadow' }), 'plan')).toBe('shadow');
+    expect(parseJevEnv('task-size', { ...active, OMC_JEV_PLAN_MODE: 'shadow' }, 'plan')).toBe('off');
+  });
+
+  it('off: every point is off in plan mode', () => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'off' }, 'plan')).toBe('off');
+    expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all', OMC_JEV_PLAN_MODE: 'off' }), 'plan')).toBe('off');
+  });
+
+  it.each([undefined, 'default', 'acceptEdits', 'auto', 'dontAsk', 'bypassPermissions'])(
+    'does not apply outside plan mode (%s)',
+    (permissionMode) => {
+      expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: 'off' }, permissionMode)).toBe('active');
+    },
+  );
+
+  it.each(['active', 'bogus', ''])('ignores an unrecognized value (%j)', (value) => {
+    expect(parseJevEnv('model-routing', { ...active, OMC_JEV_PLAN_MODE: value }, 'plan')).toBe('active');
+  });
+});
+
 describe('wire shape parity with the TS client (#4091)', () => {
   it('serializes score criteria to the ordered list the API requires', () => {
     const wire = serializeQuestions({
@@ -137,6 +168,30 @@ describe('resolveRequest', () => {
     const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
     expect(result.mode).toBe('active');
     expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
+  });
+
+  it('plan mode with OMC_JEV_PLAN_MODE=shadow: the request permission mode makes an active point resolve and log as shadow', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest(
+      { point: 'model-routing', state: {}, questions: QUESTIONS, heuristic: 'haiku', permissionMode: 'plan' },
+      baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_PLAN_MODE: 'shadow' }),
+      fetchFn,
+    );
+    expect(result.mode).toBe('shadow');
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line).toMatchObject({ point: 'model-routing', mode: 'shadow', heuristic: 'haiku', jev: { choice: 'opus' } });
+  });
+
+  it('plan mode with OMC_JEV_PLAN_MODE=off: zero fetch', async () => {
+    let fetched = false;
+    const fetchFn = async () => { fetched = true; };
+    const result = await resolveRequest(
+      { point: 'model-routing', state: {}, questions: QUESTIONS, permissionMode: 'plan' },
+      baseEnv({ OMC_JEV: 'model-routing:active', OMC_JEV_PLAN_MODE: 'off' }),
+      fetchFn,
+    );
+    expect(result.mode).toBe('off');
+    expect(fetched).toBe(false);
   });
 
   it('degrades on HTTP error and logs jev:null', async () => {
