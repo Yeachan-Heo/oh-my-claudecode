@@ -2,9 +2,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const { TEST_STATE_DIR, TEST_WORKTREE_ROOT } = vi.hoisted(() => ({
+const { TEST_STATE_DIR, TEST_WORKTREE_ROOT, TEST_GLOBAL_STATE_DIR } = vi.hoisted(() => ({
   TEST_STATE_DIR: '/tmp/omc-glob-test-state',
   TEST_WORKTREE_ROOT: '/tmp/omc-glob-test-worktree',
+  TEST_GLOBAL_STATE_DIR: '/tmp/omc-glob-test-global-state',
+}));
+
+// Keep the global state dir away from the real ~/.omc so cleanup never touches it.
+vi.mock('../../../utils/paths.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../utils/paths.js')>()),
+  getGlobalOmcStateRoot: () => TEST_GLOBAL_STATE_DIR,
 }));
 
 vi.mock('../../../lib/worktree-paths.js', () => ({
@@ -17,6 +24,7 @@ vi.mock('../../../lib/worktree-paths.js', () => ({
 }));
 
 import { listStates, cleanupOrphanedStates } from '../index.js';
+import { StateLocation } from '../types.js';
 
 describe('state-manager glob patterns', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -43,9 +51,8 @@ describe('state-manager glob patterns', () => {
     return filePath;
   }
 
-  // The mocked local state dir may also be reported as the global one, so de-duplicate.
   const names = (pattern: string) =>
-    [...new Set(listStates({ pattern }).map((s) => s.name))].sort();
+    listStates({ pattern, location: StateLocation.LOCAL }).map((s) => s.name).sort();
 
   it('treats regex metacharacters in a list pattern literally', () => {
     writeState('a.b');
