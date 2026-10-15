@@ -11,7 +11,7 @@ const { TEST_ROOT, TEST_STATE_DIR, TEST_WORKTREE_ROOT, TEST_GLOBAL_STATE_DIR } =
 
     return {
       TEST_ROOT: testRoot,
-      TEST_STATE_DIR: `${testRoot}/state`,
+      TEST_STATE_DIR: `${testRoot}/worktree/state`,
       TEST_WORKTREE_ROOT: `${testRoot}/worktree`,
       TEST_GLOBAL_STATE_DIR: `${testRoot}/global-state`,
     };
@@ -25,10 +25,10 @@ vi.mock("../../../utils/paths.js", async (importOriginal) => ({
 
 vi.mock("../../../lib/worktree-paths.js", () => ({
   OmcPaths: {
-    STATE: TEST_STATE_DIR,
+    STATE: "state",
   },
   getWorktreeRoot: () => TEST_WORKTREE_ROOT,
-  validateWorkingDirectory: () => "/",
+  validateWorkingDirectory: () => TEST_WORKTREE_ROOT,
   getOmcRoot: (dir?: string) => `${dir ?? TEST_WORKTREE_ROOT}/.omc`,
 }));
 
