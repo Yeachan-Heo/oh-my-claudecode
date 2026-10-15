@@ -579,12 +579,13 @@ const MODEL_ROUTING_QUESTIONS = {
   },
 };
 
-function recordSlopWarningShadow(toolName, toolInput, warned) {
+function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
   recordJevShadow({
     point: 'slop-warning',
     state: { toolName, toolInput },
     questions: SLOP_WARNING_QUESTIONS,
     heuristic: warned,
+    permissionMode,
   });
 }
 
@@ -603,8 +604,8 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput) {
-  if (!isJevShadowOptedIn('model-routing')) return;
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode) {
+  if (!isJevShadowOptedIn('model-routing', process.env, permissionMode)) return;
 
   const originalInput = boundModelRoutingInput(toolInput);
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
@@ -628,6 +629,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput) {
     },
     questions: MODEL_ROUTING_QUESTIONS,
     heuristic,
+    permissionMode,
   });
   
   // In active mode with valid answer, update the toolInput model to Jev's choice
@@ -655,7 +657,7 @@ function generateSlopWarning(data, toolName) {
     .concat(collectStringValues(promptLikeFields))
     .join('\n');
   const warned = shouldWarnForSlopFallbackLanguage(data, toolName, inspectedText);
-  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned);
+  recordSlopWarningShadow(toolName, data.toolInput || data.tool_input || {}, warned, data.permission_mode);
   if (!warned) return '';
 
   return '[SLOP WARNING] Detected fallback/workaround language in this tool input. ' +
@@ -1948,7 +1950,7 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput);
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
     }
