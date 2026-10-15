@@ -69,9 +69,11 @@ describe("state-manager glob patterns", () => {
     writeState("a.b");
     writeState("aXb");
     writeState("state(1)");
+    writeState("state[");
 
     expect(names("a.b")).toEqual(["a.b"]);
     expect(names("state(1)")).toEqual(["state(1)"]);
+    expect(names("state[")).toEqual(["state["]);
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
@@ -100,5 +102,19 @@ describe("state-manager glob patterns", () => {
     expect(fs.existsSync(dotted)).toBe(true);
     expect(fs.existsSync(lookalike)).toBe(false);
     expect(fs.existsSync(dottedLookalike)).toBe(false);
+  });
+
+  it("still expands * in cleanup exclusions", () => {
+    const keep = writeState("keep-active", 60);
+    const remove = writeState("orphan", 60);
+
+    const result = cleanupOrphanedStates({
+      maxAgeDays: 30,
+      exclude: ["keep-*"],
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(fs.existsSync(keep)).toBe(true);
+    expect(fs.existsSync(remove)).toBe(false);
   });
 });
