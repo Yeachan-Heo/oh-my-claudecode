@@ -58,9 +58,9 @@ Content without required fields.
 
     const frontmatter = generateSkillFrontmatter(metadata);
 
-    expect(frontmatter).toContain('id: "gen-skill-001"');
+    expect(frontmatter).toContain("id: 'gen-skill-001'");
     expect(frontmatter).toContain('triggers:');
-    expect(frontmatter).toContain('  - "generate"');
+    expect(frontmatter).toContain("  - 'generate'");
   });
 
   it('should reject content without frontmatter', () => {

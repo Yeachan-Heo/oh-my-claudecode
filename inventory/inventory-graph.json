@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-15T16:22:45.241Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ea658dbdf589815025386279d67011d1d785a285",
-    "sourceSha256": "5e6d0c5e9fdef0f580751a849e5d8865ad711e46628e820e1a03f10d054fa8b6",
-    "generatedAt": null,
+    "head": "d893c59e922c1759492863dbc542356ecf667b0b",
+    "sourceSha256": "0d47d87beae47d75edc46d61a7f4c4826c1bb4cae71afe11627a028874250255",
+    "generatedAt": "2026-10-15T16:22:45.241Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ea658dbdf589815025386279d67011d1d785a285",
-  "sourceSha256": "5e6d0c5e9fdef0f580751a849e5d8865ad711e46628e820e1a03f10d054fa8b6",
+  "head": "d893c59e922c1759492863dbc542356ecf667b0b",
+  "sourceSha256": "0d47d87beae47d75edc46d61a7f4c4826c1bb4cae71afe11627a028874250255",
   "counts": {
     "public": {
       "skills": 48,
@@ -50111,6 +50111,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/hooks/learner/parser.test.ts",
+        "to": "src/hooks/learner/types.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/__tests__/hooks/learner/transliteration-map.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -65771,6 +65776,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/learner/parser.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/promotion.ts",
         "to": "src/hooks/learner/types.ts",
         "kind": "type-imports"
@@ -71308,6 +71318,11 @@
       {
         "from": "src/hooks/wiki/storage.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/wiki/storage.ts",
+        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88533,11 +88548,11 @@
     ],
     "stats": {
       "nodeCount": 7741,
-      "edgeCount": 8541,
-      "importEdgeCount": 7094,
+      "edgeCount": 8544,
+      "importEdgeCount": 7096,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "3660cf6e00f22f26bc61048038c5826111a6deb57b2bd2704d916919fe098b90",
-  "manifestSha256": "78be6fc5b3b62fe766d3189bd96a105d0c1cf72799c88a061fb1149f71b2435e"
+  "manifestSha256": "97d2722da9e054a38eb4ad943400433a1f8ac33b540dd8ef9034de9016edffef"
 }
