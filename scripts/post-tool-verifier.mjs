@@ -571,6 +571,7 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
     },
     questions: CONTEXT_PRUNING_QUESTIONS,
     heuristic: action,
+    permissionMode: data.permission_mode,
   });
   
   // In active mode, use Jev's action instead of heuristic
