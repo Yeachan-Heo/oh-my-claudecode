@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-15T06:18:19.485Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "51bec397e7bf52d3e00468ff3abf81a12cc84b33",
-    "sourceSha256": "01a4f2b7db2282f848c782e4d8c9d3040e9faa9a64db2761056f30888e0f0463",
-    "generatedAt": null,
+    "head": "d698bb448f2bed76b9cee996ea4e3a492eb57655",
+    "sourceSha256": "edcf4b696612128c5eed37eee352ba24db4e108b55e852c3328e92ce08ef7d1b",
+    "generatedAt": "2026-10-15T06:18:19.485Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "51bec397e7bf52d3e00468ff3abf81a12cc84b33",
-  "sourceSha256": "01a4f2b7db2282f848c782e4d8c9d3040e9faa9a64db2761056f30888e0f0463",
+  "head": "d698bb448f2bed76b9cee996ea4e3a492eb57655",
+  "sourceSha256": "edcf4b696612128c5eed37eee352ba24db4e108b55e852c3328e92ce08ef7d1b",
   "counts": {
     "public": {
       "skills": 48,
@@ -79626,6 +79626,11 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
+        "to": "src/team/process-identity-lock.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/runtime-owner-client.ts",
         "kind": "imports"
       },
@@ -88357,11 +88362,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8511,
-      "importEdgeCount": 7066,
+      "edgeCount": 8512,
+      "importEdgeCount": 7067,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "0a60f779cc78eebf1d8359dca69b668d73a503f12ab4c41bac9131dbcee4e79f"
+  "manifestSha256": "3b04047af5834d2842e7ab344f52f25dd143f689ba0d54ab7e7fc8b8446952a7"
 }
