@@ -87,7 +87,10 @@ First check whether CLAUDE.md management is disabled. Read `${CLAUDE_CONFIG_DIR:
 node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),c=(process.env.CLAUDE_CONFIG_DIR||'').trim(),d=!c?p.join(h,'.claude'):c==='~'?h:/^~[/\x5c]/.test(c)?p.join(h,c.slice(2)):c;let off=false;try{off=JSON.parse(f.readFileSync(p.join(d,'.omc-config.json'),'utf8')).claudeMdEnabled===false}catch{};console.log(off?'CLAUDE.md management disabled by claudeMdEnabled: false':'CLAUDE.md management enabled')"
 ```
 
-If it prints `CLAUDE.md management disabled by claudeMdEnabled: false`, report that line as INFO, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`. Otherwise continue:
+Continue with the CLAUDE.md checks below only when the probe printed exactly `CLAUDE.md management enabled`.
+
+- If it prints `CLAUDE.md management disabled by claudeMdEnabled: false`, report that line as INFO, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`.
+- If it prints neither line, or the command fails (for example `node` is not on `PATH`, which Step 5 diagnoses), report WARN - could not check the `claudeMdEnabled` opt-out, skip the rest of this step and the "Fix: Missing/Outdated CLAUDE.md" fix, and never create or overwrite `CLAUDE.md` or `CLAUDE-omc.md`.
 
 ```bash
 # Check if CLAUDE.md exists
@@ -246,7 +249,7 @@ node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=pro
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
-Skip this fix when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false`.
+Skip this fix unless Step 4 printed `CLAUDE.md management enabled`: skip it when Step 4 reported `CLAUDE.md management disabled by claudeMdEnabled: false` or could not check the opt-out.
 
 Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`:
 ```
