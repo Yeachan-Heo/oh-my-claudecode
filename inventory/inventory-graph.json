@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T07:44:48.608Z",
+  "generatedAt": null,
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "bc0db2d4543e15ffffb9689dec4d1ace5b4e2b8e",
-    "sourceSha256": "f60275305f5a05f300a3798d8589c48bb46bc5a165a6ec82e4444aff8593bf19",
-    "generatedAt": "2026-10-15T07:44:48.608Z",
+    "head": "6ca31a3a271a6098d22dedbdfb1639780b92c626",
+    "sourceSha256": "f3ed14461fc89d0835e871ecfebedc3e984ccb563eb796b21bf537c4ddb60437",
+    "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "bc0db2d4543e15ffffb9689dec4d1ace5b4e2b8e",
-  "sourceSha256": "f60275305f5a05f300a3798d8589c48bb46bc5a165a6ec82e4444aff8593bf19",
+  "head": "6ca31a3a271a6098d22dedbdfb1639780b92c626",
+  "sourceSha256": "f3ed14461fc89d0835e871ecfebedc3e984ccb563eb796b21bf537c4ddb60437",
   "counts": {
     "public": {
       "skills": 48,
@@ -79626,11 +79626,6 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
-        "to": "src/team/process-identity-lock.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/runtime-owner-client.ts",
         "kind": "imports"
       },
@@ -88362,11 +88357,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8512,
-      "importEdgeCount": 7067,
+      "edgeCount": 8511,
+      "importEdgeCount": 7066,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "927ae03b4dd5d7aa9c43f6825ff4138209a9d0ec26e2d8fb3009bb8a24066027"
+  "manifestSha256": "18e1ba5072676b9b9768330585569a982334af567d2e3f9899982e4ca2ccf360"
 }
