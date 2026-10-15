@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T11:41:26.740Z",
+  "generatedAt": "2026-10-15T11:42:30.149Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "bce000948057b6c57047506b365a0fc54b5d1336",
-    "sourceSha256": "1e0bc6b9c73e01f76ddc38309fd966d8b8fe2bb7bc1d6b78d577aec184315950",
-    "generatedAt": "2026-10-15T11:41:26.740Z",
+    "sourceSha256": "02c4d4fc04b351d60ca1111de9863a5250e5067c445dfaa7432aaee9e714914d",
+    "generatedAt": "2026-10-15T11:42:30.149Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "bce000948057b6c57047506b365a0fc54b5d1336",
-  "sourceSha256": "1e0bc6b9c73e01f76ddc38309fd966d8b8fe2bb7bc1d6b78d577aec184315950",
+  "sourceSha256": "02c4d4fc04b351d60ca1111de9863a5250e5067c445dfaa7432aaee9e714914d",
   "counts": {
     "public": {
       "skills": 48,
@@ -54601,6 +54601,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/session-start-script-context.test.ts",
+        "to": "scripts/lib/cache-occupancy.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/session-start-timeout-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -65736,11 +65741,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/learner/parser.ts",
-        "to": "src/utils/frontmatter.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/learner/promotion.ts",
         "to": "src/hooks/learner/types.ts",
         "kind": "type-imports"
@@ -71278,11 +71278,6 @@
       {
         "from": "src/hooks/wiki/storage.ts",
         "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/wiki/storage.ts",
-        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88468,11 +88463,11 @@
     ],
     "stats": {
       "nodeCount": 7740,
-      "edgeCount": 8529,
-      "importEdgeCount": 7082,
+      "edgeCount": 8528,
+      "importEdgeCount": 7081,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "8b2e89bd01425124391a0343d924328861051593f525df07e5b0b895ab37eae2"
+  "manifestSha256": "776e7ca4676f615ac58819e0ef519d782544b28da4a3b207564944bcc53fa771"
 }
