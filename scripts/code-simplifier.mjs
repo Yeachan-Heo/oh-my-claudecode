@@ -159,6 +159,7 @@ async function main() {
       state: { cwd, files, source: 'code-simplifier-stop' },
       questions: SIMPLIFIER_TRIGGER_QUESTIONS,
       heuristic: true,
+      permissionMode: data.permission_mode,
     });
 
     // Write trigger marker to prevent re-triggering within this turn cycle
