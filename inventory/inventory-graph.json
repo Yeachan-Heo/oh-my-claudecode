@@ -74637,6 +74637,11 @@
       },
       {
         "from": "src/lib/security-config.ts",
+        "to": "external:zod",
+        "kind": "imports"
+      },
+      {
+        "from": "src/lib/security-config.ts",
         "to": "src/utils/jsonc.ts",
         "kind": "imports"
       },

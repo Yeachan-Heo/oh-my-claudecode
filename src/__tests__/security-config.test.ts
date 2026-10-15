@@ -198,5 +198,42 @@ describe('security-config', () => {
       expect(config.pythonSandbox).toBe(false);
       expect(config.disableExternalLLM).toBe(false);
     });
+
+    it.each([
+      ['string boolean', { restrictToolPaths: 'false', pythonSandbox: 'true', disableRemoteMcp: 1 }],
+      ['non-numeric hardMaxIterations', { hardMaxIterations: 'abc' }],
+      ['negative hardMaxIterations', { hardMaxIterations: -1 }],
+      ['fractional hardMaxIterations', { hardMaxIterations: 2.5 }],
+      ['null values', { restrictToolPaths: null, hardMaxIterations: null }],
+    ])('non-strict mode: ignores malformed overrides (%s)', (_label, security) => {
+      delete process.env.OMC_SECURITY;
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({ security }));
+      clearSecurityConfigCache();
+
+      const config = getSecurityConfig();
+      expect(config.restrictToolPaths).toBe(false);
+      expect(config.pythonSandbox).toBe(false);
+      expect(config.disableRemoteMcp).toBe(false);
+      expect(config.hardMaxIterations).toBe(500);
+    });
+
+    it('ignores a security section that is an array', () => {
+      delete process.env.OMC_SECURITY;
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({ security: [{ restrictToolPaths: true }] }));
+      clearSecurityConfigCache();
+
+      expect(getSecurityConfig().restrictToolPaths).toBe(false);
+    });
+
+    it('keeps 0 as an explicit unlimited hardMaxIterations in non-strict mode', () => {
+      delete process.env.OMC_SECURITY;
+      mockedExistsSync.mockReturnValue(true);
+      mockedReadFileSync.mockReturnValue(JSON.stringify({ security: { hardMaxIterations: 0 } }));
+      clearSecurityConfigCache();
+
+      expect(getSecurityConfig().hardMaxIterations).toBe(0);
+    });
   });
 });
