@@ -134,6 +134,8 @@ const STABILIZE_TOOL_FAILURE_CLEANUP_FLAG = '--stabilize-legacy-tool-failure-sta
 const TOOL_FAILURE_CLEANUP_STABILIZATION_MS = 30_000;
 const TOOL_FAILURE_CLEANUP_RESCAN_MS = 250;
 const TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS = 5000;
+const TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS = 10;
+const TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS = 60_000;
 let postToolFailureStateLockModule;
 
 async function loadPostToolFailureStateLock() {
@@ -180,7 +182,7 @@ function hasToolFailureArtifacts(directory, canonicalFilename) {
   }
 }
 
-async function purgeToolFailureStateDirectory(directory, canonicalFilename, deadline) {
+async function purgeToolFailureStateDirectory(directory, canonicalFilename, deadline, lifetimeDeadline = Infinity) {
   if (!hasToolFailureArtifacts(directory, canonicalFilename)) return false;
   const canonicalPath = join(directory, canonicalFilename);
   let postToolFailureLock;
@@ -193,13 +195,18 @@ async function purgeToolFailureStateDirectory(directory, canonicalFilename, dead
   postToolFailureLock = lockWait.lock;
   if (!postToolFailureLock) return lockWait.timedOut;
   let releaseFailed = false;
+  let pastLifetime = false;
   try {
-    purgeLegacyToolFailureFile(canonicalPath);
-    purgeToolFailureTemps(directory);
+    // The lock can be granted after the helper's lifetime ended: leave the artifacts.
+    pastLifetime = Date.now() >= lifetimeDeadline;
+    if (!pastLifetime) {
+      purgeLegacyToolFailureFile(canonicalPath);
+      purgeToolFailureTemps(directory);
+    }
   } finally {
     releaseFailed = !releasePostToolFailureLock(postToolFailureLock);
   }
-  return releaseFailed;
+  return releaseFailed || pastLifetime;
 }
 
 function deferLegacyToolFailureCleanup(omcRoot, waitMs = POST_TOOL_FAILURE_DEFERRED_WAIT_MS) {
@@ -223,6 +230,19 @@ function toolFailureCleanupStabilizationMs() {
     if (Number.isFinite(testWindow) && testWindow > 0) return Math.min(testWindow, 5000);
   }
   return TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
+}
+
+// Hard lifetime of the detached stabilization helper. Sessions on another plugin
+// version can stay open for days, so waiting for them to exit is unbounded. The
+// purge is idempotent and every SessionStart purges again and starts a new
+// helper, so the helper may stop waiting. A caller-supplied cap can only shorten
+// the derived default.
+function toolFailureCleanupMaxLifetimeMs(stabilizationMs, requestedMs) {
+  const defaultMs = Math.max(
+    stabilizationMs * TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS,
+    TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS,
+  );
+  return Number.isFinite(requestedMs) && requestedMs > 0 ? Math.min(requestedMs, defaultMs) : defaultMs;
 }
 
 function shouldStabilizeToolFailureCleanup() {
@@ -290,13 +310,18 @@ function legacyToolFailureArtifactSnapshot(omcRoot) {
   return artifacts.sort().join('\n');
 }
 
-function hasActiveOlderPluginRoot() {
+// The identity probe may not outlive `lifetimeDeadline`. A probe that times out or
+// has no time left identifies nothing, so every registry record is kept and its
+// root counts as occupied.
+function hasActiveOlderPluginRoot(lifetimeDeadline = Infinity) {
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (!pluginRoot) return false;
   try {
     const currentRoot = pathIdentity(pluginRoot);
     const pluginVersionsDirectory = dirname(currentRoot);
-    const { roots, unavailable } = readOccupiedPluginRoots(configDir);
+    const { roots, unavailable } = readOccupiedPluginRoots(configDir, {
+      probeTimeoutMs: Math.max(0, lifetimeDeadline - Date.now()),
+    });
     if (unavailable) return true;
     return [...roots].some(root => root !== currentRoot && dirname(root) === pluginVersionsDirectory);
   } catch {
@@ -320,12 +345,15 @@ function resolveSessionPluginOccupancy(deadline) {
   return occupancy;
 }
 
-async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
+async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLifetimeMs = toolFailureCleanupMaxLifetimeMs(stabilizationMs)) {
   const stateDir = join(omcRoot, 'state');
-  let olderPluginActive = hasActiveOlderPluginRoot();
+  const lifetimeDeadline = Date.now() + maxLifetimeMs;
+  let olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
   let quietUntil = Date.now() + stabilizationMs;
   let nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
   while (true) {
+    const now = Date.now();
+    if (now >= lifetimeDeadline) return;
     try {
       if (!lstatSync(stateDir).isDirectory()) return;
       break;
@@ -333,13 +361,12 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
       if (error?.code !== 'ENOENT') return;
     }
 
-    const now = Date.now();
     if (now >= nextPluginRootCheck) {
-      olderPluginActive = hasActiveOlderPluginRoot();
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
       nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     }
     if (now >= quietUntil && !olderPluginActive) {
-      olderPluginActive = hasActiveOlderPluginRoot();
+      olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
       nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
       if (!olderPluginActive) return;
     }
@@ -351,20 +378,25 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
   }
 
   const stateLock = await loadPostToolFailureStateLock();
+  // The state directory can appear at or after the deadline: bound the lock wait by the remaining lifetime.
   const workerLock = stateLock.acquireStateFileLockAtPathSync(
-    join(stateDir, '.legacy-tool-failure-cleanup-worker.lock'), 300, true,
+    join(stateDir, '.legacy-tool-failure-cleanup-worker.lock'), 300, true, false,
+    undefined, undefined, Math.max(0, lifetimeDeadline - Date.now()),
   );
   if (!workerLock) return;
 
-  quietUntil = Date.now() + stabilizationMs;
-  let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
-  olderPluginActive = hasActiveOlderPluginRoot();
-  nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
   try {
+    // The lock can be granted at the deadline: release it without doing any work.
+    if (Date.now() >= lifetimeDeadline) return;
+    quietUntil = Date.now() + stabilizationMs;
+    let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+    olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
+    nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     while (true) {
       const now = Date.now();
+      if (now >= lifetimeDeadline) return;
       if (now >= nextPluginRootCheck) {
-        olderPluginActive = hasActiveOlderPluginRoot();
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
         nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
       }
       const currentArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
@@ -373,11 +405,11 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
         quietUntil = now + stabilizationMs;
       }
       if (currentArtifactSnapshot) {
-        const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false);
+        const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false, lifetimeDeadline);
         if (cleanupPending) quietUntil = Date.now() + stabilizationMs;
       }
       if (Date.now() >= quietUntil && !olderPluginActive) {
-        olderPluginActive = hasActiveOlderPluginRoot();
+        olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
         nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
         if (!olderPluginActive) {
           const finalArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
@@ -385,7 +417,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
             artifactSnapshot = finalArtifactSnapshot;
             quietUntil = Date.now() + stabilizationMs;
             if (finalArtifactSnapshot) {
-              const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false);
+              const cleanupPending = await purgeLegacyToolFailureState(omcRoot, POST_TOOL_FAILURE_LOCK_WAIT_MS, false, lifetimeDeadline);
               if (cleanupPending) quietUntil = Date.now() + stabilizationMs;
             }
             continue;
@@ -404,8 +436,8 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs) {
   }
 }
 
-async function purgeLegacyToolFailureState(omcRoot, waitMs = POST_TOOL_FAILURE_LOCK_WAIT_MS, deferOnTimeout = true) {
-  const deadline = Date.now() + waitMs;
+async function purgeLegacyToolFailureState(omcRoot, waitMs = POST_TOOL_FAILURE_LOCK_WAIT_MS, deferOnTimeout = true, lifetimeDeadline = Infinity) {
+  const deadline = Math.min(Date.now() + waitMs, lifetimeDeadline);
   const stateDir = join(omcRoot, 'state');
   try {
     if (!lstatSync(stateDir).isDirectory()) return false;
@@ -432,7 +464,7 @@ async function purgeLegacyToolFailureState(omcRoot, waitMs = POST_TOOL_FAILURE_L
   }
 
   const cleanupPending = (await Promise.all(
-    directories.map(([directory, filename]) => purgeToolFailureStateDirectory(directory, filename, deadline)),
+    directories.map(([directory, filename]) => purgeToolFailureStateDirectory(directory, filename, deadline, lifetimeDeadline)),
   )).some(Boolean);
   if (cleanupPending && deferOnTimeout && !shouldStabilizeToolFailureCleanup()) {
     deferLegacyToolFailureCleanup(omcRoot, POST_TOOL_FAILURE_DEFERRED_WAIT_MS);
@@ -1255,7 +1287,7 @@ if (process.argv.includes(REFRESH_UPDATE_CACHE_FLAG)) {
   const stabilizationMs = Number.isFinite(requestedWindow) && requestedWindow > 0
     ? Math.min(requestedWindow, TOOL_FAILURE_CLEANUP_STABILIZATION_MS)
     : TOOL_FAILURE_CLEANUP_STABILIZATION_MS;
-  stabilizeLegacyToolFailureState(omcRoot, stabilizationMs)
+  stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, toolFailureCleanupMaxLifetimeMs(stabilizationMs, Number(process.argv[5])))
     .catch(() => {})
     .finally(() => process.exit(0));
 } else {

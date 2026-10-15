@@ -32,6 +32,25 @@ function identities(pids, probeTimeoutMs = 3000) {
     } catch { return new Map(); }
   }
 
+  if (process.platform === 'darwin') {
+    // One `ps` for every pid instead of one spawn per registry record. ps prints
+    // the live pids and exits 1 when none of them exist (some BSD builds also
+    // when only some are gone), so a missing pid is simply absent from the map.
+    try {
+      const timeout = Math.max(1, Math.min(2000, Math.floor(probeTimeoutMs)));
+      const result = spawnSync('ps', ['-p', validPids.join(','), '-o', 'pid=,lstart='], { encoding: 'utf8', timeout });
+      if (result.error || (result.status !== 0 && result.status !== 1)) return new Map();
+      const found = new Map();
+      for (const line of (result.stdout ?? '').split('\n')) {
+        const match = line.match(/^\s*(\d+)\s+(.+?)\s*$/);
+        const pid = Number(match?.[1]);
+        const value = match ? new Date(match[2]).getTime() : NaN;
+        if (validPids.includes(pid) && Number.isFinite(value)) found.set(pid, String(value));
+      }
+      return found;
+    } catch { return new Map(); }
+  }
+
   const deadline = Date.now() + probeTimeoutMs;
   const result = new Map();
   for (const pid of validPids) {

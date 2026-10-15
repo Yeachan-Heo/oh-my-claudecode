@@ -1,6 +1,6 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync, lstatSync, symlinkSync, utimesSync } from 'fs';
-import { execFileSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, lstatSync, symlinkSync, utimesSync } from 'fs';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -304,5 +304,140 @@ describe('cache occupancy registry', () => {
       expect(result.identityCount).toBe(0);
       expect(result.elapsedMs).toBeLessThan(500);
     }
+  });
+
+  describe.skipIf(process.platform === 'win32')('darwin identity probe', () => {
+    const LSTART = 'Tue Jan  6 09:00:00 2026';
+    const helperPaths = [
+      fileURLToPath(new URL('../../../scripts/lib/cache-occupancy.mjs', import.meta.url)),
+      fileURLToPath(new URL('../../../templates/hooks/lib/cache-occupancy.mjs', import.meta.url)),
+    ];
+
+    // Runs the real helper with process.platform spoofed to darwin and a fake
+    // `ps` first on PATH, so the spawnSync call path is exercised unmodified.
+    const probe = (helperPath: string, psBody: string) => {
+      const probeDirectory = join(dir, 'fake-bin');
+      mkdirSync(probeDirectory, { recursive: true });
+      const ps = join(probeDirectory, 'ps');
+      const psLog = join(dir, 'ps.log');
+      writeFileSync(ps, `#!/bin/sh\necho "$@" >> "$PS_LOG"\n${psBody}\n`);
+      chmodSync(ps, 0o755);
+      // The first exec of a new script can take seconds on a loaded macOS host,
+      // longer than the helper's own ps timeout. Run it once up front.
+      spawnSync(ps, ['warmup'], { env: { PATH: probeDirectory, PS_LOG: '/dev/null' }, timeout: 30000 });
+      const script = `
+        import { createHash } from 'node:crypto';
+        import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const helper = await import(process.argv[1]);
+        const configDir = process.argv[2];
+        const lstart = new Date(process.argv[3]).getTime();
+        const registryDir = join(configDir, '.omc', 'cache-occupancy');
+        mkdirSync(registryDir, { recursive: true });
+        // pid 1 is the "gone" pid: the fake ps never prints it.
+        const stored = new Map([[process.pid, String(lstart)], [process.ppid, 'stale-identity'], [1, 'unverifiable-identity']]);
+        for (const [pid, processStartIdentity] of stored) {
+          const pluginRoot = join(configDir, 'plugins', String(pid));
+          const name = createHash('sha256').update([pluginRoot, pid, processStartIdentity].join('\\0')).digest('hex');
+          writeFileSync(join(registryDir, name + '.json'), JSON.stringify({ version: 1, pid, processStartIdentity, pluginRoot, updatedAt: new Date().toISOString() }));
+        }
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        const result = helper.readOccupiedPluginRoots(configDir);
+        process.stdout.write(JSON.stringify({
+          pid: process.pid,
+          ppid: process.ppid,
+          lstart,
+          identities: [...result.identities],
+          roots: [...result.roots],
+          records: readdirSync(registryDir).length,
+        }));
+      `;
+      const output = execFileSync(process.execPath, [
+        '--input-type=module', '-e', script, pathToFileURL(helperPath).href, join(dir, 'config'), LSTART,
+      ], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: probeDirectory, PS_LOG: psLog },
+        timeout: 30000,
+      });
+      const calls = existsSync(psLog) ? readFileSync(psLog, 'utf8').trim().split('\n').filter(Boolean) : [];
+      return {
+        calls,
+        ...(JSON.parse(output) as { pid: number; ppid: number; lstart: number; identities: Array<[number, string]>; roots: string[]; records: number }),
+      };
+    };
+
+    it.each(helperPaths)('resolves every record with one batched ps and tolerates missing pids (%s)', helperPath => {
+      // BSD ps prints the live pids; it exits 1 when none of the pids exist and
+      // some builds also when only some are gone.
+      const result = probe(helperPath, `IFS=,; for id in $2; do [ "$id" = 1 ] || printf '%5s ${LSTART}    \\n' "$id"; done\nexit 1`);
+
+      expect(result.calls).toHaveLength(1);
+      const [flag, pidList, outputFlag, format] = result.calls[0].split(' ');
+      expect([flag, outputFlag, format]).toEqual(['-p', '-o', 'pid=,lstart=']);
+      expect(pidList.split(',').sort()).toEqual([String(result.pid), String(result.ppid), '1'].sort());
+      expect(new Map(result.identities)).toEqual(new Map([
+        [result.pid, String(result.lstart)],
+        [result.ppid, String(result.lstart)],
+      ]));
+      // A matching identity is kept, a mismatching one is dropped, and a pid
+      // ps did not report is kept conservatively.
+      expect(result.records).toBe(2);
+      expect(result.roots.sort()).toEqual([
+        join(dir, 'config', 'plugins', '1'),
+        join(dir, 'config', 'plugins', String(result.pid)),
+      ].sort());
+    });
+
+    it.each(helperPaths)('keeps records when the batched ps fails (%s)', helperPath => {
+      const result = probe(helperPath, 'exit 2');
+
+      expect(result.calls).toHaveLength(1);
+      expect(result.identities).toEqual([]);
+      expect(result.records).toBe(3);
+    });
+
+    it('bounds a hanging darwin ps for script and template helpers', () => {
+      const probeDirectory = join(dir, 'fake-bin');
+      mkdirSync(probeDirectory);
+      const ps = join(probeDirectory, 'ps');
+      writeFileSync(ps, '#!/bin/sh\nwhile :; do :; done\n');
+      chmodSync(ps, 0o755);
+
+      const script = `
+        import { createHash } from 'node:crypto';
+        import { mkdirSync, writeFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const helper = await import(process.argv[1]);
+        const configDir = process.argv[2];
+        const pluginRoot = process.argv[3];
+        const pid = process.pid;
+        const processStartIdentity = String(new Date(process.argv[4]).getTime());
+        const registryDir = join(configDir, '.omc', 'cache-occupancy');
+        mkdirSync(registryDir, { recursive: true });
+        const name = createHash('sha256').update([pluginRoot, pid, processStartIdentity].join('\\0')).digest('hex');
+        writeFileSync(join(registryDir, name + '.json'), JSON.stringify({ version: 1, pid, processStartIdentity, pluginRoot, updatedAt: new Date().toISOString() }));
+        Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+        const startedAt = Date.now();
+        const result = helper.readOccupiedPluginRoots(configDir, { includePids: [pid], probeTimeoutMs: 75 });
+        process.stdout.write(JSON.stringify({ roots: [...result.roots], identityCount: result.identities.size, elapsedMs: Date.now() - startedAt }));
+      `;
+
+      for (const [index, helperPath] of helperPaths.entries()) {
+        const configDir = join(dir, `config-${index}`);
+        const pluginRoot = join(dir, 'plugins', `version-${index}`);
+        const output = execFileSync(process.execPath, [
+          '--input-type=module', '-e', script, pathToFileURL(helperPath).href, configDir, pluginRoot, LSTART,
+        ], {
+          encoding: 'utf8',
+          env: { ...process.env, PATH: probeDirectory },
+          timeout: 5000,
+        });
+        const result = JSON.parse(output) as { roots: string[]; identityCount: number; elapsedMs: number };
+        // A probe that times out proves nothing, so the record is kept.
+        expect(result.roots).toEqual([pluginRoot]);
+        expect(result.identityCount).toBe(0);
+        expect(result.elapsedMs).toBeLessThan(500);
+      }
+    });
   });
 });
