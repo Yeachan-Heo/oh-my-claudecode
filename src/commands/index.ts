@@ -35,7 +35,7 @@ export function getCommandsDir(): string {
  * Parse command frontmatter and content
  */
 function parseCommandFile(content: string): { description: string; template: string } {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
 
   if (!frontmatterMatch) {
     return { description: '', template: content };
