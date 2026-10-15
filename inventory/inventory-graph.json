@@ -1,18 +1,18 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T11:16:22.417Z",
+  "generatedAt": "2026-10-15T11:28:12.426Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "751552c56e901f770e42f60a47c5471e8b407f79",
+    "head": "5897c34d02f68b11eebcde9c030cd553d05725ac",
     "sourceSha256": "a714ec09dfb74260bf5e18cf215fd943ccbeb2f3bf5a486b34af8dc926b34d45",
-    "generatedAt": "2026-10-15T11:16:22.417Z",
+    "generatedAt": "2026-10-15T11:28:12.426Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "751552c56e901f770e42f60a47c5471e8b407f79",
+  "head": "5897c34d02f68b11eebcde9c030cd553d05725ac",
   "sourceSha256": "a714ec09dfb74260bf5e18cf215fd943ccbeb2f3bf5a486b34af8dc926b34d45",
   "counts": {
     "public": {
@@ -88469,5 +88469,5 @@
     }
   },
   "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "0ca5e79b54d2a9cec8a1e7837f4ffa4a226f623235b5829b96947b285c510f95"
+  "manifestSha256": "8c3f901f524b78fa335ef7495eda8d01fc791783903dd28f80484ddba930c3b9"
 }
