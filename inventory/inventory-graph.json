@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6d56eea9bace0e2012ad5bfb68e50c23e62c9b63",
-    "sourceSha256": "c28a09e0fae14bd756ef315cfa61b0d860e892e11ca64087af76a8e2754ee206",
+    "head": "751552c56e901f770e42f60a47c5471e8b407f79",
+    "sourceSha256": "3deafa406d1f8ef45482a6e1c01684b21080fb4c23fa14ed0dc704549b6f0d49",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6d56eea9bace0e2012ad5bfb68e50c23e62c9b63",
-  "sourceSha256": "c28a09e0fae14bd756ef315cfa61b0d860e892e11ca64087af76a8e2754ee206",
+  "head": "751552c56e901f770e42f60a47c5471e8b407f79",
+  "sourceSha256": "3deafa406d1f8ef45482a6e1c01684b21080fb4c23fa14ed0dc704549b6f0d49",
   "counts": {
     "public": {
       "skills": 48,
@@ -24,12 +24,12 @@
     },
     "internal": {
       "hookFiles": 339,
-      "featureFiles": 85,
+      "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1465,
-      "total": 1488
+      "srcFiles": 1468,
+      "total": 1491
     },
     "generated": {
       "distFiles": 5613,
@@ -574,7 +574,10 @@
       "src/features/session-history-search/index.ts",
       "src/features/session-history-search/types.ts",
       "src/features/state-manager/__tests__/cache.test.ts",
+      "src/features/state-manager/__tests__/glob-patterns.test.ts",
       "src/features/state-manager/index.ts",
+      "src/features/state-manager/list-cleanup.ts",
+      "src/features/state-manager/state-paths.ts",
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
@@ -7034,7 +7037,10 @@
       "src/features/session-history-search/index.ts",
       "src/features/session-history-search/types.ts",
       "src/features/state-manager/__tests__/cache.test.ts",
+      "src/features/state-manager/__tests__/glob-patterns.test.ts",
       "src/features/state-manager/index.ts",
+      "src/features/state-manager/list-cleanup.ts",
+      "src/features/state-manager/state-paths.ts",
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
@@ -40648,9 +40654,24 @@
         "path": "src/features/state-manager/__tests__/cache.test.ts"
       },
       {
+        "id": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "kind": "feature",
+        "path": "src/features/state-manager/__tests__/glob-patterns.test.ts"
+      },
+      {
         "id": "src/features/state-manager/index.ts",
         "kind": "feature",
         "path": "src/features/state-manager/index.ts"
+      },
+      {
+        "id": "src/features/state-manager/list-cleanup.ts",
+        "kind": "feature",
+        "path": "src/features/state-manager/list-cleanup.ts"
+      },
+      {
+        "id": "src/features/state-manager/state-paths.ts",
+        "kind": "feature",
+        "path": "src/features/state-manager/state-paths.ts"
       },
       {
         "id": "src/features/state-manager/types.ts",
@@ -61035,6 +61056,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "to": "src/features/state-manager/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/__tests__/glob-patterns.test.ts",
+        "to": "src/features/state-manager/types.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/features/state-manager/index.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -61042,6 +61088,16 @@
       {
         "from": "src/features/state-manager/index.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/index.ts",
+        "to": "src/features/state-manager/list-cleanup.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/state-manager/index.ts",
+        "to": "src/features/state-manager/state-paths.ts",
         "kind": "imports"
       },
       {
@@ -61066,6 +61122,46 @@
       },
       {
         "from": "src/features/state-manager/index.ts",
+        "to": "src/utils/paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/state-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/types.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/list-cleanup.ts",
+        "to": "src/features/state-manager/types.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/state-manager/state-paths.ts",
         "to": "src/utils/paths.ts",
         "kind": "imports"
       },
@@ -88401,12 +88497,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7737,
-      "edgeCount": 8520,
-      "importEdgeCount": 7075,
+      "nodeCount": 7740,
+      "edgeCount": 8535,
+      "importEdgeCount": 7088,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "6e6b843b54cb536dc64ad681b05cd5f241b911028f608c835a2514ad1c014987"
+  "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
+  "manifestSha256": "912e11ee9f3bf71f79a6688c561f295c1336066528956faafbde584cd456f1cf"
 }
