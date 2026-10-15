@@ -6359,7 +6359,9 @@ export async function shutdownTeamV2(
       // Write shutdown inbox
       const shutdownRoot = workerInstructionStateRoot(cwd, sanitized);
       const shutdownAckPath = `${shutdownRoot}/workers/${w.name}/shutdown-ack.json`;
-      const shutdownInbox = `# Shutdown Request\n\nThe leader requests shutdown. Please wrap up if possible and respond with your shutdown decision.\n\nWrite your ack to: ${shutdownAckPath}\nFormat:\n- Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n- Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}\n\nIf you accept, exit your session. If you reject, remain active for task work and mailbox instructions; do not exit because of this request.\n`;
+      const shutdownInbox = force
+        ? `# Shutdown Request\n\nThe leader requests forced shutdown. Please wrap up if possible and acknowledge promptly.\n\nWrite your ack to: ${shutdownAckPath}\nFormat:\n- Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n\nThis is a forced shutdown: a rejection does not veto termination. After acknowledging, exit your session; do not resume task work.\n`
+        : `# Shutdown Request\n\nThe leader requests shutdown. Please wrap up if possible and respond with your shutdown decision.\n\nWrite your ack to: ${shutdownAckPath}\nFormat:\n- Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n- Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}\n\nIf you accept, exit your session. If you reject, remain active for task work and mailbox instructions; do not exit because of this request.\n`;
       await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);
     } catch (err) {
       process.stderr.write(`[team/runtime-v2] shutdown request failed for ${w.name}: ${err}\n`);

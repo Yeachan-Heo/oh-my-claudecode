@@ -193,7 +193,19 @@ describe('worker-bootstrap', () => {
       expect(overlay).toContain('Focus on TypeScript');
     });
 
-    it('exits only on shutdown acceptance and keeps rejecting workers active', () => {
+    it('scopes reject-survival guidance to normal shutdown and defers forced shutdown to the inbox', () => {
+      const overlay = generateWorkerOverlay(baseParams);
+      const shutdown = overlay.split('## Shutdown Protocol')[1]!.split('## Rules')[0]!;
+      const forced = shutdown.indexOf('For forced shutdown, follow the inbox instructions instead');
+      const normal = shutdown.indexOf('For normal shutdown requests only:');
+      const decision = shutdown.indexOf('1. Write your decision to:');
+      expect(forced).toBeGreaterThan(-1);
+      expect(normal).toBeGreaterThan(forced);
+      expect(decision).toBeGreaterThan(normal);
+      expect(shutdown).toContain('a rejection does not veto termination; do not resume task work');
+    });
+
+    it('exits only on acceptance and keeps rejecting workers active during normal shutdown', () => {
       const overlay = generateWorkerOverlay(baseParams);
       const shutdown = overlay.split('## Shutdown Protocol')[1]!.split('## Rules')[0]!;
       expect(shutdown).toContain('Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}');

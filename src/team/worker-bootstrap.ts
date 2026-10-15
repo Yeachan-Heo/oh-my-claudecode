@@ -329,6 +329,8 @@ Send messages via CLI API:
 
 ## Shutdown Protocol
 When you see a shutdown request in your inbox:
+For forced shutdown, follow the inbox instructions instead of the normal decision flow below: a rejection does not veto termination; do not resume task work.
+For normal shutdown requests only:
 1. Write your decision to: ${shutdownAckPath}
 2. Format:
    - Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}
