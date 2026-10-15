@@ -1088,15 +1088,17 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         notify();
         return pending;
       });
-    // Generous bound well below the suite timeout: a hang fails with a specific
-    // message and still reaches `finally`, which releases the gate.
-    const withinDeadline = async <T,>(promise: Promise<T>, label: string): Promise<T> => {
+    // Share one 20s race budget and reserve 5s for teardown under the suite's
+    // 30s timeout, so a failing gate still reports its specific error.
+    const raceDeadline = Date.now() + 20_000;
+    const withinDeadline = async <T,>(promise: Promise<T>, label: string, deadline: number): Promise<T> => {
+      const remainingMs = Math.max(0, deadline - Date.now());
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
           promise,
           new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`${label} not reached within 20s`)), 20_000);
+            timer = setTimeout(() => reject(new Error(`${label} not reached within ${Math.ceil(remainingMs / 1000)}s`)), remainingMs);
           }),
         ]);
       } finally {
@@ -1115,7 +1117,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       const gateOrEarlyExit = await withinDeadline(Promise.race([
         disposeEntered.then(() => ({ status: 'entered' as const })),
         firstSettled,
-      ]), 'final disposal gate');
+      ]), 'final disposal gate', raceDeadline);
       if (gateOrEarlyExit.status === 'resolved') {
         throw new Error(`first shutdown completed before final disposal: ${JSON.stringify(gateOrEarlyExit.value)}`);
       }
@@ -1131,7 +1133,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         second.then(value => {
           throw new Error(`second shutdown settled before lifecycle lock attempt: ${JSON.stringify(value)}`);
         }),
-      ]), 'second lifecycle lock attempt');
+      ]), 'second lifecycle lock attempt', raceDeadline);
       expect(secondCallbackEntered).toBe(false);
       expect(firstDone).toBe(false);
       expect(secondSettled).toBe(false);
@@ -1154,7 +1156,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
       await withinDeadline(Promise.all([
         firstCompletion?.catch(() => undefined),
         secondCompletion,
-      ]), 'shutdown drain').catch(() => undefined);
+      ]), 'shutdown drain', Date.now() + 5_000).catch(() => undefined);
     }
   });
 });
