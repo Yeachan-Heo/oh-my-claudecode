@@ -191,6 +191,30 @@ describe('setup-claude-md.sh committed plugin shipping surface (issue #3476)', (
       .toBe(readFileSync(join(fixture.pluginRoot, 'skills', 'wiki', 'SKILL.md'), 'utf-8'));
   });
 
+  it('skips global CLAUDE.md writes before invoking the committed coordinator when disabled', () => {
+    const fixture = createCommittedPluginFixture();
+    const configDir = join(fixture.homeRoot, 'custom-profile');
+    const userClaude = Buffer.from('# User CLAUDE\r\nKeep exact bytes.\r\n');
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, 'CLAUDE.md'), userClaude);
+    writeFileSync(join(configDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+
+    const result = spawnSync('bash', [fixture.scriptPath, 'global', 'overwrite'], {
+      cwd: fixture.projectRoot,
+      env: { ...process.env, HOME: fixture.homeRoot, CLAUDE_CONFIG_DIR: configDir },
+      encoding: 'utf-8',
+    });
+
+    expect(result.status).toBe(0);
+    expect(readFileSync(join(configDir, 'CLAUDE.md'))).toEqual(userClaude);
+    expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
+    expect(existsSync(join(configDir, '.omc'))).toBe(false);
+    expect(result.stdout).toContain('Coordinator note: Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)');
+    expect(result.stdout).not.toContain('Coordinator mutated path');
+    expect(result.stdout).not.toContain('Coordinator backup');
+  });
+
   for (const scenario of ['missing', 'stale'] as const) {
     it(`fails before local mutation when the committed coordinator is ${scenario}`, () => {
       const fixture = createCommittedPluginFixture();
