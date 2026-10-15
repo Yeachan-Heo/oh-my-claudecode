@@ -584,6 +584,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
+| `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
 #### Point Activation Syntax
@@ -608,6 +609,21 @@ export OMC_JEV="off"
 ```
 
 Unknown point names are ignored. Activation unions across sources: code-time `ACTIVATED_POINTS` (empty in every release) plus env `:active` suffix; either source activates a point.
+
+#### Plan mode
+
+`OMC_JEV` applies to every Claude Code permission mode. To keep Jev from deciding while Claude Code is in plan mode, set `OMC_JEV_PLAN_MODE`:
+
+```bash
+# Active outside plan mode; in plan mode Jev is still called and logged, but the heuristic decides
+export OMC_JEV="all:active"
+export OMC_JEV_PLAN_MODE="shadow"
+
+# No Jev requests at all while in plan mode
+export OMC_JEV_PLAN_MODE="off"
+```
+
+The plugin hook scripts read `permission_mode` from each hook payload and apply `OMC_JEV_PLAN_MODE` only when it is `plan`. It narrows existing `OMC_JEV` opt-ins and never enables a point. The TypeScript resolver behind `bridge.ts` receives no permission mode and ignores this variable.
 
 ### Shadow vs. Active Mode
 
