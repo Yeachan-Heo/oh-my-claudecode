@@ -62,6 +62,8 @@ Note: This configuration is project-specific and won't affect other projects or 
 ```
 
 If `CONFIG_TARGET` is `global`:
+If the coordinator reported the `claudeMdEnabled` skip, report `CLAUDE.md: Skipped (claudeMdEnabled is false; existing global files were left untouched)` instead of claiming an update, and omit the Companion line. Otherwise, use the report below.
+
 ```
 OMC Global Configuration Complete
 - CLAUDE.md: Updated at ~/.claude/CLAUDE.md, or preserved with explicit preserve mode
