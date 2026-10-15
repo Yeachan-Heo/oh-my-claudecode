@@ -51,18 +51,19 @@ const LEARNER_EXTRACTION_QUESTIONS = {
   },
 };
 
-function recordLoopContinuationShadow(state, heuristic) {
+function recordLoopContinuationShadow(state, heuristic, permissionMode) {
   recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
     heuristic,
+    permissionMode,
   });
 }
 
 async function recordLearnerExtractionShadow(data) {
   const assistantMessage = data.last_assistant_message;
-  if (typeof assistantMessage !== "string" || !assistantMessage.trim() || !isJevShadowOptedIn("learner-extraction")) {
+  if (typeof assistantMessage !== "string" || !assistantMessage.trim() || !isJevShadowOptedIn("learner-extraction", process.env, data.permission_mode)) {
     return;
   }
 
@@ -76,6 +77,7 @@ async function recordLearnerExtractionShadow(data) {
       state: { assistant_message: assistantMessage, user_message: null },
       questions: LEARNER_EXTRACTION_QUESTIONS,
       heuristic,
+      permissionMode: data.permission_mode,
     });
   } catch {
     // Missing optional detector output or resolver plumbing must not affect Stop.
@@ -1450,7 +1452,7 @@ async function main() {
             should_block: true,
             continuation_excerpt: reason,
           };
-          recordLoopContinuationShadow(judgmentState, heuristic);
+          recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
           console.log(
             JSON.stringify({
@@ -1483,7 +1485,7 @@ async function main() {
           shouldBlock: true,
           iteration: ralph.state.iteration,
           maxIterations: ralph.state.max_iterations,
-        });
+        }, data.permission_mode);
         console.log(
           JSON.stringify({
             decision: "block",
@@ -1650,7 +1652,7 @@ async function main() {
               shouldBlock: true,
               iteration: newCount,
               phase,
-            });
+            }, data.permission_mode);
 
             console.log(
               JSON.stringify({

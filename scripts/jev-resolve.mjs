@@ -7,7 +7,7 @@
  * program through this one-shot child process: the caller writes one JSON
  * request to stdin and reads one JSON result from stdout.
  *
- * Request:  { point, state, questions, heuristic }
+ * Request:  { point, state, questions, heuristic, permissionMode? }
  * Result:   { mode, answer, confidence, durationMs }
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
@@ -66,8 +66,13 @@ export function serializeQuestions(questions) {
  * Mirror of parseJevConfig + pointState in src/hooks/jev/config.ts. Returns
  * the tri-state decision the TS resolver makes for one point:
  * off | shadow | active.
+ *
+ * permissionMode is the hook input's permission_mode. In Claude Code plan
+ * mode, OMC_JEV_PLAN_MODE=shadow runs opted-in points in shadow and
+ * OMC_JEV_PLAN_MODE=off turns them off; any other value changes nothing.
+ * Script channel only: the TS resolver receives no permission mode.
  */
-export function parseJevEnv(point, env = process.env) {
+export function parseJevEnv(point, env = process.env, permissionMode) {
   const raw = (env.OMC_JEV || "").trim();
   if (!env.TYPESAFE_API_KEY || raw === "off") return "off";
   let sawAll = false;
@@ -89,6 +94,10 @@ export function parseJevEnv(point, env = process.env) {
     }
   }
   if (!sawAll && !listed) return "off";
+  if (permissionMode === "plan") {
+    const planMode = (env.OMC_JEV_PLAN_MODE || "").trim();
+    if (planMode === "shadow" || planMode === "off") return planMode;
+  }
   if (activateAll || active) return "active";
   return "shadow";
 }
@@ -171,7 +180,7 @@ export async function resolveRequest(
   fetchFn = fetch,
 ) {
   const startedAt = Date.now();
-  const mode = parseJevEnv(request.point, env);
+  const mode = parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
     return { mode, answer: null, confidence: undefined, durationMs: 0 };
   }
