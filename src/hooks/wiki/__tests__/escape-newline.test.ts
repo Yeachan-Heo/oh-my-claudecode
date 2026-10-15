@@ -78,4 +78,22 @@ describe('flow-sequence frontmatter fields with commas', () => {
 
     expect(parsed!.frontmatter.tags).toEqual(['alpha', "don't", 'x, y', 'p, q']);
   });
+
+  it('decodes doubled apostrophes in single-quoted array fields', () => {
+    const raw = [
+      '---',
+      'title: "Hand written"',
+      "tags: ['tag''s, note', plain]",
+      "sources: ['source''s, name']",
+      "links: ['link''s, title']",
+      '---',
+      'body',
+    ].join('\n');
+
+    const parsed = parseFrontmatter(raw);
+
+    expect(parsed!.frontmatter.tags).toEqual(["tag's, note", 'plain']);
+    expect(parsed!.frontmatter.sources).toEqual(["source's, name"]);
+    expect(parsed!.frontmatter.links).toEqual(["link's, title"]);
+  });
 });

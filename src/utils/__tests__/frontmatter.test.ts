@@ -313,6 +313,7 @@ describe('parseFrontmatterList quoted commas', () => {
 
   it('keeps commas inside single-quoted items with escaped apostrophes', () => {
     expect(splitFlowSequenceItems("'it''s, fine', next")).toEqual(["'it''s, fine'", ' next']);
+    expect(parseFrontmatterList("['it''s, fine', next]")).toEqual(["it's, fine", 'next']);
   });
 
   it('treats a bare apostrophe as literal text', () => {

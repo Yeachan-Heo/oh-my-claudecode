@@ -5,18 +5,19 @@
  * Used by both the builtin-skills loader and the auto-slash-command executor.
  */
 
+/** Remove matching YAML quotes while preserving the scalar's inner whitespace. */
+export function unquoteYamlScalar(value: string): string {
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'")) return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+
 /**
  * Remove surrounding single or double quotes from a trimmed value.
  */
 export function stripOptionalQuotes(value: string): string {
   const trimmed = value.trim();
-  if (
-    (trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-    (trimmed.startsWith("'") && trimmed.endsWith("'"))
-  ) {
-    return trimmed.slice(1, -1).trim();
-  }
-  return trimmed;
+  return unquoteYamlScalar(trimmed).trim();
 }
 
 /**

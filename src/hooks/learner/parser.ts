@@ -5,7 +5,7 @@
  */
 
 import type { SkillMetadata } from './types.js';
-import { splitFlowSequenceItems } from '../../utils/frontmatter.js';
+import { splitFlowSequenceItems, unquoteYamlScalar } from '../../utils/frontmatter.js';
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -148,11 +148,7 @@ export function parseYamlMetadata(yamlContent: string): Partial<SkillMetadata> {
 
 export function parseStringValue(value: string): string {
   if (!value) return '';
-  if ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-  return value;
+  return unquoteYamlScalar(value);
 }
 
 function normalizeStringArray(value: string | string[]): string[] {

@@ -313,5 +313,21 @@ Body.`;
       expect(result.metadata.triggers).toEqual(["fix bug, quickly", "retry"]);
       expect(result.metadata.tags).toEqual(["a, b"]);
     });
+
+    it("should decode doubled apostrophes in single-quoted inline list items", () => {
+      const content = `---
+name: Inline Lists
+description: Escaped apostrophes
+triggers: ['don''t, repeat', retry]
+tags: ['learner''s, note']
+---
+
+Body.`;
+
+      const result = parseSkillFile(content);
+
+      expect(result.metadata.triggers).toEqual(["don't, repeat", "retry"]);
+      expect(result.metadata.tags).toEqual(["learner's, note"]);
+    });
   });
 });
