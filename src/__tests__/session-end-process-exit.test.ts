@@ -195,7 +195,19 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
     configureDeferredAdapters(cwd);
     const sessionId = `configured-${_name}`;
 
-    const result = await runUntilClose(script, cwd, validSessionEndInput(cwd, sessionId));
+    // Preserve the outer process-exit bound while avoiding a load-dependent
+    // fail-open when CI startup contention exceeds run.cjs's production 300ms
+    // foreground budget before the durable manifest can be published.
+    const result = await runUntilClose(
+      script,
+      cwd,
+      validSessionEndInput(cwd, sessionId),
+      COMMAND_CEILING_MS,
+      {
+        NODE_ENV: 'test',
+        OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(Math.max(450, COMMAND_CEILING_MS - 50)),
+      },
+    );
     expectPromptExit(result);
 
     if (_name === 'session-end') {
