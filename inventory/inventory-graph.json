@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T21:10:02.000Z",
+  "generatedAt": "2026-10-15T20:53:54.402Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "51db48a8f1008f35b3b7dca7941b619697ef1b24",
-    "sourceSha256": "5ee1424295894b9155f58b10298089f587cdedf94588ab143c8886cb030b972e",
-    "generatedAt": "2026-10-15T21:10:02.000Z",
+    "sourceSha256": "3c32e008d5261a8f7144868d1cd34f654c60781a5a2c77ffd317cea3bab1e72f",
+    "generatedAt": "2026-10-15T20:53:54.402Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "51db48a8f1008f35b3b7dca7941b619697ef1b24",
-  "sourceSha256": "5ee1424295894b9155f58b10298089f587cdedf94588ab143c8886cb030b972e",
+  "sourceSha256": "3c32e008d5261a8f7144868d1cd34f654c60781a5a2c77ffd317cea3bab1e72f",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1469,
-      "total": 1492
+      "srcFiles": 1470,
+      "total": 1493
     },
     "generated": {
       "distFiles": 5613,
@@ -38169,6 +38169,11 @@
         "path": "src/__tests__/cli-win32-warning.test.ts"
       },
       {
+        "id": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/commands-frontmatter-crlf.test.ts"
+      },
+      {
         "id": "src/__tests__/compact-denylist.test.ts",
         "kind": "src",
         "path": "src/__tests__/compact-denylist.test.ts"
@@ -49361,6 +49366,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "src/commands/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/compact-denylist.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -59093,6 +59123,11 @@
       {
         "from": "src/commands/index.ts",
         "to": "src/utils/config-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/commands/index.ts",
+        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88552,12 +88587,17 @@
       }
     ],
     "stats": {
-      "nodeCount": 7741,
-      "edgeCount": 8545,
-      "importEdgeCount": 7097,
+      "nodeCount": 7742,
+      "edgeCount": 8551,
+      "importEdgeCount": 7103,
       "registerEdgeCount": 69
     }
   },
+<<<<<<< HEAD
   "inventorySha256": "3660cf6e00f22f26bc61048038c5826111a6deb57b2bd2704d916919fe098b90",
   "manifestSha256": "a0097989ffc4af27ca1faef8ace6860bdfc4d47317a643078262349db03c56a2"
+=======
+  "inventorySha256": "68d23efa22ec74900c119e0ae8d3af37a71a0327c1121063ea324b6f24f95c88",
+  "manifestSha256": "da6533fe0788cddb07b0cefe19750f21b26f35d303daf671d8b9da7c1423e7e7"
+>>>>>>> origin/dev
 }
