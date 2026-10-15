@@ -767,7 +767,11 @@ export function formatReport(report: ConflictReport, json: boolean): string {
     lines.push(`  ${colors.gray(`Path: ${report.claudeMdStatus.path}`)}`);
     if (report.claudeMdStatus.exactLegacyPaths.length > 0) {
       lines.push(`  ${colors.yellow('⚠')} Exact legacy guide content: ${report.claudeMdStatus.exactLegacyPaths.join(', ')}`);
-      lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup for coordinator-backed cleanup with a verified backup.')}`);
+      if (report.claudeMdStatus.managementDisabled) {
+        lines.push(`    ${colors.gray('Setup cleanup is skipped while claudeMdEnabled is false: re-enable claudeMdEnabled in .omc-config.json, or remove the legacy content manually.')}`);
+      } else {
+        lines.push(`    ${colors.gray('Run /oh-my-claudecode:omc-setup for coordinator-backed cleanup with a verified backup.')}`);
+      }
     }
     if (report.claudeMdStatus.manualReviewPaths.length > 0) {
       lines.push(`  ${colors.yellow('⚠')} Inspection-only review required: ${report.claudeMdStatus.manualReviewPaths.join(', ')}`);

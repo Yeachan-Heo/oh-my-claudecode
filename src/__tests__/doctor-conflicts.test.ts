@@ -750,6 +750,23 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     expect(output).toContain('Global CLAUDE.md management is disabled (claudeMdEnabled is false in .omc-config.json)');
   });
 
+  it('does not recommend omc-setup cleanup of an exact legacy guide when claudeMdEnabled is false', () => {
+    const mainPath = join(TEST_CLAUDE_DIR, 'CLAUDE.md');
+    writeFileSync(mainPath, Buffer.from(corpus.variants[0].dataBase64, 'base64'));
+    writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+    const report = runConflictCheck();
+    const fullOutput = formatReport(report, false);
+    const output = fullOutput.slice(fullOutput.indexOf('CLAUDE.md Status'), fullOutput.indexOf('Environment Flags'));
+
+    expect(report.claudeMdStatus!.managementDisabled).toBe(true);
+    expect(report.claudeMdStatus!.exactLegacyPaths).toEqual([mainPath]);
+    expect(output).toContain(`Exact legacy guide content: ${mainPath}`);
+    expect(output).not.toContain('/oh-my-claudecode:omc-setup');
+    expect(output).toContain('re-enable claudeMdEnabled');
+    expect(output).toContain('remove the legacy content manually');
+  });
+
   it('reports the claudeMdEnabled opt-out when no CLAUDE*.md file exists', () => {
     writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
 
