@@ -110,6 +110,57 @@ describe('worker-bootstrap', () => {
       expect(sentinelIdx).toBeLessThan(tasksIdx); // sentinel before tasks
     });
 
+    it.each([
+      ['cursor executor', 'cursor', false],
+      ['trusted cursor reviewer', 'cursor', true],
+      ['non-cursor worker', 'codex', false],
+    ] as const)('orders successful claim, one startup ACK, and work for %s', (_label, agentType, reviewerRole) => {
+      const overlay = generateWorkerOverlay({ ...baseParams, agentType, reviewerRole });
+      const workflow = overlay.split('## MANDATORY WORKFLOW')[1]!.split('## Recovery-safe Boundaries')[0]!;
+      const claim = workflow.indexOf('team api claim-task --input');
+      const claimStep = workflow.indexOf('1. **Claim**');
+      const recovery = workflow.indexOf('For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again.');
+      const idle = workflow.indexOf('If no task is assigned, wait for an assignment without inventing a task.');
+      const ack = workflow.indexOf('ACK: worker-1 initialized');
+      const work = workflow.indexOf(reviewerRole ? '**Do the read-only review**' : '**Do the work**');
+      const completion = workflow.indexOf(reviewerRole ? '**Write the structured verdict**' : '**Transition**');
+      expect(claim).toBeGreaterThan(-1);
+      expect(claimStep).toBeGreaterThan(-1);
+      for (const exception of [recovery, idle]) {
+        expect(exception).toBeGreaterThan(-1);
+        expect(exception).toBeLessThan(claimStep);
+        expect(exception).toBeLessThan(claim);
+      }
+      const applicability = workflow.indexOf('The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.');
+      expect(applicability).toBeGreaterThan(-1);
+      expect(applicability).toBeLessThan(claimStep);
+      expect(workflow).toContain('For ordinary new tasks only: Only after a successful claim may you continue. If the claim fails, do not send the startup ACK or begin work');
+      expect(ack).toBeGreaterThan(claim);
+      expect(work).toBeGreaterThan(ack);
+      expect(completion).toBeGreaterThan(work);
+      expect(overlay.indexOf('.ready')).toBeLessThan(overlay.indexOf('## MANDATORY WORKFLOW'));
+      expect(overlay.match(/ACK: worker-1 initialized/g)).toHaveLength(1);
+      expect(overlay).not.toContain('## Startup Handshake');
+      expect(workflow).toContain('Only after a successful claim');
+      expect(workflow).toContain('If the claim fails, do not send the startup ACK or begin work');
+      expect(workflow).toContain('exactly one startup ACK');
+      expect(workflow).toContain('do not claim the task again');
+      expect(workflow).toContain('If no task is assigned, wait');
+      expect(overlay).toContain('OMC_TEAM_WORKER=test-team/worker-1');
+      expect(overlay).toContain('OMC_WORKER_LAUNCH_ATTEMPT_ID');
+      expect(overlay).toContain('Every startup status MUST include the exact current');
+      expect(overlay).toContain('canonical leader-owned state root');
+      expect(overlay).toContain('Do NOT spawn sub-agents');
+      expect(overlay).toContain('Subagent skip reason:');
+      expect(overlay).toContain('team api read-task --input');
+      expect(overlay).toContain('team api release-task-claim --input');
+      if (reviewerRole) {
+        expect(workflow).not.toContain('team api transition-task-status');
+      } else {
+        expect(workflow).toContain('team api transition-task-status --input');
+      }
+    });
+
     it('includes team and worker identity', () => {
       const overlay = generateWorkerOverlay(baseParams);
       expect(overlay).toContain('test-team');
@@ -140,6 +191,16 @@ describe('worker-bootstrap', () => {
       const overlay = generateWorkerOverlay({ ...baseParams, bootstrapInstructions: 'Focus on TypeScript' });
       expect(overlay).toContain('Role Context');
       expect(overlay).toContain('Focus on TypeScript');
+    });
+
+    it('exits only on shutdown acceptance and keeps rejecting workers active', () => {
+      const overlay = generateWorkerOverlay(baseParams);
+      const shutdown = overlay.split('## Shutdown Protocol')[1]!.split('## Rules')[0]!;
+      expect(shutdown).toContain('Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}');
+      expect(shutdown).toContain('Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}');
+      expect(shutdown).toContain('If you accept, exit your session');
+      expect(shutdown).toContain('If you reject, remain active for task work and mailbox instructions; do not exit because of this request');
+      expect(shutdown).not.toContain('3. Exit your session');
     });
 
     it('includes explicit worker-not-leader prohibitions', () => {
@@ -183,6 +244,17 @@ describe('worker-bootstrap', () => {
       expect(overlay).not.toContain('On success:');
       expect(overlay).toContain('keep waiting for the next mailbox message');
     });
+    it('names the Cursor reviewer completion report separately from the startup ACK', () => {
+      const contract = renderWorkerExitContract('cursor', true);
+      expect(contract).toContain('Write the trusted structured verdict, send a review completion report to the leader, and keep waiting for mailbox instructions');
+      expect(contract).not.toContain('ACK');
+      expect(contract).toContain('Do not call transition-task-status or exit solely because the verdict was written');
+      const overlay = generateWorkerOverlay({ ...baseParams, agentType: 'cursor', reviewerRole: true });
+      expect(overlay).toContain(contract);
+      expect(overlay).not.toContain('team api transition-task-status --input');
+      expect(overlay).toContain('the leader consumes it and transitions the task');
+    });
+
     it('does not activate reviewer restrictions from task text', () => {
       const overlay = generateWorkerOverlay({
         ...baseParams,

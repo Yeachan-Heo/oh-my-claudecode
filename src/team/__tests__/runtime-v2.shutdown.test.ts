@@ -775,6 +775,7 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
   });
 
   it('restores active lifecycle when a worker rejects normal shutdown before pane cleanup', async () => {
+    tmuxMocks.killOwnedWorkerPane.mockClear();
     const teamName = 'shutdown-worker-rejected';
     await reserveFixtureInstance(teamName, repoDir);
     const teamRoot = fixtureTeamRoot(repoDir, teamName);
@@ -797,6 +798,14 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 25 }))
       .rejects.toThrow('shutdown_rejected:worker-1:still working');
 
+    const inbox = readFileSync(join(workerRoot, 'inbox.md'), 'utf8');
+    expect(inbox).toContain('Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}');
+    expect(inbox).toContain('Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}');
+    expect(inbox).toContain('If you accept, exit your session');
+    expect(inbox).toContain('If you reject, remain active for task work and mailbox instructions; do not exit because of this request');
+    expect(inbox).not.toContain('Then exit your session.');
+    expect(inbox).not.toContain('All tasks are complete.');
+    expect(tmuxMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
     expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
     expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
     const persisted = JSON.parse(readFileSync(configPath, 'utf8'));

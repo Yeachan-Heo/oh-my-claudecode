@@ -107,7 +107,7 @@ export function renderRecoveryContinuationInstruction(instruction: RecoveryConti
 export function renderWorkerExitContract(agentType: CliAgentType, reviewerRole = false): string {
   const transitionTaskStatusCommand = formatOmcCliInvocation('team api transition-task-status');
   if (agentType === 'cursor' && reviewerRole) {
-    return 'Write the trusted structured verdict, ACK the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written.';
+    return 'Write the trusted structured verdict, send a review completion report to the leader, and keep waiting for mailbox instructions. Do not call transition-task-status or exit solely because the verdict was written.';
   }
   if (agentType === 'cursor') {
     return `Run \`${transitionTaskStatusCommand}\` when the assigned task is done, then keep waiting for the next mailbox message. Exit only when the leader sends an explicit shutdown.`;
@@ -221,18 +221,23 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
   const persistentCursor = agentType === 'cursor' && !cursorReviewer;
   const mandatoryWorkflow = cursorReviewer
     ? [
+      'For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again. If no task is assigned, wait for an assignment without inventing a task.',
+      'The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.',
       'You MUST complete the reviewer steps below. Do NOT skip any step.',
       '',
       '1. **Claim** your task (run this command first):',
       `   \`${claimTaskCommand}\``,
       '   Save the `claim_token` from the response.',
-      '2. **Do the read-only review** described in your task assignment below.',
-      '3. **Send ACK** to the leader:',
+      '   For ordinary new tasks only: Only after a successful claim may you continue. If the claim fails, do not send the startup ACK or begin work; report the failure to leader-fixed and wait for instructions.',
+      '2. **Send exactly one startup ACK** to the leader before review; do not repeat it for later tasks:',
       `   \`${sendAckCommand}\``,
+      '3. **Do the read-only review** described in your task assignment below.',
       '4. **Write the structured verdict** required by the trusted reviewer contract.',
       '5. **Keep the Cursor session alive** after writing the verdict; the leader consumes it and transitions the task.',
     ].join('\n')
     : [
+      'For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again. If no task is assigned, wait for an assignment without inventing a task.',
+      'The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.',
       persistentCursor
         ? 'You MUST complete ALL of these steps. Transitioning the task does not end the session.'
         : 'You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.',
@@ -240,9 +245,10 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
       '1. **Claim** your task (run this command first):',
       `   \`${claimTaskCommand}\``,
       '   Save the `claim_token` from the response — you need it for step 4.',
-      '2. **Do the work** described in your task assignment below.',
-      '3. **Send ACK** to the leader:',
+      '   For ordinary new tasks only: Only after a successful claim may you continue. If the claim fails, do not send the startup ACK or begin work; report the failure to leader-fixed and wait for instructions.',
+      '2. **Send exactly one startup ACK** to the leader before work; do not repeat it for later tasks:',
       `   \`${sendAckCommand}\``,
+      '3. **Do the work** described in your task assignment below.',
       persistentCursor
         ? '4. **Transition** the task status when that task is done:'
         : '4. **Transition** the task status (REQUIRED before exit):',
@@ -321,17 +327,13 @@ Send messages via CLI API:
 - Check mailbox: \`${mailboxListCommand}\`
 - Mark delivered: \`${mailboxDeliveredCommand}\`
 
-## Startup Handshake (Required)
-Before doing any task work, send exactly one startup ACK to the leader:
-\`${sendAckCommand}\`
-
 ## Shutdown Protocol
 When you see a shutdown request in your inbox:
 1. Write your decision to: ${shutdownAckPath}
 2. Format:
    - Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}
    - Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}
-3. Exit your session
+3. If you accept, exit your session. If you reject, remain active for task work and mailbox instructions; do not exit because of this request.
 
 ## Rules
 - You are NOT the leader. Never run leader orchestration workflows.
