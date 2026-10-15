@@ -1678,6 +1678,10 @@ ${cleanContent}
       // precomputed identity.
       const occupancy = readOccupiedPluginRoots(configDir, { identities: occupancyResolution?.identities ?? [] });
       let versions = [];
+      // Newest entry that is a real directory. Symlink entries stay in
+      // `versions` so they can be re-pointed, but never serve as a link target:
+      // a dangling or downgrade symlink as the target would close a cycle.
+      let latest = null;
       if (existsSync(cacheBase)) {
         versions = readdirSync(cacheBase)
           .filter(v => /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(v))
@@ -1693,9 +1697,16 @@ ${cleanContent}
           .sort(semverCompare)
           .reverse();
 
-        if (versions.length > 2) {
-          const latest = versions[0];
-          const toSymlink = versions.slice(2);
+        latest = versions.find(v => {
+          try {
+            return !lstatSync(join(cacheBase, v)).isSymbolicLink();
+          } catch {
+            return false;
+          }
+        }) ?? null;
+
+        if (latest && versions.length > 2) {
+          const toSymlink = versions.slice(2).filter(v => v !== latest);
           for (const version of toSymlink) {
             try {
               const versionPath = join(cacheBase, version);
@@ -1755,8 +1766,7 @@ ${cleanContent}
       const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT?.replace(/[\/\\]+$/, ''); // strip trailing separators
       if (pluginRoot && !existsSync(pluginRoot)) {
         const pluginRootVersion = basename(pluginRoot);
-        if (/^\d+\.\d+\.\d+/.test(pluginRootVersion) && versions.length > 0) {
-          const latest = versions[0];
+        if (/^\d+\.\d+\.\d+/.test(pluginRootVersion) && latest) {
           const stalePath = pluginRoot;
           const isWin = process.platform === 'win32';
           // Always use absolute path to avoid symlink target resolution issues
