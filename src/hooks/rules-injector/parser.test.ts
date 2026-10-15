@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 
-import { parseRuleFrontmatter } from "./parser.js";
+import { parseRuleFrontmatter } from './parser.js';
 
 // Rule files authored on Windows use CRLF line endings. The frontmatter
 // delimiter regex tolerates `\r`, but the multi-line array branch matches
@@ -8,128 +8,103 @@ import { parseRuleFrontmatter } from "./parser.js";
 // Without normalising line endings, a `\r`-terminated `  - pattern` item
 // fails to match and the whole array collapses (globs -> ''), so the rule
 // silently applies to nothing.
-describe("parseRuleFrontmatter line endings", () => {
-  it("parses a multi-line globs array with CRLF line endings", () => {
+describe('parseRuleFrontmatter line endings', () => {
+  it('parses a multi-line globs array with CRLF line endings', () => {
     const content = [
-      "---",
-      "globs:",
+      '---',
+      'globs:',
       '  - "**/*.py"',
       '  - "src/**/*.ts"',
-      "alwaysApply: false",
-      "---",
-      "body",
-    ].join("\r\n");
+      'alwaysApply: false',
+      '---',
+      'body',
+    ].join('\r\n');
 
     const { metadata } = parseRuleFrontmatter(content);
 
-    expect(metadata.globs).toEqual(["**/*.py", "src/**/*.ts"]);
+    expect(metadata.globs).toEqual(['**/*.py', 'src/**/*.ts']);
   });
 
-  it("matches the LF result for the same multi-line array", () => {
+  it('matches the LF result for the same multi-line array', () => {
     const lines = [
-      "---",
-      "globs:",
+      '---',
+      'globs:',
       '  - "**/*.py"',
       '  - "src/**/*.ts"',
-      "---",
-      "body",
+      '---',
+      'body',
     ];
 
-    const lf = parseRuleFrontmatter(lines.join("\n"));
-    const crlf = parseRuleFrontmatter(lines.join("\r\n"));
+    const lf = parseRuleFrontmatter(lines.join('\n'));
+    const crlf = parseRuleFrontmatter(lines.join('\r\n'));
 
     expect(crlf.metadata).toEqual(lf.metadata);
   });
 
-  it("parses a multi-line paths alias array with CRLF line endings", () => {
-    const content = ["---", "paths:", '  - "*.md"', "---", "body"].join("\r\n");
+  it('parses a multi-line paths alias array with CRLF line endings', () => {
+    const content = [
+      '---',
+      'paths:',
+      '  - "*.md"',
+      '---',
+      'body',
+    ].join('\r\n');
 
     const { metadata } = parseRuleFrontmatter(content);
 
-    expect(metadata.globs).toEqual(["*.md"]);
+    expect(metadata.globs).toEqual(['*.md']);
   });
 });
 
-describe("parseRuleFrontmatter brace globs", () => {
-  const parseGlobs = (line: string) =>
-    parseRuleFrontmatter(`---\n${line}\n---\nbody`).metadata.globs;
+describe('parseRuleFrontmatter brace globs', () => {
+  const parseGlobs = (line: string) => parseRuleFrontmatter(`---\n${line}\n---\nbody`).metadata.globs;
 
-  it("keeps commas inside braces in a bare string value", () => {
-    expect(parseGlobs("paths: src/**/*.{ts,tsx}")).toEqual([
-      "src/**/*.{ts,tsx}",
-    ]);
-    expect(parseGlobs("paths: src/*.{ts,tsx,}")).toEqual(["src/*.{ts,tsx,}"]);
+  it('keeps commas inside braces in a bare string value', () => {
+    expect(parseGlobs('paths: src/**/*.{ts,tsx}')).toEqual(['src/**/*.{ts,tsx}']);
+    expect(parseGlobs('paths: src/*.{ts,tsx,}')).toEqual(['src/*.{ts,tsx,}']);
   });
 
-  it("still splits comma-separated patterns outside braces", () => {
-    expect(parseGlobs("globs: a/*.{ts,tsx}, b/*.md")).toEqual([
-      "a/*.{ts,tsx}",
-      "b/*.md",
-    ]);
-    expect(parseGlobs("globs: **/*.ts,**/*.tsx")).toEqual([
-      "**/*.ts",
-      "**/*.tsx",
-    ]);
-    expect(parseGlobs('globs: "docs/what\'s-new.md, src/*.ts"')).toEqual([
+  it('still splits comma-separated patterns outside braces', () => {
+    expect(parseGlobs('globs: a/*.{ts,tsx}, b/*.md')).toEqual(['a/*.{ts,tsx}', 'b/*.md']);
+    expect(parseGlobs('globs: **/*.ts,**/*.tsx')).toEqual(['**/*.ts', '**/*.tsx']);
+    expect(parseGlobs("globs: \"docs/what's-new.md, src/*.ts\"")).toEqual([
       "docs/what's-new.md",
-      "src/*.ts",
+      'src/*.ts',
     ]);
     expect(parseGlobs("globs: docs/what's-new.md, src/*.ts")).toEqual([
       "docs/what's-new.md",
-      "src/*.ts",
+      'src/*.ts',
     ]);
-    expect(parseGlobs("globs: a{b.ts, docs/*.md")).toEqual([
-      "a{b.ts",
-      "docs/*.md",
-    ]);
-    expect(parseGlobs("paths: [a{b.ts, docs/*.md]")).toEqual([
-      "a{b.ts",
-      "docs/*.md",
-    ]);
+    expect(parseGlobs('globs: a{b.ts, docs/*.md')).toEqual(['a{b.ts', 'docs/*.md']);
+    expect(parseGlobs('paths: [a{b.ts, docs/*.md]')).toEqual(['a{b.ts', 'docs/*.md']);
   });
 
-  it("keeps commas inside braces in an unquoted inline array item", () => {
-    expect(parseGlobs("paths: [src/*.{ts,tsx}, docs/*.md]")).toEqual([
-      "src/*.{ts,tsx}",
-      "docs/*.md",
-    ]);
-    expect(parseGlobs("paths: [src/*.{ts,tsx,}, docs/*.md]")).toEqual([
-      "src/*.{ts,tsx,}",
-      "docs/*.md",
-    ]);
-    expect(parseGlobs("paths: [docs/what's-new.md, src/*.ts]")).toEqual([
-      "docs/what's-new.md",
-      "src/*.ts",
-    ]);
-    expect(parseGlobs('paths: ["src/*.{ts,tsx}", "docs/*.md"]')).toEqual([
-      "src/*.{ts,tsx}",
-      "docs/*.md",
-    ]);
+  it('keeps commas inside braces in an unquoted inline array item', () => {
+    expect(parseGlobs('paths: [src/*.{ts,tsx}, docs/*.md]')).toEqual(['src/*.{ts,tsx}', 'docs/*.md']);
+    expect(parseGlobs('paths: [src/*.{ts,tsx,}, docs/*.md]')).toEqual(['src/*.{ts,tsx,}', 'docs/*.md']);
+    expect(parseGlobs("paths: [docs/what's-new.md, src/*.ts]")).toEqual(["docs/what's-new.md", 'src/*.ts']);
+    expect(parseGlobs('paths: ["src/*.{ts,tsx}", "docs/*.md"]')).toEqual(['src/*.{ts,tsx}', 'docs/*.md']);
     expect(parseGlobs(String.raw`globs: ['fixtures/\{a,b\}.json']`)).toEqual([
       String.raw`fixtures/\{a,b\}.json`,
     ]);
   });
 
-  it("preserves escaped literal brace globs in a block array", () => {
+  it('preserves escaped literal brace globs in a block array', () => {
     const literalGlob = String.raw`fixtures/\{a,b\}.json`;
-    const { metadata } = parseRuleFrontmatter(
-      `---\nglobs:\n  - '${literalGlob}'\n---\nbody`,
-    );
+    const { metadata } = parseRuleFrontmatter(`---\nglobs:\n  - '${literalGlob}'\n---\nbody`);
 
     expect(metadata.globs).toEqual([literalGlob]);
   });
 
-  it("merges paths and globs without splitting brace alternatives", () => {
-    const { metadata } = parseRuleFrontmatter(
-      [
-        "---",
-        "paths: src/**/*.{ts,tsx}",
-        'globs: "**/*.md"',
-        "---",
-        "body",
-      ].join("\n"),
-    );
+  it('merges paths and globs without splitting brace alternatives', () => {
+    const { metadata } = parseRuleFrontmatter([
+      '---',
+      'paths: src/**/*.{ts,tsx}',
+      'globs: "**/*.md"',
+      '---',
+      'body',
+    ].join('\n'));
 
-    expect(metadata.globs).toEqual(["src/**/*.{ts,tsx}", "**/*.md"]);
+    expect(metadata.globs).toEqual(['src/**/*.{ts,tsx}', '**/*.md']);
   });
 });
