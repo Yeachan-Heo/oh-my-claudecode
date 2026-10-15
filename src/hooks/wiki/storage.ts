@@ -18,6 +18,7 @@ import { join, resolve, sep } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { atomicWriteFileSync } from '../../lib/atomic-write.js';
 import { lockPathFor, withFileLockSync } from '../../lib/file-lock.js';
+import { splitFlowSequenceItems } from '../../utils/frontmatter.js';
 import {
   type WikiPage,
   type WikiPageFrontmatter,
@@ -153,9 +154,7 @@ function parseYamlArray(value: string | undefined): string[] {
   if (!value) return [];
   const trimmed = value.trim();
   if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-    return trimmed
-      .slice(1, -1)
-      .split(',')
+    return splitFlowSequenceItems(trimmed.slice(1, -1))
       .map(s => s.trim().replace(/^["']|["']$/g, '').replace(/\\(\\|"|n|r)/g, (_, ch) => { if (ch === 'n') return '\n'; if (ch === 'r') return '\r'; return ch; }))
       .filter(Boolean);
   }

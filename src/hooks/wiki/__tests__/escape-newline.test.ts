@@ -47,3 +47,35 @@ describe('escapeYaml newline handling', () => {
     expect(parsed!.frontmatter.title).toBe('path\\\nline2');
   });
 });
+
+describe('flow-sequence frontmatter fields with commas', () => {
+  it('roundtrips tags, sources and links containing commas', () => {
+    const page = makePage('Commas');
+    page.frontmatter.tags = ['a, b', 'plain', 'say "hi", twice'];
+    page.frontmatter.sources = ['https://example.com/search?q=a,b', 'notes, draft'];
+    page.frontmatter.links = ['page-one', 'page, two'];
+
+    const parsed = parseFrontmatter(serializePage(page));
+
+    expect(parsed).not.toBeNull();
+    expect(parsed!.frontmatter.tags).toEqual(['a, b', 'plain', 'say "hi", twice']);
+    expect(parsed!.frontmatter.sources).toEqual(['https://example.com/search?q=a,b', 'notes, draft']);
+    expect(parsed!.frontmatter.links).toEqual(['page-one', 'page, two']);
+  });
+
+  it('still splits hand-written unquoted and single-quoted items', () => {
+    const raw = [
+      '---',
+      'title: "Hand written"',
+      "tags: [alpha, don't, 'x, y', \"p, q\"]",
+      'sources: []',
+      'links: []',
+      '---',
+      'body',
+    ].join('\n');
+
+    const parsed = parseFrontmatter(raw);
+
+    expect(parsed!.frontmatter.tags).toEqual(['alpha', "don't", 'x, y', 'p, q']);
+  });
+});
