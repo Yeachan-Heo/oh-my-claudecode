@@ -403,6 +403,19 @@ export function migrateState(
 }
 
 /**
+ * Compile a simple glob (`*` matches anything) into an anchored RegExp.
+ * Every other character is matched literally, so a name such as `a.b` or
+ * `state(1)` neither matches unintended names nor throws on an invalid regex.
+ */
+function globToRegExp(pattern: string): RegExp {
+  const source = pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*");
+  return new RegExp("^" + source + "$");
+}
+
+/**
  * List all state files
  *
  * Returns information about all state files in the specified location(s).
@@ -415,9 +428,7 @@ export function listStates(options?: ListStatesOptions): StateFileInfo[] {
   // Helper to check if name matches pattern
   const matchesPattern = (name: string): boolean => {
     if (!pattern) return true;
-    // Simple glob: * matches anything
-    const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-    return regex.test(name);
+    return globToRegExp(pattern).test(name);
   };
 
   // Helper to add state files from a directory
@@ -497,10 +508,7 @@ export function cleanupOrphanedStates(options?: CleanupOptions): CleanupResult {
   for (const state of states) {
     // Skip excluded patterns
     if (
-      exclude.some((pattern) => {
-        const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-        return regex.test(state.name);
-      })
+      exclude.some((pattern) => globToRegExp(pattern).test(state.name))
     ) {
       continue;
     }
