@@ -209,17 +209,18 @@ function hasActivePreviousSweepLock(markerPath, now = Date.now()) {
 /**
  * Get the Jev mode for a point: 'off' | 'shadow' | 'active'.
  * Reuses the script resolver's config gates and union activation semantics.
+ * permissionMode is the hook input's permission_mode; see parseJevEnv.
  */
-export function jevModeFor(point, env = process.env) {
-  return parseJevEnv(point, env);
+export function jevModeFor(point, env = process.env, permissionMode) {
+  return parseJevEnv(point, env, permissionMode);
 }
 
 /**
  * Check if Jev is opted in for a point (shadow or active, not off).
  * Backward-compatible boolean API for existing callers.
  */
-export function isJevShadowOptedIn(point, env = process.env) {
-  return jevModeFor(point, env) !== "off";
+export function isJevShadowOptedIn(point, env = process.env, permissionMode) {
+  return jevModeFor(point, env, permissionMode) !== "off";
 }
 
 /**
@@ -276,9 +277,11 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
  * - Active mode: waits (sync) for Jev answer, returns { mode, answer, source, ... }
  * - Off mode: returns undefined
  * Falls back to undefined (caller uses heuristic) on timeout/error/parse-failure.
+ * permissionMode is the hook input's permission_mode; it travels in the
+ * request so the resolver logs the same mode the caller acted on.
  */
-export function recordJevShadow({ point, state, questions, heuristic }) {
-  const mode = jevModeFor(point);
+export function recordJevShadow({ point, state, questions, heuristic, permissionMode }) {
+  const mode = jevModeFor(point, process.env, permissionMode);
   if (mode === "off") return undefined;
 
   // Throttled best-effort sweep of stale temp directories (once per hour)
@@ -312,7 +315,7 @@ export function recordJevShadow({ point, state, questions, heuristic }) {
 
     writeFileSync(
       requestFile,
-      JSON.stringify({ point, state, questions, heuristic }),
+      JSON.stringify({ point, state, questions, heuristic, permissionMode }),
       {
         encoding: "utf8",
         mode: 0o600,
