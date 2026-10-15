@@ -16,6 +16,7 @@ import {
 import { currentProcessStartIdentity } from '../team-owner-epoch.js';
 import { createTeamInstanceBinding, reserveTeamInstance } from '../team-instance.js';
 import * as teamInstanceModule from '../team-instance.js';
+import * as processIdentityLockModule from '../process-identity-lock.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
 import { absPath, TeamPaths, teamStateRoot } from '../state-paths.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
@@ -1062,36 +1063,82 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
     const disposeGate = new Promise<void>(resolveGate => { releaseDispose = resolveGate; });
     let disposeReleased = false;
     let firstCompletion: Promise<unknown> | undefined;
+    let secondCompletion: Promise<unknown> | undefined;
     const disposeSpy = vi.spyOn(teamInstanceModule, 'disposeTeamInstanceUnderLock')
       .mockImplementation(async (...args) => {
         enteredDispose();
         await disposeGate;
         return originalDispose(...args);
       });
+    // Transparent spy: the real lock still runs; it only signals once the
+    // second shutdown has actually attempted the shared lifecycle lock.
+    const lifecycleLockPath = teamInstanceModule.teamInstanceLifecycleLockPath(repoDir, teamName);
+    const originalLock = processIdentityLockModule.withProcessIdentityFileLock;
+    let signalLockAttempt: (() => void) | undefined;
+    let secondCallbackEntered = false;
+    const lockSpy = vi.spyOn(processIdentityLockModule, 'withProcessIdentityFileLock')
+      .mockImplementation((path, fn, timeoutMs) => {
+        const notify = path === lifecycleLockPath ? signalLockAttempt : undefined;
+        if (!notify) return originalLock(path, fn, timeoutMs);
+        signalLockAttempt = undefined;
+        const pending = originalLock(path, () => {
+          secondCallbackEntered = true;
+          return fn();
+        }, timeoutMs);
+        notify();
+        return pending;
+      });
+    // Share one 20s race budget and reserve 5s for teardown under the suite's
+    // 30s timeout, so a failing gate still reports its specific error.
+    const raceDeadline = Date.now() + 20_000;
+    const withinDeadline = async <T,>(promise: Promise<T>, label: string, deadline: number): Promise<T> => {
+      const remainingMs = Math.max(0, deadline - Date.now());
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          promise,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error(`${label} not reached within ${Math.ceil(remainingMs / 1000)}s`)), remainingMs);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     try {
       const { shutdownTeamV2 } = await import('../runtime-v2.js');
       const first = shutdownTeamV2(teamName, repoDir, { force: true, timeoutMs: 0, instanceId: TEAM_INSTANCE_ID });
+      let firstDone = false;
       const firstSettled = first.then(
         value => ({ status: 'resolved' as const, value }),
         error => ({ status: 'rejected' as const, error }),
-      );
+      ).finally(() => { firstDone = true; });
       firstCompletion = firstSettled;
-      const gateOrEarlyExit = await Promise.race([
+      const gateOrEarlyExit = await withinDeadline(Promise.race([
         disposeEntered.then(() => ({ status: 'entered' as const })),
         firstSettled,
-        new Promise<{ status: 'timeout' }>(resolve => setTimeout(() => resolve({ status: 'timeout' }), 2_000)),
-      ]);
+      ]), 'final disposal gate', raceDeadline);
       if (gateOrEarlyExit.status === 'resolved') {
         throw new Error(`first shutdown completed before final disposal: ${JSON.stringify(gateOrEarlyExit.value)}`);
       }
       if (gateOrEarlyExit.status === 'rejected') throw gateOrEarlyExit.error;
-      if (gateOrEarlyExit.status === 'timeout') throw new Error('final disposal gate was not reached');
 
+      const secondLockAttempted = new Promise<void>(resolveAttempt => { signalLockAttempt = resolveAttempt; });
       let secondSettled = false;
       const second = shutdownTeamV2(teamName, repoDir, { force: true, timeoutMs: 0, instanceId: TEAM_INSTANCE_ID })
         .finally(() => { secondSettled = true; });
-      await new Promise(resolveTick => setTimeout(resolveTick, 10));
+      secondCompletion = second.catch(() => undefined);
+      await withinDeadline(Promise.race([
+        secondLockAttempted,
+        second.then(value => {
+          throw new Error(`second shutdown settled before lifecycle lock attempt: ${JSON.stringify(value)}`);
+        }),
+      ]), 'second lifecycle lock attempt', raceDeadline);
+      expect(secondCallbackEntered).toBe(false);
+      expect(firstDone).toBe(false);
       expect(secondSettled).toBe(false);
+      expect(existsSync(configPath)).toBe(true);
+      expect(disposeSpy).toHaveBeenCalledTimes(1);
 
       disposeReleased = true;
       releaseDispose();
@@ -1104,8 +1151,12 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         disposeReleased = true;
         releaseDispose();
       }
-      await firstCompletion?.catch(() => undefined);
+      lockSpy.mockRestore();
       disposeSpy.mockRestore();
+      await withinDeadline(Promise.all([
+        firstCompletion?.catch(() => undefined),
+        secondCompletion,
+      ]), 'shutdown drain', Date.now() + 5_000).catch(() => undefined);
     }
   });
 });

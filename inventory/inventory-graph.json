@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T09:02:59.950Z",
+  "generatedAt": "2026-10-15T09:44:46.854Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e017ceda4bb2d1e5b33025e0abbc7ccf1b512bf1",
-    "sourceSha256": "999ede604ce21225726d4f2267f5c1b40ccf740205617d293648f9c2b0ca95cd",
-    "generatedAt": "2026-10-15T09:02:59.950Z",
+    "head": "7d5c30f6771dfa1bde6a762ee01a9a3f02354f6e",
+    "sourceSha256": "1b553ba38a711e70ba7652d07e8d949abbdafabb226f72a7b58b45a33feb08a1",
+    "generatedAt": "2026-10-15T09:44:46.854Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e017ceda4bb2d1e5b33025e0abbc7ccf1b512bf1",
-  "sourceSha256": "999ede604ce21225726d4f2267f5c1b40ccf740205617d293648f9c2b0ca95cd",
+  "head": "7d5c30f6771dfa1bde6a762ee01a9a3f02354f6e",
+  "sourceSha256": "1b553ba38a711e70ba7652d07e8d949abbdafabb226f72a7b58b45a33feb08a1",
   "counts": {
     "public": {
       "skills": 48,
@@ -79626,6 +79626,11 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
+        "to": "src/team/process-identity-lock.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/runtime-owner-client.ts",
         "kind": "imports"
       },
@@ -88357,11 +88362,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8511,
-      "importEdgeCount": 7066,
+      "edgeCount": 8512,
+      "importEdgeCount": 7067,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "16cd699002b26e851ee872d049e8e293e05fae63882648e2fe0901c65fa9fadf"
+  "manifestSha256": "a80414cd5fd5dd46db20dae4ad123683b87697202872e29142803454ad822d9a"
 }
