@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T11:41:19.661Z",
+  "generatedAt": "2026-10-15T14:13:10.329Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "5897c34d02f68b11eebcde9c030cd553d05725ac",
-    "sourceSha256": "d2867ffd79e6bdbcebfbb566ed1b4da735053a2f9ceeca6fa52505914224c533",
-    "generatedAt": "2026-10-15T11:41:19.661Z",
+    "head": "bce000948057b6c57047506b365a0fc54b5d1336",
+    "sourceSha256": "0dc710e68e7274dfe90a37665ba581d5d78c8b406c178934b0f125f6764665e2",
+    "generatedAt": "2026-10-15T14:13:10.329Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "5897c34d02f68b11eebcde9c030cd553d05725ac",
-  "sourceSha256": "d2867ffd79e6bdbcebfbb566ed1b4da735053a2f9ceeca6fa52505914224c533",
+  "head": "bce000948057b6c57047506b365a0fc54b5d1336",
+  "sourceSha256": "0dc710e68e7274dfe90a37665ba581d5d78c8b406c178934b0f125f6764665e2",
   "counts": {
     "public": {
       "skills": 48,
@@ -54601,6 +54601,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/session-start-script-context.test.ts",
+        "to": "scripts/lib/cache-occupancy.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/session-start-timeout-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88458,11 +88463,11 @@
     ],
     "stats": {
       "nodeCount": 7740,
-      "edgeCount": 8527,
-      "importEdgeCount": 7080,
+      "edgeCount": 8528,
+      "importEdgeCount": 7081,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "4c40cf70d9f886e741be065c4232c239cba8cad32b99dfbd86ce73f3df335a9a"
+  "manifestSha256": "c297c9931272b7e31be00012d267cf86f0d0e7e335a32f0b38ec4b89b6a6927b"
 }
