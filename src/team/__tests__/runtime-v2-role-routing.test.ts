@@ -96,6 +96,7 @@ vi.mock('../tmux-session.js', async (importOriginal) => {
     isWorkerPaneAlive: mocks.isWorkerPaneAlive,
     getWorkerLiveness: mocks.getWorkerLiveness,
     getOwnedWorkerLiveness: mocks.getOwnedWorkerLiveness,
+    captureOwnedTeamPane: vi.fn(async () => ''),
   };
 });
 
@@ -1116,6 +1117,246 @@ describe('runtime-v2 role routing — processCliWorkerVerdicts (AC-7)', () => {
 
     expect(results[0]).toMatchObject({ status: 'failed', verdict: 'revise' });
     expect(JSON.parse(await readFile(taskPath, 'utf-8')).metadata?.verdict).toBe('revise');
+  });
+
+  function claimedCursorVerdict(overrides: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      role: 'critic',
+      task_id: '1',
+      claim_token: 'tk-1',
+      task_version: 1,
+      launch_attempt_id: 'attempt-worker-1',
+      verdict: 'approve',
+      summary: 'claimed approve summary',
+      findings: [],
+      ...overrides,
+    });
+  }
+
+  async function bootstrapClaimedCursorVerdict(): Promise<Awaited<ReturnType<typeof bootstrap>>> {
+    const fixture = await bootstrap({
+      verdict: 'approve',
+      paneAlive: true,
+      workerCli: 'cursor',
+      verdictRole: 'critic',
+      omitVerdictFile: true,
+    });
+    await writeFile(fixture.outputFile + '.processing', claimedCursorVerdict(), 'utf-8');
+    return fixture;
+  }
+
+  async function rewriteTask(taskPath: string, mutate: (task: Record<string, unknown>) => void): Promise<string> {
+    const task = JSON.parse(await readFile(taskPath, 'utf-8')) as Record<string, unknown>;
+    mutate(task);
+    const bytes = JSON.stringify(task, null, 2);
+    await writeFile(taskPath, bytes, 'utf-8');
+    return bytes;
+  }
+
+  async function readNudgeReasons(): Promise<string[]> {
+    let raw: string;
+    try {
+      raw = await readFile(absPath(cwd, TeamPaths.events('role-routing-team')), 'utf-8');
+    } catch {
+      return [];
+    }
+    return raw.trim().split('\n').filter(Boolean)
+      .map(line => JSON.parse(line) as { type: string; reason?: string })
+      .filter(event => event.type === 'team_leader_nudge')
+      .map(event => event.reason ?? '');
+  }
+
+  const leaseUntil = () => new Date(Date.now() + 60000).toISOString();
+
+  it.each([
+    ['pending', (task: Record<string, unknown>) => {
+      task.status = 'pending';
+      delete task.owner;
+      delete task.claim;
+      task.version = 2;
+    }],
+    ['foreign owner', (task: Record<string, unknown>) => {
+      task.owner = 'worker-2';
+      task.claim = { owner: 'worker-2', token: 'tk-2', leased_until: leaseUntil(), launch_attempt_id: 'attempt-worker-2' };
+      task.version = 2;
+    }],
+    ['terminal elsewhere', (task: Record<string, unknown>) => {
+      task.status = 'completed';
+      task.owner = 'worker-2';
+      delete task.claim;
+      task.version = 2;
+      task.completed_at = new Date().toISOString();
+      task.metadata = { verdict_source: 'other-path' };
+    }],
+  ] as const)('quarantines a claimed Cursor verdict once its task is %s, across public monitor cycles', async (_label, mutate) => {
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-stale-monitor-');
+    const { outputFile, taskPath, instanceId } = await bootstrapClaimedCursorVerdict();
+    const taskBytes = await rewriteTask(taskPath, mutate);
+
+    const { monitorTeamV2 } = await import('../runtime-v2.js');
+    await monitorTeamV2('role-routing-team', cwd, instanceId);
+    await monitorTeamV2('role-routing-team', cwd, instanceId);
+
+    expect(await readFile(taskPath, 'utf-8')).toBe(taskBytes);
+    await expect(access(outputFile + '.processing')).rejects.toThrow();
+    expect(await readFile(outputFile + '.processed', 'utf-8')).toBe(claimedCursorVerdict());
+    expect((await readNudgeReasons()).filter(reason => reason.startsWith('cli_worker_verdict_'))).toEqual([]);
+  });
+
+  it.each([
+    ['missing', (taskPath: string) => rm(taskPath, { force: true })],
+    ['unreadable', (taskPath: string) => writeFile(taskPath, '{corrupt task', 'utf-8')],
+  ] as const)('retains a claimed Cursor verdict while its task is %s, then completes on retry', async (_label, breakTask) => {
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-task-unavailable-');
+    const { outputFile, taskPath, instanceId } = await bootstrapClaimedCursorVerdict();
+    const validTask = await readFile(taskPath, 'utf-8');
+    await breakTask(taskPath);
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+        status: 'skipped',
+        taskId: '1',
+        reason: 'cursor_verdict_task_unavailable',
+      }]);
+    }
+    expect(await readFile(outputFile + '.processing', 'utf-8')).toBe(claimedCursorVerdict());
+    await expect(access(outputFile + '.processed')).rejects.toThrow();
+    expect(await readNudgeReasons()).toEqual([
+      'cli_worker_verdict_transition_failed:worker-1:1:task_unavailable',
+    ]);
+
+    await writeFile(taskPath, validTask, 'utf-8');
+    expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+      status: 'completed',
+      taskId: '1',
+      verdict: 'approve',
+    }]);
+    expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({ status: 'completed', version: 2 });
+    await expect(access(outputFile + '.processing')).rejects.toThrow();
+    await expect(access(outputFile + '.processed')).resolves.toBeUndefined();
+  });
+
+  it('retains a still-valid Cursor verdict when one canonical task read fails transiently', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-transient-read-');
+    const { outputFile, taskPath, instanceId } = await bootstrapClaimedCursorVerdict();
+    const taskBytes = await readFile(taskPath, 'utf-8');
+
+    // The task file stays intact and still carries the verdict's claim; only
+    // the first canonical read fails. A raw re-read would see the live claim.
+    const teamOps = await import('../team-ops.js');
+    const originalReadTask = teamOps.teamReadTask;
+    let failNextRead = true;
+    const readSpy = vi.spyOn(teamOps, 'teamReadTask').mockImplementation(async (...args) => {
+      if (failNextRead && args[1] === '1') {
+        failNextRead = false;
+        throw new Error('transient canonical read failure');
+      }
+      return originalReadTask(...args);
+    });
+    try {
+      const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+      expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+        status: 'skipped',
+        taskId: '1',
+        reason: 'cursor_verdict_task_unavailable',
+      }]);
+      expect(failNextRead).toBe(false);
+      expect(await readFile(taskPath, 'utf-8')).toBe(taskBytes);
+      expect(await readFile(outputFile + '.processing', 'utf-8')).toBe(claimedCursorVerdict());
+      await expect(access(outputFile + '.processed')).rejects.toThrow();
+
+      expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+        status: 'completed',
+        taskId: '1',
+        verdict: 'approve',
+      }]);
+      expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({ status: 'completed', version: 2 });
+    } finally {
+      readSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ['claim token', (task: Record<string, unknown>) => {
+      task.claim = { owner: 'worker-1', token: 'tk-2', leased_until: leaseUntil(), launch_attempt_id: 'attempt-worker-1' };
+    }],
+    ['task version', (task: Record<string, unknown>) => {
+      task.version = 2;
+    }],
+    ['launch attempt', (task: Record<string, unknown>) => {
+      task.claim = { owner: 'worker-1', token: 'tk-1', leased_until: leaseUntil(), launch_attempt_id: 'attempt-worker-0' };
+    }],
+  ] as const)('quarantines a claimed Cursor verdict with a stale %s and still applies the fresh replacement', async (_label, mutate) => {
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-stale-identity-');
+    const { outputFile, taskPath, instanceId } = await bootstrapClaimedCursorVerdict();
+    const taskBytes = await rewriteTask(taskPath, mutate);
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+      status: 'skipped',
+      taskId: '1',
+      reason: 'cursor_verdict_claim_mismatch',
+    }]);
+    expect(await readFile(taskPath, 'utf-8')).toBe(taskBytes);
+    await expect(access(outputFile + '.processing')).rejects.toThrow();
+    expect(await readFile(outputFile + '.processed', 'utf-8')).toBe(claimedCursorVerdict());
+
+    const fresh = await rewriteTask(taskPath, task => {
+      task.claim = { owner: 'worker-1', token: 'tk-fresh', leased_until: leaseUntil(), launch_attempt_id: 'attempt-worker-1' };
+    });
+    const freshVersion = (JSON.parse(fresh) as { version: number }).version;
+    await writeFile(outputFile, claimedCursorVerdict({
+      claim_token: 'tk-fresh',
+      task_version: freshVersion,
+      summary: 'fresh approve summary',
+    }), 'utf-8');
+    expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+      status: 'completed',
+      taskId: '1',
+    }]);
+    expect(JSON.parse(await readFile(taskPath, 'utf-8'))).toMatchObject({
+      status: 'completed',
+      version: freshVersion + 1,
+      metadata: { verdict_claim_token: 'tk-fresh', verdict_summary: 'fresh approve summary' },
+    });
+  });
+
+  it('retains a stale Cursor verdict when quarantine rename fails and notifies once per assignment', async () => {
+    cwd = await mkdtempFixture('omc-runtime-routing-cursor-quarantine-rename-');
+    const { outputFile, taskPath, instanceId } = await bootstrapClaimedCursorVerdict();
+    await rewriteTask(taskPath, task => {
+      task.status = 'pending';
+      delete task.owner;
+      delete task.claim;
+      task.version = 2;
+    });
+    renameFault.destination = outputFile + '.processed';
+    const quarantineFailure = 'cli_worker_verdict_transition_failed:worker-1:1:stale_verdict_quarantine_failed';
+
+    const { processCliWorkerVerdicts } = await import('../runtime-v2.js');
+    for (let cycle = 0; cycle < 2; cycle++) {
+      expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+        status: 'skipped',
+        reason: 'cursor_verdict_quarantine_failed',
+      }]);
+    }
+    expect(await readFile(outputFile + '.processing', 'utf-8')).toBe(claimedCursorVerdict());
+    expect(await readNudgeReasons()).toEqual([quarantineFailure]);
+
+    // A different stale assignment is a new notification, not a duplicate.
+    await writeFile(outputFile + '.processing', claimedCursorVerdict({ claim_token: 'tk-other' }), 'utf-8');
+    await processCliWorkerVerdicts('role-routing-team', cwd, instanceId);
+    expect(await readNudgeReasons()).toEqual([quarantineFailure, quarantineFailure]);
+
+    renameFault.destination = undefined;
+    expect(await processCliWorkerVerdicts('role-routing-team', cwd, instanceId)).toMatchObject([{
+      status: 'skipped',
+      reason: 'cursor_verdict_claim_mismatch',
+    }]);
+    await expect(access(outputFile + '.processing')).rejects.toThrow();
+    await expect(access(outputFile + '.processed')).resolves.toBeUndefined();
+    expect(await readNudgeReasons()).toEqual([quarantineFailure, quarantineFailure]);
   });
 
   it('routes Cursor completion through lease and delegation invariants', async () => {
