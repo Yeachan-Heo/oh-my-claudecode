@@ -59,6 +59,34 @@ const STRICT_OVERRIDES: SecurityConfig = {
 /** Cached config to avoid re-reading files on every call */
 let cachedConfig: SecurityConfig | null = null;
 
+const BOOLEAN_KEYS = [
+  "restrictToolPaths",
+  "pythonSandbox",
+  "disableProjectSkills",
+  "disableAutoUpdate",
+  "disableRemoteMcp",
+  "disableExternalLLM",
+] as const;
+
+/**
+ * Keep only well-typed override values. Without this a hand-edited config such
+ * as `"restrictToolPaths": "false"` (truthy string) or `"hardMaxIterations": -1`
+ * / `"abc"` (which makes the `hardMax > 0` guard silently skip the limit) would
+ * be applied verbatim. Invalid entries are ignored so the default/strict value
+ * stays in effect.
+ */
+function sanitizeSecurityOverrides(raw: Record<string, unknown>): Partial<SecurityConfig> {
+  const result: Partial<SecurityConfig> = {};
+  for (const key of BOOLEAN_KEYS) {
+    if (typeof raw[key] === "boolean") result[key] = raw[key] as boolean;
+  }
+  const max = raw.hardMaxIterations;
+  if (typeof max === "number" && Number.isInteger(max) && max >= 0) {
+    result.hardMaxIterations = max;
+  }
+  return result;
+}
+
 /**
  * Load the security section from config files.
  * Checks project config first, then user config.
@@ -74,8 +102,8 @@ function loadSecurityFromConfigFiles(): Partial<SecurityConfig> {
     try {
       const content = readFileSync(configPath, "utf-8");
       const parsed = parseJsonc(content) as Record<string, unknown>;
-      if (parsed?.security && typeof parsed.security === "object") {
-        return parsed.security as Partial<SecurityConfig>;
+      if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
+        return sanitizeSecurityOverrides(parsed.security as Record<string, unknown>);
       }
     } catch {
       // Ignore parse errors
