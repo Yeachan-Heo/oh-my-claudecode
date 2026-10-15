@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-15T14:13:10.329Z",
+  "generatedAt": "2026-10-15T14:50:37.342Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "bce000948057b6c57047506b365a0fc54b5d1336",
-    "sourceSha256": "0dc710e68e7274dfe90a37665ba581d5d78c8b406c178934b0f125f6764665e2",
-    "generatedAt": "2026-10-15T14:13:10.329Z",
+    "head": "9559dba7eb8262c1d1d8f6847b43ad995fb0ae8b",
+    "sourceSha256": "9bbedc03cdb29f3b80f1f326f4900422c71d0ff66e4ecf8bd7e7611381cbad67",
+    "generatedAt": "2026-10-15T14:50:37.342Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "bce000948057b6c57047506b365a0fc54b5d1336",
-  "sourceSha256": "0dc710e68e7274dfe90a37665ba581d5d78c8b406c178934b0f125f6764665e2",
+  "head": "9559dba7eb8262c1d1d8f6847b43ad995fb0ae8b",
+  "sourceSha256": "9bbedc03cdb29f3b80f1f326f4900422c71d0ff66e4ecf8bd7e7611381cbad67",
   "counts": {
     "public": {
       "skills": 48,
@@ -65741,6 +65741,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/learner/parser.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/promotion.ts",
         "to": "src/hooks/learner/types.ts",
         "kind": "type-imports"
@@ -71278,6 +71283,11 @@
       {
         "from": "src/hooks/wiki/storage.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/wiki/storage.ts",
+        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88463,11 +88473,11 @@
     ],
     "stats": {
       "nodeCount": 7740,
-      "edgeCount": 8528,
-      "importEdgeCount": 7081,
+      "edgeCount": 8530,
+      "importEdgeCount": 7083,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "a5ca516f0840c66e6537179a803703c0bd4df1e3fddc3c55e9bdac633d0c568c",
-  "manifestSha256": "c297c9931272b7e31be00012d267cf86f0d0e7e335a32f0b38ec4b89b6a6927b"
+  "manifestSha256": "4de882a99addc539920b98370094d7f4fd2e7c3c059ada2e2b7a7f681e014a2d"
 }
