@@ -2,7 +2,7 @@
  * Shared frontmatter parsing utilities
  *
  * Parses YAML-like frontmatter from markdown files.
- * Used by both the builtin-skills loader and the auto-slash-command executor.
+ * Used by skills, commands, and wiki frontmatter parsing.
  */
 
 /**
