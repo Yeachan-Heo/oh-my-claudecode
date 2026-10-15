@@ -738,6 +738,18 @@ describe('doctor-conflicts: CLAUDE.md companion file detection (issue #1101)', (
     expect(JSON.parse(formatReport(report, true)).claudeMdStatus.managementDisabled).toBe(true);
   });
 
+  it('reports disabled management when OMC markers remain from a previous install', () => {
+    writeFileSync(join(TEST_CLAUDE_DIR, 'CLAUDE.md'), '<!-- OMC:START -->\n# OMC Config\n<!-- OMC:END -->\n');
+    writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+
+    const report = runConflictCheck();
+    const output = formatReport(report, false);
+
+    expect(report.claudeMdStatus!.managementDisabled).toBe(true);
+    expect(output).toContain('OMC markers present');
+    expect(output).toContain('Global CLAUDE.md management is disabled (claudeMdEnabled is false in .omc-config.json)');
+  });
+
   it('reports the claudeMdEnabled opt-out when no CLAUDE*.md file exists', () => {
     writeFileSync(join(TEST_CLAUDE_DIR, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
 

@@ -743,6 +743,9 @@ export function formatReport(report: ConflictReport, json: boolean): string {
     lines.push('');
 
     if (report.claudeMdStatus.hasMarkers) {
+      if (report.claudeMdStatus.managementDisabled) {
+        lines.push(`  ${colors.blue('ℹ')} Global CLAUDE.md management is disabled (claudeMdEnabled is false in .omc-config.json)`);
+      }
       if (report.claudeMdStatus.companionFile) {
         lines.push(`  ${colors.green('✓')} OMC markers found in companion file`);
         lines.push(`    ${colors.gray(`Companion: ${report.claudeMdStatus.companionFile}`)}`);
