@@ -353,6 +353,8 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
   let quietUntil = Date.now() + stabilizationMs;
   let nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
   while (true) {
+    const now = Date.now();
+    if (now >= lifetimeDeadline) return;
     try {
       if (!lstatSync(stateDir).isDirectory()) return;
       break;
@@ -360,8 +362,6 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
       if (error?.code !== 'ENOENT') return;
     }
 
-    const now = Date.now();
-    if (now >= lifetimeDeadline) return;
     if (now >= nextPluginRootCheck) {
       olderPluginActive = hasActiveOlderPluginRoot();
       nextPluginRootCheck = now + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
@@ -379,16 +379,20 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
   }
 
   const stateLock = await loadPostToolFailureStateLock();
+  // The state directory can appear at or after the deadline: bound the lock wait by the remaining lifetime.
   const workerLock = stateLock.acquireStateFileLockAtPathSync(
-    join(stateDir, '.legacy-tool-failure-cleanup-worker.lock'), 300, true,
+    join(stateDir, '.legacy-tool-failure-cleanup-worker.lock'), 300, true, false,
+    undefined, undefined, Math.max(0, lifetimeDeadline - Date.now()),
   );
   if (!workerLock) return;
 
-  quietUntil = Date.now() + stabilizationMs;
-  let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
-  olderPluginActive = hasActiveOlderPluginRoot();
-  nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
   try {
+    // The lock can be granted at the deadline: release it without doing any work.
+    if (Date.now() >= lifetimeDeadline) return;
+    quietUntil = Date.now() + stabilizationMs;
+    let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+    olderPluginActive = hasActiveOlderPluginRoot();
+    nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     while (true) {
       const now = Date.now();
       if (now >= lifetimeDeadline) return;

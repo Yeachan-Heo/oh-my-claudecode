@@ -612,6 +612,53 @@ describe('session-start.mjs regression #1386', () => {
     }
   });
 
+  it('stops waiting for the cleanup worker lock once the worker reaches its hard lifetime', async () => {
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const holder = startPostToolFailureLockHolder(join(stateDir, '.legacy-tool-failure-cleanup-worker'));
+    let worker: ReturnType<typeof spawn> | undefined;
+    let workerExit: Promise<{ code: number | null; at: number }> | undefined;
+
+    try {
+      await holder.ready;
+      worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '50', '200'], {
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+          CLAUDE_PLUGIN_ROOT: join(tempDir, 'plugin-cache', 'oh-my-claudecode', 'current'),
+          OMC_HOOK_BACKGROUND_CHILD: '1',
+        },
+      });
+      const child = worker;
+      workerExit = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', code => resolve({ code, at: Date.now() }));
+      });
+
+      // Free the lock long after the 200 ms lifetime but before the worker's own lock wait (about 3 s) could run out.
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      const releasedAt = Date.now();
+      expect(await holder.release()).toEqual({ code: 0, signal: null });
+
+      const exit = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 5000)),
+      ]);
+      expect(exit?.code).toBe(0);
+      // The worker left at its deadline while the lock was still held, not once the lock freed up.
+      expect(exit!.at).toBeLessThan(releasedAt);
+      expect(existsSync(workerLockPath)).toBe(false);
+    } finally {
+      await holder.release();
+      if (worker && worker.exitCode === null) worker.kill();
+      await workerExit?.catch(() => undefined);
+    }
+  });
+
   it('lets stabilization workers exit while sanitized failure records remain', async () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');
