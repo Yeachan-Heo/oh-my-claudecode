@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-15T07:44:48.608Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0b07c4d71c4152975c65416c400b3f52e918d9e4",
-    "sourceSha256": "883c4210d2b2bfa07089b5cdd0b316bc675925dcc75e9b15965b9a888ab8858b",
-    "generatedAt": null,
+    "head": "bc0db2d4543e15ffffb9689dec4d1ace5b4e2b8e",
+    "sourceSha256": "f60275305f5a05f300a3798d8589c48bb46bc5a165a6ec82e4444aff8593bf19",
+    "generatedAt": "2026-10-15T07:44:48.608Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0b07c4d71c4152975c65416c400b3f52e918d9e4",
-  "sourceSha256": "883c4210d2b2bfa07089b5cdd0b316bc675925dcc75e9b15965b9a888ab8858b",
+  "head": "bc0db2d4543e15ffffb9689dec4d1ace5b4e2b8e",
+  "sourceSha256": "f60275305f5a05f300a3798d8589c48bb46bc5a165a6ec82e4444aff8593bf19",
   "counts": {
     "public": {
       "skills": 48,
@@ -79626,6 +79626,11 @@
       },
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
+        "to": "src/team/process-identity-lock.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/runtime-owner-client.ts",
         "kind": "imports"
       },
@@ -88357,11 +88362,11 @@
     ],
     "stats": {
       "nodeCount": 7737,
-      "edgeCount": 8511,
-      "importEdgeCount": 7066,
+      "edgeCount": 8512,
+      "importEdgeCount": 7067,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "d11a3ba23d8ffd964115b1f162f7d2e98bcce5564b14699355479249007ebecd",
-  "manifestSha256": "6d35694ae1d4dc1b76c0ac1ca5f9c54c5785fe52f947269aa885c8bbdbc7a396"
+  "manifestSha256": "927ae03b4dd5d7aa9c43f6825ff4138209a9d0ec26e2d8fb3009bb8a24066027"
 }
