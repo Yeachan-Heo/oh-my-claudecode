@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "51db48a8f1008f35b3b7dca7941b619697ef1b24",
-    "sourceSha256": "5c73210739f295101a7dc401ea97b976d92347ea554d7122e4ea1a65e6cecdad",
+    "sourceSha256": "049b2f8b6e662c3964c59686d2ddc3d086b700df491969086509fc6974ee4046",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "51db48a8f1008f35b3b7dca7941b619697ef1b24",
-  "sourceSha256": "5c73210739f295101a7dc401ea97b976d92347ea554d7122e4ea1a65e6cecdad",
+  "sourceSha256": "049b2f8b6e662c3964c59686d2ddc3d086b700df491969086509fc6974ee4046",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1469,
-      "total": 1492
+      "srcFiles": 1470,
+      "total": 1493
     },
     "generated": {
       "distFiles": 5613,
@@ -38169,6 +38169,11 @@
         "path": "src/__tests__/cli-win32-warning.test.ts"
       },
       {
+        "id": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/commands-frontmatter-crlf.test.ts"
+      },
+      {
         "id": "src/__tests__/compact-denylist.test.ts",
         "kind": "src",
         "path": "src/__tests__/compact-denylist.test.ts"
@@ -49361,6 +49366,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/commands-frontmatter-crlf.test.ts",
+        "to": "src/commands/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/__tests__/compact-denylist.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -59093,6 +59123,11 @@
       {
         "from": "src/commands/index.ts",
         "to": "src/utils/config-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/commands/index.ts",
+        "to": "src/utils/frontmatter.ts",
         "kind": "imports"
       },
       {
@@ -88552,12 +88587,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7741,
-      "edgeCount": 8545,
-      "importEdgeCount": 7097,
+      "nodeCount": 7742,
+      "edgeCount": 8551,
+      "importEdgeCount": 7103,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "3660cf6e00f22f26bc61048038c5826111a6deb57b2bd2704d916919fe098b90",
-  "manifestSha256": "578c23f88ebb17dfc60920a451d338ebbe2957a841fb78fbdf4d4b59cb58dd94"
+  "inventorySha256": "68d23efa22ec74900c119e0ae8d3af37a71a0327c1121063ea324b6f24f95c88",
+  "manifestSha256": "84a2c8d3d354cf2f25630993bb17553e1027722b05dd039f0b58225fca39f7f7"
 }

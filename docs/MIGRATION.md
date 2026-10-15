@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Rule Glob Brace Alternation](#unreleased-rule-glob-brace-alternation)
 - [Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)](#unreleased-glossary-file-rename-contextmd--glossarymd)
 - [Unreleased: Shipyard Tracker Artifacts and Audit Contract v2](#unreleased-shipyard-tracker-artifacts-and-audit-contract-v2)
 - [Unreleased: SSRF Guard for IPv6 Literals](#unreleased-ssrf-guard-for-ipv6-literals)
@@ -22,6 +23,20 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
 
 ---
+
+## Unreleased: Rule Glob Brace Alternation
+
+Rule frontmatter `globs` and Claude Code `paths` now treat unescaped `{a,b}`
+as alternation. Existing patterns that used comma-bearing braces to match a
+literal path must escape both braces and keep the pattern as one array item:
+
+```yaml
+globs:
+  - 'fixtures/\{a,b\}.json'
+```
+
+Use a quoted inline or block array item as shown; an unquoted comma-separated
+scalar still treats commas outside brace groups as pattern separators.
 
 ## Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)
 

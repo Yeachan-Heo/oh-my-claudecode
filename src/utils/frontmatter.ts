@@ -44,7 +44,7 @@ export function stripOptionalQuotes(value: string): string {
  * Returns { metadata, body } where metadata is a flat string map.
  */
 export function parseFrontmatter(content: string): { metadata: Record<string, string>; body: string } {
-  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
+  const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
   const match = content.match(frontmatterRegex);
 
   if (!match) {
@@ -53,7 +53,7 @@ export function parseFrontmatter(content: string): { metadata: Record<string, st
 
   const [, yamlContent, body] = match;
   const metadata: Record<string, string> = {};
-  const lines = yamlContent.split('\n');
+  const lines = yamlContent.split(/\r?\n/);
   const rootLine = lines.find((line) => {
     const trimmed = line.trimStart();
     return trimmed.length > 0 && !trimmed.startsWith('#') && trimmed.includes(':');
