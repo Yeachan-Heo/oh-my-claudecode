@@ -405,4 +405,73 @@ describe("jev active-mode subprocess repro", () => {
     ).toContain("code-review");
     expect(active.stdout).toBe(baseline.stdout);
   }, 15000);
+
+  it("pre-tool-enforcer.mjs: plan mode with OMC_JEV_PLAN_MODE=shadow keeps the requested model and logs shadow", async () => {
+    const input = { ...taskInput("Agent"), permission_mode: "plan" };
+    const baseline = await runScript("pre-tool-enforcer.mjs", input, env, cwd);
+    const planShadow = await runScript(
+      "pre-tool-enforcer.mjs",
+      input,
+      { ...env, OMC_JEV: "model-routing:active", OMC_JEV_PLAN_MODE: "shadow" },
+      cwd,
+    );
+    expect(baseline.exitCode, baseline.stderr).toBe(0);
+    expect(planShadow.exitCode, planShadow.stderr).toBe(0);
+    expect(planShadow.stdout).toBe(baseline.stdout);
+    await waitForShadowLog("model-routing");
+    expect(requests.some((entry) => "model-tier" in entry.body.questions)).toBe(
+      true,
+    );
+  }, 15000);
+
+  it("pre-tool-enforcer.mjs: plan mode without OMC_JEV_PLAN_MODE still lets the active point override the model", async () => {
+    const input = { ...taskInput("Agent"), permission_mode: "plan" };
+    const result = await runScript(
+      "pre-tool-enforcer.mjs",
+      input,
+      { ...env, OMC_JEV: "model-routing:active" },
+      cwd,
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.updatedInput).toEqual({
+      ...input.toolInput,
+      model: "opus",
+    });
+  }, 15000);
+
+  it("pre-tool-enforcer.mjs: plan mode with OMC_JEV_PLAN_MODE=off sends no Jev request", async () => {
+    const input = { ...taskInput("Agent"), permission_mode: "plan" };
+    const baseline = await runScript("pre-tool-enforcer.mjs", input, env, cwd);
+    const planOff = await runScript(
+      "pre-tool-enforcer.mjs",
+      input,
+      { ...env, OMC_JEV: "all:active", OMC_JEV_PLAN_MODE: "off" },
+      cwd,
+    );
+    expect(planOff.exitCode, planOff.stderr).toBe(0);
+    expect(planOff.stdout).toBe(baseline.stdout);
+    // A detached shadow child would post after the hook exits; give it time.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(requests).toHaveLength(0);
+  }, 15000);
+
+  it("keyword-detector.mjs: plan mode with OMC_JEV_PLAN_MODE=shadow keeps the baseline skill when active Jev says none", async () => {
+    choice = "none";
+    const input = { ...keywordInput(), permission_mode: "plan" };
+    const baseline = await runScript("keyword-detector.mjs", input, env, cwd);
+    const planShadow = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "skill-trigger:active", OMC_JEV_PLAN_MODE: "shadow" },
+      cwd,
+    );
+    expect(baseline.exitCode, baseline.stderr).toBe(0);
+    expect(planShadow.exitCode, planShadow.stderr).toBe(0);
+    expect(
+      JSON.parse(baseline.stdout).hookSpecificOutput.additionalContext,
+    ).toContain("code-review");
+    expect(planShadow.stdout).toBe(baseline.stdout);
+    await waitForShadowLog("skill-trigger");
+    expect(requests).toHaveLength(1);
+  }, 15000);
 });
