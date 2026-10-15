@@ -142,6 +142,8 @@ export function splitFlowSequenceItems(inner: string): string[] {
       current += char;
       if (quote === '"' && char === '\\' && i + 1 < inner.length) {
         current += inner[++i];
+      } else if (quote === "'" && char === "'" && inner[i + 1] === "'") {
+        current += inner[++i];
       } else if (char === quote) {
         quote = null;
       }
