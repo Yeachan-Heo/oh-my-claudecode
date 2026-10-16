@@ -40,37 +40,95 @@ export function stripOptionalQuotes(value: string): string {
 }
 
 /** `|` / `>` block scalar header with optional chomping/indent indicators and comment. */
-const BLOCK_SCALAR_HEADER = /^([|>])(?:[+-][1-9]?|[1-9][+-]?)?(?:\s+#.*)?$/;
+const BLOCK_SCALAR_HEADER = /^([|>])(?:(?:([+-])([1-9])?)|(?:([1-9])([+-])?))?(?:[ \t]+#.*)?$/;
 
-/**
- * Join the indented lines of a block scalar: `|` keeps line breaks, `>` folds
- * single breaks into spaces. Trailing breaks are dropped (values are flat strings).
- */
-function readBlockScalar(blockLines: string[], folded: boolean): string {
-  const indents = blockLines.filter((l) => l.trim() !== '').map((l) => l.length - l.trimStart().length);
-  const contentIndent = indents.length > 0 ? Math.min(...indents) : 0;
-  const rows = blockLines.map((l) => l.slice(Math.min(contentIndent, l.length - l.trimStart().length)).trimEnd());
-  if (!folded) return rows.join('\n').replace(/\n+$/, '');
+interface BlockScalarHeader {
+  folded: boolean;
+  chomping: 'clip' | 'keep' | 'strip';
+  indentIndicator?: number;
+}
 
-  let out = '';
-  let pendingBreaks = 0;
+function parseBlockScalarHeader(rawValue: string): BlockScalarHeader | null {
+  const match = BLOCK_SCALAR_HEADER.exec(rawValue);
+  if (!match) return null;
+
+  const chompingIndicator = match[2] ?? match[5];
+  const indentIndicator = match[3] ?? match[4];
+  return {
+    folded: match[1] === '>',
+    chomping: chompingIndicator === '+' ? 'keep' : chompingIndicator === '-' ? 'strip' : 'clip',
+    ...(indentIndicator ? { indentIndicator: Number(indentIndicator) } : {}),
+  };
+}
+
+interface BlockScalarRow {
+  text: string;
+  moreIndented: boolean;
+}
+
+/** Read literal/folded block lines and apply YAML chomping to their final breaks. */
+function readBlockScalar(blockLines: string[], header: BlockScalarHeader, parentIndent: number): string {
+  const nonBlankIndents = blockLines.filter((line) => line.trim() !== '').map((line) => line.length - line.trimStart().length);
+  const contentIndent =
+    header.indentIndicator === undefined ? (nonBlankIndents[0] ?? parentIndent + 1) : parentIndent + header.indentIndicator;
+  const rows: BlockScalarRow[] = blockLines.map((line) => {
+    if (line.trim() === '') return { text: '', moreIndented: false };
+    const indent = line.length - line.trimStart().length;
+    return {
+      text: line.slice(Math.min(contentIndent, indent)),
+      moreIndented: indent > contentIndent,
+    };
+  });
+
+  let value: string;
+  if (header.folded) {
+    value = foldBlockScalarRows(rows);
+  } else {
+    value = rows.map((row) => row.text).join('\n') + (rows.length > 0 ? '\n' : '');
+  }
+
+  if (header.chomping === 'keep') return value;
+  const withoutTrailingBreaks = value.replace(/\n+$/, '');
+  if (header.chomping === 'strip' || !rows.some((row) => row.text !== '')) return withoutTrailingBreaks;
+  return `${withoutTrailingBreaks}\n`;
+}
+
+function foldBlockScalarRows(rows: BlockScalarRow[]): string {
+  let value = '';
+  let previous: BlockScalarRow | undefined;
+  let pendingEmptyLines = 0;
+
   for (const row of rows) {
-    if (row === '') {
-      pendingBreaks++;
+    if (row.text === '') {
+      pendingEmptyLines++;
       continue;
     }
-    if (out) out += pendingBreaks > 0 ? '\n'.repeat(pendingBreaks) : ' ';
-    pendingBreaks = 0;
-    out += row;
+
+    if (!previous) {
+      value += '\n'.repeat(pendingEmptyLines);
+    } else if (pendingEmptyLines > 0) {
+      const preservedBreak = previous.moreIndented || row.moreIndented ? 1 : 0;
+      value += '\n'.repeat(pendingEmptyLines + preservedBreak);
+    } else {
+      value += previous.moreIndented || row.moreIndented ? '\n' : ' ';
+    }
+
+    value += row.text;
+    previous = row;
+    pendingEmptyLines = 0;
   }
-  return out;
+
+  return value + '\n'.repeat(previous ? pendingEmptyLines + 1 : pendingEmptyLines);
 }
 
 /**
  * Parse YAML-like frontmatter from markdown content.
  * Returns { metadata, body } where metadata is a flat string map.
  */
-export function parseFrontmatter(content: string): { metadata: Record<string, string>; body: string } {
+export function parseFrontmatter(content: string): {
+  metadata: Record<string, string>;
+  body: string;
+} {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
   const match = content.match(frontmatterRegex);
 
@@ -105,18 +163,17 @@ export function parseFrontmatter(content: string): { metadata: Record<string, st
       const key = line.slice(0, colonIndex).trim();
       const rawValue = line.slice(colonIndex + 1).trim();
 
-      const blockHeader = BLOCK_SCALAR_HEADER.exec(rawValue);
+      const blockHeader = parseBlockScalarHeader(rawValue);
       if (blockHeader) {
         // `key: >-` / `key: |` — the value is the more-indented lines that follow.
         const blockLines: string[] = [];
         while (
           lineIndex + 1 < lines.length &&
-          (lines[lineIndex + 1].trim() === '' ||
-            lines[lineIndex + 1].length - lines[lineIndex + 1].trimStart().length > rootIndent!)
+          (lines[lineIndex + 1].trim() === '' || lines[lineIndex + 1].length - lines[lineIndex + 1].trimStart().length > rootIndent!)
         ) {
           blockLines.push(lines[++lineIndex]);
         }
-        metadata[key] = readBlockScalar(blockLines, blockHeader[1] === '>');
+        metadata[key] = readBlockScalar(blockLines, blockHeader, rootIndent!);
         continue;
       }
 
