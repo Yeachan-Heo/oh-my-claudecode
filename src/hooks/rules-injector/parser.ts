@@ -8,6 +8,7 @@
  */
 
 import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
+import { stripLeadingUtf8Bom } from '../../utils/frontmatter.js';
 
 /**
  * Parse YAML frontmatter from rule file content.
@@ -21,7 +22,7 @@ import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
 export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
   // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
-  const match = content.replace(/^\uFEFF/, '').match(frontmatterRegex);
+  const match = stripLeadingUtf8Bom(content).match(frontmatterRegex);
 
   if (!match) {
     return { metadata: {}, body: content };

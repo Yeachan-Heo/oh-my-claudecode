@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { stripOptionalQuotes, parseFrontmatter, parseFrontmatterAliases, parseFrontmatterList, splitFlowSequenceItems } from '../frontmatter.js';
+import { stripLeadingUtf8Bom, stripOptionalQuotes, parseFrontmatter, parseFrontmatterAliases, parseFrontmatterList, splitFlowSequenceItems } from '../frontmatter.js';
 
 describe('stripOptionalQuotes', () => {
   it('strips double quotes', () => {
@@ -354,9 +354,14 @@ describe('parseFrontmatterList quoted commas', () => {
 
 describe('parseFrontmatter UTF-8 BOM', () => {
   it('parses frontmatter that follows a leading BOM', () => {
-    expect(parseFrontmatter('﻿---\nname: x\ndescription: hello\n---\nbody')).toEqual({
+    expect(parseFrontmatter('\uFEFF---\nname: x\ndescription: hello\n---\nbody\uFEFFtail')).toEqual({
       metadata: { name: 'x', description: 'hello' },
-      body: 'body',
+      body: 'body\uFEFFtail',
     });
+  });
+
+  it('strips exactly one BOM only at the beginning', () => {
+    expect(stripLeadingUtf8Bom('\uFEFF\uFEFFbody\uFEFF')).toBe('\uFEFFbody\uFEFF');
+    expect(stripLeadingUtf8Bom('body\uFEFF')).toBe('body\uFEFF');
   });
 });
