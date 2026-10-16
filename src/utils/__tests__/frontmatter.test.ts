@@ -351,3 +351,40 @@ describe('parseFrontmatterList quoted commas', () => {
     expect(parseFrontmatterList('[]')).toEqual([]);
   });
 });
+
+describe('parseFrontmatter block scalars', () => {
+  const parse = (yaml: string) => parseFrontmatter(`---\n${yaml}\n---\nbody`).metadata;
+
+  it('folds `>-` descriptions into one line', () => {
+    expect(parse('name: x\ndescription: >-\n  First part\n  second part\nmodel: opus')).toEqual({
+      name: 'x',
+      description: 'First part second part',
+      model: 'opus',
+    });
+  });
+
+  it('folds `>` descriptions and keeps blank-line paragraph breaks', () => {
+    expect(parse('description: >\n  One\n  two\n\n  three\n')).toEqual({ description: 'One two\nthree' });
+  });
+
+  it('keeps line breaks for `|` literals', () => {
+    expect(parse('description: |\n  line one\n    indented\n  line two')).toEqual({
+      description: 'line one\n  indented\nline two',
+    });
+  });
+
+  it('accepts chomping and indentation indicators and a trailing comment', () => {
+    expect(parse('description: |+2 # note\n  kept')).toEqual({ description: 'kept' });
+  });
+
+  it('parses CRLF block scalars', () => {
+    expect(parseFrontmatter('---\r\ndescription: >-\r\n  a\r\n  b\r\nname: x\r\n---\r\nbody').metadata).toEqual({
+      description: 'a b',
+      name: 'x',
+    });
+  });
+
+  it('does not treat a quoted or plain `>` text value as a block scalar', () => {
+    expect(parse('description: ">"\nargument-hint: a > b')).toEqual({ description: '>', 'argument-hint': 'a > b' });
+  });
+});

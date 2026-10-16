@@ -39,6 +39,33 @@ export function stripOptionalQuotes(value: string): string {
   return unquoteYamlScalar(trimmed).trim();
 }
 
+/** `|` / `>` block scalar header with optional chomping/indent indicators and comment. */
+const BLOCK_SCALAR_HEADER = /^([|>])(?:[+-][1-9]?|[1-9][+-]?)?(?:\s+#.*)?$/;
+
+/**
+ * Join the indented lines of a block scalar: `|` keeps line breaks, `>` folds
+ * single breaks into spaces. Trailing breaks are dropped (values are flat strings).
+ */
+function readBlockScalar(blockLines: string[], folded: boolean): string {
+  const indents = blockLines.filter((l) => l.trim() !== '').map((l) => l.length - l.trimStart().length);
+  const contentIndent = indents.length > 0 ? Math.min(...indents) : 0;
+  const rows = blockLines.map((l) => l.slice(Math.min(contentIndent, l.length - l.trimStart().length)).trimEnd());
+  if (!folded) return rows.join('\n').replace(/\n+$/, '');
+
+  let out = '';
+  let pendingBreaks = 0;
+  for (const row of rows) {
+    if (row === '') {
+      pendingBreaks++;
+      continue;
+    }
+    if (out) out += pendingBreaks > 0 ? '\n'.repeat(pendingBreaks) : ' ';
+    pendingBreaks = 0;
+    out += row;
+  }
+  return out;
+}
+
 /**
  * Parse YAML-like frontmatter from markdown content.
  * Returns { metadata, body } where metadata is a flat string map.
@@ -63,7 +90,8 @@ export function parseFrontmatter(content: string): { metadata: Record<string, st
   let flowDepth = 0;
   let quote: "'" | '"' | null = null;
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex];
     const trimmed = line.trimStart();
     const indent = line.length - trimmed.length;
 
@@ -75,9 +103,24 @@ export function parseFrontmatter(content: string): { metadata: Record<string, st
       if (colonIndex === -1) continue;
 
       const key = line.slice(0, colonIndex).trim();
-      const value = stripOptionalQuotes(line.slice(colonIndex + 1));
+      const rawValue = line.slice(colonIndex + 1).trim();
 
-      metadata[key] = value;
+      const blockHeader = BLOCK_SCALAR_HEADER.exec(rawValue);
+      if (blockHeader) {
+        // `key: >-` / `key: |` — the value is the more-indented lines that follow.
+        const blockLines: string[] = [];
+        while (
+          lineIndex + 1 < lines.length &&
+          (lines[lineIndex + 1].trim() === '' ||
+            lines[lineIndex + 1].length - lines[lineIndex + 1].trimStart().length > rootIndent!)
+        ) {
+          blockLines.push(lines[++lineIndex]);
+        }
+        metadata[key] = readBlockScalar(blockLines, blockHeader[1] === '>');
+        continue;
+      }
+
+      metadata[key] = stripOptionalQuotes(rawValue);
     } else {
       // Inside an unterminated multiline flow collection ({...} / [...]) every line is a
       // continuation member, never a root mapping key — even when it shares the root
