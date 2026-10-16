@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-16T02:32:19.904Z",
+  "generatedAt": "2026-10-16T02:33:57.022Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "2fbdf40a69c0ba98f5f2cb1bf9ff81aee1b4befb",
-    "sourceSha256": "ce3253935404cd35125bef5b169356d7504fc6eafb74bfb19eef59b424aaf92f",
-    "generatedAt": "2026-10-16T02:32:19.904Z",
+    "sourceSha256": "fa92b4512b56f2ebff455734c80eda78703699a8286c546a872bcf2f4997b2b9",
+    "generatedAt": "2026-10-16T02:33:57.022Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "2fbdf40a69c0ba98f5f2cb1bf9ff81aee1b4befb",
-  "sourceSha256": "ce3253935404cd35125bef5b169356d7504fc6eafb74bfb19eef59b424aaf92f",
+  "sourceSha256": "fa92b4512b56f2ebff455734c80eda78703699a8286c546a872bcf2f4997b2b9",
   "counts": {
     "public": {
       "skills": 48,
@@ -27,9 +27,9 @@
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
-      "templateHooks": 23,
+      "templateHooks": 24,
       "srcFiles": 1470,
-      "total": 1493
+      "total": 1494
     },
     "generated": {
       "distFiles": 5613,
@@ -716,6 +716,7 @@
       "templates/hooks/lib/state-lock.mjs",
       "templates/hooks/lib/state-root.mjs",
       "templates/hooks/lib/stdin.mjs",
+      "templates/hooks/lib/utf8-bom.mjs",
       "templates/hooks/lib/workflow-profile-runtime.mjs",
       "templates/hooks/lib/workflow-stage-prompts.mjs",
       "templates/hooks/persistent-mode.mjs",
@@ -45471,6 +45472,11 @@
         "path": "templates/hooks/lib/stdin.mjs"
       },
       {
+        "id": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/lib/utf8-bom.mjs"
+      },
+      {
         "id": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/workflow-profile-runtime.mjs"
@@ -87233,6 +87239,16 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/lib/utf8-bom.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/utf8-bom.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
         "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "to": "external:child_process",
         "kind": "imports"
@@ -88639,12 +88655,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7744,
-      "edgeCount": 8559,
+      "nodeCount": 7745,
+      "edgeCount": 8561,
       "importEdgeCount": 7111,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "e2933f8521a9f83fcb828abe4d2a8ee975b45e0aa50cd7d3e7893eb5d6a79a07",
-  "manifestSha256": "14e736b8330e851d54bccd496a485b3839f87604400b2dc2299d87706efbcf7e"
+  "inventorySha256": "73b3fd2cc6b6f3994988753801b31bda91c92604b0c9d45ddb3fc74096e9fcb5",
+  "manifestSha256": "5461b77c344cf8193d54aefde0bb667f56148093f618dbdd1e40f7c445a5c063"
 }
