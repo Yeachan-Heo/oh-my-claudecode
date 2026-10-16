@@ -1166,6 +1166,24 @@ describe('shouldAttemptAdaptiveRetry', () => {
 });
 
 describe('pane readiness startup banners', () => {
+  it('recognizes Codex 0.162 folder trust without treating it as task-ready', () => {
+    const capture = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      'Continue only if you trust these files. Your',
+      'trust decision will be saved.',
+      '› 1. Trust and continue', '  2. Quit',
+      'enter continue · esc quit',
+    ].join('\n');
+    expect(paneHasTrustPrompt(capture, 'codex')).toBe(true);
+    expect(paneLooksReady(capture, 'codex')).toBe(false);
+    expect(paneHasActiveTask(capture, 'codex')).toBe(false);
+    expect(paneHasTrustPrompt(capture, 'claude')).toBe(false);
+  });
+
   it('does not treat Claude bypass-permissions startup banner as ready', () => {
     const capture = [
       'Read .omc/state/team/example/workers/worker-1/inbox.md, execute now, report concrete progress.',

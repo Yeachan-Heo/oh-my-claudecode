@@ -185,6 +185,15 @@ import { createTaskRecord, validateTaskDependencies } from './state/tasks.js';
 function workerInstructionStateRoot(cwd: string, teamName: string): string {
   return process.platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
 }
+
+function startupInboxTrigger(cwd: string, teamName: string, workerName: string, attemptId: string): string {
+  const suffix = ` [launch:${attemptId.slice(0, 12)}]`;
+  const message = generateTriggerMessage(teamName, workerName, workerInstructionStateRoot(cwd, teamName)) + suffix;
+  if (process.platform !== 'win32' || message.length <= 200) return message;
+  // Both initial and recovery launches explicitly supply this environment variable.
+  // Name it in prose so the instruction works with PowerShell, cmd, and Bash.
+  return `Read workers/${workerName}/inbox.md under the OMC_TEAM_STATE_ROOT environment variable; execute now, report concrete progress.${suffix}`;
+}
 import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity, type OwnerEpochRecord, type OwnerFence } from './team-owner-epoch.js';
 import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
 import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
@@ -1544,7 +1553,6 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   const instruction = buildV2TaskInstruction(
     opts.teamName, opts.workerName, opts.task, opts.taskId, opts.agentType, cliOutputContract,
   );
-  const instructionStateRoot = workerInstructionStateRoot(opts.cwd, opts.teamName);
   const startupBaseline = await captureWorkerStartupBaseline(
     opts.teamName, opts.workerName, opts.taskId, opts.cwd,
   );
@@ -1615,8 +1623,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     }
     throw error;
   }
-  const inboxTriggerMessage = `${generateTriggerMessage(opts.teamName, opts.workerName, instructionStateRoot)} ` +
-    `[launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
+  const inboxTriggerMessage = startupInboxTrigger(opts.cwd, opts.teamName, opts.workerName, startupContext.attempt.attempt_id);
   const cleanupStartedLaunch = async (reason: string): Promise<void> => {
     const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(startupContext.attempt, reason, async () => {
       try {
@@ -3631,11 +3638,9 @@ export async function executeRecoverDeadWorkerV2Owner(
             // identity has been verified live, so waiting for fabricated progress
             // would turn a successful idle recovery into a deterministic timeout.
           } else {
-          const recoveryTriggerMessage = `${generateTriggerMessage(
-            input.teamName,
-            sagaInput.workerName,
-            workerInstructionStateRoot(input.cwd, input.teamName),
-          )} [launch:${startupContext.attempt.attempt_id.slice(0, 12)}]`;
+          const recoveryTriggerMessage = startupInboxTrigger(
+            input.cwd, input.teamName, sagaInput.workerName, startupContext.attempt.attempt_id,
+          );
           const outcome = await queueInboxInstruction({
             teamName: input.teamName,
             workerName: sagaInput.workerName,

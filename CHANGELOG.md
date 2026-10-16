@@ -1,3 +1,12 @@
+## [Unreleased]
+
+### Fixed
+
+- Recognize Codex 0.162 folder-trust dialogs and report an untrusted workspace instead of typing task text into the menu or granting trust automatically.
+- Repair native Windows worker supervisor generation, console handle isolation, process cleanup, and provider exit status.
+- Compress the source-bound supervisor invocation to fit Windows command-line limits and reject unresolved native provider executables.
+- Submit tmux startup inboxes with Enter; shorten only overflowing Windows inbox notifications using the supplied state-root environment variable.
+
 # oh-my-claudecode v5.7.3: Retire agent variant names, parallel consensus reviews
 
 ## Release Notes

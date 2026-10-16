@@ -2884,9 +2884,9 @@ describe('worker launch acknowledgement', () => {
 
   it('binds the Windows supervisor source, environment, Job Object, and argv protocol', () => {
     const source = buildWindowsSupervisorSource();
-    const create = source.indexOf('CreateProcessW(');
-    const assign = source.indexOf('AssignProcessToJobObject(');
-    const resume = source.indexOf('ResumeThread(');
+    const create = source.indexOf('[O]::CreateConsoleProcess(');
+    const assign = source.indexOf('[O]::AssignProcessToJobObject(');
+    const resume = source.indexOf('[O]::ResumeThread(');
 
     expect(create).toBeGreaterThan(-1);
     expect(source).toContain('0x00000400');
