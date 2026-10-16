@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-16T20:48:16.652Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "c6a3db0c915d5a20530d9cb6d529ebc804032f61",
-    "sourceSha256": "7ac29107293b6b62067b96343cc309a07bf43806573a5fc2d8e01ae7fb5f0e7a",
-    "generatedAt": null,
+    "sourceSha256": "8be14e3e4e2a7b7344f0723225f5b86ac995a4f474e9c24dfc7dd3088ee43cae",
+    "generatedAt": "2026-10-16T20:48:16.652Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "c6a3db0c915d5a20530d9cb6d529ebc804032f61",
-  "sourceSha256": "7ac29107293b6b62067b96343cc309a07bf43806573a5fc2d8e01ae7fb5f0e7a",
+  "sourceSha256": "8be14e3e4e2a7b7344f0723225f5b86ac995a4f474e9c24dfc7dd3088ee43cae",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 340,
+      "hookFiles": 339,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1475,
-      "total": 1499
+      "srcFiles": 1474,
+      "total": 1498
     },
     "generated": {
       "distFiles": 5613,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 340,
+    "hookFiles": 339,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -243,7 +243,6 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
-      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -6637,7 +6636,6 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
-      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -41399,11 +41397,6 @@
         "path": "src/hooks/factcheck/__tests__/sentinel.test.ts"
       },
       {
-        "id": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts"
-      },
-      {
         "id": "src/hooks/factcheck/checks.ts",
         "kind": "hook",
         "path": "src/hooks/factcheck/checks.ts"
@@ -64884,16 +64877,6 @@
         "from": "src/hooks/factcheck/__tests__/sentinel.test.ts",
         "to": "src/hooks/factcheck/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "to": "src/hooks/factcheck/config.ts",
-        "kind": "imports"
       },
       {
         "from": "src/hooks/factcheck/checks.ts",
@@ -88772,12 +88755,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7750,
-      "edgeCount": 8579,
-      "importEdgeCount": 7129,
+      "nodeCount": 7749,
+      "edgeCount": 8577,
+      "importEdgeCount": 7127,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "a705f0eac85d39096236435e132b3fb36e310118d123707ab9c9bfbd9eebed76",
-  "manifestSha256": "3aab2b3123d55df1eee5f35991f2c1927f972707688582bbec311babcabe67b3"
+  "inventorySha256": "3953bcd175ebdb400a73f1e7427b0c23dd8ff64afdb6c11cbfdd160d7cc17295",
+  "manifestSha256": "21669c3730060e27e5b378cc1567ecaa94f92a30f8dc986f8d59b5fd95917ea7"
 }
