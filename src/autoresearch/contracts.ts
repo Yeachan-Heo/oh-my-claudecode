@@ -105,7 +105,7 @@ function parseSimpleYamlFrontmatter(frontmatter: string): Record<string, unknown
     }
 
     const [, key, rawValue] = nestedMatch;
-    const value = rawValue.replace(/^['"]|['"]$/g, '');
+    const value = rawValue.replace(/^(['"])(.*)\1$/, '$2');
     if (line.startsWith(' ') || line.startsWith('\t')) {
       if (!currentSection) {
         throw contractError(`Nested sandbox.md frontmatter key requires a parent section: ${trimmed}`);
