@@ -177,41 +177,137 @@ psm_create_feature_worktree() {
     return 0
 }
 
-# Remove a worktree
-# Usage: psm_remove_worktree <local_repo> <worktree_path>
-psm_remove_worktree() {
-    local local_repo="$1"
-    local worktree_path="$2"
+# Resolve without accepting a symlink anywhere in the directory path.
+psm_physical_directory() {
+    local logical physical
+    logical=$(cd -- "$1" && pwd -L) || return 1
+    physical=$(cd -- "$1" && pwd -P) || return 1
+    [[ "$logical" == "$physical" ]] || return 1
+    printf '%s\n' "$physical"
+}
 
-    if [[ ! -d "$worktree_path" ]]; then
-        echo "not_found|$worktree_path"
-        return 1
-    fi
+# Prove Git membership before trusting a path or writing its private metadata.
+psm_worktree_identity() {
+    local source="$1" candidate="$2" root common private branch head listing line listed top
+    source=$(psm_physical_directory "$source") || return 1
+    candidate=$(psm_physical_directory "$candidate") || return 1
+    root=$(psm_get_worktree_root) || return 1
+    root=$(psm_physical_directory "$root") || return 1
+    [[ "$candidate" == "$root"/* && "$candidate" != "$source" && "$candidate" != "$(pwd -P)" ]] || return 1
+    [[ "$candidate" != / && "$candidate" != "${HOME:-}" && -f "$candidate/.git" && ! -L "$candidate/.git" ]] || return 1
+    common=$(git -C "$source" rev-parse --path-format=absolute --git-common-dir) || return 1
+    common=$(psm_physical_directory "$common") || return 1
+    listed=$(git -C "$candidate" rev-parse --path-format=absolute --git-common-dir) || return 1
+    listed=$(psm_physical_directory "$listed") || return 1
+    [[ "$listed" == "$common" ]] || return 1
+    top=$(git -C "$candidate" rev-parse --show-toplevel) || return 1
+    top=$(psm_physical_directory "$top") || return 1
+    [[ "$top" == "$candidate" ]] || return 1
+    private=$(git -C "$candidate" rev-parse --absolute-git-dir) || return 1
+    private=$(psm_physical_directory "$private") || return 1
+    [[ "$private" == "$common"/worktrees/* && "$private" != "$common"/worktrees ]] || return 1
+    listing=$(git -C "$source" worktree list --porcelain) || return 1
+    local found=false matching=false
+    while IFS= read -r line; do
+        case "$line" in
+            'worktree '*)
+                matching=false
+                listed=$(psm_physical_directory "${line#worktree }") || return 1
+                if [[ "$listed" == "$candidate" ]]; then found=true; matching=true; fi ;;
+            locked*|prunable*) [[ "$matching" != true ]] || return 1 ;;
+        esac
+    done <<< "$listing"
+    [[ "$found" == true ]] || return 1
+    branch=$(git -C "$candidate" symbolic-ref --quiet --short HEAD) || return 1
+    head=$(git -C "$candidate" rev-parse --verify HEAD) || return 1
+    [[ -n "$branch" && "$head" =~ ^[0-9a-f]{40}$ ]] || return 1
+    jq -cn --arg common "$common" --arg path "$candidate" --arg private "$private" \
+        --arg branch "$branch" --arg head "$head" \
+        '{source_common_dir:$common,worktree:$path,git_dir:$private,branch:$branch,created_head:$head}'
+}
 
-    # Check for uncommitted changes
-    if [[ -d "$worktree_path/.git" ]] || [[ -f "$worktree_path/.git" ]]; then
-        cd "$worktree_path" || return 1
-        if [[ -n $(git status --porcelain 2>/dev/null) ]]; then
-            echo "dirty|$worktree_path"
-            return 1
-        fi
-    fi
+# New sessions only. Never manufacture ownership for an existing registry entry.
+psm_create_worktree_owner() {
+    local id="$1" identity private temporary token owner target
+    identity=$(psm_worktree_identity "$2" "$3") || return 1
+    private=$(jq -er '.git_dir' <<< "$identity") || return 1
+    target="$private/psm-owner.json"
+    [[ ! -e "$target" && ! -L "$target" ]] || return 1
+    temporary=$(mktemp "$private/.psm-owner.XXXXXXXX") || return 1
+    token=$(printf '%s' "$temporary" | git hash-object --stdin) || { rm -f -- "$temporary"; return 1; }
+    rm -f -- "$temporary"
+    [[ "$token" =~ ^[0-9a-f]{40}$ ]] || return 1
+    [[ -n "${4:-}" ]] || return 1
+    owner=$(jq -c --arg id "$id" --arg token "$token" --arg tmux "$4" \
+        '. + {schema:1,session_id:$id,token:$token,tmux:$tmux}' <<< "$identity") || return 1
+    # Exclusive creation + readback: a partial/orphan file never grants cleanup.
+    (umask 077; set -o noclobber; printf '%s\n' "$owner" > "$target") || return 1
+    [[ ! -L "$target" && "$(jq -cS . "$target")" == "$(jq -cS . <<< "$owner")" ]] || return 1
+    printf '%s\n' "$owner"
+}
 
-    cd "$local_repo" || return 1
-
-    # Validate path is under PSM worktree root before any deletion
-    if validate_worktree_path "$worktree_path"; then
-        git worktree remove "$worktree_path" --force 2>/dev/null || {
-            # Force remove the directory if git worktree remove fails
-            rm -rf "$worktree_path"
-        }
+# Removal requires matching new-session ownership on both sides, not a prefix.
+# Usage: psm_remove_worktree <local_repo> <worktree_path> <registered_session_json>
+psm_session_inactive() {
+    local name="$1" sessions rc line
+    if sessions=$(LC_ALL=C tmux list-sessions -F '#{session_name}' 2>&1); then
+        [[ -n "$sessions" ]] || return 1
+        while IFS= read -r line; do
+            [[ -n "$line" && "$line" != "$name" ]] || return 1
+        done <<< "$sessions"
+        return 0
     else
-        echo "error|Refusing to delete path outside worktree root: $worktree_path" >&2
-        return 1
+        rc=$?
+        [[ "$rc" -eq 1 ]] || return 1
+        case "$sessions" in
+            'no server running on '*) return 0 ;;
+            'error connecting to '*'(No such file or directory)') return 0 ;;
+            *) return 1 ;;
+        esac
     fi
+}
 
-    echo "removed|$worktree_path"
-    return 0
+psm_remove_worktree() {
+    local local_repo="$1" worktree_path="$2" session="${3:-}" identity owner target expected actual status tmux_name base tip archive registered id rc
+    identity=$(psm_worktree_identity "$local_repo" "$worktree_path") || return 1
+    owner=$(jq -ce '.cleanup_owner | select(.schema==1 and (.token|type=="string" and length>0))' <<< "$session") || return 1
+    target="$(jq -er '.git_dir' <<< "$identity")/psm-owner.json"
+    [[ -f "$target" && ! -L "$target" ]] || return 1
+    [[ "$(jq -cS . "$target")" == "$(jq -cS . <<< "$owner")" ]] || return 1
+    [[ "$(jq -er '.id' <<< "$session")" == "$(jq -er '.session_id' <<< "$owner")" ]] || return 1
+    expected=$(jq -cS 'del(.schema,.token,.session_id,.created_head,.tmux)' <<< "$owner") || return 1
+    actual=$(jq -cS 'del(.created_head)' <<< "$identity") || return 1
+    [[ "$expected" == "$actual" ]] || return 1
+    worktree_path=$(jq -er '.worktree' <<< "$identity") || return 1
+    tmux_name=$(jq -er '.tmux | strings | select(length>0)' <<< "$session") || return 1
+    [[ "$tmux_name" == "$(jq -er '.tmux' <<< "$owner")" ]] || return 1
+    psm_session_inactive "$tmux_name" || return 1
+    status=$(git -C "$worktree_path" status --porcelain --untracked-files=all --ignored) || return 1
+    [[ -z "$status" ]] || return 1
+    tip=$(git -C "$worktree_path" rev-parse --verify HEAD) || return 1
+    base=$(jq -er '.base | strings | select(length>0 and (startswith("-")|not))' <<< "$session") || return 1
+    base=$(git -C "$local_repo" rev-parse --verify "${base}^{commit}") || return 1
+    if git -C "$local_repo" merge-base --is-ancestor "$tip" "$base"; then
+        :
+    else
+        rc=$?
+        [[ "$rc" -eq 1 ]] || return 1
+        archive=$(jq -er 'select(.metadata.cleanup_archive_confirmed==true) | .metadata.cleanup_archive_ref | strings | select(startswith("refs/tags/psm-archive/"))' <<< "$session") || return 1
+        archive=$(git -C "$local_repo" rev-parse --verify "${archive}^{commit}") || return 1
+        [[ "$archive" == "$tip" ]] || return 1
+    fi
+    id=$(jq -er '.id' <<< "$session") || return 1
+    registered=$(psm_get_session "$id") || return 1
+    [[ "$(jq -cS . <<< "$registered")" == "$(jq -cS . <<< "$session")" ]] || return 1
+    [[ "$(jq -cS . "$target")" == "$(jq -cS . <<< "$owner")" ]] || return 1
+    psm_session_inactive "$tmux_name" || return 1
+    actual=$(git -C "$worktree_path" rev-parse --verify HEAD) || return 1
+    [[ "$actual" == "$tip" ]] || return 1
+    status=$(git -C "$worktree_path" status --porcelain --untracked-files=all --ignored) || return 1
+    [[ -z "$status" ]] || return 1
+    # Git rechecks dirtiness; failures never fall back to filesystem deletion.
+    git -C "$local_repo" worktree remove "$worktree_path" || return 1
+    printf 'removed|%s\n' "$worktree_path"
 }
 
 # List all PSM worktrees

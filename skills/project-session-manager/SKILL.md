@@ -401,24 +401,10 @@ Parse `{{ARGUMENTS}}` to determine:
 
 **Steps**:
 
-1. **Kill tmux session**:
-   ```bash
-   tmux kill-session -t "psm_${session_id//[.:]/_}" 2>/dev/null
-   ```
-
-2. **Remove worktree**:
-   ```bash
-   worktree_path=$(jq -r ".sessions[\"$session_id\"].worktree" ~/.psm/sessions.json)
-   source_repo=$(jq -r ".sessions[\"$session_id\"].source_repo" ~/.psm/sessions.json)
-
-   cd "$source_repo"
-   git worktree remove "$worktree_path" --force
-   ```
-
-3. **Update registry**:
-   ```bash
-   # Remove from sessions.json
-   ```
+1. Stop only the explicitly named non-current tmux session. Stopping a session does not authorize discarding its worktree.
+2. Delegate cleanup to `psm.sh`'s checked removal helper. Require matching new-session ownership in the registry and Git-private `psm-owner.json`, exact source/common-dir/worktree/branch identity, and exclusion of current/main, foreign, linked or uncertain paths. Legacy records without ownership are preserved; never manufacture a token to clean an old session.
+3. Remove only when Git status succeeds and is clean (including untracked and ignored files), the session/executors are conclusively inactive, and the current tip is merged into the recorded base or explicitly archived with a verified ref covering the tip. Ignored local files are retained until separately handled. Use non-force `git worktree remove`; never recursive-delete on failure.
+4. Remove the registry entry only after the checked Git removal succeeds. Otherwise retain the worktree and session record and report why; do not claim successful cleanup.
 
 ### Subcommand: `cleanup`
 
@@ -438,10 +424,11 @@ Parse `{{ARGUMENTS}}` to determine:
    gh issue view <issue_number> --repo <repo> --json closed,state
    ```
 
-4. **Clean up merged/closed sessions**:
-   - Kill tmux session
-   - Remove worktree
-   - Update registry
+4. **Clean up eligible inactive sessions**:
+   - A merged PR or closed issue only selects a candidate; it does not prove local work is integrated or abandoned.
+   - Apply the same dual-ownership, current/main, clean, inactive and merged-or-explicitly-archived checks as `kill`.
+   - Automatic cleanup never stops active sessions. Unknown state means keep.
+   - Count a session as cleaned and update its registry only after successful non-force Git removal. Keep and report failures.
 
 5. **Report**:
    ```
@@ -508,7 +495,7 @@ omc teleport list
 
 # Remove a worktree
 omc teleport remove issue/my-repo-123
-omc teleport remove --force feat/my-repo-my-feature
+omc teleport remove feat/my-repo-my-feature
 ```
 
 ### Options

@@ -126,7 +126,8 @@ Read these files at startup and at the beginning of each iteration:
    ```
    Where `{goal_slug}` is derived from the goal objective (lowercase, underscored). If the branch already exists, skip creation. Persist `goal_slug` in agent-settings.json.
 10. **Mode exclusivity**: Call `state_list_active`. If autopilot or ralph is active, refuse to start.
-11. Write initial state: `state_write(mode='self-improve', active=true, iteration=0, started_at=<now>)`
+11. For a newly initialized run, generate a unique `run_id` and persist it in `state/agent-settings.json` before creating worktrees; resume must retain that same id. A legacy run without one does not gain ownership of existing trees: keep them. Any identity recorded for future fresh trees applies only to those new trees, never retroactively to old paths.
+12. Write initial state: `state_write(mode='self-improve', active=true, iteration=0, started_at=<now>)`
 
 ---
 
@@ -141,6 +142,7 @@ All git operations happen inside the target repo, NOT in the OMC project root.
   ```
   git -C {repo_path} worktree add worktrees/round_{n}_executor_{id} -b experiment/round_{n}_executor_{id} improve/{goal_slug}
   ```
+  Only after a successful fresh add, verify the concrete linked-worktree path and same source Git common-dir. Persist the same ownership record in `<self-improve-root>/state/worktree-owners.json` and the new worktree's Git-private directory (from `git -C {path} rev-parse --absolute-git-dir`) as `self-improve-owner.json`: schema version, `run_id`, `topic_slug`, resolved state root, source common-dir, worktree/private-dir paths, actual branch and `created_head`. Create the private record exclusively; never overwrite an old owner. If either record cannot be written/verified, leave the tree in place and do not launch its executor or claim it is ready. Do not infer ownership from names, backfill legacy paths, or reuse an existing directory. `created_head` is a creation baseline, not a requirement that legitimate future commits never advance.
 - **Winner merges** via `oh-my-claudecode:git-master`:
   ```
   Merge experiment/round_{n}_executor_{winner_id} into improve/{goal_slug} with --no-ff
@@ -161,10 +163,11 @@ Update `state_write(mode='self-improve', active=true, status="running")`.
 
 **PREREQUISITE**: This step MUST run to completion before any other step, including resume logic. It is idempotent and safe to run multiple times.
 
-1. List all worktrees in the target repo: `git -C {repo_path} worktree list`
-2. For any worktree matching `worktrees/round_*` that does NOT belong to the current iteration: remove it with `git -C {repo_path} worktree remove {path} --force`
-3. Run `git -C {repo_path} worktree prune` to clean up stale references
-4. This handles crash recovery — orphaned worktrees from interrupted iterations are cleaned before the new iteration starts
+1. List registered worktrees in the target repo: `git -C {repo_path} worktree list --porcelain`.
+2. A `round_*` name or a different iteration is not ownership proof. Require the state and Git-private ownership records to match each other and the current run/topic plus actual common-dir/path/branch identity; exclude the main/current checkout, other runs, locked worktrees and active executors. Missing legacy ownership or uncertain activity means **keep and report**, not infer abandonment. Never populate missing owner metadata merely to make a cleanup candidate eligible.
+3. Require a successful clean Git status (including untracked **and ignored** files), no active work, and the current branch tip merged into the recorded target or explicitly archived with a verified ref covering that tip. Git/status/ownership/merge errors mean keep. Recheck these facts immediately before removal. Ignored files such as local configuration or build caches are retained until separately handled; they are not automatically disposable.
+4. Remove only that exact eligible path using `git -C {repo_path} worktree remove {path}` without force. A failure preserves the worktree and state/registry references; never use filesystem-deletion fallback or remove metadata on failure. Explicitly discarding work requires separate user authorization and is not part of automatic cleanup. Do not prune unrelated worktrees.
+5. Retained or inconclusive worktrees are reported and excluded from reuse; they do not authorize overwriting an existing path during resume or the next iteration.
 
 ### Step 1 — Refresh State
 
@@ -295,13 +298,9 @@ SKILL.md does this directly (not delegated):
 
 ### Step 10 — Cleanup
 
-Remove worktrees:
-```
-git -C {repo_path} worktree remove worktrees/round_{n}_executor_{id} --force
-git -C {repo_path} worktree prune
-```
+Apply the same ownership, clean/inactive, merged-or-explicitly-archived and non-force policy from Step 0 to each exact current-run worktree. A completed iteration is not proof that every executor path is safe to remove. Preserve and report any uncertain or failed cleanup, including its state references; never force removal, recursively delete it, or claim it was reclaimed.
 
-Update `iteration_state.json` status to `completed`.
+Record `iteration_state.json` as `completed` only for the iteration's work; record cleanup results separately and retain references to every worktree not successfully removed.
 
 ### Step 11 — Stop Condition Check
 

@@ -28,14 +28,21 @@ _psm_add_session_impl() {
     local tmux_session="$7"
     local worktree="$8"
     local source_repo="$9"
-    local metadata="${10:-{}}"
+    local metadata="${10:-}"
+    [[ -n "$metadata" ]] || metadata='{}'
     local provider="${11:-github}"
     local provider_ref="${12:-}"
 
-    local now=$(date -Iseconds)
+    local exists owner now
+    exists=$(jq -r --arg id "$id" '.sessions | has($id)' "$PSM_SESSIONS") || return 1
+    [[ "$exists" == false ]] || return 1
+    jq -e 'type=="object"' <<< "$metadata" >/dev/null || return 1
+    owner=$(psm_create_worktree_owner "$id" "$source_repo" "$worktree" "$tmux_session") || return 1
+    now=$(date -Iseconds) || return 1
 
-    local tmp=$(mktemp)
-    jq --arg id "$id" \
+    local tmp
+    tmp=$(mktemp "${PSM_SESSIONS}.tmp.XXXXXXXX") || return 1
+    if ! jq --arg id "$id" \
        --arg type "$type" \
        --arg project "$project" \
        --arg ref "$ref" \
@@ -48,6 +55,7 @@ _psm_add_session_impl() {
        --arg provider "$provider" \
        --arg provider_ref "$provider_ref" \
        --argjson meta "$metadata" \
+       --argjson owner "$owner" \
        '.sessions[$id] = {
           "id": $id,
           "type": $type,
@@ -63,9 +71,13 @@ _psm_add_session_impl() {
           "state": "active",
           "provider": $provider,
           "provider_ref": $provider_ref,
-          "metadata": $meta
+          "metadata": $meta,
+          "cleanup_owner": $owner
         } | .stats.total_created += 1' \
-       "$PSM_SESSIONS" > "$tmp" && mv "$tmp" "$PSM_SESSIONS"
+       "$PSM_SESSIONS" > "$tmp" || ! mv "$tmp" "$PSM_SESSIONS"; then
+        rm -f -- "$tmp"
+        return 1
+    fi
 }
 
 # Add session to registry (with file locking)
@@ -104,11 +116,20 @@ psm_update_session_state() {
 # Internal: Remove session from registry (must be called via psm_with_lock)
 _psm_remove_session_impl() {
     local id="$1"
+    local expected_owner="${2:-}"
+    if [[ -n "$expected_owner" ]]; then
+        jq -e --arg id "$id" --arg owner "$expected_owner" \
+            '.sessions[$id].cleanup_owner.token == $owner' "$PSM_SESSIONS" >/dev/null || return 1
+    fi
 
-    local tmp=$(mktemp)
-    jq --arg id "$id" \
+    local tmp
+    tmp=$(mktemp "${PSM_SESSIONS}.tmp.XXXXXXXX") || return 1
+    if ! jq --arg id "$id" \
        'del(.sessions[$id]) | .stats.total_cleaned += 1' \
-       "$PSM_SESSIONS" > "$tmp" && mv "$tmp" "$PSM_SESSIONS"
+       "$PSM_SESSIONS" > "$tmp" || ! mv "$tmp" "$PSM_SESSIONS"; then
+        rm -f -- "$tmp"
+        return 1
+    fi
 }
 
 # Remove session from registry (with file locking)
