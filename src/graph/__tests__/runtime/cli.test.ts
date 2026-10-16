@@ -165,6 +165,29 @@ describe('graphCommand run subcommand', () => {
     expect(stderr).toContain('scheduler contract violated');
   });
 
+  it.each(['abc', '10m', '0', '-5', '1.5'])(
+    'rejects invalid --approval-timeout %j instead of waiting forever',
+    async (raw) => {
+      const fixturePath = join(workDir, 'descriptor.json');
+      writeFileSync(fixturePath, JSON.stringify(descriptorInput('run-timeout', 'timeout')));
+      const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`exit:${code}`);
+      }) as never);
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+      try {
+        await expect(
+          parseCli(['run', fixturePath, '--approval-mode', 'remote', '--approval-timeout', raw]),
+        ).rejects.toThrow('exit:1');
+      } finally {
+        exitSpy.mockRestore();
+        stderrSpy.mockRestore();
+      }
+
+      expect(mocks.runGraph).not.toHaveBeenCalled();
+    },
+  );
+
   it('reports a clean nonzero failure for a missing descriptor file', async () => {
     // Arrange
     const missingPath = join(workDir, 'nope.json');

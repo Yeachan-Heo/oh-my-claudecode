@@ -7,6 +7,7 @@
 
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { integerOption } from './utils/integer-option.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -240,7 +241,7 @@ export function graphCommand(): Command {
     .option(
       '--approval-timeout <seconds>',
       'Remote approvals: max seconds to wait for a decision (default: wait forever)',
-      (value: string) => Number(value),
+      integerOption(1),
     )
     .option(
       '--approval-timeout-policy <policy>',
