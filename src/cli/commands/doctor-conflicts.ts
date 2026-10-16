@@ -364,7 +364,7 @@ export function checkEnvFlags(): ConflictReport['envFlags'] {
   const skipHooks: string[] = [];
 
   if (process.env.OMC_SKIP_HOOKS) {
-    skipHooks.push(...process.env.OMC_SKIP_HOOKS.split(',').map(h => h.trim()));
+    skipHooks.push(...process.env.OMC_SKIP_HOOKS.split(',').map(h => h.trim()).filter(Boolean));
   }
 
   return { disableOmc, skipHooks };
