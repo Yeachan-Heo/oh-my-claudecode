@@ -104,8 +104,9 @@ export function withWikiLock<T>(root: string, fn: () => T, options?: WikiLockOpt
  * Expects content starting with `---\n...\n---\n`.
  */
 export function parseFrontmatter(raw: string): { frontmatter: WikiPageFrontmatter; content: string } | null {
-  // Normalize CRLF to LF so files edited on Windows are still parseable
-  const normalized = raw.replace(/\r\n/g, '\n');
+  // Drop a leading UTF-8 BOM and normalize CRLF to LF so files saved by
+  // Windows editors are still parseable
+  const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
 
