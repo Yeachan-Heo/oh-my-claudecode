@@ -237,10 +237,11 @@ node -e "const p=require('path'),f=require('fs'),h=require('os').homedir(),d=pro
 ```
 
 ### Fix: Missing/Outdated CLAUDE.md
-Fetch latest from GitHub and write to `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`:
+Use the active plugin's canonical `omc-setup` flow. For a doctor repair, preserve user content and use the runtime-supplied plugin root:
+```bash
+bash "${OMC_SETUP_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}/scripts/setup-claude-md.sh" global preserve
 ```
-WebFetch(url: "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode/main/docs/CLAUDE.md", prompt: "Return the complete raw markdown content exactly as-is")
-```
+The existing coordinator owns the canonical source, managed companion/import, user-section preservation, backups and rollback. Do not fetch mutable `main`, directly write either CLAUDE file, hand-merge content, guess a plugin root, or fall back to overwrite. If the supplied root, canonical-source handshake or coordinator response cannot be verified, stop and leave the files unchanged. An overwrite is a separate explicit setup choice, not an automatic doctor repair.
 
 ### Fix: Legacy Curl-Installed Content
 
