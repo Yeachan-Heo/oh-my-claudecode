@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-    "sourceSha256": "6581374dd7e412755e002b654eaacb9d5461cb7bd189a40f8b56122ea4be6e4d",
+    "sourceSha256": "f8665ae0254c4ad52ffee0d5b016921ddbef3f5b8737e2932222c665691781c1",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-  "sourceSha256": "6581374dd7e412755e002b654eaacb9d5461cb7bd189a40f8b56122ea4be6e4d",
+  "sourceSha256": "f8665ae0254c4ad52ffee0d5b016921ddbef3f5b8737e2932222c665691781c1",
   "counts": {
     "public": {
       "skills": 48,
@@ -856,6 +856,8 @@
       "scripts/lib/state-root.cjs",
       "scripts/lib/state-root.mjs",
       "scripts/lib/stdin.mjs",
+      "scripts/lib/utf8-bom.d.mts",
+      "scripts/lib/utf8-bom.mjs",
       "scripts/lib/workflow-profile-runtime.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
       "scripts/measure-prompt-ssot.ts",
@@ -37239,6 +37241,16 @@
         "path": "scripts/lib/stdin.mjs"
       },
       {
+        "id": "scripts/lib/utf8-bom.d.mts",
+        "kind": "script",
+        "path": "scripts/lib/utf8-bom.d.mts"
+      },
+      {
+        "id": "scripts/lib/utf8-bom.mjs",
+        "kind": "script",
+        "path": "scripts/lib/utf8-bom.mjs"
+      },
+      {
         "id": "scripts/lib/workflow-profile-runtime.mjs",
         "kind": "script",
         "path": "scripts/lib/workflow-profile-runtime.mjs"
@@ -48188,6 +48200,11 @@
       {
         "from": "scripts/skill-injector.mjs",
         "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/skill-injector.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -65571,6 +65588,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/learner/bridge.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/config.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -68794,6 +68816,11 @@
         "from": "src/hooks/rules-injector/parser.ts",
         "to": "src/hooks/rules-injector/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/rules-injector/parser.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/rules-injector/storage.ts",
@@ -86646,6 +86673,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/utils/frontmatter.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/utils/omc-cli-rendering.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -88587,12 +88619,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7742,
-      "edgeCount": 8551,
-      "importEdgeCount": 7103,
+      "nodeCount": 7744,
+      "edgeCount": 8555,
+      "importEdgeCount": 7107,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "68d23efa22ec74900c119e0ae8d3af37a71a0327c1121063ea324b6f24f95c88",
-  "manifestSha256": "0cf2326073277b80edb3ea375122b1da1d4432735a56232931a783bc45b55a1a"
+  "inventorySha256": "e2933f8521a9f83fcb828abe4d2a8ee975b45e0aa50cd7d3e7893eb5d6a79a07",
+  "manifestSha256": "0460a46a13a655700683101f2fe585f86273c844f2ed8042c035b5fa974dccc2"
 }
