@@ -984,6 +984,61 @@ describe('pre-tool-use packaged artifacts', () => {
     }
   });
 
+  it('guards BOM-prefixed primary skill names and aliases in both runtimes', () => {
+    const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
+    const runtimePath = join(packageRoot, 'scripts', 'pre-tool-enforcer.mjs');
+    const tempDir = mkdtempSync(join(tmpdir(), 'pre-tool-bom-skill-'));
+    const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-bom-skill-home-'));
+    const pluginRoot = join(tempDir, 'plugin');
+    const skillDir = join(pluginRoot, 'skills', 'debug');
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '\uFEFF---\nname: omc-debug\naliases: [zz-bom-alias]\n---\nSkill body\n',
+    );
+    const env = {
+      CLAUDE_PLUGIN_ROOT: pluginRoot,
+      CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+      HOME: fakeHome,
+      USER_TYPE: '',
+    };
+
+    try {
+      for (const scriptPath of [templatePath, runtimePath]) {
+        for (const skill of ['omc-debug', 'zz-bom-alias']) {
+          const output = runPreToolPayload(
+            scriptPath,
+            {
+              tool_name: 'Task',
+              cwd: tempDir,
+              directory: tempDir,
+              tool_input: {
+                subagent_type: `oh-my-claudecode:${skill}`,
+                description: `Run ${skill}`,
+                prompt: `Run the ${skill} skill`,
+              },
+            },
+            env,
+          );
+          const hook = output.hookSpecificOutput as Record<string, unknown>;
+          expect(output.continue).toBe(true);
+          expect(hook.permissionDecision).toBe('deny');
+          expect(String(hook.permissionDecisionReason ?? '')).toContain('[SKILL vs AGENT]');
+        }
+      }
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+      rmSync(fakeHome, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the BOM helpers byte-identical across plugin and standalone runtimes', () => {
+    const scriptsHelperPath = join(packageRoot, 'scripts', 'lib', 'utf8-bom.mjs');
+    const templateHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'utf8-bom.mjs');
+
+    expect(readFileSync(templateHelperPath)).toEqual(readFileSync(scriptsHelperPath));
+  });
+
   it('preserves real-agent precedence when a plugin agent collides with a skill', () => {
     const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
     const runtimePath = join(packageRoot, 'scripts', 'pre-tool-enforcer.mjs');
@@ -1033,6 +1088,7 @@ describe('pre-tool-use packaged artifacts', () => {
     const sourceStdinHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'stdin.mjs');
     const sourceStateRootHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'state-root.mjs');
     const sourceSkillEntitlementsPath = join(packageRoot, 'templates', 'hooks', 'lib', 'skill-entitlements.mjs');
+    const sourceUtf8BomHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'utf8-bom.mjs');
     const configDir = mkdtempSync(join(tmpdir(), 'pre-tool-installed-layout-'));
     const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-installed-home-'));
     const installedHookDir = join(configDir, 'hooks');
@@ -1047,6 +1103,7 @@ describe('pre-tool-use packaged artifacts', () => {
     copyFileSync(sourceStdinHelperPath, join(installedHookDir, 'lib', 'stdin.mjs'));
     copyFileSync(sourceStateRootHelperPath, join(installedHookDir, 'lib', 'state-root.mjs'));
     copyFileSync(sourceSkillEntitlementsPath, join(installedHookDir, 'lib', 'skill-entitlements.mjs'));
+    copyFileSync(sourceUtf8BomHelperPath, join(installedHookDir, 'lib', 'utf8-bom.mjs'));
     mkdirSync(installedSkillsDir, { recursive: true });
     writeFileSync(join(installedSkillsDir, 'SKILL.md'), '---\nname: ai-slop-cleaner\n---\nBundled skill.\n');
     mkdirSync(installedAgentsDir, { recursive: true });

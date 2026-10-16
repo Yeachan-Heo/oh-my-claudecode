@@ -13,6 +13,7 @@ import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { encodeProjectPath } from './lib/encode-project-path.mjs';
 import { evaluateAgentHeavyPreflight } from './lib/pre-tool-enforcer-preflight.mjs';
 import { evaluateForceAgentDelegation } from './lib/force-agent-delegation-preflight.mjs';
@@ -227,7 +228,7 @@ function agentDefinitionExists(agentType, directory, namespaced) {
  * lines in the skill body cannot create false matches.
  */
 function parseSkillFrontmatterIdentifiers(content) {
-  const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+  const fmMatch = stripLeadingUtf8Bom(content).match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
   if (!fmMatch) return { aliases: [], primary: null };
   const fm = fmMatch[1];
   const nameMatch = fm.match(/^name:\s*(\S+)/m);
