@@ -118,7 +118,7 @@ function parseArrayOrStringValue(
       const nextLine = lines[j];
 
       // Check if this is an array item (starts with whitespace + dash)
-      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
+      const arrayMatch = nextLine.match(/^\s*-\s*(.*)$/);
       if (arrayMatch) {
         const itemValue = parseStringValue(arrayMatch[1].trim());
         if (itemValue) {
