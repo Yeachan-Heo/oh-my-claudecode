@@ -52,6 +52,15 @@ describe('command file frontmatter line endings', () => {
     expect(command?.template).toBe(body);
   });
 
+  it('parses frontmatter after one leading BOM and preserves body BOMs', () => {
+    const body = 'Template\uFEFF body\n';
+    writeCommand('zz-bom', `\uFEFF---\ndescription: Do the thing\n---\n${body}`);
+
+    const command = getCommand('zz-bom');
+    expect(command?.description).toBe('Do the thing');
+    expect(command?.template).toBe(body);
+  });
+
   it('does not parse partial CRLF separators as frontmatter', () => {
     const fixtures: Array<[string, string]> = [
       ['opening', '---\rdescription: Do the thing\n---\nTemplate'],

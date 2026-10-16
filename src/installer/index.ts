@@ -22,7 +22,7 @@ import { getRuntimePackageVersion } from '../lib/version.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { MIN_NODE_VERSION } from '../utils/node-version.js';
 import { resolveNodeBinary } from '../utils/resolve-node.js';
-import { parseFrontmatter } from '../utils/frontmatter.js';
+import { parseFrontmatter, stripLeadingUtf8Bom } from '../utils/frontmatter.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
@@ -1886,7 +1886,7 @@ function resolveBestPluginSyncSource(targetRoots: string[]): { sourceRoot: strin
 
 
 function extractFrontmatterBlock(content: string): string | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const match = stripLeadingUtf8Bom(content).match(/^---\r?\n([\s\S]*?)\r?\n---/);
   return match?.[1] ?? null;
 }
 

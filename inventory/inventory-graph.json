@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-    "sourceSha256": "049b2f8b6e662c3964c59686d2ddc3d086b700df491969086509fc6974ee4046",
+    "sourceSha256": "afaa3e287e82cb441df83207d61054d985c2b084e9a4f8170956693a0388d4af",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-  "sourceSha256": "049b2f8b6e662c3964c59686d2ddc3d086b700df491969086509fc6974ee4046",
+  "sourceSha256": "afaa3e287e82cb441df83207d61054d985c2b084e9a4f8170956693a0388d4af",
   "counts": {
     "public": {
       "skills": 48,
@@ -27,9 +27,9 @@
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
-      "templateHooks": 23,
-      "srcFiles": 1470,
-      "total": 1493
+      "templateHooks": 24,
+      "srcFiles": 1472,
+      "total": 1496
     },
     "generated": {
       "distFiles": 5613,
@@ -716,6 +716,7 @@
       "templates/hooks/lib/state-lock.mjs",
       "templates/hooks/lib/state-root.mjs",
       "templates/hooks/lib/stdin.mjs",
+      "templates/hooks/lib/utf8-bom.mjs",
       "templates/hooks/lib/workflow-profile-runtime.mjs",
       "templates/hooks/lib/workflow-stage-prompts.mjs",
       "templates/hooks/persistent-mode.mjs",
@@ -856,6 +857,8 @@
       "scripts/lib/state-root.cjs",
       "scripts/lib/state-root.mjs",
       "scripts/lib/stdin.mjs",
+      "scripts/lib/utf8-bom.d.mts",
+      "scripts/lib/utf8-bom.mjs",
       "scripts/lib/workflow-profile-runtime.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
       "scripts/measure-prompt-ssot.ts",
@@ -37239,6 +37242,16 @@
         "path": "scripts/lib/stdin.mjs"
       },
       {
+        "id": "scripts/lib/utf8-bom.d.mts",
+        "kind": "script",
+        "path": "scripts/lib/utf8-bom.d.mts"
+      },
+      {
+        "id": "scripts/lib/utf8-bom.mjs",
+        "kind": "script",
+        "path": "scripts/lib/utf8-bom.mjs"
+      },
+      {
         "id": "scripts/lib/workflow-profile-runtime.mjs",
         "kind": "script",
         "path": "scripts/lib/workflow-profile-runtime.mjs"
@@ -39834,6 +39847,11 @@
         "path": "src/cli/__tests__/hud-watch.test.ts"
       },
       {
+        "id": "src/cli/__tests__/integer-option.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/integer-option.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/launch-secure-transport.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/launch-secure-transport.test.ts"
@@ -40137,6 +40155,11 @@
         "id": "src/cli/utils/formatting.ts",
         "kind": "src",
         "path": "src/cli/utils/formatting.ts"
+      },
+      {
+        "id": "src/cli/utils/integer-option.ts",
+        "kind": "src",
+        "path": "src/cli/utils/integer-option.ts"
       },
       {
         "id": "src/cli/win32-warning.ts",
@@ -45459,6 +45482,11 @@
         "path": "templates/hooks/lib/stdin.mjs"
       },
       {
+        "id": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "template-hook",
+        "path": "templates/hooks/lib/utf8-bom.mjs"
+      },
+      {
         "id": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/workflow-profile-runtime.mjs"
@@ -47771,6 +47799,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/project-memory-posttool.mjs",
         "to": "dist/hooks/project-memory/learner.js",
         "kind": "imports"
@@ -48146,6 +48179,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/shipyard-audit.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/skill-injector.mjs",
         "to": "dist/hooks/skill-bridge.cjs",
         "kind": "imports"
@@ -48188,6 +48226,11 @@
       {
         "from": "scripts/skill-injector.mjs",
         "to": "scripts/lib/stdin.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/skill-injector.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -56836,6 +56879,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/autoresearch/contracts.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/autoresearch/runtime.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -57114,6 +57162,26 @@
         "from": "src/cli/__tests__/hud-watch.test.ts",
         "to": "src/mcp/standalone-shutdown.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
       },
       {
         "from": "src/cli/__tests__/launch-secure-transport.test.ts",
@@ -58817,6 +58885,11 @@
       },
       {
         "from": "src/cli/index.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/index.ts",
         "to": "src/cli/win32-warning.ts",
         "kind": "imports"
       },
@@ -59093,6 +59166,11 @@
       {
         "from": "src/cli/tmux-utils.ts",
         "to": "external:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/utils/integer-option.ts",
+        "to": "external:commander",
         "kind": "imports"
       },
       {
@@ -65571,6 +65649,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/learner/bridge.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/config.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -68794,6 +68877,11 @@
         "from": "src/hooks/rules-injector/parser.ts",
         "to": "src/hooks/rules-injector/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/rules-injector/parser.ts",
+        "to": "src/utils/frontmatter.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/rules-injector/storage.ts",
@@ -86646,6 +86734,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/utils/frontmatter.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "src/utils/omc-cli-rendering.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -87186,6 +87279,16 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/lib/utf8-bom.mjs",
+        "to": "hooks/hooks.json",
+        "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/lib/utf8-bom.mjs",
+        "to": "src/hooks/bridge.ts",
+        "kind": "projects"
+      },
+      {
         "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "to": "external:child_process",
         "kind": "imports"
@@ -87378,6 +87481,11 @@
       {
         "from": "templates/hooks/pre-tool-use.mjs",
         "to": "templates/hooks/lib/skill-entitlements.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/pre-tool-use.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -88587,12 +88695,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7742,
-      "edgeCount": 8551,
-      "importEdgeCount": 7103,
+      "nodeCount": 7747,
+      "edgeCount": 8567,
+      "importEdgeCount": 7117,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "68d23efa22ec74900c119e0ae8d3af37a71a0327c1121063ea324b6f24f95c88",
-  "manifestSha256": "b0776f3a2d358bb923334f3f68e3b5525fbe9b83a0cf07d6120db4c73eaf57a6"
+  "inventorySha256": "8263938ef3904d69821e499dc339bbf56d8b9658c6b93902c89177120d703ffa",
+  "manifestSha256": "2232e6093c991df009b7b83ed77b58488c86b268e2d9876430ba08ad5096cd62"
 }

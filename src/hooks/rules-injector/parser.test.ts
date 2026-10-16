@@ -108,3 +108,33 @@ describe('parseRuleFrontmatter brace globs', () => {
     expect(metadata.globs).toEqual(['src/**/*.{ts,tsx}', '**/*.md']);
   });
 });
+
+describe('parseRuleFrontmatter UTF-8 BOM', () => {
+  it('parses a rule file that starts with a BOM', () => {
+    const { metadata, body } = parseRuleFrontmatter('\uFEFF---\nglobs: "src/**/*.ts"\nalwaysApply: false\n---\nrule\uFEFF body');
+
+    expect(metadata.globs).toBe('src/**/*.ts');
+    expect(body).toBe('rule\uFEFF body');
+  });
+});
+
+describe('parseRuleFrontmatter unindented block sequences', () => {
+  const parseGlobs = (yaml: string) => parseRuleFrontmatter(`---\n${yaml}\n---\nbody`).metadata.globs;
+
+  it('reads list items written at the same indentation as their key', () => {
+    expect(parseGlobs('paths:\n- src/**/*.ts\n- "lib/**"')).toEqual(['src/**/*.ts', 'lib/**']);
+    expect(parseGlobs('globs:\n- "**/*.py"')).toEqual(['**/*.py']);
+  });
+
+  it('stops at the next key after an unindented list', () => {
+    const { metadata } = parseRuleFrontmatter('---\npaths:\n- src/**\nalwaysApply: true\n---\nbody');
+
+    expect(metadata.globs).toEqual(['src/**']);
+    expect(metadata.alwaysApply).toBe(true);
+  });
+
+  it('still reads indented lists and CRLF lists', () => {
+    expect(parseGlobs('paths:\n  - src/**')).toEqual(['src/**']);
+    expect(parseRuleFrontmatter('---\r\npaths:\r\n- src/**\r\n---\r\nbody').metadata.globs).toEqual(['src/**']);
+  });
+});

@@ -27,6 +27,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 
 const toPosix = (value) => value.replace(/\\/g, '/');
 
@@ -239,7 +240,7 @@ async function checkProjectSkillTriggers(root) {
     if (!entry.endsWith('.md')) continue;
     const rel = `${toPosix(join(relStateRoot, 'skills'))}/${entry}`;
     const content = readFileSync(join(skillsDir, entry), 'utf-8');
-    const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const fm = stripLeadingUtf8Bom(content).match(/^---\r?\n([\s\S]*?)\r?\n---/);
     if (!fm) {
       findings.push(
         finding(

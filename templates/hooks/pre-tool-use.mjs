@@ -13,6 +13,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { homedir, tmpdir } from 'os';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -213,7 +214,7 @@ function agentDefinitionExists(agentType, directory, namespaced) {
 
 /** Extract a bundled skill's primary name and raw aliases from frontmatter. */
 function parseSkillFrontmatterIdentifiers(content) {
-  const fmMatch = content.match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
+  const fmMatch = stripLeadingUtf8Bom(content).match(/^---[\r\n]+([\s\S]*?)[\r\n]+---/);
   if (!fmMatch) return { aliases: [], primary: null };
   const fm = fmMatch[1];
   const nameMatch = fm.match(/^name:\s*(\S+)/m);

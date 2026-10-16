@@ -226,6 +226,15 @@ Content`;
       expect(result?.metadata.triggers).toEqual(["alpha", "beta", "gamma"]);
     });
 
+    it("strips only the leading BOM from skill content", () => {
+      const result = parseSkillFile(
+        '\uFEFF---\nname: BOM Skill\ntriggers:\n  - bom\n---\nBody\uFEFF text',
+      );
+
+      expect(result?.metadata.name).toBe('BOM Skill');
+      expect(result?.content).toBe('Body\uFEFF text');
+    });
+
     it("should handle unterminated inline array (missing closing bracket)", () => {
       const content = `---
 name: Malformed Triggers

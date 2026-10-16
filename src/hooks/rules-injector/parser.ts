@@ -8,6 +8,7 @@
  */
 
 import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
+import { stripLeadingUtf8Bom } from '../../utils/frontmatter.js';
 
 /**
  * Parse YAML frontmatter from rule file content.
@@ -20,7 +21,8 @@ import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
  */
 export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = stripLeadingUtf8Bom(content).match(frontmatterRegex);
 
   if (!match) {
     return { metadata: {}, body: content };
@@ -118,7 +120,7 @@ function parseArrayOrStringValue(
       const nextLine = lines[j];
 
       // Check if this is an array item (starts with whitespace + dash)
-      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
+      const arrayMatch = nextLine.match(/^\s*-\s*(.*)$/);
       if (arrayMatch) {
         const itemValue = parseStringValue(arrayMatch[1].trim());
         if (itemValue) {

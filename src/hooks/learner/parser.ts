@@ -5,7 +5,7 @@
  */
 
 import type { SkillMetadata } from './types.js';
-import { escapeYamlSingleQuoted, splitFlowSequenceItems, unquoteYamlScalar } from '../../utils/frontmatter.js';
+import { escapeYamlSingleQuoted, splitFlowSequenceItems, stripLeadingUtf8Bom, unquoteYamlScalar } from '../../utils/frontmatter.js';
 
 export interface SkillParseResult {
   metadata: Partial<SkillMetadata>;
@@ -19,7 +19,8 @@ export interface SkillParseResult {
  */
 export function parseSkillFile(rawContent: string): SkillParseResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = rawContent.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = stripLeadingUtf8Bom(rawContent).match(frontmatterRegex);
 
   if (!match) {
     return {
