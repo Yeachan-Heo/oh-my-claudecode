@@ -68,6 +68,7 @@ import {
   checkLegacySkills,
   checkWorkspaceMarker,
   checkWindowsUnsafePluginHooks,
+  checkEnvFlags,
   runConflictCheck,
   formatReport,
   doctorConflictsCommand,
@@ -1205,5 +1206,24 @@ describe('doctor-conflicts: workspace marker check (Wave F.2)', () => {
     expect(typeof report.workspaceMarker.markerRoot).toBe('object'); // null is valid
     expect(typeof report.workspaceMarker.stateDirEnvSet).toBe('boolean');
     expect(typeof report.workspaceMarker.precedenceConflict).toBe('boolean');
+  });
+});
+
+describe('doctor-conflicts: OMC_SKIP_HOOKS parsing', () => {
+  const original = process.env.OMC_SKIP_HOOKS;
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.OMC_SKIP_HOOKS;
+    else process.env.OMC_SKIP_HOOKS = original;
+  });
+
+  it('ignores empty entries from stray commas and whitespace', () => {
+    process.env.OMC_SKIP_HOOKS = ' keyword-detector , ,persistent-mode,';
+    expect(checkEnvFlags().skipHooks).toEqual(['keyword-detector', 'persistent-mode']);
+  });
+
+  it('reports no skipped hooks when the value has no names', () => {
+    process.env.OMC_SKIP_HOOKS = ' , ';
+    expect(checkEnvFlags().skipHooks).toEqual([]);
   });
 });
