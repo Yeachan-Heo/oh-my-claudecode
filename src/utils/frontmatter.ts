@@ -91,11 +91,20 @@ function getBlockScalarContentIndent(
     return { value: parentIndent + header.indentIndicator, isDetermined: true };
   }
 
+  let leadingBlankIndent = parentIndent;
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i];
-    if (isBlankBlockScalarLine(line)) continue;
     const indent = countLeadingYamlSpaces(line);
-    if (indent > parentIndent) return { value: indent, isDetermined: true };
+    if (isBlankBlockScalarLine(line)) {
+      leadingBlankIndent = Math.max(leadingBlankIndent, indent);
+      continue;
+    }
+    if (indent > parentIndent) {
+      if (line[indent] === '#' && indent < leadingBlankIndent) {
+        return { value: leadingBlankIndent, isDetermined: false };
+      }
+      return { value: indent, isDetermined: true };
+    }
     break;
   }
 

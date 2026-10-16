@@ -462,6 +462,13 @@ describe('parseFrontmatter block scalars', () => {
     });
   });
 
+  it('keeps a shallower comment outside a block after leading blank rows', () => {
+    expect(parse('description: |-\n  \n # note\nmodel: opus')).toEqual({
+      description: '',
+      model: 'opus',
+    });
+  });
+
   it('accepts chomping and indentation indicators and a trailing comment', () => {
     expect(parse('description: |+2 # note\n  kept')).toEqual({
       description: 'kept\n',
