@@ -444,6 +444,13 @@ describe('parseFrontmatter block scalars', () => {
     expect(parse('description: |\n\n')).toEqual({ description: '' });
   });
 
+  it('normalizes all-blank implicit block scalars', () => {
+    expect(parse('description: |-\n  \nmodel: opus')).toEqual({
+      description: '',
+      model: 'opus',
+    });
+  });
+
   it('accepts chomping and indentation indicators and a trailing comment', () => {
     expect(parse('description: |+2 # note\n  kept')).toEqual({
       description: 'kept\n',
