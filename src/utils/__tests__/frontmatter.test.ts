@@ -467,6 +467,10 @@ describe('parseFrontmatter block scalars', () => {
       description: '',
       model: 'opus',
     });
+    expect(parse('description: |-\n  \n  # note\nmodel: opus')).toEqual({
+      description: '\n# note',
+      model: 'opus',
+    });
   });
 
   it('accepts chomping and indentation indicators and a trailing comment', () => {
