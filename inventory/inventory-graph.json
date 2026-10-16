@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "06a2c16e9fc200f2fd38b223c9b0796bb1d7e366",
-    "sourceSha256": "cf9bd413461916713c40be075e0e425ddef34de38fc2c7a99caa9cfc32333077",
+    "head": "ca87ff93967f4cc58675a60a0caef0daf70cff89",
+    "sourceSha256": "a664bd9decbaa6863c6d3b3b5f444e10686c139898a4caffe71c3558fc76e0af",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "06a2c16e9fc200f2fd38b223c9b0796bb1d7e366",
-  "sourceSha256": "cf9bd413461916713c40be075e0e425ddef34de38fc2c7a99caa9cfc32333077",
+  "head": "ca87ff93967f4cc58675a60a0caef0daf70cff89",
+  "sourceSha256": "a664bd9decbaa6863c6d3b3b5f444e10686c139898a4caffe71c3558fc76e0af",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,7 +23,7 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 340,
+      "hookFiles": 339,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 340,
+    "hookFiles": 339,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -243,7 +243,6 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
-      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -6637,7 +6636,6 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
-      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -40004,6 +40002,11 @@
         "path": "src/cli/commands/__tests__/factory-init.test.ts"
       },
       {
+        "id": "src/cli/commands/__tests__/factory-listen-port.test.ts",
+        "kind": "src",
+        "path": "src/cli/commands/__tests__/factory-listen-port.test.ts"
+      },
+      {
         "id": "src/cli/commands/__tests__/intake-headless-flag.test.ts",
         "kind": "src",
         "path": "src/cli/commands/__tests__/intake-headless-flag.test.ts"
@@ -41392,11 +41395,6 @@
         "id": "src/hooks/factcheck/__tests__/sentinel.test.ts",
         "kind": "hook",
         "path": "src/hooks/factcheck/__tests__/sentinel.test.ts"
-      },
-      {
-        "id": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts"
       },
       {
         "id": "src/hooks/factcheck/checks.ts",
@@ -58016,6 +58014,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/commands/__tests__/factory-listen-port.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/__tests__/factory-listen-port.test.ts",
+        "to": "src/cli/commands/factory.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/commands/__tests__/intake-headless-flag.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -58303,6 +58311,11 @@
       {
         "from": "src/cli/commands/factory.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/factory.ts",
+        "to": "src/cli/utils/integer-option.ts",
         "kind": "imports"
       },
       {
@@ -64864,16 +64877,6 @@
         "from": "src/hooks/factcheck/__tests__/sentinel.test.ts",
         "to": "src/hooks/factcheck/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
-        "to": "src/hooks/factcheck/config.ts",
-        "kind": "imports"
       },
       {
         "from": "src/hooks/factcheck/checks.ts",
@@ -88753,11 +88756,11 @@
     ],
     "stats": {
       "nodeCount": 7749,
-      "edgeCount": 8576,
-      "importEdgeCount": 7126,
+      "edgeCount": 8577,
+      "importEdgeCount": 7127,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "d7a82df442812e8e5985ff13539c571ceb13e9427d4f4391ccb31455cbbb49ab",
-  "manifestSha256": "8e39ceba70aa56edae0dbc9d8bdfd1a0dd24561dd4d2fa38f24de4049dc03de0"
+  "inventorySha256": "3953bcd175ebdb400a73f1e7427b0c23dd8ff64afdb6c11cbfdd160d7cc17295",
+  "manifestSha256": "39076c60661f2f00d491895e5687a7948b4940527263cd1eb3466ef6f4e0427d"
 }
