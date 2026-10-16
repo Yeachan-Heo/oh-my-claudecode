@@ -26,11 +26,11 @@ describe('parseFrontmatter CRLF handling', () => {
 
 describe('parseFrontmatter UTF-8 BOM handling', () => {
   it('should parse frontmatter after a leading BOM', () => {
-    const raw = '﻿---\ntitle: Bom\ntags: []\n---\n\n# Content\n';
+    const raw = '\uFEFF---\ntitle: Bom\ntags: []\n---\n\n# Content\uFEFF tail\n';
     const result = parseFrontmatter(raw);
     expect(result).not.toBeNull();
     expect(result!.frontmatter.title).toBe('Bom');
-    expect(result!.content).toBe('\n# Content\n');
+    expect(result!.content).toBe('\n# Content\uFEFF tail\n');
   });
 
   it('should parse CRLF frontmatter after a leading BOM', () => {
