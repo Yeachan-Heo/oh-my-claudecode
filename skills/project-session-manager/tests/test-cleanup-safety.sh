@@ -77,6 +77,17 @@ SCENARIO=clean; export SCENARIO
 pushd "$WORKTREE" >/dev/null
 if psm_remove_worktree "$REPO" "$WORKTREE" "$SESSION"; then fail 'current worktree removed'; fi
 popd >/dev/null
+mkdir -p "$WORKTREE/nested/deeper" "$ROOT/worktrees/owned-sibling"
+pushd "$WORKTREE/nested/deeper" >/dev/null
+if psm_remove_worktree "$REPO" "$WORKTREE" "$SESSION"; then fail 'ancestor of current directory removed'; fi
+popd >/dev/null
+assert_no_remove
+# A shared string prefix without a path separator is a different checkout.
+pushd "$ROOT/worktrees/owned-sibling" >/dev/null
+psm_remove_worktree "$REPO" "$WORKTREE" "$SESSION" || fail 'sibling current directory incorrectly blocks removal'
+popd >/dev/null
+[[ -e "$ROOT/removed" ]] || fail 'sibling positive control did not invoke Git'
+command rm -f -- "$ROOT/removed"
 if psm_remove_worktree "$REPO" "$REPO" "$SESSION"; then fail 'main checkout removed'; fi
 mkdir -p "$ROOT/outside"; printf 'gitdir: fixture\n' > "$ROOT/outside/.git"
 if psm_remove_worktree "$REPO" "$ROOT/outside" "$SESSION"; then fail 'outside-root path removed'; fi

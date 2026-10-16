@@ -188,12 +188,14 @@ psm_physical_directory() {
 
 # Prove Git membership before trusting a path or writing its private metadata.
 psm_worktree_identity() {
-    local source="$1" candidate="$2" root common private branch head listing line listed top
+    local source="$1" candidate="$2" root common private branch head listing line listed top current
     source=$(psm_physical_directory "$source") || return 1
     candidate=$(psm_physical_directory "$candidate") || return 1
     root=$(psm_get_worktree_root) || return 1
     root=$(psm_physical_directory "$root") || return 1
-    [[ "$candidate" == "$root"/* && "$candidate" != "$source" && "$candidate" != "$(pwd -P)" ]] || return 1
+    current=$(pwd -P) || return 1
+    [[ "$candidate" == "$root"/* && "$candidate" != "$source" ]] || return 1
+    [[ "$current" != "$candidate" && "$current" != "$candidate"/* ]] || return 1
     [[ "$candidate" != / && "$candidate" != "${HOME:-}" && -f "$candidate/.git" && ! -L "$candidate/.git" ]] || return 1
     common=$(git -C "$source" rev-parse --path-format=absolute --git-common-dir) || return 1
     common=$(psm_physical_directory "$common") || return 1
