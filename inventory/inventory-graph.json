@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "2fbdf40a69c0ba98f5f2cb1bf9ff81aee1b4befb",
-    "sourceSha256": "20bd586ef7fddb8180df823fcac3fcd3542d135b6523446ce4d9ece7da1b087f",
+    "sourceSha256": "51dec7dce916bc336a05d032133a2c5a37511fc36261a8105b834403bb85dc36",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "2fbdf40a69c0ba98f5f2cb1bf9ff81aee1b4befb",
-  "sourceSha256": "20bd586ef7fddb8180df823fcac3fcd3542d135b6523446ce4d9ece7da1b087f",
+  "sourceSha256": "51dec7dce916bc336a05d032133a2c5a37511fc36261a8105b834403bb85dc36",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1470,
-      "total": 1494
+      "srcFiles": 1472,
+      "total": 1496
     },
     "generated": {
       "distFiles": 5613,
@@ -39847,6 +39847,11 @@
         "path": "src/cli/__tests__/hud-watch.test.ts"
       },
       {
+        "id": "src/cli/__tests__/integer-option.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/integer-option.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/launch-secure-transport.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/launch-secure-transport.test.ts"
@@ -40150,6 +40155,11 @@
         "id": "src/cli/utils/formatting.ts",
         "kind": "src",
         "path": "src/cli/utils/formatting.ts"
+      },
+      {
+        "id": "src/cli/utils/integer-option.ts",
+        "kind": "src",
+        "path": "src/cli/utils/integer-option.ts"
       },
       {
         "id": "src/cli/win32-warning.ts",
@@ -57154,6 +57164,26 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/launch-secure-transport.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -58855,6 +58885,11 @@
       },
       {
         "from": "src/cli/index.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/index.ts",
         "to": "src/cli/win32-warning.ts",
         "kind": "imports"
       },
@@ -59131,6 +59166,11 @@
       {
         "from": "src/cli/tmux-utils.ts",
         "to": "external:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/utils/integer-option.ts",
+        "to": "external:commander",
         "kind": "imports"
       },
       {
@@ -88655,12 +88695,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7745,
-      "edgeCount": 8561,
-      "importEdgeCount": 7111,
+      "nodeCount": 7747,
+      "edgeCount": 8567,
+      "importEdgeCount": 7117,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "73b3fd2cc6b6f3994988753801b31bda91c92604b0c9d45ddb3fc74096e9fcb5",
-  "manifestSha256": "7c44a37ed63583cad95424a2814c337181c3c7adf41b40c0e6778ee171e45de3"
+  "inventorySha256": "8263938ef3904d69821e499dc339bbf56d8b9658c6b93902c89177120d703ffa",
+  "manifestSha256": "6938b4f9beb41492a801c11e3a7741f675b6adcc84d96919ddac498738d2c738"
 }
