@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-    "sourceSha256": "79cab637bf65ce4d1a03640e5c890f3012e3e6a41695c6770cbc719e7f147d8d",
+    "head": "27513eea7b7f904dd36c3caf215151790710c8d5",
+    "sourceSha256": "0425904860e8ba82c7a697ff59f26418c5511c0ac618fd6af05429806aa25bbb",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ca9c29722c00b44458408bae20adce7ff2c553b5",
-  "sourceSha256": "79cab637bf65ce4d1a03640e5c890f3012e3e6a41695c6770cbc719e7f147d8d",
+  "head": "27513eea7b7f904dd36c3caf215151790710c8d5",
+  "sourceSha256": "0425904860e8ba82c7a697ff59f26418c5511c0ac618fd6af05429806aa25bbb",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 23,
-      "srcFiles": 1470,
-      "total": 1493
+      "srcFiles": 1472,
+      "total": 1495
     },
     "generated": {
       "distFiles": 5613,
@@ -39834,6 +39834,11 @@
         "path": "src/cli/__tests__/hud-watch.test.ts"
       },
       {
+        "id": "src/cli/__tests__/integer-option.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/integer-option.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/launch-secure-transport.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/launch-secure-transport.test.ts"
@@ -40137,6 +40142,11 @@
         "id": "src/cli/utils/formatting.ts",
         "kind": "src",
         "path": "src/cli/utils/formatting.ts"
+      },
+      {
+        "id": "src/cli/utils/integer-option.ts",
+        "kind": "src",
+        "path": "src/cli/utils/integer-option.ts"
       },
       {
         "id": "src/cli/win32-warning.ts",
@@ -57116,6 +57126,26 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:commander",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/integer-option.test.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/launch-secure-transport.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -58817,6 +58847,11 @@
       },
       {
         "from": "src/cli/index.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/index.ts",
         "to": "src/cli/win32-warning.ts",
         "kind": "imports"
       },
@@ -59093,6 +59128,11 @@
       {
         "from": "src/cli/tmux-utils.ts",
         "to": "external:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/utils/integer-option.ts",
+        "to": "external:commander",
         "kind": "imports"
       },
       {
@@ -88587,12 +88627,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7742,
-      "edgeCount": 8551,
-      "importEdgeCount": 7103,
+      "nodeCount": 7744,
+      "edgeCount": 8557,
+      "importEdgeCount": 7109,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "68d23efa22ec74900c119e0ae8d3af37a71a0327c1121063ea324b6f24f95c88",
-  "manifestSha256": "f401c2474deca6bd4632ec9bae50885db74212e075f21f8e8a9bef0168c3ec1c"
+  "inventorySha256": "bd69b065700ba6138f471f1a5721dc4f9d42aa5c8589be691e0074aaa3a953bf",
+  "manifestSha256": "54ea163262cd6ad0731d5491712dd39383fbc8272340e1aa3806df4444416244"
 }
