@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import { existsSync, realpathSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { basename, join, relative, resolve } from 'path';
+import { unquoteYamlScalar } from '../utils/frontmatter.js';
 
 export type AutoresearchKeepPolicy = 'score_improvement' | 'pass_only';
 
@@ -105,7 +106,7 @@ function parseSimpleYamlFrontmatter(frontmatter: string): Record<string, unknown
     }
 
     const [, key, rawValue] = nestedMatch;
-    const value = rawValue.replace(/^['"]|['"]$/g, '');
+    const value = unquoteYamlScalar(rawValue);
     if (line.startsWith(' ') || line.startsWith('\t')) {
       if (!currentSection) {
         throw contractError(`Nested sandbox.md frontmatter key requires a parent section: ${trimmed}`);
