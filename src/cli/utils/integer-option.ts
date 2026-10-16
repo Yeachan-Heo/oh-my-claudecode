@@ -9,7 +9,7 @@ export function integerOption(min: number, max: number = Number.MAX_SAFE_INTEGER
   return (value: string): number => {
     const normalized = value.trim();
     const parsed = Number(normalized);
-    if (!/^\d+$/.test(normalized) || !Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    if (!/^[+-]?\d+$/.test(normalized) || !Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
       throw new InvalidArgumentError(
         max === Number.MAX_SAFE_INTEGER ? `must be an integer of at least ${min}` : `must be an integer between ${min} and ${max}`,
       );

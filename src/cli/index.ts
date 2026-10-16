@@ -1024,7 +1024,7 @@ waitCmd
   .description('Start or stop the auto-resume daemon')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('-f, --foreground', 'Run in foreground (blocking)')
-  .option('-i, --interval <seconds>', 'Poll interval in seconds', integerOption(1, 86400), 60)
+  .option('-i, --interval <seconds>', 'Poll interval in seconds', integerOption(1), 60)
   .addHelpText('after', `
 Examples:
   $ omc wait daemon start            Start background daemon
@@ -1047,7 +1047,7 @@ waitCmd
   .command('detect')
   .description('Scan for blocked Claude Code sessions in tmux')
   .option('--json', 'Output as JSON')
-  .option('-l, --lines <number>', 'Number of pane lines to analyze', integerOption(1, 1000), 15)
+  .option('-l, --lines <number>', 'Number of pane lines to analyze', integerOption(1), 15)
   .action(async (options) => {
     await waitDetectCommand({
       json: options.json,
