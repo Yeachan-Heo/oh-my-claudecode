@@ -119,8 +119,8 @@ describe('worker-bootstrap', () => {
       const workflow = overlay.split('## MANDATORY WORKFLOW')[1]!.split('## Recovery-safe Boundaries')[0]!;
       const claim = workflow.indexOf('team api claim-task --input');
       const claimStep = workflow.indexOf('1. **Claim**');
-      const recovery = workflow.indexOf('For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again.');
-      const idle = workflow.indexOf('If no task is assigned, wait for an assignment without inventing a task.');
+      const recovery = workflow.indexOf('For an owner-adopted recovery task, follow Recovery Continuation in place of steps 1 and 2 only');
+      const idle = workflow.indexOf('If no task is assigned, wait for an assignment without inventing a task');
       const ack = workflow.indexOf('ACK: worker-1 initialized');
       const work = workflow.indexOf(reviewerRole ? '**Do the read-only review**' : '**Do the work**');
       const completion = workflow.indexOf(reviewerRole ? '**Write the structured verdict**' : '**Transition**');
@@ -131,9 +131,6 @@ describe('worker-bootstrap', () => {
         expect(exception).toBeLessThan(claimStep);
         expect(exception).toBeLessThan(claim);
       }
-      const applicability = workflow.indexOf('The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.');
-      expect(applicability).toBeGreaterThan(-1);
-      expect(applicability).toBeLessThan(claimStep);
       expect(workflow).toContain('For ordinary new tasks only: Only after a successful claim may you continue. If the claim fails, do not send the startup ACK or begin work');
       expect(ack).toBeGreaterThan(claim);
       expect(work).toBeGreaterThan(ack);
@@ -158,6 +155,68 @@ describe('worker-bootstrap', () => {
         expect(workflow).not.toContain('team api transition-task-status');
       } else {
         expect(workflow).toContain('team api transition-task-status --input');
+      }
+    });
+
+    it.each([
+      ['cursor executor', 'cursor', false],
+      ['trusted cursor reviewer', 'cursor', true],
+      ['non-cursor worker', 'codex', false],
+    ] as const)('exempts adopted recovery only from claim and startup ACK for %s', (_label, agentType, reviewerRole) => {
+      const overlay = generateWorkerOverlay({ ...baseParams, agentType, reviewerRole });
+      const workflow = overlay.split('## MANDATORY WORKFLOW')[1]!.split('## Recovery-safe Boundaries')[0]!;
+      expect(workflow).not.toContain('not adopted recovery');
+      expect(workflow).not.toContain('follow Recovery Continuation instead;');
+      const lines = workflow.split('\n');
+      const recovery = lines.find(line => line.startsWith('For an owner-adopted recovery task'));
+      const idle = lines.find(line => line.startsWith('If no task is assigned'));
+      expect(recovery).toContain('in place of steps 1 and 2 only');
+      expect(recovery).toContain('do not claim the task again or send the startup ACK');
+      expect(recovery).toContain('Steps 3 onward still apply');
+      expect(recovery).not.toContain('If no task is assigned');
+      if (reviewerRole) {
+        expect(recovery).toContain('write the structured verdict');
+        expect(recovery).toContain('leave the task transition to the leader');
+        expect(recovery).not.toContain('claim_token');
+      } else {
+        expect(recovery).toContain('transition the task with the adopted `claim_token` from Recovery Continuation');
+      }
+      expect(idle).toContain('wait for an assignment without inventing a task');
+      expect(idle).toContain('skip all numbered steps until a task is assigned');
+    });
+
+    it.each([
+      ['cursor executor', 'cursor', false, true],
+      ['cursor executor (idle)', 'cursor', false, false],
+      ['trusted cursor reviewer', 'cursor', true, true],
+      ['trusted cursor reviewer (idle)', 'cursor', true, false],
+      ['non-cursor worker', 'codex', false, true],
+      ['non-cursor worker (idle)', 'codex', false, false],
+    ] as const)('subjects the mandatory header to recovery and idle exceptions for %s', (_label, agentType, reviewerRole, assigned) => {
+      const overlay = generateWorkerOverlay({ ...baseParams, agentType, reviewerRole, tasks: assigned ? baseParams.tasks : [] });
+      const workflow = overlay.split('## MANDATORY WORKFLOW')[1]!.split('## Recovery-safe Boundaries')[0]!;
+      const lines = workflow.split('\n');
+      const headers = lines.filter(line => line.includes('MUST complete'));
+      expect(headers).toHaveLength(1);
+      const header = headers[0]!;
+      const headerIdx = lines.indexOf(header);
+      expect(lines.findIndex(line => line.startsWith('For an owner-adopted recovery task'))).toBeLessThan(headerIdx);
+      expect(lines.findIndex(line => line.startsWith('If no task is assigned'))).toBeLessThan(headerIdx);
+      expect(lines.findIndex(line => line.startsWith('1. **Claim**'))).toBeGreaterThan(headerIdx);
+      expect(header).toMatch(/^Subject to the recovery and idle exceptions above, you MUST complete every applicable /);
+      for (const unconditional of [/\bALL\b/, /skip any step/i, 'You MUST complete the reviewer steps below.', 'You MUST complete ALL of these steps.']) {
+        expect(workflow).not.toMatch(unconditional);
+      }
+      for (const sentence of header.split('. ').filter(s => /exit/i.test(s))) {
+        expect(sentence).toContain('For an assigned task');
+      }
+      if (reviewerRole) {
+        expect(header).not.toContain('transition');
+      } else if (agentType === 'cursor') {
+        expect(header).toContain('Transitioning the task does not end the session.');
+        expect(header).not.toMatch(/exit/i);
+      } else {
+        expect(header).toContain('For an assigned task, do NOT exit without step 4.');
       }
     });
 

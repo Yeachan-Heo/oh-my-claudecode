@@ -221,9 +221,9 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
   const persistentCursor = agentType === 'cursor' && !cursorReviewer;
   const mandatoryWorkflow = cursorReviewer
     ? [
-      'For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again. If no task is assigned, wait for an assignment without inventing a task.',
-      'The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.',
-      'You MUST complete the reviewer steps below. Do NOT skip any step.',
+      'For an owner-adopted recovery task, follow Recovery Continuation in place of steps 1 and 2 only: do not claim the task again or send the startup ACK. Steps 3 onward still apply: resume the read-only review and write the structured verdict; leave the task transition to the leader.',
+      'If no task is assigned, wait for an assignment without inventing a task; skip all numbered steps until a task is assigned.',
+      'Subject to the recovery and idle exceptions above, you MUST complete every applicable reviewer step below.',
       '',
       '1. **Claim** your task (run this command first):',
       `   \`${claimTaskCommand}\``,
@@ -236,11 +236,11 @@ export function generateWorkerOverlay(params: WorkerBootstrapParams): string {
       '5. **Keep the Cursor session alive** after writing the verdict; the leader consumes it and transitions the task.',
     ].join('\n')
     : [
-      'For an owner-adopted recovery task, follow Recovery Continuation instead; do not claim the task again. If no task is assigned, wait for an assignment without inventing a task.',
-      'The numbered steps and claim success/failure rules below apply only to ordinary new tasks, not adopted recovery or idle waiting.',
+      'For an owner-adopted recovery task, follow Recovery Continuation in place of steps 1 and 2 only: do not claim the task again or send the startup ACK. Steps 3 onward still apply: resume the work, then transition the task with the adopted `claim_token` from Recovery Continuation as `<claim_token>`.',
+      'If no task is assigned, wait for an assignment without inventing a task; skip all numbered steps until a task is assigned.',
       persistentCursor
-        ? 'You MUST complete ALL of these steps. Transitioning the task does not end the session.'
-        : 'You MUST complete ALL of these steps. Do NOT skip any step. Do NOT exit without step 4.',
+        ? 'Subject to the recovery and idle exceptions above, you MUST complete every applicable step. Transitioning the task does not end the session.'
+        : 'Subject to the recovery and idle exceptions above, you MUST complete every applicable step. For an assigned task, do NOT exit without step 4.',
       '',
       '1. **Claim** your task (run this command first):',
       `   \`${claimTaskCommand}\``,
