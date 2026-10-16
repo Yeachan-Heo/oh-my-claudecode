@@ -20,7 +20,8 @@ import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
  */
 export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = content.replace(/^\uFEFF/, '').match(frontmatterRegex);
 
   if (!match) {
     return { metadata: {}, body: content };

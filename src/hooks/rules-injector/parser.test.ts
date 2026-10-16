@@ -108,3 +108,12 @@ describe('parseRuleFrontmatter brace globs', () => {
     expect(metadata.globs).toEqual(['src/**/*.{ts,tsx}', '**/*.md']);
   });
 });
+
+describe('parseRuleFrontmatter UTF-8 BOM', () => {
+  it('parses a rule file that starts with a BOM', () => {
+    const { metadata, body } = parseRuleFrontmatter('﻿---\nglobs: "src/**/*.ts"\nalwaysApply: false\n---\nrule body');
+
+    expect(metadata.globs).toBe('src/**/*.ts');
+    expect(body).toBe('rule body');
+  });
+});

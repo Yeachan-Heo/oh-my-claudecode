@@ -45,7 +45,8 @@ export function stripOptionalQuotes(value: string): string {
  */
 export function parseFrontmatter(content: string): { metadata: Record<string, string>; body: string } {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  // Editors on Windows may prepend a UTF-8 BOM, which readFileSync keeps as U+FEFF.
+  const match = content.replace(/^\uFEFF/, '').match(frontmatterRegex);
 
   if (!match) {
     return { metadata: {}, body: content };

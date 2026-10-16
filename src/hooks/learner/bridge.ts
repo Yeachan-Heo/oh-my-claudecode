@@ -454,7 +454,8 @@ export function findSkillFiles(
  */
 export function parseSkillFile(content: string): ParseResult | null {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = content.replace(/^\uFEFF/, '').match(frontmatterRegex);
 
   if (!match) {
     // No frontmatter - still valid, use filename as name

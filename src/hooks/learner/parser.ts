@@ -19,7 +19,8 @@ export interface SkillParseResult {
  */
 export function parseSkillFile(rawContent: string): SkillParseResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = rawContent.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = rawContent.replace(/^\uFEFF/, '').match(frontmatterRegex);
 
   if (!match) {
     return {

@@ -351,3 +351,12 @@ describe('parseFrontmatterList quoted commas', () => {
     expect(parseFrontmatterList('[]')).toEqual([]);
   });
 });
+
+describe('parseFrontmatter UTF-8 BOM', () => {
+  it('parses frontmatter that follows a leading BOM', () => {
+    expect(parseFrontmatter('﻿---\nname: x\ndescription: hello\n---\nbody')).toEqual({
+      metadata: { name: 'x', description: 'hello' },
+      body: 'body',
+    });
+  });
+});
