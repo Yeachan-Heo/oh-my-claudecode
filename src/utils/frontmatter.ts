@@ -107,9 +107,10 @@ function readBlockScalar(blockLines: string[], header: BlockScalarHeader, conten
   const rows: BlockScalarRow[] = blockLines.map((line) => {
     const indent = countLeadingYamlSpaces(line);
     if (isBlankBlockScalarLine(line) && !contentIndent.isDetermined) return { text: '', moreIndented: false };
+    const moreIndented = indent > contentIndent.value || line[contentIndent.value] === '\t';
     return {
       text: line.slice(Math.min(contentIndent.value, indent)),
-      moreIndented: indent > contentIndent.value,
+      moreIndented,
     };
   });
 

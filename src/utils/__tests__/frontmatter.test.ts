@@ -415,6 +415,12 @@ describe('parseFrontmatter block scalars', () => {
     expect(parse('description: >-\n  first\n   second')).toEqual({ description: 'first  second' });
   });
 
+  it('preserves folded breaks around tab-indented content', () => {
+    expect(parse('description: >-\n  before\n  \tcode\n  after')).toEqual({
+      description: 'before\n\tcode\nafter',
+    });
+  });
+
   it('applies strip, clip, and keep chomping to folded scalars', () => {
     expect(parse('description: >-\n  first\n  second')).toEqual({
       description: 'first second',
