@@ -66,13 +66,23 @@ interface BlockScalarRow {
   moreIndented: boolean;
 }
 
+function getBlockScalarContentIndent(lines: string[], startIndex: number, parentIndent: number, header: BlockScalarHeader): number {
+  if (header.indentIndicator !== undefined) return parentIndent + header.indentIndicator;
+
+  for (let i = startIndex; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (indent > parentIndent) return indent;
+    break;
+  }
+
+  return parentIndent + 1;
+}
+
 /** Read literal/folded block lines and apply YAML chomping to their final breaks. */
-function readBlockScalar(blockLines: string[], header: BlockScalarHeader, parentIndent: number): string {
-  const nonBlankIndents = blockLines.filter((line) => line.trim() !== '').map((line) => line.length - line.trimStart().length);
-  const contentIndent =
-    header.indentIndicator === undefined ? (nonBlankIndents[0] ?? parentIndent + 1) : parentIndent + header.indentIndicator;
+function readBlockScalar(blockLines: string[], header: BlockScalarHeader, contentIndent: number): string {
   const rows: BlockScalarRow[] = blockLines.map((line) => {
-    if (line.trim() === '') return { text: '', moreIndented: false };
     const indent = line.length - line.trimStart().length;
     return {
       text: line.slice(Math.min(contentIndent, indent)),
@@ -166,14 +176,15 @@ export function parseFrontmatter(content: string): {
       const blockHeader = parseBlockScalarHeader(rawValue);
       if (blockHeader) {
         // `key: >-` / `key: |` — the value is the more-indented lines that follow.
+        const contentIndent = getBlockScalarContentIndent(lines, lineIndex + 1, rootIndent!, blockHeader);
         const blockLines: string[] = [];
-        while (
-          lineIndex + 1 < lines.length &&
-          (lines[lineIndex + 1].trim() === '' || lines[lineIndex + 1].length - lines[lineIndex + 1].trimStart().length > rootIndent!)
-        ) {
+        while (lineIndex + 1 < lines.length) {
+          const nextLine = lines[lineIndex + 1];
+          const nextIndent = nextLine.length - nextLine.trimStart().length;
+          if (nextLine.trim() !== '' && nextIndent < contentIndent) break;
           blockLines.push(lines[++lineIndex]);
         }
-        metadata[key] = readBlockScalar(blockLines, blockHeader, rootIndent!);
+        metadata[key] = readBlockScalar(blockLines, blockHeader, contentIndent);
         continue;
       }
 

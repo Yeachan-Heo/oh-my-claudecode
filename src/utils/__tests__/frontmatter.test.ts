@@ -380,9 +380,25 @@ describe('parseFrontmatter block scalars', () => {
     });
   });
 
+  it('preserves spaces beyond the content indent on whitespace-only literal rows', () => {
+    expect(parse('description: |-\n  first\n   \n  second')).toEqual({
+      description: 'first\n \nsecond',
+    });
+    expect(parse('description: |-\n  first\n   \n')).toEqual({
+      description: 'first\n ',
+    });
+  });
+
   it('preserves breaks around more-indented folded lines', () => {
     expect(parse('description: >-\n  Run:\n    npm test\n  afterwards')).toEqual({
       description: 'Run:\n  npm test\nafterwards',
+    });
+  });
+
+  it('stops at a nonblank line indented less than the scalar content', () => {
+    expect(parse('description: >-\n    Real text\n  # note\nmodel: opus')).toEqual({
+      description: 'Real text',
+      model: 'opus',
     });
   });
 
