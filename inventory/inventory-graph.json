@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "06a2c16e9fc200f2fd38b223c9b0796bb1d7e366",
-    "sourceSha256": "d5408e97f1f29008b4fd6ab8926dfb88d16443ff6af7df9ae145a14d8294056d",
+    "head": "77009b90a9015d45dd3af7878f13cfb133956842",
+    "sourceSha256": "cf9bd413461916713c40be075e0e425ddef34de38fc2c7a99caa9cfc32333077",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "06a2c16e9fc200f2fd38b223c9b0796bb1d7e366",
-  "sourceSha256": "d5408e97f1f29008b4fd6ab8926dfb88d16443ff6af7df9ae145a14d8294056d",
+  "head": "77009b90a9015d45dd3af7878f13cfb133956842",
+  "sourceSha256": "cf9bd413461916713c40be075e0e425ddef34de38fc2c7a99caa9cfc32333077",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 339,
+      "hookFiles": 340,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1473,
-      "total": 1497
+      "srcFiles": 1474,
+      "total": 1498
     },
     "generated": {
       "distFiles": 5613,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 339,
+    "hookFiles": 340,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -243,6 +243,7 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
+      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -6636,6 +6637,7 @@
       "src/hooks/factcheck/__tests__/factcheck.test.ts",
       "src/hooks/factcheck/__tests__/sentinel-gate.test.ts",
       "src/hooks/factcheck/__tests__/sentinel.test.ts",
+      "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
       "src/hooks/factcheck/checks.ts",
       "src/hooks/factcheck/config.ts",
       "src/hooks/factcheck/index.ts",
@@ -41392,6 +41394,11 @@
         "path": "src/hooks/factcheck/__tests__/sentinel.test.ts"
       },
       {
+        "id": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts"
+      },
+      {
         "id": "src/hooks/factcheck/checks.ts",
         "kind": "hook",
         "path": "src/hooks/factcheck/checks.ts"
@@ -64857,6 +64864,16 @@
         "from": "src/hooks/factcheck/__tests__/sentinel.test.ts",
         "to": "src/hooks/factcheck/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/factcheck/__tests__/strict-mode-glob.test.ts",
+        "to": "src/hooks/factcheck/config.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/factcheck/checks.ts",
@@ -88735,12 +88752,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7748,
-      "edgeCount": 8574,
-      "importEdgeCount": 7124,
+      "nodeCount": 7749,
+      "edgeCount": 8576,
+      "importEdgeCount": 7126,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "5612873febf29f029957c6cad4772815ec898dac0f5458446aac108a2e015a3f",
-  "manifestSha256": "18e4e0a428c8b3f45cbfea224b02004cdc2c9dc76bd8ead582e971a96724ecd4"
+  "inventorySha256": "d7a82df442812e8e5985ff13539c571ceb13e9427d4f4391ccb31455cbbb49ab",
+  "manifestSha256": "372561282c1ad11007736c95cf9704f845e9bfb1b004cf80b9de66ff0fb12b3f"
 }
