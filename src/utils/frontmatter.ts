@@ -71,6 +71,16 @@ interface BlockScalarIndent {
   isDetermined: boolean;
 }
 
+function countLeadingYamlSpaces(line: string): number {
+  let count = 0;
+  while (line[count] === ' ') count++;
+  return count;
+}
+
+function isBlankBlockScalarLine(line: string): boolean {
+  return countLeadingYamlSpaces(line) === line.length;
+}
+
 function getBlockScalarContentIndent(
   lines: string[],
   startIndex: number,
@@ -83,8 +93,8 @@ function getBlockScalarContentIndent(
 
   for (let i = startIndex; i < lines.length; i++) {
     const line = lines[i];
-    if (line.trim() === '') continue;
-    const indent = line.length - line.trimStart().length;
+    if (isBlankBlockScalarLine(line)) continue;
+    const indent = countLeadingYamlSpaces(line);
     if (indent > parentIndent) return { value: indent, isDetermined: true };
     break;
   }
@@ -95,8 +105,8 @@ function getBlockScalarContentIndent(
 /** Read literal/folded block lines and apply YAML chomping to their final breaks. */
 function readBlockScalar(blockLines: string[], header: BlockScalarHeader, contentIndent: BlockScalarIndent): string {
   const rows: BlockScalarRow[] = blockLines.map((line) => {
-    const indent = line.length - line.trimStart().length;
-    if (line.trim() === '' && !contentIndent.isDetermined) return { text: '', moreIndented: false };
+    const indent = countLeadingYamlSpaces(line);
+    if (isBlankBlockScalarLine(line) && !contentIndent.isDetermined) return { text: '', moreIndented: false };
     return {
       text: line.slice(Math.min(contentIndent.value, indent)),
       moreIndented: indent > contentIndent.value,
@@ -193,8 +203,8 @@ export function parseFrontmatter(content: string): {
         const blockLines: string[] = [];
         while (lineIndex + 1 < lines.length) {
           const nextLine = lines[lineIndex + 1];
-          const nextIndent = nextLine.length - nextLine.trimStart().length;
-          if (nextLine.trim() !== '' && nextIndent < contentIndent.value) break;
+          const nextIndent = countLeadingYamlSpaces(nextLine);
+          if (!isBlankBlockScalarLine(nextLine) && nextIndent < contentIndent.value) break;
           blockLines.push(lines[++lineIndex]);
         }
         metadata[key] = readBlockScalar(blockLines, blockHeader, contentIndent);

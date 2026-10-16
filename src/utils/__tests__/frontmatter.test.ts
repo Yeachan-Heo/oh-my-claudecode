@@ -410,6 +410,11 @@ describe('parseFrontmatter block scalars', () => {
     });
   });
 
+  it('counts only ASCII spaces when inferring scalar indentation', () => {
+    expect(parse('description: |-\n   text')).toEqual({ description: ' text' });
+    expect(parse('description: >-\n  first\n   second')).toEqual({ description: 'first  second' });
+  });
+
   it('applies strip, clip, and keep chomping to folded scalars', () => {
     expect(parse('description: >-\n  first\n  second')).toEqual({
       description: 'first second',
