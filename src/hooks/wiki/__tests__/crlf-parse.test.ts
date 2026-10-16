@@ -23,3 +23,20 @@ describe('parseFrontmatter CRLF handling', () => {
     expect(result!.frontmatter.title).toBe('Mixed');
   });
 });
+
+describe('parseFrontmatter UTF-8 BOM handling', () => {
+  it('should parse frontmatter after a leading BOM', () => {
+    const raw = '﻿---\ntitle: Bom\ntags: []\n---\n\n# Content\n';
+    const result = parseFrontmatter(raw);
+    expect(result).not.toBeNull();
+    expect(result!.frontmatter.title).toBe('Bom');
+    expect(result!.content).toBe('\n# Content\n');
+  });
+
+  it('should parse CRLF frontmatter after a leading BOM', () => {
+    const raw = '﻿---\r\ntitle: Bom\r\ntags: []\r\n---\r\n\r\n# Content\r\n';
+    const result = parseFrontmatter(raw);
+    expect(result).not.toBeNull();
+    expect(result!.frontmatter.title).toBe('Bom');
+  });
+});
