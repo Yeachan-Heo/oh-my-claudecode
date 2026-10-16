@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-16T01:55:43.711Z",
+  "generatedAt": "2026-10-16T02:02:24.914Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "3d74f517183658cc49b5fe9762648e1253fec117",
-    "sourceSha256": "ede98919c595d722103bcfb9c4f763341b0f92a3b268741429cd2d155db79836",
-    "generatedAt": "2026-10-16T01:55:43.711Z",
+    "sourceSha256": "53de6d5009d47c8a07b78f82197fdcf80a769fc176f5d8ab4f6bb8a73d90a1d0",
+    "generatedAt": "2026-10-16T02:02:24.914Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "3d74f517183658cc49b5fe9762648e1253fec117",
-  "sourceSha256": "ede98919c595d722103bcfb9c4f763341b0f92a3b268741429cd2d155db79836",
+  "sourceSha256": "53de6d5009d47c8a07b78f82197fdcf80a769fc176f5d8ab4f6bb8a73d90a1d0",
   "counts": {
     "public": {
       "skills": 48,
@@ -48158,6 +48158,11 @@
         "kind": "imports"
       },
       {
+        "from": "scripts/shipyard-audit.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "scripts/skill-injector.mjs",
         "to": "dist/hooks/skill-bridge.cjs",
         "kind": "imports"
@@ -88620,11 +88625,11 @@
     ],
     "stats": {
       "nodeCount": 7744,
-      "edgeCount": 8555,
-      "importEdgeCount": 7107,
+      "edgeCount": 8556,
+      "importEdgeCount": 7108,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "e2933f8521a9f83fcb828abe4d2a8ee975b45e0aa50cd7d3e7893eb5d6a79a07",
-  "manifestSha256": "c8fa9441723e9437dec22a67c97e27aabcc280c3c3ab0a0db1256802159a3177"
+  "manifestSha256": "5cfd29b91a48cff94e25859da9f9ad8f0a8d1c16bb83e352a58cd9c1cb73bc74"
 }
