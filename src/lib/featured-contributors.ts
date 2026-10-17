@@ -392,10 +392,10 @@ export function parseCliOptions(args: string[]): CliOptions {
 
     if (arg.startsWith('--min-stars=')) {
       const raw = arg.slice('--min-stars='.length).trim();
-      const minStars = raw === '' ? Number.NaN : Number(raw);
+      const minStars = Number(raw);
       // A NaN threshold makes `stars < minStars` always false, which would
       // feature every contributor and write "NaN+ GitHub stars" into README.md.
-      if (!Number.isInteger(minStars) || minStars < 0) {
+      if (!/^\d+$/.test(raw) || !Number.isSafeInteger(minStars)) {
         throw new Error(`Invalid --min-stars value "${raw}": expected a non-negative integer`);
       }
       options.minStars = minStars;

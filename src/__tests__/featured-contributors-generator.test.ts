@@ -148,7 +148,7 @@ describe('featured contributors generator', () => {
     expect(parseCliOptions(['--min-stars=0']).minStars).toBe(0);
   });
 
-  it.each(['abc', '', '-5', '1.5', '10x', 'Infinity'])(
+  it.each(['abc', '', '-5', '1.5', '10x', 'Infinity', '1e-324', '9007199254740993'])(
     'rejects invalid --min-stars=%s instead of silently disabling the threshold',
     (value) => {
       expect(() => parseCliOptions([`--min-stars=${value}`])).toThrow(/Invalid --min-stars/);
