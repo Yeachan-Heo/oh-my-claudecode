@@ -16,7 +16,6 @@ import { canClearStateForSession, findCompletedSessionStateFiles, findCompletedS
 import { isModeActive, getActiveModes, getAllModeStatuses, clearModeState, getStateFilePath, MODE_CONFIGS, getActiveSessionsForMode } from '../hooks/mode-registry/index.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
-import { cancelMergeReadiness, createInitialMergeReadinessState, readMergeReadinessState, setMergeReadinessContent, recordMergeReadinessMCQAnswer } from '../hooks/merge-readiness/runtime.js';
 import { withProcessIdentityFileLock, withProcessIdentityFileLockSync } from '../team/process-identity-lock.js';
 const MAX_MIGRATION_FILE_BYTES = 1_048_576;
 function ensureMigrationDirectoryTree(root, target) {
@@ -49,7 +48,6 @@ function ensureMigrationDirectoryTree(root, target) {
         }
     }
 }
-import { formatMergeReadinessReport, redactMergeReadinessState } from '../hooks/merge-readiness/report.js';
 // Canonical execution modes from mode-registry (deep-interview and self-improve
 // are first-class modes with dedicated MODE_CONFIGS entries; ralplan remains an
 // extra state-only mode handled via the registry-fallback path).
@@ -59,18 +57,15 @@ const EXECUTION_MODES = [
 // ultrawork and ultraqa were retired; their state stays read/clear-eligible for
 // bounded cleanup of pre-existing retired state, but is not write-eligible.
 const RETIRED_STATE_MODES = ['ultrawork', 'ultraqa'];
-// merge-readiness is read/clear-eligible (state_read/status/clear + /cancel work) but NOT write-eligible.
 const STATE_TOOL_MODES = [
     ...EXECUTION_MODES,
     ...RETIRED_STATE_MODES,
     'ralplan',
     'omc-teams',
     'skill-active',
-    'merge-readiness',
     // Runtime guard mode for $ultragoal; not MODE_CONFIGS-backed (#3630).
     'ultragoal',
 ];
-// Modes that may be generically written via state_write. Excludes merge-readiness (runtime-owned).
 const STATE_WRITE_MODES = [
     ...EXECUTION_MODES,
     'ralplan',
@@ -740,9 +735,7 @@ function publicStateForMode(mode, state) {
     if (mode === 'autopilot') {
         return redactAutopilotPublicState(state);
     }
-    return mode === 'merge-readiness'
-        ? redactMergeReadinessState(state)
-        : state;
+    return state;
 }
 // ============================================================================
 // state_read - Read state for a mode
@@ -1202,7 +1195,7 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
 }
 export const stateClearTool = {
     name: 'state_clear',
-    description: 'Clear/delete orchestration state for a specific mode. Removes the state file and any associated marker files, but does not remove native Team runtimes or cleanup evidence. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).',
+    description: 'Clear/delete orchestration state for a specific mode. Removes the state file and any associated marker files, but does not remove native Team runtimes or cleanup evidence.',
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     schema: {
         mode: z.enum(STATE_TOOL_MODES).describe('The mode to clear state for'),
@@ -1223,50 +1216,6 @@ export const stateClearTool = {
                 catch {
                     // Missing roots follow the normal no-state path.
                 }
-            }
-            // Merge-readiness is an audit gate, so clearing it must leave a durable
-            // terminal result and report rather than deleting the evidence trail.
-            if (mode === 'merge-readiness') {
-                const cancelledSessions = [];
-                const blockedSessions = [];
-                const cancelActiveSession = (targetSessionId) => {
-                    const current = readMergeReadinessState(root, targetSessionId);
-                    if (!current?.active)
-                        return 'inactive';
-                    // cancelMergeReadiness fail-closes to an active blocked state when the
-                    // write cannot land; distinguish that from a real cancelled result so
-                    // the operator learns the cancel did not persist.
-                    return cancelMergeReadiness(root, targetSessionId)?.result === 'cancelled' ? 'cancelled' : 'blocked';
-                };
-                const recordResult = (sid, status) => {
-                    if (status === 'cancelled')
-                        cancelledSessions.push(sid);
-                    else if (status === 'blocked')
-                        blockedSessions.push(sid);
-                };
-                if (sessionId) {
-                    validateSessionId(sessionId);
-                    recordResult(sessionId, cancelActiveSession(sessionId));
-                }
-                else {
-                    // Omitting session_id must not cross session boundaries: only cancel
-                    // the caller's own session (resolved from env) and legacy state,
-                    // never other sessions' active gates.
-                    const callerSid = (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
-                    if (callerSid)
-                        recordResult(callerSid, cancelActiveSession(callerSid));
-                    recordResult('legacy', cancelActiveSession());
-                }
-                const blocked = blockedSessions.length > 0;
-                const text = blocked
-                    ? `Merge-readiness cancellation FAILED for: ${blockedSessions.join(', ')}. The state could not be persisted (read-only state dir / full disk); the gate(s) remain active on disk. Resolve and re-run.`
-                    : cancelledSessions.length > 0
-                        ? `Cancelled merge-readiness gate(s) with durable state audit records: ${cancelledSessions.join(', ')}`
-                        : 'No active merge-readiness gate found; existing state audit records were preserved.';
-                return {
-                    content: [{ type: 'text', text }],
-                    ...(blocked ? { isError: true } : {}),
-                };
             }
             if (mode === 'autopilot')
                 recoverAutopilotEmergencyTransactions(root, sessionId);
@@ -2129,128 +2078,5 @@ export const stateTools = [
     stateListActiveTool,
     stateGetStatusTool,
     stateMigrateNonGitTool,
-    {
-        name: 'merge_readiness_start',
-        description: 'Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick or --deep; standard is the default when neither flag is present). Re-running it while an active attempt is still pending is rejected - cancel via merge_readiness_cancel or let the attempt pass/pause first, so the in-progress audit trail is never silently overwritten.',
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-        schema: {
-            summary: z.string().max(2000),
-            baseRef: z.string().max(200).regex(/^[A-Za-z0-9._\/@{}~^:-]+$/, "baseRef must be a valid git ref").refine((s) => !s.startsWith("-"), "baseRef must not start with '-'").optional().describe("Base ref to diff committed changes against (e.g. origin/dev, HEAD, HEAD~1, HEAD^). Defaults to the branch upstream / origin/HEAD."),
-            workingDirectory: z.string().optional(), session_id: z.string().optional(),
-        },
-        handler: async (args) => {
-            try {
-                const directory = resolveStateWorkingDirectory(args.workingDirectory);
-                const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
-                const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
-                const blocked = state.result === 'blocked';
-                return { content: [{ type: 'text', text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(' ') ?? 'missing evidence'}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...(blocked ? { isError: true } : {}) };
-            }
-            catch (error) {
-                return { content: [{ type: 'text', text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-            }
-        },
-    },
-    {
-        name: 'merge_readiness_set_content',
-        description: 'Validate and submit the five-section merge-readiness report and objective MCQs. Requires an active gate (call merge_readiness_start first).',
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-        schema: {
-            why: z.string().max(10000), whatChanged: z.string().max(10000), tradeoffs: z.string().max(10000), risksConsidered: z.string().max(10000), teamUnderstanding: z.string().max(10000),
-            questions: z.array(z.object({ id: z.string().max(100), dimension: z.enum(['why', 'change', 'tradeoff', 'risk', 'team']), stem: z.string().max(2000), options: z.array(z.object({ id: z.string().max(100), text: z.string().max(1000) })).max(8), correctOptionId: z.string().max(100), rationale: z.string().max(2000).optional() })).max(8),
-            workingDirectory: z.string().optional(), session_id: z.string().optional(),
-        },
-        handler: async (args) => {
-            try {
-                const directory = resolveStateWorkingDirectory(args.workingDirectory);
-                const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
-                const state = setMergeReadinessContent(directory, args, sessionId);
-                if (!state || !state.active) {
-                    return { content: [{ type: 'text', text: 'Merge-readiness content rejected: no active gate (the gate is missing or already terminal - pass/cancelled/overridden). Call merge_readiness_start first.' }], isError: true };
-                }
-                const errors = state.validation_errors ?? [];
-                return { content: [{ type: 'text', text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(' ')}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? 'none'}` }], ...(errors.length > 0 ? { isError: true } : {}) };
-            }
-            catch (error) {
-                return { content: [{ type: 'text', text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-            }
-        },
-    },
-    {
-        name: 'merge_readiness_record_answer',
-        description: 'Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.',
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-        schema: {
-            questionId: z.string().max(100),
-            optionId: z.string().max(100),
-            workingDirectory: z.string().optional(), session_id: z.string().optional(),
-        },
-        handler: async (args) => {
-            try {
-                const directory = resolveStateWorkingDirectory(args.workingDirectory);
-                const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: "cli" });
-                const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
-                if (!state) {
-                    return { content: [{ type: 'text', text: 'Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ.' }], isError: true };
-                }
-                const result = state.result;
-                const score = state.readiness_score;
-                const persistFailed = result === 'blocked' && (state.validation_errors ?? []).some((e) => e.includes('persisted'));
-                const text = persistFailed
-                    ? `Merge-readiness answer NOT recorded: state could not be persisted (read-only state dir / full disk / invalid path). The gate is still armed on disk. ${(state.validation_errors ?? []).join(' ')}`
-                    : result === 'pass' || result === 'paused' || result === 'blocked' || result === 'overridden'
-                        ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === 'pass' ? 'The change may proceed to human merge approval.' : result === 'paused' ? 'Explanation gap remains; reread the report and rerun /merge-readiness.' : result === 'blocked' ? 'Missing evidence; produce it before rerunning.' : 'Gate overridden; terminal session state preserves the record.'}`
-                        : `Answer recorded. Next question: ${state.pending_question?.id ?? 'none'}. Answered: ${state.answers.length}/${state.questions.length}.`;
-                return { content: [{ type: 'text', text }], ...(persistFailed ? { isError: true } : {}) };
-            }
-            catch (error) {
-                return { content: [{ type: 'text', text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-            }
-        },
-    },
-    {
-        name: 'merge_readiness_report',
-        description: 'Render the authoritative merge-readiness session state as a Markdown report without writing a file.',
-        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-        schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
-        handler: async (args) => {
-            try {
-                const directory = resolveStateWorkingDirectory(args.workingDirectory);
-                const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
-                const state = readMergeReadinessState(directory, sessionId);
-                if (!state) {
-                    return { content: [{ type: 'text', text: 'Merge-readiness report unavailable: no session state found.' }], isError: true };
-                }
-                return { content: [{ type: 'text', text: formatMergeReadinessReport(state) }] };
-            }
-            catch (error) {
-                return { content: [{ type: 'text', text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-            }
-        },
-    },
-    {
-        name: 'merge_readiness_cancel',
-        description: 'Cancel an active merge-readiness gate while preserving its terminal state audit record.',
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-        schema: { workingDirectory: z.string().optional(), session_id: z.string().optional() },
-        handler: async (args) => {
-            try {
-                const directory = resolveStateWorkingDirectory(args.workingDirectory);
-                const sessionId = (args.session_id && args.session_id.trim()) || (process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim()) || resolveSessionId({ context: 'cli' });
-                const state = cancelMergeReadiness(directory, sessionId);
-                const persistFailed = state?.result === 'blocked' && (state.validation_errors ?? []).some((e) => e.includes('persisted'));
-                if (persistFailed) {
-                    return { content: [{ type: 'text', text: `Merge-readiness cancellation FAILED: state could not be persisted (read-only state dir / full disk). The gate is still armed on disk. ${(state?.validation_errors ?? []).join(' ')}` }], isError: true };
-                }
-                if (!state || state.result !== 'cancelled') {
-                    return { content: [{ type: 'text', text: 'Merge-readiness cancellation rejected: no active gate.' }], isError: true };
-                }
-                return { content: [{ type: 'text', text: 'Merge-readiness cancelled. Terminal session state preserved as the audit record.' }] };
-            }
-            catch (error) {
-                return { content: [{ type: 'text', text: `Merge-readiness error: ${error instanceof Error ? error.message : String(error)}` }], isError: true };
-            }
-        },
-    },
 ];
 //# sourceMappingURL=state-tools.js.map

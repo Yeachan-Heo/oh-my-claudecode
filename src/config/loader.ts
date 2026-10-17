@@ -647,7 +647,6 @@ const AUTOPILOT_WORKFLOW_RESERVED_NAMES = new Set([
   "qa",
   "autoresearch",
   "ultraqa",
-  "merge-readiness",
   "self-improve",
   "ultrawork",
   "ultrapilot",
@@ -1378,7 +1377,7 @@ export function generateConfigSchema(): object {
               not: {
                 enum: [
                   "autopilot", "ralplan", "execution", "ralph", "qa", "autoresearch", "ultraqa",
-                  "merge-readiness", "self-improve", "ultrawork", "ultrapilot", "swarm", "pipeline",
+                  "self-improve", "ultrawork", "ultrapilot", "swarm", "pipeline",
                   "plan", "team", "cancel", "deep-interview", "deepsearch", "ultrathink", "tdd",
                   "code-review", "security-review", "analyze", "search",
                 ],

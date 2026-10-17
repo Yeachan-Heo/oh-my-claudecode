@@ -12,6 +12,7 @@
  * - State cleanup utilities
  */
 import { StateLocation, StateConfig, StateReadResult, StateWriteResult, StateClearResult, StateMigrationResult, StateFileInfo, ListStatesOptions, CleanupOptions, CleanupResult, StateData } from "./types.js";
+export { cleanupOrphanedStates, listStates } from "./list-cleanup.js";
 /**
  * Clear the state read cache.
  * Exported for testing and for write/clear operations to invalidate stale entries.
@@ -61,19 +62,6 @@ export declare function clearState(name: string, location?: StateLocation): Stat
  * Deletes the legacy file after successful migration.
  */
 export declare function migrateState(name: string, location?: StateLocation): StateMigrationResult;
-/**
- * List all state files
- *
- * Returns information about all state files in the specified location(s).
- */
-export declare function listStates(options?: ListStatesOptions): StateFileInfo[];
-/**
- * Cleanup orphaned state files
- *
- * Removes state files that haven't been modified in a long time.
- * Useful for cleaning up abandoned states.
- */
-export declare function cleanupOrphanedStates(options?: CleanupOptions): CleanupResult;
 /**
  * Determine whether a state's metadata indicates staleness.
  *

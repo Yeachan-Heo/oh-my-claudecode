@@ -235,5 +235,91 @@ describe('installer bundled + standalone skill sync', () => {
             logSpy.mockRestore();
         }
     });
+    it('reports an unchanged CLAUDE.md as already up to date on a repeated install', async () => {
+        const claudeMdPath = join(claudeConfigDir, 'CLAUDE.md');
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+        try {
+            const firstInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+            const firstResult = firstInstaller.install({
+                skipClaudeCheck: true,
+                skipHud: true,
+                verbose: true,
+            });
+            expect(firstResult.success).toBe(true);
+            expect(logSpy).toHaveBeenCalledWith('Created CLAUDE.md');
+            const firstContent = readFileSync(claudeMdPath, 'utf-8');
+            logSpy.mockClear();
+            const secondInstaller = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+            const secondResult = secondInstaller.install({
+                skipClaudeCheck: true,
+                skipHud: true,
+                verbose: true,
+            });
+            expect(secondResult.success).toBe(true);
+            expect(logSpy).toHaveBeenCalledWith('CLAUDE.md already up to date');
+            expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+            expect(logSpy).not.toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+            expect(readFileSync(claudeMdPath, 'utf-8')).toBe(firstContent);
+        }
+        finally {
+            logSpy.mockRestore();
+        }
+    });
+    describe('claudeMdEnabled opt-out', () => {
+        const SKIP_LOG = 'Skipping CLAUDE.md (claudeMdEnabled is false in .omc-config.json)';
+        it('leaves an existing CLAUDE.md untouched and logs a skip when claudeMdEnabled is false', async () => {
+            const claudeMdPath = join(claudeConfigDir, 'CLAUDE.md');
+            writeFileSync(claudeMdPath, '# My own global config\n');
+            writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+            const logSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+            try {
+                const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+                const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+                expect(result.success).toBe(true);
+                expect(logSpy).toHaveBeenCalledWith(SKIP_LOG);
+                expect(logSpy).not.toHaveBeenCalledWith('Created CLAUDE.md');
+                expect(logSpy).not.toHaveBeenCalledWith('Updated CLAUDE.md (merged with existing content)');
+                expect(readFileSync(claudeMdPath, 'utf-8')).toBe('# My own global config\n');
+                expect(existsSync(join(claudeConfigDir, 'CLAUDE-omc.md'))).toBe(false);
+                expect(JSON.parse(readFileSync(join(claudeConfigDir, '.omc-config.json'), 'utf-8')).claudeMdEnabled).toBe(false);
+            }
+            finally {
+                logSpy.mockRestore();
+            }
+        });
+        it('does not create a CLAUDE.md when claudeMdEnabled is false and none exists', async () => {
+            writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+            const logSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+            try {
+                const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+                const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+                expect(result.success).toBe(true);
+                expect(logSpy).toHaveBeenCalledWith(SKIP_LOG);
+                expect(existsSync(join(claudeConfigDir, 'CLAUDE.md'))).toBe(false);
+            }
+            finally {
+                logSpy.mockRestore();
+            }
+        });
+        for (const config of [undefined, { claudeMdEnabled: true }]) {
+            it(`still writes CLAUDE.md when claudeMdEnabled is ${config ? 'true' : 'absent'}`, async () => {
+                if (config) {
+                    writeFileSync(join(claudeConfigDir, '.omc-config.json'), JSON.stringify(config));
+                }
+                const logSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+                try {
+                    const installer = await loadInstallerWithEnv(claudeConfigDir, homeDir);
+                    const result = installer.install({ skipClaudeCheck: true, skipHud: true, verbose: true });
+                    expect(result.success).toBe(true);
+                    expect(logSpy).toHaveBeenCalledWith('Created CLAUDE.md');
+                    expect(logSpy).not.toHaveBeenCalledWith(SKIP_LOG);
+                    expect(readFileSync(join(claudeConfigDir, 'CLAUDE.md'), 'utf-8')).toContain('<!-- OMC:START -->');
+                }
+                finally {
+                    logSpy.mockRestore();
+                }
+            });
+        }
+    });
 });
 //# sourceMappingURL=installer-omc-reference.test.js.map

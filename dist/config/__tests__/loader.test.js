@@ -888,6 +888,19 @@ describe("loadConfig() — autopilot.workflows", () => {
         }));
         expect(loadConfig().autopilot?.workflows?.["plan-build"]?.stages).toEqual(stages);
     });
+    it("allows the retired merge-readiness name for a custom workflow profile", () => {
+        writeProjectConfig(JSON.stringify({
+            autopilot: {
+                workflows: {
+                    "merge-readiness": { version: 1, stages: ["ralplan", "execution"] },
+                },
+            },
+        }));
+        expect(loadConfig().autopilot?.workflows?.["merge-readiness"]?.stages).toEqual([
+            "ralplan",
+            "execution",
+        ]);
+    });
     it.each([
         ["stageModels", { version: 1, stages: ["ralplan", "execution"], stageModels: {} }, /project autopilot\.workflows\.plan-build\.stageModels/],
         ["wrong order", { version: 1, stages: ["execution", "ralplan"] }, /project autopilot\.workflows\.plan-build\.stages/],

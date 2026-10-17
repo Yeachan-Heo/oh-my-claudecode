@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { MODE_NAMES, ALL_MODE_NAMES, MODE_STATE_FILE_MAP, SESSION_END_MODE_STATE_FILES, SESSION_METRICS_MODE_FILES, } from '../lib/mode-names.js';
+import { MODE_CONFIGS } from '../hooks/mode-registry/index.js';
 describe('mode-names ralplan', () => {
     it('MODE_NAMES should include AUTORESEARCH', () => {
         expect(MODE_NAMES.AUTORESEARCH).toBe('autoresearch');
@@ -45,6 +46,12 @@ describe('mode-names ralplan', () => {
         const modeCount = Object.keys(MODE_NAMES).length;
         expect(ALL_MODE_NAMES.length).toBe(modeCount);
         expect(Object.keys(MODE_STATE_FILE_MAP).length).toBe(modeCount);
+    });
+    it('does not register retired merge-readiness mode state', () => {
+        expect(ALL_MODE_NAMES).not.toContain('merge-readiness');
+        expect(Object.keys(MODE_CONFIGS)).not.toContain('merge-readiness');
+        expect(SESSION_END_MODE_STATE_FILES.map((entry) => entry.mode)).not.toContain('merge-readiness');
+        expect(SESSION_METRICS_MODE_FILES.map((entry) => entry.mode)).not.toContain('merge-readiness');
     });
 });
 //# sourceMappingURL=mode-names-ralplan.test.js.map

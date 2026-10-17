@@ -15,13 +15,9 @@
 import * as fs from "fs";
 import * as path from "path";
 import { atomicWriteJsonSync } from "../../lib/atomic-write.js";
-import {
-  OmcPaths,
-  getWorktreeRoot,
-  getOmcRoot,
-  validateWorkingDirectory,
-} from "../../lib/worktree-paths.js";
-import { getGlobalOmcStateRoot, getLegacyOmcPath } from "../../utils/paths.js";
+import { getWorktreeRoot, getOmcRoot } from "../../lib/worktree-paths.js";
+import { getLegacyOmcPath } from "../../utils/paths.js";
+import { GLOBAL_STATE_DIR, getLocalStateDir } from "./state-paths.js";
 import {
   StateLocation,
   StateConfig,
@@ -37,16 +33,7 @@ import {
   DEFAULT_STATE_CONFIG,
 } from "./types.js";
 
-// Standard state directories
-/** Get the absolute path to the local state directory, resolved from the git worktree root. */
-function getLocalStateDir(): string {
-  return path.join(validateWorkingDirectory(), OmcPaths.STATE);
-}
-/**
- * @deprecated for mode state. Global state directory is only used for analytics and daemon state.
- * Mode state should use LOCAL_STATE_DIR exclusively.
- */
-const GLOBAL_STATE_DIR = getGlobalOmcStateRoot();
+export { cleanupOrphanedStates, listStates } from "./list-cleanup.js";
 
 /** Maximum age for state files before they are considered stale (4 hours) */
 const MAX_STATE_AGE_MS = 4 * 60 * 60 * 1000;
@@ -97,7 +84,10 @@ export function getStatePath(name: string, location: StateLocation): string {
 /**
  * Get legacy paths for a state file (for migration)
  */
-export function getLegacyPaths(name: string, location: StateLocation = StateLocation.LOCAL): string[] {
+export function getLegacyPaths(
+  name: string,
+  location: StateLocation = StateLocation.LOCAL,
+): string[] {
   const legacyPaths = [...(LEGACY_LOCATIONS[name] || [])];
 
   if (location === StateLocation.GLOBAL) {
@@ -124,7 +114,11 @@ function resolveLegacyStatePath(legacyPath: string): string {
     : path.join(getWorktreeRoot() || process.cwd(), legacyPath);
 }
 
-function warnStateReadFailure(kind: "state" | "legacy state", filePath: string, error: unknown): void {
+function warnStateReadFailure(
+  kind: "state" | "legacy state",
+  filePath: string,
+  error: unknown,
+): void {
   console.warn(`Failed to read ${kind} from ${filePath}:`, error);
 }
 
@@ -400,135 +394,6 @@ export function migrateState(
     from: readResult.foundAt,
     to: writeResult.path,
   };
-}
-
-/**
- * List all state files
- *
- * Returns information about all state files in the specified location(s).
- */
-export function listStates(options?: ListStatesOptions): StateFileInfo[] {
-  const results: StateFileInfo[] = [];
-  const includeLegacy = options?.includeLegacy ?? false;
-  const pattern = options?.pattern;
-
-  // Helper to check if name matches pattern
-  const matchesPattern = (name: string): boolean => {
-    if (!pattern) return true;
-    // Simple glob: * matches anything
-    const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-    return regex.test(name);
-  };
-
-  // Helper to add state files from a directory
-  const addStatesFromDir = (
-    dir: string,
-    location: StateLocation,
-    isLegacy: boolean = false,
-  ) => {
-    if (!fs.existsSync(dir)) return;
-
-    try {
-      const files = fs.readdirSync(dir);
-      for (const file of files) {
-        if (!file.endsWith(".json")) continue;
-
-        const name = file.slice(0, -5); // Remove .json
-        if (!matchesPattern(name)) continue;
-
-        const filePath = path.join(dir, file);
-        const stats = fs.statSync(filePath);
-
-        results.push({
-          name,
-          path: filePath,
-          location,
-          size: stats.size,
-          modified: stats.mtime,
-          isLegacy,
-        });
-      }
-    } catch (error) {
-      console.warn(`Failed to list states from ${dir}:`, error);
-    }
-  };
-
-  // Check standard locations
-  if (!options?.location || options.location === StateLocation.LOCAL) {
-    addStatesFromDir(getLocalStateDir(), StateLocation.LOCAL);
-  }
-  if (!options?.location || options.location === StateLocation.GLOBAL) {
-    addStatesFromDir(GLOBAL_STATE_DIR, StateLocation.GLOBAL);
-  }
-
-  // Check legacy locations if requested
-  if (includeLegacy) {
-    // Add logic to scan legacy locations
-    // This would require knowing all possible legacy locations
-    // For now, we skip this as legacy locations are name-specific
-  }
-
-  return results;
-}
-
-/**
- * Cleanup orphaned state files
- *
- * Removes state files that haven't been modified in a long time.
- * Useful for cleaning up abandoned states.
- */
-export function cleanupOrphanedStates(options?: CleanupOptions): CleanupResult {
-  const maxAgeDays = options?.maxAgeDays ?? 30;
-  const dryRun = options?.dryRun ?? false;
-  const exclude = options?.exclude ?? [];
-
-  const result: CleanupResult = {
-    deleted: [],
-    wouldDelete: dryRun ? [] : undefined,
-    spaceFreed: 0,
-    errors: [],
-  };
-
-  const cutoffDate = new Date();
-  cutoffDate.setDate(cutoffDate.getDate() - maxAgeDays);
-
-  const states = listStates({ includeLegacy: false });
-
-  for (const state of states) {
-    // Skip excluded patterns
-    if (
-      exclude.some((pattern) => {
-        const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
-        return regex.test(state.name);
-      })
-    ) {
-      continue;
-    }
-
-    // Check if old enough
-    if (state.modified > cutoffDate) {
-      continue;
-    }
-
-    // Delete or record for dry run
-    if (dryRun) {
-      result.wouldDelete?.push(state.path);
-      result.spaceFreed += state.size;
-    } else {
-      try {
-        fs.unlinkSync(state.path);
-        result.deleted.push(state.path);
-        result.spaceFreed += state.size;
-      } catch (error) {
-        result.errors.push({
-          path: state.path,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-  }
-
-  return result;
 }
 
 /**

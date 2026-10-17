@@ -85,6 +85,25 @@ describe('plugin skill context budget gate (issues #2943, #2986)', () => {
         expect(isPathInsideOrEqual(winRoot, winArchivedBody)).toBe(true);
         expect(isPathInsideOrEqual(winRoot, winEscapedBody)).toBe(false);
     });
+    it('preserves BOM-prefixed plugin skill frontmatter when compacting shims', () => {
+        const tempRoot = mkdtempSync(join(tmpdir(), 'omc-plugin-skill-bom-'));
+        const skillDir = join(tempRoot, 'skills', 'plan');
+        mkdirSync(skillDir, { recursive: true });
+        writeFileSync(join(skillDir, 'SKILL.md'), '\uFEFF---\nname: omc-plan\ndescription: Plan work\naliases: [plan]\nargument-hint: <goal>\npipeline: [ralplan, execute]\n---\nFull plan instructions.\n');
+        try {
+            const result = compactPluginSkillPayload(tempRoot);
+            const shim = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8');
+            expect(result.errors).toEqual([]);
+            expect(result.compacted).toBe(1);
+            expect(shim).toContain('name: omc-plan');
+            expect(shim).toContain('aliases: [plan]');
+            expect(shim).toContain('argument-hint: <goal>');
+            expect(shim).toContain('pipeline: [ralplan, execute]');
+        }
+        finally {
+            rmSync(tempRoot, { recursive: true, force: true });
+        }
+    });
     it('keeps bundled skills discoverable and manually callable', () => {
         expect(readPluginJson().commands).toBe('./commands/');
         const registeredSkillDirs = pluginSkillDirs();

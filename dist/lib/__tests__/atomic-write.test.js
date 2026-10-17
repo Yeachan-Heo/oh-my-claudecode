@@ -30,6 +30,15 @@ vi.mock('fs/promises', async (importOriginal) => {
     };
 });
 import { atomicWriteBatchSync, atomicWriteFileSync, atomicWriteJson, fileIdentityOf, sameFileIdentity, } from '../atomic-write.js';
+// SQLite's busy handler sums the sleeps it requests (about 75 ms of them here)
+// instead of watching a clock, so a loaded or virtualized runner stretches the
+// real wait: macOS CI runners were observed at 533 and 575 ms for 75 ms. The
+// ceiling stays well under the 2000 ms default busy timeout, so a lock call
+// that ignores the caller's value still fails, while the floor proves the
+// caller's value was waited on at all.
+const SQLITE_CONTENTION_BUSY_TIMEOUT_MS = 75;
+const SQLITE_CONTENTION_MIN_WAIT_MS = 50;
+const SQLITE_CONTENTION_RUNNER_MARGIN_MS = 1000;
 function deferred() {
     let resolve;
     return { promise: new Promise(done => { resolve = done; }), resolve };
@@ -450,10 +459,12 @@ describe('atomicWriteJson', () => {
         });
         try {
             await readyPromise;
-            const startedAt = Date.now();
-            const lock = acquireStateFileLockAtPathSync(lockPath, 1, true, false, 75);
+            const startedAt = performance.now();
+            const lock = acquireStateFileLockAtPathSync(lockPath, 1, true, false, SQLITE_CONTENTION_BUSY_TIMEOUT_MS);
+            const elapsedMs = performance.now() - startedAt;
             expect(lock).toBeNull();
-            expect(Date.now() - startedAt).toBeLessThan(500);
+            expect(elapsedMs).toBeGreaterThanOrEqual(SQLITE_CONTENTION_MIN_WAIT_MS);
+            expect(elapsedMs).toBeLessThan(SQLITE_CONTENTION_BUSY_TIMEOUT_MS + SQLITE_CONTENTION_RUNNER_MARGIN_MS);
             expect(getStateFileLockFailureKind()).toBe('contention');
         }
         finally {
@@ -507,10 +518,12 @@ describe('atomicWriteJson', () => {
         });
         try {
             await readyPromise;
-            const startedAt = Date.now();
-            const lock = acquireStateFileLockAtPathSync(contendedLockPath, 1, true, false, 75);
+            const startedAt = performance.now();
+            const lock = acquireStateFileLockAtPathSync(contendedLockPath, 1, true, false, SQLITE_CONTENTION_BUSY_TIMEOUT_MS);
+            const elapsedMs = performance.now() - startedAt;
             expect(lock).toBeNull();
-            expect(Date.now() - startedAt).toBeLessThan(500);
+            expect(elapsedMs).toBeGreaterThanOrEqual(SQLITE_CONTENTION_MIN_WAIT_MS);
+            expect(elapsedMs).toBeLessThan(SQLITE_CONTENTION_BUSY_TIMEOUT_MS + SQLITE_CONTENTION_RUNNER_MARGIN_MS);
             expect(getStateFileLockFailureKind()).toBe('contention');
             releaseAttempted = true;
             expect(releaseStateFileLockSync(heldLock)).toBe(false);

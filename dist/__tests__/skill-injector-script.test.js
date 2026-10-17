@@ -95,9 +95,9 @@ Module._load = function(request, parent, isMain) {
     });
 });
 describe('skill-injector.mjs learned skill injection', () => {
-    function writeLearnedSkill(projectDir) {
+    function writeLearnedSkill(projectDir, withBom = false) {
         mkdirSync(join(projectDir, '.omc', 'skills'), { recursive: true });
-        writeFileSync(join(projectDir, '.omc', 'skills', 'release-notes.md'), `---
+        writeFileSync(join(projectDir, '.omc', 'skills', 'release-notes.md'), `${withBom ? '\uFEFF' : ''}---
 name: Release Notes
 triggers:
   - release notes
@@ -114,7 +114,7 @@ Write concise release notes.`);
         });
         expect(output.hookSpecificOutput?.additionalContext).toContain('### Release Notes (project)');
     });
-    it('injects a matching learned skill through the trusted run.cjs Worker path', () => {
+    it('injects a BOM-prefixed learned skill through the standalone fallback Worker path', () => {
         const projectDir = makeTempDir('skill-injector-worker-project-');
         const pluginRoot = makeTempDir('skill-injector-worker-plugin-');
         const scriptsDir = join(pluginRoot, 'scripts');
@@ -122,7 +122,7 @@ Write concise release notes.`);
         mkdirSync(libDir, { recursive: true });
         mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
         provisionStandaloneStateLockBridge(PACKAGE_ROOT, join(libDir, 'state-lock.mjs'));
-        for (const file of ['config-dir.mjs', 'stdin.mjs', 'atomic-write.mjs']) {
+        for (const file of ['config-dir.mjs', 'stdin.mjs', 'atomic-write.mjs', 'utf8-bom.mjs']) {
             writeFileSync(join(libDir, file), readFileSync(join(process.cwd(), 'scripts', 'lib', file)));
         }
         writeFileSync(join(scriptsDir, 'run.cjs'), readFileSync(join(process.cwd(), 'scripts', 'run.cjs')));
@@ -136,7 +136,7 @@ Write concise release notes.`);
                             }] }],
             },
         }));
-        writeLearnedSkill(projectDir);
+        writeLearnedSkill(projectDir, true);
         const result = spawnSync(NODE, [join(scriptsDir, 'run.cjs'), join(scriptsDir, 'skill-injector.mjs')], {
             cwd: projectDir,
             encoding: 'utf-8',

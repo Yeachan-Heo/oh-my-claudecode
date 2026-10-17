@@ -147,6 +147,27 @@ describe('setup-claude-md.sh committed plugin shipping surface (issue #3476)', (
         expect(readFileSync(join(fixture.projectRoot, '.claude', 'skills', 'wiki', 'SKILL.md'), 'utf-8'))
             .toBe(readFileSync(join(fixture.pluginRoot, 'skills', 'wiki', 'SKILL.md'), 'utf-8'));
     });
+    it('skips global CLAUDE.md writes before invoking the committed coordinator when disabled', () => {
+        const fixture = createCommittedPluginFixture();
+        const configDir = join(fixture.homeRoot, 'custom-profile');
+        const userClaude = Buffer.from('# User CLAUDE\r\nKeep exact bytes.\r\n');
+        mkdirSync(configDir, { recursive: true });
+        writeFileSync(join(configDir, 'CLAUDE.md'), userClaude);
+        writeFileSync(join(configDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: false }));
+        writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+        const result = spawnSync('bash', [fixture.scriptPath, 'global', 'overwrite'], {
+            cwd: fixture.projectRoot,
+            env: { ...process.env, HOME: fixture.homeRoot, CLAUDE_CONFIG_DIR: configDir },
+            encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        expect(readFileSync(join(configDir, 'CLAUDE.md'))).toEqual(userClaude);
+        expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
+        expect(existsSync(join(configDir, '.omc'))).toBe(false);
+        expect(result.stdout).toContain('Coordinator note: Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)');
+        expect(result.stdout).not.toContain('Coordinator mutated path');
+        expect(result.stdout).not.toContain('Coordinator backup');
+    });
     for (const scenario of ['missing', 'stale']) {
         it(`fails before local mutation when the committed coordinator is ${scenario}`, () => {
             const fixture = createCommittedPluginFixture();
@@ -793,6 +814,64 @@ Use the real docs file.
         expect(companionClaude).toContain('<!-- OMC:END -->');
         expect(companionClaude).toContain('<!-- OMC:VERSION:9.9.9 -->');
         expect(companionClaude).toContain('# Canonical CLAUDE');
+    });
+    describe('claudeMdEnabled opt-out', () => {
+        const CANONICAL = `<!-- OMC:START -->
+<!-- OMC:VERSION:9.9.9 -->
+
+# Canonical CLAUDE
+Use the real docs file.
+<!-- OMC:END -->
+`;
+        const USER_CLAUDE = '# User CLAUDE\nKeep my base config.\n';
+        function runSetup(args, options = {}) {
+            const fixture = createPluginFixture(CANONICAL);
+            const configDir = join(fixture.homeRoot, 'custom-profile');
+            mkdirSync(configDir, { recursive: true });
+            if (options.userClaude)
+                writeFileSync(join(configDir, 'CLAUDE.md'), USER_CLAUDE);
+            writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ plugins: ['oh-my-claudecode'] }));
+            if (options.claudeMdEnabled !== undefined) {
+                writeFileSync(join(configDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled: options.claudeMdEnabled }));
+            }
+            const result = spawnSync('bash', [fixture.scriptPath, ...args], {
+                cwd: fixture.projectRoot,
+                env: { ...process.env, HOME: fixture.homeRoot, CLAUDE_CONFIG_DIR: configDir },
+                encoding: 'utf-8',
+            });
+            return { fixture, configDir, result };
+        }
+        for (const args of [['global'], ['global', 'overwrite'], ['global', 'preserve']]) {
+            it(`leaves the global CLAUDE.md untouched and logs a skip when disabled (${args.join(' ')})`, () => {
+                const { configDir, result } = runSetup(args, { claudeMdEnabled: false, userClaude: true });
+                expect(result.status).toBe(0);
+                expect(readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8')).toBe(USER_CLAUDE);
+                expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
+                expect(result.stdout).toContain('Coordinator note: Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)');
+            });
+        }
+        it('does not create a global CLAUDE.md when disabled and none exists', () => {
+            const { configDir, result } = runSetup(['global'], { claudeMdEnabled: false });
+            expect(result.status).toBe(0);
+            expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(false);
+            expect(existsSync(join(configDir, 'CLAUDE-omc.md'))).toBe(false);
+        });
+        for (const enabled of [undefined, true]) {
+            it(`merges into the global CLAUDE.md as before when claudeMdEnabled is ${enabled === undefined ? 'absent' : 'true'}`, () => {
+                const { configDir, result } = runSetup(['global'], { claudeMdEnabled: enabled, userClaude: true });
+                expect(result.status).toBe(0);
+                const baseClaude = readFileSync(join(configDir, 'CLAUDE.md'), 'utf-8');
+                expect(baseClaude).toContain('<!-- OMC:START -->');
+                expect(baseClaude).toContain('# User CLAUDE');
+                expect(result.stdout).not.toContain('Coordinator note');
+            });
+        }
+        it('still writes the project-scoped CLAUDE.md in local mode when disabled', () => {
+            const { fixture, configDir, result } = runSetup(['local'], { claudeMdEnabled: false });
+            expect(result.status).toBe(0);
+            expect(readFileSync(join(fixture.projectRoot, '.claude', 'CLAUDE.md'), 'utf-8')).toContain('# Canonical CLAUDE');
+            expect(existsSync(join(configDir, 'CLAUDE.md'))).toBe(false);
+        });
     });
     it('updates the preserved companion file idempotently without duplicating the managed import block', () => {
         const fixture = createPluginFixture(`<!-- OMC:START -->

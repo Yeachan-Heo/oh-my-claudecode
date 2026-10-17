@@ -45,6 +45,13 @@ var nodeFs = __toESM(require("node:fs"), 1);
 var nativePath = __toESM(require("node:path"), 1);
 var import_node_path = require("node:path");
 
+// src/lib/paths.ts
+var OMC_PLUGIN_MARKETPLACE_SLUG = "omc";
+var OMC_PLUGIN_PACKAGE_NAME = "oh-my-claudecode";
+var OMC_PLUGIN_CACHE_REL = `plugins/cache/${OMC_PLUGIN_MARKETPLACE_SLUG}/${OMC_PLUGIN_PACKAGE_NAME}`;
+var OMC_PLUGIN_MARKETPLACE_REL = `plugins/marketplaces/${OMC_PLUGIN_MARKETPLACE_SLUG}`;
+var OMC_CONFIG_FILE_REL = ".omc-config.json";
+
 // src/installer/claude-md-analysis.ts
 var import_crypto = require("crypto");
 
@@ -768,6 +775,15 @@ function lstatPresent(path, fs) {
     throw error;
   }
 }
+function isClaudeMdEnabledInConfig(configRoot, fs = defaultFs) {
+  try {
+    const configPath = (0, import_node_path.resolve)(configRoot, OMC_CONFIG_FILE_REL);
+    if (!fs.existsSync(configPath)) return true;
+    return JSON.parse(fs.readFileSync(configPath, "utf-8")).claudeMdEnabled !== false;
+  } catch {
+    return true;
+  }
+}
 function executeClaudeMdTransaction(request) {
   const fs = request.fs ?? defaultFs;
   let capturedRoot;
@@ -875,8 +891,8 @@ function executeClaudeMdTransaction(request) {
 
 // src/cli/claude-md-coordinator.ts
 var CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
-var COMPILED_ENGINE_VERSION = true ? "5.7.4" : "";
-var COMPILED_SOURCE_SHA256 = true ? "30008818053c7659845c2cbc4196673ed89b84a7752d5ae556268b21a1462577" : "";
+var COMPILED_ENGINE_VERSION = true ? "5.7.5" : "";
+var COMPILED_SOURCE_SHA256 = true ? "6b03739eb8450dc91036d06250a329d042d54cb2eee24ee267d36b2ac28eebe3" : "";
 function runClaudeMdCoordinatorHandshake() {
   if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) {
     return { exitCode: 2, response: coordinatorError(2, "Coordinator build handshake is unavailable") };
@@ -915,6 +931,9 @@ function runClaudeMdCoordinator(input) {
     const { mode } = input;
     if (input.schemaVersion !== CLAUDE_MD_COORDINATOR_SCHEMA_VERSION || input.engineVersion !== COMPILED_ENGINE_VERSION || mode !== "local" && mode !== "global-overwrite" && mode !== "global-preserve" || typeof input.configRoot !== "string" || typeof input.pluginRoot !== "string" || typeof input.sourcePath !== "string" || typeof input.sourceSha256 !== "string" || typeof input.sourceVersion !== "string") return { exitCode: 2, response: coordinatorError(2, "Invalid coordinator request") };
     if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) return { exitCode: 2, response: coordinatorError(2, "Coordinator build handshake is unavailable") };
+    if (mode !== "local" && !isClaudeMdEnabledInConfig(input.configRoot)) {
+      return { exitCode: 0, response: { ok: true, exitCode: 0, mode, operations: [], completedOperations: [], backups: [], createdPaths: [], deletedPaths: [], mutatedPaths: [], removedRanges: [], removedVariants: [], warnings: ["Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)"], rollback: [], tempCleanup: [] } };
+    }
     const source = verifiedSource(input.pluginRoot, input.sourcePath);
     const sourceSha256 = (0, import_node_crypto2.createHash)("sha256").update(source.bytes).digest("hex");
     if (sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceVersion !== COMPILED_ENGINE_VERSION) return { exitCode: 2, response: coordinatorError(2, "Canonical source handshake mismatch") };

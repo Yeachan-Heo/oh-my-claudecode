@@ -342,6 +342,7 @@ describe('createTeamSession context resolution', () => {
             expect(command).toContain('PATH=');
             expect(command).toContain('HOME=');
             expect(command).toContain('TERM="$TERM"');
+            expect(command).toContain('COLORTERM="$COLORTERM"');
             expect(command).toContain('TMUX="$TMUX"');
             expect(command).toContain('TMUX_PANE="$TMUX_PANE"');
             expect(command).not.toContain('ORCA_HOOK_TOKEN');

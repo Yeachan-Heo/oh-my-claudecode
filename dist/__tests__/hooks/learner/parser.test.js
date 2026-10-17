@@ -2,7 +2,7 @@
  * Tests for Skill Parser
  */
 import { describe, it, expect } from "vitest";
-import { parseSkillFile } from "../../../hooks/learner/parser.js";
+import { generateSkillFrontmatter, parseSkillFile, } from "../../../hooks/learner/parser.js";
 describe("parseSkillFile", () => {
     describe("backward compatibility", () => {
         it("should parse skill with only name, description, and triggers (no id, no source)", () => {
@@ -243,6 +243,92 @@ Content.`;
             const result = parseSkillFile(content);
             expect(result.valid).toBe(false);
             expect(result.errors).toContain("Missing YAML frontmatter");
+        });
+        it("should keep commas inside quoted inline list items", () => {
+            const content = `---
+name: Inline Lists
+description: Quoted commas
+triggers: ["fix bug, quickly", retry]
+tags: ["a, b"]
+---
+
+Body.`;
+            const result = parseSkillFile(content);
+            expect(result.metadata.triggers).toEqual(["fix bug, quickly", "retry"]);
+            expect(result.metadata.tags).toEqual(["a, b"]);
+        });
+        it("should decode escaped quotes in double-quoted inline list items", () => {
+            const content = `---
+name: Inline Lists
+description: Escaped quotes
+triggers: ["say \\"hi\\", twice", next]
+---
+
+Body.`;
+            const result = parseSkillFile(content);
+            expect(result.metadata.triggers).toEqual(['say "hi", twice', "next"]);
+        });
+        it("round-trips escaped strings written to learner frontmatter", () => {
+            const metadata = {
+                id: "windows-helper",
+                name: "Windows Helper",
+                description: String.raw `Windows path C:\repo\notes and literal \n`,
+                createdAt: "2025-01-01T00:00:00.000Z",
+                source: "manual",
+                sessionId: "session-id",
+                triggers: [String.raw `C:\repo\n`, 'say "hi", twice'],
+                tags: [String.raw `literal\n`],
+            };
+            const result = parseSkillFile(generateSkillFrontmatter(metadata));
+            expect(result.valid).toBe(true);
+            expect(result.metadata).toMatchObject(metadata);
+        });
+        it("preserves backslash sequences in legacy double-quoted metadata", () => {
+            const content = `---
+name: Legacy Skill
+description: "Windows path C:\\repo\\notes and literal \\n"
+triggers:
+  - "C:\\repo\\n"
+  - "literal\\n"
+---
+
+Body.`;
+            const result = parseSkillFile(content);
+            expect(result.metadata.description).toBe("Windows path C:\\repo\\notes and literal \\n");
+            expect(result.metadata.triggers).toEqual(["C:\\repo\\n", "literal\\n"]);
+        });
+        it("should decode doubled apostrophes in single-quoted inline list items", () => {
+            const content = `---
+name: Inline Lists
+description: Escaped apostrophes
+triggers: ['don''t, repeat', retry]
+tags: ['learner''s, note']
+---
+
+Body.`;
+            const result = parseSkillFile(content);
+            expect(result.metadata.triggers).toEqual(["don't, repeat", "retry"]);
+            expect(result.metadata.tags).toEqual(["learner's, note"]);
+        });
+        it("should parse multi-line list fields in CRLF (Windows-authored) files", () => {
+            const content = [
+                "---",
+                "name: Windows Skill",
+                "description: Authored on Windows",
+                "triggers:",
+                "  - first",
+                '  - "second"',
+                "tags:",
+                "  - alpha",
+                "---",
+                "",
+                "Body text.",
+            ].join("\r\n");
+            const result = parseSkillFile(content);
+            expect(result.valid).toBe(true);
+            expect(result.errors).toEqual([]);
+            expect(result.metadata.triggers).toEqual(["first", "second"]);
+            expect(result.metadata.tags).toEqual(["alpha"]);
         });
     });
 });

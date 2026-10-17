@@ -10,7 +10,7 @@ import { resolveCanonicalWorkflowStagePrompt } from './workflow-stage-prompts.mj
 const SEQUENCES = Object.freeze([Object.freeze(['ralplan', 'execution']), Object.freeze(['ralplan', 'execution', 'ralph']), Object.freeze(['ralplan', 'execution', 'qa']), Object.freeze(['ralplan', 'execution', 'ralph', 'qa'])]);
 const SIGNALS = { ralplan: 'PIPELINE_RALPLAN_COMPLETE', execution: 'PIPELINE_EXECUTION_COMPLETE', ralph: 'PIPELINE_RALPH_COMPLETE', qa: 'PIPELINE_QA_COMPLETE' };
 const NAME = /^[a-z][a-z0-9-]{0,62}$/;
-const RESERVED_WORKFLOW_NAMES = new Set(['autopilot', 'ralplan', 'execution', 'ralph', 'qa', 'autoresearch', 'ultraqa', 'merge-readiness', 'self-improve', 'ultrawork', 'ultragoal', 'ultrapilot', 'swarm', 'pipeline', 'plan', 'team', 'cancel', 'deep-interview', 'deepsearch', 'ultrathink', 'tdd', 'code-review', 'security-review', 'analyze', 'search', 'default']);
+const RESERVED_WORKFLOW_NAMES = new Set(['autopilot', 'ralplan', 'execution', 'ralph', 'qa', 'autoresearch', 'ultraqa', 'self-improve', 'ultrawork', 'ultragoal', 'ultrapilot', 'swarm', 'pipeline', 'plan', 'team', 'cancel', 'deep-interview', 'deepsearch', 'ultrathink', 'tdd', 'code-review', 'security-review', 'analyze', 'search', 'default']);
 const TRANSCRIPT_CHUNK_BYTES = 64 * 1024;
 const MAX_JSONL_RECORD_BYTES = 8 * 1024 * 1024;
 export const WORKFLOW_TRANSCRIPT_RECORD_TOO_LARGE = 'workflow_transcript_record_too_large';

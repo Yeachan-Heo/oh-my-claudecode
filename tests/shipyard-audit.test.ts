@@ -75,6 +75,18 @@ describe('shipyard-audit script (the --check structured finding contract)', () =
     expect(report!.summary.verdict).toBe('clear');
   });
 
+  it('accepts a BOM-prefixed project skill with non-empty triggers', () => {
+    seedCleanYard(yard);
+    writeFileSync(
+      join(yard, '.omc', 'skills', 'bom-skill.md'),
+      '\uFEFF---\nname: BOM Skill\ntriggers:\n  - bom\n---\nSkill body\n',
+    );
+
+    const { status, report } = runAudit(yard);
+    expect(status).toBe(0);
+    expect(report!.findings).toEqual([]);
+  });
+
   it('rejects an unlaid yard when both required day-one faces are absent', () => {
     const { status, report } = runAudit(yard);
     expect(status).toBe(1);

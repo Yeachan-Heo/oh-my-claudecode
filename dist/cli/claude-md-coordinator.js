@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { isStrictChildPath } from '../installer/claude-md-transaction.js';
-import { executeClaudeMdTransaction } from '../installer/claude-md-transaction.js';
+import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from '../installer/claude-md-transaction.js';
 export const CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
 const COMPILED_ENGINE_VERSION = typeof __OMC_COORDINATOR_ENGINE_VERSION__ === 'string' ? __OMC_COORDINATOR_ENGINE_VERSION__ : '';
 const COMPILED_SOURCE_SHA256 = typeof __OMC_COORDINATOR_SOURCE_SHA256__ === 'string' ? __OMC_COORDINATOR_SOURCE_SHA256__ : '';
@@ -51,6 +51,10 @@ export function runClaudeMdCoordinator(input) {
             return { exitCode: 2, response: coordinatorError(2, 'Invalid coordinator request') };
         if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256)
             return { exitCode: 2, response: coordinatorError(2, 'Coordinator build handshake is unavailable') };
+        // claudeMdEnabled=false in .omc-config.json opts out of every global CLAUDE.md write; local mode is unaffected.
+        if (mode !== 'local' && !isClaudeMdEnabledInConfig(input.configRoot)) {
+            return { exitCode: 0, response: { ok: true, exitCode: 0, mode, operations: [], completedOperations: [], backups: [], createdPaths: [], deletedPaths: [], mutatedPaths: [], removedRanges: [], removedVariants: [], warnings: ['Skipped CLAUDE.md (claudeMdEnabled is false in .omc-config.json)'], rollback: [], tempCleanup: [] } };
+        }
         const source = verifiedSource(input.pluginRoot, input.sourcePath);
         const sourceSha256 = createHash('sha256').update(source.bytes).digest('hex');
         if (sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceSha256 !== COMPILED_SOURCE_SHA256 || input.sourceVersion !== COMPILED_ENGINE_VERSION)

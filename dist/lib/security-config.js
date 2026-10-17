@@ -15,6 +15,7 @@
  */
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { z } from "zod";
 import { parseJsonc } from "../utils/jsonc.js";
 import { getConfigDir } from "../utils/paths.js";
 const DEFAULTS = {
@@ -38,6 +39,33 @@ const STRICT_OVERRIDES = {
 /** Cached config to avoid re-reading files on every call */
 let cachedConfig = null;
 /**
+ * Per-field schema for the config-file security section. `.catch(undefined)`
+ * drops an invalid value for that field only, so the default/strict value stays
+ * in effect (e.g. `"restrictToolPaths": "false"` or `"hardMaxIterations": -1`
+ * would otherwise be applied verbatim). The mapped type ties the schema to
+ * `SecurityConfig`, so a new field cannot be added to one and not the other.
+ */
+const optionalBoolean = z.boolean().optional().catch(undefined);
+const securityOverrideShape = {
+    restrictToolPaths: optionalBoolean,
+    pythonSandbox: optionalBoolean,
+    disableProjectSkills: optionalBoolean,
+    disableAutoUpdate: optionalBoolean,
+    disableRemoteMcp: optionalBoolean,
+    disableExternalLLM: optionalBoolean,
+    hardMaxIterations: z.number().int().nonnegative().optional().catch(undefined),
+};
+const securityOverridesSchema = z.object(securityOverrideShape);
+function sanitizeSecurityOverrides(raw) {
+    const parsed = securityOverridesSchema.parse(raw);
+    const result = {};
+    for (const [key, value] of Object.entries(parsed)) {
+        if (value !== undefined)
+            result[key] = value;
+    }
+    return result;
+}
+/**
  * Load the security section from config files.
  * Checks project config first, then user config.
  */
@@ -52,8 +80,8 @@ function loadSecurityFromConfigFiles() {
         try {
             const content = readFileSync(configPath, "utf-8");
             const parsed = parseJsonc(content);
-            if (parsed?.security && typeof parsed.security === "object") {
-                return parsed.security;
+            if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
+                return sanitizeSecurityOverrides(parsed.security);
             }
         }
         catch {

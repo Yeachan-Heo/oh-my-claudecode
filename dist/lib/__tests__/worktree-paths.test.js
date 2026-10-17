@@ -893,6 +893,19 @@ describe('worktree-paths', () => {
             expect(paths.effectiveWrite).toBe(expectedSession);
             expect(paths.sessionScoped).toBe(expectedSession);
         });
+        it('resolves a validated custom filename for transient state files', () => {
+            const sessionId = 'hud-cache-session';
+            const fileName = 'hud-stdin-cache.json';
+            const paths = resolveSessionStatePaths('hud-stdin-cache', sessionId, workDir, { fileName });
+            const expectedLegacy = join(TEST_DIR, '.omc', 'state', fileName);
+            const expectedSession = join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, fileName);
+            expect(paths.legacy).toBe(expectedLegacy);
+            expect(paths.sessionScoped).toBe(expectedSession);
+            expect(paths.effectiveWrite).toBe(expectedSession);
+        });
+        it.each(['../outside.json', 'nested/cache.json', 'nested\\cache.json', 'cache.json\n'])('rejects unsafe custom filenames (%s)', fileName => {
+            expect(() => resolveSessionStatePaths('hud-stdin-cache', 'safe-session', workDir, { fileName })).toThrow();
+        });
         it('effectiveRead === legacy when session-scoped file does not exist yet', () => {
             const sessionId = 'pid-99999-1111111111';
             const paths = resolveSessionStatePaths('ralph', sessionId, workDir);

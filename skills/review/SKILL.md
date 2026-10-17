@@ -8,8 +8,8 @@ description: Evaluate finished work for defects, risk, and simplification before
 Use this skill to evaluate work that already exists. Review never authors the
 change it is judging.
 
-This is the canonical review workflow. `merge-readiness` routes here, and
-`ai-slop-cleaner` is an opt-in lane within it.
+This is the canonical review workflow. `ai-slop-cleaner` is an opt-in lane
+within it.
 
 ## Goal
 Find what is actually wrong, ranked by severity, with enough detail to act on.

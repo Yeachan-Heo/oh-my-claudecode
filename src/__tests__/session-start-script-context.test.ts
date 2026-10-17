@@ -4,6 +4,8 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, w
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+// @ts-expect-error Standalone hook runtime source is intentionally JavaScript-only.
+import { publishCacheOccupancy } from '../../scripts/lib/cache-occupancy.mjs';
 
 const SCRIPT_PATH = join(__dirname, '..', '..', 'scripts', 'session-start.mjs');
 const NODE = process.execPath;
@@ -458,6 +460,277 @@ describe('session-start.mjs regression #1386', () => {
       expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
     } finally {
       await sessionStart.output.catch(() => '');
+    }
+  });
+
+  it('stops waiting for other plugin versions once the worker reaches its hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const currentPluginRoot = join(pluginParent, 'current');
+    const olderPluginRoot = join(pluginParent, 'older');
+    const registryDir = join(configDir, '.omc', 'cache-occupancy');
+    const omcRoot = join(fakeProject, '.omc');
+    const workerLockPath = join(omcRoot, 'state', '.legacy-tool-failure-cleanup-worker.lock');
+    expect(publishCacheOccupancy(olderPluginRoot, configDir, process.pid)).toBe(true);
+
+    const startedAt = Date.now();
+    const worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '500', '3000'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: currentPluginRoot,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<number | null>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve(code));
+    });
+
+    try {
+      expect(await waitForFilesToAppear([workerLockPath], 5000)).toBe(true);
+      // Past the 500 ms stabilization window the older version still holds the worker.
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      expect(worker.exitCode).toBeNull();
+
+      const exitCode = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 7000)),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(3000);
+      expect(existsSync(workerLockPath)).toBe(false);
+      // The older version never exited: the worker gave up waiting for it.
+      expect(readdirSync(registryDir)).toHaveLength(1);
+    } finally {
+      rmSync(registryDir, { recursive: true, force: true });
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
+    }
+  });
+
+  it('stops waiting for the state directory once the worker reaches its hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const currentPluginRoot = join(pluginParent, 'current');
+    const olderPluginRoot = join(pluginParent, 'older');
+    const registryDir = join(configDir, '.omc', 'cache-occupancy');
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    rmSync(stateDir, { recursive: true, force: true });
+    expect(publishCacheOccupancy(olderPluginRoot, configDir, process.pid)).toBe(true);
+
+    const startedAt = Date.now();
+    const worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '500', '2000'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: currentPluginRoot,
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<number | null>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve(code));
+    });
+
+    try {
+      // Past the 500 ms window the older version still keeps the worker waiting.
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(worker.exitCode).toBeNull();
+
+      const exitCode = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 6000)),
+      ]);
+      expect(exitCode).toBe(0);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(2000);
+      expect(existsSync(stateDir)).toBe(false);
+      // The older version never exited: the worker gave up waiting for it.
+      expect(readdirSync(registryDir)).toHaveLength(1);
+    } finally {
+      rmSync(registryDir, { recursive: true, force: true });
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
+    }
+  });
+
+  it('leaves legacy artifacts in place when the cleanup lock frees up after the hard lifetime', async () => {
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    const legacyPath = join(stateDir, 'last-tool-error.json');
+    const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'legacy payload that outlives the worker' }));
+    const holder = startPostToolFailureLockHolder(legacyPath);
+    let worker: ReturnType<typeof spawn> | undefined;
+    let workerExit: Promise<{ code: number | null; at: number }> | undefined;
+
+    try {
+      await holder.ready;
+      worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '500', '1000'], {
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+          CLAUDE_PLUGIN_ROOT: join(tempDir, 'plugin-cache', 'oh-my-claudecode', 'current'),
+          OMC_HOOK_BACKGROUND_CHILD: '1',
+        },
+      });
+      const child = worker;
+      workerExit = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', code => resolve({ code, at: Date.now() }));
+      });
+      expect(await waitForFilesToAppear([workerLockPath], 5000)).toBe(true);
+
+      // Free the lock after the 1000 ms lifetime but before the 2500 ms cleanup wait runs out.
+      await new Promise(resolve => setTimeout(resolve, 1700));
+      const releasedAt = Date.now();
+      expect(await holder.release()).toEqual({ code: 0, signal: null });
+
+      const exit = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 5000)),
+      ]);
+      expect(exit?.code).toBe(0);
+      expect(existsSync(legacyPath)).toBe(true);
+      // The worker left at its deadline while the lock was still held, not once the lock freed up.
+      expect(exit!.at).toBeLessThan(releasedAt);
+      expect(existsSync(workerLockPath)).toBe(false);
+    } finally {
+      await holder.release();
+      if (worker && worker.exitCode === null) worker.kill();
+      await workerExit?.catch(() => undefined);
+    }
+  });
+
+  it('stops waiting for the cleanup worker lock once the worker reaches its hard lifetime', async () => {
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const holder = startPostToolFailureLockHolder(join(stateDir, '.legacy-tool-failure-cleanup-worker'));
+    let worker: ReturnType<typeof spawn> | undefined;
+    let workerExit: Promise<{ code: number | null; at: number }> | undefined;
+
+    try {
+      await holder.ready;
+      worker = spawn(NODE, [SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '50', '200'], {
+        stdio: 'ignore',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          CLAUDE_CONFIG_DIR: join(fakeHome, '.claude'),
+          CLAUDE_PLUGIN_ROOT: join(tempDir, 'plugin-cache', 'oh-my-claudecode', 'current'),
+          OMC_HOOK_BACKGROUND_CHILD: '1',
+        },
+      });
+      const child = worker;
+      workerExit = new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', code => resolve({ code, at: Date.now() }));
+      });
+
+      // Free the lock long after the 200 ms lifetime but before the worker's own lock wait (about 3 s) could run out.
+      await new Promise(resolve => setTimeout(resolve, 2500));
+      const releasedAt = Date.now();
+      expect(await holder.release()).toEqual({ code: 0, signal: null });
+
+      const exit = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 5000)),
+      ]);
+      expect(exit?.code).toBe(0);
+      // The worker left at its deadline while the lock was still held, not once the lock freed up.
+      expect(exit!.at).toBeLessThan(releasedAt);
+      expect(existsSync(workerLockPath)).toBe(false);
+    } finally {
+      await holder.release();
+      if (worker && worker.exitCode === null) worker.kill();
+      await workerExit?.catch(() => undefined);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('bounds the plugin occupancy probe after the worker lock by the hard lifetime', async () => {
+    const configDir = join(fakeHome, '.claude');
+    const pluginParent = join(tempDir, 'plugin-cache', 'oh-my-claudecode');
+    const omcRoot = join(fakeProject, '.omc');
+    const stateDir = join(omcRoot, 'state');
+    const legacyPath = join(stateDir, 'last-tool-error.json');
+    const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const fakeBin = join(tempDir, 'fake-bin');
+    const psLog = join(tempDir, 'ps.log');
+    const slowMarker = join(tempDir, 'ps-slow-started');
+    const platformPreload = join(tempDir, 'darwin-platform.mjs');
+    const lstart = 'Tue Jan  6 09:00:00 2026';
+    mkdirSync(fakeBin, { recursive: true });
+    writeFileSync(platformPreload, "Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });\n");
+    // The batched occupancy ps hangs once the worker lock exists; every other call answers at once.
+    const ps = join(fakeBin, 'ps');
+    writeFileSync(ps, [
+      '#!/bin/sh',
+      'echo "$@" >> "$PS_LOG"',
+      'case "$4" in',
+      '  pid=,lstart=)',
+      '    if [ -e "$WORKER_LOCK" ]; then : > "$PS_SLOW_MARKER"; exec sleep 10; fi',
+      '    IFS=,; for id in $2; do printf \'%5s %s\\n\' "$id" "$PS_LSTART"; done',
+      '    ;;',
+      '  *) echo "$PS_LSTART" ;;',
+      'esac',
+      '',
+    ].join('\n'));
+    chmodSync(ps, 0o755);
+    const psEnv = { PATH: `${fakeBin}:${process.env.PATH}`, PS_LOG: psLog, PS_SLOW_MARKER: slowMarker, PS_LSTART: lstart, WORKER_LOCK: workerLockPath };
+    // The first exec of a new script can take seconds on a loaded host, longer than the probe cap.
+    spawnSync(ps, ['warmup'], { env: { ...psEnv, PS_LOG: '/dev/null' }, timeout: 30000 });
+    // An older plugin version whose live session the fake ps confirms.
+    expect(publishCacheOccupancy(join(pluginParent, 'older'), configDir, process.pid, String(new Date(lstart).getTime()))).toBe(true);
+    writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'legacy payload that outlives the worker' }));
+
+    const worker = spawn(NODE, ['--import', platformPreload, SCRIPT_PATH, '--stabilize-legacy-tool-failure-state', omcRoot, '50', '400'], {
+      stdio: 'ignore',
+      env: {
+        ...process.env,
+        ...psEnv,
+        HOME: fakeHome,
+        USERPROFILE: fakeHome,
+        CLAUDE_CONFIG_DIR: configDir,
+        CLAUDE_PLUGIN_ROOT: join(pluginParent, 'current'),
+        OMC_HOOK_BACKGROUND_CHILD: '1',
+      },
+    });
+    const workerExit = new Promise<{ code: number | null; at: number }>((resolve, reject) => {
+      worker.once('error', reject);
+      worker.once('exit', code => resolve({ code, at: Date.now() }));
+    });
+
+    try {
+      expect(await waitForFilesToAppear([slowMarker], 5000)).toBe(true);
+      const probeStartedAt = Date.now();
+
+      const exit = await Promise.race([
+        workerExit,
+        new Promise<undefined>(resolve => setTimeout(() => resolve(undefined), 6000)),
+      ]);
+      expect(exit?.code).toBe(0);
+      // The probe is cut off by the 400 ms lifetime, not by the 2 s darwin ps timeout.
+      expect(exit!.at - probeStartedAt).toBeLessThan(1200);
+      expect(existsSync(workerLockPath)).toBe(false);
+      expect(existsSync(legacyPath)).toBe(true);
+      // One batched ps per scan: before the worker lock and after it.
+      const batchedCalls = readFileSync(psLog, 'utf8').split('\n').filter(line => line.endsWith('-o pid=,lstart='));
+      expect(batchedCalls).toHaveLength(2);
+    } finally {
+      if (worker.exitCode === null) worker.kill();
+      await workerExit.catch(() => undefined);
     }
   });
 
@@ -1248,6 +1521,64 @@ ${'- oversized startup guidance\n'.repeat(700)}
     expect(combined).not.toContain('[OMC VERSION DRIFT DETECTED]');
     expect(combined).not.toContain("Run 'omc update'");
     expect(combined).not.toContain('4.15.5');
+  });
+
+  describe('CLAUDE.md version drift and claudeMdEnabled', () => {
+    function runDriftSession(claudeMdEnabled: boolean | undefined): string {
+      const claudeDir = join(fakeHome, '.claude');
+      const pluginRoot = join(tempDir, 'local-plugin-4.15.4');
+      mkdirSync(join(claudeDir, '.omc'), { recursive: true });
+      mkdirSync(join(claudeDir, 'hud'), { recursive: true });
+      mkdirSync(pluginRoot, { recursive: true });
+      writeFileSync(join(pluginRoot, 'package.json'), JSON.stringify({ version: '4.15.4', type: 'module' }));
+      writeFileSync(join(claudeDir, 'hud', 'omc-hud.mjs'), '');
+      writeFileSync(join(claudeDir, 'settings.json'), JSON.stringify({ statusLine: 'node ~/.claude/hud/omc-hud.mjs' }));
+      writeFileSync(join(claudeDir, 'CLAUDE.md'), '# My own global config without OMC markers\n');
+      if (claudeMdEnabled !== undefined) {
+        writeFileSync(join(claudeDir, '.omc-config.json'), JSON.stringify({ claudeMdEnabled }));
+      }
+
+      const result = spawnSync(NODE, [SCRIPT_PATH], {
+        input: JSON.stringify({
+          hook_event_name: 'SessionStart',
+          session_id: `session-claude-md-drift-${String(claudeMdEnabled)}`,
+          cwd: fakeProject,
+        }),
+        encoding: 'utf-8',
+        env: {
+          ...process.env,
+          HOME: fakeHome,
+          USERPROFILE: fakeHome,
+          CLAUDE_PLUGIN_ROOT: pluginRoot,
+          OMC_NOTIFY: '0',
+        },
+        timeout: 15000,
+      });
+
+      expect(result.status).toBe(0);
+      const output = JSON.parse(result.stdout) as {
+        systemMessage?: string;
+        hookSpecificOutput?: { additionalContext?: string };
+      };
+      return `${output.systemMessage ?? ''}\n${output.hookSpecificOutput?.additionalContext ?? ''}`;
+    }
+
+    it('reports CLAUDE.md drift when claudeMdEnabled is absent', () => {
+      const combined = runDriftSession(undefined);
+      expect(combined).toContain('[OMC VERSION DRIFT DETECTED]');
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it('reports CLAUDE.md drift when claudeMdEnabled is true', () => {
+      const combined = runDriftSession(true);
+      expect(combined).toContain('CLAUDE.md instructions: unknown (needs migration)');
+    });
+
+    it('does not report CLAUDE.md drift when claudeMdEnabled is false', () => {
+      const combined = runDriftSession(false);
+      expect(combined).not.toContain('CLAUDE.md instructions');
+      expect(combined).not.toContain('[OMC VERSION DRIFT DETECTED]');
+    });
   });
 
   it('shows an npm update from unmanaged 4.15.7 local plugin roots (#3867)', () => {

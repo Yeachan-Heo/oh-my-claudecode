@@ -1075,6 +1075,38 @@ describe('runtime v2 startup inbox dispatch', () => {
         expect(manifest.workers[0].launch_descriptor).toEqual(config.workers[0].launch_descriptor);
         expect(config.service_descriptor).toMatchObject({ schema_version: 1, auto_merge_enabled: false, cadence_policy: 'disabled' });
     });
+    it.each([
+        ['cursor executor', 'cursor', undefined],
+        ['trusted cursor reviewer', 'cursor', 'critic'],
+        ['non-cursor worker', 'codex', undefined],
+    ])('orders the generated initial inbox startup before work for %s', async (_label, agentType, role) => {
+        cwd = await mkdtempFixture('omc-runtime-v2-startup-order-');
+        const { startTeamV2 } = await import('../runtime-v2.js');
+        await startTeamV2({
+            teamName: 'dispatch-team', workerCount: 1, agentTypes: [agentType],
+            tasks: [{ subject: 'Protocol order', description: 'Verify ordinary startup.', role: role ?? 'executor' }], cwd,
+        });
+        const inbox = await readFile(absPath(cwd, TeamPaths.inbox('dispatch-team', 'worker-1')), 'utf8');
+        const lifecycle = inbox.split('## REQUIRED: Task Lifecycle Commands')[1].split('## Task Assignment')[0];
+        const claim = lifecycle.indexOf('team api claim-task --input');
+        const ack = lifecycle.indexOf('startup ACK from the worker overlay');
+        const work = lifecycle.indexOf('3. Do the work');
+        expect(claim).toBeGreaterThan(-1);
+        expect(ack).toBeGreaterThan(claim);
+        expect(work).toBeGreaterThan(ack);
+        expect(lifecycle).toContain('Only after a successful claim');
+        expect(lifecycle).toContain('If the claim fails, do not send the startup ACK or begin work');
+        expect(lifecycle).toContain('exactly once before work; do not resend it if already sent');
+        expect(lifecycle).not.toContain('team api send-message --input');
+        expect(lifecycle.indexOf(role ? '4. Write the structured verdict' : '4. On completion')).toBeGreaterThan(work);
+        if (role) {
+            expect(lifecycle).not.toContain('team api transition-task-status --input');
+            expect(inbox).toContain('review completion report');
+        }
+        else {
+            expect(lifecycle).toContain('team api transition-task-status --input');
+        }
+    });
     it('does not publish a corrupt canonical task when startup publication is interrupted', async () => {
         cwd = await mkdtempFixture('omc-runtime-v2-atomic-task-publication-');
         const taskPath = absPath(cwd, TeamPaths.taskFile('dispatch-team', '1'));

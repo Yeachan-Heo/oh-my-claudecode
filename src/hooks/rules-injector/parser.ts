@@ -8,6 +8,7 @@
  */
 
 import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
+import { stripLeadingUtf8Bom } from '../../utils/frontmatter.js';
 
 /**
  * Parse YAML frontmatter from rule file content.
@@ -20,7 +21,8 @@ import type { RuleMetadata, RuleFrontmatterResult } from './types.js';
  */
 export function parseRuleFrontmatter(content: string): RuleFrontmatterResult {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
+  const match = stripLeadingUtf8Bom(content).match(frontmatterRegex);
 
   if (!match) {
     return { metadata: {}, body: content };
@@ -58,7 +60,7 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
     }
 
     const key = line.slice(0, colonIndex).trim();
-    const rawValue = line.slice(colonIndex + 1).trim();
+    const rawValue = stripTrailingComment(line.slice(colonIndex + 1));
 
     if (key === 'description') {
       metadata.description = parseStringValue(rawValue);
@@ -76,6 +78,39 @@ function parseYamlContent(yamlContent: string): RuleMetadata {
   }
 
   return metadata;
+}
+
+/**
+ * Trim a YAML value and drop a trailing ` # comment`. A `#` only starts a
+ * comment at the start of the value or after whitespace, and never inside quotes.
+ */
+function stripTrailingComment(value: string): string {
+  let quoteChar = '';
+  let canStartQuote = true;
+  const flowArrayOpenerIndex = value.search(/\S/);
+  const isFlowArray = value[flowArrayOpenerIndex] === '[';
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (quoteChar) {
+      if (char === '\\' && quoteChar === '"') i++;
+      else if (quoteChar === "'" && char === "'" && value[i + 1] === "'") i++;
+      else if (char === quoteChar) {
+        quoteChar = '';
+        canStartQuote = false;
+      }
+    } else if ((char === '"' || char === "'") && canStartQuote) {
+      quoteChar = char;
+    } else if (char === '#' && (i === 0 || /\s/.test(value[i - 1]))) {
+      return value.slice(0, i).trim();
+    } else if (isFlowArray && i === flowArrayOpenerIndex && char === '[') {
+      canStartQuote = true;
+    } else if (char === ',') {
+      canStartQuote = true;
+    } else if (!/\s/.test(char)) {
+      canStartQuote = false;
+    }
+  }
+  return value.trim();
 }
 
 /**
@@ -118,9 +153,9 @@ function parseArrayOrStringValue(
       const nextLine = lines[j];
 
       // Check if this is an array item (starts with whitespace + dash)
-      const arrayMatch = nextLine.match(/^\s+-\s*(.*)$/);
+      const arrayMatch = nextLine.match(/^\s*-\s*(.*)$/);
       if (arrayMatch) {
-        const itemValue = parseStringValue(arrayMatch[1].trim());
+        const itemValue = parseStringValue(stripTrailingComment(arrayMatch[1]));
         if (itemValue) {
           arrayItems.push(itemValue);
         }
@@ -142,8 +177,7 @@ function parseArrayOrStringValue(
   // Case 3: Comma-separated patterns in single string
   const stringValue = parseStringValue(rawValue);
   if (stringValue.includes(',')) {
-    const items = stringValue
-      .split(',')
+    const items = splitOutsideBraces(stringValue)
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
     return { value: items, consumed: 1 };
@@ -151,6 +185,101 @@ function parseArrayOrStringValue(
 
   // Case 4: Single string value
   return { value: stringValue, consumed: 1 };
+}
+
+/**
+ * Split on commas that are not inside a `{...}` brace group, so a glob such as
+ * `src/**\/*.{ts,tsx}` stays one pattern while `a/*.ts, b/*.ts` still splits.
+ */
+function splitOutsideBraces(value: string, respectQuotes = false): string[] {
+  const { openings, closings } = findBalancedBraceIndices(value, respectQuotes);
+  const items: string[] = [];
+  let current = '';
+  let depth = 0;
+  let quoteChar = '';
+  // Inline-array quotes only start at item boundaries; apostrophes in plain globs are literal.
+  let canStartQuote = true;
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === '\\' && i + 1 < value.length) {
+      current += char + value[++i];
+      if (!quoteChar) canStartQuote = false;
+      continue;
+    }
+    if (respectQuotes && quoteChar) {
+      current += char;
+      if (char === quoteChar) {
+        quoteChar = '';
+        canStartQuote = false;
+      }
+      continue;
+    }
+    if (respectQuotes && canStartQuote && (char === '"' || char === "'")) {
+      quoteChar = char;
+      current += char;
+      continue;
+    }
+    if (openings.has(i)) {
+      depth++;
+      canStartQuote = false;
+    } else if (closings.has(i)) {
+      depth--;
+      canStartQuote = false;
+    }
+    if (char === ',' && depth === 0) {
+      items.push(current);
+      current = '';
+      canStartQuote = true;
+    } else {
+      current += char;
+      if (!/\s/.test(char)) canStartQuote = false;
+    }
+  }
+  items.push(current);
+  return items;
+}
+
+/** Find only balanced, unescaped brace pairs, ignoring brace characters in quotes. */
+function findBalancedBraceIndices(
+  value: string,
+  respectQuotes: boolean
+): { openings: Set<number>; closings: Set<number> } {
+  const openings = new Set<number>();
+  const closings = new Set<number>();
+  const stack: number[] = [];
+  let quoteChar = '';
+  let canStartQuote = true;
+
+  for (let i = 0; i < value.length; i++) {
+    const char = value[i];
+    if (char === '\\' && i + 1 < value.length) {
+      i++;
+      if (!quoteChar) canStartQuote = false;
+      continue;
+    }
+    if (respectQuotes && quoteChar) {
+      if (char === quoteChar) {
+        quoteChar = '';
+        canStartQuote = false;
+      }
+      continue;
+    }
+    if (respectQuotes && canStartQuote && (char === '"' || char === "'")) {
+      quoteChar = char;
+    } else if (char === '{') {
+      stack.push(i);
+      canStartQuote = false;
+    } else if (char === '}' && stack.length > 0) {
+      openings.add(stack.pop()!);
+      closings.add(i);
+      canStartQuote = false;
+    } else if (char === ',' && stack.length === 0) {
+      canStartQuote = true;
+    } else if (!/\s/.test(char)) {
+      canStartQuote = false;
+    }
+  }
+  return { openings, closings };
 }
 
 /**
@@ -162,38 +291,10 @@ function parseInlineArray(value: string): string[] {
   const content = value.slice(1, endIdx).trim();
   if (!content) return [];
 
-  const items: string[] = [];
-  let current = '';
-  let inQuote = false;
-  let quoteChar = '';
-
-  for (let i = 0; i < content.length; i++) {
-    const char = content[i];
-
-    if (!inQuote && (char === '"' || char === "'")) {
-      inQuote = true;
-      quoteChar = char;
-    } else if (inQuote && char === quoteChar) {
-      inQuote = false;
-      quoteChar = '';
-    } else if (!inQuote && char === ',') {
-      const trimmed = current.trim();
-      if (trimmed) {
-        items.push(parseStringValue(trimmed));
-      }
-      current = '';
-    } else {
-      current += char;
-    }
-  }
-
-  // Don't forget the last item
-  const trimmed = current.trim();
-  if (trimmed) {
-    items.push(parseStringValue(trimmed));
-  }
-
-  return items;
+  return splitOutsideBraces(content, true)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .map(parseStringValue);
 }
 
 /**

@@ -424,6 +424,7 @@ const WORKER_MODEL_ENV_ALLOWLIST = [
 ];
 const CLAUDE_WORKER_ENV_ALLOWLIST = [
     'CLAUDE_CONFIG_DIR',
+    'CLAUDE_SECURESTORAGE_CONFIG_DIR',
     'CLAUDE_CODE_EFFORT_LEVEL',
 ];
 export function getWorkerEnv(teamName, workerName, agentType, env = process.env, role) {

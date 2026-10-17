@@ -53,7 +53,7 @@ function encodePowerShell(source) {
     return Buffer.from(source, 'utf16le').toString('base64');
 }
 const WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, 'SystemRoot'].map(key => key.toUpperCase()));
-const SAFE_BASELINE_ENV_KEYS = ['PATH', 'TEMP', 'TMP'];
+const SAFE_BASELINE_ENV_KEYS = ['PATH', 'TEMP', 'TMP', 'TERM', 'COLORTERM'];
 function canonicalAuthorityDigest(input) {
     const env = Object.fromEntries(Object.entries(input.providerEnv).sort(([a], [b]) => a.localeCompare(b)));
     const payload = JSON.stringify({ protocol: WORKER_LAUNCH_AUTHORITY_PROTOCOL, nonce: input.containmentNonce ?? '', supervisor_source_sha256: input.supervisorSourceSha256 ?? '', identity: identityOf(input.identity), provider_argv: [...input.providerArgv], provider_env: env, cwd: resolve(input.cwd) });

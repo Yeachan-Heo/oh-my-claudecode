@@ -503,6 +503,7 @@ describe('model-contract', () => {
         it('propagates allowlisted Claude startup env vars into worker startup env', () => {
             const env = getWorkerEnv('my-team', 'worker-1', 'claude', {
                 CLAUDE_CONFIG_DIR: '/home/tester/.claude-third-party',
+                CLAUDE_SECURESTORAGE_CONFIG_DIR: '/home/tester/.claude-secure-storage',
                 CLAUDE_CODE_EFFORT_LEVEL: 'high',
                 ANTHROPIC_MODEL: 'claude-opus-4-1',
                 CLAUDE_MODEL: 'claude-sonnet-4-5',
@@ -523,6 +524,7 @@ describe('model-contract', () => {
                 ANTHROPIC_AUTH_TOKEN: 'should-not-be-forwarded',
             });
             expect(env.CLAUDE_CONFIG_DIR).toBe('/home/tester/.claude-third-party');
+            expect(env.CLAUDE_SECURESTORAGE_CONFIG_DIR).toBe('/home/tester/.claude-secure-storage');
             expect(env.CLAUDE_CODE_EFFORT_LEVEL).toBe('high');
             expect(env.ANTHROPIC_MODEL).toBe('claude-opus-4-1');
             expect(env.CLAUDE_MODEL).toBe('claude-sonnet-4-5');

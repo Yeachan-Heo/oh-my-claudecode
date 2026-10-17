@@ -616,6 +616,9 @@ export interface OMCConfig {
   notificationProfiles?: Record<string, NotificationConfig>;
   /** Whether HUD statusline is enabled (default: true). Set to false to skip HUD installation. */
   hudEnabled?: boolean;
+  /** Whether OMC may write/merge the global ~/.claude/CLAUDE.md on install, update and setup (default: true).
+   *  Set to false to leave the global CLAUDE.md untouched. */
+  claudeMdEnabled?: boolean;
   /** Whether to prompt for upgrade at session start when a new version is available (default: true).
    *  Set to false to show a passive notification instead of an interactive prompt. */
   autoUpgradePrompt?: boolean;
@@ -648,6 +651,7 @@ export function getOMCConfig(): OMCConfig {
       notifications: config.notifications,
       notificationProfiles: config.notificationProfiles,
       hudEnabled: config.hudEnabled,
+      claudeMdEnabled: config.claudeMdEnabled,
       autoUpgradePrompt: config.autoUpgradePrompt,
       nodeBinary: config.nodeBinary,
     };

@@ -58,9 +58,9 @@ Content without required fields.
 
     const frontmatter = generateSkillFrontmatter(metadata);
 
-    expect(frontmatter).toContain('id: "gen-skill-001"');
+    expect(frontmatter).toContain("id: 'gen-skill-001'");
     expect(frontmatter).toContain('triggers:');
-    expect(frontmatter).toContain('  - "generate"');
+    expect(frontmatter).toContain("  - 'generate'");
   });
 
   it('should reject content without frontmatter', () => {
@@ -91,5 +91,14 @@ Content
 
     expect(result.valid).toBe(true);
     expect(result.metadata.triggers).toEqual(['alpha', 'beta', 'gamma']);
+  });
+
+  it('parses a skill file that starts with a UTF-8 BOM', () => {
+    const result = parseSkillFile('\uFEFF---\nname: "Bom Skill"\ndescription: "d"\ntriggers:\n  - "x"\n---\n\nBody\uFEFF text\n');
+
+    expect(result.valid).toBe(true);
+    expect(result.metadata.name).toBe('Bom Skill');
+    expect(result.metadata.triggers).toEqual(['x']);
+    expect(result.content).toBe('Body\uFEFF text');
   });
 });

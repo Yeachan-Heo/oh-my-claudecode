@@ -106,7 +106,6 @@ const RESERVED_WORKFLOW_NAMES = new Set([
   "qa",
   "autoresearch",
   "ultraqa",
-  "merge-readiness",
   "self-improve",
   "ultrawork",
   "ultragoal",

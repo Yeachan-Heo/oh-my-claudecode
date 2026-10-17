@@ -18,6 +18,42 @@ const WORKER_HOOKS = [
 // still pays the timeout cannot fit inside this bound. Cold `node` start plus a
 // worker is ~150ms on the slowest runner we ship to.
 const SKIP_BUDGET_MS = 2000;
+// User-level OMC/Claude env that changes what the spawned hooks emit (for
+// example OMC_QUIET=1 silences pre-tool-enforcer's advisory output, and an
+// exported DISABLE_OMC or OMC_SKIP_HOOKS skips the hook entirely). Blank it the
+// way pre-tool-enforcer.test.ts does so a contributor's shell cannot change
+// what these tests observe. Per-test values passed to runHook still win.
+const HERMETIC_ENV = {
+    DISABLE_OMC: '',
+    OMC_SKIP_HOOKS: '',
+    OMC_STATE_DIR: '',
+    OMC_QUIET: '',
+    OMC_JEV: '',
+    OMC_AGENT_PREFLIGHT_CONTEXT_THRESHOLD: '',
+    OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: '',
+    OMC_PRE_TOOL_ADVISORY_NOW_MS: '',
+    OMC_READ_BUDGET: '',
+    OMC_READ_BUDGET_MAX_BYTES: '',
+    OMC_READ_BUDGET_MAX_LINES: '',
+    OMC_ROUTING_FORCE_INHERIT: '',
+    OMC_SUBAGENT_MODEL: '',
+    CLAUDE_MODEL: '',
+    ANTHROPIC_MODEL: '',
+    ANTHROPIC_BASE_URL: '',
+    CLAUDE_CODE_USE_BEDROCK: '',
+    CLAUDE_CODE_USE_VERTEX: '',
+    OMC_MODEL_LOW: '',
+    OMC_MODEL_MEDIUM: '',
+    OMC_MODEL_HIGH: '',
+    CLAUDE_CODE_BEDROCK_HAIKU_MODEL: '',
+    CLAUDE_CODE_BEDROCK_SONNET_MODEL: '',
+    CLAUDE_CODE_BEDROCK_OPUS_MODEL: '',
+    CLAUDE_CODE_BEDROCK_FABLE_MODEL: '',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+    ANTHROPIC_DEFAULT_OPUS_MODEL: '',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: '',
+};
 function payloadFor(event) {
     return JSON.stringify({
         // Advice injection is deduplicated per session, so every probe needs its own
@@ -36,7 +72,7 @@ function runHook(script, event, env) {
     const result = spawnSync(process.execPath, [RUN_CJS, join(REPO_ROOT, 'scripts', script)], {
         input: payloadFor(event),
         encoding: 'utf-8',
-        env: { ...process.env, CLAUDE_PLUGIN_ROOT: REPO_ROOT, ...env },
+        env: { ...process.env, ...HERMETIC_ENV, CLAUDE_PLUGIN_ROOT: REPO_ROOT, ...env },
         timeout: 30_000,
     });
     return { ...result, elapsedMs: Date.now() - started };

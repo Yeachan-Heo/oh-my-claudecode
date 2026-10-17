@@ -16,6 +16,7 @@
  * supervision reads it) plus a GET /status endpoint on the listening port.
  */
 import { Command } from 'commander';
+import { integerOption } from '../utils/integer-option.js';
 import chalk from 'chalk';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -47,7 +48,7 @@ export function factoryCommand() {
     cmd
         .command('listen')
         .description('Run the intake listener daemon: HMAC-verified webhook events -> intake label gate -> headless intent sessions')
-        .option('--port <n>', 'port to listen on (transport adapters forward here)', '7788')
+        .option('--port <n>', 'port to listen on (transport adapters forward here)', integerOption(0, 65535), 7788)
         .option('--host <addr>', 'host to bind to (default: 127.0.0.1 for localhost only; set to 0.0.0.0 only when transport adapter runs on another machine)', '127.0.0.1')
         .requiredOption('--repo <names>', 'repository whitelist, comma-separated owner/name')
         .option('--cwd <dir>', 'repository whose .omc state root the daemon writes to', process.cwd())
@@ -65,7 +66,7 @@ export function factoryCommand() {
             return;
         }
         const cwd = resolve(options.cwd);
-        void startListener({ port: Number(options.port), secret, whitelist, cwd, host: options.host }).then((server) => {
+        void startListener({ port: options.port, secret, whitelist, cwd, host: options.host }).then((server) => {
             const addr = server.address();
             const port = addr && typeof addr !== 'string' ? addr.port : options.port;
             const host = addr && typeof addr !== 'string' ? addr.address : options.host;

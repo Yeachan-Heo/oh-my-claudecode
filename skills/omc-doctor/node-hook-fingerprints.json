@@ -1275,6 +1275,14 @@
       ]
     },
     {
+      "path": "templates/hooks/lib/utf8-bom.mjs",
+      "fingerprints": [],
+      "workingTree": {
+        "sha256": "a63022b45be9b1113b79a4256836e0b9dbfb2b2eaed1ebd8d0ab5602df2c6ece",
+        "state": "working-tree"
+      }
+    },
+    {
       "path": "templates/hooks/lib/workflow-profile-runtime.mjs",
       "fingerprints": [
         {

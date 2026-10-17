@@ -13,15 +13,92 @@ import { relative } from 'path';
  *
  * `*` stays within one path segment, `**\/` matches zero or more directories
  * (so `**\/*.py` also matches `main.py`), and a bare `**` matches anything.
- * Other regex metacharacters are literal path characters, except `[...]`,
- * which stays a character class as in other glob dialects, and `\X`, which
- * is a literal X.
+ * `{a,b}` is brace alternation (see expandBraces). Other regex
+ * metacharacters are literal path characters, except `[...]`, which stays a
+ * character class as in other glob dialects, and `\X`, which is a literal X.
  */
 function matchGlob(pattern, filePath) {
+    const expanded = expandBraces(pattern);
+    return expanded !== null && expanded.some((candidate) => matchExpandedGlob(candidate, filePath));
+}
+/** Upper bound on alternatives one glob may expand to (guards `{a,b}{c,d}...`). */
+const MAX_BRACE_EXPANSIONS = 256;
+/** Bounds nested and recursive group processing for pathological brace patterns. */
+const MAX_BRACE_DEPTH = 256;
+/**
+ * Expand `{a,b}` alternation into one pattern per alternative, e.g.
+ * `src/**\/*.{ts,tsx}` -> [`src/**\/*.ts`, `src/**\/*.tsx`]. Braces nest, `\{`
+ * stays literal, and a brace group without a comma (or without a closing
+ * brace) is left as literal text so paths like `app/{id}/page.tsx` still match.
+ * Expansion keeps at most 256 alternatives and rejects patterns deeper than
+ * 256 groups to bound memory, stack use, and work.
+ */
+function expandBraces(pattern, from = 0, expansionDepth = 0) {
+    for (let i = from; i < pattern.length; i++) {
+        if (pattern[i] === '\\') {
+            i++;
+            continue;
+        }
+        if (pattern[i] !== '{')
+            continue;
+        const parts = [];
+        let depth = 0;
+        let start = i + 1;
+        let end = -1;
+        for (let j = i + 1; j < pattern.length; j++) {
+            const c = pattern[j];
+            if (c === '\\') {
+                j++;
+            }
+            else if (c === '{') {
+                depth++;
+                if (depth > MAX_BRACE_DEPTH)
+                    return null;
+            }
+            else if (c === '}') {
+                if (depth === 0) {
+                    end = j;
+                    break;
+                }
+                depth--;
+            }
+            else if (c === ',' && depth === 0) {
+                if (parts.length < MAX_BRACE_EXPANSIONS) {
+                    parts.push(pattern.slice(start, j));
+                }
+                start = j + 1;
+            }
+        }
+        if (end === -1 || parts.length === 0)
+            continue;
+        if (expansionDepth >= MAX_BRACE_DEPTH)
+            return null;
+        if (parts.length < MAX_BRACE_EXPANSIONS) {
+            parts.push(pattern.slice(start, end));
+        }
+        const prefix = pattern.slice(0, i);
+        const suffix = pattern.slice(end + 1);
+        const expanded = [];
+        for (const part of parts) {
+            const alternatives = expandBraces(prefix + part + suffix, i, expansionDepth + 1);
+            if (alternatives === null)
+                return null;
+            for (const alternative of alternatives) {
+                expanded.push(alternative);
+                if (expanded.length >= MAX_BRACE_EXPANSIONS)
+                    return expanded;
+            }
+        }
+        return expanded;
+    }
+    return [pattern];
+}
+function matchExpandedGlob(pattern, filePath) {
     let regexStr = '';
+    let inCharacterClass = false;
     for (let i = 0; i < pattern.length; i++) {
         const ch = pattern[i];
-        if (ch === '*') {
+        if (!inCharacterClass && ch === '*') {
             if (pattern[i + 1] === '*') {
                 i++;
                 if (pattern[i + 1] === '/') {
@@ -40,15 +117,31 @@ function matchGlob(pattern, filePath) {
             i++; // \X is a literal X
             regexStr += pattern[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
-        else if (ch === '?') {
+        else if (!inCharacterClass && ch === '[') {
+            inCharacterClass = true;
+            regexStr += ch;
+        }
+        else if (inCharacterClass && ch === ']') {
+            inCharacterClass = false;
+            regexStr += ch;
+        }
+        else if (!inCharacterClass && ch === '?') {
             regexStr += '.'; // ? matches single character
+        }
+        else if (!inCharacterClass && ch === '^') {
+            regexStr += '\\^'; // ^ is literal outside a character class
         }
         else {
             regexStr += ch.replace(/[.+$(){}|]/g, '\\$&');
         }
     }
-    const regex = new RegExp(`^${regexStr}$`);
-    return regex.test(filePath);
+    try {
+        const regex = new RegExp(`^${regexStr}$`);
+        return regex.test(filePath);
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Check if a rule should apply to the current file based on metadata.

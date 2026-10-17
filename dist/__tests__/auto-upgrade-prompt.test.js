@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 vi.mock('child_process', async (importOriginal) => ({
     ...(await importOriginal()),
     execSync: vi.fn(),
@@ -97,6 +100,70 @@ describe('auto-upgrade prompt config', () => {
             process.env.OMC_SECURITY = originalSecurity;
         }
         clearSecurityConfigCache();
+    });
+});
+describe('claudeMdEnabled config passthrough', () => {
+    const originalEnv = {
+        HOME: process.env.HOME,
+        USERPROFILE: process.env.USERPROFILE,
+        CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+        OMC_CLI_SKIP_PARSE: process.env.OMC_CLI_SKIP_PARSE,
+    };
+    let tempHome;
+    let configDir;
+    /** Fresh module graph on the real fs, so CONFIG_FILE resolves under the temp CLAUDE_CONFIG_DIR. */
+    async function loadReal() {
+        vi.doUnmock('fs');
+        vi.resetModules();
+        const actualFs = await import('fs');
+        const autoUpdate = await import('../features/auto-update.js');
+        return { actualFs, autoUpdate };
+    }
+    beforeEach(() => {
+        tempHome = mkdtempSync(join(tmpdir(), 'omc-claude-md-enabled-'));
+        configDir = join(tempHome, '.claude');
+        process.env.HOME = tempHome;
+        process.env.USERPROFILE = tempHome;
+        process.env.CLAUDE_CONFIG_DIR = configDir;
+        // Importing src/cli/index.ts must not auto-parse the test runner's argv.
+        process.env.OMC_CLI_SKIP_PARSE = '1';
+    });
+    afterEach(() => {
+        for (const [key, value] of Object.entries(originalEnv)) {
+            if (value === undefined)
+                delete process.env[key];
+            else
+                process.env[key] = value;
+        }
+        rmSync(tempHome, { recursive: true, force: true });
+    });
+    it('getOMCConfig returns claudeMdEnabled: false from the config file', async () => {
+        const { actualFs, autoUpdate } = await loadReal();
+        actualFs.mkdirSync(configDir, { recursive: true });
+        actualFs.writeFileSync(autoUpdate.CONFIG_FILE, JSON.stringify({ silentAutoUpdate: false, claudeMdEnabled: false }));
+        expect(autoUpdate.CONFIG_FILE.startsWith(tempHome)).toBe(true);
+        expect(autoUpdate.getOMCConfig().claudeMdEnabled).toBe(false);
+    });
+    it.each([
+        ['config-stop-callback file', ['config-stop-callback', 'file', '--enable', '--path', '/tmp/omc-stop-log.md']],
+        ['config-stop-callback --profile', ['config-stop-callback', 'discord', '--profile', 'work', '--enable', '--webhook', 'https://discord.invalid/hook']],
+    ])('keeps claudeMdEnabled: false when %s rewrites the config', async (_label, argv) => {
+        const { actualFs, autoUpdate } = await loadReal();
+        expect(autoUpdate.CONFIG_FILE.startsWith(tempHome)).toBe(true);
+        actualFs.mkdirSync(configDir, { recursive: true });
+        actualFs.writeFileSync(autoUpdate.CONFIG_FILE, JSON.stringify({ silentAutoUpdate: true, claudeMdEnabled: false }));
+        const logSpy = vi.spyOn(console, 'log').mockImplementation(() => { });
+        try {
+            const { buildProgram } = await import('../cli/index.js');
+            await buildProgram().parseAsync(argv, { from: 'user' });
+        }
+        finally {
+            logSpy.mockRestore();
+        }
+        const rewritten = JSON.parse(actualFs.readFileSync(autoUpdate.CONFIG_FILE, 'utf-8'));
+        expect(rewritten.silentAutoUpdate).toBe(true);
+        expect(rewritten.claudeMdEnabled).toBe(false);
+        expect(rewritten.stopHookCallbacks ?? rewritten.notificationProfiles).toBeDefined();
     });
 });
 //# sourceMappingURL=auto-upgrade-prompt.test.js.map

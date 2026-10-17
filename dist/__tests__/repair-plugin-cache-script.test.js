@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync, } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const REPO_ROOT = join(__dirname, '..', '..');
@@ -82,6 +82,69 @@ describe('repair-plugin-cache.mjs', () => {
             installPath: newRoot,
             version: '4.14.1',
         });
+    });
+    it.runIf(process.platform !== 'win32')('never replaces the only real cache directory with a link back to a newer symlink', () => {
+        const root = mkdtempSync(join(tmpdir(), 'omc-repair-symlink-newest-'));
+        tempRoots.push(root);
+        const configDir = join(root, '.claude');
+        const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const realRoot = join(cacheBase, '4.4.3');
+        const linkRoot = join(cacheBase, '5.0.0');
+        mkdirSync(join(configDir, 'plugins'), { recursive: true });
+        writePluginRoot(realRoot, '4.4.3');
+        // Downgrade shape: 5.0.0 is a symlink to the only real directory.
+        symlinkSync('4.4.3', linkRoot);
+        writeFileSync(join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+            version: 2,
+            plugins: {
+                'oh-my-claudecode@omc': [{ installPath: realRoot, version: '4.4.3' }],
+            },
+        }, null, 2));
+        const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+            env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'linux' },
+            encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        // 4.4.3 -> 5.0.0 next to 5.0.0 -> 4.4.3 would be a two-link cycle that
+        // destroys the only real copy.
+        expect(lstatSync(realRoot).isSymbolicLink()).toBe(false);
+        expect(lstatSync(realRoot).isDirectory()).toBe(true);
+        expect(existsSync(join(realRoot, 'hooks', 'hooks.json'))).toBe(true);
+        expect(readlinkSync(linkRoot)).toBe('4.4.3');
+        expect(realpathSync(linkRoot)).toBe(realpathSync(realRoot));
+        const registry = JSON.parse(readFileSync(join(configDir, 'plugins', 'installed_plugins.json'), 'utf-8'));
+        expect(registry.plugins['oh-my-claudecode@omc'][0]).toMatchObject({ installPath: realRoot, version: '4.4.3' });
+    });
+    it.runIf(process.platform !== 'win32')('re-points a dangling newest symlink at the real cache directory', () => {
+        const root = mkdtempSync(join(tmpdir(), 'omc-repair-dangling-newest-'));
+        tempRoots.push(root);
+        const configDir = join(root, '.claude');
+        const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+        const realRoot = join(cacheBase, '4.4.3');
+        const danglingRoot = join(cacheBase, '5.0.0');
+        mkdirSync(join(configDir, 'plugins'), { recursive: true });
+        writePluginRoot(realRoot, '4.4.3');
+        // 5.0.0 -> 4.9.9 is dangling: the real 4.9.9 directory was removed.
+        symlinkSync('4.9.9', danglingRoot);
+        writeFileSync(join(configDir, 'plugins', 'installed_plugins.json'), JSON.stringify({
+            version: 2,
+            plugins: {
+                'oh-my-claudecode@omc': [{ installPath: danglingRoot, version: '5.0.0' }],
+            },
+        }, null, 2));
+        const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+            env: { ...process.env, CLAUDE_CONFIG_DIR: configDir, OMC_REPAIR_PLUGIN_CACHE_PLATFORM: 'linux' },
+            encoding: 'utf-8',
+        });
+        expect(result.status).toBe(0);
+        expect(result.stderr).toBe('');
+        expect(lstatSync(realRoot).isSymbolicLink()).toBe(false);
+        expect(readlinkSync(danglingRoot)).toBe('4.4.3');
+        expect(realpathSync(danglingRoot)).toBe(realpathSync(realRoot));
+        expect(existsSync(join(danglingRoot, 'hooks', 'hooks.json'))).toBe(true);
+        const registry = JSON.parse(readFileSync(join(configDir, 'plugins', 'installed_plugins.json'), 'utf-8'));
+        expect(registry.plugins['oh-my-claudecode@omc'][0]).toMatchObject({ installPath: realRoot, version: '4.4.3' });
     });
     it.runIf(process.platform !== 'win32')('repairs Unix cache hooks from direct node to the find-node bootstrap', () => {
         const root = mkdtempSync(join(tmpdir(), 'omc-repair-unix-hooks-'));

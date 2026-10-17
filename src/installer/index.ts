@@ -22,7 +22,7 @@ import { getRuntimePackageVersion } from '../lib/version.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { MIN_NODE_VERSION } from '../utils/node-version.js';
 import { resolveNodeBinary } from '../utils/resolve-node.js';
-import { parseFrontmatter } from '../utils/frontmatter.js';
+import { parseFrontmatter, stripLeadingUtf8Bom } from '../utils/frontmatter.js';
 import { isSkininthegamebrosUser } from '../utils/skininthegamebros-user.js';
 import { syncUnifiedMcpRegistryTargets } from './mcp-registry.js';
 import { OMC_CONFIG_FILE_REL } from '../lib/paths.js';
@@ -31,7 +31,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 import { syncOmcLearnedUserSkillsForClaudeCode } from '../utils/user-skill-compat.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { analyzeLegacyClaudeMd, OMC_END_MARKER, OMC_START_MARKER, parseClaudeMdMarkers, removeClaudeMdRanges } from './claude-md-analysis.js';
-import { executeClaudeMdTransaction } from './claude-md-transaction.js';
+import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from './claude-md-transaction.js';
 import { HISTORICAL_AGENT_OWNERSHIP, type HistoricalAgentOwnership } from './historical-agent-ownership.js';
 import entitlementManifest from '../config/builtin-skill-entitlements.json' with { type: 'json' };
 
@@ -1886,7 +1886,7 @@ function resolveBestPluginSyncSource(targetRoots: string[]): { sourceRoot: strin
 
 
 function extractFrontmatterBlock(content: string): string | null {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const match = stripLeadingUtf8Bom(content).match(/^---\r?\n([\s\S]*?)\r?\n---/);
   return match?.[1] ?? null;
 }
 
@@ -2723,7 +2723,12 @@ export function install(options: InstallOptions = {}): InstallResult {
 
     // Keep the public installer on the same raw-byte transaction path as setup.
     // The public string merger remains exported for callers that use it directly.
-    if (!projectScoped) {
+    // claudeMdEnabled=false in .omc-config.json opts out of every global CLAUDE.md write.
+    const claudeMdDisabledByConfig = !projectScoped && !isClaudeMdEnabledInConfig(CLAUDE_CONFIG_DIR);
+    if (claudeMdDisabledByConfig) {
+      log('Skipping CLAUDE.md (claudeMdEnabled is false in .omc-config.json)');
+    }
+    if (!projectScoped && !claudeMdDisabledByConfig) {
       const transaction = executeClaudeMdTransaction({
         mode: 'global-overwrite',
         root: CLAUDE_CONFIG_DIR,

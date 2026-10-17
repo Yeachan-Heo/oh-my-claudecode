@@ -3886,49 +3886,49 @@ var require_fast_uri = __commonJS({
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative12, options, skipNormalization) {
+    function resolveComponent(base, relative11, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse10(serialize(base, options), options);
-        relative12 = parse10(serialize(relative12, options), options);
+        relative11 = parse10(serialize(relative11, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative12.scheme) {
-        target.scheme = relative12.scheme;
-        target.userinfo = relative12.userinfo;
-        target.host = relative12.host;
-        target.port = relative12.port;
-        target.path = removeDotSegments(relative12.path || "");
-        target.query = relative12.query;
+      if (!options.tolerant && relative11.scheme) {
+        target.scheme = relative11.scheme;
+        target.userinfo = relative11.userinfo;
+        target.host = relative11.host;
+        target.port = relative11.port;
+        target.path = removeDotSegments(relative11.path || "");
+        target.query = relative11.query;
       } else {
-        if (relative12.userinfo !== void 0 || relative12.host !== void 0 || relative12.port !== void 0) {
-          target.userinfo = relative12.userinfo;
-          target.host = relative12.host;
-          target.port = relative12.port;
-          target.path = removeDotSegments(relative12.path || "");
-          target.query = relative12.query;
+        if (relative11.userinfo !== void 0 || relative11.host !== void 0 || relative11.port !== void 0) {
+          target.userinfo = relative11.userinfo;
+          target.host = relative11.host;
+          target.port = relative11.port;
+          target.path = removeDotSegments(relative11.path || "");
+          target.query = relative11.query;
         } else {
-          if (!relative12.path) {
+          if (!relative11.path) {
             target.path = base.path;
-            if (relative12.query !== void 0) {
-              target.query = relative12.query;
+            if (relative11.query !== void 0) {
+              target.query = relative11.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative12.path[0] === "/") {
-              target.path = removeDotSegments(relative12.path);
+            if (relative11.path[0] === "/") {
+              target.path = removeDotSegments(relative11.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative12.path;
+                target.path = "/" + relative11.path;
               } else if (!base.path) {
-                target.path = relative12.path;
+                target.path = relative11.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative12.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative11.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative12.query;
+            target.query = relative11.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3936,7 +3936,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative12.fragment;
+      target.fragment = relative11.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -18524,6 +18524,25 @@ var STRICT_OVERRIDES = {
   disableExternalLLM: true
 };
 var cachedConfig = null;
+var optionalBoolean = external_exports.boolean().optional().catch(void 0);
+var securityOverrideShape = {
+  restrictToolPaths: optionalBoolean,
+  pythonSandbox: optionalBoolean,
+  disableProjectSkills: optionalBoolean,
+  disableAutoUpdate: optionalBoolean,
+  disableRemoteMcp: optionalBoolean,
+  disableExternalLLM: optionalBoolean,
+  hardMaxIterations: external_exports.number().int().nonnegative().optional().catch(void 0)
+};
+var securityOverridesSchema = external_exports.object(securityOverrideShape);
+function sanitizeSecurityOverrides(raw) {
+  const parsed = securityOverridesSchema.parse(raw);
+  const result = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value !== void 0) result[key] = value;
+  }
+  return result;
+}
 function loadSecurityFromConfigFiles() {
   const paths = [
     (0, import_path5.join)(process.cwd(), ".claude", "omc.jsonc"),
@@ -18534,8 +18553,8 @@ function loadSecurityFromConfigFiles() {
     try {
       const content = (0, import_fs4.readFileSync)(configPath, "utf-8");
       const parsed = parseJsonc(content);
-      if (parsed?.security && typeof parsed.security === "object") {
-        return parsed.security;
+      if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
+        return sanitizeSecurityOverrides(parsed.security);
       }
     } catch {
     }
@@ -24863,9 +24882,9 @@ var pythonReplTool = {
 
 // src/tools/state-tools.ts
 var import_crypto10 = require("crypto");
-var import_fs28 = require("fs");
+var import_fs27 = require("fs");
 var import_os4 = require("os");
-var import_path31 = require("path");
+var import_path30 = require("path");
 
 // src/lib/session-id.ts
 function readEnv() {
@@ -26393,13 +26412,6 @@ function resolveStateRoot(directory) {
   if (probe.status === "not_a_repository") return baseDir;
   throw new Error("Git probe failed while resolving runtime state root");
 }
-function resolveFile(mode, directory, sessionId) {
-  const baseDir = resolveStateRoot(directory);
-  if (sessionId) {
-    return resolveSessionStatePath(mode, sessionId, baseDir);
-  }
-  return resolveStatePath(mode, baseDir);
-}
 function discoverStateFile(path13, extra = {}) {
   try {
     const state = JSON.parse((0, import_fs16.readFileSync)(path13, "utf-8"));
@@ -26454,58 +26466,6 @@ function findCompletedSessionStateCandidates(mode, directory, requesterSessionId
 function findCompletedSessionStateFiles(mode, directory, requesterSessionId) {
   return findCompletedSessionStateCandidates(mode, directory, requesterSessionId).map((candidate) => candidate.path);
 }
-function writeModeState(mode, state, directory, sessionId) {
-  try {
-    const baseDir = resolveStateRoot(directory);
-    if (sessionId) {
-      ensureSessionStateDir(sessionId, baseDir);
-    } else {
-      ensureOmcDir("state", baseDir);
-    }
-    const filePath = resolveFile(mode, directory, sessionId);
-    const ownerPid = typeof process.pid === "number" ? process.pid : void 0;
-    const envelope = {
-      ...state,
-      ...ownerPid !== void 0 && state.owner_pid === void 0 ? { owner_pid: ownerPid } : {},
-      _meta: {
-        written_at: (/* @__PURE__ */ new Date()).toISOString(),
-        mode,
-        ...sessionId ? { sessionId } : {},
-        ...ownerPid !== void 0 ? { ownerPid } : {}
-      }
-    };
-    if (sessionId) {
-      return writeStateFileLockedCreateIf(
-        filePath,
-        (current) => current === null || canClearStateForSession(current, sessionId),
-        () => envelope
-      ) === "written";
-    }
-    return writeStateFileLocked(filePath, envelope);
-  } catch {
-    return false;
-  }
-}
-function readModeState(mode, directory, sessionId) {
-  const filePath = resolveFile(mode, directory, sessionId);
-  if (!(0, import_fs16.existsSync)(filePath)) {
-    return null;
-  }
-  try {
-    const content = (0, import_fs16.readFileSync)(filePath, "utf-8");
-    const parsed = JSON.parse(content);
-    if (sessionId && parsed && typeof parsed === "object" && !canClearStateForSession(parsed, sessionId)) {
-      return null;
-    }
-    if (parsed && typeof parsed === "object" && "_meta" in parsed) {
-      const { _meta: _, ...rest } = parsed;
-      return rest;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-}
 
 // src/hooks/mode-registry/index.ts
 var import_fs17 = require("fs");
@@ -26519,7 +26479,6 @@ var MODE_NAMES = {
   RALPH: "ralph",
   RALPLAN: "ralplan",
   DEEP_INTERVIEW: "deep-interview",
-  MERGE_READINESS: "merge-readiness",
   SELF_IMPROVE: "self-improve"
 };
 var ALL_MODE_NAMES = [
@@ -26529,7 +26488,6 @@ var ALL_MODE_NAMES = [
   MODE_NAMES.RALPH,
   MODE_NAMES.RALPLAN,
   MODE_NAMES.DEEP_INTERVIEW,
-  MODE_NAMES.MERGE_READINESS,
   MODE_NAMES.SELF_IMPROVE
 ];
 var MODE_STATE_FILE_MAP = {
@@ -26539,7 +26497,6 @@ var MODE_STATE_FILE_MAP = {
   [MODE_NAMES.RALPH]: "ralph-state.json",
   [MODE_NAMES.RALPLAN]: "ralplan-state.json",
   [MODE_NAMES.DEEP_INTERVIEW]: "deep-interview-state.json",
-  [MODE_NAMES.MERGE_READINESS]: "merge-readiness-state.json",
   [MODE_NAMES.SELF_IMPROVE]: "self-improve-state.json"
 };
 var SESSION_END_MODE_STATE_FILES = [
@@ -26558,7 +26515,6 @@ var SESSION_METRICS_MODE_FILES = [
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPH], mode: MODE_NAMES.RALPH },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN], mode: MODE_NAMES.RALPLAN },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.DEEP_INTERVIEW], mode: MODE_NAMES.DEEP_INTERVIEW },
-  { file: MODE_STATE_FILE_MAP[MODE_NAMES.MERGE_READINESS], mode: MODE_NAMES.MERGE_READINESS },
   { file: MODE_STATE_FILE_MAP[MODE_NAMES.SELF_IMPROVE], mode: MODE_NAMES.SELF_IMPROVE }
 ];
 
@@ -26591,11 +26547,6 @@ var MODE_CONFIGS = {
   [MODE_NAMES.DEEP_INTERVIEW]: {
     name: "Deep Interview",
     stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.DEEP_INTERVIEW],
-    activeProperty: "active"
-  },
-  [MODE_NAMES.MERGE_READINESS]: {
-    name: "Merge Readiness",
-    stateFile: MODE_STATE_FILE_MAP[MODE_NAMES.MERGE_READINESS],
     activeProperty: "active"
   },
   [MODE_NAMES.SELF_IMPROVE]: {
@@ -27157,7 +27108,6 @@ var RESERVED_WORKFLOW_NAMES = /* @__PURE__ */ new Set([
   "qa",
   "autoresearch",
   "ultraqa",
-  "merge-readiness",
   "self-improve",
   "ultrawork",
   "ultragoal",
@@ -27351,528 +27301,6 @@ function validateNamedWorkflowStateStructure(state, sessionId) {
   return { tracking, task };
 }
 
-// src/hooks/merge-readiness/runtime.ts
-var import_child_process13 = require("child_process");
-var import_fs26 = require("fs");
-var import_path28 = require("path");
-
-// src/hooks/merge-readiness/mcq.ts
-var MERGE_READINESS_DIMENSIONS = [
-  "why",
-  "change",
-  "tradeoff",
-  "risk",
-  "team"
-];
-var MERGE_READINESS_THRESHOLDS = {
-  quick: 0.7,
-  standard: 0.8,
-  deep: 0.9
-};
-var MERGE_READINESS_MAX_ROUNDS = {
-  quick: 3,
-  standard: 5,
-  deep: 8
-};
-function profileThreshold(profile) {
-  return MERGE_READINESS_THRESHOLDS[profile] ?? MERGE_READINESS_THRESHOLDS.standard;
-}
-function profileMaxRounds(profile) {
-  return MERGE_READINESS_MAX_ROUNDS[profile] ?? MERGE_READINESS_MAX_ROUNDS.standard;
-}
-function requiredDimensionsForProfile(profile) {
-  if (profile === "quick") return ["why", "change", "risk"];
-  return [...MERGE_READINESS_DIMENSIONS];
-}
-function scoreMCQResponse(question, selectedOptionId) {
-  return selectedOptionId === question.correctOptionId;
-}
-function computeCorrectnessRate(answers) {
-  if (answers.length === 0) return 0;
-  const correct = answers.filter((a) => a.isCorrect).length;
-  return correct / answers.length;
-}
-function isCorrectnessPass(rate, threshold) {
-  return rate >= threshold;
-}
-function hasRequiredDimensionCoverage(answers, questions, requiredDimensions) {
-  const answeredDimensions = new Set(
-    answers.map((answer) => questions.find((q) => q.id === answer.questionId)?.dimension).filter((d) => Boolean(d))
-  );
-  return requiredDimensions.every((dimension) => answeredDimensions.has(dimension));
-}
-
-// src/hooks/merge-readiness/runtime.ts
-var MODE = "merge-readiness";
-function parseMergeReadinessProfile(promptText) {
-  if (/\B--deep\b/i.test(promptText)) return "deep";
-  if (/\B--quick\b/i.test(promptText)) return "quick";
-  return "standard";
-}
-function slugifyMergeReadiness(input) {
-  const slug = input.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
-  return slug || "change";
-}
-function runGit(directory, args) {
-  try {
-    const stdout = (0, import_child_process13.execFileSync)("git", args, {
-      cwd: directory,
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-      timeout: 1e4,
-      maxBuffer: 10 * 1024 * 1024
-    });
-    return { stdout: stdout.trim() };
-  } catch (e) {
-    const err = e;
-    const timedOut = err?.code === "ETIMEDOUT" || /timed out/i.test(String(err?.message || ""));
-    const stderr = typeof err?.stderr === "string" ? err.stderr.trim().slice(0, 200) : "";
-    const exit = err?.status;
-    const error2 = timedOut ? `git ${args[0]} timed out (>10s)` : `git ${args[0]} failed (exit ${exit ?? "?"})${stderr ? ": " + stderr : ""}`;
-    return { stdout: "", error: error2 };
-  }
-}
-var EVIDENCE_MODE_STATE_FILES = /* @__PURE__ */ new Set([
-  MODE_STATE_FILE_MAP[MODE_NAMES.RALPH],
-  MODE_STATE_FILE_MAP[MODE_NAMES.AUTOPILOT],
-  MODE_STATE_FILE_MAP[MODE_NAMES.TEAM],
-  MODE_STATE_FILE_MAP[MODE_NAMES.RALPLAN],
-  MODE_STATE_FILE_MAP[MODE_NAMES.AUTORESEARCH]
-]);
-var NON_EVIDENCE_STATE_SUFFIXES = ["-stop-breaker.json", "-last-steer-at", "-continue-steer.lock"];
-function isNonEvidenceStateFile(name) {
-  return NON_EVIDENCE_STATE_SUFFIXES.some((suffix) => name.endsWith(suffix));
-}
-function modeStateRecordsRun(filePath) {
-  try {
-    const raw = (0, import_fs26.readFileSync)(filePath, "utf-8");
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === "object") {
-      if (parsed.active === true) return true;
-      if (typeof parsed.iteration === "number" && parsed.iteration > 0) return true;
-      if (typeof parsed.started_at === "string" && parsed.started_at.length > 0) return true;
-      if (typeof parsed.phase === "string" && parsed.phase.length > 0 && parsed.phase !== "init") return true;
-    }
-  } catch {
-  }
-  return false;
-}
-function listArtifactFiles(directory, sessionId) {
-  const root = getOmcRoot(directory);
-  const dirCandidates = ["plans", "artifacts", "logs", "specs", "interviews"].map((segment) => (0, import_path28.join)(root, segment)).filter((path13) => (0, import_fs26.existsSync)(path13));
-  const found = [];
-  const seen = /* @__PURE__ */ new Set();
-  const pushRelative = (full) => {
-    const relativePath = (0, import_path28.relative)(root, full).replace(/\\/g, "/");
-    if (relativePath.startsWith("artifacts/merge-readiness/")) return;
-    if (relativePath.includes("merge-readiness-state")) return;
-    if (seen.has(relativePath)) return;
-    seen.add(relativePath);
-    found.push(relativePath);
-  };
-  const MAX_PER_ROOT = 40;
-  for (const candidate of dirCandidates) {
-    const stack = [candidate];
-    let perRoot = 0;
-    while (stack.length > 0 && perRoot < MAX_PER_ROOT) {
-      const current = stack.pop();
-      if (!current) continue;
-      try {
-        const entries = (0, import_fs26.readdirSync)(current, { withFileTypes: true });
-        for (const entry of entries) {
-          if (perRoot >= MAX_PER_ROOT) break;
-          const full = (0, import_path28.join)(current, entry.name);
-          if (entry.isDirectory()) {
-            stack.push(full);
-          } else if (entry.isFile() && /\.(md|json|txt|log)$/i.test(entry.name)) {
-            pushRelative(full);
-            perRoot++;
-          }
-        }
-      } catch {
-        continue;
-      }
-    }
-  }
-  const stateDir = (0, import_path28.join)(root, "state");
-  const scanStateDir = (dir) => {
-    if (!(0, import_fs26.existsSync)(dir)) return;
-    try {
-      for (const entry of (0, import_fs26.readdirSync)(dir, { withFileTypes: true })) {
-        if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-        if (isNonEvidenceStateFile(entry.name)) continue;
-        if (!EVIDENCE_MODE_STATE_FILES.has(entry.name)) continue;
-        const full = (0, import_path28.join)(dir, entry.name);
-        if (!modeStateRecordsRun(full)) continue;
-        pushRelative(full);
-      }
-    } catch {
-    }
-  };
-  scanStateDir(stateDir);
-  if (sessionId) {
-    scanStateDir((0, import_path28.join)(stateDir, "sessions", sessionId));
-  }
-  return found.sort();
-}
-function collectMergeReadinessEvidence(directory, baseRef, sessionId) {
-  const worktree = resolveToWorktreeRoot(directory);
-  const gitErrors = [];
-  const git = (args) => {
-    const r = runGit(worktree, args);
-    if (r.error) gitErrors.push(r.error);
-    return r.stdout;
-  };
-  const changedFiles = git(["diff", "--name-only", "HEAD"]).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const stagedFiles = git(["diff", "--cached", "--name-only"]).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const untrackedFiles = git(["ls-files", "--others", "--exclude-standard"]).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const resolvedBase = baseRef || git(["rev-parse", "--abbrev-ref", "@{upstream}"]) || git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  const committedBase = resolvedBase ? git(["merge-base", resolvedBase, "HEAD"]) : "";
-  const committedFiles = /^[0-9a-f]{7,40}$/.test(committedBase || "") ? git(["diff", "--name-only", committedBase + "...HEAD"]).split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
-  const trackedChangedFiles = Array.from(/* @__PURE__ */ new Set([...changedFiles, ...stagedFiles, ...committedFiles])).sort();
-  const status = git(["status", "--short"]);
-  const diffStat = git(["diff", "--stat", "HEAD"]) || (committedBase ? git(["diff", "--stat", committedBase + "...HEAD"]) : "") || git(["diff", "--cached", "--stat"]);
-  const sourceArtifacts = listArtifactFiles(worktree, sessionId);
-  const evidenceText = sourceArtifacts.join("\n").toLowerCase();
-  const testEvidence = sourceArtifacts.filter((file) => /test|spec|qa|verify|validation/i.test(file));
-  const reviewEvidence = sourceArtifacts.filter((file) => /review|risk|security|readiness|verdict/i.test(file));
-  const missingEvidence = [];
-  if (trackedChangedFiles.length === 0 && !status) {
-    missingEvidence.push("No changed files or git status evidence were detected.");
-  }
-  if (!diffStat) {
-    missingEvidence.push("No diff stat was detected for the current worktree.");
-  }
-  if (!/test|spec|qa|verify|validation/.test(evidenceText)) {
-    missingEvidence.push("No test or verification artifact was detected under .omc.");
-  }
-  if (!/review|risk|security|verdict/.test(evidenceText)) {
-    missingEvidence.push("No review or risk artifact was detected under .omc.");
-  }
-  for (const gerr of gitErrors) missingEvidence.push(gerr);
-  return { changedFiles: trackedChangedFiles, untrackedFiles, status, diffStat, sourceArtifacts, testEvidence, reviewEvidence, missingEvidence, base_ref: resolvedBase };
-}
-function extractChangeSummary(promptText) {
-  return promptText.replace(/^\s*\/(?:oh-my-claudecode:|omc:)?merge-readiness\b/i, "").replace(/\B--(?:quick|standard|deep|from-diff|from-artifacts)\b/gi, "").trim();
-}
-function hasMinimalEvidence(evidence) {
-  return evidence.changedFiles.length > 0 || Boolean(evidence.status) || Boolean(evidence.diffStat) || evidence.sourceArtifacts.length > 0;
-}
-function parseMergeReadinessSourceMode(promptText) {
-  const fromDiff = /(?:^|\s)--from-diff(?=\s|$)/i.test(promptText);
-  const fromArtifacts = /(?:^|\s)--from-artifacts(?=\s|$)/i.test(promptText);
-  if (fromDiff && fromArtifacts) return { error: "--from-diff and --from-artifacts cannot be used together." };
-  if (fromDiff) return { mode: "diff" };
-  if (fromArtifacts) return { mode: "artifacts" };
-  return {};
-}
-function hasModeStateArtifact(evidence) {
-  return evidence.sourceArtifacts.some((path13) => {
-    const name = path13.slice(path13.lastIndexOf("/") + 1);
-    return EVIDENCE_MODE_STATE_FILES.has(name);
-  });
-}
-function hasMinimalEvidenceForMode(evidence, mode) {
-  const hasDiff = evidence.changedFiles.length > 0 || Boolean(evidence.diffStat);
-  const hasRelevantArtifact = evidence.testEvidence.length > 0 || evidence.reviewEvidence.length > 0 || hasModeStateArtifact(evidence);
-  if (mode === "diff") return hasDiff;
-  if (mode === "artifacts") return hasRelevantArtifact;
-  return hasDiff || hasRelevantArtifact;
-}
-function pickNextQuestion(state) {
-  if (state.questions.length === 0) return void 0;
-  const answered = new Set(state.answers.map((a) => a.questionId));
-  const unanswered = state.questions.filter((q) => !answered.has(q.id));
-  if (unanswered.length === 0) return void 0;
-  const requiredSet = new Set(state.required_dimensions);
-  const requiredNext = unanswered.find((q) => requiredSet.has(q.dimension));
-  return requiredNext ?? unanswered[0];
-}
-function recomputeReadiness(state) {
-  const scores = {};
-  for (const dimension of state.required_dimensions) {
-    const dimensionAnswers = state.answers.filter((a) => {
-      const question = state.questions.find((q) => q.id === a.questionId);
-      return question?.dimension === dimension;
-    });
-    if (dimensionAnswers.length > 0) {
-      const correct = dimensionAnswers.filter((a) => a.isCorrect).length;
-      scores[dimension] = correct / dimensionAnswers.length;
-    }
-  }
-  state.dimension_scores = scores;
-  state.readiness_score = computeCorrectnessRate(state.answers);
-}
-function allRequiredAnswered(state) {
-  if (state.questions.length === 0) return false;
-  const answered = new Set(state.answers.map((a) => a.questionId));
-  const answeredDimensions = new Set(
-    state.answers.map((a) => state.questions.find((q) => q.id === a.questionId)?.dimension).filter((d) => Boolean(d))
-  );
-  const coverageOk = state.required_dimensions.every((d) => answeredDimensions.has(d));
-  const cap = Math.min(state.questions.length, state.max_rounds);
-  const answeredInRange = state.answers.filter((a) => answered.has(a.questionId)).length;
-  return coverageOk && answeredInRange >= cap;
-}
-function finalizeIfReady(state, now) {
-  recomputeReadiness(state);
-  if (!hasMinimalEvidence(state.evidence)) {
-    state.phase = "complete";
-    state.result = "blocked";
-    state.completed_at = now;
-    delete state.pending_question;
-    return;
-  }
-  if (!allRequiredAnswered(state)) {
-    return;
-  }
-  const rate = state.readiness_score;
-  const coverageOk = hasRequiredDimensionCoverage(
-    state.answers,
-    state.questions,
-    state.required_dimensions
-  );
-  if (isCorrectnessPass(rate, state.threshold) && coverageOk) {
-    state.active = false;
-    state.phase = "complete";
-    state.result = "pass";
-    state.completed_at = now;
-    delete state.pending_question;
-    return;
-  }
-  state.phase = "complete";
-  state.result = "paused";
-  state.completed_at = now;
-  delete state.pending_question;
-}
-function readMergeReadinessState(directory, sessionId) {
-  return readModeState(MODE, directory, sessionId) ?? null;
-}
-function writeMergeReadinessState(directory, state, sessionId) {
-  return writeModeState(MODE, state, directory, sessionId);
-}
-function persistOrFailClosed(workingDir, state, sessionId) {
-  const persisted = writeMergeReadinessState(workingDir, state, sessionId);
-  if (persisted) return state;
-  state.active = true;
-  state.phase = "complete";
-  state.result = "blocked";
-  state.awaiting_content = false;
-  delete state.pending_question;
-  state.validation_errors = [
-    ...state.validation_errors ?? [],
-    "Merge-readiness state could not be persisted (invalid session id or state path). Resolve the session id and re-run merge_readiness_start."
-  ];
-  return state;
-}
-function createInitialMergeReadinessState(directory, promptText, sessionId, baseRef) {
-  if (sessionId) validateSessionId(sessionId);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const profile = parseMergeReadinessProfile(promptText);
-  const changeSummary = extractChangeSummary(promptText);
-  const unsupportedFromPr = /\B--from-pr\b/i.test(promptText);
-  const sourceModeResult = parseMergeReadinessSourceMode(promptText);
-  const sourceMode = sourceModeResult.mode;
-  const evidence = collectMergeReadinessEvidence(directory, baseRef, sessionId);
-  const missingEvidence = unsupportedFromPr || Boolean(sourceModeResult.error) || !hasMinimalEvidenceForMode(evidence, sourceMode);
-  const state = {
-    active: true,
-    session_id: sessionId,
-    current_phase: MODE,
-    phase: "content",
-    profile,
-    threshold: profileThreshold(profile),
-    max_rounds: profileMaxRounds(profile),
-    required_dimensions: requiredDimensionsForProfile(profile),
-    rounds: [],
-    questions: [],
-    answers: [],
-    awaiting_content: !missingEvidence,
-    evidence,
-    readiness_score: 0,
-    dimension_scores: {},
-    result: missingEvidence ? "blocked" : "pending",
-    why: "",
-    whatChanged: "",
-    tradeoffs: "",
-    risksConsidered: "",
-    teamUnderstanding: "",
-    started_at: now,
-    updated_at: now,
-    change_summary: changeSummary,
-    slug: slugifyMergeReadiness(changeSummary || "merge-readiness"),
-    source_mode: sourceMode
-  };
-  if (missingEvidence) {
-    state.validation_errors = unsupportedFromPr ? ["--from-pr is unsupported: merge-readiness uses local git and .omc evidence only."] : sourceModeResult.error ? [sourceModeResult.error] : ["No minimal evidence for the selected source mode was detected; produce it before running /merge-readiness."];
-  }
-  let prior = null;
-  try {
-    prior = readMergeReadinessState(directory, sessionId);
-  } catch {
-    prior = null;
-  }
-  if (prior && prior.result === "pending") {
-    const phase = prior.phase ?? "content";
-    const answerCount = (prior.answers ?? []).length;
-    throw new Error(
-      `An active merge-readiness attempt is still in progress (phase: ${phase}, ${answerCount} answer(s) recorded). Re-running merge_readiness_start would overwrite it and lose its audit trail. Cancel it first via merge_readiness_cancel, or let it pass/pause; the prior attempt is retained in the audit history once terminal.`
-    );
-  }
-  if (prior && prior.result !== "pending" && prior.completed_at) {
-    const priorAttempt = {
-      profile: prior.profile,
-      threshold: prior.threshold,
-      max_rounds: prior.max_rounds,
-      required_dimensions: [...prior.required_dimensions],
-      change_summary: prior.change_summary,
-      slug: prior.slug,
-      why: prior.why,
-      whatChanged: prior.whatChanged,
-      tradeoffs: prior.tradeoffs,
-      risksConsidered: prior.risksConsidered,
-      teamUnderstanding: prior.teamUnderstanding,
-      started_at: prior.started_at,
-      completed_at: prior.completed_at,
-      result: prior.result,
-      override_reason: prior.override_reason,
-      override_owner: prior.override_owner,
-      cancel_owner: prior.cancel_owner,
-      readiness_score: prior.readiness_score,
-      dimension_scores: { ...prior.dimension_scores },
-      questions: prior.questions.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
-      answers: prior.answers.map((a) => ({ ...a })),
-      evidence_summary: {
-        changedFiles: [...prior.evidence.changedFiles],
-        source_mode: prior.source_mode,
-        missingEvidence: [...prior.evidence.missingEvidence],
-        sourceArtifactCount: prior.evidence.sourceArtifacts.length,
-        testEvidenceCount: prior.evidence.testEvidence.length,
-        reviewEvidenceCount: prior.evidence.reviewEvidence.length
-      }
-    };
-    state.prior_attempts = [...prior.prior_attempts ?? [], priorAttempt];
-  }
-  const persisted = writeMergeReadinessState(directory, state, sessionId);
-  if (!persisted) {
-    throw new Error(
-      "Merge-readiness could not create durable state. The workflow was not started; restore state storage and retry."
-    );
-  }
-  return state;
-}
-function setMergeReadinessContent(directory, content, sessionId) {
-  const workingDir = resolveToWorktreeRoot(directory);
-  const state = readMergeReadinessState(workingDir, sessionId);
-  if (!state?.active) return state ?? null;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  if (state.result === "blocked" || state.result === "paused") {
-    state.validation_errors ??= [state.result === "blocked" ? "Blocked: no minimal evidence for the selected source mode. Produce it before submitting content." : "Paused: the quiz was not passed. Re-run merge_readiness_start to collect fresh evidence and retry; the prior attempt is retained in the audit history."];
-    if (state.result === "blocked") {
-      state.awaiting_content = true;
-      state.phase = "content";
-    }
-    state.updated_at = now;
-    return persistOrFailClosed(workingDir, state, sessionId);
-  }
-  const errors = validateMergeReadinessContent(content, state);
-  if (errors.length > 0) {
-    state.validation_errors = errors;
-    state.awaiting_content = true;
-    state.phase = "content";
-    state.answers = [];
-    state.readiness_score = 0;
-    state.dimension_scores = {};
-    state.result = "pending";
-    delete state.pending_question;
-    delete state.completed_at;
-    delete state.override_reason;
-    state.updated_at = now;
-    return persistOrFailClosed(workingDir, state, sessionId);
-  }
-  state.why = content.why.trim();
-  state.whatChanged = content.whatChanged.trim();
-  state.tradeoffs = content.tradeoffs.trim();
-  state.risksConsidered = content.risksConsidered.trim();
-  state.teamUnderstanding = content.teamUnderstanding.trim();
-  state.questions = content.questions.slice(0, state.max_rounds);
-  state.answers = [];
-  state.readiness_score = 0;
-  state.dimension_scores = {};
-  state.result = "pending";
-  delete state.completed_at;
-  delete state.override_reason;
-  delete state.validation_errors;
-  state.awaiting_content = false;
-  state.phase = "questioning";
-  state.updated_at = now;
-  state.pending_question = pickNextQuestion(state);
-  return persistOrFailClosed(workingDir, state, sessionId);
-}
-function recordMergeReadinessMCQAnswer(directory, questionId, selectedOptionId, sessionId) {
-  const workingDir = resolveToWorktreeRoot(directory);
-  const state = readMergeReadinessState(workingDir, sessionId);
-  if (!state?.active) return state ?? null;
-  if (state.awaiting_content || state.phase !== "questioning") return null;
-  const question = state.questions.find((q) => q.id === questionId);
-  if (!question || state.pending_question?.id !== questionId) return null;
-  const normalizedOptionId = selectedOptionId.trim();
-  if (!question.options.some((option) => option.id === normalizedOptionId)) return null;
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const isCorrect = scoreMCQResponse(question, normalizedOptionId);
-  const filtered = state.answers.filter((a) => a.questionId !== questionId);
-  const answer = {
-    questionId,
-    selectedOptionId: normalizedOptionId,
-    isCorrect,
-    answeredAt: now
-  };
-  state.answers = [...filtered, answer];
-  state.updated_at = now;
-  delete state.pending_question;
-  finalizeIfReady(state, now);
-  if (state.active && state.phase === "questioning") {
-    state.pending_question = pickNextQuestion(state);
-  } else {
-    delete state.pending_question;
-  }
-  return persistOrFailClosed(workingDir, state, sessionId);
-}
-function validateMergeReadinessContent(content, state) {
-  const errors = [];
-  const sections = [["why", content.why], ["whatChanged", content.whatChanged], ["tradeoffs", content.tradeoffs], ["risksConsidered", content.risksConsidered], ["teamUnderstanding", content.teamUnderstanding]];
-  for (const [name, value] of sections) if (!value?.trim()) errors.push(`Narrative section '${name}' is required.`);
-  if (!Array.isArray(content.questions) || content.questions.length < state.required_dimensions.length) errors.push("Questions must cover every required dimension.");
-  if (content.questions.length > state.max_rounds) errors.push(`Questions exceed the ${state.max_rounds}-question profile limit.`);
-  const ids = /* @__PURE__ */ new Set();
-  const dimensions = /* @__PURE__ */ new Set();
-  for (const question of content.questions ?? []) {
-    if (!question.id?.trim() || ids.has(question.id)) errors.push("Question ids must be non-empty and unique.");
-    ids.add(question.id);
-    dimensions.add(question.dimension);
-    if (!question.stem?.trim()) errors.push(`Question '${question.id}' needs a stem.`);
-    if (!Array.isArray(question.options) || question.options.length < 2) errors.push(`Question '${question.id}' needs at least two options.`);
-    const optionIds = new Set(question.options?.map((option) => option.id) ?? []);
-    if (optionIds.size !== (question.options?.length ?? 0) || [...optionIds].some((id) => !id?.trim())) errors.push(`Question '${question.id}' has invalid option ids.`);
-    if (!optionIds.has(question.correctOptionId)) errors.push(`Question '${question.id}' correctOptionId must identify an option.`);
-  }
-  for (const dimension of state.required_dimensions) if (!dimensions.has(dimension)) errors.push(`No question covers required dimension '${dimension}'.`);
-  return errors;
-}
-function cancelMergeReadiness(directory, sessionId) {
-  const workingDir = resolveToWorktreeRoot(directory);
-  const state = readMergeReadinessState(workingDir, sessionId);
-  if (!state?.active) return state ?? null;
-  state.active = false;
-  state.phase = "complete";
-  state.result = "cancelled";
-  state.cancel_owner = sessionId ?? "legacy";
-  state.completed_at = state.updated_at = (/* @__PURE__ */ new Date()).toISOString();
-  delete state.pending_question;
-  return persistOrFailClosed(workingDir, state, sessionId);
-}
-
 // src/team/process-identity-lock.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path2 = require("node:path");
@@ -27880,8 +27308,8 @@ var import_node_crypto = require("node:crypto");
 
 // src/team/team-owner-epoch.ts
 var import_crypto9 = require("crypto");
-var import_fs27 = require("fs");
-var import_path30 = require("path");
+var import_fs26 = require("fs");
+var import_path29 = require("path");
 var import_node_child_process = require("node:child_process");
 
 // src/graph/runtime/native-contained-fs.ts
@@ -27914,7 +27342,7 @@ function getNativeContainedFs() {
 }
 
 // src/team/state-paths.ts
-var import_path29 = require("path");
+var import_path28 = require("path");
 
 // src/team/team-owner-epoch.ts
 function darwinProcessStartFromKinfo(raw, nowSeconds = Math.floor(Date.now() / 1e3)) {
@@ -27925,7 +27353,7 @@ function darwinProcessStartFromKinfo(raw, nowSeconds = Math.floor(Date.now() / 1
   return `${seconds}:${micros}`;
 }
 function processStartIdentityForPlatform(pid, platform = process.platform, exec = import_node_child_process.execFileSync) {
-  return probeProcessStartIdentityForPlatform(pid, platform, exec, import_fs27.readFileSync, false).identity;
+  return probeProcessStartIdentityForPlatform(pid, platform, exec, import_fs26.readFileSync, false).identity;
 }
 function darwinProcessStartIdentityFromNative(pid) {
   try {
@@ -28161,244 +27589,32 @@ function withProcessIdentityFileLockSync(lockPath, fn) {
   }
 }
 
-// src/hooks/merge-readiness/report.ts
-var MERGE_BOUNDARY_STATEMENT = "Passing means the human can explain the change. It does not approve merge, replace tests, replace review, or accept risk.";
-function renderQuestions(questions, answers, result) {
-  if (questions.length === 0) return "_No quiz questions recorded yet._";
-  const answersByQuestion = new Map(answers.map((answer) => [answer.questionId, answer]));
-  const revealAll = result === "pass" || result === "paused";
-  const revealAnswered = result === "overridden" || result === "cancelled";
-  return questions.map((question, index) => {
-    const answer = answersByQuestion.get(question.id);
-    const options = question.options.map((option) => {
-      const marks = [];
-      if ((revealAll || revealAnswered && answer) && option.id === question.correctOptionId) marks.push("correct");
-      if (answer?.selectedOptionId === option.id) marks.push("selected");
-      return `- [${option.id}] ${option.text}${marks.length > 0 ? ` _(${marks.join(", ")})_` : ""}`;
-    });
-    const correctness = answer && (revealAll || revealAnswered) ? `Correct: ${answer.isCorrect ? "yes" : "no"}` : answer ? "_Answered; correctness hidden until completion._" : "_Not answered yet._";
-    return [
-      `### ${index + 1}. [${question.dimension}] ${question.stem}`,
-      "",
-      ...options,
-      "",
-      correctness
-    ].join("\n");
-  }).join("\n\n");
-}
-function renderList(values, empty) {
-  return values.length > 0 ? values.map((value) => `- ${value}`).join("\n") : empty;
-}
-function renderPriorAttempt(attempt, index, revealAssessment) {
-  const header = [
-    `### Attempt ${index + 1}: ${attempt.result}`,
-    `- Profile: ${attempt.profile} | threshold ${Math.round(attempt.threshold * 100)}% | max rounds ${attempt.max_rounds}`,
-    `- Readiness score: ${Math.round(attempt.readiness_score * 100)}%`,
-    `- Change summary: ${attempt.change_summary || "_No change summary._"}`,
-    attempt.override_reason ? `- Override reason: ${attempt.override_reason}` : "",
-    attempt.override_owner ? `- Override owner: ${attempt.override_owner}` : "",
-    attempt.cancel_owner ? `- Cancel owner: ${attempt.cancel_owner}` : "",
-    attempt.started_at ? `- Started: ${attempt.started_at}` : "",
-    attempt.completed_at ? `- Completed: ${attempt.completed_at}` : ""
-  ].filter((line) => line.length > 0).join("\n");
-  const dimensions = attempt.required_dimensions.length > 0 ? attempt.required_dimensions.map((dimension) => `- ${dimension}: ${Math.round((attempt.dimension_scores[dimension] ?? 0) * 100)}%`).join("\n") : "_No required dimensions recorded._";
-  const qa = attempt.questions.length === 0 ? "_No quiz questions recorded._" : attempt.questions.map((question, qIndex) => {
-    const answer = attempt.answers.find((a) => a.questionId === question.id);
-    const options = question.options.map((option) => {
-      const marks = [];
-      if (revealAssessment && option.id === question.correctOptionId) marks.push("correct");
-      if (revealAssessment && answer?.selectedOptionId === option.id) marks.push("selected");
-      return `- [${option.id}] ${option.text}${marks.length > 0 ? ` _(${marks.join(", ")})_` : ""}`;
-    });
-    const correctness = answer && revealAssessment ? `Correct: ${answer.isCorrect ? "yes" : "no"}` : answer ? "_Prior answer recorded; assessment hidden until the current attempt completes._" : "_Not answered._";
-    return [
-      `#### Q${qIndex + 1}. [${question.dimension}] ${question.stem}`,
-      "",
-      ...options,
-      "",
-      correctness
-    ].join("\n");
-  }).join("\n\n");
-  const evidence = attempt.evidence_summary;
-  const evidenceBlock = [
-    "#### Evidence Summary",
-    `- Changed files: ${evidence.changedFiles.length}`,
-    evidence.source_mode ? `- Source mode: ${evidence.source_mode}` : "",
-    `- Source artifacts: ${evidence.sourceArtifactCount}`,
-    `- Test artifacts: ${evidence.testEvidenceCount}`,
-    `- Review artifacts: ${evidence.reviewEvidenceCount}`,
-    evidence.missingEvidence.length > 0 ? `- Missing evidence:
-${evidence.missingEvidence.map((m) => `  - ${m}`).join("\n")}` : "- Missing evidence: none"
-  ].filter((line) => line.length > 0).join("\n");
-  const narrative = [
-    "#### Narrative",
-    `- Why: ${attempt.why || "_Not recorded._"}`,
-    `- What changed: ${attempt.whatChanged || "_Not recorded._"}`,
-    `- Tradeoffs: ${attempt.tradeoffs || "_Not recorded._"}`,
-    `- Risks considered: ${attempt.risksConsidered || "_Not recorded._"}`,
-    `- Team understanding: ${attempt.teamUnderstanding || "_Not recorded._"}`
-  ].join("\n");
-  return [header, "", narrative, "", "#### Dimension Coverage", "", dimensions, "", "#### Questions & Answers", "", qa, "", evidenceBlock].join("\n");
-}
-function formatMergeReadinessReport(state) {
-  const revealAssessment = ["pass", "paused", "overridden", "cancelled"].includes(state.result);
-  const dimensions = revealAssessment ? state.required_dimensions.map((dimension) => `- ${dimension}: ${Math.round((state.dimension_scores[dimension] ?? 0) * 100)}%`).join("\n") : "_Available after the attempt completes._";
-  const pending = state.pending_question ? `- [${state.pending_question.dimension}] ${state.pending_question.stem}` : "_No pending question._";
-  return [
-    "# Merge Readiness Report",
-    "",
-    "## Why",
-    "",
-    state.why || "_Not yet generated._",
-    "",
-    "## What Changed",
-    "",
-    state.whatChanged || "_Not yet generated._",
-    "",
-    "## Tradeoffs",
-    "",
-    state.tradeoffs || "_Not yet generated._",
-    "",
-    "## Risks Considered",
-    "",
-    state.risksConsidered || "_Not yet generated._",
-    "",
-    "## Team Understanding",
-    "",
-    state.teamUnderstanding || "_Not yet generated._",
-    "",
-    "## Change Summary",
-    "",
-    state.change_summary || "_No change summary provided._",
-    "",
-    "## Evidence Collected",
-    "",
-    "### Changed Files",
-    "",
-    renderList(state.evidence.changedFiles, "_No changed files detected._"),
-    "",
-    "### Git Status",
-    "",
-    state.evidence.status || "_No git status output._",
-    "",
-    "### Diff Stat",
-    "",
-    state.evidence.diffStat || "_No diff stat output._",
-    "",
-    "### Source Artifacts",
-    "",
-    renderList(state.evidence.sourceArtifacts, "_No source artifacts found._"),
-    "",
-    "### Missing Evidence",
-    "",
-    renderList(state.evidence.missingEvidence, "_No missing evidence recorded._"),
-    "",
-    "## Human Explainability Quiz",
-    "",
-    "This quiz checks whether the human can explain the change. It does not replace tests, review, or maintainer approval.",
-    "",
-    renderQuestions(state.questions, state.answers, state.result),
-    "",
-    "## Pending Question",
-    "",
-    pending,
-    "",
-    "## Readiness",
-    "",
-    `Result: ${state.result}`,
-    state.override_reason ? `Override reason: ${state.override_reason}` : "",
-    state.override_owner ? `Override owner: ${state.override_owner}` : "",
-    state.cancel_owner ? `Cancel owner: ${state.cancel_owner}` : "",
-    "",
-    revealAssessment ? `Correctness rate: ${Math.round(state.readiness_score * 100)}% / threshold ${Math.round(state.threshold * 100)}%` : `Correctness rate: hidden until completion / threshold ${Math.round(state.threshold * 100)}%`,
-    "",
-    "Dimension coverage:",
-    "",
-    dimensions || "_No scored dimensions yet._",
-    "",
-    "",
-    state.prior_attempts && state.prior_attempts.length > 0 ? ["## Prior Attempts", "", ...state.prior_attempts.map((a, i) => renderPriorAttempt(a, i, revealAssessment))].join("\n") : "",
-    "",
-    "## Merge Boundary",
-    "",
-    MERGE_BOUNDARY_STATEMENT,
-    ""
-  ].filter((line, index, lines) => line !== "" || lines[index - 1] !== "").join("\n");
-}
-function redactQuestion(question) {
-  const redacted = { ...question };
-  delete redacted.correctOptionId;
-  delete redacted.rationale;
-  return redacted;
-}
-function redactMergeReadinessState(state) {
-  const revealAll = state.result === "pass" || state.result === "paused";
-  const revealAnswered = state.result === "overridden" || state.result === "cancelled";
-  const answeredQuestionIds = new Set(state.answers.map((answer) => answer.questionId));
-  const shouldRevealQuestion = (question) => revealAll || revealAnswered && answeredQuestionIds.has(question.id);
-  const redacted = {
-    ...state,
-    questions: state.questions.map((question) => shouldRevealQuestion(question) ? question : redactQuestion(question)),
-    pending_question: state.pending_question ? shouldRevealQuestion(state.pending_question) ? state.pending_question : redactQuestion(state.pending_question) : void 0,
-    answers: state.answers.map((answer) => {
-      if (revealAll || revealAnswered) return answer;
-      const publicAnswer = { ...answer };
-      delete publicAnswer.isCorrect;
-      return publicAnswer;
-    }),
-    rounds: state.rounds.map((round) => {
-      if (revealAll || revealAnswered) return round;
-      const publicRound = { ...round };
-      delete publicRound.score;
-      return publicRound;
-    }),
-    // Prior attempts are terminal, but while the CURRENT attempt is still
-    // pending/blocked the operator must not read past answer keys from the
-    // audit trail. Redact correctOptionId/rationale/isCorrect on retained
-    // attempts until the current attempt reaches a terminal state.
-    prior_attempts: revealAll || revealAnswered ? state.prior_attempts : (state.prior_attempts ?? []).map((attempt) => ({
-      ...attempt,
-      questions: attempt.questions.map((q) => redactQuestion(q)),
-      answers: attempt.answers.map((a) => {
-        return { questionId: a.questionId, answeredAt: a.answeredAt };
-      }),
-      readiness_score: void 0,
-      dimension_scores: {}
-    }))
-  };
-  if (!revealAll && !revealAnswered) {
-    delete redacted.readiness_score;
-    delete redacted.dimension_scores;
-  }
-  return redacted;
-}
-
 // src/tools/state-tools.ts
 var MAX_MIGRATION_FILE_BYTES = 1048576;
 function ensureMigrationDirectoryTree(root, target) {
-  const rootResolved = (0, import_path31.resolve)(root);
-  const targetResolved = (0, import_path31.resolve)(target);
-  const suffix = (0, import_path31.relative)(rootResolved, targetResolved);
-  if (suffix.startsWith("..") || (0, import_path31.isAbsolute)(suffix)) {
+  const rootResolved = (0, import_path30.resolve)(root);
+  const targetResolved = (0, import_path30.resolve)(target);
+  const suffix = (0, import_path30.relative)(rootResolved, targetResolved);
+  if (suffix.startsWith("..") || (0, import_path30.isAbsolute)(suffix)) {
     throw new Error("state_migrate_non_git refuses a destination outside the canonical root");
   }
-  if (!(0, import_fs28.existsSync)(rootResolved)) (0, import_fs28.mkdirSync)(rootResolved, { recursive: true });
-  const rootStat = (0, import_fs28.lstatSync)(rootResolved);
+  if (!(0, import_fs27.existsSync)(rootResolved)) (0, import_fs27.mkdirSync)(rootResolved, { recursive: true });
+  const rootStat = (0, import_fs27.lstatSync)(rootResolved);
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     throw new Error("state_migrate_non_git refuses symlinked migration roots");
   }
   let cursor = rootResolved;
   for (const segment of suffix.split(/[\\/]+/).filter(Boolean)) {
-    cursor = (0, import_path31.join)(cursor, segment);
-    if ((0, import_fs28.existsSync)(cursor)) {
-      const stat = (0, import_fs28.lstatSync)(cursor);
+    cursor = (0, import_path30.join)(cursor, segment);
+    if ((0, import_fs27.existsSync)(cursor)) {
+      const stat = (0, import_fs27.lstatSync)(cursor);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
         throw new Error("state_migrate_non_git refuses symlinked migration roots");
       }
       continue;
     }
-    (0, import_fs28.mkdirSync)(cursor);
-    const created = (0, import_fs28.lstatSync)(cursor);
+    (0, import_fs27.mkdirSync)(cursor);
+    const created = (0, import_fs27.lstatSync)(cursor);
     if (created.isSymbolicLink() || !created.isDirectory()) {
       throw new Error("state_migrate_non_git refuses symlinked migration roots");
     }
@@ -28419,7 +27635,6 @@ var STATE_TOOL_MODES = [
   "ralplan",
   "omc-teams",
   "skill-active",
-  "merge-readiness",
   // Runtime guard mode for $ultragoal; not MODE_CONFIGS-backed (#3630).
   "ultragoal"
 ];
@@ -28444,7 +27659,7 @@ function getStateFileName(mode) {
 }
 function readJsonRecord(filePath) {
   try {
-    return JSON.parse((0, import_fs28.readFileSync)(filePath, "utf-8"));
+    return JSON.parse((0, import_fs27.readFileSync)(filePath, "utf-8"));
   } catch {
     return null;
   }
@@ -28461,7 +27676,7 @@ function teamStateLockPath(statePath) {
 async function writeTeamState(statePath, sessionId, patch) {
   return withProcessIdentityFileLock(teamStateLockPath(statePath), () => {
     if (!recoverEmergencyStateFile(statePath)) {
-      const existing = (0, import_fs28.existsSync)(statePath) ? readJsonRecordStrict(statePath) : void 0;
+      const existing = (0, import_fs27.existsSync)(statePath) ? readJsonRecordStrict(statePath) : void 0;
       if (existing === null) return { result: "corrupt" };
       if (sessionId && existing && getStateSessionOwner(existing) !== void 0 && getStateSessionOwner(existing) !== sessionId) {
         return { result: "foreign" };
@@ -28469,7 +27684,7 @@ async function writeTeamState(statePath, sessionId, patch) {
       return { result: "failed" };
     }
     const transaction = withStateFileMutationLock(statePath, () => {
-      if (!(0, import_fs28.existsSync)(statePath)) {
+      if (!(0, import_fs27.existsSync)(statePath)) {
         try {
           atomicWriteJsonSync(statePath, patch);
           return { result: "written", state: patch };
@@ -28503,7 +27718,7 @@ async function writeTeamState(statePath, sessionId, patch) {
 }
 function readJsonRecordStrict(filePath) {
   try {
-    const parsed = JSON.parse((0, import_fs28.readFileSync)(filePath, "utf-8"));
+    const parsed = JSON.parse((0, import_fs27.readFileSync)(filePath, "utf-8"));
     return isJsonRecord(parsed) ? parsed : null;
   } catch {
     return null;
@@ -28533,12 +27748,12 @@ function matchesNamedPauseTarget(current, sessionId, workflowRunId, stateDigest2
   return current.active === true && current.workflowRunId === workflowRunId && hasValidatedNamedWorkflowTuple(current) && getStateSessionOwner(current) === sessionId && (stateDigest2 === void 0 || (0, import_crypto10.createHash)("sha256").update(JSON.stringify(current)).digest("hex") === stateDigest2);
 }
 function listSessionIdsUnderOmcRoot(omcRoot) {
-  const sessionsDir = (0, import_path31.join)(omcRoot, "state", "sessions");
-  if (!(0, import_fs28.existsSync)(sessionsDir)) {
+  const sessionsDir = (0, import_path30.join)(omcRoot, "state", "sessions");
+  if (!(0, import_fs27.existsSync)(sessionsDir)) {
     return [];
   }
   try {
-    return (0, import_fs28.readdirSync)(sessionsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((name) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(name));
+    return (0, import_fs27.readdirSync)(sessionsDir, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).filter((name) => /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(name));
   } catch {
     return [];
   }
@@ -28548,8 +27763,8 @@ function getConvergedOmcRoots(root) {
   if (process.env.OMC_STATE_DIR) return [canonicalRoot];
   if (probeGitTopLevel(root).status !== "ok") return [canonicalRoot];
   const roots = /* @__PURE__ */ new Set([canonicalRoot]);
-  roots.add((0, import_path31.join)(root, OmcPaths.ROOT));
-  roots.add((0, import_path31.join)((0, import_os4.homedir)(), OmcPaths.ROOT));
+  roots.add((0, import_path30.join)(root, OmcPaths.ROOT));
+  roots.add((0, import_path30.join)((0, import_os4.homedir)(), OmcPaths.ROOT));
   return [...roots];
 }
 function getConvergedStateCandidates(mode, root, sessionId) {
@@ -28559,11 +27774,11 @@ function getConvergedStateCandidates(mode, root, sessionId) {
   const filename = getStateFileName(mode);
   const paths = /* @__PURE__ */ new Set();
   for (const omcRoot of getConvergedOmcRoots(root)) {
-    const stateDir = (0, import_path31.join)(omcRoot, "state");
+    const stateDir = (0, import_path30.join)(omcRoot, "state");
     if (sessionId) {
-      paths.add((0, import_path31.join)(stateDir, "sessions", sessionId, filename));
+      paths.add((0, import_path30.join)(stateDir, "sessions", sessionId, filename));
       for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-        const candidatePath = (0, import_path31.join)(stateDir, "sessions", sid, filename);
+        const candidatePath = (0, import_path30.join)(stateDir, "sessions", sid, filename);
         const raw = readJsonRecord(candidatePath);
         if (raw && getStateSessionOwner(raw) === sessionId) {
           paths.add(candidatePath);
@@ -28571,11 +27786,11 @@ function getConvergedStateCandidates(mode, root, sessionId) {
       }
     } else {
       for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-        paths.add((0, import_path31.join)(stateDir, "sessions", sid, filename));
+        paths.add((0, import_path30.join)(stateDir, "sessions", sid, filename));
       }
     }
-    paths.add((0, import_path31.join)(stateDir, filename));
-    paths.add((0, import_path31.join)(omcRoot, filename));
+    paths.add((0, import_path30.join)(stateDir, filename));
+    paths.add((0, import_path30.join)(omcRoot, filename));
   }
   return [...paths];
 }
@@ -28694,7 +27909,7 @@ function hasActiveConvergedState(mode, root, sessionId) {
   return getConvergedStateCandidates(mode, root, sessionId).some((statePath) => isConvergedCandidateActiveForSession(statePath, sessionId));
 }
 function recordTeamClearFailure(mode, candidate, result, teamCleanup) {
-  if (mode !== "team" || !teamCleanup || result === "cleared" || !(0, import_fs28.existsSync)(candidate.path)) return;
+  if (mode !== "team" || !teamCleanup || result === "cleared" || !(0, import_fs27.existsSync)(candidate.path)) return;
   teamCleanup.blocked = true;
 }
 function blockForeignTeamPrimary(root, requesterSessionId, teamCleanup) {
@@ -28725,7 +27940,7 @@ function getSessionStatePath(mode, root, sessionId) {
 function clearModePrimaryWithTeamLock(mode, statePath, clear, captured = true) {
   if (mode !== "team") return clear();
   try {
-    return withProcessIdentityFileLockSync(teamStateLockPath(statePath), () => captured ? clear() : !(0, import_fs28.existsSync)(statePath));
+    return withProcessIdentityFileLockSync(teamStateLockPath(statePath), () => captured ? clear() : !(0, import_fs27.existsSync)(statePath));
   } catch {
     return false;
   }
@@ -28741,33 +27956,33 @@ function getLegacyStateFileCandidates(mode, root) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
   const candidates = [
     getStatePath(mode, root),
-    (0, import_path31.join)(getOmcRoot(root), `${normalizedName}.json`)
+    (0, import_path30.join)(getOmcRoot(root), `${normalizedName}.json`)
   ];
-  if (mode === "autopilot" && probeGitTopLevel(root).status === "ok") candidates.push((0, import_path31.join)((0, import_os4.homedir)(), ".omc", "state", "autopilot-state.json"));
+  if (mode === "autopilot" && probeGitTopLevel(root).status === "ok") candidates.push((0, import_path30.join)((0, import_os4.homedir)(), ".omc", "state", "autopilot-state.json"));
   return [...new Set(candidates)];
 }
 function isSharedHomeAutopilotCandidate(path13, root) {
-  const sharedHomeStateRoot = (0, import_path31.resolve)((0, import_os4.homedir)(), ".omc", "state");
-  const candidatePath = (0, import_path31.resolve)(path13);
-  const canonicalStateRoot = (0, import_path31.resolve)(getOmcRoot(root), "state");
+  const sharedHomeStateRoot = (0, import_path30.resolve)((0, import_os4.homedir)(), ".omc", "state");
+  const candidatePath = (0, import_path30.resolve)(path13);
+  const canonicalStateRoot = (0, import_path30.resolve)(getOmcRoot(root), "state");
   const isDescendant = (ancestor, descendant) => {
-    const fromAncestor = (0, import_path31.relative)(ancestor, descendant);
-    return fromAncestor === "" || !fromAncestor.startsWith(`..${import_path31.sep}`) && fromAncestor !== ".." && !(0, import_path31.isAbsolute)(fromAncestor);
+    const fromAncestor = (0, import_path30.relative)(ancestor, descendant);
+    return fromAncestor === "" || !fromAncestor.startsWith(`..${import_path30.sep}`) && fromAncestor !== ".." && !(0, import_path30.isAbsolute)(fromAncestor);
   };
   return !isDescendant(canonicalStateRoot, candidatePath) && isDescendant(sharedHomeStateRoot, candidatePath);
 }
 function isStateCandidateForProject(mode, path13, state, root) {
   if (mode !== "autopilot" || !isSharedHomeAutopilotCandidate(path13, root)) return true;
-  return typeof state.project_path === "string" && (0, import_path31.resolve)(state.project_path) === (0, import_path31.resolve)(root);
+  return typeof state.project_path === "string" && (0, import_path30.resolve)(state.project_path) === (0, import_path30.resolve)(root);
 }
 function isAutopilotRecoveryCandidateForProject(path13, root) {
   if (!isSharedHomeAutopilotCandidate(path13, root)) return true;
   const primary = readJsonRecord(path13);
   if (primary) return isStateCandidateForProject("autopilot", path13, primary, root);
-  const artifactPrefix = `${(0, import_path31.basename)(path13)}.emergency-quarantine.`;
+  const artifactPrefix = `${(0, import_path30.basename)(path13)}.emergency-quarantine.`;
   let artifacts;
   try {
-    artifacts = (0, import_fs28.readdirSync)((0, import_path31.dirname)(path13)).filter(
+    artifacts = (0, import_fs27.readdirSync)((0, import_path30.dirname)(path13)).filter(
       (name) => name.startsWith(artifactPrefix) && (name.endsWith(".payload") || /^[0-9a-f-]{36}$/i.test(name.slice(artifactPrefix.length)))
     );
   } catch {
@@ -28775,12 +27990,12 @@ function isAutopilotRecoveryCandidateForProject(path13, root) {
   }
   if (artifacts.length === 0) return false;
   return artifacts.every((name) => {
-    const state = readJsonRecord((0, import_path31.join)((0, import_path31.dirname)(path13), name));
+    const state = readJsonRecord((0, import_path30.join)((0, import_path30.dirname)(path13), name));
     return state !== null && isStateCandidateForProject("autopilot", path13, state, root);
   });
 }
 function getWorkingDirectoryLocalOmcRoot(root) {
-  return (0, import_path31.join)(root, OmcPaths.ROOT);
+  return (0, import_path30.join)(root, OmcPaths.ROOT);
 }
 function shouldCheckWorkingDirectoryLocalState(root) {
   if (probeGitTopLevel(root).status !== "ok") return false;
@@ -28788,13 +28003,13 @@ function shouldCheckWorkingDirectoryLocalState(root) {
 }
 function getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
-  return (0, import_path31.join)(getWorkingDirectoryLocalOmcRoot(root), "state", "sessions", sessionId, `${normalizedName}.json`);
+  return (0, import_path30.join)(getWorkingDirectoryLocalOmcRoot(root), "state", "sessions", sessionId, `${normalizedName}.json`);
 }
 function getWorkingDirectoryLocalLegacyStateFileCandidates(mode, root) {
   const normalizedName = mode.endsWith("-state") ? mode : `${mode}-state`;
   return [
-    (0, import_path31.join)(getWorkingDirectoryLocalOmcRoot(root), "state", `${normalizedName}.json`),
-    (0, import_path31.join)(getWorkingDirectoryLocalOmcRoot(root), `${normalizedName}.json`)
+    (0, import_path30.join)(getWorkingDirectoryLocalOmcRoot(root), "state", `${normalizedName}.json`),
+    (0, import_path30.join)(getWorkingDirectoryLocalOmcRoot(root), `${normalizedName}.json`)
   ];
 }
 function getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId) {
@@ -28842,7 +28057,7 @@ function clearCompletedSessionStateCandidates(mode, root, requesterSessionId, di
   return clearStateCandidates(
     mode,
     discovered,
-    (candidate, current) => current.active === true && candidate.ownerSessionId === candidate.completedSessionId && getStateSessionOwner(current) === candidate.completedSessionId && Boolean(candidate.completionEvidencePath && (0, import_fs28.existsSync)(candidate.completionEvidencePath)),
+    (candidate, current) => current.active === true && candidate.ownerSessionId === candidate.completedSessionId && getStateSessionOwner(current) === candidate.completedSessionId && Boolean(candidate.completionEvidencePath && (0, import_fs27.existsSync)(candidate.completionEvidencePath)),
     (candidate) => emergencyRecoveryOptionsForProject(mode, candidate.path, root),
     teamCleanup
   );
@@ -28875,19 +28090,19 @@ ${checkedPaths.map((statePath) => `  - ${statePath}`).join("\n")}` : "";
   return `No state found to clear for mode: ${mode}${scope}${checked}`;
 }
 function getModeRuntimeArtifactPaths(mode, root, sessionIds, includeLegacy = true) {
-  const stateRoot = (0, import_path31.join)(getOmcRoot(root), "state");
+  const stateRoot = (0, import_path30.join)(getOmcRoot(root), "state");
   const names = [`${mode}-stop-breaker.json`, `${mode}-last-steer-at`, `${mode}-continue-steer.lock`];
   const dirs = /* @__PURE__ */ new Set([
     ...includeLegacy ? [stateRoot] : [],
-    ...[...sessionIds ?? listSessionIds(root)].map((sid) => (0, import_path31.join)(stateRoot, "sessions", sid))
+    ...[...sessionIds ?? listSessionIds(root)].map((sid) => (0, import_path30.join)(stateRoot, "sessions", sid))
   ]);
-  return [...dirs].flatMap((dir) => names.map((name) => (0, import_path31.join)(dir, name)));
+  return [...dirs].flatMap((dir) => names.map((name) => (0, import_path30.join)(dir, name)));
 }
 function captureTeamRuntimeArtifacts(root) {
   const captured = /* @__PURE__ */ new Map();
   for (const path13 of getModeRuntimeArtifactPaths("team", root)) try {
-    const stat = (0, import_fs28.lstatSync)(path13);
-    if (stat.isFile()) captured.set(path13, { bytes: (0, import_fs28.readFileSync)(path13), identity: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}` });
+    const stat = (0, import_fs27.lstatSync)(path13);
+    if (stat.isFile()) captured.set(path13, { bytes: (0, import_fs27.readFileSync)(path13), identity: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}` });
   } catch {
   }
   return captured;
@@ -28896,17 +28111,17 @@ function clearRuntimeArtifactPaths(paths, captured) {
   let cleared = 0, hadFailure = false;
   for (const artifactPath of paths) {
     const expected = captured?.get(artifactPath);
-    if (!(0, import_fs28.existsSync)(artifactPath) || captured && !expected) continue;
+    if (!(0, import_fs27.existsSync)(artifactPath) || captured && !expected) continue;
     if (expected) {
       try {
-        const stat = (0, import_fs28.lstatSync)(artifactPath);
-        if (!stat.isFile() || `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}` !== expected.identity || !(0, import_fs28.readFileSync)(artifactPath).equals(expected.bytes)) continue;
+        const stat = (0, import_fs27.lstatSync)(artifactPath);
+        if (!stat.isFile() || `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}` !== expected.identity || !(0, import_fs27.readFileSync)(artifactPath).equals(expected.bytes)) continue;
       } catch {
         continue;
       }
     }
     try {
-      (0, import_fs28.unlinkSync)(artifactPath);
+      (0, import_fs27.unlinkSync)(artifactPath);
       cleared++;
     } catch {
       hadFailure = true;
@@ -28945,11 +28160,11 @@ function isSessionModeActive(mode, root, sessionId) {
     return isModeActive(mode, root, sessionId);
   }
   const statePath = resolveSessionStatePath(mode, sessionId, root);
-  if (!(0, import_fs28.existsSync)(statePath)) {
+  if (!(0, import_fs27.existsSync)(statePath)) {
     return false;
   }
   try {
-    const state = JSON.parse((0, import_fs28.readFileSync)(statePath, "utf-8"));
+    const state = JSON.parse((0, import_fs27.readFileSync)(statePath, "utf-8"));
     return state.active === true;
   } catch {
     return false;
@@ -29015,7 +28230,7 @@ function publicStateForMode(mode, state) {
   if (mode === "autopilot") {
     return redactAutopilotPublicState(state);
   }
-  return mode === "merge-readiness" ? redactMergeReadinessState(state) : state;
+  return state;
 }
 var stateReadTool = {
   name: "state_read",
@@ -29034,11 +28249,11 @@ var stateReadTool = {
       if (sessionId) {
         validateSessionId(sessionId);
         const statePath2 = getSessionStatePath(mode, root, sessionId);
-        if (!(0, import_fs28.existsSync)(statePath2)) {
+        if (!(0, import_fs27.existsSync)(statePath2)) {
           const completedSessionPaths = findCompletedSessionStateFiles(mode, root, sessionId);
           if (completedSessionPaths.length > 0) {
             const orphanList = completedSessionPaths.map((orphanPath) => {
-              const sessionMarker = `${(0, import_path31.join)("state", "sessions")}/`;
+              const sessionMarker = `${(0, import_path30.join)("state", "sessions")}/`;
               const markerIndex = orphanPath.indexOf(sessionMarker);
               if (markerIndex === -1) return `- ${orphanPath}`;
               const rest = orphanPath.slice(markerIndex + sessionMarker.length);
@@ -29067,7 +28282,7 @@ Expected path: ${statePath2}`
             }]
           };
         }
-        const content = (0, import_fs28.readFileSync)(statePath2, "utf-8");
+        const content = (0, import_fs27.readFileSync)(statePath2, "utf-8");
         let state;
         try {
           state = JSON.parse(content);
@@ -29102,12 +28317,12 @@ ${JSON.stringify(publicStateForMode(mode, state), null, 2)}
         };
       }
       const statePath = getStatePath(mode, root);
-      const legacyExists = (0, import_fs28.existsSync)(statePath);
+      const legacyExists = (0, import_fs27.existsSync)(statePath);
       const sessionIds = listSessionIds(root);
       const activeSessions = [];
       for (const sid of sessionIds) {
         const sessionStatePath = getSessionStatePath(mode, root, sid);
-        if ((0, import_fs28.existsSync)(sessionStatePath)) {
+        if ((0, import_fs27.existsSync)(sessionStatePath)) {
           activeSessions.push(sid);
         }
       }
@@ -29131,7 +28346,7 @@ Note: Reading from legacy/aggregate path (no session_id). This may include state
       let teamReadError = false;
       if (legacyExists) {
         try {
-          const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+          const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
           const state = JSON.parse(content);
           if (mode === "team" && !isJsonRecord(state)) {
             throw new Error("team state is corrupt; expected a JSON object");
@@ -29160,7 +28375,7 @@ Path: ${statePath}
         for (const sid of activeSessions) {
           const sessionStatePath = getSessionStatePath(mode, root, sid);
           try {
-            const content = (0, import_fs28.readFileSync)(sessionStatePath, "utf-8");
+            const content = (0, import_fs27.readFileSync)(sessionStatePath, "utf-8");
             const state = JSON.parse(content);
             if (mode === "team" && !isJsonRecord(state)) {
               throw new Error("team state is corrupt; expected a JSON object");
@@ -29260,7 +28475,7 @@ var stateWriteTool = {
         ensureOmcDir("state", root);
         statePath = getStatePath(mode, root);
       }
-      if (mode !== "team" && sessionId && (0, import_fs28.existsSync)(statePath)) {
+      if (mode !== "team" && sessionId && (0, import_fs27.existsSync)(statePath)) {
         const existingState = readJsonRecord(statePath);
         const ownerSessionId = existingState ? getStateSessionOwner(existingState) : void 0;
         if (ownerSessionId && ownerSessionId !== sessionId) {
@@ -29314,7 +28529,7 @@ var stateWriteTool = {
       } else if (mode === "autopilot" && builtState.active === false) {
         let currentState = null;
         try {
-          currentState = JSON.parse((0, import_fs28.readFileSync)(statePath, "utf8"));
+          currentState = JSON.parse((0, import_fs27.readFileSync)(statePath, "utf8"));
         } catch {
         }
         if (hasNamedWorkflowMarker(currentState ?? {})) {
@@ -29416,7 +28631,7 @@ function getAllRootSessionStatePaths(mode, root) {
   roots.add(getOmcRoot(root));
   for (const omcRoot of roots) {
     for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-      paths.add((0, import_path31.join)(omcRoot, "state", "sessions", sid, getStateFileName(mode)));
+      paths.add((0, import_path30.join)(omcRoot, "state", "sessions", sid, getStateFileName(mode)));
     }
   }
   return [...paths];
@@ -29426,9 +28641,9 @@ function discoverAllRootSessionStateCandidates(mode, root) {
 }
 function findUnresolvedTeamStatePaths(paths) {
   return [...new Set(paths)].filter((path13) => {
-    if (!(0, import_fs28.existsSync)(path13)) return false;
+    if (!(0, import_fs27.existsSync)(path13)) return false;
     if (readJsonRecordStrict(path13) !== null) return false;
-    return (0, import_fs28.existsSync)(path13);
+    return (0, import_fs27.existsSync)(path13);
   });
 }
 function recoverAutopilotEmergencyTransactions(root, sessionId) {
@@ -29440,12 +28655,12 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
   if (shouldCheckWorkingDirectoryLocalState(root)) {
     const localOmcRoot = getWorkingDirectoryLocalOmcRoot(root);
     for (const sid of listSessionIdsUnderOmcRoot(localOmcRoot)) {
-      broadPaths.add((0, import_path31.join)(localOmcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
+      broadPaths.add((0, import_path30.join)(localOmcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
     }
   }
   for (const omcRoot of getConvergedOmcRoots(root)) {
     for (const sid of listSessionIdsUnderOmcRoot(omcRoot)) {
-      broadPaths.add((0, import_path31.join)(omcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
+      broadPaths.add((0, import_path30.join)(omcRoot, "state", "sessions", sid, getStateFileName("autopilot")));
     }
   }
   const directSessionPaths = /* @__PURE__ */ new Set();
@@ -29453,7 +28668,7 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
     directSessionPaths.add(resolveSessionStatePath("autopilot", sessionId, root));
     if (shouldCheckWorkingDirectoryLocalState(root)) directSessionPaths.add(getWorkingDirectoryLocalSessionStatePath("autopilot", root, sessionId));
     for (const omcRoot of getConvergedOmcRoots(root)) {
-      directSessionPaths.add((0, import_path31.join)(omcRoot, "state", "sessions", sessionId, getStateFileName("autopilot")));
+      directSessionPaths.add((0, import_path30.join)(omcRoot, "state", "sessions", sessionId, getStateFileName("autopilot")));
     }
     for (const path13 of directSessionPaths) broadPaths.add(path13);
   }
@@ -29475,10 +28690,10 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
     }
     if (!recoverEmergencyStateFile(path13, recoveryOptions)) throw new Error(`workflow_emergency_recovery_failed: ${path13}`);
     if (recoveryOptions && !isAutopilotRecoveryCandidateForProject(path13, root)) continue;
-    const artifactPrefix = `${(0, import_path31.basename)(path13)}.emergency-`;
+    const artifactPrefix = `${(0, import_path30.basename)(path13)}.emergency-`;
     let artifacts;
     try {
-      artifacts = (0, import_fs28.readdirSync)((0, import_path31.dirname)(path13)).filter((name) => name.startsWith(artifactPrefix) && !name.endsWith(".recovery.guard"));
+      artifacts = (0, import_fs27.readdirSync)((0, import_path30.dirname)(path13)).filter((name) => name.startsWith(artifactPrefix) && !name.endsWith(".recovery.guard"));
     } catch {
       artifacts = [];
     }
@@ -29487,7 +28702,7 @@ function recoverAutopilotEmergencyTransactions(root, sessionId) {
 }
 var stateClearTool = {
   name: "state_clear",
-  description: "Clear/delete orchestration state for a specific mode. Removes the state file and any associated marker files, but does not remove native Team runtimes or cleanup evidence. For merge-readiness, cancels an active gate while preserving the terminal audit record (no deletion).",
+  description: "Clear/delete orchestration state for a specific mode. Removes the state file and any associated marker files, but does not remove native Team runtimes or cleanup evidence.",
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   schema: {
     mode: external_exports.enum(STATE_TOOL_MODES).describe("The mode to clear state for"),
@@ -29501,38 +28716,11 @@ var stateClearTool = {
       const sessionId = session_id;
       if (mode === "ultrawork") {
         try {
-          if ((0, import_fs28.lstatSync)((0, import_path31.join)((0, import_path31.resolve)(root), OmcPaths.ROOT)).isSymbolicLink()) {
+          if ((0, import_fs27.lstatSync)((0, import_path30.join)((0, import_path30.resolve)(root), OmcPaths.ROOT)).isSymbolicLink()) {
             return { content: [{ type: "text", text: `No state found to clear for mode: ${mode}` }] };
           }
         } catch {
         }
-      }
-      if (mode === "merge-readiness") {
-        const cancelledSessions = [];
-        const blockedSessions = [];
-        const cancelActiveSession = (targetSessionId) => {
-          const current = readMergeReadinessState(root, targetSessionId);
-          if (!current?.active) return "inactive";
-          return cancelMergeReadiness(root, targetSessionId)?.result === "cancelled" ? "cancelled" : "blocked";
-        };
-        const recordResult = (sid, status) => {
-          if (status === "cancelled") cancelledSessions.push(sid);
-          else if (status === "blocked") blockedSessions.push(sid);
-        };
-        if (sessionId) {
-          validateSessionId(sessionId);
-          recordResult(sessionId, cancelActiveSession(sessionId));
-        } else {
-          const callerSid = process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-          if (callerSid) recordResult(callerSid, cancelActiveSession(callerSid));
-          recordResult("legacy", cancelActiveSession());
-        }
-        const blocked = blockedSessions.length > 0;
-        const text = blocked ? `Merge-readiness cancellation FAILED for: ${blockedSessions.join(", ")}. The state could not be persisted (read-only state dir / full disk); the gate(s) remain active on disk. Resolve and re-run.` : cancelledSessions.length > 0 ? `Cancelled merge-readiness gate(s) with durable state audit records: ${cancelledSessions.join(", ")}` : "No active merge-readiness gate found; existing state audit records were preserved.";
-        return {
-          content: [{ type: "text", text }],
-          ...blocked ? { isError: true } : {}
-        };
       }
       if (mode === "autopilot") recoverAutopilotEmergencyTransactions(root, sessionId);
       const teamCleanup = {
@@ -29565,7 +28753,7 @@ var stateClearTool = {
         let directCleared = 0;
         for (const candidate of namedPrimaries) {
           const success = clearAutopilotMarkerCandidate(candidate, root);
-          if (!success || (0, import_fs28.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+          if (!success || (0, import_fs27.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
           directCleared += 1;
         }
         const completedSessionCleanup = clearCompletedSessionStateCandidates(
@@ -29579,11 +28767,11 @@ var stateClearTool = {
         const sessionSignalCandidates = operationCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
         const signaledCandidateDirs = /* @__PURE__ */ new Set();
         for (const candidate of sessionSignalCandidates) {
-          const signalDir = (0, import_path31.dirname)(candidate.path);
+          const signalDir = (0, import_path30.dirname)(candidate.path);
           if (signaledCandidateDirs.has(signalDir)) continue;
           signaledCandidateDirs.add(signalDir);
           const now = Date.now();
-          const signalPath = (0, import_path31.join)(signalDir, "cancel-signal-state.json");
+          const signalPath = (0, import_path30.join)(signalDir, "cancel-signal-state.json");
           const payload = {
             active: true,
             requested_at: new Date(now).toISOString(),
@@ -29625,7 +28813,7 @@ var stateClearTool = {
           const clearPrimary = () => clearModeState(mode, root, sessionId, expectedDirectState);
           const directCaptured = directCandidate?.path === directStatePath;
           primarySuccess = clearModePrimaryWithTeamLock(mode, directStatePath, clearPrimary, directCaptured);
-          if (directCaptured && primarySuccess && !(0, import_fs28.existsSync)(directStatePath)) {
+          if (directCaptured && primarySuccess && !(0, import_fs27.existsSync)(directStatePath)) {
             directCleared = 1;
             if (mode === "team" && directCandidate) teamCleanup.clearedSessions.add(sessionId);
           } else if (mode === "team" && directCaptured && directCandidate) {
@@ -29641,7 +28829,7 @@ var stateClearTool = {
               const ownerNamedPrimary = mode === "autopilot" && ownerDirectCandidate && hasNamedWorkflowMarker(ownerDirectCandidate.state) ? ownerDirectCandidate : void 0;
               if (ownerNamedPrimary) {
                 const success = clearAutopilotMarkerCandidate(ownerNamedPrimary, root);
-                if (!success || (0, import_fs28.existsSync)(ownerNamedPrimary.path)) throw new Error("primary state mutation failed; dependent state preserved");
+                if (!success || (0, import_fs27.existsSync)(ownerNamedPrimary.path)) throw new Error("primary state mutation failed; dependent state preserved");
               } else {
                 writeSessionCancelSignal(root, ownerSessionId, mode, ownerDirectCandidate);
                 clearModeState(mode, root, ownerSessionId, ownerDirectCandidate?.state);
@@ -29656,9 +28844,9 @@ var stateClearTool = {
         }
         if (mode === "team" && teamRuntimeSnapshots) {
           const safeTeamSessions = new Set([...teamCleanup.clearedSessions].filter((sid) => !operationCandidates.some(
-            (candidate) => teamSessionIdForCandidate(candidate, sessionId) === sid && (0, import_fs28.existsSync)(candidate.path)
+            (candidate) => teamSessionIdForCandidate(candidate, sessionId) === sid && (0, import_fs27.existsSync)(candidate.path)
           )));
-          const eligibleTeamSessions = new Set([...safeTeamSessions].filter((sid) => !(0, import_fs28.existsSync)(getSessionStatePath("team", root, sid))));
+          const eligibleTeamSessions = new Set([...safeTeamSessions].filter((sid) => !(0, import_fs27.existsSync)(getSessionStatePath("team", root, sid))));
           const teamRuntimeCleanup = clearTeamRuntimeArtifacts(root, eligibleTeamSessions, teamRuntimeSnapshots);
           runtimeCleanup2.cleared += teamRuntimeCleanup.cleared;
           runtimeCleanup2.hadFailure ||= teamRuntimeCleanup.hadFailure;
@@ -29675,7 +28863,7 @@ var stateClearTool = {
         );
         const clearedStateOrArtifacts = directCleared + completedSessionCleanup.cleared + sessionCleanup.cleared + legacyCleanup.cleared + convergedCleanup2.cleared + workingDirectoryLocalCleanup.cleared + ownerSessionCleanup.cleared + ownerLegacyCleanup.cleared + runtimeCleanup2.cleared;
         const capturedCleanupIncomplete2 = operationCandidates.some((candidate) => {
-          if (!(0, import_fs28.existsSync)(candidate.path)) return false;
+          if (!(0, import_fs27.existsSync)(candidate.path)) return false;
           if (mode === "team") return true;
           const current = readJsonRecordStrict(candidate.path);
           if (!current) return true;
@@ -29719,7 +28907,7 @@ var stateClearTool = {
       const broadNamedPrimaries = mode === "autopilot" ? broadOperationCandidates.filter((candidate) => hasNamedWorkflowMarker(candidate.state)) : [];
       for (const candidate of broadNamedPrimaries) {
         const success = clearAutopilotMarkerCandidate(candidate, root);
-        if (!success || (0, import_fs28.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
+        if (!success || (0, import_fs27.existsSync)(candidate.path)) throw new Error(`primary state mutation failed; dependent state preserved: ${candidate.path}`);
       }
       const broadLegacySignalCandidates = broadLegacyCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
       const broadSessionSignalCandidates = broadSessionCandidates.filter((candidate) => !hasNamedWorkflowMarker(candidate.state));
@@ -29734,10 +28922,10 @@ var stateClearTool = {
         };
         const signaledLegacyDirs = /* @__PURE__ */ new Set();
         for (const legacyCandidate of broadLegacySignalCandidates) {
-          const signalDir = (0, import_path31.dirname)(legacyCandidate.path);
+          const signalDir = (0, import_path30.dirname)(legacyCandidate.path);
           if (signaledLegacyDirs.has(signalDir)) continue;
           signaledLegacyDirs.add(signalDir);
-          const legacySignalPath = (0, import_path31.join)(signalDir, "cancel-signal-state.json");
+          const legacySignalPath = (0, import_path30.join)(signalDir, "cancel-signal-state.json");
           const legacyPayload = {
             ...cancelSignalPayload,
             ...legacyCandidate.workflowRunId ? { target_workflow_run_id: legacyCandidate.workflowRunId } : {},
@@ -29768,14 +28956,14 @@ var stateClearTool = {
         if (primaryCandidate) {
           const clearPrimary = () => clearModeState(mode, root, void 0, primaryCandidate.state);
           const success = clearModePrimaryWithTeamLock(mode, primaryLegacyStatePath, clearPrimary);
-          if (success && !(0, import_fs28.existsSync)(primaryCandidate.path)) {
+          if (success && !(0, import_fs27.existsSync)(primaryCandidate.path)) {
             clearedCount++;
             if (mode === "team") {
               teamLegacyCleared = true;
               const ownerSessionId = teamSessionIdForCandidate(primaryCandidate);
               if (ownerSessionId) teamCleanup.clearedSessions.add(ownerSessionId);
             }
-          } else if ((0, import_fs28.existsSync)(primaryCandidate.path)) {
+          } else if ((0, import_fs27.existsSync)(primaryCandidate.path)) {
             if (mode === "team") {
               recordTeamClearFailure(mode, primaryCandidate, success ? "skipped" : "failed", teamCleanup);
             }
@@ -29830,7 +29018,7 @@ var stateClearTool = {
             const ownerSessionId = teamSessionIdForCandidate(candidate);
             if (ownerSessionId) teamCleanup.clearedSessions.add(ownerSessionId);
           }
-        } else if (result === "failed" || (0, import_fs28.existsSync)(candidate.path)) {
+        } else if (result === "failed" || (0, import_fs27.existsSync)(candidate.path)) {
           recordTeamClearFailure(mode, candidate, result, teamCleanup);
           errors.push(`session candidate: ${candidate.path}`);
         }
@@ -29840,12 +29028,12 @@ var stateClearTool = {
         ...broadConvergedCandidates,
         ...broadSessionCandidates
       ].map((candidate) => [candidate.path, candidate])).values()];
-      const capturedCleanupIncomplete = broadCapturedCandidates.some((candidate) => (0, import_fs28.existsSync)(candidate.path));
+      const capturedCleanupIncomplete = broadCapturedCandidates.some((candidate) => (0, import_fs27.existsSync)(candidate.path));
       if (mode === "team" && teamRuntimeSnapshots) {
         const safeTeamSessions = new Set([...teamCleanup.clearedSessions].filter((sid) => !broadCapturedCandidates.some(
-          (candidate) => teamSessionIdForCandidate(candidate) === sid && (0, import_fs28.existsSync)(candidate.path)
+          (candidate) => teamSessionIdForCandidate(candidate) === sid && (0, import_fs27.existsSync)(candidate.path)
         )));
-        const eligibleTeamSessions = new Set([...safeTeamSessions].filter((sid) => !(0, import_fs28.existsSync)(getSessionStatePath("team", root, sid))));
+        const eligibleTeamSessions = new Set([...safeTeamSessions].filter((sid) => !(0, import_fs27.existsSync)(getSessionStatePath("team", root, sid))));
         const teamRuntimeCleanup = clearTeamRuntimeArtifacts(root, eligibleTeamSessions, teamRuntimeSnapshots);
         runtimeCleanup.cleared += teamRuntimeCleanup.cleared;
         runtimeCleanup.hadFailure ||= teamRuntimeCleanup.hadFailure;
@@ -29859,11 +29047,11 @@ var stateClearTool = {
         errors.push("runtime artifacts");
       }
       for (const candidate of broadCapturedCandidates) {
-        if ((0, import_fs28.existsSync)(candidate.path) && !errors.some((error2) => error2.includes(candidate.path))) {
+        if ((0, import_fs27.existsSync)(candidate.path) && !errors.some((error2) => error2.includes(candidate.path))) {
           errors.push(`captured candidate survived: ${candidate.path}`);
         }
       }
-      clearedCount = broadCapturedCandidates.filter((candidate) => !(0, import_fs28.existsSync)(candidate.path)).length + runtimeCleanup.cleared;
+      clearedCount = broadCapturedCandidates.filter((candidate) => !(0, import_fs27.existsSync)(candidate.path)).length + runtimeCleanup.cleared;
       if (clearedCount === 0 && errors.length === 0) {
         return {
           content: [{
@@ -29923,8 +29111,8 @@ var stateListActiveTool = {
         for (const mode of EXTRA_STATE_ONLY_MODES) {
           try {
             const statePath = resolveSessionStatePath(mode, sessionId, root);
-            if ((0, import_fs28.existsSync)(statePath)) {
-              const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+            if ((0, import_fs27.existsSync)(statePath)) {
+              const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
               const state = JSON.parse(content);
               if (state.active && canClearStateForSession(state, sessionId)) {
                 activeModes.push(mode);
@@ -29963,9 +29151,9 @@ ${modeList}`
       const legacyActiveModes = [...getActiveModes(root)].filter((activeMode) => !isRetiredWorkflowMode(activeMode));
       for (const mode of EXTRA_STATE_ONLY_MODES) {
         const statePath = getStatePath(mode, root);
-        if ((0, import_fs28.existsSync)(statePath)) {
+        if ((0, import_fs27.existsSync)(statePath)) {
           try {
-            const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+            const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
             const state = JSON.parse(content);
             if (state.active) {
               legacyActiveModes.push(mode);
@@ -29992,8 +29180,8 @@ ${modeList}`
         for (const mode of EXTRA_STATE_ONLY_MODES) {
           try {
             const statePath = resolveSessionStatePath(mode, sid, root);
-            if ((0, import_fs28.existsSync)(statePath)) {
-              const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+            if ((0, import_fs27.existsSync)(statePath)) {
+              const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
               const state = JSON.parse(content);
               if (state.active && canClearStateForSession(state, sid)) {
                 sessionActiveModes.push(mode);
@@ -30059,9 +29247,9 @@ var stateGetStatusTool = {
         if (sessionId) {
           validateSessionId(sessionId);
           const statePath = getSessionStatePath(mode, root, sessionId);
-          const active = !isRetiredWorkflowMode(mode) && (MODE_CONFIGS[mode] ? isModeActive(mode, root, sessionId) : (0, import_fs28.existsSync)(statePath) && (() => {
+          const active = !isRetiredWorkflowMode(mode) && (MODE_CONFIGS[mode] ? isModeActive(mode, root, sessionId) : (0, import_fs27.existsSync)(statePath) && (() => {
             try {
-              const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+              const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
               const state = JSON.parse(content);
               return state.active === true && canClearStateForSession(state, sessionId);
             } catch {
@@ -30069,9 +29257,9 @@ var stateGetStatusTool = {
             }
           })());
           let statePreview = "No state file";
-          if ((0, import_fs28.existsSync)(statePath)) {
+          if ((0, import_fs27.existsSync)(statePath)) {
             try {
-              const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+              const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
               const state = JSON.parse(content);
               const owner = getStateSessionOwner(state);
               if (!owner || owner === sessionId) {
@@ -30083,10 +29271,10 @@ var stateGetStatusTool = {
             }
           }
           lines2.push(`### Session: ${sessionId}`);
-          const visible = !(0, import_fs28.existsSync)(statePath) || statePreview !== "No state file" && !statePreview.includes("Error reading state file");
+          const visible = !(0, import_fs27.existsSync)(statePath) || statePreview !== "No state file" && !statePreview.includes("Error reading state file");
           lines2.push(`- **Active:** ${visible && active ? "Yes" : "No"}`);
           lines2.push(`- **State Path:** ${statePath}`);
-          lines2.push(`- **Exists:** ${visible && (0, import_fs28.existsSync)(statePath) ? "Yes" : "No"}`);
+          lines2.push(`- **Exists:** ${visible && (0, import_fs27.existsSync)(statePath) ? "Yes" : "No"}`);
           lines2.push(`
 ### State Preview
 \`\`\`json
@@ -30100,9 +29288,9 @@ ${statePreview}
           };
         }
         const legacyPath = getStatePath(mode, root);
-        const legacyActive = !isRetiredWorkflowMode(mode) && (MODE_CONFIGS[mode] ? isModeActive(mode, root) : (0, import_fs28.existsSync)(legacyPath) && (() => {
+        const legacyActive = !isRetiredWorkflowMode(mode) && (MODE_CONFIGS[mode] ? isModeActive(mode, root) : (0, import_fs27.existsSync)(legacyPath) && (() => {
           try {
-            const content = (0, import_fs28.readFileSync)(legacyPath, "utf-8");
+            const content = (0, import_fs27.readFileSync)(legacyPath, "utf-8");
             const state = JSON.parse(content);
             return state.active === true;
           } catch {
@@ -30112,13 +29300,13 @@ ${statePreview}
         lines2.push(`### Legacy Path`);
         lines2.push(`- **Active:** ${legacyActive ? "Yes" : "No"}`);
         lines2.push(`- **State Path:** ${legacyPath}`);
-        lines2.push(`- **Exists:** ${(0, import_fs28.existsSync)(legacyPath) ? "Yes" : "No"}
+        lines2.push(`- **Exists:** ${(0, import_fs27.existsSync)(legacyPath) ? "Yes" : "No"}
 `);
         const activeSessions = isRetiredWorkflowMode(mode) ? [] : MODE_CONFIGS[mode] ? getActiveSessionsForMode(mode, root) : listSessionIds(root).filter((sid) => {
           try {
             const sessionPath = resolveSessionStatePath(mode, sid, root);
-            if ((0, import_fs28.existsSync)(sessionPath)) {
-              const content = (0, import_fs28.readFileSync)(sessionPath, "utf-8");
+            if ((0, import_fs27.existsSync)(sessionPath)) {
+              const content = (0, import_fs27.readFileSync)(sessionPath, "utf-8");
               const state = JSON.parse(content);
               return state.active === true && canClearStateForSession(state, sid);
             }
@@ -30162,9 +29350,9 @@ No active sessions for this mode.`);
       for (const mode2 of EXTRA_STATE_ONLY_MODES) {
         const statePath = sessionId ? resolveSessionStatePath(mode2, sessionId, root) : getStatePath(mode2, root);
         let active = false;
-        if ((0, import_fs28.existsSync)(statePath)) {
+        if ((0, import_fs27.existsSync)(statePath)) {
           try {
-            const content = (0, import_fs28.readFileSync)(statePath, "utf-8");
+            const content = (0, import_fs27.readFileSync)(statePath, "utf-8");
             const state = JSON.parse(content);
             active = state.active === true && (!sessionId || canClearStateForSession(state, sessionId));
           } catch {
@@ -30203,68 +29391,68 @@ var stateMigrateNonGitTool = {
     try {
       if (!args.session_id) throw new Error("session_id is required");
       validateSessionId(args.session_id);
-      const sourceRoot = (0, import_fs28.realpathSync)((0, import_path31.resolve)(args.workingDirectory || process.cwd()));
-      const trustedWorkingDirectory = (0, import_fs28.realpathSync)((0, import_path31.resolve)(process.cwd()));
-      const sourceFromTrustedCwd = (0, import_path31.relative)(trustedWorkingDirectory, sourceRoot);
-      if (sourceFromTrustedCwd === ".." || sourceFromTrustedCwd.startsWith(`..${import_path31.sep}`) || (0, import_path31.isAbsolute)(sourceFromTrustedCwd)) {
+      const sourceRoot = (0, import_fs27.realpathSync)((0, import_path30.resolve)(args.workingDirectory || process.cwd()));
+      const trustedWorkingDirectory = (0, import_fs27.realpathSync)((0, import_path30.resolve)(process.cwd()));
+      const sourceFromTrustedCwd = (0, import_path30.relative)(trustedWorkingDirectory, sourceRoot);
+      if (sourceFromTrustedCwd === ".." || sourceFromTrustedCwd.startsWith(`..${import_path30.sep}`) || (0, import_path30.isAbsolute)(sourceFromTrustedCwd)) {
         throw new Error("state_migrate_non_git refuses a source outside the trusted session working directory");
       }
       const gitProbe = probeGitTopLevel(sourceRoot);
       if (gitProbe.status === "ok") throw new Error("state_migrate_non_git only accepts a non-git source directory");
       if (gitProbe.status !== "not_a_repository") throw new Error("state_migrate_non_git refused a failed Git probe");
       if (findGitMetadataDir(sourceRoot)) throw new Error("state_migrate_non_git refuses a directory with Git metadata");
-      const authorizedHome = (0, import_fs28.realpathSync)((0, import_os4.homedir)());
-      const sourceFromHome = (0, import_path31.relative)(authorizedHome, sourceRoot);
-      if (sourceFromHome === ".." || sourceFromHome.startsWith(`..${import_path31.sep}`) || (0, import_path31.isAbsolute)(sourceFromHome)) {
+      const authorizedHome = (0, import_fs27.realpathSync)((0, import_os4.homedir)());
+      const sourceFromHome = (0, import_path30.relative)(authorizedHome, sourceRoot);
+      if (sourceFromHome === ".." || sourceFromHome.startsWith(`..${import_path30.sep}`) || (0, import_path30.isAbsolute)(sourceFromHome)) {
         throw new Error("state_migrate_non_git refuses a source outside the authorized home boundary");
       }
       if (isSensitiveStateLocation(sourceRoot)) throw new Error("state_migrate_non_git refuses sensitive source directories");
       const canonicalOmc = getOmcRoot(sourceRoot);
-      const sourceDir = (0, import_path31.join)(sourceRoot, OmcPaths.ROOT, "state", "sessions", args.session_id);
-      const destinationDir = (0, import_path31.join)(canonicalOmc, "state", "sessions", args.session_id);
+      const sourceDir = (0, import_path30.join)(sourceRoot, OmcPaths.ROOT, "state", "sessions", args.session_id);
+      const destinationDir = (0, import_path30.join)(canonicalOmc, "state", "sessions", args.session_id);
       const report = { source: sourceDir, destination: destinationDir, copied: [], skipped: [], rejected: [] };
-      const sourceOmc = (0, import_path31.join)(sourceRoot, OmcPaths.ROOT);
-      if (!(0, import_fs28.existsSync)(sourceOmc)) {
+      const sourceOmc = (0, import_path30.join)(sourceRoot, OmcPaths.ROOT);
+      if (!(0, import_fs27.existsSync)(sourceOmc)) {
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       }
-      const sourceState = (0, import_path31.join)(sourceOmc, "state");
-      const sourceSessions = (0, import_path31.join)(sourceState, "sessions");
+      const sourceState = (0, import_path30.join)(sourceOmc, "state");
+      const sourceSessions = (0, import_path30.join)(sourceState, "sessions");
       for (const path13 of [sourceOmc, sourceState, sourceSessions]) {
-        if (!(0, import_fs28.existsSync)(path13)) {
+        if (!(0, import_fs27.existsSync)(path13)) {
           return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
         }
-        if ((0, import_fs28.lstatSync)(path13).isSymbolicLink()) throw new Error("state_migrate_non_git refuses symlinked legacy state paths");
+        if ((0, import_fs27.lstatSync)(path13).isSymbolicLink()) throw new Error("state_migrate_non_git refuses symlinked legacy state paths");
       }
-      if (!(0, import_fs28.existsSync)(sourceDir)) {
+      if (!(0, import_fs27.existsSync)(sourceDir)) {
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       }
-      const destinationState = (0, import_path31.join)(canonicalOmc, "state");
-      const destinationSessions = (0, import_path31.join)(destinationState, "sessions");
+      const destinationState = (0, import_path30.join)(canonicalOmc, "state");
+      const destinationSessions = (0, import_path30.join)(destinationState, "sessions");
       const migrationRoots = [canonicalOmc, destinationState, destinationSessions, destinationDir];
-      if ((0, import_fs28.lstatSync)(sourceDir).isSymbolicLink() || migrationRoots.some((path13) => (0, import_fs28.existsSync)(path13) && (0, import_fs28.lstatSync)(path13).isSymbolicLink())) {
+      if ((0, import_fs27.lstatSync)(sourceDir).isSymbolicLink() || migrationRoots.some((path13) => (0, import_fs27.existsSync)(path13) && (0, import_fs27.lstatSync)(path13).isSymbolicLink())) {
         throw new Error("state_migrate_non_git refuses symlinked migration roots");
       }
       ensureMigrationDirectoryTree(canonicalOmc, destinationDir);
-      for (const entry of (0, import_fs28.readdirSync)(sourceDir, { withFileTypes: true })) {
+      for (const entry of (0, import_fs27.readdirSync)(sourceDir, { withFileTypes: true })) {
         if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-        const sourcePath = (0, import_path31.join)(sourceDir, entry.name);
-        const sourceFd = (0, import_fs28.openSync)(sourcePath, import_fs28.constants.O_RDONLY | (import_fs28.constants.O_NOFOLLOW ?? 0));
+        const sourcePath = (0, import_path30.join)(sourceDir, entry.name);
+        const sourceFd = (0, import_fs27.openSync)(sourcePath, import_fs27.constants.O_RDONLY | (import_fs27.constants.O_NOFOLLOW ?? 0));
         let sourceBytes;
         try {
-          const sourceStat = (0, import_fs28.fstatSync)(sourceFd);
+          const sourceStat = (0, import_fs27.fstatSync)(sourceFd);
           if (!sourceStat.isFile()) throw new Error("state_migrate_non_git refuses a non-file source entry");
           if (sourceStat.size > MAX_MIGRATION_FILE_BYTES) {
             report.rejected.push(entry.name);
             continue;
           }
           sourceBytes = Buffer.alloc(sourceStat.size);
-          const bytesRead = sourceStat.size === 0 ? 0 : (0, import_fs28.readSync)(sourceFd, sourceBytes, 0, sourceStat.size, 0);
+          const bytesRead = sourceStat.size === 0 ? 0 : (0, import_fs27.readSync)(sourceFd, sourceBytes, 0, sourceStat.size, 0);
           if (bytesRead !== sourceStat.size) {
             report.rejected.push(entry.name);
             continue;
           }
         } finally {
-          (0, import_fs28.closeSync)(sourceFd);
+          (0, import_fs27.closeSync)(sourceFd);
         }
         let state = null;
         try {
@@ -30275,14 +29463,14 @@ var stateMigrateNonGitTool = {
           report.rejected.push(entry.name);
           continue;
         }
-        const destinationPath = (0, import_path31.join)(destinationDir, entry.name);
+        const destinationPath = (0, import_path30.join)(destinationDir, entry.name);
         ensureMigrationDirectoryTree(canonicalOmc, destinationDir);
-        if ((0, import_fs28.existsSync)(destinationPath)) {
+        if ((0, import_fs27.existsSync)(destinationPath)) {
           report.skipped.push(entry.name);
           continue;
         }
         try {
-          (0, import_fs28.writeFileSync)(destinationPath, sourceBytes, { flag: "wx", mode: 384 });
+          (0, import_fs27.writeFileSync)(destinationPath, sourceBytes, { flag: "wx", mode: 384 });
           report.copied.push(entry.name);
         } catch (error2) {
           if (error2.code === "EEXIST") report.skipped.push(entry.name);
@@ -30301,146 +29489,25 @@ var stateTools = [
   stateClearTool,
   stateListActiveTool,
   stateGetStatusTool,
-  stateMigrateNonGitTool,
-  {
-    name: "merge_readiness_start",
-    description: "Initialize a merge-readiness gate session for the current change. Call this first, before merge_readiness_set_content. The depth profile is parsed from the summary (--quick or --deep; standard is the default when neither flag is present). Re-running it while an active attempt is still pending is rejected - cancel via merge_readiness_cancel or let the attempt pass/pause first, so the in-progress audit trail is never silently overwritten.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    schema: {
-      summary: external_exports.string().max(2e3),
-      baseRef: external_exports.string().max(200).regex(/^[A-Za-z0-9._\/@{}~^:-]+$/, "baseRef must be a valid git ref").refine((s) => !s.startsWith("-"), "baseRef must not start with '-'").optional().describe("Base ref to diff committed changes against (e.g. origin/dev, HEAD, HEAD~1, HEAD^). Defaults to the branch upstream / origin/HEAD."),
-      workingDirectory: external_exports.string().optional(),
-      session_id: external_exports.string().optional()
-    },
-    handler: async (args) => {
-      try {
-        const directory = resolveStateWorkingDirectory(args.workingDirectory);
-        const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = createInitialMergeReadinessState(directory, args.summary, sessionId, args.baseRef);
-        const blocked = state.result === "blocked";
-        return { content: [{ type: "text", text: blocked ? `Merge-readiness blocked: ${state.validation_errors?.join(" ") ?? "missing evidence"}` : `Merge-readiness started (profile: ${state.profile}, threshold: ${state.threshold}, max rounds: ${state.max_rounds}). Awaiting content via merge_readiness_set_content.` }], ...blocked ? { isError: true } : {} };
-      } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
-      }
-    }
-  },
-  {
-    name: "merge_readiness_set_content",
-    description: "Validate and submit the five-section merge-readiness report and objective MCQs. Requires an active gate (call merge_readiness_start first).",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    schema: {
-      why: external_exports.string().max(1e4),
-      whatChanged: external_exports.string().max(1e4),
-      tradeoffs: external_exports.string().max(1e4),
-      risksConsidered: external_exports.string().max(1e4),
-      teamUnderstanding: external_exports.string().max(1e4),
-      questions: external_exports.array(external_exports.object({ id: external_exports.string().max(100), dimension: external_exports.enum(["why", "change", "tradeoff", "risk", "team"]), stem: external_exports.string().max(2e3), options: external_exports.array(external_exports.object({ id: external_exports.string().max(100), text: external_exports.string().max(1e3) })).max(8), correctOptionId: external_exports.string().max(100), rationale: external_exports.string().max(2e3).optional() })).max(8),
-      workingDirectory: external_exports.string().optional(),
-      session_id: external_exports.string().optional()
-    },
-    handler: async (args) => {
-      try {
-        const directory = resolveStateWorkingDirectory(args.workingDirectory);
-        const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = setMergeReadinessContent(directory, args, sessionId);
-        if (!state || !state.active) {
-          return { content: [{ type: "text", text: "Merge-readiness content rejected: no active gate (the gate is missing or already terminal - pass/cancelled/overridden). Call merge_readiness_start first." }], isError: true };
-        }
-        const errors = state.validation_errors ?? [];
-        return { content: [{ type: "text", text: errors.length > 0 ? `Merge-readiness content rejected: ${errors.join(" ")}` : `Merge-readiness content accepted. Next question: ${state.pending_question?.id ?? "none"}` }], ...errors.length > 0 ? { isError: true } : {} };
-      } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
-      }
-    }
-  },
-  {
-    name: "merge_readiness_record_answer",
-    description: "Record the human-selected option for the current merge-readiness MCQ. Advances the gate; returns the next question or the final result plus readiness score.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-    schema: {
-      questionId: external_exports.string().max(100),
-      optionId: external_exports.string().max(100),
-      workingDirectory: external_exports.string().optional(),
-      session_id: external_exports.string().optional()
-    },
-    handler: async (args) => {
-      try {
-        const directory = resolveStateWorkingDirectory(args.workingDirectory);
-        const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = recordMergeReadinessMCQAnswer(directory, args.questionId, args.optionId, sessionId);
-        if (!state) {
-          return { content: [{ type: "text", text: "Merge-readiness answer rejected: no active gate, or the questionId/optionId does not match the current MCQ." }], isError: true };
-        }
-        const result = state.result;
-        const score = state.readiness_score;
-        const persistFailed = result === "blocked" && (state.validation_errors ?? []).some((e) => e.includes("persisted"));
-        const text = persistFailed ? `Merge-readiness answer NOT recorded: state could not be persisted (read-only state dir / full disk / invalid path). The gate is still armed on disk. ${(state.validation_errors ?? []).join(" ")}` : result === "pass" || result === "paused" || result === "blocked" || result === "overridden" ? `Merge-readiness ${result}. Readiness score: ${score}. ${result === "pass" ? "The change may proceed to human merge approval." : result === "paused" ? "Explanation gap remains; reread the report and rerun /merge-readiness." : result === "blocked" ? "Missing evidence; produce it before rerunning." : "Gate overridden; terminal session state preserves the record."}` : `Answer recorded. Next question: ${state.pending_question?.id ?? "none"}. Answered: ${state.answers.length}/${state.questions.length}.`;
-        return { content: [{ type: "text", text }], ...persistFailed ? { isError: true } : {} };
-      } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
-      }
-    }
-  },
-  {
-    name: "merge_readiness_report",
-    description: "Render the authoritative merge-readiness session state as a Markdown report without writing a file.",
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    schema: { workingDirectory: external_exports.string().optional(), session_id: external_exports.string().optional() },
-    handler: async (args) => {
-      try {
-        const directory = resolveStateWorkingDirectory(args.workingDirectory);
-        const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = readMergeReadinessState(directory, sessionId);
-        if (!state) {
-          return { content: [{ type: "text", text: "Merge-readiness report unavailable: no session state found." }], isError: true };
-        }
-        return { content: [{ type: "text", text: formatMergeReadinessReport(state) }] };
-      } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
-      }
-    }
-  },
-  {
-    name: "merge_readiness_cancel",
-    description: "Cancel an active merge-readiness gate while preserving its terminal state audit record.",
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    schema: { workingDirectory: external_exports.string().optional(), session_id: external_exports.string().optional() },
-    handler: async (args) => {
-      try {
-        const directory = resolveStateWorkingDirectory(args.workingDirectory);
-        const sessionId = args.session_id && args.session_id.trim() || process.env.CLAUDE_SESSION_ID && process.env.CLAUDE_SESSION_ID.trim() || resolveSessionId({ context: "cli" });
-        const state = cancelMergeReadiness(directory, sessionId);
-        const persistFailed = state?.result === "blocked" && (state.validation_errors ?? []).some((e) => e.includes("persisted"));
-        if (persistFailed) {
-          return { content: [{ type: "text", text: `Merge-readiness cancellation FAILED: state could not be persisted (read-only state dir / full disk). The gate is still armed on disk. ${(state?.validation_errors ?? []).join(" ")}` }], isError: true };
-        }
-        if (!state || state.result !== "cancelled") {
-          return { content: [{ type: "text", text: "Merge-readiness cancellation rejected: no active gate." }], isError: true };
-        }
-        return { content: [{ type: "text", text: "Merge-readiness cancelled. Terminal session state preserved as the audit record." }] };
-      } catch (error2) {
-        return { content: [{ type: "text", text: `Merge-readiness error: ${error2 instanceof Error ? error2.message : String(error2)}` }], isError: true };
-      }
-    }
-  }
+  stateMigrateNonGitTool
 ];
 
 // src/hooks/notepad/index.ts
-var import_fs30 = require("fs");
-var import_path32 = require("path");
+var import_fs29 = require("fs");
+var import_path31 = require("path");
 
 // src/lib/file-lock.ts
-var import_fs29 = require("fs");
+var import_fs28 = require("fs");
 var path6 = __toESM(require("path"), 1);
 var DEFAULT_STALE_LOCK_MS = 3e4;
 var DEFAULT_RETRY_DELAY_MS = 50;
 function isLockStale(lockPath, staleLockMs) {
   try {
-    const stat = (0, import_fs29.statSync)(lockPath);
+    const stat = (0, import_fs28.statSync)(lockPath);
     const ageMs = Date.now() - stat.mtimeMs;
     if (ageMs < staleLockMs) return false;
     try {
-      const raw = (0, import_fs29.readFileSync)(lockPath, "utf-8");
+      const raw = (0, import_fs28.readFileSync)(lockPath, "utf-8");
       const payload = JSON.parse(raw);
       if (payload.pid && isProcessAlive(payload.pid)) return false;
     } catch {
@@ -30456,21 +29523,21 @@ function lockPathFor(filePath) {
 function tryAcquireSync(lockPath, staleLockMs) {
   ensureDirSync(path6.dirname(lockPath));
   try {
-    const fd = (0, import_fs29.openSync)(
+    const fd = (0, import_fs28.openSync)(
       lockPath,
-      import_fs29.constants.O_CREAT | import_fs29.constants.O_EXCL | import_fs29.constants.O_WRONLY,
+      import_fs28.constants.O_CREAT | import_fs28.constants.O_EXCL | import_fs28.constants.O_WRONLY,
       384
     );
     try {
       const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-      (0, import_fs29.writeSync)(fd, payload, null, "utf-8");
+      (0, import_fs28.writeSync)(fd, payload, null, "utf-8");
     } catch (writeErr) {
       try {
-        (0, import_fs29.closeSync)(fd);
+        (0, import_fs28.closeSync)(fd);
       } catch {
       }
       try {
-        (0, import_fs29.unlinkSync)(lockPath);
+        (0, import_fs28.unlinkSync)(lockPath);
       } catch {
       }
       throw writeErr;
@@ -30480,25 +29547,25 @@ function tryAcquireSync(lockPath, staleLockMs) {
     if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
       if (isLockStale(lockPath, staleLockMs)) {
         try {
-          (0, import_fs29.unlinkSync)(lockPath);
+          (0, import_fs28.unlinkSync)(lockPath);
         } catch {
         }
         try {
-          const fd = (0, import_fs29.openSync)(
+          const fd = (0, import_fs28.openSync)(
             lockPath,
-            import_fs29.constants.O_CREAT | import_fs29.constants.O_EXCL | import_fs29.constants.O_WRONLY,
+            import_fs28.constants.O_CREAT | import_fs28.constants.O_EXCL | import_fs28.constants.O_WRONLY,
             384
           );
           try {
             const payload = JSON.stringify({ pid: process.pid, timestamp: Date.now() });
-            (0, import_fs29.writeSync)(fd, payload, null, "utf-8");
+            (0, import_fs28.writeSync)(fd, payload, null, "utf-8");
           } catch (writeErr) {
             try {
-              (0, import_fs29.closeSync)(fd);
+              (0, import_fs28.closeSync)(fd);
             } catch {
             }
             try {
-              (0, import_fs29.unlinkSync)(lockPath);
+              (0, import_fs28.unlinkSync)(lockPath);
             } catch {
             }
             throw writeErr;
@@ -30538,11 +29605,11 @@ function acquireFileLockSync(lockPath, opts) {
 }
 function releaseFileLockSync(handle) {
   try {
-    (0, import_fs29.closeSync)(handle.fd);
+    (0, import_fs28.closeSync)(handle.fd);
   } catch {
   }
   try {
-    (0, import_fs29.unlinkSync)(handle.path);
+    (0, import_fs28.unlinkSync)(handle.path);
   } catch {
   }
 }
@@ -30620,19 +29687,19 @@ function getSectionRegexSet(header) {
   return SECTION_REGEXES[header] ?? createSectionRegexSet(header);
 }
 function getNotepadPath(directory) {
-  return (0, import_path32.join)(getOmcRoot(directory), NOTEPAD_FILENAME);
+  return (0, import_path31.join)(getOmcRoot(directory), NOTEPAD_FILENAME);
 }
 function initNotepad(directory) {
   const omcDir = getOmcRoot(directory);
-  if (!(0, import_fs30.existsSync)(omcDir)) {
+  if (!(0, import_fs29.existsSync)(omcDir)) {
     try {
-      (0, import_fs30.mkdirSync)(omcDir, { recursive: true });
+      (0, import_fs29.mkdirSync)(omcDir, { recursive: true });
     } catch {
       return false;
     }
   }
   const notepadPath = getNotepadPath(directory);
-  if ((0, import_fs30.existsSync)(notepadPath)) {
+  if ((0, import_fs29.existsSync)(notepadPath)) {
     return true;
   }
   const content = `# Notepad
@@ -30657,11 +29724,11 @@ ${MANUAL_HEADER}
 }
 function readNotepad(directory) {
   const notepadPath = getNotepadPath(directory);
-  if (!(0, import_fs30.existsSync)(notepadPath)) {
+  if (!(0, import_fs29.existsSync)(notepadPath)) {
     return null;
   }
   try {
-    return (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+    return (0, import_fs29.readFileSync)(notepadPath, "utf-8");
   } catch {
     return null;
   }
@@ -30707,7 +29774,7 @@ function getManualSection(directory) {
   return extractSection(content, MANUAL_HEADER);
 }
 function setPriorityContext(directory, content, config2 = DEFAULT_CONFIG3) {
-  if (!(0, import_fs30.existsSync)(getNotepadPath(directory))) {
+  if (!(0, import_fs29.existsSync)(getNotepadPath(directory))) {
     if (!initNotepad(directory)) {
       return { success: false };
     }
@@ -30715,7 +29782,7 @@ function setPriorityContext(directory, content, config2 = DEFAULT_CONFIG3) {
   const notepadPath = getNotepadPath(directory);
   try {
     return withFileLockSync(lockPathFor(notepadPath), () => {
-      let notepadContent = (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+      let notepadContent = (0, import_fs29.readFileSync)(notepadPath, "utf-8");
       const warning = content.length > config2.priorityMaxChars ? `Priority Context exceeds ${config2.priorityMaxChars} chars (${content.length} chars). Consider condensing.` : void 0;
       notepadContent = replaceSection(notepadContent, PRIORITY_HEADER, content);
       atomicWriteFileSync(notepadPath, notepadContent);
@@ -30726,7 +29793,7 @@ function setPriorityContext(directory, content, config2 = DEFAULT_CONFIG3) {
   }
 }
 function addWorkingMemoryEntry(directory, content) {
-  if (!(0, import_fs30.existsSync)(getNotepadPath(directory))) {
+  if (!(0, import_fs29.existsSync)(getNotepadPath(directory))) {
     if (!initNotepad(directory)) {
       return false;
     }
@@ -30734,7 +29801,7 @@ function addWorkingMemoryEntry(directory, content) {
   const notepadPath = getNotepadPath(directory);
   try {
     return withFileLockSync(lockPathFor(notepadPath), () => {
-      let notepadContent = (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+      let notepadContent = (0, import_fs29.readFileSync)(notepadPath, "utf-8");
       const currentMemory = extractSection(notepadContent, WORKING_MEMORY_HEADER) || "";
       const now = /* @__PURE__ */ new Date();
       const timestamp2 = now.toISOString().slice(0, 16).replace("T", " ");
@@ -30755,7 +29822,7 @@ ${content}
   }
 }
 function addManualEntry(directory, content) {
-  if (!(0, import_fs30.existsSync)(getNotepadPath(directory))) {
+  if (!(0, import_fs29.existsSync)(getNotepadPath(directory))) {
     if (!initNotepad(directory)) {
       return false;
     }
@@ -30763,7 +29830,7 @@ function addManualEntry(directory, content) {
   const notepadPath = getNotepadPath(directory);
   try {
     return withFileLockSync(lockPathFor(notepadPath), () => {
-      let notepadContent = (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+      let notepadContent = (0, import_fs29.readFileSync)(notepadPath, "utf-8");
       const currentManual = extractSection(notepadContent, MANUAL_HEADER) || "";
       const now = /* @__PURE__ */ new Date();
       const timestamp2 = now.toISOString().slice(0, 16).replace("T", " ");
@@ -30781,12 +29848,12 @@ ${content}
 }
 function pruneOldEntries(directory, daysOld = DEFAULT_CONFIG3.workingMemoryDays) {
   const notepadPath = getNotepadPath(directory);
-  if (!(0, import_fs30.existsSync)(notepadPath)) {
+  if (!(0, import_fs29.existsSync)(notepadPath)) {
     return { pruned: 0, remaining: 0 };
   }
   try {
     return withFileLockSync(lockPathFor(notepadPath), () => {
-      let notepadContent = (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+      let notepadContent = (0, import_fs29.readFileSync)(notepadPath, "utf-8");
       const workingMemory = extractSection(notepadContent, WORKING_MEMORY_HEADER);
       if (!workingMemory) {
         return { pruned: 0, remaining: 0 };
@@ -30824,7 +29891,7 @@ ${entry.content}`).join("\n\n");
 }
 function getNotepadStats(directory) {
   const notepadPath = getNotepadPath(directory);
-  if (!(0, import_fs30.existsSync)(notepadPath)) {
+  if (!(0, import_fs29.existsSync)(notepadPath)) {
     return {
       exists: false,
       totalSize: 0,
@@ -30833,7 +29900,7 @@ function getNotepadStats(directory) {
       oldestEntry: null
     };
   }
-  const content = (0, import_fs30.readFileSync)(notepadPath, "utf-8");
+  const content = (0, import_fs29.readFileSync)(notepadPath, "utf-8");
   const priorityContext = extractSection(content, PRIORITY_HEADER) || "";
   const workingMemory = extractSection(content, WORKING_MEMORY_HEADER) || "";
   const wmMatches = workingMemory.match(
@@ -31146,7 +30213,7 @@ var notepadTools = [
 ];
 
 // src/hooks/project-memory/index.ts
-var import_path40 = __toESM(require("path"), 1);
+var import_path39 = __toESM(require("path"), 1);
 
 // src/features/context-injector/collector.ts
 var PRIORITY_ORDER = {
@@ -31256,18 +30323,18 @@ var ContextCollector = class {
 var contextCollector = new ContextCollector();
 
 // src/hooks/rules-injector/finder.ts
-var import_fs31 = require("fs");
-var import_path34 = require("path");
+var import_fs30 = require("fs");
+var import_path33 = require("path");
 
 // src/hooks/rules-injector/constants.ts
-var import_path33 = require("path");
+var import_path32 = require("path");
 var import_os5 = require("os");
-var OMC_STORAGE_DIR = (0, import_path33.join)((0, import_os5.homedir)(), ".omc");
-var RULES_INJECTOR_STORAGE = (0, import_path33.join)(OMC_STORAGE_DIR, "rules-injector");
+var OMC_STORAGE_DIR = (0, import_path32.join)((0, import_os5.homedir)(), ".omc");
+var RULES_INJECTOR_STORAGE = (0, import_path32.join)(OMC_STORAGE_DIR, "rules-injector");
 
 // src/hooks/project-memory/storage.ts
 var import_promises2 = __toESM(require("fs/promises"), 1);
-var import_path35 = __toESM(require("path"), 1);
+var import_path34 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/constants.ts
 var CACHE_EXPIRY_MS = 24 * 60 * 60 * 1e3;
@@ -31299,7 +30366,7 @@ async function loadProjectMemory(projectRoot) {
 }
 async function saveProjectMemory(projectRoot, memory) {
   const memoryPath = getMemoryPath(projectRoot);
-  const omcDir = import_path35.default.dirname(memoryPath);
+  const omcDir = import_path34.default.dirname(memoryPath);
   try {
     await import_promises2.default.mkdir(omcDir, { recursive: true });
     await atomicWriteJson(memoryPath, memory);
@@ -31315,17 +30382,17 @@ async function withProjectMemoryLock(projectRoot, fn) {
 
 // src/hooks/project-memory/detector.ts
 var import_promises4 = __toESM(require("fs/promises"), 1);
-var import_path37 = __toESM(require("path"), 1);
+var import_path36 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/directory-mapper.ts
 var import_promises3 = __toESM(require("fs/promises"), 1);
-var import_path36 = __toESM(require("path"), 1);
+var import_path35 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/formatter.ts
-var import_path39 = __toESM(require("path"), 1);
+var import_path38 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/hot-path-tracker.ts
-var import_path38 = __toESM(require("path"), 1);
+var import_path37 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/directive-detector.ts
 function addDirective(directives, newDirective) {
@@ -31708,27 +30775,27 @@ var memoryTools = [
 ];
 
 // src/tools/trace-tools.ts
-var import_fs34 = require("fs");
-var import_path43 = require("path");
+var import_fs33 = require("fs");
+var import_path42 = require("path");
 
 // src/hooks/subagent-tracker/session-replay.ts
-var import_fs32 = require("fs");
-var import_path41 = require("path");
+var import_fs31 = require("fs");
+var import_path40 = require("path");
 var REPLAY_PREFIX = "agent-replay-";
 var MAX_REPLAY_SIZE_BYTES = 5 * 1024 * 1024;
 function getReplayFilePath(directory, sessionId) {
-  const stateDir = (0, import_path41.join)(getOmcRoot(directory), "state");
-  if (!(0, import_fs32.existsSync)(stateDir)) {
-    (0, import_fs32.mkdirSync)(stateDir, { recursive: true });
+  const stateDir = (0, import_path40.join)(getOmcRoot(directory), "state");
+  if (!(0, import_fs31.existsSync)(stateDir)) {
+    (0, import_fs31.mkdirSync)(stateDir, { recursive: true });
   }
   const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return (0, import_path41.join)(stateDir, `${REPLAY_PREFIX}${safeId}.jsonl`);
+  return (0, import_path40.join)(stateDir, `${REPLAY_PREFIX}${safeId}.jsonl`);
 }
 function readReplayEvents(directory, sessionId) {
   const filePath = getReplayFilePath(directory, sessionId);
-  if (!(0, import_fs32.existsSync)(filePath)) return [];
+  if (!(0, import_fs31.existsSync)(filePath)) return [];
   try {
-    const content = (0, import_fs32.readFileSync)(filePath, "utf-8");
+    const content = (0, import_fs31.readFileSync)(filePath, "utf-8");
     return content.split("\n").filter((line) => line.trim()).map((line) => {
       try {
         return JSON.parse(line);
@@ -31906,9 +30973,9 @@ function getReplaySummary(directory, sessionId) {
 }
 
 // src/features/session-history-search/index.ts
-var import_child_process14 = require("child_process");
-var import_fs33 = require("fs");
-var import_path42 = require("path");
+var import_child_process13 = require("child_process");
+var import_fs32 = require("fs");
+var import_path41 = require("path");
 var import_readline = require("readline");
 var DEFAULT_LIMIT = 10;
 var DEFAULT_CONTEXT_CHARS = 120;
@@ -31941,28 +31008,28 @@ function parseSinceSpec(since) {
 }
 function getMainRepoRoot(projectRoot) {
   try {
-    const gitCommonDir = (0, import_child_process14.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
+    const gitCommonDir = (0, import_child_process13.execFileSync)("git", ["rev-parse", "--git-common-dir"], {
       cwd: projectRoot,
       encoding: "utf-8",
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true
     }).trim();
-    const absoluteCommonDir = (0, import_path42.resolve)(projectRoot, gitCommonDir);
-    const mainRepoRoot = (0, import_path42.dirname)(absoluteCommonDir);
+    const absoluteCommonDir = (0, import_path41.resolve)(projectRoot, gitCommonDir);
+    const mainRepoRoot = (0, import_path41.dirname)(absoluteCommonDir);
     return mainRepoRoot === projectRoot ? null : mainRepoRoot;
   } catch {
     return null;
   }
 }
 function getClaudeWorktreeParent(projectRoot) {
-  const marker = `${(0, import_path42.normalize)("/.claude/worktrees/")}`;
-  const normalizedRoot = (0, import_path42.normalize)(projectRoot);
+  const marker = `${(0, import_path41.normalize)("/.claude/worktrees/")}`;
+  const normalizedRoot = (0, import_path41.normalize)(projectRoot);
   const idx = normalizedRoot.indexOf(marker);
   if (idx === -1) return null;
   return normalizedRoot.slice(0, idx) || null;
 }
 function listJsonlFiles(rootDir) {
-  if (!(0, import_fs33.existsSync)(rootDir)) {
+  if (!(0, import_fs32.existsSync)(rootDir)) {
     return [];
   }
   const files = [];
@@ -31971,12 +31038,12 @@ function listJsonlFiles(rootDir) {
     const current = stack.pop();
     let entries;
     try {
-      entries = (0, import_fs33.readdirSync)(current, { withFileTypes: true });
+      entries = (0, import_fs32.readdirSync)(current, { withFileTypes: true });
     } catch {
       continue;
     }
     for (const entry of entries) {
-      const fullPath = (0, import_path42.join)(current, entry.name);
+      const fullPath = (0, import_path41.join)(current, entry.name);
       if (entry.isDirectory()) {
         stack.push(fullPath);
         continue;
@@ -31996,8 +31063,8 @@ function uniqueSortedTargets(targets) {
     seen.add(key);
     return true;
   }).sort((a, b) => {
-    const aTime = (0, import_fs33.existsSync)(a.filePath) ? (0, import_fs33.statSync)(a.filePath).mtimeMs : 0;
-    const bTime = (0, import_fs33.existsSync)(b.filePath) ? (0, import_fs33.statSync)(b.filePath).mtimeMs : 0;
+    const aTime = (0, import_fs32.existsSync)(a.filePath) ? (0, import_fs32.statSync)(a.filePath).mtimeMs : 0;
+    const bTime = (0, import_fs32.existsSync)(b.filePath) ? (0, import_fs32.statSync)(b.filePath).mtimeMs : 0;
     return bTime - aTime;
   });
 }
@@ -32012,22 +31079,22 @@ function buildCurrentProjectTargets(projectRoot, transcriptProjectRoots = [proje
   }
   const targets = [];
   for (const root of projectRoots) {
-    const encodedDir = (0, import_path42.join)(claudeDir, "projects", encodeProjectPath(root));
+    const encodedDir = (0, import_path41.join)(claudeDir, "projects", encodeProjectPath(root));
     for (const filePath of listJsonlFiles(encodedDir)) {
       targets.push({ filePath, sourceType: "project-transcript" });
     }
   }
-  const legacyTranscriptsDir = (0, import_path42.join)(claudeDir, "transcripts");
+  const legacyTranscriptsDir = (0, import_path41.join)(claudeDir, "transcripts");
   for (const filePath of listJsonlFiles(legacyTranscriptsDir)) {
     targets.push({ filePath, sourceType: "legacy-transcript" });
   }
   const omcRoot = getOmcRoot(projectRoot);
-  const sessionSummariesDir = (0, import_path42.join)(omcRoot, "sessions");
+  const sessionSummariesDir = (0, import_path41.join)(omcRoot, "sessions");
   for (const filePath of listJsonlFiles(sessionSummariesDir)) {
     targets.push({ filePath, sourceType: "omc-session-summary" });
   }
-  const replayDir = (0, import_path42.join)(omcRoot, "state");
-  if ((0, import_fs33.existsSync)(replayDir)) {
+  const replayDir = (0, import_path41.join)(omcRoot, "state");
+  if ((0, import_fs32.existsSync)(replayDir)) {
     for (const filePath of listJsonlFiles(replayDir)) {
       if (filePath.includes("agent-replay-") && filePath.endsWith(".jsonl")) {
         targets.push({ filePath, sourceType: "omc-session-replay" });
@@ -32039,10 +31106,10 @@ function buildCurrentProjectTargets(projectRoot, transcriptProjectRoots = [proje
 function buildAllProjectTargets() {
   const claudeDir = getClaudeConfigDir();
   const targets = [];
-  for (const filePath of listJsonlFiles((0, import_path42.join)(claudeDir, "projects"))) {
+  for (const filePath of listJsonlFiles((0, import_path41.join)(claudeDir, "projects"))) {
     targets.push({ filePath, sourceType: "project-transcript" });
   }
-  for (const filePath of listJsonlFiles((0, import_path42.join)(claudeDir, "transcripts"))) {
+  for (const filePath of listJsonlFiles((0, import_path41.join)(claudeDir, "transcripts"))) {
     targets.push({ filePath, sourceType: "legacy-transcript" });
   }
   return uniqueSortedTargets(targets);
@@ -32051,9 +31118,9 @@ function isWithinProject(projectPath, projectRoots) {
   if (!projectPath) {
     return false;
   }
-  const normalizedProjectPath = (0, import_path42.normalize)((0, import_path42.resolve)(projectPath)).replace(/\\/g, "/");
+  const normalizedProjectPath = (0, import_path41.normalize)((0, import_path41.resolve)(projectPath)).replace(/\\/g, "/");
   return projectRoots.some((root) => {
-    const normalizedRoot = (0, import_path42.normalize)((0, import_path42.resolve)(root)).replace(/\\/g, "/");
+    const normalizedRoot = (0, import_path41.normalize)((0, import_path41.resolve)(root)).replace(/\\/g, "/");
     return normalizedProjectPath === normalizedRoot || normalizedProjectPath.startsWith(`${normalizedRoot}/`);
   });
 }
@@ -32257,7 +31324,7 @@ function createMatchRetainer(limit) {
   };
 }
 async function collectMatchesFromFile(target, options) {
-  const fileMtime = (0, import_fs33.existsSync)(target.filePath) ? (0, import_fs33.statSync)(target.filePath).mtimeMs : 0;
+  const fileMtime = (0, import_fs32.existsSync)(target.filePath) ? (0, import_fs32.statSync)(target.filePath).mtimeMs : 0;
   if (target.sourceType === "omc-session-summary" && target.filePath.endsWith(".json")) {
     try {
       const payload = JSON.parse(await import("fs/promises").then((fs8) => fs8.readFile(target.filePath, "utf-8")));
@@ -32289,7 +31356,7 @@ async function collectMatchesFromFile(target, options) {
     }
     return;
   }
-  const stream = (0, import_fs33.createReadStream)(target.filePath, { encoding: "utf-8" });
+  const stream = (0, import_fs32.createReadStream)(target.filePath, { encoding: "utf-8" });
   const reader = (0, import_readline.createInterface)({ input: stream, crlfDelay: Infinity });
   let line = 0;
   try {
@@ -32348,7 +31415,7 @@ async function searchSessionHistory(rawOptions) {
   const currentProjectRoot = resolveToWorktreeRoot(workingDirectory);
   const scopeMode = buildScopeMode(rawOptions.project);
   const projectFilter = scopeMode === "project" ? rawOptions.project : void 0;
-  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path42.resolve)(rawOptions.workingDirectory) : workingDirectory;
+  const literalWorkingDirectory = rawOptions.workingDirectory ? (0, import_path41.resolve)(rawOptions.workingDirectory) : workingDirectory;
   const currentProjectRoots = [currentProjectRoot, literalWorkingDirectory].concat(getMainRepoRoot(currentProjectRoot) ?? []).concat(getClaudeWorktreeParent(currentProjectRoot) ?? []).filter((value, index, arr) => Boolean(value) && arr.indexOf(value) === index);
   const transcriptProjectRoots = currentProjectRoots.filter((root) => isWithinProject(root, [currentProjectRoot]));
   const targets = scopeMode === "all" ? buildAllProjectTargets() : buildCurrentProjectTargets(currentProjectRoot, transcriptProjectRoots);
@@ -32421,12 +31488,12 @@ var sessionSearchTool = {
 // src/tools/trace-tools.ts
 var REPLAY_PREFIX2 = "agent-replay-";
 function findLatestSessionId(directory) {
-  const stateDir = (0, import_path43.join)(getOmcRoot(directory), "state");
+  const stateDir = (0, import_path42.join)(getOmcRoot(directory), "state");
   try {
-    const files = (0, import_fs34.readdirSync)(stateDir).filter((f) => f.startsWith(REPLAY_PREFIX2) && f.endsWith(".jsonl")).map((f) => ({
+    const files = (0, import_fs33.readdirSync)(stateDir).filter((f) => f.startsWith(REPLAY_PREFIX2) && f.endsWith(".jsonl")).map((f) => ({
       name: f,
       sessionId: f.slice(REPLAY_PREFIX2.length, -".jsonl".length),
-      mtime: (0, import_fs34.statSync)((0, import_path43.join)(stateDir, f)).mtimeMs
+      mtime: (0, import_fs33.statSync)((0, import_path42.join)(stateDir, f)).mtimeMs
     })).sort((a, b) => b.mtime - a.mtime);
     return files.length > 0 ? files[0].sessionId : null;
   } catch {
@@ -32780,14 +31847,14 @@ No events recorded.`
 var traceTools = [traceTimelineTool, traceSummaryTool, sessionSearchTool];
 
 // src/lib/shared-memory.ts
-var import_fs35 = require("fs");
-var import_path44 = require("path");
+var import_fs34 = require("fs");
+var import_path43 = require("path");
 var CONFIG_FILE_NAME = ".omc-config.json";
 function isSharedMemoryEnabled() {
   try {
-    const configPath = (0, import_path44.join)(getClaudeConfigDir(), CONFIG_FILE_NAME);
-    if (!(0, import_fs35.existsSync)(configPath)) return true;
-    const raw = JSON.parse((0, import_fs35.readFileSync)(configPath, "utf-8"));
+    const configPath = (0, import_path43.join)(getClaudeConfigDir(), CONFIG_FILE_NAME);
+    if (!(0, import_fs34.existsSync)(configPath)) return true;
+    const raw = JSON.parse((0, import_fs34.readFileSync)(configPath, "utf-8"));
     const enabled = raw?.agents?.sharedMemory?.enabled;
     if (typeof enabled === "boolean") return enabled;
     return true;
@@ -32821,16 +31888,16 @@ function validateKey(key) {
 function getNamespaceDir(namespace, worktreeRoot) {
   validateNamespace(namespace);
   const omcRoot = getOmcRoot(worktreeRoot);
-  return (0, import_path44.join)(omcRoot, SHARED_MEMORY_DIR, namespace);
+  return (0, import_path43.join)(omcRoot, SHARED_MEMORY_DIR, namespace);
 }
 function getEntryPath(namespace, key, worktreeRoot) {
   validateKey(key);
-  return (0, import_path44.join)(getNamespaceDir(namespace, worktreeRoot), `${key}.json`);
+  return (0, import_path43.join)(getNamespaceDir(namespace, worktreeRoot), `${key}.json`);
 }
 function ensureNamespaceDir(namespace, worktreeRoot) {
   const dir = getNamespaceDir(namespace, worktreeRoot);
-  if (!(0, import_fs35.existsSync)(dir)) {
-    (0, import_fs35.mkdirSync)(dir, { recursive: true });
+  if (!(0, import_fs34.existsSync)(dir)) {
+    (0, import_fs34.mkdirSync)(dir, { recursive: true });
   }
   return dir;
 }
@@ -32845,9 +31912,9 @@ function writeEntry(namespace, key, value, ttl, worktreeRoot) {
   const lockPath = filePath + ".lock";
   const doWrite = () => {
     let existingCreatedAt = now;
-    if ((0, import_fs35.existsSync)(filePath)) {
+    if ((0, import_fs34.existsSync)(filePath)) {
       try {
-        const existing = JSON.parse((0, import_fs35.readFileSync)(filePath, "utf-8"));
+        const existing = JSON.parse((0, import_fs34.readFileSync)(filePath, "utf-8"));
         existingCreatedAt = existing.createdAt || now;
       } catch {
       }
@@ -32864,11 +31931,11 @@ function writeEntry(namespace, key, value, ttl, worktreeRoot) {
       entry.expiresAt = new Date(Date.now() + ttl * 1e3).toISOString();
     }
     const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}`;
-    (0, import_fs35.writeFileSync)(tmpPath, JSON.stringify(entry, null, 2), "utf-8");
-    (0, import_fs35.renameSync)(tmpPath, filePath);
+    (0, import_fs34.writeFileSync)(tmpPath, JSON.stringify(entry, null, 2), "utf-8");
+    (0, import_fs34.renameSync)(tmpPath, filePath);
     try {
       const legacyTmp = filePath + ".tmp";
-      if ((0, import_fs35.existsSync)(legacyTmp)) (0, import_fs35.unlinkSync)(legacyTmp);
+      if ((0, import_fs34.existsSync)(legacyTmp)) (0, import_fs34.unlinkSync)(legacyTmp);
     } catch {
     }
     return entry;
@@ -32883,12 +31950,12 @@ function readEntry(namespace, key, worktreeRoot) {
   validateNamespace(namespace);
   validateKey(key);
   const filePath = getEntryPath(namespace, key, worktreeRoot);
-  if (!(0, import_fs35.existsSync)(filePath)) return null;
+  if (!(0, import_fs34.existsSync)(filePath)) return null;
   try {
-    const entry = JSON.parse((0, import_fs35.readFileSync)(filePath, "utf-8"));
+    const entry = JSON.parse((0, import_fs34.readFileSync)(filePath, "utf-8"));
     if (isExpired(entry)) {
       try {
-        (0, import_fs35.unlinkSync)(filePath);
+        (0, import_fs34.unlinkSync)(filePath);
       } catch {
       }
       return null;
@@ -32901,14 +31968,14 @@ function readEntry(namespace, key, worktreeRoot) {
 function listEntries(namespace, worktreeRoot) {
   validateNamespace(namespace);
   const dir = getNamespaceDir(namespace, worktreeRoot);
-  if (!(0, import_fs35.existsSync)(dir)) return [];
+  if (!(0, import_fs34.existsSync)(dir)) return [];
   const items = [];
   try {
-    const files = (0, import_fs35.readdirSync)(dir).filter((f) => f.endsWith(".json"));
+    const files = (0, import_fs34.readdirSync)(dir).filter((f) => f.endsWith(".json"));
     for (const file of files) {
       try {
-        const filePath = (0, import_path44.join)(dir, file);
-        const entry = JSON.parse((0, import_fs35.readFileSync)(filePath, "utf-8"));
+        const filePath = (0, import_path43.join)(dir, file);
+        const entry = JSON.parse((0, import_fs34.readFileSync)(filePath, "utf-8"));
         if (!isExpired(entry)) {
           items.push({
             key: entry.key,
@@ -32927,9 +31994,9 @@ function deleteEntry(namespace, key, worktreeRoot) {
   validateNamespace(namespace);
   validateKey(key);
   const filePath = getEntryPath(namespace, key, worktreeRoot);
-  if (!(0, import_fs35.existsSync)(filePath)) return false;
+  if (!(0, import_fs34.existsSync)(filePath)) return false;
   try {
-    (0, import_fs35.unlinkSync)(filePath);
+    (0, import_fs34.unlinkSync)(filePath);
     return true;
   } catch {
     return false;
@@ -32937,15 +32004,15 @@ function deleteEntry(namespace, key, worktreeRoot) {
 }
 function cleanupExpired(namespace, worktreeRoot) {
   const omcRoot = getOmcRoot(worktreeRoot);
-  const sharedMemDir = (0, import_path44.join)(omcRoot, SHARED_MEMORY_DIR);
-  if (!(0, import_fs35.existsSync)(sharedMemDir)) return { removed: 0, namespaces: [] };
+  const sharedMemDir = (0, import_path43.join)(omcRoot, SHARED_MEMORY_DIR);
+  if (!(0, import_fs34.existsSync)(sharedMemDir)) return { removed: 0, namespaces: [] };
   const namespacesToClean = [];
   if (namespace) {
     validateNamespace(namespace);
     namespacesToClean.push(namespace);
   } else {
     try {
-      const entries = (0, import_fs35.readdirSync)(sharedMemDir, { withFileTypes: true });
+      const entries = (0, import_fs34.readdirSync)(sharedMemDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isDirectory()) {
           namespacesToClean.push(entry.name);
@@ -32958,17 +32025,17 @@ function cleanupExpired(namespace, worktreeRoot) {
   let removed = 0;
   const cleanedNamespaces = [];
   for (const ns of namespacesToClean) {
-    const nsDir = (0, import_path44.join)(sharedMemDir, ns);
-    if (!(0, import_fs35.existsSync)(nsDir)) continue;
+    const nsDir = (0, import_path43.join)(sharedMemDir, ns);
+    if (!(0, import_fs34.existsSync)(nsDir)) continue;
     let nsRemoved = 0;
     try {
-      const files = (0, import_fs35.readdirSync)(nsDir).filter((f) => f.endsWith(".json"));
+      const files = (0, import_fs34.readdirSync)(nsDir).filter((f) => f.endsWith(".json"));
       for (const file of files) {
         try {
-          const filePath = (0, import_path44.join)(nsDir, file);
-          const entry = JSON.parse((0, import_fs35.readFileSync)(filePath, "utf-8"));
+          const filePath = (0, import_path43.join)(nsDir, file);
+          const entry = JSON.parse((0, import_fs34.readFileSync)(filePath, "utf-8"));
           if (isExpired(entry)) {
-            (0, import_fs35.unlinkSync)(filePath);
+            (0, import_fs34.unlinkSync)(filePath);
             nsRemoved++;
           }
         } catch {
@@ -32985,10 +32052,10 @@ function cleanupExpired(namespace, worktreeRoot) {
 }
 function listNamespaces(worktreeRoot) {
   const omcRoot = getOmcRoot(worktreeRoot);
-  const sharedMemDir = (0, import_path44.join)(omcRoot, SHARED_MEMORY_DIR);
-  if (!(0, import_fs35.existsSync)(sharedMemDir)) return [];
+  const sharedMemDir = (0, import_path43.join)(omcRoot, SHARED_MEMORY_DIR);
+  if (!(0, import_fs34.existsSync)(sharedMemDir)) return [];
   try {
-    const entries = (0, import_fs35.readdirSync)(sharedMemDir, { withFileTypes: true });
+    const entries = (0, import_fs34.readdirSync)(sharedMemDir, { withFileTypes: true });
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
   } catch {
     return [];
@@ -33540,25 +32607,78 @@ var DEFAULT_WIKI_CONFIG = {
 };
 
 // src/hooks/wiki/storage.ts
-var import_fs36 = require("fs");
-var import_path45 = require("path");
+var import_fs35 = require("fs");
+var import_path44 = require("path");
+
+// scripts/lib/utf8-bom.mjs
+function stripLeadingUtf8Bom(content) {
+  return content.startsWith("\uFEFF") ? content.slice(1) : content;
+}
+
+// src/utils/frontmatter.ts
+function unquoteYamlScalar(value) {
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'"))
+    return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+function escapeYamlString(value) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r");
+}
+function unescapeYamlString(value) {
+  return value.replace(/\\(\\|"|n|r)/g, (_, ch) => {
+    if (ch === "n") return "\n";
+    if (ch === "r") return "\r";
+    return ch;
+  });
+}
+function splitFlowSequenceItems(inner) {
+  const items = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i];
+    if (quote) {
+      current += char;
+      if (quote === '"' && char === "\\" && i + 1 < inner.length) {
+        current += inner[++i];
+      } else if (quote === "'" && char === "'" && inner[i + 1] === "'") {
+        current += inner[++i];
+      } else if (char === quote) {
+        quote = null;
+      }
+    } else if ((char === '"' || char === "'") && current.trim() === "") {
+      quote = char;
+      current += char;
+    } else if (char === ",") {
+      items.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  items.push(current);
+  return items;
+}
+
+// src/hooks/wiki/storage.ts
 var WIKI_DIR = "wiki";
 var INDEX_FILE = "index.md";
 var LOG_FILE = "log.md";
 var ENVIRONMENT_FILE = "environment.md";
 var RESERVED_FILES = /* @__PURE__ */ new Set([INDEX_FILE, LOG_FILE, ENVIRONMENT_FILE]);
 function getWikiDir(root) {
-  return (0, import_path45.join)(getOmcRoot(root), WIKI_DIR);
+  return (0, import_path44.join)(getOmcRoot(root), WIKI_DIR);
 }
 function ensureWikiDir(root) {
   const wikiDir = getWikiDir(root);
-  if (!(0, import_fs36.existsSync)(wikiDir)) {
-    (0, import_fs36.mkdirSync)(wikiDir, { recursive: true });
+  if (!(0, import_fs35.existsSync)(wikiDir)) {
+    (0, import_fs35.mkdirSync)(wikiDir, { recursive: true });
   }
   const omcRoot = getOmcRoot(root);
-  const gitignorePath = (0, import_path45.join)(omcRoot, ".gitignore");
-  if ((0, import_fs36.existsSync)(gitignorePath)) {
-    const content = (0, import_fs36.readFileSync)(gitignorePath, "utf-8");
+  const gitignorePath = (0, import_path44.join)(omcRoot, ".gitignore");
+  if ((0, import_fs35.existsSync)(gitignorePath)) {
+    const content = (0, import_fs35.readFileSync)(gitignorePath, "utf-8");
     if (!content.includes("wiki/")) {
       atomicWriteFileSync(gitignorePath, content.trimEnd() + "\nwiki/\n");
     }
@@ -33569,13 +32689,13 @@ function ensureWikiDir(root) {
 }
 function withWikiLock(root, fn, options) {
   const wikiDir = ensureWikiDir(root);
-  const lockPath = lockPathFor((0, import_path45.join)(wikiDir, ".wiki-lock"));
+  const lockPath = lockPathFor((0, import_path44.join)(wikiDir, ".wiki-lock"));
   const remainingMs = options?.deadlineAt === void 0 ? void 0 : Math.max(0, options.deadlineAt - Date.now());
   const timeoutMs = Math.min(options?.timeoutMs ?? 5e3, remainingMs ?? Infinity);
   return withFileLockSync(lockPath, fn, { timeoutMs, retryDelayMs: 50 });
 }
 function parseFrontmatter(raw) {
-  const normalized = raw.replace(/\r\n/g, "\n");
+  const normalized = stripLeadingUtf8Bom(raw).replace(/\r\n/g, "\n");
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!match) return null;
   const yamlBlock = match[1];
@@ -33605,12 +32725,10 @@ function parseSimpleYaml(yaml) {
     if (colonIdx === -1) continue;
     const key = line.slice(0, colonIdx).trim();
     let value = line.slice(colonIdx + 1).trim();
-    if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-      value = value.slice(1, -1).replace(/\\(\\|"|n|r)/g, (_, ch) => {
-        if (ch === "n") return "\n";
-        if (ch === "r") return "\r";
-        return ch;
-      });
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = unescapeYamlString(unquoteYamlScalar(value));
+    } else if (value.startsWith("'") && value.endsWith("'")) {
+      value = unquoteYamlScalar(value);
     }
     if (key) result[key] = value;
   }
@@ -33620,26 +32738,23 @@ function parseYamlArray(value) {
   if (!value) return [];
   const trimmed = value.trim();
   if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return trimmed.slice(1, -1).split(",").map((s) => s.trim().replace(/^["']|["']$/g, "").replace(/\\(\\|"|n|r)/g, (_, ch) => {
-      if (ch === "n") return "\n";
-      if (ch === "r") return "\r";
-      return ch;
-    })).filter(Boolean);
+    return splitFlowSequenceItems(trimmed.slice(1, -1)).map((item) => {
+      const scalar = item.trim();
+      const unquoted = unquoteYamlScalar(scalar);
+      return scalar.startsWith('"') && scalar.endsWith('"') ? unescapeYamlString(unquoted) : unquoted;
+    }).filter(Boolean);
   }
   return trimmed ? [trimmed] : [];
-}
-function escapeYaml(s) {
-  return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\r/g, "\\r");
 }
 function serializePage(page) {
   const fm = page.frontmatter;
   const yaml = [
-    `title: "${escapeYaml(fm.title)}"`,
-    `tags: [${fm.tags.map((t) => `"${escapeYaml(t)}"`).join(", ")}]`,
+    `title: "${escapeYamlString(fm.title)}"`,
+    `tags: [${fm.tags.map((t) => `"${escapeYamlString(t)}"`).join(", ")}]`,
     `created: ${fm.created}`,
     `updated: ${fm.updated}`,
-    `sources: [${fm.sources.map((s) => `"${escapeYaml(s)}"`).join(", ")}]`,
-    `links: [${fm.links.map((l) => `"${escapeYaml(l)}"`).join(", ")}]`,
+    `sources: [${fm.sources.map((s) => `"${escapeYamlString(s)}"`).join(", ")}]`,
+    `links: [${fm.links.map((l) => `"${escapeYamlString(l)}"`).join(", ")}]`,
     `category: ${fm.category}`,
     `confidence: ${fm.confidence}`,
     `schemaVersion: ${fm.schemaVersion}`
@@ -33653,9 +32768,9 @@ function safeWikiPath(wikiDir, filename) {
   if (filename.includes("/") || filename.includes("\\") || filename.includes("..")) {
     return null;
   }
-  const filePath = (0, import_path45.join)(wikiDir, filename);
-  const resolved = (0, import_path45.resolve)(filePath);
-  if (!resolved.startsWith((0, import_path45.resolve)(wikiDir) + import_path45.sep)) {
+  const filePath = (0, import_path44.join)(wikiDir, filename);
+  const resolved = (0, import_path44.resolve)(filePath);
+  if (!resolved.startsWith((0, import_path44.resolve)(wikiDir) + import_path44.sep)) {
     return null;
   }
   return filePath;
@@ -33664,9 +32779,9 @@ function readPage(root, filename) {
   const wikiDir = getWikiDir(root);
   const filePath = safeWikiPath(wikiDir, filename);
   if (!filePath) return null;
-  if (!(0, import_fs36.existsSync)(filePath)) return null;
+  if (!(0, import_fs35.existsSync)(filePath)) return null;
   try {
-    const raw = (0, import_fs36.readFileSync)(filePath, "utf-8");
+    const raw = (0, import_fs35.readFileSync)(filePath, "utf-8");
     const parsed = parseFrontmatter(raw);
     if (!parsed) return null;
     return {
@@ -33680,16 +32795,16 @@ function readPage(root, filename) {
 }
 function listPages(root) {
   const wikiDir = getWikiDir(root);
-  if (!(0, import_fs36.existsSync)(wikiDir)) return [];
-  return (0, import_fs36.readdirSync)(wikiDir).filter((f) => f.endsWith(".md") && !RESERVED_FILES.has(f)).sort();
+  if (!(0, import_fs35.existsSync)(wikiDir)) return [];
+  return (0, import_fs35.readdirSync)(wikiDir).filter((f) => f.endsWith(".md") && !RESERVED_FILES.has(f)).sort();
 }
 function readAllPages(root) {
   return listPages(root).map((f) => readPage(root, f)).filter((p) => p !== null);
 }
 function readIndex(root) {
-  const indexPath = (0, import_path45.join)(getWikiDir(root), INDEX_FILE);
-  if (!(0, import_fs36.existsSync)(indexPath)) return null;
-  return (0, import_fs36.readFileSync)(indexPath, "utf-8");
+  const indexPath = (0, import_path44.join)(getWikiDir(root), INDEX_FILE);
+  if (!(0, import_fs35.existsSync)(indexPath)) return null;
+  return (0, import_fs35.readFileSync)(indexPath, "utf-8");
 }
 function writePageUnsafe(root, page) {
   if (RESERVED_FILES.has(page.filename)) {
@@ -33704,8 +32819,8 @@ function deletePageUnsafe(root, filename) {
   const wikiDir = getWikiDir(root);
   const filePath = safeWikiPath(wikiDir, filename);
   if (!filePath) return false;
-  if (!(0, import_fs36.existsSync)(filePath)) return false;
-  (0, import_fs36.unlinkSync)(filePath);
+  if (!(0, import_fs35.existsSync)(filePath)) return false;
+  (0, import_fs35.unlinkSync)(filePath);
   return true;
 }
 function updateIndexUnsafe(root) {
@@ -33734,19 +32849,19 @@ function updateIndexUnsafe(root) {
     lines.push("");
   }
   const wikiDir = ensureWikiDir(root);
-  atomicWriteFileSync((0, import_path45.join)(wikiDir, INDEX_FILE), lines.join("\n"));
+  atomicWriteFileSync((0, import_path44.join)(wikiDir, INDEX_FILE), lines.join("\n"));
 }
 function appendLogUnsafe(root, entry) {
   const wikiDir = ensureWikiDir(root);
-  const logPath = (0, import_path45.join)(wikiDir, LOG_FILE);
+  const logPath = (0, import_path44.join)(wikiDir, LOG_FILE);
   const logLine = `## [${entry.timestamp}] ${entry.operation}
 - **Pages:** ${entry.pagesAffected.join(", ") || "none"}
 - **Summary:** ${entry.summary}
 
 `;
   let existing = "";
-  if ((0, import_fs36.existsSync)(logPath)) {
-    existing = (0, import_fs36.readFileSync)(logPath, "utf-8");
+  if ((0, import_fs35.existsSync)(logPath)) {
+    existing = (0, import_fs35.readFileSync)(logPath, "utf-8");
   } else {
     existing = "# Wiki Log\n\n";
   }
@@ -34506,37 +33621,37 @@ var wikiTools = [
 ];
 
 // src/tools/skills-tools.ts
-var import_path49 = require("path");
+var import_path48 = require("path");
 var import_os7 = require("os");
 
 // src/hooks/learner/loader.ts
-var import_fs38 = require("fs");
-var import_crypto11 = require("crypto");
-var import_path48 = require("path");
-
-// src/hooks/learner/finder.ts
 var import_fs37 = require("fs");
+var import_crypto11 = require("crypto");
 var import_path47 = require("path");
 
-// src/hooks/learner/constants.ts
+// src/hooks/learner/finder.ts
+var import_fs36 = require("fs");
 var import_path46 = require("path");
+
+// src/hooks/learner/constants.ts
+var import_path45 = require("path");
 var import_os6 = require("os");
-var USER_SKILLS_DIR = (0, import_path46.join)(getClaudeConfigDir(), "skills", "omc-learned");
-var GLOBAL_SKILLS_DIR = (0, import_path46.join)((0, import_os6.homedir)(), ".omc", "skills");
+var USER_SKILLS_DIR = (0, import_path45.join)(getClaudeConfigDir(), "skills", "omc-learned");
+var GLOBAL_SKILLS_DIR = (0, import_path45.join)((0, import_os6.homedir)(), ".omc", "skills");
 var PROJECT_SKILLS_SUBDIR = OmcPaths.SKILLS;
-var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path46.join)(".agents", "skills");
+var PROJECT_AGENT_SKILLS_SUBDIR = (0, import_path45.join)(".agents", "skills");
 var MAX_RECURSION_DEPTH = 10;
 var SKILL_EXTENSION = ".md";
 var DEBUG_ENABLED = process.env.OMC_DEBUG === "1";
 
 // src/hooks/learner/finder.ts
 function findSkillFilesRecursive(dir, results, depth = 0) {
-  if (!(0, import_fs37.existsSync)(dir)) return;
+  if (!(0, import_fs36.existsSync)(dir)) return;
   if (depth > MAX_RECURSION_DEPTH) return;
   try {
-    const entries = (0, import_fs37.readdirSync)(dir, { withFileTypes: true });
+    const entries = (0, import_fs36.readdirSync)(dir, { withFileTypes: true });
     for (const entry of entries) {
-      const fullPath = (0, import_path47.join)(dir, entry.name);
+      const fullPath = (0, import_path46.join)(dir, entry.name);
       if (entry.isDirectory()) {
         findSkillFilesRecursive(fullPath, results, depth + 1);
       } else if (entry.isFile() && entry.name.endsWith(SKILL_EXTENSION)) {
@@ -34551,15 +33666,15 @@ function findSkillFilesRecursive(dir, results, depth = 0) {
 }
 function safeRealpathSync(filePath) {
   try {
-    return (0, import_fs37.realpathSync)(filePath);
+    return (0, import_fs36.realpathSync)(filePath);
   } catch {
     return filePath;
   }
 }
 function isWithinBoundary(realPath, boundary) {
-  const normalizedReal = (0, import_path47.normalize)(realPath);
-  const normalizedBoundary = (0, import_path47.normalize)(safeRealpathSync(boundary));
-  return normalizedReal === normalizedBoundary || normalizedReal.startsWith(normalizedBoundary + import_path47.sep);
+  const normalizedReal = (0, import_path46.normalize)(realPath);
+  const normalizedBoundary = (0, import_path46.normalize)(safeRealpathSync(boundary));
+  return normalizedReal === normalizedBoundary || normalizedReal.startsWith(normalizedBoundary + import_path46.sep);
 }
 function findSkillFiles(projectRoot, options) {
   const candidates = [];
@@ -34567,8 +33682,8 @@ function findSkillFiles(projectRoot, options) {
   const scope = options?.scope ?? "all";
   if (projectRoot && (scope === "project" || scope === "all")) {
     const projectSkillDirs = [
-      (0, import_path47.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
-      (0, import_path47.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
+      (0, import_path46.join)(projectRoot, PROJECT_SKILLS_SUBDIR),
+      (0, import_path46.join)(projectRoot, PROJECT_AGENT_SKILLS_SUBDIR)
     ];
     for (const projectSkillsDir of projectSkillDirs) {
       const projectFiles = [];
@@ -34622,7 +33737,7 @@ function findSkillFiles(projectRoot, options) {
 // src/hooks/learner/parser.ts
 function parseSkillFile(rawContent) {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = rawContent.match(frontmatterRegex);
+  const match = stripLeadingUtf8Bom(rawContent).match(frontmatterRegex);
   if (!match) {
     return {
       metadata: {},
@@ -34663,7 +33778,7 @@ function parseSkillFile(rawContent) {
   }
 }
 function parseYamlMetadata(yamlContent) {
-  const lines = yamlContent.split("\n");
+  const lines = yamlContent.split(/\r?\n/);
   const metadata = {};
   let i = 0;
   while (i < lines.length) {
@@ -34727,10 +33842,8 @@ function parseYamlMetadata(yamlContent) {
 }
 function parseStringValue(value) {
   if (!value) return "";
-  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
+  const unquoted = unquoteYamlScalar(value);
+  return value.startsWith('"') && value.endsWith('"') ? unquoted.replace(/\\"/g, '"') : unquoted;
 }
 function normalizeStringArray(value) {
   const values = Array.isArray(value) ? value : [value];
@@ -34742,7 +33855,7 @@ function parseArrayValue(rawValue, lines, currentIndex) {
     if (endIdx === -1) return { value: [], consumed: 1 };
     const content = rawValue.slice(1, endIdx).trim();
     if (!content) return { value: [], consumed: 1 };
-    const items = content.split(",").map((s) => parseStringValue(s.trim())).filter(Boolean);
+    const items = splitFlowSequenceItems(content).map((s) => parseStringValue(s.trim())).filter(Boolean);
     return { value: items, consumed: 1 };
   }
   if (!rawValue || rawValue === "") {
@@ -34777,7 +33890,7 @@ function loadAllSkills(projectRoot) {
   const seenIds = /* @__PURE__ */ new Map();
   for (const candidate of candidates) {
     try {
-      const rawContent = (0, import_fs38.readFileSync)(candidate.path, "utf-8");
+      const rawContent = (0, import_fs37.readFileSync)(candidate.path, "utf-8");
       const { metadata, content, valid, errors } = parseSkillFile(rawContent);
       if (!valid) {
         if (DEBUG_ENABLED) {
@@ -34786,7 +33899,7 @@ function loadAllSkills(projectRoot) {
         continue;
       }
       const skillId = metadata.id;
-      const relativePath = (0, import_path48.normalize)((0, import_path48.relative)(candidate.sourceDir, candidate.path));
+      const relativePath = (0, import_path47.normalize)((0, import_path47.relative)(candidate.sourceDir, candidate.path));
       const skill = {
         path: candidate.path,
         relativePath,
@@ -34812,13 +33925,13 @@ function loadAllSkills(projectRoot) {
 // src/tools/skills-tools.ts
 var ALLOWED_BOUNDARIES = [process.cwd(), (0, import_os7.homedir)()];
 function validateProjectRoot(input) {
-  const normalized = (0, import_path49.normalize)((0, import_path49.resolve)(input));
+  const normalized = (0, import_path48.normalize)((0, import_path48.resolve)(input));
   if (input.includes("..")) {
     throw new Error("Invalid project root: path traversal not allowed");
   }
   const isWithinAllowed = ALLOWED_BOUNDARIES.some((boundary) => {
-    const normalizedBoundary = (0, import_path49.normalize)(boundary);
-    return normalized === normalizedBoundary || normalized.startsWith(normalizedBoundary + import_path49.sep);
+    const normalizedBoundary = (0, import_path48.normalize)(boundary);
+    return normalized === normalizedBoundary || normalized.startsWith(normalizedBoundary + import_path48.sep);
   });
   if (!isWithinAllowed) {
     throw new Error("Invalid project root: path is outside allowed directories");

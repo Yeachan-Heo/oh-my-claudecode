@@ -3,7 +3,7 @@
  *
  * Defines the supported execution modes and their state file locations.
  */
-export type ExecutionMode = 'autopilot' | 'autoresearch' | 'team' | 'ralph' | 'deep-interview' | 'merge-readiness' | 'self-improve';
+export type ExecutionMode = 'autopilot' | 'autoresearch' | 'team' | 'ralph' | 'deep-interview' | 'self-improve';
 export interface ModeConfig {
     /** Display name for the mode */
     name: string;

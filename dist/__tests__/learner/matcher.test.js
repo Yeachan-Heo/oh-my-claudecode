@@ -45,6 +45,17 @@ describe('Smart Skill Matcher', () => {
             // Should match because "*.ts" pattern matches "ts" in the text
             expect(results.length).toBeGreaterThanOrEqual(0); // Pattern converts to regex
         });
+        it('should treat regex metacharacters in glob triggers literally', () => {
+            // "." must not match any character
+            const dot = [{ id: 'ts-skill', triggers: ['*.tsx'] }];
+            expect(matchSkills('open the file component_tsx', dot)).toEqual([]);
+            expect(matchSkills('open the file component.tsx', dot).length).toBe(1);
+            // "+" must not produce an invalid regex that silently never matches
+            const plus = [{ id: 'cpp-skill', triggers: ['c++ *tips'] }];
+            const results = matchSkills('c++ and tips please', plus);
+            expect(results.length).toBe(1);
+            expect(results[0].matchType).toBe('pattern');
+        });
         it('should match explicit regex patterns', () => {
             const skills = [{ id: 'error-skill', triggers: ['/error/i'] }];
             const results = matchSkills('there is an ERROR in my code', skills);

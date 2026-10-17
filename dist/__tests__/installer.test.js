@@ -543,7 +543,7 @@ describe('Installer Constants', () => {
             expect(existsSync(templatesLibDir)).toBe(true);
             const libFiles = readdirSync(templatesLibDir);
             // Required lib files that must be present
-            const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs', 'bounded-git-timeout.mjs'];
+            const requiredFiles = ['stdin.mjs', 'atomic-write.mjs', 'config-dir.mjs', 'state-root.mjs', 'model-routing-override-message.mjs', 'bounded-git-timeout.mjs', 'utf8-bom.mjs'];
             for (const file of requiredFiles) {
                 expect(libFiles).toContain(file);
             }

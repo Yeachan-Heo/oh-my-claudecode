@@ -9,6 +9,7 @@ import { readFileSync, existsSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 
 const PACKAGED_COMMANDS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'commands');
 export interface CommandInfo {
@@ -35,20 +36,8 @@ export function getCommandsDir(): string {
  * Parse command frontmatter and content
  */
 function parseCommandFile(content: string): { description: string; template: string } {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-
-  if (!frontmatterMatch) {
-    return { description: '', template: content };
-  }
-
-  const frontmatter = frontmatterMatch[1];
-  const template = frontmatterMatch[2];
-
-  // Extract description from frontmatter
-  const descMatch = frontmatter.match(/description:\s*(.+)/);
-  const description = descMatch ? descMatch[1].trim() : '';
-
-  return { description, template };
+  const { metadata, body } = parseFrontmatter(content);
+  return { description: metadata.description ?? '', template: body };
 }
 
 function getCommandFilePath(name: string): string | null {

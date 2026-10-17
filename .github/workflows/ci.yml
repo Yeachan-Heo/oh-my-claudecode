@@ -115,9 +115,6 @@ jobs:
           src/tools/__tests__/wiki-tools-git-probe-failclosed.test.ts
           src/tools/__tests__/wiki-tools-direct-dist-failclosed.test.ts
           src/hooks/project-memory/__tests__/hot-path-tracker.test.ts
-          src/hooks/merge-readiness/__tests__/win-cross-platform.test.ts
-          src/hooks/merge-readiness/__tests__/runtime.test.ts
-          src/hooks/merge-readiness/__tests__/tool-flow.test.ts
           src/__tests__/windows-prompt-hook-runner.test.ts
           src/__tests__/run-cjs-generic-timeout.test.ts
           src/__tests__/run-cjs-windows-stdio-contract.test.ts
@@ -217,15 +214,15 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Verify bridge registers all merge-readiness tools (source/packaged parity)
+      - name: Verify bridge omits retired merge-readiness tools
         run: |
           set -e
           for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
-            if ! grep -q "\"$tool\"" bridge/mcp-server.cjs; then
-              echo "::error::Packaged bridge/mcp-server.cjs is missing tool: $tool. Source/packaged parity broken (run npm run build)."
+            if grep -q "\"$tool\"" bridge/mcp-server.cjs; then
+              echo "::error::Retired merge-readiness tool remains registered in bridge/mcp-server.cjs: $tool"
               exit 1
             fi
-            echo "bridge registers $tool"
+            echo "bridge omits retired tool $tool"
           done
 
       - name: Check dist size
@@ -353,24 +350,28 @@ jobs:
           TARBALL=$(ls -t oh-my-claude-sisyphus-*.tgz | head -1)
           echo "📦 Tarball: $TARBALL"
 
-          echo "🔎 Verifying the packaged MCP bridge registers every merge-readiness tool..."
+          echo "🔎 Verifying the packaged MCP bridge omits retired merge-readiness tools..."
+          PACKAGED_MCP_SERVER="$RUNNER_TEMP/packaged-mcp-server.cjs"
+          tar -xzOf "$TARBALL" package/bridge/mcp-server.cjs > "$PACKAGED_MCP_SERVER"
           for tool in merge_readiness_start merge_readiness_set_content merge_readiness_record_answer merge_readiness_report merge_readiness_cancel; do
-            if ! tar -xOf "$TARBALL" package/bridge/mcp-server.cjs | grep -q "\"$tool\""; then
-              echo "::error::npm package bridge/mcp-server.cjs is missing tool: $tool"
+            if grep -q "\"$tool\"" "$PACKAGED_MCP_SERVER"; then
+              echo "::error::Retired merge-readiness tool remains registered in npm package: $tool"
               exit 1
             fi
-            echo "packaged bridge registers $tool"
+            echo "npm package omits retired tool $tool"
           done
 
           echo "🔎 Verifying contained-fs in packaged tarball (issue #4217)..."
+          PACKAGED_FILES="$RUNNER_TEMP/packaged-files.txt"
+          tar -tzf "$TARBALL" > "$PACKAGED_FILES"
           for script in scripts/build-contained-fs.mjs scripts/postinstall-contained-fs.mjs scripts/verify-graph-contained-fs.mjs; do
-            if ! tar -tzf "$TARBALL" | grep -q "package/$script"; then
+            if ! grep -q "package/$script" "$PACKAGED_FILES"; then
               echo "::error::npm package missing required script: $script"
               exit 1
             fi
             echo "✓ $script included in tarball"
           done
-          if ! tar -tzf "$TARBALL" | grep -q "package/native/contained-fs.c"; then
+          if ! grep -q "package/native/contained-fs.c" "$PACKAGED_FILES"; then
             echo "::error::npm package missing native source: native/contained-fs.c"
             exit 1
           fi

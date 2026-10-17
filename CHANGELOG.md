@@ -1,3 +1,54 @@
+# oh-my-claudecode v5.7.5: More reliable frontmatter, glob matching, and worker startup
+
+## Release Notes
+
+Release with **1 new feature**, **22 bug fixes**, **1 CI improvement**, and **1 retired-tools removal** across **25 merged PRs**.
+
+### Highlights
+
+- **feat(installer): add `claudeMdEnabled` opt-out for the global CLAUDE.md** (#4383)
+- **fix(frontmatter): handle CRLF, BOMs, YAML block scalars, and quoted values across files** (#4392, #4393, #4402, #4405, #4406, #4407, #4408, #4410, #4411)
+- **fix: match configured globs literally and stabilize team worker startup** (#4390, #4403, #4404, #4413, #4416, #4418)
+
+### New Features
+
+- **feat(installer): add `claudeMdEnabled` opt-out for the global CLAUDE.md** (#4383)
+  - Lets users leave the global `CLAUDE.md` untouched when configuring the installer.
+
+### Bug Fixes
+
+- **fix(session-start): bound the stabilization helper lifetime and batch the Darwin identity probe** (#4384)
+- **fix: ignore malformed context-guard and security configuration values** (#4388, #4389)
+- **fix(state-manager): match list and cleanup glob patterns literally** (#4390)
+- **fix(learner): parse block-list skill metadata in CRLF files** (#4392)
+- **fix(frontmatter): preserve quoted flow values** (#4393)
+- **fix(ralph): retain feedback failures when tests log ENOENT** (#4399)
+- **fix(commands): parse CRLF frontmatter in command files** (#4402)
+- **fix(rules-injector): support `{a,b}` brace alternation in rule globs** (#4403)
+- **fix(team): align worker startup ACK and shutdown instructions** (#4404)
+- **fix(frontmatter): read YAML block scalars and indented block-list values** (#4405, #4406)
+- **fix(rules-injector): ignore trailing YAML comments and preserve quoted hashes in flow values** (#4407)
+- **fix(frontmatter): accept a leading UTF-8 BOM in skill, command, rule, and wiki files** (#4408, #4410)
+- **fix(cli): reject non-integer values for wait and session options** (#4409)
+- **fix(autoresearch): keep quotes inside an unquoted `sandbox.md` value** (#4411)
+- **fix(team): stabilize cmux worker startup** (#4413)
+- **fix(factcheck): match strict project globs literally** (#4416)
+- **fix(doctor): ignore empty `OMC_SKIP_HOOKS` entries** (#4417)
+- **fix(learner): match glob triggers literally apart from `*`** (#4418)
+- **fix(factory): validate `listen --port` as an integer in 0–65535** (#4420)
+
+### Other Changes
+
+- **test(session-end): stabilize configured process exit on CI** (#4397)
+- **chore: remove retired merge-readiness MCP tools and regenerate shipped artifacts** (#4422)
+- **ci: refresh inventory baselines and generated-artifact authorizations** (#4423–#4432)
+
+### Stats
+
+- **25 PRs merged** | **1 new feature** | **22 bug fixes** | **1 CI improvement** | **1 retired-tools removal**
+
+---
+
 # oh-my-claudecode v5.7.4: More reliable hooks, team workflows, HUD, and Jev planning
 
 ## Release Notes

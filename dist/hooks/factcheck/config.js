@@ -117,7 +117,13 @@ export function loadGuardsConfig(workspace) {
  */
 export function shouldUseStrictMode(projectName, patterns) {
     for (const pattern of patterns) {
-        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$');
+        // Only `*` and `?` are wildcards; escape every other regex metacharacter
+        // so names such as `my.app` or `app(1)` match literally and never throw.
+        const source = pattern
+            .split('')
+            .map((ch) => (ch === '*' ? '.*' : ch === '?' ? '.' : ch.replace(/[.+^${}()|[\]\\]/g, '\\$&')))
+            .join('');
+        const regex = new RegExp('^' + source + '$');
         if (regex.test(projectName)) {
             return true;
         }

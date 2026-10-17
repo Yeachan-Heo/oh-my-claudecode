@@ -9,6 +9,7 @@ import * as processUtils from '../../platform/process-utils.js';
 import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, buildWorkerLaunchBootstrapSpec, buildWindowsSupervisorInvocation, buildWindowsSupervisorSource, cleanupWorkerLaunchTransport, observeWorkerLaunchProvider, isWorkerLaunchAttemptAccepted, isWorkerLaunchProviderStarted, loadWorkerLaunchAttempt, loadCurrentWorkerLaunchAttempt, prepareWorkerLaunchAttempt, materializeWorkerLaunchTransport, runWorkerLaunchBootstrap, readAndConsumeWorkerLaunchDescriptor, retireWorkerLaunchAttempt, retireAndCleanupCurrentWorkerLaunchAttempt, terminateWorkerLaunchProvider, revokeWorkerLaunchAttempt, withWorkerLaunchAttemptFence, buildProviderEnvironment, buildProviderSpawnInvocation, materializeProviderSpawnInvocation, quoteWindowsCreateProcessArgument, } from '../worker-launch-ack.js';
 import { captureOwnedProcessGroup, getProcessStartIdentity, isProcessAlive, terminateOwnedProcessGroup, terminateOwnedProcessTree, } from '../../platform/process-utils.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { getWorkerEnv } from '../model-contract.js';
 let cwd = '';
 const disposableProviders = new Set();
 // These waits poll for a condition produced by a spawned process, so they
@@ -2185,10 +2186,17 @@ describe('worker launch acknowledgement', () => {
         const posix = buildProviderEnvironment(undefined, {
             PATH: '/usr/bin:/bin',
             HOME: '/home/provider',
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
             USERPROFILE: 'C:\\Users\\wrong-platform',
             GH_TOKEN: 'ambient-secret',
         }, 'linux');
-        expect(posix).toEqual({ PATH: '/usr/bin:/bin', HOME: '/home/provider' });
+        expect(posix).toEqual({
+            PATH: '/usr/bin:/bin',
+            HOME: '/home/provider',
+            TERM: 'xterm-256color',
+            COLORTERM: 'truecolor',
+        });
         const macos = buildProviderEnvironment(undefined, {
             PATH: '/usr/bin:/bin',
             HOME: '/Users/provider',
@@ -2266,6 +2274,39 @@ describe('worker launch acknowledgement', () => {
             value: 'provider-value',
             attempt: launchAttempt.attempt_id,
         });
+    });
+    it('preserves Claude secure-storage login and terminal colors through supervised launch', async () => {
+        const launchAttempt = await attempt();
+        const envKeys = ['CLAUDE_SECURESTORAGE_CONFIG_DIR', 'TERM', 'COLORTERM'];
+        const saved = Object.fromEntries(envKeys.map(key => [key, process.env[key]]));
+        process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR = join(cwd, 'claude-secure-storage');
+        process.env.TERM = 'xterm-256color';
+        process.env.COLORTERM = 'truecolor';
+        try {
+            const workerEnv = getWorkerEnv('launch-team', 'worker-1', 'claude', process.env);
+            const marker = join(cwd, 'claude-worker-env.json');
+            const providerScript = `require('node:fs').writeFileSync(${JSON.stringify(marker)},JSON.stringify({secureStorage:process.env.CLAUDE_SECURESTORAGE_CONFIG_DIR,term:process.env.TERM,color:process.env.COLORTERM}));setTimeout(()=>process.exit(0),200)`;
+            const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(launchAttempt, [process.execPath, '-e', providerScript], cwd, { providerEnv: workerEnv, releaseAfterSpawn: true }));
+            await expect(awaitWorkerLaunchAcknowledgement(launchAttempt, {
+                timeoutMs: LAUNCH_WAIT_TIMEOUT_MS,
+                pollIntervalMs: 5,
+            })).resolves.toEqual({ ok: true });
+            await expect(bootstrap).resolves.toEqual({ outcome: 'ran', exitCode: 0, signal: null });
+            await expect(readFile(marker, 'utf8').then(JSON.parse)).resolves.toEqual({
+                secureStorage: join(cwd, 'claude-secure-storage'),
+                term: 'xterm-256color',
+                color: 'truecolor',
+            });
+        }
+        finally {
+            for (const key of envKeys) {
+                const value = saved[key];
+                if (value === undefined)
+                    delete process.env[key];
+                else
+                    process.env[key] = value;
+            }
+        }
     });
     it('rejects provider environment tampering through the authority digest', async () => {
         const launchAttempt = await attempt();

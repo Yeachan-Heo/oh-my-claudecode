@@ -16,6 +16,7 @@
 
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { z } from "zod";
 import { parseJsonc } from "../utils/jsonc.js";
 import { getConfigDir } from "../utils/paths.js";
 
@@ -60,6 +61,34 @@ const STRICT_OVERRIDES: SecurityConfig = {
 let cachedConfig: SecurityConfig | null = null;
 
 /**
+ * Per-field schema for the config-file security section. `.catch(undefined)`
+ * drops an invalid value for that field only, so the default/strict value stays
+ * in effect (e.g. `"restrictToolPaths": "false"` or `"hardMaxIterations": -1`
+ * would otherwise be applied verbatim). The mapped type ties the schema to
+ * `SecurityConfig`, so a new field cannot be added to one and not the other.
+ */
+const optionalBoolean = z.boolean().optional().catch(undefined);
+const securityOverrideShape: { [K in keyof SecurityConfig]: z.ZodTypeAny } = {
+  restrictToolPaths: optionalBoolean,
+  pythonSandbox: optionalBoolean,
+  disableProjectSkills: optionalBoolean,
+  disableAutoUpdate: optionalBoolean,
+  disableRemoteMcp: optionalBoolean,
+  disableExternalLLM: optionalBoolean,
+  hardMaxIterations: z.number().int().nonnegative().optional().catch(undefined),
+};
+const securityOverridesSchema = z.object(securityOverrideShape);
+
+function sanitizeSecurityOverrides(raw: Record<string, unknown>): Partial<SecurityConfig> {
+  const parsed = securityOverridesSchema.parse(raw) as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result as Partial<SecurityConfig>;
+}
+
+/**
  * Load the security section from config files.
  * Checks project config first, then user config.
  */
@@ -74,8 +103,8 @@ function loadSecurityFromConfigFiles(): Partial<SecurityConfig> {
     try {
       const content = readFileSync(configPath, "utf-8");
       const parsed = parseJsonc(content) as Record<string, unknown>;
-      if (parsed?.security && typeof parsed.security === "object") {
-        return parsed.security as Partial<SecurityConfig>;
+      if (parsed?.security && typeof parsed.security === "object" && !Array.isArray(parsed.security)) {
+        return sanitizeSecurityOverrides(parsed.security as Record<string, unknown>);
       }
     } catch {
       // Ignore parse errors

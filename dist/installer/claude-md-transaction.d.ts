@@ -73,5 +73,10 @@ export declare function decodeClaudeMdUtf8(bytes: Buffer, path: string): string;
  */
 export declare function isStrictChildPath(root: string, candidate: string, path?: Pick<typeof nativePath, 'isAbsolute' | 'relative' | 'resolve'>): boolean;
 export declare function validateRootedRegularFile(root: string, path: string, allowAbsent?: boolean, fs?: ClaudeMdTransactionFs): string;
+/**
+ * Read claudeMdEnabled from <configRoot>/.omc-config.json. Only an explicit `false`
+ * opts out of OMC writing the global CLAUDE.md; a missing or unreadable config means enabled.
+ */
+export declare function isClaudeMdEnabledInConfig(configRoot: string, fs?: Pick<ClaudeMdTransactionFs, 'existsSync' | 'readFileSync'>): boolean;
 export declare function executeClaudeMdTransaction(request: ClaudeMdTransactionRequest): ClaudeMdTransactionResult;
 //# sourceMappingURL=claude-md-transaction.d.ts.map

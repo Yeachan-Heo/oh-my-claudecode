@@ -777,6 +777,13 @@ describe("workflow profile descriptor contract (#3487)", () => {
     expect(verifyWorkflowDescriptor(recomputed)).toBe(false);
   });
 
+  it("allows the retired merge-readiness name as a custom workflow identity", () => {
+    const descriptor = createWorkflowDescriptor("merge-readiness", profile);
+
+    expect(descriptor?.workflowName).toBe("merge-readiness");
+    expect(verifyWorkflowDescriptor(descriptor)).toBe(true);
+  });
+
   it("rejects comma-collapsed and nested stage structures before descriptor creation", () => {
     expect(
       createWorkflowDescriptor("release-flow", {

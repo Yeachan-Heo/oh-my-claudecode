@@ -8,6 +8,7 @@ import { awaitWorkerLaunchAcknowledgement, awaitWorkerLaunchProviderStarted, bui
 import { currentProcessStartIdentity } from '../team-owner-epoch.js';
 import { createTeamInstanceBinding, reserveTeamInstance } from '../team-instance.js';
 import * as teamInstanceModule from '../team-instance.js';
+import * as processIdentityLockModule from '../process-identity-lock.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
 import { absPath, TeamPaths, teamStateRoot } from '../state-paths.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
@@ -672,7 +673,58 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
         expect(JSON.parse(readFileSync(configPath, 'utf8')).lifecycle_state).toBe('active');
     });
+    it('does not promise survival to a rejecting worker when forced shutdown proceeds with cleanup', async () => {
+        tmuxMocks.killOwnedWorkerPane.mockClear();
+        const teamName = 'shutdown-worker-rejected-force';
+        await reserveFixtureInstance(teamName, repoDir);
+        const teamRoot = fixtureTeamRoot(repoDir, teamName);
+        const workerRoot = join(teamRoot, 'workers', 'worker-1');
+        mkdirSync(workerRoot, { recursive: true });
+        const launchAttempt = await prepareAcceptedLaunch(repoDir, teamName, 'worker-1', '%77');
+        writeFileSync(join(teamRoot, 'config.json'), JSON.stringify({
+            name: teamName, instance_id: TEAM_INSTANCE_ID, tmux_server_identity: tmuxMocks.tmuxServerIdentity,
+            task: 'demo', agent_type: 'claude', worker_launch_mode: 'interactive',
+            worker_count: 1, max_workers: 20,
+            workers: [{
+                    name: 'worker-1', index: 1, role: 'executor', assigned_tasks: [], pane_id: '%77',
+                    worker_cli: 'claude', launch_attempt_id: launchAttempt.attempt_id,
+                    launch_descriptor: { schema_version: 1, provider: 'claude', model: null, binary: '/bin/echo', args: [] },
+                }],
+            created_at: new Date().toISOString(), tmux_session: `${teamName}:0`, lifecycle_state: 'active', state_revision: 4,
+            next_task_id: 1,
+        }));
+        writeFileSync(join(workerRoot, 'shutdown-ack.json'), JSON.stringify({
+            status: 'reject', reason: 'still working', updated_at: '2099-01-01T00:00:00.000Z',
+        }));
+        let inbox = '';
+        let events = '';
+        tmuxMocks.getWorkerLiveness.mockResolvedValue('alive');
+        tmuxMocks.killOwnedWorkerPane.mockImplementationOnce(async () => {
+            inbox = readFileSync(join(workerRoot, 'inbox.md'), 'utf8');
+            events = readFileSync(join(teamRoot, 'events.jsonl'), 'utf8');
+            tmuxMocks.getWorkerLiveness.mockResolvedValue('dead');
+        });
+        const { shutdownTeamV2 } = await import('../runtime-v2.js');
+        await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 1_000, force: true }))
+            .resolves.toEqual({ outcome: 'cleaned' });
+        expect(tmuxMocks.killOwnedWorkerPane).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+            paneId: '%77', provider: 'tmux', tmuxServerIdentity: tmuxMocks.tmuxServerIdentity,
+        }));
+        expect(events.trim().split('\n').map(line => JSON.parse(line))).toContainEqual(expect.objectContaining({
+            type: 'shutdown_ack', worker: 'worker-1', reason: 'reject:still working',
+        }));
+        expect(existsSync(teamRoot)).toBe(false);
+        const shutdownRoot = process.platform === 'win32' ? teamRoot : '$OMC_TEAM_STATE_ROOT';
+        expect(inbox).toContain(`Write your ack to: ${shutdownRoot}/workers/worker-1/shutdown-ack.json`);
+        expect(inbox).toContain('Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}');
+        expect(inbox).not.toContain('remain active for task work and mailbox instructions');
+        expect(inbox).not.toContain('do not exit because of this request');
+        expect(inbox).toContain('forced shutdown');
+        expect(inbox).toContain('rejection does not veto termination');
+        expect(inbox).toContain('do not resume task work');
+    });
     it('restores active lifecycle when a worker rejects normal shutdown before pane cleanup', async () => {
+        tmuxMocks.killOwnedWorkerPane.mockClear();
         const teamName = 'shutdown-worker-rejected';
         await reserveFixtureInstance(teamName, repoDir);
         const teamRoot = fixtureTeamRoot(repoDir, teamName);
@@ -693,6 +745,14 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         const { shutdownTeamV2 } = await import('../runtime-v2.js');
         await expect(shutdownTeamV2(teamName, repoDir, { timeoutMs: 25 }))
             .rejects.toThrow('shutdown_rejected:worker-1:still working');
+        const inbox = readFileSync(join(workerRoot, 'inbox.md'), 'utf8');
+        expect(inbox).toContain('Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}');
+        expect(inbox).toContain('Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}');
+        expect(inbox).toContain('If you accept, exit your session');
+        expect(inbox).toContain('If you reject, remain active for task work and mailbox instructions; do not exit because of this request');
+        expect(inbox).not.toContain('Then exit your session.');
+        expect(inbox).not.toContain('All tasks are complete.');
+        expect(tmuxMocks.killOwnedWorkerPane).not.toHaveBeenCalled();
         expect(tmuxMocks.killWorkerPanes).not.toHaveBeenCalled();
         expect(tmuxMocks.killTeamSession).not.toHaveBeenCalled();
         const persisted = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -940,34 +1000,81 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
         const disposeGate = new Promise(resolveGate => { releaseDispose = resolveGate; });
         let disposeReleased = false;
         let firstCompletion;
+        let secondCompletion;
         const disposeSpy = vi.spyOn(teamInstanceModule, 'disposeTeamInstanceUnderLock')
             .mockImplementation(async (...args) => {
             enteredDispose();
             await disposeGate;
             return originalDispose(...args);
         });
+        // Transparent spy: the real lock still runs; it only signals once the
+        // second shutdown has actually attempted the shared lifecycle lock.
+        const lifecycleLockPath = teamInstanceModule.teamInstanceLifecycleLockPath(repoDir, teamName);
+        const originalLock = processIdentityLockModule.withProcessIdentityFileLock;
+        let signalLockAttempt;
+        let secondCallbackEntered = false;
+        const lockSpy = vi.spyOn(processIdentityLockModule, 'withProcessIdentityFileLock')
+            .mockImplementation((path, fn, timeoutMs) => {
+            const notify = path === lifecycleLockPath ? signalLockAttempt : undefined;
+            if (!notify)
+                return originalLock(path, fn, timeoutMs);
+            signalLockAttempt = undefined;
+            const pending = originalLock(path, () => {
+                secondCallbackEntered = true;
+                return fn();
+            }, timeoutMs);
+            notify();
+            return pending;
+        });
+        // Share one 20s race budget and reserve 5s for teardown under the suite's
+        // 30s timeout, so a failing gate still reports its specific error.
+        const raceDeadline = Date.now() + 20_000;
+        const withinDeadline = async (promise, label, deadline) => {
+            const remainingMs = Math.max(0, deadline - Date.now());
+            let timer;
+            try {
+                return await Promise.race([
+                    promise,
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => reject(new Error(`${label} not reached within ${Math.ceil(remainingMs / 1000)}s`)), remainingMs);
+                    }),
+                ]);
+            }
+            finally {
+                clearTimeout(timer);
+            }
+        };
         try {
             const { shutdownTeamV2 } = await import('../runtime-v2.js');
             const first = shutdownTeamV2(teamName, repoDir, { force: true, timeoutMs: 0, instanceId: TEAM_INSTANCE_ID });
-            const firstSettled = first.then(value => ({ status: 'resolved', value }), error => ({ status: 'rejected', error }));
+            let firstDone = false;
+            const firstSettled = first.then(value => ({ status: 'resolved', value }), error => ({ status: 'rejected', error })).finally(() => { firstDone = true; });
             firstCompletion = firstSettled;
-            const gateOrEarlyExit = await Promise.race([
+            const gateOrEarlyExit = await withinDeadline(Promise.race([
                 disposeEntered.then(() => ({ status: 'entered' })),
                 firstSettled,
-                new Promise(resolve => setTimeout(() => resolve({ status: 'timeout' }), 2_000)),
-            ]);
+            ]), 'final disposal gate', raceDeadline);
             if (gateOrEarlyExit.status === 'resolved') {
                 throw new Error(`first shutdown completed before final disposal: ${JSON.stringify(gateOrEarlyExit.value)}`);
             }
             if (gateOrEarlyExit.status === 'rejected')
                 throw gateOrEarlyExit.error;
-            if (gateOrEarlyExit.status === 'timeout')
-                throw new Error('final disposal gate was not reached');
+            const secondLockAttempted = new Promise(resolveAttempt => { signalLockAttempt = resolveAttempt; });
             let secondSettled = false;
             const second = shutdownTeamV2(teamName, repoDir, { force: true, timeoutMs: 0, instanceId: TEAM_INSTANCE_ID })
                 .finally(() => { secondSettled = true; });
-            await new Promise(resolveTick => setTimeout(resolveTick, 10));
+            secondCompletion = second.catch(() => undefined);
+            await withinDeadline(Promise.race([
+                secondLockAttempted,
+                second.then(value => {
+                    throw new Error(`second shutdown settled before lifecycle lock attempt: ${JSON.stringify(value)}`);
+                }),
+            ]), 'second lifecycle lock attempt', raceDeadline);
+            expect(secondCallbackEntered).toBe(false);
+            expect(firstDone).toBe(false);
             expect(secondSettled).toBe(false);
+            expect(existsSync(configPath)).toBe(true);
+            expect(disposeSpy).toHaveBeenCalledTimes(1);
             disposeReleased = true;
             releaseDispose();
             await expect(first).resolves.toEqual({ outcome: 'cleaned' });
@@ -980,8 +1087,12 @@ describe('shutdownTeamV2 detached worktree cleanup', () => {
                 disposeReleased = true;
                 releaseDispose();
             }
-            await firstCompletion?.catch(() => undefined);
+            lockSpy.mockRestore();
             disposeSpy.mockRestore();
+            await withinDeadline(Promise.all([
+                firstCompletion?.catch(() => undefined),
+                secondCompletion,
+            ]), 'shutdown drain', Date.now() + 5_000).catch(() => undefined);
         }
     });
 });

@@ -257,8 +257,8 @@ describe('spawnWorkerInPane', () => {
         expect(mockedCalls.cmuxArgs).toEqual([
             ['send-key-surface', '--surface', 'cmux-worker-1', 'enter'],
             ['send-key-surface', '--surface', 'cmux-worker-1', 'tab'],
-            ['send-key-surface', '--surface', 'cmux-worker-1', 'C-m'],
-            ['send-key-surface', '--surface', 'cmux-worker-1', 'C-u'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'enter'],
+            ['send-key-surface', '--surface', 'cmux-worker-1', 'ctrl+u'],
         ]);
     });
     it('falls back to legacy cmux surface commands when current dialect is unavailable', async () => {
@@ -282,7 +282,7 @@ describe('spawnWorkerInPane', () => {
         expect(mockedCalls.cmuxArgs[0]?.[0]).toBe('send-surface');
         expect(mockedCalls.cmuxArgs[1]?.[0]).toBe('send');
         expect(mockedCalls.cmuxArgs[2]?.[0]).toBe('send-key-surface');
-        expect(mockedCalls.cmuxArgs[3]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'Enter']);
+        expect(mockedCalls.cmuxArgs[3]).toEqual(['send-key', '--surface', 'cmux-worker-1', 'enter']);
     });
     it('falls back for clap-style cmux surface option dialect errors', async () => {
         vi.stubEnv('TMUX', '');

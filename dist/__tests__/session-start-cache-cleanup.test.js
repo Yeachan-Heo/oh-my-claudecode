@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, lstatSync, readlinkSync, readdirSync } from 'fs';
-import { join, relative } from 'path';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, lstatSync, readlinkSync, readdirSync, realpathSync, symlinkSync } from 'fs';
+import { join, relative, resolve } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { pathIdentity, publishCacheOccupancy, readOccupiedPluginRoots } from '../utils/cache-occupancy.js';
@@ -203,6 +203,65 @@ describe('session-start.mjs — plugin cache cleanup uses symlinks', () => {
         // 4.4.3 and 4.4.2 remain as real directories
         expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);
         expect(lstatSync(join(fakeCacheBase, '4.4.2')).isSymbolicLink()).toBe(false);
+    });
+    function resolveErrorCode(path) {
+        try {
+            realpathSync(path);
+            return null;
+        }
+        catch (err) {
+            return err.code ?? 'UNKNOWN';
+        }
+    }
+    it('does not link a stale plugin root into a cycle when the only cache entry is a dangling symlink', () => {
+        // 4.14.2 -> 4.14.5 is dangling: the real 4.14.5 directory was removed.
+        const danglingLink = join(fakeCacheBase, '4.14.2');
+        symlinkSync('4.14.5', danglingLink);
+        const staleRoot = join(fakeCacheBase, '4.14.5');
+        runSessionStart({ CLAUDE_PLUGIN_ROOT: staleRoot });
+        // Linking 4.14.5 -> 4.14.2 would close a two-link cycle (ELOOP on every hook).
+        expect(resolveErrorCode(staleRoot)).not.toBe('ELOOP');
+        expect(resolveErrorCode(danglingLink)).not.toBe('ELOOP');
+        expect(readdirSync(fakeCacheBase)).toEqual(['4.14.2']);
+        expect(readlinkSync(danglingLink)).toBe('4.14.5');
+    });
+    it('points a stale plugin root at the real directory, not at a newer-named symlink', () => {
+        // Downgrade shape: 4.14.5 is a symlink to the only real directory, 4.14.2.
+        const realDir = createFakeVersion('4.14.2');
+        symlinkSync('4.14.2', join(fakeCacheBase, '4.14.5'));
+        const staleRoot = join(fakeCacheBase, '4.14.4'); // removed version
+        runSessionStart({ CLAUDE_PLUGIN_ROOT: staleRoot });
+        expect(lstatSync(staleRoot).isSymbolicLink()).toBe(true);
+        const target = resolve(fakeCacheBase, readlinkSync(staleRoot));
+        expect(target).toBe(realDir);
+        expect(lstatSync(target).isSymbolicLink()).toBe(false);
+        expect(existsSync(join(staleRoot, 'scripts', 'run.cjs'))).toBe(true);
+    });
+    it('keep-latest-2 pass re-points old entries at the real latest directory when the highest entry is a symlink', () => {
+        createFakeVersion('4.4.1');
+        createFakeVersion('4.4.2');
+        createFakeVersion('4.4.3');
+        symlinkSync('4.4.3', join(fakeCacheBase, '4.5.0'));
+        runSessionStart();
+        expect(lstatSync(join(fakeCacheBase, '4.4.3')).isSymbolicLink()).toBe(false);
+        expect(lstatSync(join(fakeCacheBase, '4.5.0')).isSymbolicLink()).toBe(true);
+        expect(readlinkSync(join(fakeCacheBase, '4.5.0'))).toBe('4.4.3');
+        for (const old of ['4.4.2', '4.4.1']) {
+            expect(lstatSync(join(fakeCacheBase, old)).isSymbolicLink()).toBe(true);
+            expect(readlinkSync(join(fakeCacheBase, old))).toBe('4.4.3');
+        }
+        expect(existsSync(join(fakeCacheBase, '4.4.1', 'scripts', 'run.cjs'))).toBe(true);
+    });
+    it('never replaces the only real directory with a symlink when newer entries are symlinks', () => {
+        createFakeVersion('4.4.3');
+        symlinkSync('4.4.3', join(fakeCacheBase, '5.0.0'));
+        symlinkSync('4.4.3', join(fakeCacheBase, '4.9.0'));
+        runSessionStart({ CLAUDE_PLUGIN_ROOT: join(fakeCacheBase, '5.0.0') });
+        const realDir = join(fakeCacheBase, '4.4.3');
+        expect(lstatSync(realDir).isSymbolicLink()).toBe(false);
+        expect(lstatSync(realDir).isDirectory()).toBe(true);
+        expect(existsSync(join(realDir, 'package.json'))).toBe(true);
+        expect(resolveErrorCode(join(fakeCacheBase, '5.0.0'))).toBeNull();
     });
     it('with only 1 version, no cleanup is needed', () => {
         createFakeVersion('4.4.3');

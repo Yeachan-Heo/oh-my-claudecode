@@ -340,7 +340,7 @@ export function resolveFeedbackCommands(directory, sessionId) {
         return [];
     }
 }
-const UNRUNNABLE_PATTERN = /not recognized as an internal or external command|command not found|no such file or directory/i;
+const SHELL_MISSING_COMMAND_PATTERN = /^(?:[^:\r\n]*\/)?(?:sh|bash):\s*(?:(?:line\s+)?\d+:\s*)?[^:\r\n]+:\s*(?:command not found|not found)\s*$|^(?:zsh:\s*)?(?:(?:line\s+)?\d+:\s*)?command not found:\s*\S+\s*$|^['"][^'"\r\n]+['"] is not recognized as an internal or external command\b/im;
 /** Run one feedback command on the current tree and fingerprint its failures. */
 export function runFeedbackCommand(command, directory) {
     try {
@@ -353,11 +353,34 @@ export function runFeedbackCommand(command, directory) {
             maxBuffer: 32 * 1024 * 1024,
         });
         const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
-        const unrunnable = Boolean(result.error) || (result.status !== 0 && UNRUNNABLE_PATTERN.test(output));
-        return { signatures: unrunnable ? [] : signatureLines(output), ...(unrunnable ? { unrunnable: true } : {}) };
+        const errorCode = result.error && 'code' in result.error && typeof result.error.code === 'string'
+            ? result.error.code
+            : undefined;
+        // spawnSync also reports errors after a child ran (for example, ETIMEDOUT); pid 0 means no child started.
+        const failedToSpawn = Boolean(result.error) && result.pid === 0;
+        const outputWithExecutionError = errorCode && errorCode !== 'ENOENT'
+            ? `${output}\nCommand execution failed: ${errorCode}`
+            : output;
+        const signatures = signatureLines(outputWithExecutionError);
+        const hasShellMissingCommand = SHELL_MISSING_COMMAND_PATTERN.test(output);
+        const otherSignatures = hasShellMissingCommand
+            ? signatureLines(output.split(/\r?\n/).filter((line) => (!SHELL_MISSING_COMMAND_PATTERN.test(line)
+                && !/^>\s/.test(line)
+                && !/^operable program or batch file\.?$/i.test(line))).join('\n'))
+            : signatures;
+        const unrunnable = failedToSpawn
+            || result.status === 126
+            || result.status === 127
+            || (!result.error && hasShellMissingCommand && otherSignatures.length === 0);
+        return { signatures: unrunnable ? [] : signatures, ...(unrunnable ? { unrunnable: true } : {}) };
     }
-    catch {
-        return { signatures: [], unrunnable: true };
+    catch (error) {
+        const errorCode = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
+            ? error.code
+            : undefined;
+        return errorCode === 'ENOENT'
+            ? { signatures: [], unrunnable: true }
+            : { signatures: [`Command execution failed: ${errorCode ?? 'unknown'}`] };
     }
 }
 /** The verify action, extracted so tests can drive it directly. Exit code is the contract. */
@@ -397,7 +420,7 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
     if (commands.length === 0) {
         const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
         if (options.json)
-            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: false, commands: [], newFailures: [], resolvedFailures: [], note: message }));
+            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: false, commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
         else
             console.log(`ralph verify: ${message}`);
         return 0;
@@ -405,11 +428,12 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
     const current = {};
     for (const command of commands)
         current[command] = runFeedbackCommand(command, directory);
+    const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
     if (options.writeBaseline) {
         const written = path ? writeBaseline(path, current, now) : false;
         const note = written ? `baseline recorded at ${path}` : 'could not write a baseline (no session id; pass --session)';
         if (options.json)
-            console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])) }));
+            console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
         else
             console.log(`ralph verify: ${note}`);
         return written ? 0 : 1;
@@ -417,7 +441,7 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
     const baseline = path ? readBaseline(path) : null;
     const diff = diffAgainstBaseline(baseline, current);
     if (options.json) {
-        console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures }));
+        console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands }));
         return diff.newSignatures.length > 0 ? 1 : 0;
     }
     if (!baseline) {
@@ -431,6 +455,13 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
         for (const signature of diff.newSignatures)
             console.log(`  new: ${signature}`);
         return 1;
+    }
+    const stillUnrunnable = unrunnableCommands.filter((command) => baseline?.commands[command]?.unrunnable);
+    if (stillUnrunnable.length > 0) {
+        console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
+        for (const command of stillUnrunnable)
+            console.log(`  unavailable: ${command}`);
+        return 0;
     }
     const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : '';
     console.log(`ralph verify: clean vs baseline${note}`);

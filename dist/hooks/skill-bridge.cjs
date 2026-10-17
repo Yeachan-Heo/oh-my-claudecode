@@ -1017,9 +1017,50 @@ var ForeignWorkingDirectoryError = class extends Error {
   }
 };
 
+// scripts/lib/utf8-bom.mjs
+function stripLeadingUtf8Bom(content) {
+  return content.startsWith("\uFEFF") ? content.slice(1) : content;
+}
+
+// src/utils/frontmatter.ts
+function unquoteYamlScalar(value) {
+  if (value.startsWith('"') && value.endsWith('"')) return value.slice(1, -1);
+  if (value.startsWith("'") && value.endsWith("'"))
+    return value.slice(1, -1).replace(/''/g, "'");
+  return value;
+}
+function splitFlowSequenceItems(inner) {
+  const items = [];
+  let current = "";
+  let quote = null;
+  for (let i = 0; i < inner.length; i++) {
+    const char = inner[i];
+    if (quote) {
+      current += char;
+      if (quote === '"' && char === "\\" && i + 1 < inner.length) {
+        current += inner[++i];
+      } else if (quote === "'" && char === "'" && inner[i + 1] === "'") {
+        current += inner[++i];
+      } else if (char === quote) {
+        quote = null;
+      }
+    } else if ((char === '"' || char === "'") && current.trim() === "") {
+      quote = char;
+      current += char;
+    } else if (char === ",") {
+      items.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  items.push(current);
+  return items;
+}
+
 // src/hooks/learner/parser.ts
 function parseYamlMetadata(yamlContent) {
-  const lines = yamlContent.split("\n");
+  const lines = yamlContent.split(/\r?\n/);
   const metadata = {};
   let i = 0;
   while (i < lines.length) {
@@ -1083,10 +1124,8 @@ function parseYamlMetadata(yamlContent) {
 }
 function parseStringValue(value) {
   if (!value) return "";
-  if (value.startsWith('"') && value.endsWith('"') || value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1);
-  }
-  return value;
+  const unquoted = unquoteYamlScalar(value);
+  return value.startsWith('"') && value.endsWith('"') ? unquoted.replace(/\\"/g, '"') : unquoted;
 }
 function normalizeStringArray(value) {
   const values = Array.isArray(value) ? value : [value];
@@ -1098,7 +1137,7 @@ function parseArrayValue(rawValue, lines, currentIndex) {
     if (endIdx === -1) return { value: [], consumed: 1 };
     const content = rawValue.slice(1, endIdx).trim();
     if (!content) return { value: [], consumed: 1 };
-    const items = content.split(",").map((s) => parseStringValue(s.trim())).filter(Boolean);
+    const items = splitFlowSequenceItems(content).map((s) => parseStringValue(s.trim())).filter(Boolean);
     return { value: items, consumed: 1 };
   }
   if (!rawValue || rawValue === "") {
@@ -1356,7 +1395,7 @@ function findSkillFiles(projectRoot, options) {
 }
 function parseSkillFile(content) {
   const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-  const match = content.match(frontmatterRegex);
+  const match = stripLeadingUtf8Bom(content).match(frontmatterRegex);
   if (!match) {
     return {
       metadata: {},

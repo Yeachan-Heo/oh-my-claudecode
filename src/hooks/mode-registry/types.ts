@@ -10,7 +10,6 @@ export type ExecutionMode =
   | 'team'
   | 'ralph'
   | 'deep-interview'
-  | 'merge-readiness'
   | 'self-improve';
 
 export interface ModeConfig {

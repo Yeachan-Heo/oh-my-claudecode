@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getProcessStartIdentitySync } from '../../src/platform/process-utils.js';
 import { provisionStandaloneStateLockBridge } from '../../src/installer/index.js';
+import { isWorkflowRuntimeSupported, selectWorkflowProfile } from '../../scripts/lib/workflow-profile-runtime.mjs';
 import { resolveCanonicalWorkflowStagePrompt } from '../../scripts/lib/workflow-stage-prompts.mjs';
 
 
@@ -82,6 +83,29 @@ function fixture(kind) {
   }
   return { dir, home, claudeConfigDir, project, sessionId, transcript, statePath, hook };
 }
+
+it.skipIf(!isWorkflowRuntimeSupported())('allows custom workflows to use the retired merge-readiness name', () => {
+  const f = fixture('plugin');
+  const originalXdgConfigHome = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = join(f.home, 'xdg');
+
+  try {
+    const projectConfig = join(f.project, '.claude', 'omc.jsonc');
+    mkdirSync(dirname(projectConfig), { recursive: true });
+    writeFileSync(projectConfig, JSON.stringify({
+      autopilot: {
+        workflows: {
+          'merge-readiness': { version: 1, stages: ['ralplan', 'execution'] },
+        },
+      },
+    }));
+
+    expect(selectWorkflowProfile(f.project, 'merge-readiness').workflowName).toBe('merge-readiness');
+  } finally {
+    if (originalXdgConfigHome === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = originalXdgConfigHome;
+  }
+});
 
 function transcriptIdentity(path) {
   const stat = lstatSync(path, { bigint: true });

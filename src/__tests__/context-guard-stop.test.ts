@@ -127,6 +127,44 @@ describe('context-guard-stop safe recovery messaging (issue #1373)', () => {
     expect(String(out.reason)).toContain('Run /compact immediately');
   });
 
+  it.each(['abc', '', '0', '-5', '150', '95', '7.5'])(
+    'falls back to the default threshold when OMC_CONTEXT_GUARD_THRESHOLD is %j',
+    (threshold) => {
+      writeTranscriptWithContext(transcriptPath, 1000, 850); // 85%
+
+      const out = runContextGuardStopWithEnv(
+        {
+          session_id: `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          transcript_path: transcriptPath,
+          cwd: tempDir,
+          stop_reason: 'normal',
+        },
+        { OMC_CONTEXT_GUARD_THRESHOLD: threshold },
+      );
+
+      expect(out.continue).toBe(false);
+      expect(out.decision).toBe('block');
+      expect(String(out.reason)).toContain('threshold: 75%');
+    },
+  );
+
+  it('honors a valid OMC_CONTEXT_GUARD_THRESHOLD override', () => {
+    writeTranscriptWithContext(transcriptPath, 1000, 650); // 65%
+
+    const out = runContextGuardStopWithEnv(
+      {
+        session_id: `session-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        transcript_path: transcriptPath,
+        cwd: tempDir,
+        stop_reason: 'normal',
+      },
+      { OMC_CONTEXT_GUARD_THRESHOLD: '60' },
+    );
+
+    expect(out.decision).toBe('block');
+    expect(String(out.reason)).toContain('threshold: 60%');
+  });
+
   it('fails open at critical context exhaustion to avoid stop-hook deadlock', () => {
     writeTranscriptWithContext(transcriptPath, 1000, 960); // 96%
 

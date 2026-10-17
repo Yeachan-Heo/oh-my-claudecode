@@ -447,6 +447,7 @@ export function getOMCConfig() {
             notifications: config.notifications,
             notificationProfiles: config.notificationProfiles,
             hudEnabled: config.hudEnabled,
+            claudeMdEnabled: config.claudeMdEnabled,
             autoUpgradePrompt: config.autoUpgradePrompt,
             nodeBinary: config.nodeBinary,
         };
