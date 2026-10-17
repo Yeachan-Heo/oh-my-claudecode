@@ -1,13 +1,13 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-17T22:10:43.939Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "162f1e9f3bfca43af4e3addcfc1c708460cf71da",
     "sourceSha256": "5f445d2ef4c20bc630e34a1e8040a2b834cac24b09d629496d02ab3648932c98",
-    "generatedAt": null,
+    "generatedAt": "2026-10-17T22:10:43.939Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
@@ -88409,5 +88409,5 @@
     }
   },
   "inventorySha256": "bc60efcf26c91fe25e3dcf72bd78ea0f55177cf5f9124a706ef05cb8a04a3973",
-  "manifestSha256": "3559d74b8a238cd3129c42f3f738b3ca575d057ffdbea54052559c6174bfd1e9"
+  "manifestSha256": "f5bbedc8a387f5ea27788d33639e286fb045e6aa70b53d1e645e218a328abb3e"
 }
