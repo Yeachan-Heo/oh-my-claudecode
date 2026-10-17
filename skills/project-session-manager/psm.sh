@@ -320,7 +320,7 @@ cmd_review() {
       '{pr_number: $pr_number, pr_title: $pr_title, pr_author: $pr_author, pr_url: $pr_url}')
 
     # Add to registry
-    psm_add_session "$session_id" "review" "$alias" "pr-${pr_number}" "$head_branch" "$base_branch" "$session_name" "$worktree_path" "$local_path" "$metadata" "github" "${repo}#${pr_number}"
+    psm_add_session "$session_id" "review" "$alias" "pr-${pr_number}" "$head_branch" "$base_branch" "$session_name" "$worktree_path" "$local_path" "$metadata" "github" "${repo}#${pr_number}" || { log_error "Session ownership/registration failed; worktree retained."; return 1; }
 
     # Output summary
     echo ""
@@ -481,7 +481,7 @@ cmd_fix() {
       --arg issue_url "$issue_url" \
       '{issue_number: $issue_number, issue_title: $issue_title, issue_url: $issue_url}')
 
-    psm_add_session "$session_id" "fix" "$alias" "issue-${issue_number}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "$metadata" "$provider" "$provider_ref"
+    psm_add_session "$session_id" "fix" "$alias" "issue-${issue_number}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "$metadata" "$provider" "$provider_ref" || { log_error "Session ownership/registration failed; worktree retained."; return 1; }
 
     echo ""
     log_success "Session ready!"
@@ -546,7 +546,7 @@ cmd_feature() {
     local feature_prompt="Implement feature \"${feature_name}\" for project ${project}. Working branch: ${branch_name}. Build the feature, add tests, and open a PR when ready: gh pr create --title \"feat: ${feature_name}\""
     psm_launch_claude "$session_name" "$feature_prompt"
 
-    psm_add_session "$session_id" "feature" "$project" "feat-${safe_name}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "{}"
+    psm_add_session "$session_id" "feature" "$project" "feat-${safe_name}" "$branch_name" "$base" "$session_name" "$worktree_path" "$local_path" "{}" || { log_error "Session ownership/registration failed; worktree retained."; return 1; }
 
     echo ""
     log_success "Session ready!"
@@ -602,31 +602,46 @@ cmd_attach() {
 # Command: kill
 cmd_kill() {
     local session_id="$1"
+    local stop_session="${2:-true}"
 
     log_info "Killing session: $session_id"
 
     # Get session info
     local session_json
-    session_json=$(psm_get_session "$session_id")
+    session_json=$(psm_get_session "$session_id") || return 1
     if [[ -z "$session_json" ]]; then
         log_error "Session not found in registry: $session_id"
         return 1
     fi
 
-    local tmux_name=$(echo "$session_json" | jq -r '.tmux')
-    local worktree_path=$(echo "$session_json" | jq -r '.worktree')
-    local source_repo=$(echo "$session_json" | jq -r '.source_repo')
+    [[ "$(jq -er '.id' <<< "$session_json")" == "$session_id" ]] || return 1
+    local tmux_name worktree_path source_repo
+    tmux_name=$(jq -er '.tmux | strings | select(length>0)' <<< "$session_json") || return 1
+    worktree_path=$(jq -er '.worktree | strings | select(length>0)' <<< "$session_json") || return 1
+    source_repo=$(jq -er '.source_repo | strings | select(length>0)' <<< "$session_json") || return 1
 
-    # Kill tmux
-    psm_kill_tmux_session "$tmux_name"
-    log_info "Killed tmux session: $tmux_name"
+    # Automatic cleanup never stops live sessions; explicit kill still may stop
+    # its named non-current session, but does not authorize discarding work.
+    if [[ -n "${TMUX:-}" ]]; then
+        local current
+        current=$(psm_current_tmux_session) || return 1
+        [[ "$current" != "$tmux_name" ]] || { log_warn "Current session retained"; return 1; }
+    fi
+    if [[ "$stop_session" == true ]]; then
+        psm_kill_tmux_session "$tmux_name" || return 1
+        log_info "Stopped tmux session: $tmux_name"
+    fi
 
-    # Remove worktree
-    psm_remove_worktree "$source_repo" "$worktree_path"
+    if ! psm_remove_worktree "$source_repo" "$worktree_path" "$session_json"; then
+        log_warn "Worktree/session record retained: cleanup ownership, inactivity or Git safety not proven"
+        return 1
+    fi
     log_info "Removed worktree: $worktree_path"
 
-    # Remove from registry
-    psm_remove_session "$session_id"
+    # Only successful, checked Git removal permits registry deletion.
+    local cleanup_owner
+    cleanup_owner=$(jq -er '.cleanup_owner.token' <<< "$session_json") || return 1
+    psm_remove_session "$session_id" "$cleanup_owner" || return 1
     log_info "Removed from registry"
 
     log_success "Session killed: $session_id"
@@ -655,8 +670,11 @@ cmd_cleanup() {
         if [[ -n "$repo" && -n "$pr_number" ]]; then
             if provider_github_available && provider_call "github" pr_merged "$pr_number" "$repo"; then
                 log_info "PR #${pr_number} is merged - cleaning up $id"
-                cmd_kill "$id"
-                ((cleaned++))
+                if cmd_kill "$id" false; then
+                    cleaned=$((cleaned + 1))
+                else
+                    log_warn "Retained session: $id"
+                fi
             fi
         fi
     done < <(psm_get_review_sessions)
@@ -674,8 +692,11 @@ cmd_cleanup() {
             if provider_jira_available && [[ -n "$provider_ref" ]]; then
                 if provider_call "jira" issue_closed "$provider_ref"; then
                     log_info "Jira issue ${provider_ref} is done - cleaning up $id"
-                    cmd_kill "$id"
-                    ((cleaned++))
+                    if cmd_kill "$id" false; then
+                        cleaned=$((cleaned + 1))
+                    else
+                        log_warn "Retained session: $id"
+                    fi
                 fi
             fi
         else
@@ -684,8 +705,11 @@ cmd_cleanup() {
             if provider_github_available && [[ -n "$repo" && -n "$issue_number" ]]; then
                 if provider_call "github" issue_closed "$issue_number" "$repo"; then
                     log_info "Issue #${issue_number} is closed - cleaning up $id"
-                    cmd_kill "$id"
-                    ((cleaned++))
+                    if cmd_kill "$id" false; then
+                        cleaned=$((cleaned + 1))
+                    else
+                        log_warn "Retained session: $id"
+                    fi
                 fi
             fi
         fi
