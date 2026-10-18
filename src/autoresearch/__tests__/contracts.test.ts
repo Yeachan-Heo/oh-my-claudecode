@@ -46,6 +46,12 @@ describe('autoresearch contracts', () => {
     expect(single.evaluator.command).toBe('node scripts/eval.js');
   });
 
+  it('accepts a leading UTF-8 BOM before the sandbox frontmatter', () => {
+    const parsed = parseSandboxContract(`\uFEFF---\nevaluator:\n  command: node scripts/eval.js\n  format: json\n---\nStay in bounds.\n`);
+    expect(parsed.evaluator.command).toBe('node scripts/eval.js');
+    expect(parsed.body).toBe('Stay in bounds.');
+  });
+
   it('rejects sandbox contract without frontmatter', () => {
     expect(() => parseSandboxContract('No frontmatter here')).toThrow(/sandbox\.md must start with YAML frontmatter/i);
   });
