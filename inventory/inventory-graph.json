@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-18T17:20:05.417Z",
+  "generatedAt": "2026-10-18T17:37:46.683Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d6e16d1658692294c10936a61299511d4ba5b20e",
-    "sourceSha256": "a632e7352e2dd9993eab0326b531b5f89e2ee089ce7574964191cd02fb7811c6",
-    "generatedAt": "2026-10-18T17:20:05.417Z",
+    "head": "cd540aa8e8ff35f95539c12e76e7a0bb84655bd8",
+    "sourceSha256": "4fbe238ee87890d460732b146c5c145a0379a116cf83f95f8d36a4975a597e9d",
+    "generatedAt": "2026-10-18T17:37:46.683Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d6e16d1658692294c10936a61299511d4ba5b20e",
-  "sourceSha256": "a632e7352e2dd9993eab0326b531b5f89e2ee089ce7574964191cd02fb7811c6",
+  "head": "cd540aa8e8ff35f95539c12e76e7a0bb84655bd8",
+  "sourceSha256": "4fbe238ee87890d460732b146c5c145a0379a116cf83f95f8d36a4975a597e9d",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 332,
+      "hookFiles": 333,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1468,
-      "total": 1492
+      "srcFiles": 1469,
+      "total": 1493
     },
     "generated": {
       "distFiles": 5589,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 332,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -157,6 +157,7 @@
     "hookFiles": [
       "src/hooks/AGENTS.md",
       "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
+      "src/hooks/__tests__/auto-slash-namespaced.test.ts",
       "src/hooks/__tests__/background-notifications.test.ts",
       "src/hooks/__tests__/background-process-guard.test.ts",
       "src/hooks/__tests__/bridge-openclaw.test.ts",
@@ -6519,6 +6520,7 @@
     "hookFiles": [
       "src/hooks/AGENTS.md",
       "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
+      "src/hooks/__tests__/auto-slash-namespaced.test.ts",
       "src/hooks/__tests__/background-notifications.test.ts",
       "src/hooks/__tests__/background-process-guard.test.ts",
       "src/hooks/__tests__/bridge-openclaw.test.ts",
@@ -40809,6 +40811,11 @@
         "path": "src/hooks/__tests__/askuserquestion-lifecycle.test.ts"
       },
       {
+        "id": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/__tests__/auto-slash-namespaced.test.ts"
+      },
+      {
         "id": "src/hooks/__tests__/background-notifications.test.ts",
         "kind": "hook",
         "path": "src/hooks/__tests__/background-notifications.test.ts"
@@ -62379,6 +62386,16 @@
         "from": "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
         "to": "src/hooks/bridge.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "to": "src/hooks/auto-slash-command/detector.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/__tests__/background-notifications.test.ts",
@@ -88412,12 +88429,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7719,
-      "edgeCount": 8546,
-      "importEdgeCount": 7106,
+      "nodeCount": 7720,
+      "edgeCount": 8548,
+      "importEdgeCount": 7108,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "bc60efcf26c91fe25e3dcf72bd78ea0f55177cf5f9124a706ef05cb8a04a3973",
-  "manifestSha256": "f99b3153180295b6fc1aea944965274a9f429b98fcdb493a7973273a64728f58"
+  "inventorySha256": "c2d02e07c79c083d3240b2fafb5a2ace78f256f3a90a85d9f68bdaac5c3fed59",
+  "manifestSha256": "9cfe7e2fd903a859b7605b3d10132bad0909f0d5cd4a2584eeb70d58df15a1ab"
 }
