@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { loadAgentPrompt } from '../agents/utils.js';
+import { loadAgentPrompt, stripFrontmatter, extractDisallowedTools } from '../agents/utils.js';
 
 describe('loadAgentPrompt', () => {
   describe('valid agent names', () => {
@@ -85,5 +85,33 @@ describe('loadAgentPrompt', () => {
       expect(result).not.toContain('agents/');
       expect(result).not.toContain('.md');
     });
+  });
+});
+
+describe('agent frontmatter helpers', () => {
+  test('stripFrontmatter keeps the body when a frontmatter value contains ---', () => {
+    const content = '---\nname: x\ndescription: Use for a --- separator\n---\nBody text';
+    expect(stripFrontmatter(content)).toBe('Body text');
+  });
+
+  test('stripFrontmatter removes frontmatter after a UTF-8 BOM', () => {
+    expect(stripFrontmatter('﻿---\nname: x\n---\nBody text')).toBe('Body text');
+  });
+
+  test('stripFrontmatter does not treat a leading horizontal rule as frontmatter', () => {
+    expect(stripFrontmatter('---not frontmatter---\nBody')).toBe('---not frontmatter---\nBody');
+  });
+
+  test('extractDisallowedTools reads the list after a UTF-8 BOM', () => {
+    expect(extractDisallowedTools('﻿---\nname: x\ndisallowedTools: Write, Edit\n---\nBody')).toEqual(['Write', 'Edit']);
+  });
+
+  test('extractDisallowedTools ignores disallowedTools text in the body', () => {
+    expect(extractDisallowedTools('---\nname: x\n---\ndisallowedTools: Write')).toBeUndefined();
+  });
+
+  test('extractDisallowedTools reads the list when a value contains ---', () => {
+    const content = '---\ndescription: a --- b\ndisallowedTools: Write, Edit\n---\nBody';
+    expect(extractDisallowedTools(content)).toEqual(['Write', 'Edit']);
   });
 });
