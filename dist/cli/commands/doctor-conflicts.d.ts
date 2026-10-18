@@ -28,8 +28,6 @@ export interface ConflictReport {
         dirtyFiles: string[];
         exactLegacyPaths: string[];
         manualReviewPaths: string[];
-        /** True when .omc-config.json sets claudeMdEnabled to false (OMC does not manage CLAUDE.md). */
-        managementDisabled: boolean;
     } | null;
     legacySkills: {
         name: string;

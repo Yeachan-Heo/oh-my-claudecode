@@ -32,9 +32,9 @@
       "total": 1492
     },
     "generated": {
-      "distFiles": 5593,
+      "distFiles": 5589,
       "bridgeFiles": 9,
-      "total": 5602
+      "total": 5598
     },
     "prompt": {
       "promptLikeFiles": 61
@@ -2485,10 +2485,6 @@
       "dist/cli/utils/formatting.d.ts.map",
       "dist/cli/utils/formatting.js",
       "dist/cli/utils/formatting.js.map",
-      "dist/cli/utils/integer-option.d.ts",
-      "dist/cli/utils/integer-option.d.ts.map",
-      "dist/cli/utils/integer-option.js",
-      "dist/cli/utils/integer-option.js.map",
       "dist/cli/win32-warning.d.ts",
       "dist/cli/win32-warning.d.ts.map",
       "dist/cli/win32-warning.js",
@@ -15856,26 +15852,6 @@
         "id": "dist/cli/utils/formatting.js.map",
         "kind": "generated-dist",
         "path": "dist/cli/utils/formatting.js.map"
-      },
-      {
-        "id": "dist/cli/utils/integer-option.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/cli/utils/integer-option.d.ts"
-      },
-      {
-        "id": "dist/cli/utils/integer-option.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/cli/utils/integer-option.d.ts.map"
-      },
-      {
-        "id": "dist/cli/utils/integer-option.js",
-        "kind": "generated-dist",
-        "path": "dist/cli/utils/integer-option.js"
-      },
-      {
-        "id": "dist/cli/utils/integer-option.js.map",
-        "kind": "generated-dist",
-        "path": "dist/cli/utils/integer-option.js.map"
       },
       {
         "id": "dist/cli/win32-warning.d.ts",

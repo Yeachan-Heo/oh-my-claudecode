@@ -24,8 +24,6 @@ const execFileAsync = promisify(execFile);
 const TMUX_SESSION_PREFIX = 'omc-team';
 const TMUX_LIVENESS_SERVER_RECHECK_ATTEMPTS = 3;
 const TMUX_LIVENESS_SERVER_RECHECK_DELAY_MS = 20;
-const CMUX_MEMBERSHIP_RETRY_ATTEMPTS = 20;
-const CMUX_MEMBERSHIP_RETRY_INTERVAL_MS = 50;
 const defaultTmuxServerIdentityDependencies = {
     tmuxQuery: (args, options) => tmuxCmdAsync(args, options),
     processIdentity: currentStrictProcessStartIdentity,
@@ -654,19 +652,17 @@ async function cmuxSplitSurface(targetSurfaceId, direction, _cwd) {
     return { ...result, paneId };
 }
 async function cmuxSendSurface(surfaceId, text) {
-    // cmux releases expose either the dedicated command or the --surface form.
-    // Probe the CLI's actual behavior and fall back only on a dialect error;
-    // do not pin command syntax to a version string.
+    // cmux 0.64.x targets a specific surface with the dedicated
+    // `send-surface` subcommand. `cmux send --surface ...` is parsed as the
+    // focused-surface form plus an unknown option in current cmux builds, which
+    // makes worker startup fail after the split/worktree has already been
+    // created. The top-level `omc team` catch then prints generic usage and the
+    // startup rollback tears the empty worktree down. (#3325)
     await cmuxExecPrimaryWithLegacyFallback(['send-surface', '--surface', surfaceId, text], ['send', '--surface', surfaceId, text]);
 }
 function normalizeCmuxKey(key) {
     const normalized = key.trim();
     const lower = normalized.toLowerCase();
-    const controlKey = normalized.match(/^[Cc]-([A-Za-z])$/);
-    if (controlKey?.[1]) {
-        const character = controlKey[1].toLowerCase();
-        return character === 'm' ? 'enter' : `ctrl+${character}`;
-    }
     switch (lower) {
         case 'enter':
         case 'return':
@@ -685,10 +681,11 @@ function normalizeCmuxKey(key) {
     }
 }
 async function cmuxSendSurfaceKey(surfaceId, key) {
-    // See cmuxSendSurface(): older and newer cmux releases use different
-    // surface-targeting commands. Normalize tmux-style control keys for both.
+    // See cmuxSendSurface(): targeting a surface uses `send-key-surface`, not a
+    // `--surface` option on `send-key`. Key names are lower-case in the cmux CLI
+    // reference; normalize common names while leaving advanced chord strings alone.
     const normalizedKey = normalizeCmuxKey(key);
-    await cmuxExecPrimaryWithLegacyFallback(['send-key-surface', '--surface', surfaceId, normalizedKey], ['send-key', '--surface', surfaceId, normalizedKey]);
+    await cmuxExecPrimaryWithLegacyFallback(['send-key-surface', '--surface', surfaceId, normalizedKey], ['send-key', '--surface', surfaceId, key]);
 }
 async function cmuxCaptureSurface(surfaceId) {
     const result = await cmuxExecPrimaryWithLegacyFallback(['read-screen', '--surface', surfaceId], ['capture-pane', '--surface', surfaceId, '--scrollback']);
@@ -905,21 +902,6 @@ export async function verifyTeamTargetOwnership(target, dependencies = defaultMa
     catch {
         return { kind: 'unavailable' };
     }
-}
-async function verifyCmuxTargetOwnershipWithRetry(target, dependencies) {
-    let membership = await verifyTeamTargetOwnership(target, dependencies);
-    if (membership.kind === 'owned' || membership.kind === 'provider_mismatch')
-        return membership;
-    // cmux allocates a new surface before it becomes visible in list-panes.
-    // Retry the authoritative membership query rather than delaying once and
-    // assuming the new surface is ready. Each retry observes provider state.
-    for (let attempt = 1; attempt < CMUX_MEMBERSHIP_RETRY_ATTEMPTS; attempt++) {
-        await sleep(CMUX_MEMBERSHIP_RETRY_INTERVAL_MS);
-        membership = await verifyTeamTargetOwnership(target, dependencies);
-        if (membership.kind === 'owned' || membership.kind === 'provider_mismatch')
-            return membership;
-    }
-    return membership;
 }
 const defaultDirectMailboxEffectDependencies = {
     sendWorker: sendToWorker,
@@ -1320,7 +1302,7 @@ export function workerPaneShellCommand() {
     // file that the pane shell sources and removes before exec'ing the login shell.
     const inline = buildProviderEnvironment({ SHELL: shell }, process.env, process.platform, []);
     const passthrough = Object.fromEntries(Object.entries(baseline).filter(([key, value]) => inline[key] !== value));
-    const inheritedPaneEnvironment = ['TERM', 'COLORTERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE']
+    const inheritedPaneEnvironment = ['TERM', 'TMUX', 'TMUX_PANE', 'TMUX_TMPDIR', 'LANG', 'LC_ALL', 'LC_CTYPE']
         .map(key => `${key}="$${key}"`);
     const inlineAssignments = Object.entries(inline).map(([key, value]) => `${key}=${shellQuote(value)}`);
     if (Object.keys(passthrough).length === 0) {
@@ -1631,7 +1613,7 @@ export async function adoptWorkerPaneOwnership(input) {
             serverIdentityDependencies: input.serverIdentityDependencies,
         }
         : membershipDependencies;
-    const target = {
+    const membership = await verifyTeamTargetOwnership({
         provider: input.provider,
         providerTarget: input.providerTarget,
         recipient: 'worker',
@@ -1640,10 +1622,7 @@ export async function adoptWorkerPaneOwnership(input) {
         ...(input.provider === 'tmux'
             ? { tmuxServerIdentity: input.tmuxServerIdentity }
             : {}),
-    };
-    const membership = input.provider === 'cmux'
-        ? await verifyCmuxTargetOwnershipWithRetry(target, dependenciesWithIdentityProbe)
-        : await verifyTeamTargetOwnership(target, dependenciesWithIdentityProbe);
+    }, dependenciesWithIdentityProbe);
     if (membership.kind === 'foreign')
         return { ok: false, reason: 'pane_foreign' };
     if (membership.kind !== 'owned')
@@ -1654,7 +1633,7 @@ export async function adoptWorkerPaneOwnership(input) {
     };
 }
 export async function workerPaneBelongsToProviderTarget(input, dependencies = input.dependencies ?? defaultMailboxTargetOwnershipDependencies) {
-    const target = {
+    const membership = await verifyTeamTargetOwnership({
         provider: input.provider,
         providerTarget: input.providerTarget,
         recipient: 'worker',
@@ -1663,10 +1642,7 @@ export async function workerPaneBelongsToProviderTarget(input, dependencies = in
         ...(input.provider === 'tmux'
             ? { tmuxServerIdentity: input.tmuxServerIdentity }
             : {}),
-    };
-    const membership = input.provider === 'cmux'
-        ? await verifyCmuxTargetOwnershipWithRetry(target, dependencies)
-        : await verifyTeamTargetOwnership(target, dependencies);
+    }, dependencies);
     return membership.kind === 'owned';
 }
 /** Owned variant of pane membership; tmux queries never reconnect by name. */

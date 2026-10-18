@@ -2,7 +2,6 @@ import { execFileSync } from 'child_process';
 import { existsSync, realpathSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { basename, join, relative, resolve } from 'path';
-import { unquoteYamlScalar } from '../utils/frontmatter.js';
 function contractError(message) {
     return new Error(message);
 }
@@ -68,7 +67,7 @@ function parseSimpleYamlFrontmatter(frontmatter) {
             throw contractError(`Unsupported sandbox.md frontmatter line: ${trimmed}`);
         }
         const [, key, rawValue] = nestedMatch;
-        const value = unquoteYamlScalar(rawValue);
+        const value = rawValue.replace(/^['"]|['"]$/g, '');
         if (line.startsWith(' ') || line.startsWith('\t')) {
             if (!currentSection) {
                 throw contractError(`Nested sandbox.md frontmatter key requires a parent section: ${trimmed}`);
