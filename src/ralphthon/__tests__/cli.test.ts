@@ -67,16 +67,20 @@ describe("Ralphthon CLI", () => {
       expect(options.task).toBe("Build auth system");
     });
 
-    it("should ignore invalid --max-waves values", () => {
-      const options = parseRalphthonArgs(["--max-waves", "abc", "task"]);
-      expect(options.maxWaves).toBe(RALPHTHON_DEFAULTS.maxWaves);
+    it.each([
+      ["--max-waves", "abc"],
+      ["--max-waves", "5x"],
+      ["--max-waves", "2.5"],
+      ["--max-waves", "0"],
+      ["--poll-interval", "-5"],
+      ["--poll-interval", "60s"],
+      ["--poll-interval", ""],
+    ])("should reject invalid %s value %j", (flag, value) => {
+      expect(() => parseRalphthonArgs([flag, value, "task"])).toThrow(flag);
     });
 
-    it("should ignore negative --poll-interval values", () => {
-      const options = parseRalphthonArgs(["--poll-interval", "-5", "task"]);
-      expect(options.pollInterval).toBe(
-        RALPHTHON_DEFAULTS.pollIntervalMs / 1000,
-      );
+    it("should reject a missing --max-waves value", () => {
+      expect(() => parseRalphthonArgs(["--max-waves"])).toThrow("requires a value");
     });
 
     it("should ignore unknown flags", () => {
