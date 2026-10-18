@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ecfeeb5cc3f758655bfa9c0e8230b7831a4ef73d",
-    "sourceSha256": "c2224cf8b43ac66974fcba26ba57169f86f477584420f3a20051016fddee0f28",
+    "head": "ee0343ed95320bffb8191dd13aff5ca8629fe2b8",
+    "sourceSha256": "a70f98aca10ca494e06e4cea46987d74b8f0f155caba5600a38ac6e48adcebaf",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ecfeeb5cc3f758655bfa9c0e8230b7831a4ef73d",
-  "sourceSha256": "c2224cf8b43ac66974fcba26ba57169f86f477584420f3a20051016fddee0f28",
+  "head": "ee0343ed95320bffb8191dd13aff5ca8629fe2b8",
+  "sourceSha256": "a70f98aca10ca494e06e4cea46987d74b8f0f155caba5600a38ac6e48adcebaf",
   "counts": {
     "public": {
       "skills": 48,
@@ -58272,6 +58272,11 @@
       },
       {
         "from": "src/cli/commands/ralphthon.ts",
+        "to": "src/cli/utils/integer-option.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralphthon.ts",
         "to": "src/ralphthon/index.ts",
         "kind": "imports"
       },
@@ -88403,11 +88408,11 @@
     ],
     "stats": {
       "nodeCount": 7719,
-      "edgeCount": 8544,
-      "importEdgeCount": 7104,
+      "edgeCount": 8545,
+      "importEdgeCount": 7105,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "bc60efcf26c91fe25e3dcf72bd78ea0f55177cf5f9124a706ef05cb8a04a3973",
-  "manifestSha256": "f18d9752e72b6d0aefda1b5be2e172774428275abc0086934ee3a85c4b8f05b8"
+  "manifestSha256": "05c09e91ce71182e2531b89051a9b9bcf0ed0d89c588c377a3329f9308d3098f"
 }
