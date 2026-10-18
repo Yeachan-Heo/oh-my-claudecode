@@ -17,6 +17,7 @@ export type PayloadPressure = "normal" | "warning" | "critical";
 
 const COMPACT_BOUNDARY_MARKER = "compact_boundary";
 const COMPACT_BOUNDARY_MARKER_BYTES = Buffer.from(COMPACT_BOUNDARY_MARKER);
+const LOCAL_API_REQUEST_PREFIX = Buffer.from('{"type":"api-request');
 const SCAN_CHUNK_BYTES = 64 * 1024;
 const MAX_BOUNDARY_LINE_BYTES = 256 * 1024;
 
@@ -191,6 +192,54 @@ function findLastCompactBoundaryEndOffset(
   return null;
 }
 
+function countLocalApiRequestRecordBytes(
+  transcriptPath: string,
+  start: number,
+  end: number,
+): number {
+  if (end <= start) return 0;
+
+  const fd = openSync(transcriptPath, "r");
+  try {
+    const chunk = Buffer.allocUnsafe(SCAN_CHUNK_BYTES);
+    const prefix = Buffer.allocUnsafe(LOCAL_API_REQUEST_PREFIX.length);
+    let excludedBytes = 0;
+    let lineStart = start;
+
+    const countLine = (lineEndExclusive: number): void => {
+      const lineLength = lineEndExclusive - lineStart;
+      if (lineLength >= prefix.length) {
+        const bytesRead = readSync(fd, prefix, 0, prefix.length, lineStart);
+        if (
+          bytesRead === prefix.length &&
+          prefix.equals(LOCAL_API_REQUEST_PREFIX)
+        ) {
+          excludedBytes += lineLength;
+        }
+      }
+      lineStart = lineEndExclusive;
+    };
+
+    let position = start;
+    while (position < end) {
+      const length = Math.min(SCAN_CHUNK_BYTES, end - position);
+      readSync(fd, chunk, 0, length, position);
+      const view = chunk.subarray(0, length);
+      let newline = view.indexOf(0x0a);
+      while (newline !== -1) {
+        countLine(position + newline + 1);
+        newline = view.indexOf(0x0a, newline + 1);
+      }
+      position += length;
+    }
+
+    if (lineStart < end) countLine(end);
+    return excludedBytes;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function estimateTranscriptPayloadBytes(
   transcriptPath: string,
   size: number,
@@ -199,9 +248,11 @@ function estimateTranscriptPayloadBytes(
     transcriptPath,
     size,
   );
-  return boundaryEndOffset === null
-    ? size
-    : Math.max(0, size - boundaryEndOffset);
+  const start = boundaryEndOffset ?? 0;
+  return Math.max(
+    0,
+    size - start - countLocalApiRequestRecordBytes(transcriptPath, start, size),
+  );
 }
 
 export function estimatePayloadFromTranscriptPath(

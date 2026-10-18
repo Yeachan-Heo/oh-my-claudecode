@@ -10,6 +10,7 @@
  */
 
 import chalk from "chalk";
+import { integerOption } from "../utils/integer-option.js";
 import { tmuxShell } from "../../cli/tmux-utils.js";
 import { existsSync } from "fs";
 import {
@@ -62,8 +63,24 @@ Examples:
 // Argument Parsing
 // ============================================================================
 
+const parsePositiveInteger = integerOption(1);
+
+function parsePositiveIntegerFlag(flag: string, value: string | undefined): number {
+  if (value === undefined) {
+    throw new Error(`${flag} requires a value`);
+  }
+  try {
+    return parsePositiveInteger(value);
+  } catch (error) {
+    throw new Error(`${flag} ${(error as Error).message} (got "${value}")`);
+  }
+}
+
 /**
  * Parse ralphthon CLI arguments
+ *
+ * Throws when --max-waves or --poll-interval is not a positive whole number,
+ * rather than silently using the default (`5x` would otherwise parse as 5).
  */
 export function parseRalphthonArgs(args: string[]): RalphthonCliOptions {
   const options: RalphthonCliOptions = {
@@ -85,16 +102,12 @@ export function parseRalphthonArgs(args: string[]): RalphthonCliOptions {
       case "--skip-interview":
         options.skipInterview = true;
         break;
-      case "--max-waves": {
-        const val = parseInt(args[++i], 10);
-        if (!isNaN(val) && val > 0) options.maxWaves = val;
+      case "--max-waves":
+        options.maxWaves = parsePositiveIntegerFlag("--max-waves", args[++i]);
         break;
-      }
-      case "--poll-interval": {
-        const val = parseInt(args[++i], 10);
-        if (!isNaN(val) && val > 0) options.pollInterval = val;
+      case "--poll-interval":
+        options.pollInterval = parsePositiveIntegerFlag("--poll-interval", args[++i]);
         break;
-      }
       case "--help":
       case "-h":
         console.log(RALPHTHON_HELP);
@@ -297,7 +310,13 @@ function isInsideTmux(): boolean {
  * Execute the ralphthon CLI command
  */
 export async function ralphthonCommand(args: string[]): Promise<void> {
-  const options = parseRalphthonArgs(args);
+  let options: RalphthonCliOptions;
+  try {
+    options = parseRalphthonArgs(args);
+  } catch (error) {
+    console.error(chalk.red((error as Error).message));
+    process.exit(1);
+  }
   const cwd = process.cwd();
 
   // Resume mode
