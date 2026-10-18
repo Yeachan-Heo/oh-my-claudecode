@@ -3,14 +3,12 @@
  *
  * Parses YAML frontmatter from skill files.
  */
-import { escapeYamlSingleQuoted, splitFlowSequenceItems, stripLeadingUtf8Bom, unquoteYamlScalar } from '../../utils/frontmatter.js';
 /**
  * Parse skill file frontmatter and content.
  */
 export function parseSkillFile(rawContent) {
     const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-    // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
-    const match = stripLeadingUtf8Bom(rawContent).match(frontmatterRegex);
+    const match = rawContent.match(frontmatterRegex);
     if (!match) {
         return {
             metadata: {},
@@ -63,7 +61,7 @@ export function parseSkillFile(rawContent) {
  * Parse YAML metadata without external library.
  */
 export function parseYamlMetadata(yamlContent) {
-    const lines = yamlContent.split(/\r?\n/);
+    const lines = yamlContent.split('\n');
     const metadata = {};
     let i = 0;
     while (i < lines.length) {
@@ -129,10 +127,11 @@ export function parseYamlMetadata(yamlContent) {
 export function parseStringValue(value) {
     if (!value)
         return '';
-    const unquoted = unquoteYamlScalar(value);
-    // The previous learner writer stored backslashes literally inside double quotes.
-    // Preserve those values while decoding escaped quotes in handwritten YAML.
-    return value.startsWith('"') && value.endsWith('"') ? unquoted.replace(/\\"/g, '"') : unquoted;
+    if ((value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))) {
+        return value.slice(1, -1);
+    }
+    return value;
 }
 function normalizeStringArray(value) {
     const values = Array.isArray(value) ? value : [value];
@@ -147,7 +146,7 @@ export function parseArrayValue(rawValue, lines, currentIndex) {
         const content = rawValue.slice(1, endIdx).trim();
         if (!content)
             return { value: [], consumed: 1 };
-        const items = splitFlowSequenceItems(content).map(s => parseStringValue(s.trim())).filter(Boolean);
+        const items = content.split(',').map(s => parseStringValue(s.trim())).filter(Boolean);
         return { value: items, consumed: 1 };
     }
     // Multi-line array
@@ -183,14 +182,14 @@ export function parseArrayValue(rawValue, lines, currentIndex) {
 export function generateSkillFrontmatter(metadata) {
     const lines = [
         '---',
-        `id: '${escapeYamlSingleQuoted(metadata.id)}'`,
-        `name: '${escapeYamlSingleQuoted(metadata.name)}'`,
-        `description: '${escapeYamlSingleQuoted(metadata.description)}'`,
+        `id: "${metadata.id}"`,
+        `name: "${metadata.name}"`,
+        `description: "${metadata.description}"`,
         `source: ${metadata.source}`,
-        `createdAt: '${escapeYamlSingleQuoted(metadata.createdAt)}'`,
+        `createdAt: "${metadata.createdAt}"`,
     ];
     if (metadata.sessionId) {
-        lines.push(`sessionId: '${escapeYamlSingleQuoted(metadata.sessionId)}'`);
+        lines.push(`sessionId: "${metadata.sessionId}"`);
     }
     if (metadata.quality !== undefined) {
         lines.push(`quality: ${metadata.quality}`);
@@ -200,12 +199,12 @@ export function generateSkillFrontmatter(metadata) {
     }
     lines.push('triggers:');
     for (const trigger of metadata.triggers) {
-        lines.push(`  - '${escapeYamlSingleQuoted(trigger)}'`);
+        lines.push(`  - "${trigger}"`);
     }
     if (metadata.tags && metadata.tags.length > 0) {
         lines.push('tags:');
         for (const tag of metadata.tags) {
-            lines.push(`  - '${escapeYamlSingleQuoted(tag)}'`);
+            lines.push(`  - "${tag}"`);
         }
     }
     lines.push('---');

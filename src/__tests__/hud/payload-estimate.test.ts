@@ -78,6 +78,70 @@ describe("HUD payload estimate", () => {
     }
   });
 
+  it("excludes Claude Code local API request records from payload estimates", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-payload-est-"));
+    try {
+      const transcriptPath = join(dir, "transcript.jsonl");
+      const liveLine = JSON.stringify({ type: "message", content: "live" });
+      writeJsonl(transcriptPath, [
+        JSON.stringify({
+          type: "api-request",
+          params: "x".repeat(PAYLOAD_WARNING_BYTES),
+        }),
+        JSON.stringify({ type: "api-request-blob", blob: "local" }),
+        JSON.stringify({ type: "api-request-shape", shape: "local" }),
+        liveLine,
+      ]);
+
+      expect(estimatePayloadFromTranscriptPath(transcriptPath)).toMatchObject({
+        estimatedBytes: Buffer.byteLength(`${liveLine}\n`),
+        pressure: "normal",
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts ordinary transcript content that quotes the local-record prefix", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-payload-est-"));
+    try {
+      const transcriptPath = join(dir, "transcript.jsonl");
+      const quotedLine = JSON.stringify({
+        type: "message",
+        content: 'quoted text: {"type":"api-request',
+      });
+      writeJsonl(transcriptPath, [quotedLine]);
+
+      expect(
+        estimatePayloadFromTranscriptPath(transcriptPath)?.estimatedBytes,
+      ).toBe(Buffer.byteLength(`${quotedLine}\n`));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("excludes local API request records only after the latest compact boundary", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omc-payload-est-"));
+    try {
+      const transcriptPath = join(dir, "transcript.jsonl");
+      const liveLine = JSON.stringify({ type: "message", content: "live" });
+      writeFileSync(
+        transcriptPath,
+        `${JSON.stringify({ type: "message", content: "old" })}\n` +
+          `${JSON.stringify({ type: "compact_boundary" })}\n` +
+          `${JSON.stringify({ type: "api-request", params: "local" })}\n` +
+          `${liveLine}\n` +
+          JSON.stringify({ type: "api-request-blob", blob: "local" }),
+      );
+
+      expect(
+        estimatePayloadFromTranscriptPath(transcriptPath)?.estimatedBytes,
+      ).toBe(Buffer.byteLength(`${liveLine}\n`));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("does not treat message content mentioning compact_boundary as a boundary", () => {
     const dir = mkdtempSync(join(tmpdir(), "omc-payload-est-"));
     try {

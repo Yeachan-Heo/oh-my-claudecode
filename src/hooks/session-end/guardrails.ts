@@ -25,8 +25,10 @@ export const DAILY_CHAIN_LIMIT = 10;
 
 /** Read the effective daily cap: `OMC_DAILY_CHAIN_LIMIT` env override, else the default. */
 export function dailyChainLimit(): number {
-  const raw = Number(process.env.OMC_DAILY_CHAIN_LIMIT);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : DAILY_CHAIN_LIMIT;
+  // Floor before validating: a fractional override like "0.5" would otherwise
+  // floor to 0 and silently block every chain link (count >= 0 is always true).
+  const raw = Math.floor(Number(process.env.OMC_DAILY_CHAIN_LIMIT));
+  return Number.isFinite(raw) && raw >= 1 ? raw : DAILY_CHAIN_LIMIT;
 }
 
 /**

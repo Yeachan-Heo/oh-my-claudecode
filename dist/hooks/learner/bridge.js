@@ -13,7 +13,6 @@ import { homedir } from "os";
 import { OmcPaths, getOmcRoot } from "../../lib/worktree-paths.js";
 import { parseYamlMetadata } from "./parser.js";
 import { expandTriggers } from "./transliteration-map.js";
-import { stripLeadingUtf8Bom } from "../../utils/frontmatter.js";
 // Re-export constants
 export const USER_SKILLS_DIR = join(homedir(), ".claude", "skills", "omc-learned");
 export const GLOBAL_SKILLS_DIR = join(homedir(), ".omc", "skills");
@@ -319,8 +318,7 @@ export function findSkillFiles(projectRoot, options) {
  */
 export function parseSkillFile(content) {
     const frontmatterRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-    // A UTF-8 BOM (Windows editors) would otherwise hide the opening `---`.
-    const match = stripLeadingUtf8Bom(content).match(frontmatterRegex);
+    const match = content.match(frontmatterRegex);
     if (!match) {
         // No frontmatter - still valid, use filename as name
         return {

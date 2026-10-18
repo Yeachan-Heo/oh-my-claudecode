@@ -123,11 +123,7 @@ function levenshteinDistance(str1, str2) {
 function patternMatch(text, pattern) {
     // Check for glob-like patterns
     if (pattern.includes('*')) {
-        // `*` is the only wildcard; every other character is matched literally.
-        const regexPattern = pattern
-            .split('*')
-            .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-            .join('.*');
+        const regexPattern = pattern.replace(/\*/g, '.*');
         try {
             const regex = new RegExp(regexPattern, 'i');
             if (regex.test(text)) {

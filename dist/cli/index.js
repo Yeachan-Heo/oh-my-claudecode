@@ -44,7 +44,6 @@ import { factoryCommand } from './commands/factory.js';
 import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
 import { parseHudWatchInterval, runHudWatchLoop } from './hud-watch.js';
-import { integerOption } from './utils/integer-option.js';
 const version = getRuntimePackageVersion();
 /**
  * Apply a --plugin-dir option value: resolve to absolute path, warn if it
@@ -923,7 +922,7 @@ waitCmd
     .description('Start or stop the auto-resume daemon')
     .option('-v, --verbose', 'Enable verbose logging')
     .option('-f, --foreground', 'Run in foreground (blocking)')
-    .option('-i, --interval <seconds>', 'Poll interval in seconds', integerOption(1), 60)
+    .option('-i, --interval <seconds>', 'Poll interval in seconds', '60')
     .addHelpText('after', `
 Examples:
   $ omc wait daemon start            Start background daemon
@@ -938,18 +937,18 @@ Examples:
     await waitDaemonCommand(action, {
         verbose: options.verbose,
         foreground: options.foreground,
-        interval: options.interval,
+        interval: parseInt(options.interval),
     });
 });
 waitCmd
     .command('detect')
     .description('Scan for blocked Claude Code sessions in tmux')
     .option('--json', 'Output as JSON')
-    .option('-l, --lines <number>', 'Number of pane lines to analyze', integerOption(1), 15)
+    .option('-l, --lines <number>', 'Number of pane lines to analyze', '15')
     .action(async (options) => {
     await waitDetectCommand({
         json: options.json,
-        lines: options.lines,
+        lines: parseInt(options.lines),
     });
 });
 /**
@@ -1042,22 +1041,22 @@ Examples:
 sessionCmd
     .command('search <query>')
     .description('Search prior local session transcripts and OMC session artifacts')
-    .option('-l, --limit <number>', 'Maximum number of matches to return', integerOption(1), 10)
+    .option('-l, --limit <number>', 'Maximum number of matches to return', '10')
     .option('-s, --session <id>', 'Restrict search to a specific session id')
     .option('--since <duration|date>', 'Only include matches since a duration (e.g. 7d, 24h) or absolute date')
     .option('--project <scope>', 'Project scope. Defaults to current project. Use "all" to search all local projects')
     .option('--json', 'Output results as JSON')
     .option('--case-sensitive', 'Match query case-sensitively')
-    .option('--context <chars>', 'Approximate snippet context on each side of a match', integerOption(0), 120)
+    .option('--context <chars>', 'Approximate snippet context on each side of a match', '120')
     .action(async (query, options) => {
     await sessionSearchCommand(query, {
-        limit: options.limit,
+        limit: parseInt(options.limit, 10),
         session: options.session,
         since: options.since,
         project: options.project,
         json: options.json,
         caseSensitive: options.caseSensitive,
-        context: options.context,
+        context: parseInt(options.context, 10),
         workingDirectory: process.cwd(),
     });
 });
@@ -1066,14 +1065,14 @@ sessionCmd
     .description('Report local session context-bloat and operator-friction signals')
     .command('report')
     .description('Summarize local session/context bloat and friction without raw prompt content')
-    .option('-l, --limit <number>', 'Maximum number of sessions to return', integerOption(1), 10)
+    .option('-l, --limit <number>', 'Maximum number of sessions to return', '10')
     .option('-s, --session <id>', 'Restrict report to a specific session id')
     .option('--since <duration|date>', 'Only include artifacts since a duration (e.g. 7d, 24h) or absolute date')
     .option('--project <scope>', 'Project scope. Defaults to current project. Use "all" to inspect all local projects')
     .option('--json', 'Output report as JSON')
     .action(async (options) => {
     await sessionFrictionReportCommand({
-        limit: options.limit,
+        limit: parseInt(options.limit, 10),
         session: options.session,
         since: options.since,
         project: options.project,

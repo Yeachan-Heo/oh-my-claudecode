@@ -4,6 +4,7 @@ import {
   FEATURED_CONTRIBUTORS_START_MARKER,
   FEATURED_CONTRIBUTORS_TITLE,
   formatStarCount,
+  parseCliOptions,
   pickTopPersonalRepo,
   renderFeaturedContributorsSection,
   upsertFeaturedContributorsSection,
@@ -141,4 +142,16 @@ describe('featured contributors generator', () => {
     expect(formatStarCount(1500)).toBe('1.5k');
     expect(formatStarCount(12500)).toBe('13k');
   });
+
+  it('parses a valid --min-stars value', () => {
+    expect(parseCliOptions(['--min-stars=250']).minStars).toBe(250);
+    expect(parseCliOptions(['--min-stars=0']).minStars).toBe(0);
+  });
+
+  it.each(['abc', '', '-5', '1.5', '10x', 'Infinity', '1e-324', '9007199254740993'])(
+    'rejects invalid --min-stars=%s instead of silently disabling the threshold',
+    (value) => {
+      expect(() => parseCliOptions([`--min-stars=${value}`])).toThrow(/Invalid --min-stars/);
+    },
+  );
 });
