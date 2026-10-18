@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-18T17:23:44.954Z",
+  "generatedAt": null,
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "427d328e5126a0c60ea1bdbf4ed9be92f13b4868",
-    "sourceSha256": "88ee3c033adeab403fa216b7d43474dac5a1456c3720326bac0f88209e83723f",
-    "generatedAt": "2026-10-18T17:23:44.954Z",
+    "head": "d6e16d1658692294c10936a61299511d4ba5b20e",
+    "sourceSha256": "4528f3b6da6c025c2e2ae72a7a676a002bea19ff686466606de13b15995845af",
+    "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "427d328e5126a0c60ea1bdbf4ed9be92f13b4868",
-  "sourceSha256": "88ee3c033adeab403fa216b7d43474dac5a1456c3720326bac0f88209e83723f",
+  "head": "d6e16d1658692294c10936a61299511d4ba5b20e",
+  "sourceSha256": "4528f3b6da6c025c2e2ae72a7a676a002bea19ff686466606de13b15995845af",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 332,
+      "hookFiles": 333,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1468,
-      "total": 1492
+      "srcFiles": 1469,
+      "total": 1493
     },
     "generated": {
       "distFiles": 5589,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 332,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -157,6 +157,7 @@
     "hookFiles": [
       "src/hooks/AGENTS.md",
       "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
+      "src/hooks/__tests__/auto-slash-namespaced.test.ts",
       "src/hooks/__tests__/background-notifications.test.ts",
       "src/hooks/__tests__/background-process-guard.test.ts",
       "src/hooks/__tests__/bridge-openclaw.test.ts",
@@ -6519,6 +6520,7 @@
     "hookFiles": [
       "src/hooks/AGENTS.md",
       "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
+      "src/hooks/__tests__/auto-slash-namespaced.test.ts",
       "src/hooks/__tests__/background-notifications.test.ts",
       "src/hooks/__tests__/background-process-guard.test.ts",
       "src/hooks/__tests__/bridge-openclaw.test.ts",
@@ -40809,6 +40811,11 @@
         "path": "src/hooks/__tests__/askuserquestion-lifecycle.test.ts"
       },
       {
+        "id": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/__tests__/auto-slash-namespaced.test.ts"
+      },
+      {
         "id": "src/hooks/__tests__/background-notifications.test.ts",
         "kind": "hook",
         "path": "src/hooks/__tests__/background-notifications.test.ts"
@@ -62374,6 +62381,16 @@
         "from": "src/hooks/__tests__/askuserquestion-lifecycle.test.ts",
         "to": "src/hooks/bridge.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/__tests__/auto-slash-namespaced.test.ts",
+        "to": "src/hooks/auto-slash-command/detector.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hooks/__tests__/background-notifications.test.ts",
@@ -88407,12 +88424,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7719,
-      "edgeCount": 8545,
-      "importEdgeCount": 7105,
+      "nodeCount": 7720,
+      "edgeCount": 8547,
+      "importEdgeCount": 7107,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "bc60efcf26c91fe25e3dcf72bd78ea0f55177cf5f9124a706ef05cb8a04a3973",
-  "manifestSha256": "b1358429e98b1716b59d545fb8cfc06ef6c8add767eb1b2e76a095f27da00dea"
+  "inventorySha256": "c2d02e07c79c083d3240b2fafb5a2ace78f256f3a90a85d9f68bdaac5c3fed59",
+  "manifestSha256": "01f0cb5fafedd56224138e0f40c569960957648f79a440c5070fc81f9a88a077"
 }
