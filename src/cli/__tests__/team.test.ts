@@ -556,6 +556,17 @@ describe('team cli', () => {
     logSpy.mockRestore();
   });
 
+  it.each(['3x', '2.5', 'abc'])('teamCommand start rejects non-integer --count %j', async (value) => {
+    const cwd = makeProject('omc-team-cli-bad-count-');
+    const { teamCommand } = await import('../team.js');
+    await expect(teamCommand([
+      'start', '--agent', 'gemini', '--count', value,
+      '--task', 'lint all modules', '--name', 'lint-team', '--cwd', cwd, '--json',
+    ])).rejects.toThrow('Invalid --count value');
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
   it('teamCommand start --agent antigravity --count expands antigravity worker types', async () => {
     const write = vi.fn();
     const end = vi.fn();
