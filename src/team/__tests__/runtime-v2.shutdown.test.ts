@@ -20,6 +20,7 @@ import * as processIdentityLockModule from '../process-identity-lock.js';
 import { resolveRuntimeCliPath } from '../runtime-owner-client.js';
 import { absPath, TeamPaths, teamStateRoot } from '../state-paths.js';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { readShutdownAck } from '../monitor.js';
 
 const TEAM_INSTANCE_ID = '11111111-1111-4111-8111-111111111111';
 const REPLACEMENT_INSTANCE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -130,6 +131,57 @@ async function prepareAcceptedLaunch(cwd: string, teamName: string, workerName: 
   }
   return attempt;
 }
+
+describe('readShutdownAck validation', () => {
+  let cwd: string;
+  const requestedAt = '2026-01-01T00:00:00.000Z';
+
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), 'omc-monitor-shutdown-ack-'));
+    vi.stubEnv('OMC_STATE_DIR', join(cwd, 'omc-state'));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['missing file', undefined, undefined, false],
+    ['valid legacy', { status: 'accept' }, undefined, true],
+    ['valid legacy reject', { status: 'reject' }, undefined, true],
+    ['valid extra field', { status: 'accept', source: 'legacy' }, undefined, true],
+    ['valid timestamped', { status: 'reject', reason: 'still working', updated_at: requestedAt }, undefined, true],
+    ['malformed JSON', '{', undefined, false],
+    ['null', null, undefined, false],
+    ['array', [], undefined, false],
+    ['primitive', 1, undefined, false],
+    ['missing status', {}, undefined, false],
+    ['unknown status', { status: 'pending' }, undefined, false],
+    ['non-string reason', { status: 'accept', reason: 1 }, undefined, false],
+    ['null updated_at', { status: 'accept', updated_at: null }, undefined, false],
+    ['numeric updated_at', { status: 'accept', updated_at: 1 }, undefined, false],
+    ['empty updated_at', { status: 'accept', updated_at: '' }, undefined, false],
+    ['invalid updated_at', { status: 'accept', updated_at: 'not-a-date' }, undefined, false],
+    ['missing fresh timestamp', { status: 'reject' }, requestedAt, false],
+    ['stale timestamp', { status: 'reject', updated_at: '2025-12-31T23:59:59.999Z' }, requestedAt, false],
+    ['equal timestamp', { status: 'accept', updated_at: requestedAt }, requestedAt, true],
+    ['equal timezone timestamp', { status: 'accept', updated_at: '2025-12-31T19:00:00.000-05:00' }, requestedAt, true],
+    ['newer timestamp', { status: 'reject', updated_at: '2026-01-01T00:00:00.001Z' }, requestedAt, true],
+    ['stale timezone timestamp', { status: 'reject', updated_at: '2026-01-01T01:59:59.999+02:00' }, requestedAt, false],
+    ['invalid fresh timestamp', { status: 'accept', updated_at: 'not-a-date' }, requestedAt, false],
+    ['empty requestedAfter', { status: 'accept', updated_at: requestedAt }, '', false],
+    ['invalid requestedAfter', { status: 'accept', updated_at: requestedAt }, 'not-a-date', false],
+  ])('validates %s', async (_label, value, requestedAfter, accepted) => {
+    if (value !== undefined) {
+      const path = absPath(cwd, TeamPaths.shutdownAck('shutdown-ack-team', 'worker-1'));
+      mkdirSync(join(path, '..'), { recursive: true });
+      writeFileSync(path, typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
+    }
+    await expect(readShutdownAck('shutdown-ack-team', 'worker-1', cwd, requestedAfter))
+      .resolves.toStrictEqual(accepted ? value : null);
+  });
+});
 
 describe('shutdownTeamV2 detached worktree cleanup', () => {
   let repoDir: string;
