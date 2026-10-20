@@ -123,3 +123,16 @@ describe('workflow runtime JSONC parser parity', () => {
     },
   );
 });
+
+
+describe('agent model hook JSONC parity', () => {
+  it.each([
+    '{"agents":{"executor":{"model":"sonnet",},},}',
+    '{"agents":{"executor":{"model":"sonnet",/* next */},},}',
+    '{"items":["literal,}", "escaped\\\"quote",],}',
+  ])('accepts supported JSONC without changing string contents: %s', async (input) => {
+    const runtimePath = '../../../scripts/lib/agent-model-config.mjs';
+    const runtime: { stripJsoncComments(content: string): string } = await import(runtimePath);
+    expect(JSON.parse(runtime.stripJsoncComments(input))).toEqual(parseJsonc(input));
+  });
+});
