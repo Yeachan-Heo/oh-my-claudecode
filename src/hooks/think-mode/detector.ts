@@ -82,7 +82,32 @@ const MULTILINGUAL_KEYWORDS = [
  * ('सोचना') do the same; and Han, Hiragana, Katakana, Hangul and Thai run words
  * together with no separator at all.
  */
-const ANCHORED_SCRIPTS = /\p{Script=Latin}/u;
+/**
+ * Keywords that occur inside ordinary English words, so a substring match on them is
+ * a false positive. Measured against the 235,976-entry system word list: 'pensa'
+ * appears inside 53 English words ("compensate", "dispensary"), 'pense' inside 35
+ * ("expense", "suspense", "prepense"), 'penser' inside 11 ("dispenser"), 'repense'
+ * inside two ("prepense", "prepensely"), and 'pensar', 'denk' and 'gruble' inside one
+ * each ("dispensary", "goldenknop", "grubless").
+ *
+ * Re-derive after adding a Latin keyword: a new stem that occurs inside an English
+ * word belongs here, or it will fire on English prose.
+ *
+ * Nothing else needs anchoring, and anchoring more has repeatedly cost ordinary
+ * requests: 'denken' occurs inside no English word at all, so requiring a word start
+ * for it silently disabled every German prefixed form -- 'bedenken', 'umdenken',
+ * 'nachdenken', 'überdenken' -- one productive prefix at a time. Leaving it as a
+ * substring covers them all without a per-prefix list.
+ */
+const ENGLISH_COLLIDING_KEYWORDS = new Set([
+  'pensa',
+  'pensar',
+  'pense',
+  'penser',
+  'repense',
+  'denk',
+  'gruble',
+]);
 
 /** Escape a keyword so that regex metacharacters match literally. */
 function escapeRegExp(value: string): string {
@@ -90,7 +115,11 @@ function escapeRegExp(value: string): string {
 }
 
 const UNICODE_WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
-const LATIN_WORD_CHARACTER_CLASS = String.raw`[\p{Script=Latin}\p{M}\p{N}_]`;
+// Script_Extensions=Latin covers the combining marks actually used with Latin text
+// while excluding marks belonging to other scripts. A bare \p{M} counted a Devanagari
+// matra, a Thai mark, an NFD Japanese mark or an emoji variation selector as Latin
+// adjacency, which suppressed the boundary in 'कृपयाthinkकरें', 'นี่thinkให้ลึกๆ' and '❤️think'.
+const LATIN_WORD_CHARACTER_CLASS = String.raw`[\p{Script_Extensions=Latin}\p{N}_]`;
 
 /** Build a case-insensitive matcher that requires a Unicode-aware word start. */
 function buildWordStartPattern(keyword: string): RegExp {
@@ -131,9 +160,8 @@ const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
  * loses ordinary requests on either side.
  */
 function buildKeywordPattern(keyword: string): RegExp {
-  const escaped = escapeRegExp(keyword);
-  if (!ANCHORED_SCRIPTS.test(keyword)) {
-    return new RegExp(escaped, 'iu');
+  if (!ENGLISH_COLLIDING_KEYWORDS.has(keyword.toLowerCase())) {
+    return new RegExp(escapeRegExp(keyword), 'iu');
   }
   return buildWordStartPattern(keyword);
 }

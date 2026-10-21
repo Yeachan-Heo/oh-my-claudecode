@@ -187,6 +187,37 @@ World`);
         expect(detectThinkKeyword('denken, bitte')).toBe(true);
       });
 
+      it('should match a German keyword behind any productive prefix', () => {
+        // 'denken' occurs inside no English word, so it is not anchored and every
+        // prefixed form works without a per-prefix list.
+        expect(detectThinkKeyword('Bitte bedenken Sie diese Risiken')).toBe(true);
+        expect(detectThinkKeyword('Bitte umdenken und neu entwerfen')).toBe(true);
+      });
+
+      it('should reject an English word that embeds an anchored stem', () => {
+        expect(detectThinkKeyword('a prepense plan')).toBe(false);
+        expect(detectThinkKeyword('the goldenknop flower')).toBe(false);
+      });
+
+      it('documents that a word-initial collision still matches', () => {
+        // A word start is the only anchor, so an English word that *begins* with a
+        // keyword cannot be excluded: 'grubless' starts with 'gruble' and 'pensacola'
+        // with 'pensa'. Requiring a trailing boundary too would break every stem that
+        // takes a suffix, so these stay as known false positives rather than being
+        // traded for a much larger regression.
+        expect(detectThinkKeyword('a grubless afternoon')).toBe(true);
+        expect(detectThinkKeyword('pensacola is a city')).toBe(true);
+      });
+
+      it('should treat a non-Latin combining mark as an English word boundary', () => {
+        // Script_Extensions=Latin excludes marks belonging to other scripts, so an
+        // unspaced prompt keeps triggering on the English keyword.
+        expect(detectThinkKeyword('\u0915\u0943\u092a\u092f\u093ethink\u0915\u0930\u0947\u0902')).toBe(true);
+        expect(detectThinkKeyword('\u0e19\u0e35\u0e48think\u0e43\u0e2b\u0e49\u0e25\u0e36\u0e01\u0e46')).toBe(true);
+        expect(detectThinkKeyword('\u304cthink\u3057\u3066'.normalize('NFD'))).toBe(true);
+        expect(detectThinkKeyword('\u2764\ufe0fthink')).toBe(true);
+      });
+
       it('should keep matching keywords that carry an attached clitic or affix', () => {
         // Arabic definite article: ال + تفكير
         expect(detectThinkKeyword('يرجى التفكير بعمق')).toBe(true);
