@@ -100,7 +100,10 @@ const LETTER_MARK = String.raw`(?:(?![${EMOJI_MARKS}])\p{M})`;
 // A word character for the anchored multilingual stems. Emoji presentation marks are
 // excluded for the same reason as above: '\u{2764}\u{FE0F}pense profundamente' must still
 // activate.
-const UNICODE_WORD_CHARACTER_CLASS = String.raw`(?:[\p{L}\p{N}_]|${LETTER_MARK})`;
+// \p{Nd} rather than \p{N}: a decimal digit next to a stem really is word adjacency,
+// but Number-Other and Number-Letter code points are list markers, not identifier text.
+// '\u{2460}Pense profundamente' and a roman-numeral list item must still activate.
+const UNICODE_WORD_CHARACTER_CLASS = String.raw`(?:[\p{L}\p{Nd}_]|${LETTER_MARK})`;
 // A Latin grapheme next to the keyword, rather than a Latin code point.
 //
 // Every earlier attempt asked the wrong question of a single character class.

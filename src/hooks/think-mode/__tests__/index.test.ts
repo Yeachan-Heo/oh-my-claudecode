@@ -256,6 +256,16 @@ World`);
         expect(detectThinkKeyword('\u0439think')).toBe(true);
       });
 
+      it('should treat an enclosed or letter number as a boundary', () => {
+        // A decimal digit beside a stem is word adjacency, but Number-Other and
+        // Number-Letter code points are list markers.
+        expect(detectThinkKeyword('\u2460Pense profundamente')).toBe(true);
+        expect(detectThinkKeyword('\u2170pense')).toBe(true);
+        expect(detectThinkKeyword('\u2460think')).toBe(true);
+        // A real digit still counts as adjacency.
+        expect(detectThinkKeyword('1pense')).toBe(false);
+      });
+
       it('should treat an emoji presentation mark as a boundary', () => {
         // Variation selectors and the enclosing keycap belong to the emoji, not to a
         // letter. Traversing them would find the ASCII '1' inside a keycap, or read
