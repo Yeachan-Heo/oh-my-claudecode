@@ -217,6 +217,26 @@ World`);
         expect(detectThinkKeyword('Bitte umdenke das')).toBe(true);
       });
 
+      it('should match a French keyword behind another productive prefix', () => {
+        // Each allowed prefix was checked against the system word list: none of them
+        // followed by an anchored stem begins an English word. The unaccented 'pre' is
+        // excluded, since it would admit "prepense".
+        expect(detectThinkKeyword('Pr\u00e9penser les cas limites en amont')).toBe(true);
+        expect(detectThinkKeyword('Arr\u00eate de surpenser cette d\u00e9cision')).toBe(true);
+      });
+
+      it('should still reject the words the anchor exists for', () => {
+        // English collisions the anchor suppresses.
+        expect(detectThinkKeyword('a prepense plan')).toBe(false);
+        expect(detectThinkKeyword('prepensely odd')).toBe(false);
+        expect(detectThinkKeyword('a fair recompense for the work')).toBe(false);
+        // French words that embed a stem but do not mean "think". 'dé' is excluded from
+        // the prefix allowance for exactly this reason.
+        expect(detectThinkKeyword('d\u00e9penser')).toBe(false);
+        expect(detectThinkKeyword('compenser')).toBe(false);
+        expect(detectThinkKeyword('r\u00e9compenser')).toBe(false);
+      });
+
       it('should match Romance conjugations behind a re/ri prefix', () => {
         expect(detectThinkKeyword('Devemos repensamos isso')).toBe(true);
         expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);

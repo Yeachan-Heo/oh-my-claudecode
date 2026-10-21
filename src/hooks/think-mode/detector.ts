@@ -68,6 +68,20 @@ const MULTILINGUAL_KEYWORDS = [
 ];
 
 /**
+ * Productive prefixes that may precede an anchored stem at a word start.
+ *
+ * Each was checked twice. Against the system word list, no English word begins with any
+ * of these followed by an anchored stem. And against French, where the stems live: the
+ * allowance must not admit a word that is not about thinking.
+ *
+ * Two near-misses are deliberately absent. The unaccented 'pre' would admit "prepense"
+ * and "prepensely", the very collision the anchor exists to suppress; French writes that
+ * prefix with an accent, so 'pré' is safe while 'pre' is not. And 'dé' would admit
+ * 'dépenser', which means to spend, not to think.
+ */
+const ROMANCE_PREFIXES = 're|ri|pré|sur';
+
+/**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
  * included because it occurs inside "prepense" and "prepensely".
  *
@@ -141,7 +155,7 @@ function buildKeywordPattern(keyword: string): RegExp {
     return new RegExp(escapeRegExp(keyword), 'iu');
   }
   return new RegExp(
-    `(?<!${UNICODE_WORD_CHARACTER_CLASS})(?:re|ri)?${escapeRegExp(keyword)}`,
+    `(?<!${UNICODE_WORD_CHARACTER_CLASS})(?:${ROMANCE_PREFIXES})?${escapeRegExp(keyword)}`,
     'iu',
   );
 }
