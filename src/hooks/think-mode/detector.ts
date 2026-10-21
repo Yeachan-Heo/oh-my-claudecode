@@ -68,36 +68,10 @@ const MULTILINGUAL_KEYWORDS = [
 ];
 
 /**
- * Keywords whose script can collide with English prose.
- *
- * Only Latin qualifies, and only Latin needs it: every observed false positive is a
- * Latin keyword sitting inside an English word, where Portuguese 'pense' fires inside
- * "expense" and Italian 'pensa' inside "compensate". A keyword in any other script
- * cannot occur inside a Latin word at all.
- *
- * Every other script keeps substring matching, because anchoring it loses ordinary
- * requests. Arabic and Hebrew attach clitics directly to the word, so the Arabic
- * definite article in 'التفكير' and the Hebrew conjunction in 'ולחשוב' sit exactly where
- * a boundary expects a separator; Russian prefixes ('обдумать') and Hindi suffixes
- * ('सोचना') do the same; and Han, Hiragana, Katakana, Hangul and Thai run words
- * together with no separator at all.
- */
-/**
- * Keywords that occur inside ordinary English words, so a substring match on them is
- * a false positive. Measured against the 235,976-entry system word list: 'pensa'
- * appears inside 53 English words ("compensate", "dispensary"), 'pense' inside 35
- * ("expense", "suspense", "prepense"), 'penser' inside 11 ("dispenser"), 'repense'
- * inside two ("prepense", "prepensely"), and 'pensar', 'denk' and 'gruble' inside one
- * each ("dispensary", "goldenknop", "grubless").
- *
- * Re-derive after adding a Latin keyword: a new stem that occurs inside an English
- * word belongs here, or it will fire on English prose.
- *
- * Nothing else needs anchoring, and anchoring more has repeatedly cost ordinary
- * requests: 'denken' occurs inside no English word at all, so requiring a word start
- * for it silently disabled every German prefixed form -- 'bedenken', 'umdenken',
- * 'nachdenken', 'überdenken' -- one productive prefix at a time. Leaving it as a
- * substring covers them all without a per-prefix list.
+ * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
+ * included because it occurs inside "prepense" and "prepensely". 'denk' is deliberately
+ * omitted: its rare hit in "goldenknop" is not worth rejecting common German forms such
+ * as "bedenke", "umdenken" and "überdenken".
  */
 const ENGLISH_COLLIDING_KEYWORDS = new Set([
   'pensa',
@@ -149,31 +123,16 @@ const ULTRATHINK_PATTERN = buildWordPattern('ultrathink');
 const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
 
 /**
- * Build a matcher for a single think keyword.
- *
- * Latin keywords must start at a word start. That is the whole of the observed
- * false-positive class, because every one of them has the keyword preceded by
- * letters -- 'pense' inside "expense", 'pensa' inside "compensate", "dispense",
- * "suspense". A trailing boundary is deliberately not required: MULTILINGUAL_KEYWORDS
- * stores stems, and the agglutinative Latin-script languages only ever write them
- * with a suffix attached, so Turkish 'dusunun', Finnish 'ajattelen' and Hungarian
- * 'gondolkodjunk' would stop matching at all.
- * Common prefixed forms are listed explicitly instead of allowing arbitrary prefixes,
- * which would reintroduce the English false positives.
- *
- * Keywords in every other script keep substring matching, because anchoring them
- * loses ordinary requests on either side.
+ * Anchor only stems that collide with English words. A word-initial 're' or 'ri' is
+ * allowed before an anchored stem for Romance conjugations; no trailing boundary is
+ * used because the multilingual keywords are stems with productive suffixes.
  */
 function buildKeywordPattern(keyword: string): RegExp {
   if (!ENGLISH_COLLIDING_KEYWORDS.has(keyword.toLowerCase())) {
     return new RegExp(escapeRegExp(keyword), 'iu');
   }
-  const start = `(?<!${UNICODE_WORD_CHARACTER_CLASS})`;
-  // An anchored stem may also follow a word-initial Romance 're'/'ri', so the
-  // conjugated prefixed forms match: 'repensons', 'repensamos', 'ripensiamo'. The
-  // 're' must itself begin the word, so "prepense" and "recompense" stay rejected.
   return new RegExp(
-    `(?:${start}|(?<=${start}[rR][eEiI]))${escapeRegExp(keyword)}`,
+    `(?<!${UNICODE_WORD_CHARACTER_CLASS})(?:re|ri)?${escapeRegExp(keyword)}`,
     'iu',
   );
 }
