@@ -71,11 +71,12 @@ const MULTILINGUAL_KEYWORDS = [
 ];
 
 /**
- * Keywords whose script writes each listed token as a standalone word.
+ * Keywords whose script can collide with English prose.
  *
  * Only Latin qualifies, and only Latin needs it: every observed false positive is a
  * Latin keyword sitting inside an English word, where Portuguese 'pense' fires inside
- * "expense" and Italian 'pensa' inside "compensate".
+ * "expense" and Italian 'pensa' inside "compensate". A keyword in any other script
+ * cannot occur inside a Latin word at all.
  *
  * Every other script keeps substring matching, because anchoring it loses ordinary
  * requests. Arabic and Hebrew attach clitics directly to the word, so the Arabic
@@ -94,16 +95,23 @@ function escapeRegExp(value: string): string {
 /**
  * Build a matcher for a single think keyword.
  *
- * Latin keywords are anchored on both sides so they only match whole words. Keywords
- * in every other script keep substring matching, because anchoring them would stop
- * ordinary requests matching at all.
+ * Latin keywords must start at a word start. That is the whole of the observed
+ * false-positive class, because every one of them has the keyword preceded by
+ * letters -- 'pense' inside "expense", 'pensa' inside "compensate", "dispense",
+ * "suspense". A trailing boundary is deliberately not required: MULTILINGUAL_KEYWORDS
+ * stores stems, and the agglutinative Latin-script languages only ever write them
+ * with a suffix attached, so Turkish 'dusunun', Finnish 'ajattelen' and Hungarian
+ * 'gondolkodjunk' would stop matching at all.
+ *
+ * Keywords in every other script keep substring matching, because anchoring them
+ * loses ordinary requests on either side.
  */
 function buildKeywordPattern(keyword: string): RegExp {
   const escaped = escapeRegExp(keyword);
   if (!ANCHORED_SCRIPTS.test(keyword)) {
     return new RegExp(escaped, 'iu');
   }
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu');
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}`, 'iu');
 }
 
 /** Combined patterns including multilingual support */

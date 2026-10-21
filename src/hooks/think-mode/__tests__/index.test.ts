@@ -134,9 +134,16 @@ World`);
         expect(detectThinkKeyword(text)).toBe(false);
       });
 
-      it('should not fire on a Latin keyword embedded in a longer word', () => {
-        expect(detectThinkKeyword('nachdenkenswert')).toBe(false);
-        expect(detectThinkKeyword('pensaremos')).toBe(false);
+      it('should match a Latin keyword that carries a suffix', () => {
+        // MULTILINGUAL_KEYWORDS stores stems, and the agglutinative Latin-script
+        // languages only ever write them with a suffix attached, so a trailing
+        // boundary would stop them matching at all.
+        expect(detectThinkKeyword('l\u00fctfen bunu d\u00fc\u015f\u00fcn\u00fcn')).toBe(true);
+        expect(detectThinkKeyword('derinlemesine d\u00fc\u015f\u00fcnelim')).toBe(true);
+        expect(detectThinkKeyword('mieti ja ajattelen t\u00e4t\u00e4')).toBe(true);
+        expect(detectThinkKeyword('gondolkodjunk ezen a probl\u00e9m\u00e1n')).toBe(true);
+        expect(detectThinkKeyword('pensaremos nisso')).toBe(true);
+        expect(detectThinkKeyword('das ist nachdenkenswert')).toBe(true);
       });
 
       it('should still match a Latin keyword delimited by punctuation', () => {
