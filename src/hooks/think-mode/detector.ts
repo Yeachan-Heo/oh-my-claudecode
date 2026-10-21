@@ -71,15 +71,20 @@ const MULTILINGUAL_KEYWORDS = [
 ];
 
 /**
- * Scripts that separate words with whitespace.
+ * Keywords whose script writes each listed token as a standalone word.
  *
- * For these a bare substring match is a false positive: Portuguese 'pense' would
- * otherwise fire inside the English word "expense". Scripts absent from this list
- * (Han, Hiragana, Katakana, Hangul, Thai) run words together, so substring matching
- * is the only thing that can match them.
+ * Only Latin qualifies, and only Latin needs it: every observed false positive is a
+ * Latin keyword sitting inside an English word, where Portuguese 'pense' fires inside
+ * "expense" and Italian 'pensa' inside "compensate".
+ *
+ * Every other script keeps substring matching, because anchoring it loses ordinary
+ * requests. Arabic and Hebrew attach clitics directly to the word, so the Arabic
+ * definite article in 'التفكير' and the Hebrew conjunction in 'ולחשוב' sit exactly where
+ * a boundary expects a separator; Russian prefixes ('обдумать') and Hindi suffixes
+ * ('सोचना') do the same; and Han, Hiragana, Katakana, Hangul and Thai run words
+ * together with no separator at all.
  */
-const WORD_DELIMITED_SCRIPTS =
-  /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Bengali}]/u;
+const ANCHORED_SCRIPTS = /\p{Script=Latin}/u;
 
 /** Escape a keyword so that regex metacharacters match literally. */
 function escapeRegExp(value: string): string {
@@ -89,13 +94,13 @@ function escapeRegExp(value: string): string {
 /**
  * Build a matcher for a single think keyword.
  *
- * Keywords written in a space-delimited script are anchored on both sides so they
- * only match whole words. Keywords in scripts without word separators keep substring
- * matching, because a boundary would stop them matching at all.
+ * Latin keywords are anchored on both sides so they only match whole words. Keywords
+ * in every other script keep substring matching, because anchoring them would stop
+ * ordinary requests matching at all.
  */
 function buildKeywordPattern(keyword: string): RegExp {
   const escaped = escapeRegExp(keyword);
-  if (!WORD_DELIMITED_SCRIPTS.test(keyword)) {
+  if (!ANCHORED_SCRIPTS.test(keyword)) {
     return new RegExp(escaped, 'iu');
   }
   return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu');

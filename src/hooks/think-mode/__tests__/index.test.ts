@@ -143,6 +143,17 @@ World`);
         expect(detectThinkKeyword('(piensa)')).toBe(true);
         expect(detectThinkKeyword('denken, bitte')).toBe(true);
       });
+
+      it('should keep matching keywords that carry an attached clitic or affix', () => {
+        // Arabic definite article: ال + تفكير
+        expect(detectThinkKeyword('يرجى التفكير بعمق')).toBe(true);
+        // Hebrew conjunction: ו + לחשוב
+        expect(detectThinkKeyword('ולחשוב על זה')).toBe(true);
+        // Russian prefix: об + думать
+        expect(detectThinkKeyword('надо обдумать это')).toBe(true);
+        // Hindi suffix: सोच + ना
+        expect(detectThinkKeyword('इसके बारे में सोचना चाहिए')).toBe(true);
+      });
     });
 
     describe('Code block exclusion', () => {
