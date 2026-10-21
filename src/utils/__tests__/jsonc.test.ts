@@ -189,3 +189,70 @@ describe('config loader reads a BOM-prefixed config file', () => {
     expect(loadJsoncFile(file)).toMatchObject({ security: { enabled: true } });
   });
 });
+
+describe('shipped hook JSONC parsers accept a leading UTF-8 BOM', () => {
+  const BOM = '﻿';
+
+  // The hook scripts are standalone CLI entry points, so their parsers cannot be
+  // imported without running main(). Lift the parser functions out of the real
+  // source and execute them, the way the workflow runtime parity test above does.
+  function mirrorParser(path: string): (content: string) => string {
+    const source = readFileSync(path, 'utf8');
+    const required = ['stripJsoncComments', 'stripComments', 'stripTrailingCommas'];
+    const blocks = [...required, 'stripBom'].flatMap((name) => {
+      const match = source.match(new RegExp(`^function ${name}\\([\\s\\S]*?\\n\\}`, 'm'));
+      if (!match) {
+        // stripBom is the helper under test; a missing required function means the
+        // extraction itself broke and the assertions below would be meaningless.
+        expect(required).not.toContain(name);
+        return [];
+      }
+      return [match[0]];
+    });
+    return runInNewContext(`${blocks.join('\n')}; stripJsoncComments`);
+  }
+
+  function inlineMirrorParser(path: string): (content: string) => string {
+    const line = readFileSync(path, 'utf8')
+      .split('\n')
+      .find((candidate) => candidate.startsWith('function stripJsonc('));
+    expect(line, `${path} must define stripJsonc() on one line`).toBeDefined();
+    return runInNewContext(`${line}; stripJsonc`);
+  }
+
+  it.each([
+    'scripts/keyword-detector.mjs',
+    'templates/hooks/keyword-detector.mjs',
+    'scripts/persistent-mode.mjs',
+    'templates/hooks/persistent-mode.mjs',
+  ])('parses a BOM-prefixed config in %s', (path) => {
+    const strip = mirrorParser(path);
+    expect(JSON.parse(strip(`${BOM}{"a":1}`))).toEqual({ a: 1 });
+    const config = `${BOM}{\n  // saved by a Windows editor\n  "keywordDetector": { "disabled": true },\n}`;
+    expect(JSON.parse(strip(config))).toEqual({ keywordDetector: { disabled: true } });
+    expect(strip('{"a":1}')).toBe('{"a":1}');
+    expect(JSON.parse(strip(`${BOM}{"a":"x${BOM}y"}`))).toEqual({ a: `x${BOM}y` });
+  });
+
+  it.each([
+    'scripts/lib/workflow-profile-runtime.mjs',
+    'templates/hooks/lib/workflow-profile-runtime.mjs',
+  ])('parses a BOM-prefixed profile in %s', (path) => {
+    const strip = inlineMirrorParser(path);
+    expect(JSON.parse(strip(`${BOM}{"version":1,}`))).toEqual({ version: 1 });
+    expect(strip('{"version":1}')).toBe('{"version":1}');
+    expect(JSON.parse(strip(`${BOM}{"name":"x${BOM}y"}`))).toEqual({ name: `x${BOM}y` });
+  });
+
+  it.each([
+    'scripts/keyword-detector.mjs',
+    'templates/hooks/keyword-detector.mjs',
+    'scripts/persistent-mode.mjs',
+    'templates/hooks/persistent-mode.mjs',
+  ])('matches the canonical parser output in %s', (path) => {
+    const strip = mirrorParser(path);
+    for (const input of [`${BOM}{"a":1,}`, '{"a":1}', `${BOM}{/*c*/"a":[1,2,],}`]) {
+      expect(strip(input)).toBe(stripJsoncComments(input));
+    }
+  });
+});
