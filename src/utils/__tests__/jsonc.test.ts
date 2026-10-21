@@ -136,3 +136,56 @@ describe('agent model hook JSONC parity', () => {
     expect(JSON.parse(runtime.stripJsoncComments(input))).toEqual(parseJsonc(input));
   });
 });
+
+describe('leading UTF-8 BOM', () => {
+  const BOM = '﻿';
+
+  it('parses an object saved with a BOM', () => {
+    expect(parseJsonc(`${BOM}{"a":1}`)).toEqual({ a: 1 });
+  });
+
+  it('parses a BOM alongside comments and trailing commas', () => {
+    const input = `${BOM}{
+      // leading comment
+      "list": [1, 2,],
+      "obj": { "x": true, },
+    }`;
+    expect(parseJsonc(input)).toEqual({ list: [1, 2], obj: { x: true } });
+  });
+
+  it('strips the BOM from stripJsoncComments output', () => {
+    expect(stripJsoncComments(`${BOM}{"a":1,}`)).toBe('{"a":1}');
+  });
+
+  it('keeps a U+FEFF that is not the first character', () => {
+    expect(parseJsonc(`{"a":"x${BOM}y"}`)).toEqual({ a: `x${BOM}y` });
+    expect(parseJsonc(`${BOM}{"a":"x${BOM}y"}`)).toEqual({ a: `x${BOM}y` });
+  });
+
+  it('leaves BOM-free content unchanged', () => {
+    expect(stripJsoncComments('{"a":1}')).toBe('{"a":1}');
+  });
+
+  it('matches the agent model hook runtime for BOM input', async () => {
+    const runtimePath = '../../../scripts/lib/agent-model-config.mjs';
+    const runtime: { stripJsoncComments(content: string): string } = await import(runtimePath);
+    for (const input of [`${BOM}{"a":1}`, `${BOM}{"agents":{"executor":{"model":"sonnet",},},}`]) {
+      expect(JSON.parse(runtime.stripJsoncComments(input))).toEqual(parseJsonc(input));
+    }
+  });
+});
+
+describe('config loader reads a BOM-prefixed config file', () => {
+  it('loads .claude/omc.jsonc saved as UTF-8 with BOM', async () => {
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { loadJsoncFile } = await import('../../config/loader.js');
+
+    const dir = mkdtempSync(join(tmpdir(), 'omc-jsonc-bom-'));
+    const file = join(dir, 'omc.jsonc');
+    writeFileSync(file, '﻿{\n  // saved by a Windows editor\n  "security": { "enabled": true },\n}\n', 'utf-8');
+
+    expect(loadJsoncFile(file)).toMatchObject({ security: { enabled: true } });
+  });
+});

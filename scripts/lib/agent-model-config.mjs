@@ -146,9 +146,16 @@ export function resolveConfiguredAgentModel(subagentType, cwd) {
   return null;
 }
 
-// Keep trailing-comma support aligned with src/utils/jsonc.ts.
+// Keep BOM and trailing-comma support aligned with src/utils/jsonc.ts.
 export function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripBom(content)));
+}
+
+// Editors on Windows prepend a UTF-8 BOM when saving as "UTF-8 with BOM", and
+// readFileSync(path, 'utf-8') keeps it as the first character, where JSON.parse
+// rejects it. Only the first character is considered.
+function stripBom(content) {
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
 }
 
 function stripTrailingCommas(content) {
