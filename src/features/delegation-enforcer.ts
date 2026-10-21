@@ -14,6 +14,7 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
+import { isDebugEnabled } from '../utils/debug-flag.js';
 import { join } from 'path';
 import { getAgentDefinitions } from '../agents/definitions.js';
 import { normalizeDelegationRole } from './delegation-routing/types.js';
@@ -131,7 +132,7 @@ export interface EnforcementResult {
   injected: boolean;
   /** The model that was used */
   model: string;
-  /** Warning message (only if OMC_DEBUG=true) */
+  /** Warning message (only when OMC_DEBUG is enabled) */
   warning?: string;
 }
 
@@ -339,7 +340,7 @@ export function enforceModel(agentInput: AgentInput): EnforcementResult {
   };
 
   let warning: string | undefined;
-  if (process.env.OMC_DEBUG === 'true') {
+  if (isDebugEnabled('delegation-enforcer')) {
     const aliasNote = resolvedModel !== agentDef.model && aliasSourceModel
       ? ` (aliased from ${aliasSourceModel})`
       : '';

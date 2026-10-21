@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "27bec3883ee63e9e504f6c79f54d3a71dac015e6",
-    "sourceSha256": "e9b0e64711a3338789b7060821f5251783218898aca3d8ae4ddf7a5afa57d9c2",
+    "head": "b9cbb020ee7dac1632d05677c0a80422e6161dd1",
+    "sourceSha256": "3977f055bdf937da23acccf10cbfcd5249b9a04ed204f4002e97ef1bd029dc9b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "27bec3883ee63e9e504f6c79f54d3a71dac015e6",
-  "sourceSha256": "e9b0e64711a3338789b7060821f5251783218898aca3d8ae4ddf7a5afa57d9c2",
+  "head": "b9cbb020ee7dac1632d05677c0a80422e6161dd1",
+  "sourceSha256": "3977f055bdf937da23acccf10cbfcd5249b9a04ed204f4002e97ef1bd029dc9b",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1469,
-      "total": 1493
+      "srcFiles": 1472,
+      "total": 1496
     },
     "generated": {
       "distFiles": 5593,
@@ -45120,6 +45120,16 @@
         "path": "src/utils/__tests__/cache-occupancy.test.ts"
       },
       {
+        "id": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/debug-flag-call-sites.test.ts"
+      },
+      {
+        "id": "src/utils/__tests__/debug-flag.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/debug-flag.test.ts"
+      },
+      {
         "id": "src/utils/__tests__/encode-project-path.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/encode-project-path.test.ts"
@@ -45158,6 +45168,11 @@
         "id": "src/utils/daemon-module-path.ts",
         "kind": "src",
         "path": "src/utils/daemon-module-path.ts"
+      },
+      {
+        "id": "src/utils/debug-flag.ts",
+        "kind": "src",
+        "path": "src/utils/debug-flag.ts"
       },
       {
         "id": "src/utils/encode-project-path.ts",
@@ -60208,6 +60223,11 @@
       },
       {
         "from": "src/features/delegation-enforcer.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/delegation-enforcer.ts",
         "to": "src/utils/skininthegamebros-user.ts",
         "kind": "imports"
       },
@@ -65624,6 +65644,11 @@
       {
         "from": "src/hooks/learner/constants.ts",
         "to": "src/utils/config-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/learner/constants.ts",
+        "to": "src/utils/debug-flag.ts",
         "kind": "imports"
       },
       {
@@ -86412,6 +86437,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "src/hooks/learner/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag.test.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/utils/__tests__/encode-project-path.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -88568,12 +88618,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7726,
-      "edgeCount": 8569,
-      "importEdgeCount": 7129,
+      "nodeCount": 7729,
+      "edgeCount": 8576,
+      "importEdgeCount": 7136,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
-  "manifestSha256": "b5e42d3cd226acb44608a019f39686da4ebf04e496f5b74c4fe374fc6b7a5eb9"
+  "inventorySha256": "27a9c7fae046a5a6299d6dbe0f033840385f597fee196cf9e1b7ba940d94894c",
+  "manifestSha256": "29d9b8b72fde286d261fb9f91664ca30e0951adc3f20276247faa3bb492eca09"
 }
