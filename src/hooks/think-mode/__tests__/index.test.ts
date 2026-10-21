@@ -245,6 +245,25 @@ World`);
         expect(detectUltrathinkKeyword('Please\u202Fultrathink')).toBe(true);
       });
 
+      it('should treat an NFD non-Latin grapheme as a boundary', () => {
+        // Combining marks are Script=Inherited and take their base's script, so NFD
+        // 'ά' is alpha + U+0301 and NFD 'й' is и + U+0306. Classifying the mark alone
+        // would read it as Latin adjacency and let normalization disable think mode.
+        expect(detectThinkKeyword('\u03acthink'.normalize('NFD'))).toBe(true);
+        expect(detectThinkKeyword('\u0439think'.normalize('NFD'))).toBe(true);
+        // The composed forms behave the same way.
+        expect(detectThinkKeyword('\u03acthink')).toBe(true);
+        expect(detectThinkKeyword('\u0439think')).toBe(true);
+      });
+
+      it('should still treat an adjacent Latin grapheme as a word character', () => {
+        // Same shape, Latin base: NFD 'é' is e + U+0301, which is Latin adjacency.
+        expect(detectThinkKeyword('e\u0301think')).toBe(false);
+        expect(detectThinkKeyword('\u00e9think')).toBe(false);
+        // A trailing mark attaches to the final letter, making a different word.
+        expect(detectThinkKeyword('think\u0301')).toBe(false);
+      });
+
       it('should still treat an adjacent Latin letter or mark as a word character', () => {
         expect(detectThinkKeyword('rethinking the schema')).toBe(false);
         expect(detectThinkKeyword('e\u0301think')).toBe(false);
