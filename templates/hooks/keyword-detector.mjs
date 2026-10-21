@@ -22,6 +22,7 @@
  */
 
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { join, dirname, resolve, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -1392,10 +1393,11 @@ function getOmcUserConfigDir() {
   return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
 }
 
-// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips comments AND trailing commas)
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips a leading BOM, comments AND trailing commas)
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
+
 
 function stripComments(content) {
   let result = '';

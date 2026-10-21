@@ -11,6 +11,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { stripLeadingUtf8Bom } from './utf8-bom.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -146,10 +147,11 @@ export function resolveConfiguredAgentModel(subagentType, cwd) {
   return null;
 }
 
-// Keep trailing-comma support aligned with src/utils/jsonc.ts.
+// Keep BOM and trailing-comma support aligned with src/utils/jsonc.ts.
 export function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
+
 
 function stripTrailingCommas(content) {
   let result = '';
