@@ -693,11 +693,28 @@ function parseDiscordUserIds(envValue, configValue) {
     return [];
 }
 /** Parse an integer from a string, returning undefined for invalid/empty input. */
-function parseIntSafe(value) {
-    if (value == null || value === "")
+/**
+ * Parse a positive integer from an environment variable or a config value.
+ *
+ * parseInt stops at the first character it cannot read, so "1e3" would silently
+ * become 1 and "12abc" 12. The whole string must be a plain positive integer.
+ *
+ * Zero and negatives are rejected because both consumers treat them as degenerate
+ * rather than as "unset": pollIntervalMs feeds setTimeout, where 0 polls in a tight
+ * loop, and rateLimitPerMinute feeds a `timestamps.length >= maxPerMinute` check,
+ * where 0 is always true and silently drops every reply.
+ */
+function parsePositiveInt(value) {
+    if (typeof value === "number") {
+        return Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+    }
+    if (typeof value !== "string")
         return undefined;
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : undefined;
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed))
+        return undefined;
+    const parsed = Number(trimmed);
+    return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
 /**
  * Get reply injection configuration.
@@ -743,9 +760,13 @@ export function getReplyConfig() {
     const authorizedSlackUserIds = parseSlackUserIds(process.env.OMC_REPLY_SLACK_USER_IDS, replyRaw?.authorizedSlackUserIds);
     return {
         enabled: true,
-        pollIntervalMs: parseIntSafe(process.env.OMC_REPLY_POLL_INTERVAL_MS) ?? replyRaw?.pollIntervalMs ?? 3000,
+        pollIntervalMs: parsePositiveInt(process.env.OMC_REPLY_POLL_INTERVAL_MS) ??
+            parsePositiveInt(replyRaw?.pollIntervalMs) ??
+            3000,
         maxMessageLength: replyRaw?.maxMessageLength ?? 500,
-        rateLimitPerMinute: parseIntSafe(process.env.OMC_REPLY_RATE_LIMIT) ?? replyRaw?.rateLimitPerMinute ?? 10,
+        rateLimitPerMinute: parsePositiveInt(process.env.OMC_REPLY_RATE_LIMIT) ??
+            parsePositiveInt(replyRaw?.rateLimitPerMinute) ??
+            10,
         includePrefix: process.env.OMC_REPLY_INCLUDE_PREFIX !== "false" && (replyRaw?.includePrefix !== false),
         authorizedDiscordUserIds,
         authorizedSlackUserIds,

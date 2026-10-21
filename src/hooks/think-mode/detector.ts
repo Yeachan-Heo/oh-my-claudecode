@@ -87,7 +87,20 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const UNICODE_WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
+// Marks that belong to emoji presentation rather than to a letter: the variation
+// selectors and the enclosing keycap. They must not be traversed as part of a
+// grapheme, or an emoji becomes word adjacency and swallows the boundary --
+// '1\u{FE0F}\u{20E3}think' would find the ASCII '1' inside the keycap, and
+// '\u{2764}\u{FE0F}pense' would see U+FE0F as a word character.
+const EMOJI_MARKS = String.raw`\uFE00-\uFE0F\u20E3`;
+
+/** A combining mark that forms part of a letter, excluding emoji presentation marks. */
+const LETTER_MARK = String.raw`(?:(?![${EMOJI_MARKS}])\p{M})`;
+
+// A word character for the anchored multilingual stems. Emoji presentation marks are
+// excluded for the same reason as above: '\u{2764}\u{FE0F}pense profundamente' must still
+// activate.
+const UNICODE_WORD_CHARACTER_CLASS = String.raw`(?:[\p{L}\p{N}_]|${LETTER_MARK})`;
 // A Latin grapheme next to the keyword, rather than a Latin code point.
 //
 // Every earlier attempt asked the wrong question of a single character class.
@@ -106,7 +119,7 @@ const UNICODE_WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
 // different word) or a Latin letter, ASCII digit or underscore. ASCII digits and
 // underscore are explicit, which keeps a non-Latin digit a boundary, matching the \b
 // this replaced.
-const LATIN_GRAPHEME_BEFORE = String.raw`(?<![\p{Script=Latin}0-9_]\p{M}*)`;
+const LATIN_GRAPHEME_BEFORE = String.raw`(?<![\p{Script=Latin}0-9_]${LETTER_MARK}*)`;
 const LATIN_GRAPHEME_AFTER = String.raw`(?![\p{M}\p{Script=Latin}0-9_])`;
 
 /**

@@ -52,7 +52,7 @@ describe('context-safety hook (issues #1006, #1597)', () => {
             cwd: process.cwd(),
         });
         expect(result.exitCode).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual({ continue: true, suppressOutput: true });
+        expect(result.stdout).toBe('');
     });
     it('does NOT block ExitPlanMode even when transcript shows high context', () => {
         const dir = makeTempDir();
@@ -65,7 +65,7 @@ describe('context-safety hook (issues #1006, #1597)', () => {
             cwd: dir,
         }, { OMC_CONTEXT_SAFETY_THRESHOLD: '55' });
         expect(result.exitCode).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual({ continue: true, suppressOutput: true });
+        expect(result.stdout).toBe('');
     });
     it('allows unknown tools through without blocking', () => {
         const result = runContextSafety({
@@ -75,7 +75,7 @@ describe('context-safety hook (issues #1006, #1597)', () => {
             cwd: process.cwd(),
         });
         expect(result.exitCode).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual({ continue: true, suppressOutput: true });
+        expect(result.stdout).toBe('');
     });
 });
 describe('context-safety hook matcher', () => {

@@ -70,6 +70,14 @@ function runPreToolPayload(scriptPath, payload, env = {}) {
         env: { ...process.env, ...env },
     }));
 }
+function runPreToolPayloadRaw(scriptPath, payload, env = {}) {
+    return execFileSync('node', [provisionedTemplatePath(scriptPath)], {
+        cwd: packageRoot,
+        input: JSON.stringify(payload),
+        encoding: 'utf-8',
+        env: { ...process.env, ...env },
+    }).trim();
+}
 describe('keyword-detector packaged artifacts', () => {
     it('does not ship stale pipeline keyword handling in installer templates', () => {
         const template = KEYWORD_DETECTOR_SCRIPT_NODE;
@@ -774,6 +782,55 @@ describe('pre-tool-use packaged artifacts', () => {
         });
         expect(JSON.stringify(runPreToolHook(scriptPath, 'cat fixture.txt > src/app.js'))).toContain('Bash command may modify source files');
         expect(JSON.stringify(runPreToolHook(scriptPath, 'printf x | tee -- -generated.ts'))).toContain('Bash command may modify source files');
+    });
+    it('emits Codex-compatible PreToolUse output from the installed standalone template', () => {
+        const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');
+        const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-codex-home-'));
+        const configDir = join(fakeHome, '.claude');
+        mkdirSync(configDir, { recursive: true });
+        const env = {
+            PLUGIN_ROOT: packageRoot,
+            CLAUDE_PLUGIN_ROOT: packageRoot,
+            CLAUDE_CONFIG_DIR: configDir,
+            HOME: fakeHome,
+            USERPROFILE: fakeHome,
+        };
+        try {
+            const noOp = runPreToolPayloadRaw(templatePath, {
+                hook_event_name: 'PreToolUse',
+                turn_id: 'codex-turn-4488',
+                tool_name: 'Read',
+                tool_input: { file_path: 'README.md' },
+                cwd: packageRoot,
+            }, env);
+            expect(noOp).toBe('');
+            const advisory = JSON.parse(runPreToolPayloadRaw(templatePath, {
+                hook_event_name: 'PreToolUse',
+                turn_id: 'codex-turn-4488',
+                tool_name: 'Bash',
+                tool_input: { command: 'cat fixture.txt > src/app.js' },
+                cwd: packageRoot,
+            }, env));
+            const advisoryHookOutput = advisory.hookSpecificOutput;
+            expect(advisory).not.toHaveProperty('continue');
+            expect(advisory).not.toHaveProperty('suppressOutput');
+            expect(advisoryHookOutput.additionalContext).toContain('Bash command may modify source files');
+            const denied = JSON.parse(runPreToolPayloadRaw(templatePath, {
+                hook_event_name: 'PreToolUse',
+                turn_id: 'codex-turn-4488',
+                tool_name: 'Task',
+                tool_input: { subagent_type: 'oh-my-claudecode:ralph' },
+                cwd: packageRoot,
+            }, { ...env, OMC_TEAM_WORKER: 'worker-1' }));
+            const deniedHookOutput = denied.hookSpecificOutput;
+            expect(denied).not.toHaveProperty('continue');
+            expect(denied).not.toHaveProperty('suppressOutput');
+            expect(deniedHookOutput.permissionDecision).toBe('deny');
+            expect(deniedHookOutput.permissionDecisionReason).toContain('cannot spawn/delegate Task');
+        }
+        finally {
+            rmSync(fakeHome, { recursive: true, force: true });
+        }
     });
     it('keeps the Skill-vs-Agent guard in parity with the runtime enforcer', () => {
         const templatePath = join(packageRoot, 'templates', 'hooks', 'pre-tool-use.mjs');

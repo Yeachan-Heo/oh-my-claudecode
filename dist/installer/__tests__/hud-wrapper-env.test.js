@@ -12,11 +12,12 @@
  */
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, copyFileSync, readFileSync, existsSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { OMC_PLUGIN_ROOT_ENV } from '../../lib/env-vars.js';
+import { buildHudWrapper as buildHudWrapperTs } from '../../lib/hud-wrapper-template.js';
 const CACHE_STUB_MARKER = 'FROM_CACHE_TEST_STUB';
 const CACHE_STUB_VERSION = '0.0.0-test-stub';
 /**
@@ -32,6 +33,11 @@ function makeStubConfigDir(rootDir) {
     mkdirSync(stubDir, { recursive: true });
     writeFileSync(join(stubDir, 'index.js'), `process.stdout.write(${JSON.stringify(CACHE_STUB_MARKER + '\n')});\n`, 'utf8');
     return configDir;
+}
+function writeHudPackage(nodeModulesRoot, packageName, marker) {
+    const hudDir = join(nodeModulesRoot, packageName, 'dist', 'hud');
+    mkdirSync(hudDir, { recursive: true });
+    writeFileSync(join(hudDir, 'index.js'), `process.stdout.write(${JSON.stringify(marker + '\n')});\n`, 'utf8');
 }
 /**
  * Minimal env that scrubs PATH/NODE_PATH so the wrapper's
@@ -73,17 +79,18 @@ function stage() {
     writeFileSync(join(fakeHudDir, 'index.js'), 'process.stdout.write("FROM_OMC_PLUGIN_ROOT\\n");\n', 'utf8');
     return { dir, wrapperPath, fakePluginRoot };
 }
-function runWrapper(wrapperPath, env) {
+function runWrapper(wrapperPath, env, cwd = process.cwd(), nodeBin = process.execPath) {
     // Sanitize env: drop undefined keys.
     const finalEnv = {};
     for (const [k, v] of Object.entries(env)) {
         if (typeof v === 'string')
             finalEnv[k] = v;
     }
-    return spawnSync(process.execPath, [wrapperPath], {
+    return spawnSync(nodeBin, [wrapperPath], {
         input: STDIN_PAYLOAD,
         encoding: 'utf8',
         env: finalEnv,
+        cwd,
         timeout: 15000,
     });
 }
@@ -155,6 +162,124 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
         expect(result.stdout).toContain(CACHE_STUB_MARKER);
         expect(result.stderr ?? '').not.toMatch(/Error|throw/i);
     });
+    it('does not import an npm package from the current project node_modules', () => {
+        const s = staged;
+        const projectDir = join(s.dir, 'untrusted-project');
+        const cwd = join(projectDir, 'nested');
+        mkdirSync(cwd, { recursive: true });
+        writeHudPackage(join(cwd, 'node_modules'), 'oh-my-claude-sisyphus', 'FROM_PROJECT_NODE_MODULES');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-project-decoy'),
+        }), cwd);
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('FROM_PROJECT_NODE_MODULES');
+        expect(result.stdout).toContain('[OMC HUD] Plugin not installed.');
+    });
+    it('does not import an npm package from a parent folder node_modules', () => {
+        const s = staged;
+        const projectDir = join(s.dir, 'untrusted-project');
+        const cwd = join(projectDir, 'nested');
+        mkdirSync(cwd, { recursive: true });
+        writeHudPackage(join(projectDir, 'node_modules'), 'oh-my-claudecode', 'FROM_PARENT_NODE_MODULES');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-parent-decoy'),
+        }), cwd);
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('FROM_PARENT_NODE_MODULES');
+        expect(result.stdout).toContain('[OMC HUD] Plugin not installed.');
+    });
+    it('does not import an npm package relative to the installed HUD wrapper', () => {
+        const s = staged;
+        writeHudPackage(join(s.dir, 'node_modules'), 'oh-my-claude-sisyphus', 'FROM_WRAPPER_NODE_MODULES');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-wrapper-decoy'),
+        }));
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('FROM_WRAPPER_NODE_MODULES');
+        expect(result.stdout).toContain('[OMC HUD] Plugin not installed.');
+    });
+    it('does not treat a relative npm prefix as a project package root', () => {
+        const s = staged;
+        const projectDir = join(s.dir, 'untrusted-project');
+        const cwd = join(projectDir, 'nested');
+        mkdirSync(cwd, { recursive: true });
+        writeHudPackage(join(cwd, 'node_modules'), 'oh-my-claude-sisyphus', 'FROM_RELATIVE_PREFIX');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-relative-prefix'),
+            npm_config_prefix: '.',
+        }), cwd);
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('FROM_RELATIVE_PREFIX');
+        expect(result.stdout).toContain('[OMC HUD] Plugin not installed.');
+    });
+    it('does not trust an absolute npm_config_prefix exported by the project', () => {
+        const s = staged;
+        const projectDir = join(s.dir, 'untrusted-project');
+        const cwd = join(projectDir, 'nested');
+        const projectNpmPrefix = join(projectDir, 'npm-prefix');
+        mkdirSync(cwd, { recursive: true });
+        writeHudPackage(join(projectNpmPrefix, 'lib', 'node_modules'), 'oh-my-claude-sisyphus', 'FROM_PROJECT_NPM_CONFIG_PREFIX');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-project-prefix'),
+            npm_config_prefix: projectNpmPrefix,
+        }), cwd);
+        expect(result.status).toBe(0);
+        expect(result.stdout).not.toContain('FROM_PROJECT_NPM_CONFIG_PREFIX');
+    });
+    it('loads a global npm-prefix install and reports an earlier load failure once', () => {
+        const s = staged;
+        const pluginRoot = join(s.dir, 'broken-plugin-root');
+        const pluginHudDir = join(pluginRoot, 'dist', 'hud');
+        const globalPrefix = join(s.dir, 'global-npm-prefix');
+        const fakeHome = join(s.dir, 'global-home');
+        const globalNodeModules = process.platform === 'win32'
+            ? join(globalPrefix, 'node_modules')
+            : join(globalPrefix, 'lib', 'node_modules');
+        const failingHudPath = join(pluginHudDir, 'index.js');
+        mkdirSync(pluginHudDir, { recursive: true });
+        mkdirSync(fakeHome, { recursive: true });
+        writeFileSync(failingHudPath, 'throw new Error("plugin root import failed");\n', 'utf8');
+        writeHudPackage(globalNodeModules, 'oh-my-claude-sisyphus', 'FROM_GLOBAL_NPM_PREFIX');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-global-fallback'),
+            HOME: fakeHome,
+            USERPROFILE: fakeHome,
+            [OMC_PLUGIN_ROOT_ENV]: pluginRoot,
+            PREFIX: globalPrefix,
+        }));
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('FROM_GLOBAL_NPM_PREFIX');
+        const earlierFailureLines = result.stdout
+            .split(/\r?\n/)
+            .filter((line) => line.includes('[OMC HUD] HUD import failed'));
+        expect(earlierFailureLines).toHaveLength(1);
+        expect(earlierFailureLines[0]).toContain(failingHudPath);
+        expect(earlierFailureLines[0]).toContain('plugin root import failed');
+    });
+    it.skipIf(process.platform !== 'linux')('loads from the Node install prefix when npm is unavailable', () => {
+        const s = staged;
+        const nodePrefix = join(s.dir, 'node-install-prefix');
+        const nodeBinDir = join(nodePrefix, 'bin');
+        const nodeBin = join(nodeBinDir, 'node');
+        const projectDir = join(s.dir, 'untrusted-project');
+        const fakeHome = join(s.dir, 'home');
+        const emptyPath = join(s.dir, 'empty-path');
+        const globalNodeModules = join(nodePrefix, 'lib', 'node_modules');
+        mkdirSync(nodeBinDir, { recursive: true });
+        mkdirSync(projectDir, { recursive: true });
+        mkdirSync(fakeHome, { recursive: true });
+        mkdirSync(emptyPath, { recursive: true });
+        copyFileSync(process.execPath, nodeBin);
+        chmodSync(nodeBin, 0o755);
+        writeHudPackage(globalNodeModules, 'oh-my-claude-sisyphus', 'FROM_NODE_INSTALL_PREFIX');
+        const result = runWrapper(s.wrapperPath, scrubbedEnv({
+            PATH: emptyPath,
+            HOME: fakeHome,
+            CLAUDE_CONFIG_DIR: join(s.dir, 'isolated-config-node-prefix'),
+        }), projectDir, nodeBin);
+        expect(result.status).toBe(0);
+        expect(result.stdout).toContain('FROM_NODE_INSTALL_PREFIX');
+    });
     it('case 6: cache step is semver-aware — stable beats prerelease with same [M.m.p]', () => {
         const s = staged;
         const configDir = join(s.dir, 'isolated-config-semver');
@@ -194,23 +319,33 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
         expect(result.stdout).toContain('FROM_RC_10');
         expect(result.stdout).not.toContain('FROM_RC_2');
     });
-    it('case 8: cache step falls back to older built version when latest built version fails to import', () => {
+    it('case 8: reports a failed latest build instead of rendering an older stale HUD', () => {
         const s = staged;
         const configDir = join(s.dir, 'isolated-config-cache-fallback');
         const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
         const latestBrokenDir = join(cacheBase, '4.11.3', 'dist', 'hud');
         const olderWorkingDir = join(cacheBase, '4.11.2', 'dist', 'hud');
+        const latestFailureMessage = `Cannot find package 'zod'\n${'STACK_DETAIL '.repeat(20)}`;
+        const staleHudOutput = [
+            '[OMC#4.11.2L] -> 4.11.3 omc update',
+            '[!] omc 4.11.3 - paste: ! claude plugin update oh-my-claudecode@omc',
+        ].join('\n') + '\n';
         mkdirSync(latestBrokenDir, { recursive: true });
         mkdirSync(olderWorkingDir, { recursive: true });
-        writeFileSync(join(latestBrokenDir, 'index.js'), 'throw new Error("BROKEN_4_11_3");\n', 'utf8');
-        writeFileSync(join(olderWorkingDir, 'index.js'), 'process.stdout.write("FROM_OLDER_WORKING_VERSION\\n");\n', 'utf8');
+        writeFileSync(join(latestBrokenDir, 'index.js'), `throw new Error(${JSON.stringify(latestFailureMessage)});\n`, 'utf8');
+        writeFileSync(join(olderWorkingDir, 'index.js'), `process.stdout.write(${JSON.stringify(staleHudOutput)});\n`, 'utf8');
         const result = runWrapper(s.wrapperPath, scrubbedEnv({
             CLAUDE_CONFIG_DIR: configDir,
             // OMC_PLUGIN_ROOT intentionally omitted → cache step fires
         }));
         expect(result.status).toBe(0);
-        expect(result.stdout).toContain('FROM_OLDER_WORKING_VERSION');
-        expect(result.stderr ?? '').not.toMatch(/Error|throw/i);
+        const diagnosticLines = result.stdout.trimEnd().split(/\r?\n/);
+        expect(diagnosticLines).toHaveLength(1);
+        expect(diagnosticLines[0]).toContain("[OMC HUD] 4.11.3 failed to load: Cannot find package 'zod'");
+        expect(diagnosticLines[0].length).toBeLessThanOrEqual(150);
+        expect(result.stdout).not.toContain('omc update');
+        expect(result.stdout).not.toContain('paste:');
+        expect(result.stderr ?? '').toBe('');
     });
     it('case 5: symmetry — installer source and plugin-setup.mjs both produce identical wrapper text', async () => {
         // Both consumers must read the same byte-for-byte template body.
@@ -219,8 +354,8 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
         const tplMod = await import(
         /* @vite-ignore */ `file://${join(REPO_ROOT, 'scripts', 'lib', 'hud-wrapper-template.mjs')}`);
         const fromMjs = tplMod.buildHudWrapper();
-        // (b) installer/index.ts path: it does `readFileSync(...txt, 'utf8')` directly
-        const fromInstaller = readFileSync(TEMPLATE_TXT, 'utf8');
+        // (b) installer/index.ts path: it calls the TS template reader.
+        const fromInstaller = buildHudWrapperTs(REPO_ROOT);
         expect(fromMjs).toBe(txt);
         expect(fromInstaller).toBe(txt);
         expect(fromMjs).toBe(fromInstaller);
@@ -229,6 +364,8 @@ describe('HUD wrapper — OMC_PLUGIN_ROOT resolution', () => {
         expect(txt).not.toContain('OMC_DEV');
         expect(txt).not.toContain('Workspace/oh-my-claudecode');
         expect(txt).not.toContain('projects/oh-my-claudecode');
+        expect(txt).not.toContain('process.cwd()');
+        expect(txt).not.toContain('createRequire');
     });
     it('uses shell:true only for Windows npm root discovery', () => {
         const txt = readFileSync(TEMPLATE_TXT, 'utf8');

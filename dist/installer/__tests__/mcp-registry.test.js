@@ -352,6 +352,57 @@ describe('unified MCP registry sync', () => {
         expect(second.changed).toBe(false);
         expect(second.content).toBe(result.content);
     });
+    it('normalizes quoted TOML table keys without splitting quoted dots', () => {
+        const existingToml = [
+            '[mcp_servers . "exa"]',
+            'command = "uvx"',
+            'args = ["exa"]',
+            '',
+            "[mcp_servers . 'linear']",
+            'command = "uvx"',
+            'args = ["linear"]',
+            '',
+            '[mcp_servers."a.b"]',
+            'command = "uvx"',
+            'args = ["dotted"]',
+            '',
+        ].join('\n');
+        const result = syncCodexConfigToml(existingToml, {
+            exa: { command: 'uvx', args: ['exa'] },
+            linear: { command: 'uvx', args: ['linear'] },
+            a: { command: 'uvx', args: ['a'] },
+            'a.b': { command: 'uvx', args: ['dotted'] },
+        });
+        expect(result.content.match(/^\[mcp_servers \. "exa"\]$/gm)).toHaveLength(1);
+        expect(result.content.match(/^\[mcp_servers \. 'linear'\]$/gm)).toHaveLength(1);
+        expect(result.content.match(/^\[mcp_servers\.a\]$/gm)).toHaveLength(1);
+        expect(result.content.match(/^\[mcp_servers\."a\.b"\]$/gm)).toHaveLength(1);
+        expect(result.content).not.toContain('[mcp_servers.exa]');
+        expect(result.content).not.toContain('[mcp_servers.linear]');
+        expect(result.content).not.toContain('[mcp_servers.a.b]');
+    });
+    it('keeps quoted Codex server tables idempotent across setup syncs', () => {
+        writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify({
+            exa: { command: 'uvx', args: ['exa'] },
+        }, null, 2));
+        writeFileSync(getCodexConfigPath(), [
+            'model = "gpt-5"',
+            '',
+            '[mcp_servers."exa"]',
+            'command = "uvx"',
+            'args = ["exa"]',
+            '',
+        ].join('\n'));
+        const first = syncUnifiedMcpRegistryTargets({ theme: 'dark' });
+        const afterFirst = readFileSync(getCodexConfigPath(), 'utf-8');
+        const second = syncUnifiedMcpRegistryTargets({ theme: 'dark' });
+        const afterSecond = readFileSync(getCodexConfigPath(), 'utf-8');
+        expect(first.result.codexChanged).toBe(false);
+        expect(second.result.codexChanged).toBe(false);
+        expect(afterSecond).toBe(afterFirst);
+        expect(afterSecond.match(/^\[mcp_servers(?:\.exa|\."exa")\]$/gm)).toHaveLength(1);
+        expect(afterSecond).not.toContain('# BEGIN OMC MANAGED MCP REGISTRY');
+    });
     it('preserves an existing user-owned codex table when setup sync runs repeatedly', () => {
         writeFileSync(getUnifiedMcpRegistryPath(), JSON.stringify({
             atlassian: { command: 'uvx', args: ['mcp-atlassian'] },

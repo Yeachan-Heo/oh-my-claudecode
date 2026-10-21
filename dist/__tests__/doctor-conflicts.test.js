@@ -316,6 +316,34 @@ describe('doctor-conflicts: hook ownership classification', () => {
         delete process.env.OMC_HOME;
         delete process.env.CODEX_HOME;
     });
+    it('recognizes a quoted Codex MCP table as present in doctor conflicts', () => {
+        const registryDir = join(TEST_CLAUDE_DIR, '..', '.omc');
+        const codexDir = join(TEST_CLAUDE_DIR, '..', '.codex');
+        mkdirSync(registryDir, { recursive: true });
+        mkdirSync(codexDir, { recursive: true });
+        writeFileSync(join(registryDir, 'mcp-registry.json'), JSON.stringify({
+            exa: { command: 'uvx', args: ['exa'] },
+        }));
+        writeFileSync(process.env.CLAUDE_MCP_CONFIG_PATH, JSON.stringify({
+            mcpServers: {
+                exa: { command: 'uvx', args: ['exa'] },
+            },
+        }));
+        writeFileSync(join(codexDir, 'config.toml'), [
+            '[mcp_servers."exa"]',
+            'command = "uvx"',
+            'args = ["exa"]',
+            '',
+        ].join('\n'));
+        process.env.OMC_HOME = registryDir;
+        process.env.CODEX_HOME = codexDir;
+        const report = runConflictCheck();
+        expect(report.mcpRegistrySync.codexMissing).toEqual([]);
+        expect(report.mcpRegistrySync.codexMismatched).toEqual([]);
+        expect(report.hasConflicts).toBe(false);
+        delete process.env.OMC_HOME;
+        delete process.env.CODEX_HOME;
+    });
     it('reports mismatched Codex config.toml entries against the unified MCP registry', () => {
         const registryDir = join(TEST_CLAUDE_DIR, '..', '.omc');
         const codexDir = join(TEST_CLAUDE_DIR, '..', '.codex');

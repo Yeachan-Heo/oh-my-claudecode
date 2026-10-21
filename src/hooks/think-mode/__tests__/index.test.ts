@@ -256,6 +256,17 @@ World`);
         expect(detectThinkKeyword('\u0439think')).toBe(true);
       });
 
+      it('should treat an emoji presentation mark as a boundary', () => {
+        // Variation selectors and the enclosing keycap belong to the emoji, not to a
+        // letter. Traversing them would find the ASCII '1' inside a keycap, or read
+        // U+FE0F itself as a word character before an anchored stem.
+        expect(detectThinkKeyword('1\ufe0f\u20e3think about this')).toBe(true);
+        expect(detectThinkKeyword('#\ufe0f\u20e3think')).toBe(true);
+        expect(detectThinkKeyword('\u2764\ufe0fthink')).toBe(true);
+        expect(detectThinkKeyword('\u2764\ufe0fpense profundamente')).toBe(true);
+        expect(detectThinkKeyword('\u26a0\ufe0fpenser vite')).toBe(true);
+      });
+
       it('should still treat an adjacent Latin grapheme as a word character', () => {
         // Same shape, Latin base: NFD 'é' is e + U+0301, which is Latin adjacency.
         expect(detectThinkKeyword('e\u0301think')).toBe(false);

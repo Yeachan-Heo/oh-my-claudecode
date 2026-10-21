@@ -3132,9 +3132,11 @@ async function readShutdownAck(teamName, workerName, cwd, requestedAfter) {
   const ack = await readJsonSafe(
     absPath(cwd, TeamPaths.shutdownAck(teamName, workerName))
   );
-  if (!ack) return null;
-  if (requestedAfter && ack.updated_at) {
-    if (new Date(ack.updated_at).getTime() < new Date(requestedAfter).getTime()) {
+  if (!isRecord2(ack) || ack.status !== "accept" && ack.status !== "reject") return null;
+  if (ack.reason !== void 0 && typeof ack.reason !== "string" || ack.updated_at !== void 0 && !isTimestamp2(ack.updated_at)) return null;
+  if (requestedAfter !== void 0) {
+    if (!isTimestamp2(requestedAfter) || ack.updated_at === void 0) return null;
+    if (Date.parse(ack.updated_at) < Date.parse(requestedAfter)) {
       return null;
     }
   }
@@ -12711,7 +12713,7 @@ function parseJsonc(content) {
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 function stripComments(content) {
   let result = "";
@@ -12804,6 +12806,7 @@ function stripTrailingCommas(content) {
 var init_jsonc = __esm({
   "src/utils/jsonc.ts"() {
     "use strict";
+    init_utf8_bom();
   }
 });
 

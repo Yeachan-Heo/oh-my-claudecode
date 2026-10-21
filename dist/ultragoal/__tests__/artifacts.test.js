@@ -82,6 +82,7 @@ describe('ultragoal artifacts', () => {
             expect(instruction).toMatch(/invoke \/goal/i);
             expect(instruction).toMatch(/ask the user to type it/i);
             expect(instruction).toMatch(/does not satisfy the PreToolUse \/goal guard/i);
+            expect(instruction).toMatch(/if `omc` is not on PATH.*oh-my-claudecode\.js/i);
             expect(instruction).toMatch(/Claude \/goal = the whole ultragoal run/i);
             expect(instruction).toMatch(/same aggregate objective as active/i);
             expect(instruction).toMatch(/do not clear the \/goal yet/i);

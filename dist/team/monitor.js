@@ -764,10 +764,15 @@ export async function writeShutdownRequest(teamName, workerName, fromWorker, cwd
 }
 export async function readShutdownAck(teamName, workerName, cwd, requestedAfter) {
     const ack = await readJsonSafe(absPath(cwd, TeamPaths.shutdownAck(teamName, workerName)));
-    if (!ack)
+    if (!isRecord(ack) || (ack.status !== 'accept' && ack.status !== 'reject'))
         return null;
-    if (requestedAfter && ack.updated_at) {
-        if (new Date(ack.updated_at).getTime() < new Date(requestedAfter).getTime()) {
+    if ((ack.reason !== undefined && typeof ack.reason !== 'string')
+        || (ack.updated_at !== undefined && !isTimestamp(ack.updated_at)))
+        return null;
+    if (requestedAfter !== undefined) {
+        if (!isTimestamp(requestedAfter) || ack.updated_at === undefined)
+            return null;
+        if (Date.parse(ack.updated_at) < Date.parse(requestedAfter)) {
             return null; // Stale ack from a previous request
         }
     }
