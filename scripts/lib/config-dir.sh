@@ -4,6 +4,8 @@ resolve_claude_config_dir() {
   configured="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
   configured="${configured#${configured%%[![:space:]]*}}"
   configured="${configured%${configured##*[![:space:]]}}"
+  # Match the JS helpers: a blank override means the default directory.
+  configured="${configured:-$HOME/.claude}"
   if [ "$configured" != "/" ]; then
     configured="${configured%/}"
   fi
