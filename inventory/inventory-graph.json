@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b0dbfc102a7e6f07e5ba27ac36b4b3a4fa179870",
-    "sourceSha256": "27566a2139ce816682710c62ae2f73c9f0d739da65e91ffd1190e34c74151ea9",
+    "head": "ed7b20a7341b88f0c40e3105c8238d0c7f4f49de",
+    "sourceSha256": "1203aed30d367d21985c30a69ea24391f272898a2cc7063087634d49c8b5c960",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b0dbfc102a7e6f07e5ba27ac36b4b3a4fa179870",
-  "sourceSha256": "27566a2139ce816682710c62ae2f73c9f0d739da65e91ffd1190e34c74151ea9",
+  "head": "ed7b20a7341b88f0c40e3105c8238d0c7f4f49de",
+  "sourceSha256": "1203aed30d367d21985c30a69ea24391f272898a2cc7063087634d49c8b5c960",
   "counts": {
     "public": {
       "skills": 48,
@@ -72848,6 +72848,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/installer/__tests__/hud-wrapper-env.test.ts",
+        "to": "src/lib/hud-wrapper-template.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/installer/__tests__/mcp-registry.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88485,11 +88490,11 @@
     ],
     "stats": {
       "nodeCount": 7722,
-      "edgeCount": 8557,
-      "importEdgeCount": 7117,
+      "edgeCount": 8558,
+      "importEdgeCount": 7118,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
-  "manifestSha256": "7113bd7e16f12db879aade6c0e1cc10b98864ab8d7a8ca35493ca4443f8d7e91"
+  "manifestSha256": "f6c52f9bda4a8e7dd71587c28d8920f22c202788883100d819ad081949bf7203"
 }

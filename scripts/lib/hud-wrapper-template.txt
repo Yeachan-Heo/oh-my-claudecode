@@ -2,15 +2,14 @@
 // Canonical path / env-var constants live in src/lib/env-vars.ts and src/lib/paths.ts — keep in sync (see src/__tests__/paths-consistency.test.ts).
 /**
  * OMC HUD - Statusline Script
- * Wrapper that imports from OMC_PLUGIN_ROOT, plugin cache, marketplace, or npm package.
+ * Wrapper that imports from OMC_PLUGIN_ROOT, plugin cache, marketplace, or global npm package.
  * Generated from scripts/lib/hud-wrapper-template.txt — do not edit by hand.
  */
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, realpathSync } from "node:fs";
-import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,10 +27,17 @@ function shortHudLoadError(error) {
   return compactMessage.length > 100 ? `${compactMessage.slice(0, 97)}...` : compactMessage;
 }
 
+function logHudLoadFailure(error, target) {
+  if (!error) return;
+  const detail = typeof error?.message === "string" ? error.message : String(error);
+  const targetDetail = target ? ` from ${target}` : "";
+  console.log(`[OMC HUD] HUD import failed${targetDetail}: ${detail}`);
+}
+
 function getGlobalNodeModuleRoots() {
   const roots = [];
   const addPrefixRoots = (prefix) => {
-    if (!prefix) return;
+    if (!prefix || !isAbsolute(prefix)) return;
     if (process.platform === "win32") {
       roots.push(join(prefix, "node_modules"));
       return;
@@ -40,50 +46,43 @@ function getGlobalNodeModuleRoots() {
     roots.push(join(prefix, "node_modules"));
   };
 
-  addPrefixRoots(process.env.npm_config_prefix);
   addPrefixRoots(process.env.PREFIX);
 
-  const nodeBinDir = dirname(process.execPath);
-  roots.push(join(nodeBinDir, "node_modules"));
-  roots.push(join(nodeBinDir, "..", "node_modules"));
-  roots.push(join(nodeBinDir, "..", "lib", "node_modules"));
+  // The Node install prefix is a global npm prefix for nvm/fnm users whose hook PATH lacks npm.
+  if (process.platform !== "win32") {
+    roots.push(join(dirname(process.execPath), "..", "lib", "node_modules"));
+  }
 
-  if (process.platform === "win32" && process.env.APPDATA) {
+  if (process.platform === "win32" && process.env.APPDATA && isAbsolute(process.env.APPDATA)) {
     roots.push(join(process.env.APPDATA, "npm", "node_modules"));
   }
 
   try {
+    // npm scripts export project .npmrc values as npm_config_*; keep them out of global-root discovery.
+    const npmEnv = { ...process.env };
+    for (const key of Object.keys(npmEnv)) {
+      if (key.toLowerCase().startsWith("npm_config_")) delete npmEnv[key];
+    }
+
     const isWin = process.platform === "win32";
     const npmCommand = isWin ? "npm.cmd" : "npm";
     const npmRoot = String(execFileSync(npmCommand, ["root", "-g"], {
       encoding: "utf8",
+      env: npmEnv,
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 1500,
+      cwd: homedir(),
       // Node 20.12+ rejects direct .cmd/.bat spawns without a shell on Windows.
       // Keep non-Windows behavior unchanged by only enabling shell there.
       shell: isWin,
     })).trim();
-    if (npmRoot) roots.unshift(npmRoot);
+    if (isAbsolute(npmRoot)) roots.unshift(npmRoot);
   } catch { /* continue */ }
 
   return uniquePaths(roots);
 }
 
 async function importHudPackage(hudPackage) {
-  try {
-    const wrapperRequire = createRequire(import.meta.url);
-    const resolvedHudPath = wrapperRequire.resolve(hudPackage);
-    await import(pathToFileURL(resolvedHudPath).href);
-    return true;
-  } catch { /* continue */ }
-
-  try {
-    const cwdRequire = createRequire(join(process.cwd(), "__omc_hud__.cjs"));
-    const resolvedHudPath = cwdRequire.resolve(hudPackage);
-    await import(pathToFileURL(resolvedHudPath).href);
-    return true;
-  } catch { /* continue */ }
-
   for (const nodeModulesRoot of getGlobalNodeModuleRoots()) {
     const resolvedHudPath = join(nodeModulesRoot, hudPackage);
     if (!existsSync(resolvedHudPath)) continue;
@@ -227,19 +226,14 @@ async function main() {
     ];
     for (const hudPackage of npmHudPackages) {
       if (await importHudPackage(hudPackage)) {
+        logHudLoadFailure(lastHudLoadError, lastHudLoadTarget);
         return;
       }
     }
   }
 
   // 5. Fallback: provide detailed error message with fix instructions
-  if (lastHudLoadError) {
-    const detail = typeof lastHudLoadError?.message === "string"
-      ? lastHudLoadError.message
-      : String(lastHudLoadError);
-    const targetDetail = lastHudLoadTarget ? ` from ${lastHudLoadTarget}` : "";
-    console.log(`[OMC HUD] HUD import failed${targetDetail}: ${detail}`);
-  }
+  logHudLoadFailure(lastHudLoadError, lastHudLoadTarget);
 
   if (pluginCacheDir && existsSync(pluginCacheDir)) {
     const distDir = join(pluginCacheDir, "dist");
