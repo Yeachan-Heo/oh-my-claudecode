@@ -12713,7 +12713,7 @@ function parseJsonc(content) {
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 function stripComments(content) {
   let result = "";
@@ -12806,6 +12806,7 @@ function stripTrailingCommas(content) {
 var init_jsonc = __esm({
   "src/utils/jsonc.ts"() {
     "use strict";
+    init_utf8_bom();
   }
 });
 

@@ -10542,6 +10542,7 @@ var init_paths = __esm({
 var init_jsonc = __esm({
   "src/utils/jsonc.ts"() {
     "use strict";
+    init_utf8_bom();
   }
 });
 

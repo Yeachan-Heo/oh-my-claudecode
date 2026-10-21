@@ -18355,13 +18355,18 @@ function validatePathSegment(segment, name) {
 var import_fs4 = require("fs");
 var import_path5 = require("path");
 
+// scripts/lib/utf8-bom.mjs
+function stripLeadingUtf8Bom(content) {
+  return content.startsWith("\uFEFF") ? content.slice(1) : content;
+}
+
 // src/utils/jsonc.ts
 function parseJsonc(content) {
   const cleaned = stripJsoncComments(content);
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 function stripComments(content) {
   let result = "";
@@ -32604,11 +32609,6 @@ var DEFAULT_WIKI_CONFIG = {
 // src/hooks/wiki/storage.ts
 var import_fs35 = require("fs");
 var import_path44 = require("path");
-
-// scripts/lib/utf8-bom.mjs
-function stripLeadingUtf8Bom(content) {
-  return content.startsWith("\uFEFF") ? content.slice(1) : content;
-}
 
 // src/utils/frontmatter.ts
 function unquoteYamlScalar(value) {

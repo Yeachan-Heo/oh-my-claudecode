@@ -3886,13 +3886,23 @@ var init_paths = __esm({
   }
 });
 
+// scripts/lib/utf8-bom.mjs
+function stripLeadingUtf8Bom(content) {
+  return content.startsWith("\uFEFF") ? content.slice(1) : content;
+}
+var init_utf8_bom = __esm({
+  "scripts/lib/utf8-bom.mjs"() {
+    "use strict";
+  }
+});
+
 // src/utils/jsonc.ts
 function parseJsonc(content) {
   const cleaned = stripJsoncComments(content);
   return JSON.parse(cleaned);
 }
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 function stripComments(content) {
   let result = "";
@@ -3985,6 +3995,7 @@ function stripTrailingCommas(content) {
 var init_jsonc = __esm({
   "src/utils/jsonc.ts"() {
     "use strict";
+    init_utf8_bom();
   }
 });
 
@@ -5121,16 +5132,6 @@ var init_loader = __esm({
     ];
     OMC_STARTUP_GUIDANCE_MAX_CHARS = 8e3;
     OMC_CONTEXT_FILES_MAX_CHARS = 12e3;
-  }
-});
-
-// scripts/lib/utf8-bom.mjs
-function stripLeadingUtf8Bom(content) {
-  return content.startsWith("\uFEFF") ? content.slice(1) : content;
-}
-var init_utf8_bom = __esm({
-  "scripts/lib/utf8-bom.mjs"() {
-    "use strict";
   }
 });
 
