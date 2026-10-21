@@ -11,6 +11,7 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
+import { stripLeadingUtf8Bom } from './utf8-bom.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -148,15 +149,9 @@ export function resolveConfiguredAgentModel(subagentType, cwd) {
 
 // Keep BOM and trailing-comma support aligned with src/utils/jsonc.ts.
 export function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(stripBom(content)));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 
-// Editors on Windows prepend a UTF-8 BOM when saving as "UTF-8 with BOM", and
-// readFileSync(path, 'utf-8') keeps it as the first character, where JSON.parse
-// rejects it. Only the first character is considered.
-function stripBom(content) {
-  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
-}
 
 function stripTrailingCommas(content) {
   let result = '';

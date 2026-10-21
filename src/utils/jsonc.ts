@@ -1,3 +1,5 @@
+import { stripLeadingUtf8Bom } from '../../scripts/lib/utf8-bom.mjs';
+
 /**
  * Simple JSONC (JSON with Comments) parser
  *
@@ -21,20 +23,9 @@ export function parseJsonc(content: string): unknown {
  * preserved because string contents are copied verbatim.
  */
 export function stripJsoncComments(content: string): string {
-  return stripTrailingCommas(stripComments(stripBom(content)));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 
-/**
- * Remove a leading UTF-8 BOM (U+FEFF).
- *
- * Editors on Windows prepend a BOM when saving as "UTF-8 with BOM", and
- * readFileSync(path, 'utf-8') keeps it as the first character, where
- * JSON.parse rejects it as an unexpected token. Only the first character is
- * considered: a U+FEFF anywhere else is content.
- */
-function stripBom(content: string): string {
-  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
-}
 
 /**
  * Strip single-line (//) and multi-line comments, leaving string literals
