@@ -86,6 +86,14 @@ World`);
       it('should not match English keywords adjacent to accented letters', () => {
         expect(detectThinkKeyword('déthinké')).toBe(false);
         expect(detectUltrathinkKeyword('éultrathinké')).toBe(false);
+        expect(detectThinkKeyword('déthink')).toBe(false);
+        expect(detectUltrathinkKeyword('éultrathink')).toBe(false);
+      });
+
+      it('should match English keywords next to CJK text', () => {
+        expect(detectThinkKeyword('请think一下')).toBe(true);
+        expect(detectThinkKeyword('thinkして')).toBe(true);
+        expect(detectUltrathinkKeyword('请ultrathink')).toBe(true);
       });
     });
 
@@ -156,6 +164,13 @@ World`);
         expect(detectThinkKeyword('Il faut repenser cette interface')).toBe(true);
         expect(detectThinkKeyword('Devemos repensar isso')).toBe(true);
         expect(detectThinkKeyword('Dobbiamo ripensare questo')).toBe(true);
+      });
+
+      it('should match finite forms of prefixed Latin keywords', () => {
+        expect(detectThinkKeyword('Repense cette interface')).toBe(true);
+        expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);
+        expect(detectThinkKeyword('Ripensa questa soluzione')).toBe(true);
+        expect(detectThinkKeyword('Bitte überdenke das')).toBe(true);
       });
 
       it('should not fire on accented keywords embedded in a Latin word', () => {

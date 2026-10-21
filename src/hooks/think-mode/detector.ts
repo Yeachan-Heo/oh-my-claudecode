@@ -26,17 +26,17 @@ const MULTILINGUAL_KEYWORDS = [
   // Portuguese
   'pensar', 'pense', 'repensar', 'refletir', 'reflita',
   // Spanish
-  'piensa', 'reflexionar', 'reflexiona',
+  'piensa', 'repiensa', 'reflexionar', 'reflexiona',
   // French
-  'penser', 'repenser', 'réfléchir', 'réfléchis',
+  'penser', 'repenser', 'repense', 'réfléchir', 'réfléchis',
   // German
-  'denken', 'denk', 'nachdenken', 'überdenken',
+  'denken', 'denk', 'nachdenken', 'überdenken', 'überdenke',
   // Vietnamese
   'suy nghĩ', 'cân nhắc',
   // Turkish
   'düşün', 'düşünmek',
   // Italian
-  'pensare', 'pensa', 'ripensare', 'riflettere', 'rifletti',
+  'pensare', 'pensa', 'ripensare', 'ripensa', 'riflettere', 'rifletti',
   // Thai
   'คิด', 'พิจารณา',
   // Polish
@@ -89,18 +89,25 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-const WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
+const UNICODE_WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
+const LATIN_WORD_CHARACTER_CLASS = String.raw`[\p{Script=Latin}\p{M}\p{N}_]`;
 
 /** Build a case-insensitive matcher that requires a Unicode-aware word start. */
 function buildWordStartPattern(keyword: string): RegExp {
   const escaped = escapeRegExp(keyword);
-  return new RegExp(`(?<!${WORD_CHARACTER_CLASS})${escaped}`, 'iu');
+  return new RegExp(`(?<!${UNICODE_WORD_CHARACTER_CLASS})${escaped}`, 'iu');
 }
 
-/** Build a case-insensitive keyword matcher with Unicode-aware word boundaries. */
+/**
+ * Build an English whole-word matcher. Non-Latin scripts count as boundaries so
+ * English triggers remain usable in unspaced CJK prompts.
+ */
 function buildWordPattern(keyword: string): RegExp {
   const escaped = escapeRegExp(keyword);
-  return new RegExp(`(?<!${WORD_CHARACTER_CLASS})${escaped}(?!${WORD_CHARACTER_CLASS})`, 'iu');
+  return new RegExp(
+    `(?<!${LATIN_WORD_CHARACTER_CLASS})${escaped}(?!${LATIN_WORD_CHARACTER_CLASS})`,
+    'iu',
+  );
 }
 
 /** English patterns for think keywords */
