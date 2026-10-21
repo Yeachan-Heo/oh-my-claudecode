@@ -31668,6 +31668,302 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4495,
+      "targetRef": "dev",
+      "mergeBaseSha": "761ecc60e413f9664fdfe36271ad21e743c7c218",
+      "headSha": "057ac169f1c1c405aa2022878a187b762b6af1d4",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-21T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 47,
+        "sha256": "7c06e70c62e72bb728d8ce14214bdfdea0d8ba6d618829096c5c6dedb18c2f0c"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "08f4a00b8d9a2d94443ffd7e6b8519e07b51a7f3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "8c5b7c5416ce133cbb05865b77fea8ff12bd6a5c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "af2d50ad05b3220c31915e412024cd361e0e9545",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "25b0835e586d171d921cffa836df6122c9fe340e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "313da9710331ae7257800ea245fab6d3bef2808d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/config-dir.test.js",
+          "sha": "2379fccf2df8a00780216c44b6e7bf0e614b685b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/config-dir.test.js.map",
+          "sha": "a0b88b759e0d301dc9bb4ff80f90687d450991b5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/context-safety.test.js",
+          "sha": "6a581fe199b1b6d8f23f63b8cd30e640326a73a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/context-safety.test.js.map",
+          "sha": "c2dc779cc82000c9aa9b8182f67485696dc363e2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/doctor-conflicts.test.js",
+          "sha": "8c0c8c6226755e7d44a6cd61f2f4c9c0ba4e36d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/doctor-conflicts.test.js.map",
+          "sha": "84a0b979ad10377593c28e033f55abcd2a7be5be",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-marketplace-resolution.test.js",
+          "sha": "1bdc796222cdb057ac9ace3f892a785d11839f24",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-marketplace-resolution.test.js.map",
+          "sha": "3be1424cb0701c0f6c488014ee201f7c564bbdf7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pre-tool-enforcer.test.js",
+          "sha": "56e3c0f951d632ffb613a99da450350817ae5a78",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/pre-tool-enforcer.test.js.map",
+          "sha": "b33f9f98edd6b14c5e5cb0aa12b46a00a122cd60",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-script-context.test.js",
+          "sha": "7ecd559ca84ff0537628d761623ad63c736a7d31",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-start-script-context.test.js.map",
+          "sha": "be48020b6c9be807413ef0f11a126aabdf9ec939",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/ultragoal.test.js",
+          "sha": "109f52d77fddb989b5093fa2222b190e6cdaf252",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/ultragoal.test.js.map",
+          "sha": "f314129d3f2ed2a881c71b70fa3114f3049db2ad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ultragoal.d.ts",
+          "sha": "19733a3bc982626024d8206415c7223b9fb98042",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ultragoal.d.ts.map",
+          "sha": "13f2aad27e8320d03b527ad523e42b64fdf251d6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ultragoal.js",
+          "sha": "0a7bfa4232dd5875eee836d1fd0a62cd2588a5d2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/ultragoal.js.map",
+          "sha": "33b547c382872d5d76c3031493ecbf1520ea5897",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ultragoal-persistence.test.js",
+          "sha": "ef98a3d6722bc400d28ac9f9b59bb59d01ae23ba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/ultragoal-persistence.test.js.map",
+          "sha": "c4ad750da0406c21abbafb50f72ce58af95b9001",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hook-templates.test.js",
+          "sha": "62ad87fb7320446691e8740ed29df7004dd22b69",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hook-templates.test.js.map",
+          "sha": "76482d919955ac1a55ed2278e3e616d049ade7e2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hud-wrapper-env.test.js",
+          "sha": "3c207238b674f3b06ac312387b44340aebbd1dbf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/hud-wrapper-env.test.js.map",
+          "sha": "60799a6d0fe1bd1ce3c49e4b1068e3487d59195e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/mcp-registry.test.js",
+          "sha": "061602391f775d57b3c6a10627bde3c3cc8ea31e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/__tests__/mcp-registry.test.js.map",
+          "sha": "2d7c89118c896c7cd2d5df549e9dec34cc0ad0a6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.d.ts.map",
+          "sha": "65eb44fdb31105e204e22156db57844972f5fcf3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js",
+          "sha": "d840f5bb956ecd991b4cec4bf3d594784db7172e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js.map",
+          "sha": "9a1cc92dda9d9914fd9414249d1c47080e2864d9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/__tests__/atomic-write.test.js",
+          "sha": "edd146ec63a4533c02765e09fec675d8c05b9e27",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/__tests__/atomic-write.test.js.map",
+          "sha": "4c532c6bea3e22630bfcdd51234b6811513fbd98",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/runtime-v2.shutdown.test.js",
+          "sha": "5990566a3d0cf32857d26df6ee15ace16382adf5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/runtime-v2.shutdown.test.js.map",
+          "sha": "75345d4db6920e37bf0a1d16d1747a23e50121f8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/monitor.d.ts.map",
+          "sha": "d481e310cb8bc2ba1831e79ef1267f67c1738905",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/monitor.js",
+          "sha": "623ff1e381789b7e44ac277fc54139549cc2dacb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/monitor.js.map",
+          "sha": "2ca050cfac437838cb8b745dc519060b32a852a9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/ultragoal/__tests__/artifacts.test.js",
+          "sha": "6deb80c835445add93f79e0040474d69253d5c4e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/ultragoal/__tests__/artifacts.test.js.map",
+          "sha": "5d430ea7cfb8a95a49848ab8df3be5806bb30f61",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/ultragoal/artifacts.js",
+          "sha": "f2795f5069c44e4dfee92c85bfe15a2f433b678f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/ultragoal/artifacts.js.map",
+          "sha": "0bb200ca9ab2105133d471e4be878fd0fd4de9bb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/jsonc.test.js",
+          "sha": "cc2e5d1dd5f3c1c56331ff8fdbc1dc67eb99e17b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/__tests__/jsonc.test.js.map",
+          "sha": "487e1e192d2fde61a82a5ca34825d20303a41323",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
