@@ -20,6 +20,7 @@ import {
   readSync,
   closeSync,
 } from "fs";
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { createHash } from "node:crypto";
 import { spawn } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
@@ -213,10 +214,11 @@ function getOmcUserConfigDir() {
   return process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
 }
 
-// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips comments AND trailing commas)
+// Mirrors src/utils/jsonc.ts:stripJsoncComments (strips a leading BOM, comments AND trailing commas)
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(content));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
+
 
 function stripComments(content) {
   let result = '';

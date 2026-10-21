@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "97630eff4f5c813e5108e7b47ac359ed75ec89bf",
-    "sourceSha256": "c788570249db2fca3deb9fb8732a5c1a18adaeaf7e1b623fc67e7a962bf7850f",
+    "head": "b70c03f8a5028eff9ab0caf45a05d48772e4031b",
+    "sourceSha256": "417122072d2a296125414434ee4662965e38b50507344ebd6abe1b7b358a4642",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "97630eff4f5c813e5108e7b47ac359ed75ec89bf",
-  "sourceSha256": "c788570249db2fca3deb9fb8732a5c1a18adaeaf7e1b623fc67e7a962bf7850f",
+  "head": "b70c03f8a5028eff9ab0caf45a05d48772e4031b",
+  "sourceSha256": "417122072d2a296125414434ee4662965e38b50507344ebd6abe1b7b358a4642",
   "counts": {
     "public": {
       "skills": 48,
@@ -46833,6 +46833,11 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/workflow-profile-runtime.mjs",
         "kind": "imports"
       },
@@ -46849,6 +46854,11 @@
       {
         "from": "scripts/lib/agent-model-config.mjs",
         "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/agent-model-config.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -47198,6 +47208,11 @@
       },
       {
         "from": "scripts/lib/workflow-profile-runtime.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/workflow-profile-runtime.mjs",
         "to": "scripts/lib/workflow-stage-prompts.mjs",
         "kind": "imports"
       },
@@ -47324,6 +47339,11 @@
       {
         "from": "scripts/persistent-mode.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/persistent-mode.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -86418,12 +86438,27 @@
       },
       {
         "from": "src/utils/__tests__/jsonc.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/jsonc.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/jsonc.test.ts",
         "to": "external:node:vm",
         "kind": "imports"
       },
       {
         "from": "src/utils/__tests__/jsonc.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/jsonc.test.ts",
+        "to": "src/config/loader.ts",
         "kind": "imports"
       },
       {
@@ -86503,6 +86538,11 @@
       },
       {
         "from": "src/utils/frontmatter.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/jsonc.ts",
         "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
@@ -86817,6 +86857,11 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/keyword-detector.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "templates/hooks/lib/atomic-write.mjs",
         "to": "external:crypto",
         "kind": "imports"
@@ -87103,6 +87148,11 @@
       },
       {
         "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "to": "templates/hooks/lib/workflow-stage-prompts.mjs",
         "kind": "imports"
       },
@@ -87150,6 +87200,11 @@
         "from": "templates/hooks/persistent-mode.mjs",
         "to": "src/hooks/bridge.ts",
         "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/persistent-mode.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
       },
       {
         "from": "templates/hooks/post-tool-use-failure.mjs",
@@ -88514,11 +88569,11 @@
     ],
     "stats": {
       "nodeCount": 7726,
-      "edgeCount": 8558,
-      "importEdgeCount": 7118,
+      "edgeCount": 8569,
+      "importEdgeCount": 7129,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
-  "manifestSha256": "f6113f12e151a0d2f2db866f83a4bc4d98e006b4e60714c730726fa86af065d2"
+  "manifestSha256": "f6d623cf86735987ce7c581d4dff5ad9288e1f901d4bee7cd4bf108e94f63474"
 }
