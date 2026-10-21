@@ -195,18 +195,36 @@ World`);
       });
 
       it('should reject an English word that embeds an anchored stem', () => {
+        // The word-initial 're'/'ri' allowance does not reach these: the 're' in
+        // "prepense" and "recompense" is not itself at a word start.
         expect(detectThinkKeyword('a prepense plan')).toBe(false);
-        expect(detectThinkKeyword('the goldenknop flower')).toBe(false);
+        expect(detectThinkKeyword('a fair recompense for the work')).toBe(false);
+        expect(detectThinkKeyword('the dispensary is closed')).toBe(false);
       });
 
-      it('documents that a word-initial collision still matches', () => {
+      it('should match a German keyword behind a prefix, including finite forms', () => {
+        // 'denk' is deliberately not anchored. Anchoring it would reject these
+        // everyday imperatives to exclude one rare word ("goldenknop"), which is the
+        // wrong trade.
+        expect(detectThinkKeyword('Bitte bedenke das')).toBe(true);
+        expect(detectThinkKeyword('Er bedenkt die Risiken')).toBe(true);
+        expect(detectThinkKeyword('Bitte umdenke das')).toBe(true);
+      });
+
+      it('should match Romance conjugations behind a re/ri prefix', () => {
+        expect(detectThinkKeyword('Devemos repensamos isso')).toBe(true);
+        expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);
+      });
+
+      it('documents the residual false positives this design accepts', () => {
         // A word start is the only anchor, so an English word that *begins* with a
-        // keyword cannot be excluded: 'grubless' starts with 'gruble' and 'pensacola'
-        // with 'pensa'. Requiring a trailing boundary too would break every stem that
-        // takes a suffix, so these stay as known false positives rather than being
-        // traded for a much larger regression.
+        // keyword cannot be excluded ('grubless' -> 'gruble', 'pensacola' -> 'pensa'),
+        // and 'denk' is left unanchored on purpose ('goldenknop'). Requiring a
+        // trailing boundary would break every stem that takes a suffix, which is a
+        // far larger regression than these three rare words.
         expect(detectThinkKeyword('a grubless afternoon')).toBe(true);
         expect(detectThinkKeyword('pensacola is a city')).toBe(true);
+        expect(detectThinkKeyword('the goldenknop flower')).toBe(true);
       });
 
       it('should treat a non-Latin combining mark as an English word boundary', () => {

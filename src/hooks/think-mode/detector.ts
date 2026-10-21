@@ -105,7 +105,6 @@ const ENGLISH_COLLIDING_KEYWORDS = new Set([
   'pense',
   'penser',
   'repense',
-  'denk',
   'gruble',
 ]);
 
@@ -163,7 +162,14 @@ function buildKeywordPattern(keyword: string): RegExp {
   if (!ENGLISH_COLLIDING_KEYWORDS.has(keyword.toLowerCase())) {
     return new RegExp(escapeRegExp(keyword), 'iu');
   }
-  return buildWordStartPattern(keyword);
+  const start = `(?<!${UNICODE_WORD_CHARACTER_CLASS})`;
+  // An anchored stem may also follow a word-initial Romance 're'/'ri', so the
+  // conjugated prefixed forms match: 'repensons', 'repensamos', 'ripensiamo'. The
+  // 're' must itself begin the word, so "prepense" and "recompense" stay rejected.
+  return new RegExp(
+    `(?:${start}|(?<=${start}[rR][eEiI]))${escapeRegExp(keyword)}`,
+    'iu',
+  );
 }
 
 /** Combined patterns including multilingual support */
