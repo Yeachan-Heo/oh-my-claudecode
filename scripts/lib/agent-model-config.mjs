@@ -31,7 +31,7 @@ function getConfigPaths(cwd) {
 }
 
 // Mirrors src/utils/jsonc.ts:stripJsoncComments
-export function stripJsoncComments(content) {
+function stripComments(content) {
   let result = '';
   let i = 0;
   while (i < content.length) {
@@ -144,4 +144,57 @@ export function resolveConfiguredAgentModel(subagentType, cwd) {
     if (typeof model === 'string' && model.trim()) return model.trim();
   }
   return null;
+}
+
+// Keep trailing-comma support aligned with src/utils/jsonc.ts.
+export function stripJsoncComments(content) {
+  return stripTrailingCommas(stripComments(content));
+}
+
+function stripTrailingCommas(content) {
+  let result = '';
+  let i = 0;
+
+  while (i < content.length) {
+    // Copy string literals verbatim so their contents are never altered.
+    if (content[i] === '"') {
+      result += content[i];
+      i++;
+      while (i < content.length && content[i] !== '"') {
+        if (content[i] === '\\') {
+          result += content[i];
+          i++;
+          if (i < content.length) {
+            result += content[i];
+            i++;
+          }
+          continue;
+        }
+        result += content[i];
+        i++;
+      }
+      if (i < content.length) {
+        result += content[i];
+        i++;
+      }
+      continue;
+    }
+
+    // Drop a comma followed only by whitespace before a closing brace/bracket.
+    if (content[i] === ',') {
+      let j = i + 1;
+      while (j < content.length && /\s/.test(content[j])) {
+        j++;
+      }
+      if (content[j] === '}' || content[j] === ']') {
+        i++; // skip the comma; whitespace is preserved by the next iteration
+        continue;
+      }
+    }
+
+    result += content[i];
+    i++;
+  }
+
+  return result;
 }
