@@ -24,19 +24,19 @@ const MULTILINGUAL_KEYWORDS = [
   // Russian
   'думать', 'думай', 'размышлять', 'размышляй',
   // Portuguese
-  'pensar', 'pense', 'refletir', 'reflita',
+  'pensar', 'pense', 'repensar', 'refletir', 'reflita',
   // Spanish
   'piensa', 'reflexionar', 'reflexiona',
   // French
-  'penser', 'réfléchir', 'réfléchis',
+  'penser', 'repenser', 'réfléchir', 'réfléchis',
   // German
-  'denken', 'denk', 'nachdenken',
+  'denken', 'denk', 'nachdenken', 'überdenken',
   // Vietnamese
   'suy nghĩ', 'cân nhắc',
   // Turkish
   'düşün', 'düşünmek',
   // Italian
-  'pensare', 'pensa', 'riflettere', 'rifletti',
+  'pensare', 'pensa', 'ripensare', 'riflettere', 'rifletti',
   // Thai
   'คิด', 'พิจารณา',
   // Polish
@@ -117,6 +117,8 @@ const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
  * stores stems, and the agglutinative Latin-script languages only ever write them
  * with a suffix attached, so Turkish 'dusunun', Finnish 'ajattelen' and Hungarian
  * 'gondolkodjunk' would stop matching at all.
+ * Common prefixed forms are listed explicitly instead of allowing arbitrary prefixes,
+ * which would reintroduce the English false positives.
  *
  * Keywords in every other script keep substring matching, because anchoring them
  * loses ordinary requests on either side.

@@ -127,7 +127,7 @@ World`);
       });
     });
 
-    describe('Multilingual keywords match whole words only', () => {
+    describe('Multilingual keyword boundaries', () => {
       it.each([
         'Can you compensate for the timezone offset?',
         'We need compensation logic in the reducer',
@@ -149,6 +149,13 @@ World`);
         expect(detectThinkKeyword('gondolkodjunk ezen a probl\u00e9m\u00e1n')).toBe(true);
         expect(detectThinkKeyword('pensaremos nisso')).toBe(true);
         expect(detectThinkKeyword('das ist nachdenkenswert')).toBe(true);
+      });
+
+      it('should match common Latin keywords with attached prefixes', () => {
+        expect(detectThinkKeyword('Bitte überdenken Sie diese Architektur')).toBe(true);
+        expect(detectThinkKeyword('Il faut repenser cette interface')).toBe(true);
+        expect(detectThinkKeyword('Devemos repensar isso')).toBe(true);
+        expect(detectThinkKeyword('Dobbiamo ripensare questo')).toBe(true);
       });
 
       it('should not fire on accented keywords embedded in a Latin word', () => {
