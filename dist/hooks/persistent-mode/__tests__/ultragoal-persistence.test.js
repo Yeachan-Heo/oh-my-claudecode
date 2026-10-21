@@ -15,6 +15,7 @@ const ISOLATED_ENV_KEYS = [
     'CLAUDE_PLUGIN_ROOT',
     'OMC_SESSION_ID',
     'OMC_DISABLE_MULTIREPO',
+    'ALLOW_ULTRAGOAL_WITHOUT_GOAL',
     'NODE_ENV',
 ];
 const created = [];
@@ -99,6 +100,7 @@ beforeEach(() => {
     process.env.CLAUDE_PLUGIN_ROOT = '';
     process.env.OMC_SESSION_ID = '';
     process.env.OMC_DISABLE_MULTIREPO = '';
+    delete process.env.ALLOW_ULTRAGOAL_WITHOUT_GOAL;
     process.env.NODE_ENV = 'test';
 });
 afterEach(() => {
@@ -185,6 +187,7 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
             `nodejs ${pluginEntry} state clear --mode ultragoal`,
             `node "${pluginEntry}" cancel`,
             'omc cancel',
+            'oh-my-claudecode.js cancel',
         ];
         for (const command of allowed) {
             const result = runHook(preToolScript, {
@@ -210,6 +213,55 @@ describe('ultragoal persistence and Claude /goal enforcement', () => {
                 tool_input: { command },
             });
             expect(result.hookSpecificOutput?.permissionDecision).toBe('deny');
+            expect(result.hookSpecificOutput?.permissionDecisionReason).toContain('[ULTRAGOAL /GOAL REQUIRED]');
+        }
+    });
+    it('allows plugin-shaped ultragoal bootstrap commands without allowing lookalikes (#4459)', () => {
+        const cwd = makeTempProject('omc-ultragoal-plugin-bootstrap-');
+        writeFileSync(join(cwd, '.omc-workspace'), JSON.stringify({ id: 'issue-4459' }));
+        writeUltragoalState(cwd);
+        const pluginEntry = join(cwd, 'plugin', 'bin', 'oh-my-claudecode.js');
+        const transcript = join(cwd, 'transcript.jsonl');
+        mkdirSync(join(cwd, 'plugin', 'bin'), { recursive: true });
+        writeFileSync(pluginEntry, '#!/usr/bin/env node\n');
+        writeFileSync(transcript, '');
+        const allowed = [
+            'oh-my-claudecode.js ultragoal status',
+            `node ${pluginEntry} ultragoal create-goals --brief "issue #4459"`,
+            `nodejs "${pluginEntry}" ultragoal checkpoint --goal-id G001`,
+            'omc ultragoal status',
+            'oh-my-claudecode.js ultragoal list-plans',
+        ];
+        for (const command of allowed) {
+            const result = runHook(preToolScript, {
+                cwd,
+                session_id: 'session-a',
+                transcript_path: transcript,
+                tool_name: 'Bash',
+                tool_input: { command },
+            });
+            expect(result.hookSpecificOutput?.permissionDecision, command).not.toBe('deny');
+        }
+        const denied = [
+            `node ${join(cwd, 'evil.js')} ultragoal status`,
+            'oh-my-claudecode.js ultragoal unknown',
+            'oh-my-claudecode.js ultragoal status && npm test',
+            'oh-my-claudecode.js ultragoal status | cat',
+            'oh-my-claudecode.js ultragoal status $(echo bypass)',
+            'oh-my-claudecode.js ultragoal status `echo bypass`',
+            `node ${pluginEntry} ultragoal checkpoint; echo bypass`,
+            `node ${pluginEntry} ultragoalish status`,
+        ];
+        writeFileSync(join(cwd, 'evil.js'), '#!/usr/bin/env node\n');
+        for (const command of denied) {
+            const result = runHook(preToolScript, {
+                cwd,
+                session_id: 'session-a',
+                transcript_path: transcript,
+                tool_name: 'Bash',
+                tool_input: { command },
+            });
+            expect(result.hookSpecificOutput?.permissionDecision, command).toBe('deny');
             expect(result.hookSpecificOutput?.permissionDecisionReason).toContain('[ULTRAGOAL /GOAL REQUIRED]');
         }
     });

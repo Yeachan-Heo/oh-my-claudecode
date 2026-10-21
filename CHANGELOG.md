@@ -1,3 +1,30 @@
+# oh-my-claudecode v5.7.7: Codex hook compatibility and safer HUD loading
+
+## Release Notes
+
+This release includes fixes for Codex hook output, HUD fallback security and reliability, configuration parsing, team shutdown validation, and plugin-only bootstrap.
+
+### Bug Fixes
+
+- **fix(hooks): emit Codex-compatible PreToolUse output** (#4489, fixes #4488)
+- **fix(hud): restrict npm fallback to the global prefix** (#4471, #4472)
+- **fix(hooks): fall back from blank shell config directory overrides** (#4474)
+- **fix(hooks): honor trailing commas in agent model JSONC** (#4473)
+- **fix(installer): recognize quoted Codex MCP keys** (#4469)
+- **fix(hud): report cached HUD load failures** (#4468)
+- **fix(skills): align argument hints with behavior** (#4465)
+- **fix(team): validate shutdown acknowledgements before consuming them** (#4462)
+- **fix(ultragoal): allow plugin-only bootstrap commands** (#4459)
+
+### Other Changes
+
+- **test(ci): make timing regression tests deterministic** (#4464)
+- **ci: canonicalize generated-artifact authorization expiry timestamps** (#4484)
+- **ci: sync the v5.7.6 main release back into dev** (#4485)
+- **chore(inventory): regenerate the inventory graph** (#4486)
+
+---
+
 # oh-my-claudecode v5.7.6: Fix plugin-mode HUD loading and tighten input validation
 
 ## Release Notes

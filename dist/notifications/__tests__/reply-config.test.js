@@ -98,6 +98,52 @@ describe("reply config", () => {
         expect(replyConfig?.authorizedDiscordUserIds).toEqual([]);
         expect(warnSpy).toHaveBeenCalledOnce();
     });
+    it.each(["0", "-5", "1e3", "12abc", "3.9", " "])("ignores a non-positive or malformed OMC_REPLY_POLL_INTERVAL_MS=%s", async (value) => {
+        // pollIntervalMs feeds setTimeout: 0 and negatives poll in a tight loop, and
+        // parseInt would read "1e3" as 1ms rather than 1000ms.
+        process.env.OMC_REPLY_POLL_INTERVAL_MS = value;
+        mockConfigFile({
+            notifications: {
+                enabled: true,
+                "discord-bot": { enabled: true, botToken: "t", channelId: "c" },
+                reply: { enabled: true, authorizedDiscordUserIds: [VALID_DISCORD_USER_ID] },
+            },
+        });
+        const { getReplyConfig } = await import("../config.js");
+        expect(getReplyConfig()?.pollIntervalMs).toBe(3000);
+    });
+    it.each(["0", "-1", "1e3", "12abc"])("ignores a non-positive or malformed OMC_REPLY_RATE_LIMIT=%s", async (value) => {
+        // rateLimitPerMinute feeds `timestamps.length >= maxPerMinute`, so 0 is always
+        // true and would silently drop every reply.
+        process.env.OMC_REPLY_RATE_LIMIT = value;
+        mockConfigFile({
+            notifications: {
+                enabled: true,
+                "discord-bot": { enabled: true, botToken: "t", channelId: "c" },
+                reply: { enabled: true, authorizedDiscordUserIds: [VALID_DISCORD_USER_ID] },
+            },
+        });
+        const { getReplyConfig } = await import("../config.js");
+        expect(getReplyConfig()?.rateLimitPerMinute).toBe(10);
+    });
+    it("ignores non-positive reply values coming from the config file", async () => {
+        mockConfigFile({
+            notifications: {
+                enabled: true,
+                "discord-bot": { enabled: true, botToken: "t", channelId: "c" },
+                reply: {
+                    enabled: true,
+                    authorizedDiscordUserIds: [VALID_DISCORD_USER_ID],
+                    pollIntervalMs: 0,
+                    rateLimitPerMinute: 0,
+                },
+            },
+        });
+        const { getReplyConfig } = await import("../config.js");
+        const replyConfig = getReplyConfig();
+        expect(replyConfig?.pollIntervalMs).toBe(3000);
+        expect(replyConfig?.rateLimitPerMinute).toBe(10);
+    });
     it("applies environment overrides for reply settings and discord user IDs", async () => {
         process.env.OMC_REPLY_POLL_INTERVAL_MS = "5000";
         process.env.OMC_REPLY_RATE_LIMIT = "20";

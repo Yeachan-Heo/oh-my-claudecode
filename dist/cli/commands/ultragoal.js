@@ -3,6 +3,8 @@ import { ClaudeGoalSnapshotError, formatClaudeGoalReconciliation, readClaudeGoal
 import { addUltragoalGoal, buildClaudeGoalInstruction, checkpointUltragoal, createUltragoalPlan, listUltragoalPlanIds, readUltragoalPlan, recordFinalReviewBlockers, resolveActivePlanId, startNextUltragoal, summarizeUltragoalPlan, UltragoalError, } from '../../ultragoal/artifacts.js';
 export const ULTRAGOAL_HELP = `omc ultragoal - Durable repo-native multi-goal workflow with Claude Code /goal handoff
 
+Plugin-only installs where omc is not on PATH can use oh-my-claudecode.js or node <plugin-root>/bin/oh-my-claudecode.js instead.
+
 Usage:
   omc ultragoal create-goals [--brief <text> | --brief-file <path> | --from-stdin] [--goal <title::objective>] [--claude-goal-mode <aggregate|per-story>] [--force] [--plan-id <id> | --auto-plan-id] [--json]
   omc ultragoal complete-goals [<goal-id>] [--retry-failed] [--plan-id <id>] [--json]

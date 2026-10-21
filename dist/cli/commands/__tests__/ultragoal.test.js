@@ -61,6 +61,7 @@ describe('omc ultragoal CLI', () => {
         expect(joined).toMatch(/omc ultragoal/);
         expect(joined).toMatch(/Artifacts[^\n]*[\s\S]*\.omc\/ultragoal\/brief\.md/);
         expect(joined).toMatch(/Claude \/goal integration/);
+        expect(joined).toMatch(/Plugin-only installs.*oh-my-claudecode\.js/);
         expect(joined).not.toMatch(/\bomx\b/);
     });
     it('create-goals from positional brief writes .omc/ultragoal artifacts', async () => {
