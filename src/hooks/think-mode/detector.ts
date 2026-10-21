@@ -114,17 +114,20 @@ function escapeRegExp(value: string): string {
 }
 
 const UNICODE_WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
-// Script_Extensions=Latin covers the combining marks actually used with Latin text
-// while excluding marks belonging to other scripts. A bare \p{M} counted a Devanagari
-// matra, a Thai mark, an NFD Japanese mark or an emoji variation selector as Latin
-// adjacency, which suppressed the boundary in 'कृपयाthinkकरें', 'นี่thinkให้ลึกๆ' and '❤️think'.
-const LATIN_WORD_CHARACTER_CLASS = String.raw`[\p{Script_Extensions=Latin}\p{N}_]`;
-
-/** Build a case-insensitive matcher that requires a Unicode-aware word start. */
-function buildWordStartPattern(keyword: string): RegExp {
-  const escaped = escapeRegExp(keyword);
-  return new RegExp(`(?<!${UNICODE_WORD_CHARACTER_CLASS})${escaped}`, 'iu');
-}
+// Latin word characters: the letters and combining marks associated with Latin, plus
+// ASCII digits and underscore.
+//
+// A bare \p{M} counted a mark from any script, which suppressed the boundary in
+// 'कृपयाthinkकरें', 'นี่thinkให้ลึกๆ', NFD 'がthinkして' and '❤️think'. Script_Extensions=Latin
+// alone over-corrects the other way: it also matches separators and punctuation merely
+// associated with Latin, so U+202F NARROW NO-BREAK SPACE in 'Please\u202Fthink' and
+// U+00B7 in 'think·deeply' counted as adjacency and suppressed the boundary there.
+//
+// Intersecting with [\p{L}\p{M}] keeps U+0301 and friends, which are marks, and drops
+// U+202F and U+00B7, which are neither letters nor marks. ASCII digits and underscore
+// are listed explicitly because neither is Script_Extensions=Latin; that also keeps a
+// non-Latin digit a boundary, matching the \b this replaced.
+const LATIN_WORD_CHARACTER_CLASS = String.raw`[[\p{Script_Extensions=Latin}&&[\p{L}\p{M}]]0-9_]`;
 
 /**
  * Build an English whole-word matcher. Non-Latin scripts count as boundaries so
@@ -132,9 +135,12 @@ function buildWordStartPattern(keyword: string): RegExp {
  */
 function buildWordPattern(keyword: string): RegExp {
   const escaped = escapeRegExp(keyword);
+  // The 'v' flag is required for the set intersection in LATIN_WORD_CHARACTER_CLASS.
+  // Only the two ASCII English keywords reach here, so the stricter class-escaping
+  // rules of 'v' mode cannot affect the escaped keyword.
   return new RegExp(
     `(?<!${LATIN_WORD_CHARACTER_CLASS})${escaped}(?!${LATIN_WORD_CHARACTER_CLASS})`,
-    'iu',
+    'iv',
   );
 }
 

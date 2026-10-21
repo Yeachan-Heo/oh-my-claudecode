@@ -236,6 +236,21 @@ World`);
         expect(detectThinkKeyword('\u2764\ufe0fthink')).toBe(true);
       });
 
+      it('should treat a Latin-associated separator or punctuation as a boundary', () => {
+        // Script_Extensions=Latin also covers separators and punctuation merely
+        // associated with Latin, so these are not word characters even though the
+        // property matches them.
+        expect(detectThinkKeyword('Please\u202Fthink')).toBe(true);
+        expect(detectThinkKeyword('think\u00b7deeply')).toBe(true);
+        expect(detectUltrathinkKeyword('Please\u202Fultrathink')).toBe(true);
+      });
+
+      it('should still treat an adjacent Latin letter or mark as a word character', () => {
+        expect(detectThinkKeyword('rethinking the schema')).toBe(false);
+        expect(detectThinkKeyword('e\u0301think')).toBe(false);
+        expect(detectThinkKeyword('think2')).toBe(false);
+      });
+
       it('should keep matching keywords that carry an attached clitic or affix', () => {
         // Arabic definite article: ال + تفكير
         expect(detectThinkKeyword('يرجى التفكير بعمق')).toBe(true);
