@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "49b720b81de16df26f4ba23cfa1733078b60df40",
-    "sourceSha256": "ede6cabf13e463d9ea1d122ec18691d2516fc71a703d9aa8ee3d382708d5831c",
+    "head": "c0df7aa00feebdb383613bb681a004a0170a8672",
+    "sourceSha256": "864159ff69ca2c09effa23629d6b4ab85f5807657896fb6b7d40f374240d052f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "49b720b81de16df26f4ba23cfa1733078b60df40",
-  "sourceSha256": "ede6cabf13e463d9ea1d122ec18691d2516fc71a703d9aa8ee3d382708d5831c",
+  "head": "c0df7aa00feebdb383613bb681a004a0170a8672",
+  "sourceSha256": "864159ff69ca2c09effa23629d6b4ab85f5807657896fb6b7d40f374240d052f",
   "counts": {
     "public": {
       "skills": 48,
@@ -67953,6 +67953,11 @@
       },
       {
         "from": "src/hooks/ralph/prd.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/prd.ts",
         "to": "src/hooks/ralph/stale-prd.ts",
         "kind": "type-imports"
       },
@@ -76329,6 +76334,11 @@
       {
         "from": "src/openclaw/config.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/openclaw/config.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -88569,11 +88579,11 @@
     ],
     "stats": {
       "nodeCount": 7726,
-      "edgeCount": 8569,
-      "importEdgeCount": 7129,
+      "edgeCount": 8571,
+      "importEdgeCount": 7131,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
-  "manifestSha256": "880d9ebc2436c1a42551821e6523828984039a6a0bc9a21840bbecf814fc4783"
+  "manifestSha256": "91558eaf2974245581150ca14ec55e3a50cbb2c059bafe1a93ec0cd52fa8c1c8"
 }

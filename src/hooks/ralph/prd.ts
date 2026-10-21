@@ -15,6 +15,7 @@
 import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { stripLeadingUtf8Bom } from '../../../scripts/lib/utf8-bom.mjs';
 import { getOmcRoot, getSessionStateDir } from '../../lib/worktree-paths.js';
 import { withStateFileMutationLock } from '../../lib/mode-state-io.js';
 import { atomicWriteJsonSync } from '../../lib/atomic-write.js';
@@ -485,7 +486,9 @@ function normalizeObservableCheck(candidate: unknown): ObservableCheck | null {
 
 export function readPrdFromPath(prdPath: string): { prd?: PRD; error?: string } {
   try {
-    const content = readFileSync(prdPath, 'utf-8');
+    // A prd.json edited in an editor that saves "UTF-8 with BOM" keeps U+FEFF as the
+    // first character, which JSON.parse rejects.
+    const content = stripLeadingUtf8Bom(readFileSync(prdPath, 'utf-8'));
     const parsed = JSON.parse(content) as unknown;
     const normalized = normalizePrd(parsed);
 
