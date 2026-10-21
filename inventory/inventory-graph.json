@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "40a411aac54e9c8d01c9c278c1282f1a216aa1a5",
-    "sourceSha256": "dc73ea25597326b9e800813aab85e80d0dbe487b4c86089cd43c95652f95d1ed",
+    "head": "49b720b81de16df26f4ba23cfa1733078b60df40",
+    "sourceSha256": "ede6cabf13e463d9ea1d122ec18691d2516fc71a703d9aa8ee3d382708d5831c",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "40a411aac54e9c8d01c9c278c1282f1a216aa1a5",
-  "sourceSha256": "dc73ea25597326b9e800813aab85e80d0dbe487b4c86089cd43c95652f95d1ed",
+  "head": "49b720b81de16df26f4ba23cfa1733078b60df40",
+  "sourceSha256": "ede6cabf13e463d9ea1d122ec18691d2516fc71a703d9aa8ee3d382708d5831c",
   "counts": {
     "public": {
       "skills": 48,
@@ -46833,6 +46833,11 @@
       },
       {
         "from": "scripts/keyword-detector.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/keyword-detector.mjs",
         "to": "scripts/lib/workflow-profile-runtime.mjs",
         "kind": "imports"
       },
@@ -47203,6 +47208,11 @@
       },
       {
         "from": "scripts/lib/workflow-profile-runtime.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/lib/workflow-profile-runtime.mjs",
         "to": "scripts/lib/workflow-stage-prompts.mjs",
         "kind": "imports"
       },
@@ -47329,6 +47339,11 @@
       {
         "from": "scripts/persistent-mode.mjs",
         "to": "scripts/lib/jev-shadow.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/persistent-mode.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -86842,6 +86857,11 @@
         "kind": "projects"
       },
       {
+        "from": "templates/hooks/keyword-detector.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "templates/hooks/lib/atomic-write.mjs",
         "to": "external:crypto",
         "kind": "imports"
@@ -87128,6 +87148,11 @@
       },
       {
         "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/lib/workflow-profile-runtime.mjs",
         "to": "templates/hooks/lib/workflow-stage-prompts.mjs",
         "kind": "imports"
       },
@@ -87175,6 +87200,11 @@
         "from": "templates/hooks/persistent-mode.mjs",
         "to": "src/hooks/bridge.ts",
         "kind": "projects"
+      },
+      {
+        "from": "templates/hooks/persistent-mode.mjs",
+        "to": "templates/hooks/lib/utf8-bom.mjs",
+        "kind": "imports"
       },
       {
         "from": "templates/hooks/post-tool-use-failure.mjs",
@@ -88539,11 +88569,11 @@
     ],
     "stats": {
       "nodeCount": 7726,
-      "edgeCount": 8563,
-      "importEdgeCount": 7123,
+      "edgeCount": 8569,
+      "importEdgeCount": 7129,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
-  "manifestSha256": "f3f9d3bff08e90505eee009ce20cbc13383d3ce5420dcf2a3991116c8438cd96"
+  "manifestSha256": "880d9ebc2436c1a42551821e6523828984039a6a0bc9a21840bbecf814fc4783"
 }

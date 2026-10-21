@@ -3,6 +3,20 @@ import { runInNewContext } from 'node:vm';
 import { describe, it, expect } from 'vitest';
 import { parseJsonc, stripJsoncComments } from '../jsonc.js';
 
+// The shipped parsers import stripLeadingUtf8Bom, and they are standalone CLI entry
+// points that cannot be imported without running main(). So their parser functions are
+// lifted out of the real source and evaluated with the shared helper's own source
+// alongside them: the BOM behaviour under test is the shipped helper's, not a copy.
+function sharedBomHelperSource(path: string): string {
+  const helper = path.startsWith('templates/')
+    ? 'templates/hooks/lib/utf8-bom.mjs'
+    : 'scripts/lib/utf8-bom.mjs';
+  const source = readFileSync(helper, 'utf8');
+  const match = source.match(/^export function stripLeadingUtf8Bom\([\s\S]*?\n\}/m);
+  expect(match, `${helper} must define stripLeadingUtf8Bom()`).not.toBeNull();
+  return (match as RegExpMatchArray)[0].replace(/^export /, '');
+}
+
 describe('parseJsonc - trailing commas', () => {
   it('tolerates a trailing comma in an object', () => {
     expect(parseJsonc('{"a":1,}')).toEqual({ a: 1 });
@@ -113,7 +127,9 @@ describe('workflow runtime JSONC parser parity', () => {
       const source = readFileSync(path, 'utf8');
       const parserSource = source.split('\n').find(line => line.startsWith('function stripJsonc('));
       expect(parserSource).toBeDefined();
-      const strip: (content: string) => string = runInNewContext(`${parserSource}; stripJsonc`);
+      const strip: (content: string) => string = runInNewContext(
+        `${sharedBomHelperSource(path)}\n${parserSource}; stripJsonc`,
+      );
       expect(JSON.parse(strip('{"version":1,}'))).toEqual({ version: 1 });
       expect(JSON.parse(strip('["ralplan","execution",]'))).toEqual(['ralplan', 'execution']);
       expect(JSON.parse(strip('{/*comment*/"version":1,}'))).toEqual({ version: 1 });
@@ -199,25 +215,23 @@ describe('shipped hook JSONC parsers accept a leading UTF-8 BOM', () => {
   function mirrorParser(path: string): (content: string) => string {
     const source = readFileSync(path, 'utf8');
     const required = ['stripJsoncComments', 'stripComments', 'stripTrailingCommas'];
-    const blocks = [...required, 'stripBom'].flatMap((name) => {
+    expect(source, `${path} must import the shared BOM helper`).toContain('stripLeadingUtf8Bom');
+    const blocks = required.map((name) => {
       const match = source.match(new RegExp(`^function ${name}\\([\\s\\S]*?\\n\\}`, 'm'));
-      if (!match) {
-        // stripBom is the helper under test; a missing required function means the
-        // extraction itself broke and the assertions below would be meaningless.
-        expect(required).not.toContain(name);
-        return [];
-      }
-      return [match[0]];
+      // A missing required function means the extraction itself broke and the
+      // assertions below would be meaningless.
+      expect(match, `${path} must define ${name}()`).not.toBeNull();
+      return (match as RegExpMatchArray)[0];
     });
-    return runInNewContext(`${blocks.join('\n')}; stripJsoncComments`);
+    return runInNewContext(`${sharedBomHelperSource(path)}\n${blocks.join('\n')}; stripJsoncComments`);
   }
 
   function inlineMirrorParser(path: string): (content: string) => string {
-    const line = readFileSync(path, 'utf8')
-      .split('\n')
-      .find((candidate) => candidate.startsWith('function stripJsonc('));
+    const source = readFileSync(path, 'utf8');
+    const line = source.split('\n').find((candidate) => candidate.startsWith('function stripJsonc('));
     expect(line, `${path} must define stripJsonc() on one line`).toBeDefined();
-    return runInNewContext(`${line}; stripJsonc`);
+    expect(source, `${path} must import the shared BOM helper`).toContain('stripLeadingUtf8Bom');
+    return runInNewContext(`${sharedBomHelperSource(path)}\n${line}; stripJsonc`);
   }
 
   it.each([

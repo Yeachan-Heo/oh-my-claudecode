@@ -20,6 +20,7 @@ import {
   readSync,
   closeSync,
 } from "fs";
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { createHash } from "node:crypto";
 import { spawn } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
@@ -215,16 +216,9 @@ function getOmcUserConfigDir() {
 
 // Mirrors src/utils/jsonc.ts:stripJsoncComments (strips a leading BOM, comments AND trailing commas)
 function stripJsoncComments(content) {
-  return stripTrailingCommas(stripComments(stripBom(content)));
+  return stripTrailingCommas(stripComments(stripLeadingUtf8Bom(content)));
 }
 
-// Mirrors src/utils/jsonc.ts:stripBom. Editors on Windows prepend a UTF-8 BOM
-// when saving as "UTF-8 with BOM", and readFileSync keeps it as the first
-// character, where JSON.parse rejects it. Only the first character is treated as
-// a BOM: a U+FEFF anywhere else is content.
-function stripBom(content) {
-  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content;
-}
 
 function stripComments(content) {
   let result = '';
