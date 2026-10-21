@@ -82,6 +82,11 @@ World`);
         // "think" should be a word boundary
         expect(detectThinkKeyword('rethinking this')).toBe(false);
       });
+
+      it('should not match English keywords adjacent to accented letters', () => {
+        expect(detectThinkKeyword('déthinké')).toBe(false);
+        expect(detectUltrathinkKeyword('éultrathinké')).toBe(false);
+      });
     });
 
     describe('Multilingual keywords', () => {
@@ -144,6 +149,15 @@ World`);
         expect(detectThinkKeyword('gondolkodjunk ezen a probl\u00e9m\u00e1n')).toBe(true);
         expect(detectThinkKeyword('pensaremos nisso')).toBe(true);
         expect(detectThinkKeyword('das ist nachdenkenswert')).toBe(true);
+      });
+
+      it('should not fire on accented keywords embedded in a Latin word', () => {
+        expect(detectThinkKeyword('dépenser')).toBe(false);
+        expect(detectThinkKeyword('dépenser')).toBe(false);
+      });
+
+      it('should treat non-Latin letters as part of Latin keyword boundaries', () => {
+        expect(detectThinkKeyword('пpense')).toBe(false);
       });
 
       it('should still match a Latin keyword delimited by punctuation', () => {

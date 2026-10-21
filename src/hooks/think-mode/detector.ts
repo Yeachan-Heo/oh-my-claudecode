@@ -7,9 +7,6 @@
  * Ported from oh-my-opencode's think-mode hook.
  */
 
-/** English patterns for think keywords */
-const ENGLISH_PATTERNS = [/\bultrathink\b/i, /\bthink\b/i];
-
 /** Multilingual think keywords for global support */
 const MULTILINGUAL_KEYWORDS = [
   // Korean
@@ -92,6 +89,24 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const WORD_CHARACTER_CLASS = String.raw`[\p{L}\p{M}\p{N}_]`;
+
+/** Build a case-insensitive matcher that requires a Unicode-aware word start. */
+function buildWordStartPattern(keyword: string): RegExp {
+  const escaped = escapeRegExp(keyword);
+  return new RegExp(`(?<!${WORD_CHARACTER_CLASS})${escaped}`, 'iu');
+}
+
+/** Build a case-insensitive keyword matcher with Unicode-aware word boundaries. */
+function buildWordPattern(keyword: string): RegExp {
+  const escaped = escapeRegExp(keyword);
+  return new RegExp(`(?<!${WORD_CHARACTER_CLASS})${escaped}(?!${WORD_CHARACTER_CLASS})`, 'iu');
+}
+
+/** English patterns for think keywords */
+const ULTRATHINK_PATTERN = buildWordPattern('ultrathink');
+const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
+
 /**
  * Build a matcher for a single think keyword.
  *
@@ -111,7 +126,7 @@ function buildKeywordPattern(keyword: string): RegExp {
   if (!ANCHORED_SCRIPTS.test(keyword)) {
     return new RegExp(escaped, 'iu');
   }
-  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}`, 'iu');
+  return buildWordStartPattern(keyword);
 }
 
 /** Combined patterns including multilingual support */
@@ -154,5 +169,5 @@ export function extractPromptText(
  */
 export function detectUltrathinkKeyword(text: string): boolean {
   const textWithoutCode = removeCodeBlocks(text);
-  return /\bultrathink\b/i.test(textWithoutCode);
+  return ULTRATHINK_PATTERN.test(textWithoutCode);
 }
