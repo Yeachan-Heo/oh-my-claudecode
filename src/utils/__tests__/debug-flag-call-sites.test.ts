@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { isDebugEnabled as isDebugEnabledDirect } from '../debug-flag.js';
 
 const ORIGINAL_ENV = process.env;
 
@@ -34,6 +35,23 @@ describe('OMC_DEBUG reaches every call site for both spellings', () => {
     process.env.OMC_DEBUG = value;
     const { DEBUG_ENABLED } = await import('../../hooks/learner/constants.js');
     expect(DEBUG_ENABLED).toBe(false);
+  });
+
+  it('todo-continuation reads the flag through the shared helper', async () => {
+    // It previously compared the whole env string against 'todo-continuation', so a
+    // comma-separated list such as 'learner,todo-continuation' left it disabled --
+    // contradicting the convention this helper introduces.
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync('src/hooks/todo-continuation/index.ts', 'utf-8');
+    expect(source).toContain("isDebugEnabled('todo-continuation')");
+    expect(source).not.toMatch(/debug === 'todo-continuation'/);
+  });
+
+  it('a comma-separated list enables several named scopes together', () => {
+    process.env.OMC_DEBUG = 'learner,todo-continuation';
+    expect(isDebugEnabledDirect('learner')).toBe(true);
+    expect(isDebugEnabledDirect('todo-continuation')).toBe(true);
+    expect(isDebugEnabledDirect('delegation-enforcer')).toBe(false);
   });
 
   it('the delegation enforcer reads the flag through the shared helper', async () => {
