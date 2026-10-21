@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "1d38507c844a0994e25e6ba2d26983c1f856fe5d",
-    "sourceSha256": "0bbbf97dea47f2bf2d237b0ad3efe515392cbc098de9936e545835f95cfa89f6",
+    "head": "7204cfd7c66bf8f684cd8653dd1f0a3eb3ef6d99",
+    "sourceSha256": "ae260f9192996405a71027af6b25563d64813cda057952e297a053c63f1603f0",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "1d38507c844a0994e25e6ba2d26983c1f856fe5d",
-  "sourceSha256": "0bbbf97dea47f2bf2d237b0ad3efe515392cbc098de9936e545835f95cfa89f6",
+  "head": "7204cfd7c66bf8f684cd8653dd1f0a3eb3ef6d99",
+  "sourceSha256": "ae260f9192996405a71027af6b25563d64813cda057952e297a053c63f1603f0",
   "counts": {
     "public": {
       "skills": 48,
@@ -45655,6 +45655,11 @@
         "path": "tests/lint/setup-phases-drift.test.ts"
       },
       {
+        "id": "tests/lint/skill-argument-hints.test.ts",
+        "kind": "other",
+        "path": "tests/lint/skill-argument-hints.test.ts"
+      },
+      {
         "id": "tests/lint/skill-parallel-caveats.test.ts",
         "kind": "other",
         "path": "tests/lint/skill-parallel-caveats.test.ts"
@@ -72867,6 +72872,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/installer/__tests__/hud-wrapper-env.test.ts",
+        "to": "src/lib/hud-wrapper-template.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/installer/__tests__/mcp-registry.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -79694,6 +79704,11 @@
       {
         "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
         "to": "src/team/git-worktree.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/runtime-v2.shutdown.test.ts",
+        "to": "src/team/monitor.ts",
         "kind": "imports"
       },
       {
@@ -88337,6 +88352,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/skill-argument-hints.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/skill-argument-hints.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/skill-argument-hints.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/skill-parallel-caveats.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88483,12 +88513,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7725,
-      "edgeCount": 8553,
-      "importEdgeCount": 7113,
+      "nodeCount": 7726,
+      "edgeCount": 8558,
+      "importEdgeCount": 7118,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "56ed15b99f83efd0887c014ccbee0a352b7aa5a10d62f51246c2392033beedff",
-  "manifestSha256": "bf77fa6c5e3251dbe163bd5af212bf40517eaa3acc868e25cc125529ebd538a1"
+  "inventorySha256": "6a586deacfc5713affb1719db7e321440a6193e0364af1ceec16329ba061967c",
+  "manifestSha256": "b9b8e1350b27259e1facdce293cea9c25393069a828768d2ca9b3907ec67856f"
 }
