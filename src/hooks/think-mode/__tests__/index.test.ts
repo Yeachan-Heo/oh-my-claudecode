@@ -187,6 +187,12 @@ World`);
         expect(detectThinkKeyword('denken, bitte')).toBe(true);
       });
 
+      it('should match a Norwegian keyword behind a productive prefix', () => {
+        // 'gruble' is unanchored, so 'begruble' works without modelling 'be-'.
+        expect(detectThinkKeyword('Vi m\u00e5 begruble dette grundig')).toBe(true);
+        expect(detectThinkKeyword('vi m\u00e5 gruble over dette')).toBe(true);
+      });
+
       it('should match a German keyword behind any productive prefix', () => {
         // 'denken' occurs inside no English word, so it is not anchored and every
         // prefixed form works without a per-prefix list.
@@ -225,6 +231,9 @@ World`);
         expect(detectThinkKeyword('a grubless afternoon')).toBe(true);
         expect(detectThinkKeyword('pensacola is a city')).toBe(true);
         expect(detectThinkKeyword('the goldenknop flower')).toBe(true);
+        // 'gruble' and 'denk' are not anchored at all: their only English collisions
+        // begin with the stem, so an anchor could not exclude them and would only cost
+        // the ordinary prefixed forms below.
       });
 
       it('should treat a non-Latin combining mark as an English word boundary', () => {

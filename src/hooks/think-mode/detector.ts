@@ -69,9 +69,17 @@ const MULTILINGUAL_KEYWORDS = [
 
 /**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
- * included because it occurs inside "prepense" and "prepensely". 'denk' is deliberately
- * omitted: its rare hit in "goldenknop" is not worth rejecting common German forms such
- * as "bedenke", "umdenken" and "überdenken".
+ * included because it occurs inside "prepense" and "prepensely".
+ *
+ * Membership requires a collision the anchor can actually suppress, which means an
+ * English word containing the stem somewhere other than its start. Measured against the
+ * system word list, each entry here has one: 'pensa' 52, 'pense' 33, 'penser' 11,
+ * 'repense' 2, 'pensar' 1.
+ *
+ * Two stems are deliberately omitted because they fail that test. 'gruble' collides only
+ * with "grubless", and 'denk' only with "goldenknop" -- both words begin with the stem,
+ * so a word-start anchor could never exclude them, and anchoring only cost the ordinary
+ * prefixed forms 'begruble', 'bedenke', 'umdenken' and 'überdenken'.
  */
 const ENGLISH_COLLIDING_KEYWORDS = new Set([
   'pensa',
@@ -79,7 +87,6 @@ const ENGLISH_COLLIDING_KEYWORDS = new Set([
   'pense',
   'penser',
   'repense',
-  'gruble',
 ]);
 
 /** Escape a keyword so that regex metacharacters match literally. */
