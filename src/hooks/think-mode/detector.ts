@@ -70,8 +70,39 @@ const MULTILINGUAL_KEYWORDS = [
   'חשוב', 'לחשוב', 'להרהר',
 ];
 
+/**
+ * Scripts that separate words with whitespace.
+ *
+ * For these a bare substring match is a false positive: Portuguese 'pense' would
+ * otherwise fire inside the English word "expense". Scripts absent from this list
+ * (Han, Hiragana, Katakana, Hangul, Thai) run words together, so substring matching
+ * is the only thing that can match them.
+ */
+const WORD_DELIMITED_SCRIPTS =
+  /[\p{Script=Latin}\p{Script=Cyrillic}\p{Script=Greek}\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Devanagari}\p{Script=Bengali}]/u;
+
+/** Escape a keyword so that regex metacharacters match literally. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Build a matcher for a single think keyword.
+ *
+ * Keywords written in a space-delimited script are anchored on both sides so they
+ * only match whole words. Keywords in scripts without word separators keep substring
+ * matching, because a boundary would stop them matching at all.
+ */
+function buildKeywordPattern(keyword: string): RegExp {
+  const escaped = escapeRegExp(keyword);
+  if (!WORD_DELIMITED_SCRIPTS.test(keyword)) {
+    return new RegExp(escaped, 'iu');
+  }
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'iu');
+}
+
 /** Combined patterns including multilingual support */
-const MULTILINGUAL_PATTERNS = MULTILINGUAL_KEYWORDS.map((kw) => new RegExp(kw, 'i'));
+const MULTILINGUAL_PATTERNS = MULTILINGUAL_KEYWORDS.map(buildKeywordPattern);
 const THINK_PATTERNS = [...ENGLISH_PATTERNS, ...MULTILINGUAL_PATTERNS];
 
 /** Regex patterns for code blocks */

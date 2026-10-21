@@ -112,6 +112,37 @@ World`);
       it('should detect German "denken"', () => {
         expect(detectThinkKeyword('bitte denken Sie')).toBe(true);
       });
+
+      it('should detect Vietnamese "suy nghĩ"', () => {
+        expect(detectThinkKeyword('hãy suy nghĩ về điều này')).toBe(true);
+      });
+
+      it('should detect Hebrew "לחשוב"', () => {
+        expect(detectThinkKeyword('אתה צריך לחשוב על זה')).toBe(true);
+      });
+    });
+
+    describe('Multilingual keywords match whole words only', () => {
+      it.each([
+        'Can you compensate for the timezone offset?',
+        'We need compensation logic in the reducer',
+        'What is the expense of this API call?',
+        'Please dispense with the boilerplate',
+        'Use a dispenser pattern for the factory',
+        'The release is in suspense until CI passes',
+      ])('should not treat an English word containing a keyword as think: %s', (text) => {
+        expect(detectThinkKeyword(text)).toBe(false);
+      });
+
+      it('should not fire on a Latin keyword embedded in a longer word', () => {
+        expect(detectThinkKeyword('nachdenkenswert')).toBe(false);
+        expect(detectThinkKeyword('pensaremos')).toBe(false);
+      });
+
+      it('should still match a Latin keyword delimited by punctuation', () => {
+        expect(detectThinkKeyword('(piensa)')).toBe(true);
+        expect(detectThinkKeyword('denken, bitte')).toBe(true);
+      });
     });
 
     describe('Code block exclusion', () => {
