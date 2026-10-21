@@ -87,43 +87,28 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Marks that belong to emoji presentation rather than to a letter: the variation
-// selectors and the enclosing keycap. They must not be traversed as part of a
-// grapheme, or an emoji becomes word adjacency and swallows the boundary --
-// '1\u{FE0F}\u{20E3}think' would find the ASCII '1' inside the keycap, and
-// '\u{2764}\u{FE0F}pense' would see U+FE0F as a word character.
-const EMOJI_MARKS = String.raw`\uFE00-\uFE0F\u20E3`;
+// Marks that decorate rather than compose a letter, so they must not be traversed as
+// part of a grapheme: the variation selectors, and every enclosing mark (\p{Me} covers
+// U+20E3 COMBINING ENCLOSING KEYCAP and U+20DD COMBINING ENCLOSING CIRCLE alike).
+//
+// Traversing them turns a decorated number into word adjacency: '1\u{FE0F}\u{20E3}think'
+// and '1\u{20DD}think' would find the ASCII '1' inside the enclosure. Combining
+// diacritics stay traversable, since U+0301 and friends are \p{Mn}, not \p{Me}.
+const LETTER_MARK = String.raw`(?:(?![\uFE00-\uFE0F]|\p{Me})\p{M})`;
 
-/** A combining mark that forms part of a letter, excluding emoji presentation marks. */
-const LETTER_MARK = String.raw`(?:(?![${EMOJI_MARKS}])\p{M})`;
+// A Latin *letter*, not merely a Latin-script code point. U+2170 ROMAN NUMERAL ONE is
+// Script=Latin but \p{Nl}, a list marker rather than identifier text, so '\u{2170}think'
+// must still activate -- matching how \p{Nd} already treats it on the multilingual side.
+const LATIN_LETTER = String.raw`(?:(?=\p{L})\p{Script=Latin})`;
 
-// A word character for the anchored multilingual stems. Emoji presentation marks are
-// excluded for the same reason as above: '\u{2764}\u{FE0F}pense profundamente' must still
-// activate.
-// \p{Nd} rather than \p{N}: a decimal digit next to a stem really is word adjacency,
-// but Number-Other and Number-Letter code points are list markers, not identifier text.
-// '\u{2460}Pense profundamente' and a roman-numeral list item must still activate.
+// A word character for the anchored multilingual stems. \p{Nd} rather than \p{N}: a
+// decimal digit beside a stem is word adjacency, but Number-Other and Number-Letter
+// code points are list markers. Emoji and enclosing marks are excluded as above.
 const UNICODE_WORD_CHARACTER_CLASS = String.raw`(?:[\p{L}\p{Nd}_]|${LETTER_MARK})`;
-// A Latin grapheme next to the keyword, rather than a Latin code point.
-//
-// Every earlier attempt asked the wrong question of a single character class.
-// A bare \p{M} counted a mark from any script, suppressing the boundary in
-// 'कृपयाthinkकरें' and '❤️think'. Script_Extensions=Latin over-corrected, matching
-// separators merely associated with Latin, so U+202F in 'Please\u202Fthink' and U+00B7
-// in 'think·deeply' suppressed it. Intersecting with [\p{L}\p{M}] fixed those but still
-// misread an inherited mark: combining marks are Script=Inherited and take the script of
-// their base, so NFD 'άthink' (α + U+0301) and NFD 'йthink' (и + U+0306) put a
-// Latin-extension mark next to the keyword even though the grapheme is Greek or
-// Cyrillic, and normalization alone disabled think mode.
-//
-// A mark cannot be classified without its base, so the assertions look at the whole
-// grapheme. Leading: reject a Latin letter, ASCII digit or underscore followed by any
-// marks. Trailing: reject a mark (it would attach to the final letter and make a
-// different word) or a Latin letter, ASCII digit or underscore. ASCII digits and
-// underscore are explicit, which keeps a non-Latin digit a boundary, matching the \b
-// this replaced.
-const LATIN_GRAPHEME_BEFORE = String.raw`(?<![\p{Script=Latin}0-9_]${LETTER_MARK}*)`;
-const LATIN_GRAPHEME_AFTER = String.raw`(?![\p{M}\p{Script=Latin}0-9_])`;
+
+const LATIN_GRAPHEME_BEFORE = String.raw`(?<!(?:${LATIN_LETTER}|[0-9_])${LETTER_MARK}*)`;
+const LATIN_GRAPHEME_AFTER = String.raw`(?!\p{M}|${LATIN_LETTER}|[0-9_])`;
+
 
 /**
  * Build an English whole-word matcher. A non-Latin grapheme counts as a boundary so

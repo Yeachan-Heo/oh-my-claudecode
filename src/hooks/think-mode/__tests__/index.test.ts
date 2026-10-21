@@ -256,6 +256,16 @@ World`);
         expect(detectThinkKeyword('\u0439think')).toBe(true);
       });
 
+      it('should treat a Latin-script number and an enclosing mark as boundaries', () => {
+        // U+2170 is Script=Latin but \p{Nl}, a list marker rather than a letter, so the
+        // English adjacency check must look for a Latin *letter*.
+        expect(detectThinkKeyword('\u2170think about this')).toBe(true);
+        // U+20DD COMBINING ENCLOSING CIRCLE is \p{Me} like the keycap, so a decorated
+        // number must not read as word adjacency.
+        expect(detectThinkKeyword('1\u20ddthink')).toBe(true);
+        expect(detectThinkKeyword('1\u20ddPense')).toBe(true);
+      });
+
       it('should treat an enclosed or letter number as a boundary', () => {
         // A decimal digit beside a stem is word adjacency, but Number-Other and
         // Number-Letter code points are list markers.
