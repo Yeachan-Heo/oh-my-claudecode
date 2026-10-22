@@ -16,7 +16,7 @@
  */
 
 interface ParsedVersion {
-  core: [number, number, number];
+  core: [string, string, string];
   /** Dot-separated prerelease identifiers; empty when this is a release. */
   prerelease: string[];
 }
@@ -32,10 +32,16 @@ function parseVersion(version: string): ParsedVersion {
   const coreText = hyphen === -1 ? withoutBuild : withoutBuild.slice(0, hyphen);
   const prereleaseText = hyphen === -1 ? '' : withoutBuild.slice(hyphen + 1);
 
-  const parts = coreText.split('.').map(part => parseInt(part, 10) || 0);
+  const parts = coreText.split('.').map(part => {
+    // Extract leading digits to handle display-only suffixes like '4.15.7L'.
+    // parseInt would lose precision on very large numbers, so extract digits
+    // as a string instead. If there are no leading digits, use '0'.
+    const match = part.match(/^(\d+)/);
+    return match ? match[1] : '0';
+  });
 
   return {
-    core: [parts[0] ?? 0, parts[1] ?? 0, parts[2] ?? 0],
+    core: [parts[0] ?? '0', parts[1] ?? '0', parts[2] ?? '0'],
     prerelease: prereleaseText === '' ? [] : prereleaseText.split('.'),
   };
 }
@@ -92,9 +98,13 @@ export function compareVersions(a: string, b: string): number {
   const parsedA = parseVersion(a);
   const parsedB = parseVersion(b);
 
+  // Compare core version using the same digit-string comparator as prerelease
+  // identifiers to avoid precision loss on very large numbers. JavaScript
+  // numbers lose precision past 2^53, so Number('1.10000000000000000000.0')
+  // and Number('1.10000000000000000001.0') would compare equal.
   for (let i = 0; i < 3; i += 1) {
-    if (parsedA.core[i] < parsedB.core[i]) return -1;
-    if (parsedA.core[i] > parsedB.core[i]) return 1;
+    const delta = comparePrereleaseIdentifier(parsedA.core[i], parsedB.core[i]);
+    if (delta !== 0) return delta < 0 ? -1 : 1;
   }
 
   return comparePrerelease(parsedA.prerelease, parsedB.prerelease);

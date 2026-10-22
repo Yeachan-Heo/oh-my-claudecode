@@ -25,6 +25,23 @@ describe('compareVersions', () => {
       expect(compareVersions('1.2', '1.2.0')).toBe(0);
       expect(compareVersions('1.2', '1.2.1')).toBeLessThan(0);
     });
+
+    it('compares large core version numbers without losing precision', () => {
+      // Number() collapses these two to the same double, so comparing through it
+      // made distinct core versions equal and could let an older target pass the
+      // installer's `compareVersions(...) < 0` downgrade guard.
+      expect(Number('10000000000000000000')).toBe(Number('10000000000000000001'));
+      expect(compareVersions('1.10000000000000000000.0', '1.10000000000000000001.0')).toBeLessThan(0);
+      expect(compareVersions('1.10000000000000000001.0', '1.10000000000000000000.0')).toBeGreaterThan(0);
+    });
+
+    it('handles precision loss in major version', () => {
+      expect(compareVersions('10000000000000000000.0.0', '10000000000000000001.0.0')).toBeLessThan(0);
+    });
+
+    it('handles precision loss in patch version', () => {
+      expect(compareVersions('1.0.10000000000000000000', '1.0.10000000000000000001')).toBeLessThan(0);
+    });
   });
 
   describe('prerelease precedence', () => {
