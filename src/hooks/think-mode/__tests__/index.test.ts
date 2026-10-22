@@ -232,7 +232,7 @@ World`);
         expect(detectThinkKeyword(text.normalize('NFD'))).toBe(false);
       });
 
-      it('should match surpenser, listed as its own keyword', () => {
+      it('should match surpenser and its finite form as explicit keywords', () => {
         // Listed explicitly rather than reached by broadening the prefix allowance. It
         // carries no accent, so NFC and NFD are identical and there is no normalization
         // hazard -- unlike an accented prefix such as 'pré', which decomposes in NFD.
@@ -240,6 +240,11 @@ World`);
         expect(detectThinkKeyword(text)).toBe(true);
         expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
         expect(detectThinkKeyword(text.normalize('NFC'))).toBe(true);
+
+        const finiteForm = 'Surpense cette d\u00e9cision';
+        expect(detectThinkKeyword(finiteForm)).toBe(true);
+        expect(detectThinkKeyword(finiteForm.normalize('NFD'))).toBe(true);
+        expect(detectThinkKeyword(finiteForm.normalize('NFC'))).toBe(true);
       });
 
       it('should still reject the words the anchor exists for', () => {

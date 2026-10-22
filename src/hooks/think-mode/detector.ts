@@ -28,7 +28,7 @@ const MULTILINGUAL_KEYWORDS = [
   // Spanish
   'piensa', 'repiensa', 'reflexionar', 'reflexiona',
   // French
-  'penser', 'repenser', 'repense', 'surpenser', 'réfléchir', 'réfléchis',
+  'penser', 'repenser', 'repense', 'surpenser', 'surpense', 'réfléchir', 'réfléchis',
   // German
   'denken', 'denk', 'nachdenken', 'überdenken', 'überdenke',
   // Vietnamese
