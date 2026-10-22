@@ -227,3 +227,44 @@ describe("resolveGateway", () => {
     expect((result!.gateway as { type?: string }).type).toBeUndefined();
   });
 });
+
+describe("getOpenClawConfig - leading UTF-8 BOM", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetOpenClawConfigCache();
+  });
+
+  afterEach(() => {
+    resetOpenClawConfigCache();
+  });
+
+  it("reads a config saved as UTF-8 with BOM", () => {
+    // Editors on Windows prepend U+FEFF, which JSON.parse rejects. This file is
+    // hand-authored, so it comes back through an editor.
+    vi.stubEnv("OMC_OPENCLAW", "1");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(
+      `\uFEFF${JSON.stringify(validConfig)}`,
+    );
+
+    expect(getOpenClawConfig()).toEqual(validConfig);
+  });
+
+  it("reads the same config without a BOM", () => {
+    vi.stubEnv("OMC_OPENCLAW", "1");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify(validConfig),
+    );
+
+    expect(getOpenClawConfig()).toEqual(validConfig);
+  });
+
+  it("still returns null for genuinely malformed JSON", () => {
+    vi.stubEnv("OMC_OPENCLAW", "1");
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(readFileSync).mockReturnValue("{ not json");
+
+    expect(getOpenClawConfig()).toBeNull();
+  });
+});
