@@ -181,6 +181,14 @@ World`);
         expect(detectThinkKeyword(text.normalize('NFD'))).toBe(false);
       });
 
+      it('should classify combining overlays by their base grapheme', () => {
+        // NFD decomposes U+2260 into '=' plus U+0338. That overlay belongs to a symbol,
+        // so it must not make the following think stem look embedded in a word.
+        const text = '≠Pense profondément';
+        expect(detectThinkKeyword(text)).toBe(true);
+        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
+      });
+
       it('should treat non-Latin letters as part of Latin keyword boundaries', () => {
         expect(detectThinkKeyword('пpense')).toBe(false);
       });

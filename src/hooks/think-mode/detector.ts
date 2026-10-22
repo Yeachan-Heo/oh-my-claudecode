@@ -126,10 +126,12 @@ const LETTER_MARK = String.raw`(?:(?![\uFE00-\uFE0F]|\p{Me})\p{M})`;
 // must still activate -- matching how \p{Nd} already treats it on the multilingual side.
 const LATIN_LETTER = String.raw`(?:(?=\p{L})\p{Script=Latin})`;
 
-// A word character for the anchored multilingual stems. \p{Nd} rather than \p{N}: a
+// A word grapheme for the anchored multilingual stems. \p{Nd} rather than \p{N}: a
 // decimal digit beside a stem is word adjacency, but Number-Other and Number-Letter
-// code points are list markers. Emoji and enclosing marks are excluded as above.
-const UNICODE_WORD_CHARACTER_CLASS = String.raw`(?:[\p{L}\p{Nd}_]|${LETTER_MARK})`;
+// code points are list markers. Marks count only when attached to a word base; a
+// decomposed overlay on a symbol is not word adjacency. Emoji and enclosing marks are
+// excluded from the trailing marks as above.
+const UNICODE_WORD_GRAPHEME = String.raw`[\p{L}\p{Nd}_]${LETTER_MARK}*`;
 
 const LATIN_GRAPHEME_BEFORE = String.raw`(?<!(?:${LATIN_LETTER}|[0-9_])${LETTER_MARK}*)`;
 const LATIN_GRAPHEME_AFTER = String.raw`(?!\p{M}|${LATIN_LETTER}|[0-9_])`;
@@ -159,7 +161,7 @@ function buildKeywordPattern(keyword: string): RegExp {
     return new RegExp(escapeRegExp(keyword), 'iu');
   }
   return new RegExp(
-    `(?<!${UNICODE_WORD_CHARACTER_CLASS})(?:${ROMANCE_PREFIXES})?${escapeRegExp(keyword)}`,
+    `(?<!${UNICODE_WORD_GRAPHEME})(?:${ROMANCE_PREFIXES})?${escapeRegExp(keyword)}`,
     'iu',
   );
 }
