@@ -40,7 +40,7 @@ const MULTILINGUAL_KEYWORDS = [
   // Turkish
   'düşün', 'düşünmek',
   // Italian
-  'pensare', 'pensa', 'ripensare', 'ripensa', 'riflettere', 'rifletti',
+  'pensare', 'pensa', 'ripensare', 'ripensa', 'strapens', 'riflettere', 'rifletti',
   // Thai
   'คิด', 'พิจารณา',
   // Polish
@@ -93,8 +93,8 @@ const MULTILINGUAL_KEYWORDS = [
  * suppress -- and 'dé' admits 'dépenser', which means to spend, not to think.
  *
  * A prefixed form that is worth supporting is therefore listed as its own keyword
- * instead, the way 'repenser', 'surpens' and 'überdenken' are. An accent-free keyword
- * is identical in NFC and NFD, so it has no normalization hazard at all.
+ * instead, the way 'repenser', 'surpens', 'strapens' and 'überdenken' are. An accent-free
+ * keyword is identical in NFC and NFD, so it has no normalization hazard at all.
  *
  * Listing it as a stem rather than one form matters. A prefixed infinitive only covers
  * the forms built on the infinitive, so 'surpenser' left the present, imperative,

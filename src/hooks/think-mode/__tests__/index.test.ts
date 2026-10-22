@@ -30,6 +30,10 @@ describe('think-mode', () => {
     clearThinkModeState('test-session');
     clearThinkModeState('session-1');
     clearThinkModeState('session-2');
+    clearThinkModeState('compound-overthink');
+    clearThinkModeState('compound-counterthink');
+    clearThinkModeState('compound-strapens');
+    clearThinkModeState('compound-negative');
   });
 
   describe('detector - removeCodeBlocks', () => {
@@ -164,6 +168,7 @@ World`);
         expect(detectThinkKeyword('Il faut repenser cette interface')).toBe(true);
         expect(detectThinkKeyword('Devemos repensar isso')).toBe(true);
         expect(detectThinkKeyword('Dobbiamo ripensare questo')).toBe(true);
+        expect(detectThinkKeyword('Strapensaci prima di rispondere')).toBe(true);
       });
 
       it('should match the explicit malpensar verb without matching common adjectives', () => {
@@ -195,9 +200,13 @@ World`);
         // detectThinkKeyword is the matcher; createThinkModeHook is what Claude Code
         // actually calls, so the prefixes are exercised through extractPromptText and
         // the session state rather than against the matcher alone.
-        for (const prompt of ['Não sobrepense isso demais', 'Intenta contrapensar esta propuesta']) {
+        const prompts = [
+          { prompt: 'Não sobrepense isso demais', sessionId: 'compound-overthink' },
+          { prompt: 'Intenta contrapensar esta propuesta', sessionId: 'compound-counterthink' },
+          { prompt: 'Strapensaci prima di rispondere', sessionId: 'compound-strapens' },
+        ];
+        for (const { prompt, sessionId } of prompts) {
           const hook = createThinkModeHook();
-          const sessionId = `compound-${prompt.slice(0, 8)}`;
           const state = hook.processChatParams(sessionId, {
             parts: [{ type: 'text', text: prompt }],
             message: {},
