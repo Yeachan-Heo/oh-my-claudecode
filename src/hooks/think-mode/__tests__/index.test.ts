@@ -82,6 +82,19 @@ World`);
         // "think" should be a word boundary
         expect(detectThinkKeyword('rethinking this')).toBe(false);
       });
+
+      it('should not match English keywords adjacent to accented letters', () => {
+        expect(detectThinkKeyword('déthinké')).toBe(false);
+        expect(detectUltrathinkKeyword('éultrathinké')).toBe(false);
+        expect(detectThinkKeyword('déthink')).toBe(false);
+        expect(detectUltrathinkKeyword('éultrathink')).toBe(false);
+      });
+
+      it('should match English keywords next to CJK text', () => {
+        expect(detectThinkKeyword('请think一下')).toBe(true);
+        expect(detectThinkKeyword('thinkして')).toBe(true);
+        expect(detectUltrathinkKeyword('请ultrathink')).toBe(true);
+      });
     });
 
     describe('Multilingual keywords', () => {
@@ -111,6 +124,14 @@ World`);
 
       it('should detect German "denken"', () => {
         expect(detectThinkKeyword('bitte denken Sie')).toBe(true);
+      });
+
+      it('should detect Vietnamese "suy nghĩ"', () => {
+        expect(detectThinkKeyword('hãy suy nghĩ về điều này')).toBe(true);
+      });
+
+      it('should detect Hebrew "לחשוב"', () => {
+        expect(detectThinkKeyword('אתה צריך לחשוב על זה')).toBe(true);
       });
     });
 

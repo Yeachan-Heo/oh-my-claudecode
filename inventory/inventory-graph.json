@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e7bff2e0da84e39117058f42576e7279471316d8",
-    "sourceSha256": "fe90b5fbb8721c7b9861830881fbeced733373b5d41afb45020e25e6a9dec382",
+    "head": "7362a770cb3756b1feb953590f898e9b9854dd29",
+    "sourceSha256": "6066f2eee6b4ba236330d486987f009b0bfc723bb268b9c867fd7f391516da3d",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e7bff2e0da84e39117058f42576e7279471316d8",
-  "sourceSha256": "fe90b5fbb8721c7b9861830881fbeced733373b5d41afb45020e25e6a9dec382",
+  "head": "7362a770cb3756b1feb953590f898e9b9854dd29",
+  "sourceSha256": "6066f2eee6b4ba236330d486987f009b0bfc723bb268b9c867fd7f391516da3d",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 334,
+      "hookFiles": 335,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1478,
-      "total": 1502
+      "srcFiles": 1477,
+      "total": 1501
     },
     "generated": {
       "distFiles": 5735,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 334,
+    "hookFiles": 335,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -459,6 +459,7 @@
       "src/hooks/team-pipeline/transitions.ts",
       "src/hooks/team-pipeline/types.ts",
       "src/hooks/team-worker-hook.ts",
+      "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
       "src/hooks/think-mode/__tests__/index.test.ts",
       "src/hooks/think-mode/detector.ts",
       "src/hooks/think-mode/index.ts",
@@ -6969,6 +6970,7 @@
       "src/hooks/team-pipeline/transitions.ts",
       "src/hooks/team-pipeline/types.ts",
       "src/hooks/team-worker-hook.ts",
+      "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
       "src/hooks/think-mode/__tests__/index.test.ts",
       "src/hooks/think-mode/detector.ts",
       "src/hooks/think-mode/index.ts",
@@ -43219,6 +43221,11 @@
         "path": "src/hooks/team-worker-hook.ts"
       },
       {
+        "id": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts"
+      },
+      {
         "id": "src/hooks/think-mode/__tests__/index.test.ts",
         "kind": "hook",
         "path": "src/hooks/think-mode/__tests__/index.test.ts"
@@ -46044,11 +46051,6 @@
         "path": "src/utils/__tests__/paths.test.ts"
       },
       {
-        "id": "src/utils/__tests__/semver-compare.test.ts",
-        "kind": "src",
-        "path": "src/utils/__tests__/semver-compare.test.ts"
-      },
-      {
         "id": "src/utils/__tests__/string-width.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/string-width.test.ts"
@@ -46112,11 +46114,6 @@
         "id": "src/utils/resolve-node.ts",
         "kind": "src",
         "path": "src/utils/resolve-node.ts"
-      },
-      {
-        "id": "src/utils/semver-compare.ts",
-        "kind": "src",
-        "path": "src/utils/semver-compare.ts"
       },
       {
         "id": "src/utils/skill-pipeline.ts",
@@ -60801,11 +60798,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/features/auto-update.ts",
-        "to": "src/utils/semver-compare.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/features/background-agent/concurrency.ts",
         "to": "src/features/background-agent/types.ts",
         "kind": "type-imports"
@@ -71561,6 +71553,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
+        "to": "src/hooks/think-mode/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/think-mode/__tests__/index.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -74358,11 +74360,6 @@
       {
         "from": "src/installer/index.ts",
         "to": "src/utils/resolve-node.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/installer/index.ts",
-        "to": "src/utils/semver-compare.ts",
         "kind": "imports"
       },
       {
@@ -87601,16 +87598,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/utils/__tests__/semver-compare.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/semver-compare.test.ts",
-        "to": "src/utils/semver-compare.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/utils/__tests__/string-width.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -87716,11 +87703,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/utils/paths.ts",
-        "to": "src/utils/semver-compare.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/utils/plugin-cache-validation.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -87758,11 +87740,6 @@
       {
         "from": "src/utils/resolve-node.ts",
         "to": "src/utils/node-version.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/resolve-node.ts",
-        "to": "src/utils/semver-compare.ts",
         "kind": "imports"
       },
       {
@@ -89712,12 +89689,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7881,
-      "edgeCount": 8614,
-      "importEdgeCount": 7173,
+      "nodeCount": 7880,
+      "edgeCount": 8610,
+      "importEdgeCount": 7169,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "0d1df24982e859e78b7841727aa27c97c45b280623511400de1a13aadfae6b20",
-  "manifestSha256": "d21e33504c2dd72628bc6576c9b741c08b7577eba7194bf3d2ee8cc247d0dc5f"
+  "inventorySha256": "ebe6dc8c7b26ff3054ca8d864fb0817a2ffcaca7b9aa9b8bca915670b54c92cf",
+  "manifestSha256": "72c41bd7ef8a419da597b3aa4adbbf449e6948fa30b394df5010e1be0f41b15c"
 }
