@@ -273,6 +273,10 @@ import {
   spawnWorkerInPane,
   spawnOwnedWorkerInPane,
   retryStartupInboxSubmit,
+  sendToWorker,
+  paneHasActiveTask,
+  paneHasTrustPrompt,
+  paneLooksReady,
   waitForStartupPaneReady,
   type StartupPaneContext,
   type WorkerPaneOwnership,
@@ -665,6 +669,36 @@ describe('worker pane startup safety', () => {
     expect(literalInputs).toEqual(['1', 'Read inbox.md, execute now.']);
     expect(tmuxState.args.findIndex(args => args.at(-1) === '1'))
       .toBeLessThan(tmuxState.args.findIndex(args => args.at(-1) === 'Read inbox.md, execute now.'));
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(3);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'C-m')).toBe(false);
+  });
+
+  strictTmuxIt('refuses Codex folder trust without selecting trust or delivering task text', async () => {
+    const context = await acceptedContext('codex');
+    const capture = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      'Continue only if you trust these files. Your',
+      'trust decision will be saved.',
+      '› 1. Trust and continue', '  2. Quit',
+      'enter continue · esc quit',
+    ].join('\n');
+    tmuxState.captures = [capture];
+
+    expect(paneHasTrustPrompt(capture, 'codex')).toBe(true);
+    expect(paneLooksReady(capture, 'codex')).toBe(false);
+    expect(paneHasActiveTask(capture, 'codex')).toBe(false);
+    expect(paneHasTrustPrompt(capture, 'claude')).toBe(false);
+    await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+    await expect(sendToWorker('', '%2', 'List files and report the result.', context.ownership.tmuxServerIdentity))
+      .resolves.toBe(false);
+    expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
   });
 
   strictTmuxIt.each([
