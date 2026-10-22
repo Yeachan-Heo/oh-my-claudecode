@@ -85,6 +85,22 @@ describe('host-load-gate', () => {
       });
     });
 
+    it('accepts leading and trailing whitespace around numeric thresholds', () => {
+      withEnv(
+        {
+          OMC_HOST_LOAD_THRESHOLD: ' 2.5 ',
+          OMC_FREE_MEMORY_THRESHOLD: ' 512 ',
+          OMC_MAX_SIBLING_SESSIONS: ' 16 ',
+        },
+        () => {
+          const config = parseGateConfig();
+          expect(config.cpuLoadThreshold).toBe(2.5);
+          expect(config.freeMemoryThreshold).toBe(512 * 1024 * 1024);
+          expect(config.maxSiblingSessions).toBe(16);
+        },
+      );
+    });
+
     it('handles invalid environment variables gracefully', () => {
       withEnv({ OMC_HOST_LOAD_THRESHOLD: 'not-a-number' }, () => {
         const config = parseGateConfig();
@@ -92,6 +108,183 @@ describe('host-load-gate', () => {
         const defaults = getDefaultGateConfig();
         expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
       });
+    });
+
+    it('does not truncate a partially-numeric free memory threshold', () => {
+      // parseInt('12abc', 10) is 12, which would have configured a 12MB floor.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '12abc' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+      });
+    });
+
+    it('does not truncate a fractional free memory threshold', () => {
+      // parseInt('8.9', 10) is 8, silently dropping the fraction.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '8.9' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+      });
+    });
+
+    it('honours exponent notation in the free memory threshold', () => {
+      // parseInt('1e3', 10) is 1, so this used to configure a 1MB floor -- low
+      // enough that the memory check effectively stopped gating.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '1e3' }, () => {
+        const config = parseGateConfig();
+        expect(config.freeMemoryThreshold).toBe(1000 * 1024 * 1024);
+      });
+    });
+
+    it('does not truncate a partially-numeric max sibling sessions', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '4 sessions' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('does not truncate a partially-numeric cpu load threshold', () => {
+      // parseFloat('2.5x', 10) is 2.5, accepting a malformed value as valid.
+      withEnv({ OMC_HOST_LOAD_THRESHOLD: '2.5x' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
+      });
+    });
+
+    it('rejects a fractional value that rounds to an integer', () => {
+      // The nearest double to '8.9999999999999999' is exactly 9, so deciding
+      // integrality from the parsed number would accept it and raise the cap.
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '8.9999999999999999' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('rejects an exponent value that underflows to zero', () => {
+      // '1e-324' is below the smallest double and becomes 0.
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1e-324' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('accepts an exponent value whose exponent covers its fraction digits', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1.5e3' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(1500);
+      });
+    });
+
+    it('rejects an exponent value whose fraction survives the exponent', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1.5e0' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('accepts equivalent spellings of the same integral threshold', () => {
+      // '1024' and these three denote the same value, so the parser must not
+      // prefer one spelling: the previous exponent-only rule rejected the last
+      // two and quietly dropped a 1024MB floor to the 256MB default.
+      for (const spelling of ['1024', '1024.0', '1.024e3', '10240e-1']) {
+        withEnv({ OMC_FREE_MEMORY_THRESHOLD: spelling }, () => {
+          expect(parseGateConfig().freeMemoryThreshold).toBe(1024 * 1024 * 1024);
+        });
+      }
+    });
+
+    it('accepts a negative exponent cancelled by trailing zeros', () => {
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '10000e-1' }, () => {
+        expect(parseGateConfig().freeMemoryThreshold).toBe(1000 * 1024 * 1024);
+      });
+    });
+
+    it('accepts zero with negative exponent notation', () => {
+      for (const spelling of ['0e-2', '-0e-2']) {
+        withEnv({ OMC_MAX_SIBLING_SESSIONS: spelling }, () => {
+          expect(parseGateConfig().maxSiblingSessions).toBe(0);
+        });
+      }
+    });
+
+    it('falls back to the default for a negative radix-prefixed integer threshold', () => {
+      const defaultMaxSiblingSessions =
+        getDefaultGateConfig().maxSiblingSessions;
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '-0x1' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(
+          defaultMaxSiblingSessions,
+        );
+      });
+    });
+
+    it('still accepts a radix-prefixed integer', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '0x10' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(16);
+      });
+    });
+
+    it('falls back to defaults for negative environment thresholds', () => {
+      const defaults = getDefaultGateConfig();
+      withEnv(
+        {
+          OMC_HOST_LOAD_THRESHOLD: '-1',
+          OMC_FREE_MEMORY_THRESHOLD: '-1',
+          OMC_MAX_SIBLING_SESSIONS: '-1',
+        },
+        () => {
+          const config = parseGateConfig();
+          expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
+          expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+          expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+        },
+      );
+    });
+
+    it('falls back to defaults for empty and whitespace-only thresholds', () => {
+      const defaults = getDefaultGateConfig();
+      withEnv(
+        {
+          OMC_HOST_LOAD_THRESHOLD: ' ',
+          OMC_FREE_MEMORY_THRESHOLD: '',
+          OMC_MAX_SIBLING_SESSIONS: '\t',
+        },
+        () => {
+          const config = parseGateConfig();
+          expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
+          expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+          expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+        },
+      );
+    });
+
+    it('uses zero as a valid free memory threshold', () => {
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '0' }, () => {
+        expect(parseGateConfig().freeMemoryThreshold).toBe(0);
+      });
+    });
+
+    it('falls back to defaults for out-of-range integer thresholds', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '9007199254740992' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(
+          getDefaultGateConfig().maxSiblingSessions,
+        );
+      });
+    });
+
+    it('rejects NaN and out-of-range non-finite thresholds', () => {
+      const defaultCpuLoadThreshold = getDefaultGateConfig().cpuLoadThreshold;
+      for (const value of ['NaN', 'Infinity', '1e999']) {
+        withEnv({ OMC_HOST_LOAD_THRESHOLD: value }, () => {
+          expect(parseGateConfig().cpuLoadThreshold).toBe(
+            defaultCpuLoadThreshold,
+          );
+        });
+      }
     });
 
     it('accepts override parameters', () => {

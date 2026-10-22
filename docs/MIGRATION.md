@@ -6,6 +6,7 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 
 ## Table of Contents
 
+- [Unreleased: Host Load Gate Threshold Values](#unreleased-host-load-gate-threshold-values)
 - [Unreleased: Rule Glob Brace Alternation](#unreleased-rule-glob-brace-alternation)
 - [Unreleased: Glossary File Rename (CONTEXT.md → GLOSSARY.md)](#unreleased-glossary-file-rename-contextmd--glossarymd)
 - [Unreleased: Shipyard Tracker Artifacts and Audit Contract v2](#unreleased-shipyard-tracker-artifacts-and-audit-contract-v2)
@@ -23,6 +24,21 @@ This guide covers all migration paths for oh-my-claudecode. Find your current ve
 - [v3.x → v4.0: Major Architecture Overhaul](#v3x--v40-major-architecture-overhaul)
 
 ---
+
+## Unreleased: Host Load Gate Threshold Values
+
+Negative values for `OMC_HOST_LOAD_THRESHOLD`, `OMC_FREE_MEMORY_THRESHOLD`, and
+`OMC_MAX_SIBLING_SESSIONS` now fall back to their documented defaults instead of
+disabling individual checks. Existing environment configurations that use `-1`
+can therefore re-enable a check after upgrading.
+
+### Migration
+
+- Remove a negative threshold variable to use its default value.
+- Set `OMC_HOST_LOAD_GATE_DISABLED=1` to disable the entire host load gate.
+- To disable an individual check from code, pass a negative value through a
+  `HostLoadGateConfig` override; negative environment values no longer disable
+  individual checks.
 
 ## Unreleased: Rule Glob Brace Alternation
 

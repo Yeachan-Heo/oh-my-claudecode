@@ -97,11 +97,12 @@ export function getDefaultGateConfig(): HostLoadGateConfig {
  */
 export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLoadGateConfig {
   const defaults = getDefaultGateConfig();
+  const freeMemoryMb = parseIntEnv('OMC_FREE_MEMORY_THRESHOLD');
 
   const config: HostLoadGateConfig = {
     cpuLoadThreshold: parseFloatEnv('OMC_HOST_LOAD_THRESHOLD') ?? defaults.cpuLoadThreshold,
-    freeMemoryThreshold: parseIntEnv('OMC_FREE_MEMORY_THRESHOLD')
-      ? parseIntEnv('OMC_FREE_MEMORY_THRESHOLD')! * 1024 * 1024
+    freeMemoryThreshold: freeMemoryMb !== null
+      ? freeMemoryMb * 1024 * 1024
       : defaults.freeMemoryThreshold,
     maxSiblingSessions: parseIntEnv('OMC_MAX_SIBLING_SESSIONS') ?? defaults.maxSiblingSessions,
     enabled: defaults.enabled,
@@ -113,18 +114,93 @@ export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLo
   return config;
 }
 
+/**
+ * Parse a finite non-negative float from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
+ *
+ * Uses Number() rather than parseFloat() because parseFloat() stops at the first
+ * character it cannot read: it turns '0.5abc' into 0.5 and 'off' into NaN, so a
+ * typo silently becomes a real threshold instead of falling back to the default.
+ * Negative environment values are invalid; a negative threshold supplied in a
+ * config override can still disable that check.
+ */
 function parseFloatEnv(key: string): number | null {
   const val = process.env[key];
-  if (!val) return null;
-  const parsed = parseFloat(val);
-  return isNaN(parsed) ? null : parsed;
+  if (!val || val.trim() === '') return null;
+  const parsed = Number(val);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
+ * Parse a non-negative safe integer from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
+ *
+ * Uses Number() rather than parseInt(), which stops at the first character it
+ * cannot read and so silently truncates: parseInt('1e3', 10) and
+ * parseInt('1_000', 10) both yield 1, meaning OMC_FREE_MEMORY_THRESHOLD=1e3
+ * configured a 1MB floor instead of 1000MB and quietly stopped gating on
+ * memory. Number() parses the whole value, so an unambiguous form is honoured
+ * ('1e3' -> 1000) and an ambiguous one is rejected in favour of the documented
+ * default ('12abc', '8.9') instead of being truncated. Exact integrality is
+ * checked from the text before converting to Number so binary rounding cannot
+ * turn a fractional literal into a safe integer.
+ */
+/** A radix-prefixed magnitude: integral by construction. */
+const RADIX_MAGNITUDE = /^0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)$/;
+
+/** A decimal magnitude: integer digits, optional fraction, optional exponent. */
+const DECIMAL_MAGNITUDE = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+
+/**
+ * Parse an environment value that must denote an exact integer, or null.
+ *
+ * Integrality is decided from the digits, never from the parsed double, because
+ * Number() rounds: the nearest double to '8.9999999999999999' is exactly 9 and
+ * '1e-324' underflows to 0, so both would otherwise pass Number.isSafeInteger
+ * despite being fractional.
+ *
+ * For a decimal magnitude, shift the decimal point by the exponent and ask
+ * whether anything but zeros would be pushed past it. That one rule covers every
+ * spelling of the same value, so '1024', '1024.0', '1.024e3' and '10240e-1' are
+ * all accepted while '1.5e0', '8.9' and '1e-324' are not. The sign is handled
+ * separately because Number('-0x1') is NaN, so a signed radix form has to be
+ * reassembled rather than passed through whole.
+ */
+function parseIntegerEnvValue(value: string): number | null {
+  const negative = value.startsWith('-');
+  const magnitude = negative || value.startsWith('+') ? value.slice(1) : value;
+  const sign = negative ? -1 : 1;
+
+  if (!RADIX_MAGNITUDE.test(magnitude)) {
+    const match = DECIMAL_MAGNITUDE.exec(magnitude);
+    if (!match) return null;
+
+    const integerDigits = match[1] ?? '';
+    const fractionDigits = match[2] ?? match[3] ?? '';
+    const exponent = match[4] === undefined ? 0 : Number(match[4]);
+
+    // Digits that the exponent cannot lift back above the decimal point.
+    const shift = fractionDigits.length - exponent;
+    if (shift > 0) {
+      const significand = integerDigits + fractionDigits;
+      // Zero is integral at every scale, including negative exponents.
+      if (/[1-9]/.test(significand)) {
+        const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+        if (trailingZeros < shift) return null;
+      }
+    }
+  }
+
+  const parsed = sign * Number(magnitude);
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed === 0 ? 0 : parsed;
 }
 
 function parseIntEnv(key: string): number | null {
   const val = process.env[key];
-  if (!val) return null;
-  const parsed = parseInt(val, 10);
-  return isNaN(parsed) ? null : parsed;
+  if (!val || val.trim() === '') return null;
+  const parsed = parseIntegerEnvValue(val.trim());
+  return parsed !== null && parsed >= 0 ? parsed : null;
 }
 
 /**
@@ -254,7 +330,6 @@ export async function waitForHostLoadGate(
   const gateConfig = config ?? parseGateConfig();
   const deadline = Date.now() + (timeoutMs ?? gateConfig.gateTimeoutMs);
 
-   
   while (true) {
     const result = checkHostLoadGate(gateConfig);
 
