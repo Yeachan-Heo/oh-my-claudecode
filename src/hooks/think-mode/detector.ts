@@ -138,7 +138,14 @@ function escapeRegExp(value: string): string {
 // Traversing them turns a decorated number into word adjacency: '1\u{FE0F}\u{20E3}think'
 // and '1\u{20DD}think' would find the ASCII '1' inside the enclosure. Combining
 // diacritics stay traversable, since U+0301 and friends are \p{Mn}, not \p{Me}.
-const LETTER_MARK = String.raw`(?:(?![\uFE00-\uFE0F]|\p{Me})\p{M})`;
+//
+// \p{Variation_Selector} rather than the [\uFE00-\uFE0F] range: the selectors also live
+// at U+180B-U+180D and U+180F (Mongolian) and U+E0100-U+E01EF (VS17-VS256, used by
+// ideographic variation sequences). All 260 of them are \p{M}, so the narrower range let
+// 'think\u{E0100}' and 'think\u180B' suppress a visible trigger while 'think\u{FE0F}'
+// did not. The property matches exactly those four ranges, so it adds no code point that
+// composes a letter.
+const LETTER_MARK = String.raw`(?:(?!\p{Variation_Selector}|\p{Me})\p{M})`;
 
 // A Latin *letter*, not merely a Latin-script code point. U+2170 ROMAN NUMERAL ONE is
 // Script=Latin but \p{Nl}, a list marker rather than identifier text, so '\u{2170}think'

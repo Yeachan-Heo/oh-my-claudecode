@@ -179,6 +179,31 @@ describe('think-mode detector - multilingual keyword boundaries', () => {
     expect(detectThinkKeyword('\u2170pense')).toBe(true);
   });
 
+  it('should treat every variation selector as decorative, not just U+FE00-U+FE0F', () => {
+    // The selectors also live at U+180B-U+180D and U+180F (Mongolian) and
+    // U+E0100-U+E01EF (VS17-VS256, used by ideographic variation sequences). All of
+    // them are \p{M}, so the narrower range suppressed a visible trigger: 'think' plus
+    // U+E0100 or U+180B returned false while 'think\uFE0F' returned true.
+    expect(detectThinkKeyword('think\uFE0F')).toBe(true);
+    expect(detectThinkKeyword('think\u{E0100}')).toBe(true);
+    expect(detectThinkKeyword('think\u180B')).toBe(true);
+    expect(detectThinkKeyword('think\u180F')).toBe(true);
+    expect(detectUltrathinkKeyword('ultrathink\u{E0100}')).toBe(true);
+    expect(detectUltrathinkKeyword('ultrathink\u180B')).toBe(true);
+  });
+
+  it('should treat a supplementary variation selector as a leading boundary too', () => {
+    expect(detectThinkKeyword('1\u{E0100}think')).toBe(true);
+    expect(detectThinkKeyword('1\uFE0F\u20E3think')).toBe(true);
+  });
+
+  it('should still block a composing mark after the selector widening', () => {
+    // The widening must not reach marks that compose a letter.
+    expect(detectThinkKeyword('think\u0301')).toBe(false);
+    expect(detectThinkKeyword('thinker')).toBe(false);
+    expect(detectThinkKeyword('Je dois dépenser moins'.normalize('NFD'))).toBe(false);
+  });
+
   it('should still match a Latin keyword delimited by punctuation', () => {
     expect(detectThinkKeyword('(piensa)')).toBe(true);
     expect(detectThinkKeyword('denken, bitte')).toBe(true);
