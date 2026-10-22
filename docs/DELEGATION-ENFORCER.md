@@ -155,7 +155,7 @@ console.log(result.modifiedInput.model); // 'sonnet'
 Enable debug logging to see when models are auto-injected:
 
 ```bash
-export OMC_DEBUG=true
+export OMC_DEBUG=1        # or OMC_DEBUG=true, or OMC_DEBUG=delegation-enforcer
 ```
 
 When enabled, you'll see warnings like:
@@ -164,7 +164,9 @@ When enabled, you'll see warnings like:
 [OMC] Auto-injecting model: sonnet for executor
 ```
 
-**Important:** Warnings are ONLY shown when `OMC_DEBUG=true`. Without this flag, enforcement happens silently.
+**Important:** Warnings are ONLY shown when `OMC_DEBUG` is enabled -- `1`, `true`, or a
+comma-separated list containing `delegation-enforcer`. Without it, enforcement happens
+silently.
 
 ## Usage Examples
 
