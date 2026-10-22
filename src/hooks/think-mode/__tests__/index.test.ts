@@ -174,8 +174,11 @@ World`);
       });
 
       it('should not fire on accented keywords embedded in a Latin word', () => {
-        expect(detectThinkKeyword('dépenser')).toBe(false);
-        expect(detectThinkKeyword('dépenser')).toBe(false);
+        // Both normalization forms. NFC 'é' is U+00E9 and NFD is 'e' + U+0301, so the
+        // two spellings render identically and the pair reads as a duplicate; it is not.
+        const text = 'dépenser';
+        expect(detectThinkKeyword(text.normalize('NFC'))).toBe(false);
+        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(false);
       });
 
       it('should treat non-Latin letters as part of Latin keyword boundaries', () => {
@@ -215,6 +218,18 @@ World`);
         expect(detectThinkKeyword('Bitte bedenke das')).toBe(true);
         expect(detectThinkKeyword('Er bedenkt die Risiken')).toBe(true);
         expect(detectThinkKeyword('Bitte umdenke das')).toBe(true);
+      });
+
+      it('should treat the dropped pré- prefix identically in NFC and NFD', () => {
+        // The prefix allowance deliberately carries no accented alternative. An accented
+        // one is not normalization-safe: 'Prépenser'.normalize('NFD') decomposes é into
+        // 'e' + U+0301, so a literal 'pré' alternative stops matching and one prompt
+        // would detect in NFC but not in NFD. Dropping it makes the two forms agree,
+        // which is what this pins. 'prépenser' is archaic, so rejecting it costs nothing.
+        const text = 'Prépenser les cas limites en amont';
+        expect(detectThinkKeyword(text)).toBe(false);
+        expect(detectThinkKeyword(text.normalize('NFC'))).toBe(false);
+        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(false);
       });
 
       it('should match surpenser, listed as its own keyword', () => {
