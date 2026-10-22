@@ -14,7 +14,7 @@
 // Usage:
 //   node scripts/build-generated-artifact-authorization.mjs \
 //     --pull 4066 --base origin/main --head HEAD --target main \
-//     --owner Yeachan-Heo --expires 2026-10-01T00:00:00Z
+//     --owner Yeachan-Heo --expires 2026-10-01T00:00:00.000Z
 //
 // Prints the entry to stdout; `--out <path>` writes it instead.
 
@@ -45,8 +45,8 @@ if (!Number.isSafeInteger(pullNumber) || pullNumber <= 0) {
   console.error('--pull <number> is required');
   process.exit(2);
 }
-if (!expiresAt || Number.isNaN(Date.parse(expiresAt))) {
-  console.error('--expires <ISO-8601 timestamp> is required');
+if (!expiresAt || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(expiresAt) || Number.isNaN(Date.parse(expiresAt))) {
+  console.error('--expires <canonical UTC timestamp with milliseconds> is required');
   process.exit(2);
 }
 
