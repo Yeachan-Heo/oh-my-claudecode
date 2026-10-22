@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "035e8896a21f430fd8230b0bcfac72d2944d4eeb",
-    "sourceSha256": "6766e8df782cf07342c16c0172a4d311ab9d59b10a649550e2f801985a478369",
+    "head": "934b1f1b074de6683df934d938956003debd572d",
+    "sourceSha256": "3b9cda8003133acf895dd5200b5a6106db3ecdc9aed6078888d22ae8b0e1409b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "035e8896a21f430fd8230b0bcfac72d2944d4eeb",
-  "sourceSha256": "6766e8df782cf07342c16c0172a4d311ab9d59b10a649550e2f801985a478369",
+  "head": "934b1f1b074de6683df934d938956003debd572d",
+  "sourceSha256": "3b9cda8003133acf895dd5200b5a6106db3ecdc9aed6078888d22ae8b0e1409b",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 334,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1477,
-      "total": 1501
+      "srcFiles": 1478,
+      "total": 1502
     },
     "generated": {
       "distFiles": 5735,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 334,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -355,6 +355,7 @@
       "src/hooks/prompt-prerequisites/index.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+      "src/hooks/ralph/__tests__/prd-read.test.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -6864,6 +6865,7 @@
       "src/hooks/prompt-prerequisites/index.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
+      "src/hooks/ralph/__tests__/prd-read.test.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -42697,6 +42699,11 @@
         "path": "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts"
       },
       {
+        "id": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/__tests__/prd-read.test.ts"
+      },
+      {
         "id": "src/hooks/ralph/feedback-baseline.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/feedback-baseline.ts"
@@ -68749,6 +68756,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/ralph/feedback-baseline.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -68881,6 +68913,11 @@
       {
         "from": "src/hooks/ralph/prd.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/prd.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -77271,6 +77308,11 @@
       {
         "from": "src/openclaw/config.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/openclaw/config.ts",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -89670,12 +89712,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7880,
-      "edgeCount": 8607,
-      "importEdgeCount": 7166,
+      "nodeCount": 7881,
+      "edgeCount": 8614,
+      "importEdgeCount": 7173,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "adc69841a1f968d96fac4408b50586d8e90919b1d86dc5ba8a06c91a45884b9d",
-  "manifestSha256": "8a89234e16b935c364729c0a827f5d029686c862304ae2bf3f032977db717917"
+  "inventorySha256": "0d1df24982e859e78b7841727aa27c97c45b280623511400de1a13aadfae6b20",
+  "manifestSha256": "badc445f858ae294a83cd62505dadc503cd23a21de1ce7d7be17648e2a365f56"
 }
