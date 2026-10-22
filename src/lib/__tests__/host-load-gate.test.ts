@@ -138,6 +138,45 @@ describe('host-load-gate', () => {
       });
     });
 
+    it('rejects a fractional value that rounds to an integer', () => {
+      // The nearest double to '8.9999999999999999' is exactly 9, so deciding
+      // integrality from the parsed number would accept it and raise the cap.
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '8.9999999999999999' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('rejects an exponent value that underflows to zero', () => {
+      // '1e-324' is below the smallest double and becomes 0.
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1e-324' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('accepts an exponent value whose exponent covers its fraction digits', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1.5e3' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(1500);
+      });
+    });
+
+    it('rejects an exponent value whose fraction survives the exponent', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '1.5e0' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('still accepts a radix-prefixed integer', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '0x10' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(16);
+      });
+    });
+
     it('preserves a negative threshold, which disables that check', () => {
       withEnv(
         { OMC_HOST_LOAD_THRESHOLD: '-1', OMC_MAX_SIBLING_SESSIONS: '-1' },

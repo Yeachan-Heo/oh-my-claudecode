@@ -143,10 +143,39 @@ function parseFloatEnv(key: string): number | null {
  * passed through -- the gate reads a negative threshold as "this check is
  * disabled".
  */
+/** A radix prefix form, or plain digits: integral by construction. */
+const INTEGER_LITERAL = /^[+-]?(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+)$/;
+
+/** A decimal literal carrying an exponent, whose integrality depends on the two. */
+const EXPONENT_LITERAL = /^[+-]?(?:\d+(?:\.(\d*))?|\.(\d+))[eE]([+-]?\d+)$/;
+
+/**
+ * Whether the text denotes an exact integer, decided from the digits rather than
+ * from the parsed double.
+ *
+ * Number() rounds, so it cannot answer this: the nearest double to
+ * '8.9999999999999999' is exactly 9 and would pass Number.isSafeInteger, while
+ * '1e-324' underflows to 0 and would pass as well. Both are fractional and must be
+ * refused. Exponent notation stays supported because it is checked exactly -- the
+ * value is integral when the exponent covers every significant fraction digit, so
+ * '1e3' and '1.5e3' qualify while '1.5e0' does not.
+ */
+function isIntegerLiteral(value: string): boolean {
+  if (INTEGER_LITERAL.test(value)) return true;
+
+  const match = EXPONENT_LITERAL.exec(value);
+  if (!match) return false;
+
+  const fractionDigits = (match[1] ?? match[2] ?? '').replace(/0+$/, '');
+  return fractionDigits.length <= Number(match[3]);
+}
+
 function parseIntEnv(key: string): number | null {
   const val = process.env[key];
   if (!val || val.trim() === '') return null;
-  const parsed = Number(val);
+  const value = val.trim();
+  if (!isIntegerLiteral(value)) return null;
+  const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
