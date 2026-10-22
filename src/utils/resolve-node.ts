@@ -3,6 +3,7 @@ import { execSync } from 'child_process';
 import { join } from 'path';
 import { homedir } from 'os';
 import { MIN_NODE_VERSION } from './node-version.js';
+import { compareVersions } from './semver-compare.js';
 
 const EPHEMERAL_NODE_PATH_MARKERS = ['hostedtoolcache', '/runner/', '\\runner\\'];
 const SYSTEM_NODE_PATHS = ['/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node'];
@@ -114,13 +115,5 @@ export function pickLatestVersion(versions: string[]): string | undefined {
 
   return versions
     .filter(v => /^v?\d/.test(v))
-    .sort((a, b) => {
-      const pa = a.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-      const pb = b.replace(/^v/, '').split('.').map(s => parseInt(s, 10) || 0);
-      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-        const diff = (pb[i] ?? 0) - (pa[i] ?? 0);
-        if (diff !== 0) return diff;
-      }
-      return 0;
-    })[0];
+    .sort((a, b) => compareVersions(b, a))[0];
 }

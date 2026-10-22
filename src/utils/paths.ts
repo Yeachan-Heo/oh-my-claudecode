@@ -10,6 +10,7 @@ import { join, dirname } from 'path';
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './config-dir.js';
+import { compareVersions } from './semver-compare.js';
 import { pathIdentity, readOccupiedPluginRoots } from './cache-occupancy.js';
 import {
   firstChildBelowDirectoryIdentity,
@@ -448,14 +449,23 @@ const STALE_THRESHOLD_MS = 10 * 60 * 1000;
  * Compare two semver-like version strings descending (higher version first).
  * Non-numeric segments fall back to 0.
  */
-function compareSemverDesc(a: string, b: string): number {
-  const parse = (s: string) => s.split('.').map(n => parseInt(n, 10) || 0);
-  const pa = parse(a), pb = parse(b);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pb[i] ?? 0) - (pa[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
+/**
+ * The trailing path segment, split on either separator.
+ *
+ * These paths come from the plugin registration file, so on Windows they are
+ * native and splitting on '/' alone returned the whole string. The comparator
+ * then read the drive and directory names as version components: every path
+ * under the default .claude directory parsed to the same leading numbers, so
+ * '...\\1.2.3' and '...\\1.2.4' compared equal and the newest active version
+ * was not reliably chosen.
+ */
+export function versionLeaf(path: string): string {
+  const segments = path.split(/[\\/]/).filter((segment) => segment.length > 0);
+  return segments[segments.length - 1] ?? path;
+}
+
+export function compareSemverDesc(a: string, b: string): number {
+  return compareVersions(b, a);
 }
 
 export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: boolean }): PurgeCacheResult {
@@ -635,10 +645,7 @@ export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: bool
         // running session whose CLAUDE_PLUGIN_ROOT still points to this path working.
         if (activeVersionDirsHere.length > 0) {
           const target = [...activeVersionDirsHere].sort((a, b) =>
-            compareSemverDesc(
-              a.split('/').pop() ?? a,
-              b.split('/').pop() ?? b,
-            ),
+            compareSemverDesc(versionLeaf(a), versionLeaf(b)),
           )[0];
           try {
             const targetStats = statSync(target);
