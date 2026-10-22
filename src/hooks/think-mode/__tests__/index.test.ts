@@ -240,19 +240,67 @@ World`);
         expect(detectThinkKeyword(text.normalize('NFD'))).toBe(false);
       });
 
-      it('should match surpenser and its finite form as explicit keywords', () => {
-        // Listed explicitly rather than reached by broadening the prefix allowance. It
-        // carries no accent, so NFC and NFD are identical and there is no normalization
-        // hazard -- unlike an accented prefix such as 'pré', which decomposes in NFD.
-        const text = 'Arr\u00eate de surpenser cette d\u00e9cision';
-        expect(detectThinkKeyword(text)).toBe(true);
-        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
-        expect(detectThinkKeyword(text.normalize('NFC'))).toBe(true);
+      it('should match every conjugated form of surpenser', () => {
+        // 'surpens' is listed as a stem, not as the infinitive. Listing the infinitive
+        // only matched the forms built on it -- the infinitive itself plus the future
+        // and conditional -- and left the present, imperative, participles and imperfect
+        // unmatched, because the embedded 'pense'/'penser' stems are anchored and the
+        // preceding 'sur' blocks them. The stem covers the paradigm in one entry.
+        const accepted = [
+          'surpenser',    // infinitive
+          'surpense',     // present 1s/3s, imperative 2s
+          'surpenses',    // present 2s
+          'surpensons',   // present 1p, imperative 1p
+          'surpensez',    // present 2p, imperative 2p
+          'surpensent',   // present 3p
+          'surpens\u00e9',     // past participle
+          'surpensant',   // present participle
+          'surpensais',   // imperfect 1s
+          'surpensait',   // imperfect 3s
+          'surpensions',  // imperfect 1p
+          'surpensaient', // imperfect 3p
+          'surpensera',   // future 3s
+          'surpenserait', // conditional 3s
+          'surpenseront', // future 3p
+        ];
+        for (const form of accepted) {
+          expect(detectThinkKeyword(`Il faut ${form} cette d\u00e9cision`)).toBe(true);
+        }
+      });
 
-        const finiteForm = 'Surpense cette d\u00e9cision';
-        expect(detectThinkKeyword(finiteForm)).toBe(true);
-        expect(detectThinkKeyword(finiteForm.normalize('NFD'))).toBe(true);
-        expect(detectThinkKeyword(finiteForm.normalize('NFC'))).toBe(true);
+      it('should match the finite surpense in both normalization forms', () => {
+        // The review's case. 'surpens' carries no accent, so the stem is byte-identical
+        // in NFC and NFD; only the surrounding words decompose.
+        const text = 'Surpense cette d\u00e9cision';
+        expect(detectThinkKeyword(text)).toBe(true);
+        expect(detectThinkKeyword(text.normalize('NFC'))).toBe(true);
+        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
+        const infinitive = 'Arr\u00eate de surpenser cette d\u00e9cision';
+        expect(detectThinkKeyword(infinitive)).toBe(true);
+        expect(detectThinkKeyword(infinitive.normalize('NFD'))).toBe(true);
+      });
+
+      it('should not let the surpens stem widen the English collisions', () => {
+        // The stem is only safe because 'sur' disambiguates it: measured against the
+        // system word list, no English word contains 'surpens' anywhere, while 35 contain
+        // 'pense'. These are the words the anchor exists for; they stay rejected, in both
+        // normalization forms.
+        const rejected = [
+          'a prepense plan',
+          'prepensely odd',
+          'the dispensary is closed',
+          'a fair recompense for the work',
+          'Use a dispenser pattern for the factory',
+          'we must compensate for that',
+          'his pension fund',
+          'd\u00e9penser',
+          'compenser',
+          'r\u00e9compenser',
+        ];
+        for (const phrase of rejected) {
+          expect(detectThinkKeyword(phrase)).toBe(false);
+          expect(detectThinkKeyword(phrase.normalize('NFD'))).toBe(false);
+        }
       });
 
       it('should still reject the words the anchor exists for', () => {

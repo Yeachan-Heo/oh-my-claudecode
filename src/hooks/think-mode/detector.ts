@@ -27,8 +27,12 @@ const MULTILINGUAL_KEYWORDS = [
   'pensar', 'pense', 'repensar', 'refletir', 'reflita',
   // Spanish
   'piensa', 'repiensa', 'reflexionar', 'reflexiona',
-  // French
-  'penser', 'repenser', 'repense', 'surpenser', 'surpense', 'réfléchir', 'réfléchis',
+  // French. 'surpens' is a bare stem, unlike its neighbours here, because the 'sur'
+  // prefix already disambiguates it: no English word contains 'surpens' at all, while 35
+  // contain 'pense', which is why the unprefixed stems are listed as whole forms and
+  // anchored instead. As a stem it covers the whole regular -er conjugation in one entry,
+  // superseding the separate 'surpenser' and 'surpense' entries.
+  'penser', 'repenser', 'repense', 'surpens', 'réfléchir', 'réfléchis',
   // German
   'denken', 'denk', 'nachdenken', 'überdenken', 'überdenke',
   // Vietnamese
@@ -80,8 +84,14 @@ const MULTILINGUAL_KEYWORDS = [
  * suppress -- and 'dé' admits 'dépenser', which means to spend, not to think.
  *
  * A prefixed form that is worth supporting is therefore listed as its own keyword
- * instead, the way 'repenser', 'surpenser' and 'überdenken' are. An accent-free keyword
+ * instead, the way 'repenser', 'surpens' and 'überdenken' are. An accent-free keyword
  * is identical in NFC and NFD, so it has no normalization hazard at all.
+ *
+ * Listing it as a stem rather than one form matters. A prefixed infinitive only covers
+ * the forms built on the infinitive, so 'surpenser' left the present, imperative,
+ * participles and imperfect unmatched, and adding 'surpense' beside it still left
+ * 'surpensons', 'surpensé', 'surpensant' and the imperfect out. The stem covers all of
+ * them at once, which is why the paradigm is enumerated in a test rather than in a list.
  */
 const ROMANCE_PREFIXES = 're|ri';
 
