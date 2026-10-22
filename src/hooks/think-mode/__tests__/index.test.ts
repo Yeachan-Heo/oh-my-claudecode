@@ -187,6 +187,32 @@ World`);
         expect(detectThinkKeyword('offer fair recompense')).toBe(false);
       });
 
+      it('should activate think mode for the compounds through the hook itself', () => {
+        // detectThinkKeyword is the matcher; createThinkModeHook is what Claude Code
+        // actually calls, so the prefixes are exercised through extractPromptText and
+        // the session state rather than against the matcher alone.
+        for (const prompt of ['Não sobrepense isso demais', 'Intenta contrapensar esta propuesta']) {
+          const hook = createThinkModeHook();
+          const sessionId = `compound-${prompt.slice(0, 8)}`;
+          const state = hook.processChatParams(sessionId, {
+            parts: [{ type: 'text', text: prompt }],
+            message: {},
+          });
+          expect(state.requested).toBe(true);
+          expect(isThinkModeActive(sessionId)).toBe(true);
+        }
+      });
+
+      it('should leave think mode inactive through the hook for English collisions', () => {
+        const hook = createThinkModeHook();
+        const state = hook.processChatParams('compound-negative', {
+          parts: [{ type: 'text', text: 'Submit the expense report, the fruit ripens quickly' }],
+          message: {},
+        });
+        expect(state.requested).toBe(false);
+        expect(isThinkModeActive('compound-negative')).toBe(false);
+      });
+
       it('should match finite forms of prefixed Latin keywords', () => {
         expect(detectThinkKeyword('Repense cette interface')).toBe(true);
         expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);
