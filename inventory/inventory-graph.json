@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "37e1f365fe384d7025a6ee56d2b20b2bf5d2644b",
-    "sourceSha256": "01608942fbae489f7e01652f51e06a381678bad6c87b2241b56c581a38749bcc",
+    "head": "f7a17160243caec54f0c93b98fcc7a1d278e26c5",
+    "sourceSha256": "18d0334b51af65377e84b2605522fbe925af55ed79d042ad93c93221ccd90bda",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "37e1f365fe384d7025a6ee56d2b20b2bf5d2644b",
-  "sourceSha256": "01608942fbae489f7e01652f51e06a381678bad6c87b2241b56c581a38749bcc",
+  "head": "f7a17160243caec54f0c93b98fcc7a1d278e26c5",
+  "sourceSha256": "18d0334b51af65377e84b2605522fbe925af55ed79d042ad93c93221ccd90bda",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1470,
-      "total": 1494
+      "srcFiles": 1472,
+      "total": 1496
     },
     "generated": {
       "distFiles": 5735,
@@ -45994,6 +45994,16 @@
         "path": "src/utils/__tests__/cache-occupancy.test.ts"
       },
       {
+        "id": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/debug-flag-call-sites.test.ts"
+      },
+      {
+        "id": "src/utils/__tests__/debug-flag.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/debug-flag.test.ts"
+      },
+      {
         "id": "src/utils/__tests__/encode-project-path.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/encode-project-path.test.ts"
@@ -46032,6 +46042,11 @@
         "id": "src/utils/daemon-module-path.ts",
         "kind": "src",
         "path": "src/utils/daemon-module-path.ts"
+      },
+      {
+        "id": "src/utils/debug-flag.ts",
+        "kind": "src",
+        "path": "src/utils/debug-flag.ts"
       },
       {
         "id": "src/utils/encode-project-path.ts",
@@ -61082,6 +61097,11 @@
       },
       {
         "from": "src/features/delegation-enforcer.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/delegation-enforcer.ts",
         "to": "src/utils/skininthegamebros-user.ts",
         "kind": "imports"
       },
@@ -66501,6 +66521,11 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/learner/constants.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/learner/detection-hook.ts",
         "to": "src/hooks/learner/detector.ts",
         "kind": "imports"
@@ -71648,6 +71673,11 @@
       {
         "from": "src/hooks/todo-continuation/index.ts",
         "to": "src/utils/config-dir.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/todo-continuation/index.ts",
+        "to": "src/utils/debug-flag.ts",
         "kind": "imports"
       },
       {
@@ -87321,6 +87351,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "src/hooks/learner/constants.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag-call-sites.test.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/debug-flag.test.ts",
+        "to": "src/utils/debug-flag.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/utils/__tests__/encode-project-path.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -89477,12 +89537,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7872,
-      "edgeCount": 8576,
-      "importEdgeCount": 7136,
+      "nodeCount": 7874,
+      "edgeCount": 8578,
+      "importEdgeCount": 7138,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "f22ffadad3b7dc46d33bb28bb896de33f086edac2e847023be2427fc02103fd9",
-  "manifestSha256": "fab82d3f492e6aff177aa96777277d0003d0f74dd107f3683c1c1de5fed614ec"
+  "inventorySha256": "4e5958861f273260e6b93f87cfb00470182e4fa9c4f7679fb961b1729994fdab",
+  "manifestSha256": "57f57bdc1d763fd1e65398987e971c50ef80fbdbce25e0c510e32b20156d43a6"
 }

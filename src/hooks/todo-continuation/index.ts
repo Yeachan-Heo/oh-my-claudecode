@@ -16,11 +16,12 @@
 
 /**
  * Debug logging for task/todo operations.
- * Set OMC_DEBUG=1 or OMC_DEBUG=todo-continuation for verbose output.
+ *
+ * Set OMC_DEBUG=1, OMC_DEBUG=true, or a comma-separated list containing
+ * todo-continuation for verbose output.
  */
 function debugLog(message: string, ...args: unknown[]): void {
-  const debug = process.env.OMC_DEBUG;
-  if (debug === '1' || debug === 'todo-continuation' || debug === 'true') {
+  if (isDebugEnabled('todo-continuation')) {
     console.error('[todo-continuation]', message, ...args);
   }
 }
@@ -29,6 +30,7 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, s
 import { join } from 'path';
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
+import { isDebugEnabled } from '../../utils/debug-flag.js';
 
 /**
  * Validates that a session ID is safe to use in file paths.
