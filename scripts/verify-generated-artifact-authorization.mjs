@@ -324,7 +324,7 @@ export function validateAuthorizationManifest(manifest) {
 
     assertExactKeys(entry.generatedDelta, ['count', 'sha256'], `${label}.generatedDelta`);
     const generatedDelta = {
-      count: requiredPositiveInteger(entry.generatedDelta.count, `${label}.generatedDelta.count`),
+      count: requiredNonNegativeInteger(entry.generatedDelta.count, `${label}.generatedDelta.count`),
       sha256: requiredString(entry.generatedDelta.sha256, `${label}.generatedDelta.sha256`),
     };
     if (!/^[0-9a-f]{64}$/.test(generatedDelta.sha256)) {
