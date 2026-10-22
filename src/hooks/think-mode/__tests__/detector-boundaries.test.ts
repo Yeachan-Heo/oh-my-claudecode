@@ -167,6 +167,18 @@ describe('think-mode detector - multilingual keyword boundaries', () => {
     expect(detectThinkKeyword('пpense')).toBe(true);
   });
 
+  it('should keep digit adjacency script-agnostic for anchored stems', () => {
+    // The script-transition fix narrowed the predecessor to Latin letters. Digits must
+    // stay \p{Nd}: a decimal digit beside a stem is word adjacency in any script, and
+    // reusing the English lookbehind verbatim narrowed it to ASCII.
+    expect(detectThinkKeyword('3pense')).toBe(false);
+    expect(detectThinkKeyword('\u0663pense')).toBe(false);
+    expect(detectThinkKeyword('\u0969pense')).toBe(false);
+    expect(detectThinkKeyword('\uff13pense')).toBe(false);
+    // Number-Letter code points remain list markers, not word characters.
+    expect(detectThinkKeyword('\u2170pense')).toBe(true);
+  });
+
   it('should still match a Latin keyword delimited by punctuation', () => {
     expect(detectThinkKeyword('(piensa)')).toBe(true);
     expect(detectThinkKeyword('denken, bitte')).toBe(true);

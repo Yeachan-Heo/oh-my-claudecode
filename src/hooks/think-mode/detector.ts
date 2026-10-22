@@ -148,6 +148,14 @@ const LATIN_LETTER = String.raw`(?:(?=\p{L})\p{Script=Latin})`;
 // Only Latin word graphemes suppress an anchored Latin stem. Non-Latin script
 // transitions remain boundaries so code-switched prompts can trigger without spaces.
 const LATIN_GRAPHEME_BEFORE = String.raw`(?<!(?:${LATIN_LETTER}|[0-9_])${LETTER_MARK}*)`;
+
+// Same rule for the anchored multilingual stems, except that digits stay \p{Nd} rather
+// than [0-9]. A decimal digit beside a stem is word adjacency in any script, which is
+// what the predecessor these stems previously used encoded; reusing the English
+// lookbehind verbatim narrowed it to ASCII and let '٣pense', '३pense' and '３pense'
+// match where they had not. Number-Other and Number-Letter code points stay excluded:
+// those are list markers, so '\u{2170}pense' is still a boundary.
+const ANCHORED_GRAPHEME_BEFORE = String.raw`(?<!(?:${LATIN_LETTER}|[\p{Nd}_])${LETTER_MARK}*)`;
 const LATIN_GRAPHEME_AFTER = String.raw`(?!${LETTER_MARK}|${LATIN_LETTER}|[0-9_])`;
 
 
@@ -176,7 +184,7 @@ function buildKeywordPattern(keyword: string): RegExp {
     return new RegExp(escapeRegExp(keyword), 'iu');
   }
   return new RegExp(
-    `${LATIN_GRAPHEME_BEFORE}(?:${ROMANCE_PREFIXES})?${escapeRegExp(keyword)}`,
+    `${ANCHORED_GRAPHEME_BEFORE}(?:${ROMANCE_PREFIXES})?${escapeRegExp(keyword)}`,
     'iu',
   );
 }
