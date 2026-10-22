@@ -161,8 +161,10 @@ describe('think-mode detector - multilingual keyword boundaries', () => {
     expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
   });
 
-  it('should treat non-Latin letters as part of Latin keyword boundaries', () => {
-    expect(detectThinkKeyword('пpense')).toBe(false);
+  it('should treat non-Latin script transitions as boundaries around anchored stems', () => {
+    expect(detectThinkKeyword('请pense一下')).toBe(true);
+    expect(detectThinkKeyword('これpensaして')).toBe(true);
+    expect(detectThinkKeyword('пpense')).toBe(true);
   });
 
   it('should still match a Latin keyword delimited by punctuation', () => {
