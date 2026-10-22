@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "15dfd45a4fa9d91f73b594cf0a2512d6c14ffbfa",
-    "sourceSha256": "df40056a93e50d2b966b48a1284bb20291c0f84c205e15b0ee94eb915f9eff2c",
+    "head": "6bbf69667c95fb4fc701b4395df56dee9816d079",
+    "sourceSha256": "2b73d4b50bbd6cb51fe3ac2cf1d8a919f1d4072012e1f88638f383e6814bb7e8",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "15dfd45a4fa9d91f73b594cf0a2512d6c14ffbfa",
-  "sourceSha256": "df40056a93e50d2b966b48a1284bb20291c0f84c205e15b0ee94eb915f9eff2c",
+  "head": "6bbf69667c95fb4fc701b4395df56dee9816d079",
+  "sourceSha256": "2b73d4b50bbd6cb51fe3ac2cf1d8a919f1d4072012e1f88638f383e6814bb7e8",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1473,
-      "total": 1497
+      "srcFiles": 1475,
+      "total": 1499
     },
     "generated": {
       "distFiles": 5735,
@@ -37369,6 +37369,11 @@
         "path": "node:string_decoder"
       },
       {
+        "id": "external:node:timers",
+        "kind": "external",
+        "path": "node:timers"
+      },
+      {
         "id": "external:node:url",
         "kind": "external",
         "path": "node:url"
@@ -44724,6 +44729,11 @@
         "path": "src/team/__tests__/events.swallowed-error.test.ts"
       },
       {
+        "id": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "kind": "src",
+        "path": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs"
+      },
+      {
         "id": "src/team/__tests__/followup-planner.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/followup-planner.test.ts"
@@ -45247,6 +45257,16 @@
         "id": "src/team/__tests__/worker-launch-posix-transport.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/worker-launch-posix-transport.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/worker-launch-windows-runtime.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/worker-launch-windows-supervisor.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/worker-launch-windows-supervisor.test.ts"
       },
       {
         "id": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
@@ -78721,6 +78741,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:timers",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/fixtures/windows-supervisor-runtime.mjs",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/followup-planner.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -82241,6 +82291,81 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "src/platform/process-utils.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-runtime.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-supervisor.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-supervisor.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-supervisor.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/worker-launch-windows-supervisor.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/worker-launch-wrapper-posix.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -85414,6 +85539,11 @@
         "from": "src/team/worker-launch-ack.ts",
         "to": "external:node:stream",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/team/worker-launch-ack.ts",
+        "to": "external:node:zlib",
+        "kind": "imports"
       },
       {
         "from": "src/team/worker-launch-ack.ts",
@@ -89542,12 +89672,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7875,
-      "edgeCount": 8586,
-      "importEdgeCount": 7146,
+      "nodeCount": 7878,
+      "edgeCount": 8601,
+      "importEdgeCount": 7160,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "9cd561290c6ab474857f492e2232cbd5a8e9465481fabc00985a58edfd05a0e1",
-  "manifestSha256": "289d7da9421e9a2207aad28ff5c0f69b646481c76d48dd14ccb07e0c01eedb9d"
+  "inventorySha256": "a572c4888dc7ae00be67841016de441f50f4d5fd0c335cbf04e90b694e63e7a0",
+  "manifestSha256": "96019913613e8709c66c39474b50dd65921f391234340b919258f0eda305dca2"
 }
