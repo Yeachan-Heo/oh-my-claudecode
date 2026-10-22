@@ -28,7 +28,7 @@ const MULTILINGUAL_KEYWORDS = [
   // Spanish
   'piensa', 'repiensa', 'reflexionar', 'reflexiona',
   // French
-  'penser', 'repenser', 'repense', 'réfléchir', 'réfléchis',
+  'penser', 'repenser', 'repense', 'surpenser', 'réfléchir', 'réfléchis',
   // German
   'denken', 'denk', 'nachdenken', 'überdenken', 'überdenke',
   // Vietnamese
@@ -70,16 +70,20 @@ const MULTILINGUAL_KEYWORDS = [
 /**
  * Productive prefixes that may precede an anchored stem at a word start.
  *
- * Each was checked twice. Against the system word list, no English word begins with any
- * of these followed by an anchored stem. And against French, where the stems live: the
- * allowance must not admit a word that is not about thinking.
+ * Kept deliberately short. Against the system word list, no English word begins with
+ * either of these followed by an anchored stem, so the allowance adds no false positive.
  *
- * Two near-misses are deliberately absent. The unaccented 'pre' would admit "prepense"
- * and "prepensely", the very collision the anchor exists to suppress; French writes that
- * prefix with an accent, so 'pré' is safe while 'pre' is not. And 'dé' would admit
- * 'dépenser', which means to spend, not to think.
+ * Broadening it further was tried and reverted. An accented prefix such as 'pré' is not
+ * robust: a prompt in NFD form decomposes the accent into a base letter plus U+0301, so
+ * the literal prefix no longer appears and the match is lost. An unaccented 'pre' is
+ * worse, because it admits "prepense" -- the very collision the anchor exists to
+ * suppress -- and 'dé' admits 'dépenser', which means to spend, not to think.
+ *
+ * A prefixed form that is worth supporting is therefore listed as its own keyword
+ * instead, the way 'repenser', 'surpenser' and 'überdenken' are. An accent-free keyword
+ * is identical in NFC and NFD, so it has no normalization hazard at all.
  */
-const ROMANCE_PREFIXES = 're|ri|pré|sur';
+const ROMANCE_PREFIXES = 're|ri';
 
 /**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is

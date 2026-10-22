@@ -217,12 +217,14 @@ World`);
         expect(detectThinkKeyword('Bitte umdenke das')).toBe(true);
       });
 
-      it('should match a French keyword behind another productive prefix', () => {
-        // Each allowed prefix was checked against the system word list: none of them
-        // followed by an anchored stem begins an English word. The unaccented 'pre' is
-        // excluded, since it would admit "prepense".
-        expect(detectThinkKeyword('Pr\u00e9penser les cas limites en amont')).toBe(true);
-        expect(detectThinkKeyword('Arr\u00eate de surpenser cette d\u00e9cision')).toBe(true);
+      it('should match surpenser, listed as its own keyword', () => {
+        // Listed explicitly rather than reached by broadening the prefix allowance. It
+        // carries no accent, so NFC and NFD are identical and there is no normalization
+        // hazard -- unlike an accented prefix such as 'pré', which decomposes in NFD.
+        const text = 'Arr\u00eate de surpenser cette d\u00e9cision';
+        expect(detectThinkKeyword(text)).toBe(true);
+        expect(detectThinkKeyword(text.normalize('NFD'))).toBe(true);
+        expect(detectThinkKeyword(text.normalize('NFC'))).toBe(true);
       });
 
       it('should still reject the words the anchor exists for', () => {
