@@ -66,6 +66,25 @@ describe('compareVersions', () => {
       expect(compareVersions('1.2.3-alpha.1', '1.2.3-alpha')).toBeGreaterThan(0);
     });
 
+    it('compares long numeric identifiers without losing precision', () => {
+      // Number() collapses these two to the same double, so comparing through it
+      // made distinct prereleases equal and let an older target pass the
+      // installer's `compareVersions(...) < 0` downgrade guard.
+      expect(Number('10000000000000000000')).toBe(Number('10000000000000000001'));
+      expect(compareVersions('1.2.3-rc.10000000000000000000', '1.2.3-rc.10000000000000000001')).toBeLessThan(0);
+      expect(compareVersions('1.2.3-rc.10000000000000000001', '1.2.3-rc.10000000000000000000')).toBeGreaterThan(0);
+    });
+
+    it('orders numeric identifiers by magnitude, not lexically', () => {
+      expect(compareVersions('1.2.3-rc.9', '1.2.3-rc.10')).toBeLessThan(0);
+      expect(compareVersions('1.2.3-rc.100', '1.2.3-rc.99')).toBeGreaterThan(0);
+    });
+
+    it('ignores leading zeros in a numeric identifier', () => {
+      expect(compareVersions('1.2.3-rc.007', '1.2.3-rc.7')).toBe(0);
+      expect(compareVersions('1.2.3-rc.007', '1.2.3-rc.8')).toBeLessThan(0);
+    });
+
     it('treats identical prereleases as equal', () => {
       expect(compareVersions('1.2.3-rc.1', '1.2.3-rc.1')).toBe(0);
     });

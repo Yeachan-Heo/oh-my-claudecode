@@ -46,8 +46,20 @@ function comparePrereleaseIdentifier(a: string, b: string): number {
 
   // Numeric identifiers compare numerically; a numeric identifier always has
   // lower precedence than an alphanumeric one (semver §11).
+  //
+  // Compared as digit strings rather than through Number, which silently loses
+  // precision past 2^53: Number('10000000000000000000') and
+  // Number('10000000000000000001') are the same double, so two distinct
+  // prereleases compared equal and an older target could pass the installer's
+  // `compareVersions(...) < 0` downgrade guard. Semver puts no bound on the
+  // length of a numeric identifier, so no fixed-width type is safe here.
   if (aNumeric && bNumeric) {
-    return Number(a) - Number(b);
+    const aDigits = a.replace(/^0+(?=\d)/, '');
+    const bDigits = b.replace(/^0+(?=\d)/, '');
+    if (aDigits.length !== bDigits.length) {
+      return aDigits.length < bDigits.length ? -1 : 1;
+    }
+    return aDigits < bDigits ? -1 : aDigits > bDigits ? 1 : 0;
   }
   if (aNumeric) return -1;
   if (bNumeric) return 1;
