@@ -19,9 +19,10 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseJevEnv } from "../jev-resolve.mjs";
+import { parseJevEnv, resolveJevTimeoutMs } from "../jev-resolve.mjs";
 
 const SWEEP_THROTTLE_MS = 60 * 60 * 1000; // 1 hour
+const ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS = 500;
 
 /**
  * Get the cross-process sweep throttle marker path.
@@ -362,9 +363,10 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
             stdio: ["ignore", "pipe", "ignore"],
             env: process.env,
             encoding: "utf8",
-            timeout:
-              (parseInt(process.env.OMC_JEV_TIMEOUT_MS || "2000", 10) || 2000) +
-              500, // Add buffer
+            timeout: resolveJevTimeoutMs(
+              process.env,
+              ACTIVE_RESOLVER_TIMEOUT_BUFFER_MS,
+            ),
           },
         );
 

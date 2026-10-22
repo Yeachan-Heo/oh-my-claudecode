@@ -45,6 +45,23 @@ function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
 }
 
 /**
+ * Resolve the script-side Jev timeout using the same strict contract for the
+ * HTTP resolver and its synchronous active-mode parent process.
+ */
+export function resolveJevTimeoutMs(env = process.env, bufferMs = 0) {
+  const timeoutMs = positiveInt(
+    env.OMC_JEV_TIMEOUT_MS,
+    DEFAULT_TIMEOUT_MS,
+    MAX_TIMER_DELAY_MS,
+  );
+  const buffer =
+    Number.isSafeInteger(bufferMs) && bufferMs > 0
+      ? Math.min(bufferMs, MAX_TIMER_DELAY_MS)
+      : 0;
+  return Math.min(timeoutMs + buffer, MAX_TIMER_DELAY_MS);
+}
+
+/**
  * Mirror of serializeQuestions in src/hooks/jev/client.ts. `score` questions
  * are rejected with HTTP 422 unless their criteria are an ordered low-to-high
  * list; `choice`/`noul` take the named map unchanged (#4091).
@@ -190,11 +207,7 @@ export async function resolveRequest(
   );
   const controller = new AbortController();
   let timer;
-  const timeoutMs = positiveInt(
-    env.OMC_JEV_TIMEOUT_MS,
-    DEFAULT_TIMEOUT_MS,
-    MAX_TIMER_DELAY_MS,
-  );
+  const timeoutMs = resolveJevTimeoutMs(env);
   const timeoutPromise = new Promise((resolve, reject) => {
     timer = setTimeout(() => {
       controller.abort();
