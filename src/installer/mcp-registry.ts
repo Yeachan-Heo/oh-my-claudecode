@@ -388,14 +388,19 @@ function escapeTomlString(value: string): string {
   let result = value.replace(/\\/g, '\\\\');
   
   // Escape other special characters and control codes
-  // An unpaired surrogate is not a Unicode scalar value, so it cannot be encoded
-  // as UTF-8: the writeFileSync that persists this content turned it into U+FFFD
-  // and silently mangled the value. Escape it as \uXXXX instead, which is the
-  // same form unescapeTomlString decodes, so the round trip still settles. A
-  // matched pair is a real astral character and is left alone.
+  // An unpaired surrogate is not a Unicode scalar value, so TOML cannot carry it
+  // either way: it has no UTF-8 encoding, and a \uXXXX escape naming a surrogate
+  // is rejected outright by a conforming parser (Python's tomllib refuses the
+  // whole document with "Escaped character is not a Unicode scalar value"), which
+  // would make one bad value unreadable for the entire Codex config rather than
+  // just for itself.
+  //
+  // Substitute U+FFFD, which is what the UTF-8 write produced anyway -- now
+  // explicitly and with a document that still parses. A matched pair is a real
+  // astral character and is left alone.
   result = result.replace(
     /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
-    (surrogate) => `\\u${surrogate.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    '\uFFFD',
   );
 
   result = result.replace(/["\n\r\t\b\f\0-\x07\x0b\x0e-\x1f\x7f]/g, (char) => {

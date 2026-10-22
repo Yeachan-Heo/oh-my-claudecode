@@ -1294,25 +1294,42 @@ describe('unified MCP registry sync', () => {
       },
     }) as unknown as Parameters<typeof syncCodexConfigToml>[1];
 
-    it('writes valid UTF-8 for an unpaired surrogate', () => {
-      // An unpaired surrogate cannot be encoded as UTF-8. Rendered raw, the
-      // writeFileSync that persists this content turned it into U+FFFD and
-      // silently mangled the value.
-      const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('\ud800'));
-      expect(content).toContain('TOKEN = "\\ud800"');
+    /**
+     * The TOML rule a conforming parser enforces: inside a basic string, every
+     * \\uXXXX / \\UXXXXXXXX escape must name a Unicode scalar value, and the text
+     * itself must be well-formed. Python's tomllib rejects a whole document that
+     * breaks either ("Escaped character is not a Unicode scalar value"), so
+     * asserting the rendered output is UTF-8 clean is not enough on its own.
+     */
+    const expectRenderedTomlIsAcceptable = (content: string) => {
+      for (const [, digits] of content.matchAll(/\\u([0-9a-fA-F]{4})|\\U([0-9a-fA-F]{8})/g)) {
+        const codePoint = parseInt(digits, 16);
+        expect(codePoint >= 0xd800 && codePoint <= 0xdfff).toBe(false);
+      }
+      expect(/[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/.test(content)).toBe(false);
       expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+    };
+
+    it('replaces an unpaired high surrogate with U+FFFD', () => {
+      // Escaping it as \\ud800 instead would be rejected by a conforming parser,
+      // making one bad value break the entire config rather than only itself.
+      const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('\ud800'));
+      expect(content).toContain('TOKEN = "\uFFFD"');
+      expect(content).not.toMatch(/\\u[dD][89abAB]/);
+      expectRenderedTomlIsAcceptable(content);
     });
 
-    it('writes valid UTF-8 for an unpaired low surrogate', () => {
+    it('replaces an unpaired low surrogate with U+FFFD', () => {
       const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('a\udc00b'));
-      expect(content).toContain('TOKEN = "a\\udc00b"');
-      expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+      expect(content).toContain('TOKEN = "a\uFFFDb"');
+      expect(content).not.toMatch(/\\u[dD][c-fC-F]/);
+      expectRenderedTomlIsAcceptable(content);
     });
 
     it('leaves a matched surrogate pair as the astral character', () => {
       const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('\ud83d\ude00'));
       expect(content).toContain('TOKEN = "\u{1F600}"');
-      expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+      expectRenderedTomlIsAcceptable(content);
     });
 
     it('settles after one sync for each of those values', () => {
