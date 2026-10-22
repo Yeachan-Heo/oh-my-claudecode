@@ -30,10 +30,6 @@ describe('think-mode', () => {
     clearThinkModeState('test-session');
     clearThinkModeState('session-1');
     clearThinkModeState('session-2');
-    clearThinkModeState('compound-overthink');
-    clearThinkModeState('compound-counterthink');
-    clearThinkModeState('compound-strapens');
-    clearThinkModeState('compound-negative');
   });
 
   describe('detector - removeCodeBlocks', () => {
