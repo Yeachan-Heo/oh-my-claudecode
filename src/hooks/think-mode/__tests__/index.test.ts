@@ -166,8 +166,12 @@ World`);
         expect(detectThinkKeyword('Dobbiamo ripensare questo')).toBe(true);
       });
 
-      it('should match the Spanish malpensar prefix before an anchored stem', () => {
+      it('should match the explicit malpensar verb without matching common adjectives', () => {
         expect(detectThinkKeyword('Intenta malpensar un poco antes de responder')).toBe(true);
+        expect(detectThinkKeyword('Eres muy malpensado, siempre dudas de todos')).toBe(false);
+        expect(detectThinkKeyword('Qué malpensada eres')).toBe(false);
+        expect(detectThinkKeyword('un giornale malpensante')).toBe(false);
+        expect(detectThinkKeyword('los malpensados siempre sospechan')).toBe(false);
       });
 
       it('should match the sobre and contra compounds before an anchored stem', () => {

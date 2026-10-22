@@ -26,7 +26,7 @@ const MULTILINGUAL_KEYWORDS = [
   // Portuguese
   'pensar', 'pense', 'repensar', 'refletir', 'reflita',
   // Spanish
-  'piensa', 'repiensa', 'reflexionar', 'reflexiona',
+  'piensa', 'repiensa', 'malpensar', 'reflexionar', 'reflexiona',
   // French. 'surpens' is a bare stem, unlike its neighbours here, because the 'sur'
   // prefix already disambiguates it: no English word contains 'surpens' at all, while 35
   // contain 'pense', which is why the unprefixed stems are listed as whole forms and
@@ -74,17 +74,17 @@ const MULTILINGUAL_KEYWORDS = [
 /**
  * Productive prefixes that may precede an anchored stem at a word start.
  *
- * Kept deliberately short: word-initial 're' and 'ri' support the existing Romance
- * conjugations, 'mal' supports the Spanish 'malpensar' form, and 'sobre' and 'contra'
- * support the productive Portuguese and Spanish compounds ('sobrepensar' to overthink,
- * 'contrapensar' to think against). Arbitrary infixes remain blocked by the anchor.
+ * Kept deliberately explicit: word-initial 're' and 'ri' support the existing Romance
+ * conjugations, while 'sobre' and 'contra' support productive Portuguese and Spanish
+ * compounds ('sobrepensar' to overthink, 'contrapensar' to think against). The specific
+ * Spanish 'malpensar' form is listed as a keyword instead of admitting 'mal' generally,
+ * which would also match common adjectives like 'malpensado' and 'malpensante'.
+ * Arbitrary infixes remain blocked by the anchor.
  *
- * Each of these is safe only because nothing ordinary begins with it followed by an
- * anchored stem: against the system word list no English word starts with 'sobrepens' or
- * 'contrapens', and neither spelling heads a common Romance derivation the way
- * 'malpensado' heads one for 'mal'. The separated forms need no allowance -- in 'pense
- * sobre isso' and 'sobre pensar nisso' the stem already starts a word, so the anchor
- * admits it without help.
+ * The 'sobre' and 'contra' allowances are safe because, against the system word list, no
+ * English word starts with 'sobrepens' or 'contrapens'. The separated forms need no
+ * allowance -- in 'pense sobre isso' and 'sobre pensar nisso' the stem already starts a
+ * word, so the anchor admits it without help.
  *
  * Broadening it further was tried and reverted. An accented prefix such as 'pré' is not
  * robust: a prompt in NFD form decomposes the accent into a base letter plus U+0301, so
@@ -102,7 +102,7 @@ const MULTILINGUAL_KEYWORDS = [
  * 'surpensons', 'surpensé', 'surpensant' and the imperfect out. The stem covers all of
  * them at once, which is why the paradigm is enumerated in a test rather than in a list.
  */
-const ROMANCE_PREFIXES = 're|ri|mal|sobre|contra';
+const ROMANCE_PREFIXES = 're|ri|sobre|contra';
 
 /**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
@@ -172,9 +172,9 @@ const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
 
 /**
  * Anchor only stems that collide with English words. Word-initial 're' and 'ri' allow
- * Romance conjugations, 'mal' allows Spanish 'malpensar', and 'sobre' and 'contra' allow
- * the Portuguese and Spanish compounds; no trailing boundary is
- * used because the multilingual keywords are stems with productive suffixes.
+ * Romance conjugations, while 'sobre' and 'contra' allow productive Portuguese and
+ * Spanish compounds; no trailing boundary is used because multilingual keywords are
+ * stems with productive suffixes.
  */
 function buildKeywordPattern(keyword: string): RegExp {
   if (!ENGLISH_COLLIDING_KEYWORDS.has(keyword.toLowerCase())) {
