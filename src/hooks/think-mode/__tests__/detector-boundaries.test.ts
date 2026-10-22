@@ -201,7 +201,9 @@ describe('think-mode detector - multilingual keyword boundaries', () => {
     // The widening must not reach marks that compose a letter.
     expect(detectThinkKeyword('think\u0301')).toBe(false);
     expect(detectThinkKeyword('thinker')).toBe(false);
-    expect(detectThinkKeyword('Je dois dépenser moins'.normalize('NFD'))).toBe(false);
+    expect(detectThinkKeyword('Je dois dépenser moins'.normalize('NFD'))).toBe(
+      false,
+    );
   });
 
   it('should still match a Latin keyword delimited by punctuation', () => {
