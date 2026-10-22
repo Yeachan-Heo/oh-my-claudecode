@@ -170,6 +170,23 @@ World`);
         expect(detectThinkKeyword('Intenta malpensar un poco antes de responder')).toBe(true);
       });
 
+      it('should match the sobre and contra compounds before an anchored stem', () => {
+        expect(detectThinkKeyword('Não sobrepense isso demais')).toBe(true);
+        expect(detectThinkKeyword('Intenta contrapensar esta propuesta')).toBe(true);
+      });
+
+      it('should still match the separated sobre forms, which need no prefix allowance', () => {
+        expect(detectThinkKeyword('Pense sobre isso')).toBe(true);
+        expect(detectThinkKeyword('Vamos sobre pensar nisso')).toBe(true);
+      });
+
+      it('should not let the new prefixes admit ordinary English words', () => {
+        expect(detectThinkKeyword('the fruit ripens quickly')).toBe(false);
+        expect(detectThinkKeyword('Submit the expense report')).toBe(false);
+        expect(detectThinkKeyword('the soap dispenser broke')).toBe(false);
+        expect(detectThinkKeyword('offer fair recompense')).toBe(false);
+      });
+
       it('should match finite forms of prefixed Latin keywords', () => {
         expect(detectThinkKeyword('Repense cette interface')).toBe(true);
         expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);

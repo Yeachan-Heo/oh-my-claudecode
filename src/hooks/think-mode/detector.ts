@@ -75,8 +75,16 @@ const MULTILINGUAL_KEYWORDS = [
  * Productive prefixes that may precede an anchored stem at a word start.
  *
  * Kept deliberately short: word-initial 're' and 'ri' support the existing Romance
- * conjugations, and 'mal' supports the Spanish 'malpensar' form. Arbitrary infixes remain
- * blocked by the anchor.
+ * conjugations, 'mal' supports the Spanish 'malpensar' form, and 'sobre' and 'contra'
+ * support the productive Portuguese and Spanish compounds ('sobrepensar' to overthink,
+ * 'contrapensar' to think against). Arbitrary infixes remain blocked by the anchor.
+ *
+ * Each of these is safe only because nothing ordinary begins with it followed by an
+ * anchored stem: against the system word list no English word starts with 'sobrepens' or
+ * 'contrapens', and neither spelling heads a common Romance derivation the way
+ * 'malpensado' heads one for 'mal'. The separated forms need no allowance -- in 'pense
+ * sobre isso' and 'sobre pensar nisso' the stem already starts a word, so the anchor
+ * admits it without help.
  *
  * Broadening it further was tried and reverted. An accented prefix such as 'pré' is not
  * robust: a prompt in NFD form decomposes the accent into a base letter plus U+0301, so
@@ -94,7 +102,7 @@ const MULTILINGUAL_KEYWORDS = [
  * 'surpensons', 'surpensé', 'surpensant' and the imperfect out. The stem covers all of
  * them at once, which is why the paradigm is enumerated in a test rather than in a list.
  */
-const ROMANCE_PREFIXES = 're|ri|mal';
+const ROMANCE_PREFIXES = 're|ri|mal|sobre|contra';
 
 /**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
@@ -164,7 +172,8 @@ const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
 
 /**
  * Anchor only stems that collide with English words. Word-initial 're' and 'ri' allow
- * Romance conjugations, and 'mal' allows Spanish 'malpensar'; no trailing boundary is
+ * Romance conjugations, 'mal' allows Spanish 'malpensar', and 'sobre' and 'contra' allow
+ * the Portuguese and Spanish compounds; no trailing boundary is
  * used because the multilingual keywords are stems with productive suffixes.
  */
 function buildKeywordPattern(keyword: string): RegExp {
