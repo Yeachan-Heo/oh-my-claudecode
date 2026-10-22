@@ -94,6 +94,69 @@ describe('host-load-gate', () => {
       });
     });
 
+    it('does not truncate a partially-numeric free memory threshold', () => {
+      // parseInt('12abc', 10) is 12, which would have configured a 12MB floor.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '12abc' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+      });
+    });
+
+    it('does not truncate a fractional free memory threshold', () => {
+      // parseInt('8.9', 10) is 8, silently dropping the fraction.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '8.9' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.freeMemoryThreshold).toBe(defaults.freeMemoryThreshold);
+      });
+    });
+
+    it('honours exponent notation in the free memory threshold', () => {
+      // parseInt('1e3', 10) is 1, so this used to configure a 1MB floor -- low
+      // enough that the memory check effectively stopped gating.
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '1e3' }, () => {
+        const config = parseGateConfig();
+        expect(config.freeMemoryThreshold).toBe(1000 * 1024 * 1024);
+      });
+    });
+
+    it('does not truncate a partially-numeric max sibling sessions', () => {
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '4 sessions' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.maxSiblingSessions).toBe(defaults.maxSiblingSessions);
+      });
+    });
+
+    it('does not truncate a partially-numeric cpu load threshold', () => {
+      // parseFloat('2.5x', 10) is 2.5, accepting a malformed value as valid.
+      withEnv({ OMC_HOST_LOAD_THRESHOLD: '2.5x' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
+      });
+    });
+
+    it('preserves a negative threshold, which disables that check', () => {
+      withEnv(
+        { OMC_HOST_LOAD_THRESHOLD: '-1', OMC_MAX_SIBLING_SESSIONS: '-1' },
+        () => {
+          const config = parseGateConfig();
+          expect(config.cpuLoadThreshold).toBe(-1);
+          expect(config.maxSiblingSessions).toBe(-1);
+        },
+      );
+    });
+
+    it('rejects a non-finite threshold', () => {
+      withEnv({ OMC_HOST_LOAD_THRESHOLD: 'Infinity' }, () => {
+        const config = parseGateConfig();
+        const defaults = getDefaultGateConfig();
+        expect(config.cpuLoadThreshold).toBe(defaults.cpuLoadThreshold);
+      });
+    });
+
     it('accepts override parameters', () => {
       const config = parseGateConfig({
         cpuLoadThreshold: 4.0,

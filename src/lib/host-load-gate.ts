@@ -97,11 +97,12 @@ export function getDefaultGateConfig(): HostLoadGateConfig {
  */
 export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLoadGateConfig {
   const defaults = getDefaultGateConfig();
+  const freeMemoryMb = parseIntEnv('OMC_FREE_MEMORY_THRESHOLD');
 
   const config: HostLoadGateConfig = {
     cpuLoadThreshold: parseFloatEnv('OMC_HOST_LOAD_THRESHOLD') ?? defaults.cpuLoadThreshold,
-    freeMemoryThreshold: parseIntEnv('OMC_FREE_MEMORY_THRESHOLD')
-      ? parseIntEnv('OMC_FREE_MEMORY_THRESHOLD')! * 1024 * 1024
+    freeMemoryThreshold: freeMemoryMb
+      ? freeMemoryMb * 1024 * 1024
       : defaults.freeMemoryThreshold,
     maxSiblingSessions: parseIntEnv('OMC_MAX_SIBLING_SESSIONS') ?? defaults.maxSiblingSessions,
     enabled: defaults.enabled,
@@ -113,18 +114,40 @@ export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLo
   return config;
 }
 
+/**
+ * Parse a finite float from the environment, or null when unset/unparseable.
+ *
+ * Uses Number() rather than parseFloat() because parseFloat() stops at the first
+ * character it cannot read: it turns '0.5abc' into 0.5 and 'off' into NaN, so a
+ * typo silently becomes a real threshold instead of falling back to the default.
+ * A negative value is passed through -- the gate reads a negative threshold as
+ * "this check is disabled".
+ */
 function parseFloatEnv(key: string): number | null {
   const val = process.env[key];
-  if (!val) return null;
-  const parsed = parseFloat(val);
-  return isNaN(parsed) ? null : parsed;
+  if (!val || val.trim() === '') return null;
+  const parsed = Number(val);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
+/**
+ * Parse a safe integer from the environment, or null when unset/unparseable.
+ *
+ * Uses Number() rather than parseInt(), which stops at the first character it
+ * cannot read and so silently truncates: parseInt('1e3', 10) and
+ * parseInt('1_000', 10) both yield 1, meaning OMC_FREE_MEMORY_THRESHOLD=1e3
+ * configured a 1MB floor instead of 1000MB and quietly stopped gating on
+ * memory. Number() parses the whole value, so an unambiguous form is honoured
+ * ('1e3' -> 1000) and an ambiguous one is rejected in favour of the documented
+ * default ('12abc', '8.9') instead of being truncated. A negative value is
+ * passed through -- the gate reads a negative threshold as "this check is
+ * disabled".
+ */
 function parseIntEnv(key: string): number | null {
   const val = process.env[key];
-  if (!val) return null;
-  const parsed = parseInt(val, 10);
-  return isNaN(parsed) ? null : parsed;
+  if (!val || val.trim() === '') return null;
+  const parsed = Number(val);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 /**
