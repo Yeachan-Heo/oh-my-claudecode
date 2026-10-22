@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { parseJevEnv, readRequestFile, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { parseJevEnv, readRequestFile, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -40,6 +40,25 @@ function baseEnv(overrides = {}) {
     ...overrides,
   };
 }
+
+describe('resolveJevTimeoutMs', () => {
+  it.each(['1e3', '1.5', '2000ms', ' 2000 ', '01', '9007199254740993'])(
+    'falls back before adding the active parent buffer for malformed values (%s)',
+    value => {
+      const env = { OMC_JEV_TIMEOUT_MS: value };
+      expect(resolveJevTimeoutMs(env)).toBe(2000);
+      expect(resolveJevTimeoutMs(env, 500)).toBe(2500);
+    },
+  );
+
+  it('accepts a canonical timeout and keeps the buffered deadline inside the Node timer range', () => {
+    expect(resolveJevTimeoutMs({ OMC_JEV_TIMEOUT_MS: '2500' })).toBe(2500);
+    expect(resolveJevTimeoutMs(
+      { OMC_JEV_TIMEOUT_MS: '2147483647' },
+      500,
+    )).toBe(2_147_483_647);
+  });
+});
 
 describe('parseJevEnv tri-state parity', () => {
   it('off when the key is absent even with OMC_JEV set', () => {

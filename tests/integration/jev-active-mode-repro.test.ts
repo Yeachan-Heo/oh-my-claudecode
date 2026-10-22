@@ -80,12 +80,14 @@ describe("jev active-mode subprocess repro", () => {
   let requests: WireRequest[];
   let status: number;
   let choice: string;
+  let responseDelayMs: number;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-active-repro-"));
     requests = [];
     status = 200;
     choice = "opus";
+    responseDelayMs = 0;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -107,11 +109,16 @@ describe("jev active-mode subprocess repro", () => {
           body.questions[question].type === "noul"
             ? { type: "noul", noul: false, confidence: 0.99 }
             : { type: "choice", choice, confidence: 0.99 };
-        response.writeHead(status, {
-          "Content-Type": "application/json",
-          Connection: "close",
-        });
-        response.end(JSON.stringify({ answers: { [question]: answer } }));
+        const sendResponse = () => {
+          if (response.destroyed) return;
+          response.writeHead(status, {
+            "Content-Type": "application/json",
+            Connection: "close",
+          });
+          response.end(JSON.stringify({ answers: { [question]: answer } }));
+        };
+        if (responseDelayMs > 0) setTimeout(sendResponse, responseDelayMs);
+        else sendResponse();
       });
     });
     await new Promise<void>((resolve, reject) => {
@@ -249,6 +256,28 @@ describe("jev active-mode subprocess repro", () => {
     },
     15000,
   );
+
+  it("pre-tool-enforcer.mjs: malformed timeout uses the resolver fallback before adding the active parent buffer", async () => {
+    responseDelayMs = 750;
+    const input = taskInput();
+    const result = await runScript(
+      "pre-tool-enforcer.mjs",
+      input,
+      {
+        ...env,
+        OMC_JEV: "model-routing:active",
+        OMC_JEV_TIMEOUT_MS: "1e3",
+      },
+      cwd,
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(requests.some((entry) => "model-tier" in entry.body.questions)).toBe(
+      true,
+    );
+    expect(JSON.parse(result.stdout).hookSpecificOutput.updatedInput.model).toBe(
+      "opus",
+    );
+  }, 15000);
 
   it("pre-tool-enforcer.mjs: point active overrides an earlier shadow wildcard", async () => {
     const input = taskInput();
