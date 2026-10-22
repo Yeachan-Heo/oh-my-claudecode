@@ -138,6 +138,14 @@ const TOOL_FAILURE_CLEANUP_LIFETIME_WINDOWS = 10;
 const TOOL_FAILURE_CLEANUP_MIN_LIFETIME_MS = 60_000;
 let postToolFailureStateLockModule;
 
+function postToolFailureLockWaitMs() {
+  if (process.env.NODE_ENV === 'test') {
+    const testWaitMs = Number(process.env.OMC_TEST_TOOL_FAILURE_LOCK_WAIT_MS);
+    if (Number.isFinite(testWaitMs) && testWaitMs > 0) return Math.min(testWaitMs, POST_TOOL_FAILURE_LOCK_WAIT_MS);
+  }
+  return POST_TOOL_FAILURE_LOCK_WAIT_MS;
+}
+
 async function loadPostToolFailureStateLock() {
   if (!postToolFailureStateLockModule) {
     postToolFailureStateLockModule = await import(pathToFileURL(join(__dirname, 'lib', 'state-lock.mjs')).href);
@@ -345,6 +353,34 @@ function resolveSessionPluginOccupancy(deadline) {
   return occupancy;
 }
 
+async function waitForTestArtifactScanRelease(scan) {
+  if (process.env.NODE_ENV !== 'test') return;
+  const scanPrefix = `OMC_TEST_TOOL_FAILURE_${scan}_SCAN`;
+  const readyPath = process.env[`${scanPrefix}_READY_PATH`];
+  const releasePath = process.env[`${scanPrefix}_RELEASE_PATH`];
+  if (!readyPath || !releasePath) return;
+  try {
+    writeFileSync(readyPath, 'ready');
+    const deadline = Date.now() + 30_000;
+    while (!existsSync(releasePath) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  } catch {
+    // Test-only synchronization must not affect cleanup behavior.
+  }
+}
+
+function signalTestDeferredToolFailureCleanupReady() {
+  if (process.env.NODE_ENV !== 'test') return;
+  const readyPath = process.env.OMC_TEST_TOOL_FAILURE_DEFERRED_CLEANUP_READY_PATH;
+  if (!readyPath) return;
+  try {
+    writeFileSync(readyPath, 'ready');
+  } catch {
+    // Test-only synchronization must not affect cleanup behavior.
+  }
+}
+
 async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLifetimeMs = toolFailureCleanupMaxLifetimeMs(stabilizationMs)) {
   const stateDir = join(omcRoot, 'state');
   const lifetimeDeadline = Date.now() + maxLifetimeMs;
@@ -390,6 +426,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
     if (Date.now() >= lifetimeDeadline) return;
     quietUntil = Date.now() + stabilizationMs;
     let artifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
+    await waitForTestArtifactScanRelease('INITIAL');
     olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
     nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
     while (true) {
@@ -412,6 +449,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
         olderPluginActive = hasActiveOlderPluginRoot(lifetimeDeadline);
         nextPluginRootCheck = Date.now() + TOOL_FAILURE_PLUGIN_ROOT_RESCAN_MS;
         if (!olderPluginActive) {
+          await waitForTestArtifactScanRelease('FINAL');
           const finalArtifactSnapshot = legacyToolFailureArtifactSnapshot(omcRoot);
           if (finalArtifactSnapshot !== artifactSnapshot) {
             artifactSnapshot = finalArtifactSnapshot;
@@ -436,7 +474,7 @@ async function stabilizeLegacyToolFailureState(omcRoot, stabilizationMs, maxLife
   }
 }
 
-async function purgeLegacyToolFailureState(omcRoot, waitMs = POST_TOOL_FAILURE_LOCK_WAIT_MS, deferOnTimeout = true, lifetimeDeadline = Infinity) {
+async function purgeLegacyToolFailureState(omcRoot, waitMs = postToolFailureLockWaitMs(), deferOnTimeout = true, lifetimeDeadline = Infinity) {
   const deadline = Math.min(Date.now() + waitMs, lifetimeDeadline);
   const stateDir = join(omcRoot, 'state');
   try {
@@ -1271,6 +1309,7 @@ if (process.argv.includes(REFRESH_UPDATE_CACHE_FLAG)) {
   if (!omcRoot) {
     process.exit(0);
   }
+  signalTestDeferredToolFailureCleanupReady();
   const requestedWaitMs = Number(process.argv[4]);
   const waitMs = Number.isFinite(requestedWaitMs) && requestedWaitMs > 0
     ? Math.min(requestedWaitMs, POST_TOOL_FAILURE_DEFERRED_WAIT_MS)

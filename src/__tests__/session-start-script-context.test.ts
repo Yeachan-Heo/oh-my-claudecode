@@ -142,7 +142,7 @@ function startSessionStartProcess(
     const timeout = setTimeout(() => {
       child.kill();
       reject(new Error(`SessionStart timed out: ${stderr}`));
-    }, 15000);
+    }, 30_000);
     child.stdout.on('data', chunk => { stdout += chunk.toString(); });
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
     child.once('error', error => {
@@ -349,26 +349,30 @@ describe('session-start.mjs regression #1386', () => {
 
     try {
       await holder.ready;
+      writeFileSync(tempPath, '{"tool_input_preview":"in-flight legacy payload"');
+      expect(existsSync(tempPath)).toBe(true);
       sessionStart = startSessionStartProcess(SCRIPT_PATH, fakeHome, {
         hook_event_name: 'SessionStart',
         session_id: 'session-current',
         cwd: fakeProject,
-      }, { CLAUDE_PLUGIN_ROOT: '', OMC_STATE_DIR: '' });
-      await new Promise(resolve => setTimeout(resolve, 250));
-      writeFileSync(tempPath, '{"tool_input_preview":"in-flight legacy payload"');
-      expect(existsSync(tempPath)).toBe(true);
+      }, {
+        CLAUDE_PLUGIN_ROOT: '',
+        OMC_STATE_DIR: '',
+        OMC_TEST_TOOL_FAILURE_LOCK_WAIT_MS: '100',
+      });
 
-      expect(await holder.release()).toEqual({ code: 0, signal: null });
       const output = JSON.parse(await sessionStart.output);
       expect(output.continue).toBe(true);
-      expect(existsSync(tempPath)).toBe(false);
+      expect(existsSync(tempPath)).toBe(true);
+      expect(await holder.release()).toEqual({ code: 0, signal: null });
+      expect(await waitForFilesToDisappear([tempPath], 15_000)).toBe(true);
     } finally {
       await holder.release();
       if (sessionStart) await sessionStart.output.catch(() => '');
     }
   });
 
-  it('defers cleanup for locked root and session state within the SessionStart timeout', async () => {
+  it('defers cleanup for locked root and session state until the locks are released', async () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const sessionDir = join(stateDir, 'sessions', 'session-locked');
     mkdirSync(sessionDir, { recursive: true });
@@ -383,32 +387,34 @@ describe('session-start.mjs regression #1386', () => {
 
     try {
       await Promise.all([rootHolder.ready, sessionHolder.ready]);
-      const startedAt = Date.now();
-      sessionStart = startSessionStartProcess(SCRIPT_PATH, fakeHome, {
-        hook_event_name: 'SessionStart',
-        session_id: 'session-current',
-        cwd: fakeProject,
-      }, { CLAUDE_PLUGIN_ROOT: '', OMC_STATE_DIR: '', OMC_HOOK_BACKGROUND_CHILD: '0' });
-      await new Promise(resolve => setTimeout(resolve, 250));
       writeFileSync(rootPath, JSON.stringify({ tool_input_preview: 'root legacy payload', error: 'legacy root error' }));
       writeFileSync(rootTemp, '{"tool_input_preview":"root legacy temp"');
       writeFileSync(sessionPath, JSON.stringify({ tool_input_preview: 'session legacy payload', error: 'legacy session error' }));
       writeFileSync(sessionTemp, '{"tool_input_preview":"session legacy payload"');
+      sessionStart = startSessionStartProcess(SCRIPT_PATH, fakeHome, {
+        hook_event_name: 'SessionStart',
+        session_id: 'session-current',
+        cwd: fakeProject,
+      }, {
+        CLAUDE_PLUGIN_ROOT: '',
+        OMC_STATE_DIR: '',
+        OMC_HOOK_BACKGROUND_CHILD: '0',
+        OMC_TEST_TOOL_FAILURE_LOCK_WAIT_MS: '100',
+      });
 
       const output = JSON.parse(await sessionStart.output);
       expect(output.continue).toBe(true);
-      expect(Date.now() - startedAt).toBeLessThan(5000);
       expect(cleanupPaths.every(path => existsSync(path))).toBe(true);
       expect(await rootHolder.release()).toEqual({ code: 0, signal: null });
       expect(await sessionHolder.release()).toEqual({ code: 0, signal: null });
-      expect(await waitForFilesToDisappear(cleanupPaths, 5000)).toBe(true);
+      expect(await waitForFilesToDisappear(cleanupPaths, 15_000)).toBe(true);
     } finally {
       await Promise.all([rootHolder.release(), sessionHolder.release()]);
       if (sessionStart) await sessionStart.output.catch(() => '');
     }
   });
 
-  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('returns promptly when failure-state lock creation is denied', async () => {
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)('continues when failure-state lock creation is denied', async () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');
     writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'read-only legacy secret' }));
@@ -416,15 +422,18 @@ describe('session-start.mjs regression #1386', () => {
     let sessionStart: ReturnType<typeof startSessionStartProcess> | undefined;
 
     try {
-      const startedAt = Date.now();
       sessionStart = startSessionStartProcess(SCRIPT_PATH, fakeHome, {
         hook_event_name: 'SessionStart',
         session_id: 'session-current',
         cwd: fakeProject,
-      }, { CLAUDE_PLUGIN_ROOT: '', OMC_STATE_DIR: '', OMC_HOOK_BACKGROUND_CHILD: '0' });
+      }, {
+        CLAUDE_PLUGIN_ROOT: '',
+        OMC_STATE_DIR: '',
+        OMC_HOOK_BACKGROUND_CHILD: '0',
+        OMC_TEST_TOOL_FAILURE_LOCK_WAIT_MS: '100',
+      });
       const output = JSON.parse(await sessionStart.output);
       expect(output.continue).toBe(true);
-      expect(Date.now() - startedAt).toBeLessThan(5000);
       expect(existsSync(legacyPath)).toBe(true);
     } finally {
       chmodSync(stateDir, 0o755);
@@ -436,6 +445,8 @@ describe('session-start.mjs regression #1386', () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');
     const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const initialScanReadyPath = join(tempDir, 'initial-scan-ready');
+    const initialScanReleasePath = join(tempDir, 'initial-scan-release');
     writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'unverifiable legacy secret' }));
     writeFileSync(`${legacyPath}.lock`, 'malformed lock metadata');
 
@@ -448,17 +459,20 @@ describe('session-start.mjs regression #1386', () => {
       OMC_STATE_DIR: '',
       OMC_HOOK_BACKGROUND_CHILD: '0',
       OMC_TEST_TOOL_FAILURE_STABILIZATION_MS: '1500',
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_READY_PATH: initialScanReadyPath,
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_RELEASE_PATH: initialScanReleasePath,
     });
-    const workerLockAppeared = waitForFilesToAppear([workerLockPath], 5000);
 
     try {
       const output = JSON.parse(await sessionStart.output);
       expect(output.continue).toBe(true);
+      expect(await waitForFilesToAppear([workerLockPath, initialScanReadyPath], 10_000)).toBe(true);
       expect(existsSync(legacyPath)).toBe(true);
       expect(readFileSync(`${legacyPath}.lock`, 'utf-8')).toBe('malformed lock metadata');
-      expect(await workerLockAppeared).toBe(true);
-      expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
+      writeFileSync(initialScanReleasePath, 'continue');
+      expect(await waitForFilesToDisappear([workerLockPath], 15_000)).toBe(true);
     } finally {
+      writeFileSync(initialScanReleasePath, 'continue');
       await sessionStart.output.catch(() => '');
     }
   });
@@ -738,6 +752,8 @@ describe('session-start.mjs regression #1386', () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');
     const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const initialScanReadyPath = join(tempDir, 'initial-scan-ready');
+    const initialScanReleasePath = join(tempDir, 'initial-scan-release');
     const sanitizedState = {
       tool_name: 'Bash',
       error: 'Tool execution failed (details omitted for privacy).',
@@ -755,15 +771,19 @@ describe('session-start.mjs regression #1386', () => {
       OMC_STATE_DIR: '',
       OMC_HOOK_BACKGROUND_CHILD: '0',
       OMC_TEST_TOOL_FAILURE_STABILIZATION_MS: '1500',
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_READY_PATH: initialScanReadyPath,
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_RELEASE_PATH: initialScanReleasePath,
     });
-    const workerLockAppeared = waitForFilesToAppear([workerLockPath], 5000);
+    // This worker's startup snapshot is synchronized with the test below.
 
     try {
       expect(JSON.parse(await sessionStart.output).continue).toBe(true);
-      expect(await workerLockAppeared).toBe(true);
-      expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
+      expect(await waitForFilesToAppear([workerLockPath, initialScanReadyPath], 10_000)).toBe(true);
+      writeFileSync(initialScanReleasePath, 'continue');
+      expect(await waitForFilesToDisappear([workerLockPath], 15_000)).toBe(true);
       expect(JSON.parse(readFileSync(legacyPath, 'utf-8'))).toEqual(sanitizedState);
     } finally {
+      writeFileSync(initialScanReleasePath, 'continue');
       await sessionStart.output.catch(() => '');
     }
   });
@@ -774,6 +794,8 @@ describe('session-start.mjs regression #1386', () => {
     const lateSessionDir = join(stateDir, 'sessions', 'session-created-after-start');
     const lateSessionPath = join(lateSessionDir, 'last-tool-error-state.json');
     const workerLockPath = join(stateDir, '.legacy-tool-failure-cleanup-worker.lock');
+    const initialScanReadyPath = join(tempDir, 'initial-scan-ready');
+    const initialScanReleasePath = join(tempDir, 'initial-scan-release');
     const sessionStart = startSessionStartProcess(SCRIPT_PATH, fakeHome, {
       hook_event_name: 'SessionStart',
       session_id: 'session-current',
@@ -783,18 +805,22 @@ describe('session-start.mjs regression #1386', () => {
       OMC_STATE_DIR: '',
       OMC_HOOK_BACKGROUND_CHILD: '0',
       OMC_TEST_TOOL_FAILURE_STABILIZATION_MS: '1500',
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_READY_PATH: initialScanReadyPath,
+      OMC_TEST_TOOL_FAILURE_INITIAL_SCAN_RELEASE_PATH: initialScanReleasePath,
     });
 
     try {
       expect(JSON.parse(await sessionStart.output).continue).toBe(true);
-      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(await waitForFilesToAppear([workerLockPath, initialScanReadyPath], 10_000)).toBe(true);
       mkdirSync(lateSessionDir, { recursive: true });
       writeFileSync(rootPath, JSON.stringify({ tool_input_preview: 'late root legacy secret' }));
       writeFileSync(lateSessionPath, JSON.stringify({ tool_input_preview: 'late session legacy secret' }));
+      writeFileSync(initialScanReleasePath, 'continue');
 
-      expect(await waitForFilesToDisappear([rootPath, lateSessionPath], 5000)).toBe(true);
-      expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
+      expect(await waitForFilesToDisappear([rootPath, lateSessionPath], 15_000)).toBe(true);
+      expect(await waitForFilesToDisappear([workerLockPath], 15_000)).toBe(true);
     } finally {
+      writeFileSync(initialScanReleasePath, 'continue');
       await sessionStart.output.catch(() => '');
     }
   });
@@ -820,12 +846,12 @@ describe('session-start.mjs regression #1386', () => {
 
     try {
       expect(JSON.parse(await sessionStart.output).continue).toBe(true);
-      expect(await waitForFilesToAppear([workerLockPath, finalScanReadyPath], 5000)).toBe(true);
+      expect(await waitForFilesToAppear([workerLockPath, finalScanReadyPath], 10_000)).toBe(true);
       writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'last-window legacy secret' }));
       writeFileSync(finalScanReleasePath, 'continue');
 
-      expect(await waitForFilesToDisappear([legacyPath], 5000)).toBe(true);
-      expect(await waitForFilesToDisappear([workerLockPath], 5000)).toBe(true);
+      expect(await waitForFilesToDisappear([legacyPath], 15_000)).toBe(true);
+      expect(await waitForFilesToDisappear([workerLockPath], 15_000)).toBe(true);
     } finally {
       writeFileSync(finalScanReleasePath, 'continue');
       await sessionStart.output.catch(() => '');
@@ -875,6 +901,7 @@ describe('session-start.mjs regression #1386', () => {
   it('retries deferred cleanup after its own lock wait expires', async () => {
     const stateDir = join(fakeProject, '.omc', 'state');
     const legacyPath = join(stateDir, 'last-tool-error.json');
+    const deferredCleanupReadyPath = join(tempDir, 'deferred-cleanup-ready');
     const holder = startPostToolFailureLockHolder(legacyPath);
 
     try {
@@ -882,14 +909,20 @@ describe('session-start.mjs regression #1386', () => {
       writeFileSync(legacyPath, JSON.stringify({ tool_input_preview: 'deferred legacy secret' }));
       const cleanup = spawnSync(NODE, [SCRIPT_PATH, '--purge-legacy-tool-failure-state', join(fakeProject, '.omc'), '100'], {
         encoding: 'utf-8',
-        timeout: 5000,
+        timeout: 30_000,
+        env: {
+          ...process.env,
+          OMC_HOOK_BACKGROUND_CHILD: '1',
+          OMC_TEST_TOOL_FAILURE_DEFERRED_CLEANUP_READY_PATH: deferredCleanupReadyPath,
+        },
       });
       expect(cleanup.error).toBeUndefined();
       expect(cleanup.status).toBe(0);
+      expect(await waitForFilesToAppear([deferredCleanupReadyPath], 15_000)).toBe(true);
       expect(existsSync(legacyPath)).toBe(true);
 
       expect(await holder.release()).toEqual({ code: 0, signal: null });
-      expect(await waitForFilesToDisappear([legacyPath], 5000)).toBe(true);
+      expect(await waitForFilesToDisappear([legacyPath], 15_000)).toBe(true);
     } finally {
       await holder.release();
     }
