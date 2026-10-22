@@ -74,8 +74,9 @@ const MULTILINGUAL_KEYWORDS = [
 /**
  * Productive prefixes that may precede an anchored stem at a word start.
  *
- * Kept deliberately short. Against the system word list, no English word begins with
- * either of these followed by an anchored stem, so the allowance adds no false positive.
+ * Kept deliberately short: word-initial 're' and 'ri' support the existing Romance
+ * conjugations, and 'mal' supports the Spanish 'malpensar' form. Arbitrary infixes remain
+ * blocked by the anchor.
  *
  * Broadening it further was tried and reverted. An accented prefix such as 'pré' is not
  * robust: a prompt in NFD form decomposes the accent into a base letter plus U+0301, so
@@ -93,7 +94,7 @@ const MULTILINGUAL_KEYWORDS = [
  * 'surpensons', 'surpensé', 'surpensant' and the imperfect out. The stem covers all of
  * them at once, which is why the paradigm is enumerated in a test rather than in a list.
  */
-const ROMANCE_PREFIXES = 're|ri';
+const ROMANCE_PREFIXES = 're|ri|mal';
 
 /**
  * Latin stems whose embedded forms collide with ordinary English words. 'repense' is
@@ -162,8 +163,8 @@ const ULTRATHINK_PATTERN = buildWordPattern('ultrathink');
 const ENGLISH_PATTERNS = [ULTRATHINK_PATTERN, buildWordPattern('think')];
 
 /**
- * Anchor only stems that collide with English words. A word-initial 're' or 'ri' is
- * allowed before an anchored stem for Romance conjugations; no trailing boundary is
+ * Anchor only stems that collide with English words. Word-initial 're' and 'ri' allow
+ * Romance conjugations, and 'mal' allows Spanish 'malpensar'; no trailing boundary is
  * used because the multilingual keywords are stems with productive suffixes.
  */
 function buildKeywordPattern(keyword: string): RegExp {

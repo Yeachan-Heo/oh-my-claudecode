@@ -166,6 +166,10 @@ World`);
         expect(detectThinkKeyword('Dobbiamo ripensare questo')).toBe(true);
       });
 
+      it('should match the Spanish malpensar prefix before an anchored stem', () => {
+        expect(detectThinkKeyword('Intenta malpensar un poco antes de responder')).toBe(true);
+      });
+
       it('should match finite forms of prefixed Latin keywords', () => {
         expect(detectThinkKeyword('Repense cette interface')).toBe(true);
         expect(detectThinkKeyword('Repiensa esta solución')).toBe(true);
@@ -212,7 +216,7 @@ World`);
       });
 
       it('should reject an English word that embeds an anchored stem', () => {
-        // The word-initial 're'/'ri' allowance does not reach these: the 're' in
+        // The word-initial Romance-prefix allowance does not reach these: the 're' in
         // "prepense" and "recompense" is not itself at a word start.
         expect(detectThinkKeyword('a prepense plan')).toBe(false);
         expect(detectThinkKeyword('a fair recompense for the work')).toBe(false);
