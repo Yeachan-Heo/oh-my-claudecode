@@ -1283,4 +1283,46 @@ describe('unified MCP registry sync', () => {
     expect(status.codexMissing).toEqual([]);
     expect(status.codexMismatched).toEqual([]);
   });
+
+  describe('surrogate handling in Codex TOML values', () => {
+    const makeRegistry = (value: string) => ({
+      surrogate_probe: {
+        command: 'node',
+        args: ['server.js'],
+        env: { TOKEN: value },
+        managed: true,
+      },
+    }) as unknown as Parameters<typeof syncCodexConfigToml>[1];
+
+    it('writes valid UTF-8 for an unpaired surrogate', () => {
+      // An unpaired surrogate cannot be encoded as UTF-8. Rendered raw, the
+      // writeFileSync that persists this content turned it into U+FFFD and
+      // silently mangled the value.
+      const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('\ud800'));
+      expect(content).toContain('TOKEN = "\\ud800"');
+      expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+    });
+
+    it('writes valid UTF-8 for an unpaired low surrogate', () => {
+      const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('a\udc00b'));
+      expect(content).toContain('TOKEN = "a\\udc00b"');
+      expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+    });
+
+    it('leaves a matched surrogate pair as the astral character', () => {
+      const { content } = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry('\ud83d\ude00'));
+      expect(content).toContain('TOKEN = "\u{1F600}"');
+      expect(Buffer.from(content, 'utf-8').toString('utf-8')).toBe(content);
+    });
+
+    it('settles after one sync for each of those values', () => {
+      for (const value of ['\ud800', 'a\udc00b', '\ud83d\ude00', 'plain']) {
+        const first = syncCodexConfigToml('model = "gpt-5"\n', makeRegistry(value));
+        const second = syncCodexConfigToml(first.content, makeRegistry(value));
+        expect(second.changed).toBe(false);
+        expect(second.content).toBe(first.content);
+      }
+    });
+  });
+
 });

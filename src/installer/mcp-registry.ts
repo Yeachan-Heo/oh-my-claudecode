@@ -388,6 +388,16 @@ function escapeTomlString(value: string): string {
   let result = value.replace(/\\/g, '\\\\');
   
   // Escape other special characters and control codes
+  // An unpaired surrogate is not a Unicode scalar value, so it cannot be encoded
+  // as UTF-8: the writeFileSync that persists this content turned it into U+FFFD
+  // and silently mangled the value. Escape it as \uXXXX instead, which is the
+  // same form unescapeTomlString decodes, so the round trip still settles. A
+  // matched pair is a real astral character and is left alone.
+  result = result.replace(
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
+    (surrogate) => `\\u${surrogate.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+
   result = result.replace(/["\n\r\t\b\f\0-\x07\x0b\x0e-\x1f\x7f]/g, (char) => {
     switch (char) {
       case '"':
