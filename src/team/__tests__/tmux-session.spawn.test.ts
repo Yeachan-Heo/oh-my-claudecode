@@ -42,6 +42,7 @@ const mockedCalls = vi.hoisted(() => ({
   delayedSubmitCapturesRemaining: null as number | null,
   paneStatusAfterEnter: null as string | null,
   delayedSubmitReplacement: '',
+  cmuxCaptures: [] as Array<string | Error>,
   cmuxFailOnce: [] as string[],
   cmuxFailures: [] as Array<{ command: string; message: string }>,
 }));
@@ -81,6 +82,11 @@ vi.mock('child_process', async (importOriginal) => {
     if (failIndex >= 0) {
       mockedCalls.cmuxFailOnce.splice(failIndex, 1);
       throw new Error(`cmux ${command} failed`);
+    }
+    if (command === 'read-screen' || command === 'capture-pane') {
+      const capture = mockedCalls.cmuxCaptures.shift() ?? '';
+      if (capture instanceof Error) throw capture;
+      return { stdout: capture, stderr: '' };
     }
     return { stdout: '', stderr: '' };
   };
@@ -186,13 +192,14 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
   };
 });
 
-import { sendTeamPaneKey, spawnWorkerInPane } from '../tmux-session.js';
+import { sendTeamPaneKey, sendToWorker, spawnWorkerInPane } from '../tmux-session.js';
 
 describe('spawnWorkerInPane', () => {
   beforeEach(() => {
     vi.useRealTimers();
     mockedCalls.tmuxArgs = [];
     mockedCalls.cmuxArgs = [];
+    mockedCalls.cmuxCaptures = [];
     mockedCalls.paneCapture = '';
     mockedCalls.paneStatus = '0 zsh\n';
     mockedCalls.echoOnLiteralSend = true;
@@ -647,5 +654,140 @@ describe('spawnWorkerInPane', () => {
       cwd: '/tmp',
     })).rejects.toThrow('worker_start_tmux_server_identity_missing');
     expect(mockedCalls.tmuxArgs).toEqual([]);
+  });
+});
+
+describe('sendToWorker cmux trust guards', () => {
+  beforeEach(() => {
+    mockedCalls.tmuxArgs = [];
+    mockedCalls.cmuxArgs = [];
+    mockedCalls.cmuxCaptures = [];
+    mockedCalls.cmuxFailOnce = [];
+    mockedCalls.cmuxFailures = [];
+    vi.unstubAllEnvs();
+    vi.stubEnv('TMUX', '');
+    vi.stubEnv('CMUX_SURFACE_ID', 'cmux-leader');
+  });
+
+  it('fails closed when the cmux pane capture throws', async () => {
+    mockedCalls.cmuxFailures = [{ command: 'read-screen', message: 'screen capture unavailable' }];
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', 'Read inbox.md, execute now.'))
+      .resolves.toBe(false);
+
+    expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-surface' || args[0] === 'send')).toBe(false);
+    expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface' || args[0] === 'send-key')).toBe(false);
+  });
+
+  it('fails closed when the cmux pane capture is empty', async () => {
+    mockedCalls.cmuxCaptures = [''];
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', 'Read inbox.md, execute now.'))
+      .resolves.toBe(false);
+
+    expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-surface' || args[0] === 'send')).toBe(false);
+    expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface' || args[0] === 'send-key')).toBe(false);
+  });
+
+  it('does not press Enter if a Codex trust selector appears after cmux text injection', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    mockedCalls.cmuxCaptures = ['› ready\n', trustSelector];
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', message)).resolves.toBe(false);
+
+    expect(mockedCalls.cmuxArgs.filter(args => args[0] === 'send-surface'))
+      .toEqual([['send-surface', '--surface', 'surface-worker-1', message]]);
+    expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface' || args[0] === 'send-key')).toBe(false);
+  });
+
+  it('does not send the next cmux submit key if trust appears between Enter keys', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    mockedCalls.cmuxCaptures = ['› ready\n', '› ready\n', '› ready\n', trustSelector];
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', message)).resolves.toBe(false);
+
+    const submitKeys = mockedCalls.cmuxArgs
+      .filter(args => args[0] === 'send-key-surface' || args[0] === 'send-key')
+      .map(args => args.at(-1));
+    expect(submitKeys).toEqual(['enter']);
+  });
+
+  it('does not treat an empty cmux post-submit capture as successful delivery', async () => {
+    const message = 'Read inbox.md, execute now.';
+    mockedCalls.cmuxCaptures = ['› ready\n', '› ready\n', '› ready\n', '› ready\n', ''];
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', message)).resolves.toBe(false);
+
+    const submitKeys = mockedCalls.cmuxArgs
+      .filter(args => args[0] === 'send-key-surface' || args[0] === 'send-key')
+      .map(args => args.at(-1));
+    expect(submitKeys).toEqual(['enter', 'enter']);
+  });
+
+  it('does not reach the final cmux submit fallback if trust appears after six rounds', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const stableCapture = `${message}\n› ready\n`;
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    const captures = ['› ready\n', stableCapture];
+    for (let round = 0; round < 6; round++) captures.push(stableCapture, stableCapture, stableCapture);
+    captures.push(trustSelector);
+    mockedCalls.cmuxCaptures = captures;
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', message)).resolves.toBe(false);
+
+    const submitKeys = mockedCalls.cmuxArgs
+      .filter(args => args[0] === 'send-key-surface' || args[0] === 'send-key')
+      .map(args => args.at(-1));
+    expect(submitKeys).toEqual(Array.from({ length: 12 }, () => 'enter'));
+  });
+
+  it('does not start an adaptive cmux retry if trust appears before its first control key', async () => {
+    const message = 'Read inbox.md, execute now.';
+    const stableCapture = `${message}\n› ready\n`;
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    const captures = ['› ready\nesc to interrupt\n', stableCapture];
+    for (let round = 0; round < 6; round++) captures.push(stableCapture, stableCapture, stableCapture);
+    captures.push(stableCapture, trustSelector);
+    mockedCalls.cmuxCaptures = captures;
+
+    await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', message)).resolves.toBe(false);
+
+    const submitKeys = mockedCalls.cmuxArgs
+      .filter(args => args[0] === 'send-key-surface' || args[0] === 'send-key')
+      .map(args => args.at(-1));
+    expect(submitKeys).toHaveLength(12);
+    expect(submitKeys.filter(key => key === 'enter')).toHaveLength(11);
+    expect(submitKeys.filter(key => key === 'tab')).toHaveLength(1);
+    expect(submitKeys).not.toContain('C-u');
   });
 });

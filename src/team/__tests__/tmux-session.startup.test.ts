@@ -683,6 +683,19 @@ describe('worker pane startup safety', () => {
       'automatically, even without a model request.',
       'Continue only if you trust these files. Your',
       'trust decision will be saved.',
+      'Review the files in this folder before continuing.',
+      'Folder settings may allow code to run automatically.',
+      'Only proceed when you recognize and trust this project.',
+      'Trust applies to the current workspace folder.',
+      'The selected choice is saved for future sessions.',
+      'You can quit now and inspect the folder first.',
+      'Folder access may include reading project files.',
+      'Folder access may include editing project files.',
+      'Review any automated actions before granting access.',
+      'Do not continue if the folder is unfamiliar.',
+      'The trust decision should reflect your own judgment.',
+      'You can return after reviewing the project contents.',
+      'This prompt requires an explicit user decision.',
       '› 1. Trust and continue', '  2. Quit',
       'enter continue · esc quit',
     ].join('\n');
@@ -692,6 +705,34 @@ describe('worker pane startup safety', () => {
     expect(paneLooksReady(capture, 'codex')).toBe(false);
     expect(paneHasActiveTask(capture, 'codex')).toBe(false);
     expect(paneHasTrustPrompt(capture, 'claude')).toBe(false);
+    const partialCaptures = [
+      ['› ready', 'Trust this folder?'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and continue'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and', 'continue'].join('\n'),
+      ['Trust this folder?', '› 1. Trust and'].join('\n'),
+      ['Trust this folder?', '› 1.'].join('\n'),
+      ['Trust this folder?', '› 1'].join('\n'),
+      ['Trust this folder?', '›'].join('\n'),
+    ];
+    for (const partialCapture of partialCaptures) {
+      expect(paneHasTrustPrompt(partialCapture, 'codex')).toBe(true);
+      expect(paneLooksReady(partialCapture, 'codex')).toBe(false);
+      tmuxState.args = [];
+      tmuxState.captures = [partialCapture];
+      await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+        ok: false,
+        reason: 'codex_workspace_untrusted',
+      });
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+
+      tmuxState.args = [];
+      tmuxState.captures = [partialCapture];
+      await expect(sendToWorker('', '%2', 'List files and report the result.', context.ownership.tmuxServerIdentity))
+        .resolves.toBe(false);
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+    }
+
+    tmuxState.args = [];
     await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
       ok: false,
       reason: 'codex_workspace_untrusted',
@@ -699,6 +740,89 @@ describe('worker pane startup safety', () => {
     await expect(sendToWorker('', '%2', 'List files and report the result.', context.ownership.tmuxServerIdentity))
       .resolves.toBe(false);
     expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+
+    const staleCapture = [
+      'Trust this folder?', '› 1. Trust and continue', '  2. Quit',
+      '› ready',
+    ].join('\n');
+    expect(paneHasTrustPrompt(staleCapture, 'codex')).toBe(false);
+    expect(paneLooksReady(staleCapture, 'codex')).toBe(true);
+    const staleBarePromptCapture = [
+      'Trust this folder?', '› 1. Trust and continue', '  2. Quit', '›',
+    ].join('\n');
+    expect(paneHasTrustPrompt(staleBarePromptCapture, 'codex')).toBe(false);
+    expect(paneLooksReady(staleBarePromptCapture, 'codex')).toBe(true);
+
+    const quitSelectedCapture = capture
+      .replace('› 1. Trust and continue', '  1. Trust and continue')
+      .replace('  2. Quit', '› 2. Quit');
+    expect(paneHasTrustPrompt(quitSelectedCapture, 'codex')).toBe(true);
+    expect(paneLooksReady(quitSelectedCapture, 'codex')).toBe(false);
+    tmuxState.args = [];
+    tmuxState.captures = [quitSelectedCapture];
+    await expect(deliverStartupInbox(context, 'List files and report the result.')).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+    expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+  });
+
+  strictTmuxIt('does not press Enter if Codex trust appears after direct text injection', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'List files and report the result.';
+    const trustSelector = [
+      'Folder access', 'D:\\test\\repo',
+      'Trust this folder? Codex can read, edit, and',
+      'run files here, subject to your permission',
+      'settings. Folder settings can run code',
+      'automatically, even without a model request.',
+      '› 1. Trust and continue', '  2. Quit',
+    ].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', trustSelector];
+
+    await expect(sendToWorker('', context.ownership.paneId, message, context.ownership.tmuxServerIdentity))
+      .resolves.toBe(false);
+
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual([message]);
+    expect(tmuxState.args.some(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toBe(false);
+  });
+
+  strictTmuxIt('does not press startup Enter when Codex trust appears after trigger injection', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'Read inbox.md, execute now.';
+    const partialTrustSelector = ['Trust this folder?', '› 1. Trust and continue'].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', '› ready\n', partialTrustSelector];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+
+    const literalInputs = tmuxState.args
+      .filter(args => args[0] === 'send-keys' && args.includes('-l'))
+      .map(args => args.at(-1));
+    expect(literalInputs).toEqual([message]);
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(0);
+  });
+
+  strictTmuxIt('rechecks Codex trust before the second startup Enter', async () => {
+    const context = await acceptedContext('codex');
+    const message = 'Read inbox.md, execute now.';
+    const partialTrustSelector = ['Trust this folder?', '› 1. Trust and continue'].join('\n');
+    tmuxState.args = [];
+    tmuxState.captures = ['› ready\n', '› ready\n', '› ready\n', partialTrustSelector];
+
+    await expect(deliverStartupInbox(context, message)).resolves.toEqual({
+      ok: false,
+      reason: 'codex_workspace_untrusted',
+    });
+
+    expect(tmuxState.args.filter(args => args[0] === 'send-keys' && args.at(-1) === 'Enter')).toHaveLength(1);
   });
 
   strictTmuxIt.each([
