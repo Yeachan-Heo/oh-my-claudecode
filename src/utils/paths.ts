@@ -10,6 +10,7 @@ import { join, dirname } from 'path';
 import { existsSync, readFileSync, readdirSync, statSync, lstatSync, realpathSync, unlinkSync, rmSync, renameSync, symlinkSync } from 'fs';
 import { homedir } from 'os';
 import { getClaudeConfigDir } from './config-dir.js';
+import { compareVersions } from './semver-compare.js';
 import { pathIdentity, readOccupiedPluginRoots } from './cache-occupancy.js';
 import {
   firstChildBelowDirectoryIdentity,
@@ -449,13 +450,7 @@ const STALE_THRESHOLD_MS = 10 * 60 * 1000;
  * Non-numeric segments fall back to 0.
  */
 function compareSemverDesc(a: string, b: string): number {
-  const parse = (s: string) => s.split('.').map(n => parseInt(n, 10) || 0);
-  const pa = parse(a), pb = parse(b);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pb[i] ?? 0) - (pa[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
+  return compareVersions(b, a);
 }
 
 export function purgeStalePluginCacheVersions(options?: { skipGracePeriod?: boolean }): PurgeCacheResult {

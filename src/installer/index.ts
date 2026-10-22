@@ -13,6 +13,7 @@ import { createHash, randomUUID } from 'crypto';
 import { join, dirname, resolve, isAbsolute, basename, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
+import { compareVersions } from '../utils/semver-compare.js';
 import { execSync } from 'child_process';
 import {
   isWindows,
@@ -146,21 +147,6 @@ function currentSkillsDir(): string {
  */
 function isComparableVersion(version: string | null | undefined): version is string {
   return !!version && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version);
-}
-
-function compareVersions(a: string, b: string): number {
-  const partsA = a.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
-  const partsB = b.replace(/^v/, '').split('.').map(part => parseInt(part, 10) || 0);
-  const maxLength = Math.max(partsA.length, partsB.length);
-
-  for (let i = 0; i < maxLength; i++) {
-    const valueA = partsA[i] || 0;
-    const valueB = partsB[i] || 0;
-    if (valueA < valueB) return -1;
-    if (valueA > valueB) return 1;
-  }
-
-  return 0;
 }
 
 function extractOmcVersionMarker(content: string): string | null {
