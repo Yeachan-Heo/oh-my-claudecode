@@ -171,6 +171,31 @@ describe('host-load-gate', () => {
       });
     });
 
+    it('accepts equivalent spellings of the same integral threshold', () => {
+      // '1024' and these three denote the same value, so the parser must not
+      // prefer one spelling: the previous exponent-only rule rejected the last
+      // two and quietly dropped a 1024MB floor to the 256MB default.
+      for (const spelling of ['1024', '1024.0', '1.024e3', '10240e-1']) {
+        withEnv({ OMC_FREE_MEMORY_THRESHOLD: spelling }, () => {
+          expect(parseGateConfig().freeMemoryThreshold).toBe(1024 * 1024 * 1024);
+        });
+      }
+    });
+
+    it('accepts a negative exponent cancelled by trailing zeros', () => {
+      withEnv({ OMC_FREE_MEMORY_THRESHOLD: '10000e-1' }, () => {
+        expect(parseGateConfig().freeMemoryThreshold).toBe(1000 * 1024 * 1024);
+      });
+    });
+
+    it('preserves the disable sentinel written in radix notation', () => {
+      // Number('-0x1') is NaN, so the sign has to be parsed separately from the
+      // radix digits or the sentinel silently becomes the default cap.
+      withEnv({ OMC_MAX_SIBLING_SESSIONS: '-0x1' }, () => {
+        expect(parseGateConfig().maxSiblingSessions).toBe(-1);
+      });
+    });
+
     it('still accepts a radix-prefixed integer', () => {
       withEnv({ OMC_MAX_SIBLING_SESSIONS: '0x10' }, () => {
         expect(parseGateConfig().maxSiblingSessions).toBe(16);

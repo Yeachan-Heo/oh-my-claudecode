@@ -143,40 +143,57 @@ function parseFloatEnv(key: string): number | null {
  * passed through -- the gate reads a negative threshold as "this check is
  * disabled".
  */
-/** A radix prefix form, or plain digits: integral by construction. */
-const INTEGER_LITERAL = /^[+-]?(?:0[xX][0-9a-fA-F]+|0[oO][0-7]+|0[bB][01]+|\d+)$/;
+/** A radix-prefixed magnitude: integral by construction. */
+const RADIX_MAGNITUDE = /^0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)$/;
 
-/** A decimal literal carrying an exponent, whose integrality depends on the two. */
-const EXPONENT_LITERAL = /^[+-]?(?:\d+(?:\.(\d*))?|\.(\d+))[eE]([+-]?\d+)$/;
+/** A decimal magnitude: integer digits, optional fraction, optional exponent. */
+const DECIMAL_MAGNITUDE = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
 
 /**
- * Whether the text denotes an exact integer, decided from the digits rather than
- * from the parsed double.
+ * Parse an environment value that must denote an exact integer, or null.
  *
- * Number() rounds, so it cannot answer this: the nearest double to
- * '8.9999999999999999' is exactly 9 and would pass Number.isSafeInteger, while
- * '1e-324' underflows to 0 and would pass as well. Both are fractional and must be
- * refused. Exponent notation stays supported because it is checked exactly -- the
- * value is integral when the exponent covers every significant fraction digit, so
- * '1e3' and '1.5e3' qualify while '1.5e0' does not.
+ * Integrality is decided from the digits, never from the parsed double, because
+ * Number() rounds: the nearest double to '8.9999999999999999' is exactly 9 and
+ * '1e-324' underflows to 0, so both would otherwise pass Number.isSafeInteger
+ * despite being fractional.
+ *
+ * For a decimal magnitude, shift the decimal point by the exponent and ask
+ * whether anything but zeros would be pushed past it. That one rule covers every
+ * spelling of the same value, so '1024', '1024.0', '1.024e3' and '10240e-1' are
+ * all accepted while '1.5e0', '8.9' and '1e-324' are not. The sign is handled
+ * separately because Number('-0x1') is NaN, so a signed radix form has to be
+ * reassembled rather than passed through whole.
  */
-function isIntegerLiteral(value: string): boolean {
-  if (INTEGER_LITERAL.test(value)) return true;
+function parseIntegerEnvValue(value: string): number | null {
+  const negative = value.startsWith('-');
+  const magnitude = negative || value.startsWith('+') ? value.slice(1) : value;
+  const sign = negative ? -1 : 1;
 
-  const match = EXPONENT_LITERAL.exec(value);
-  if (!match) return false;
+  if (!RADIX_MAGNITUDE.test(magnitude)) {
+    const match = DECIMAL_MAGNITUDE.exec(magnitude);
+    if (!match) return null;
 
-  const fractionDigits = (match[1] ?? match[2] ?? '').replace(/0+$/, '');
-  return fractionDigits.length <= Number(match[3]);
+    const integerDigits = match[1] ?? '';
+    const fractionDigits = match[2] ?? match[3] ?? '';
+    const exponent = match[4] === undefined ? 0 : Number(match[4]);
+
+    // Digits that the exponent cannot lift back above the decimal point.
+    const shift = fractionDigits.length - exponent;
+    if (shift > 0) {
+      const significand = integerDigits + fractionDigits;
+      const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+      if (trailingZeros < shift) return null;
+    }
+  }
+
+  const parsed = sign * Number(magnitude);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function parseIntEnv(key: string): number | null {
   const val = process.env[key];
   if (!val || val.trim() === '') return null;
-  const value = val.trim();
-  if (!isIntegerLiteral(value)) return null;
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  return parseIntegerEnvValue(val.trim());
 }
 
 /**
