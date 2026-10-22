@@ -376,6 +376,10 @@ describe('think-mode detector - multilingual keyword boundaries', () => {
     expect(detectThinkKeyword('\u2764\ufe0fthink')).toBe(true);
     expect(detectThinkKeyword('\u2764\ufe0fpense profundamente')).toBe(true);
     expect(detectThinkKeyword('\u26a0\ufe0fpenser vite')).toBe(true);
+    expect(detectThinkKeyword('think\ufe0f')).toBe(true);
+    expect(detectThinkKeyword('think\u20dd')).toBe(true);
+    expect(detectUltrathinkKeyword('ultrathink\ufe0f')).toBe(true);
+    expect(detectUltrathinkKeyword('ultrathink\u20dd')).toBe(true);
   });
 
   it('should still treat an adjacent Latin grapheme as a word character', () => {

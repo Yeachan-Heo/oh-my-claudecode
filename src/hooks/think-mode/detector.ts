@@ -153,7 +153,7 @@ const LATIN_LETTER = String.raw`(?:(?=\p{L})\p{Script=Latin})`;
 const UNICODE_WORD_GRAPHEME = String.raw`[\p{L}\p{Nd}_]${LETTER_MARK}*`;
 
 const LATIN_GRAPHEME_BEFORE = String.raw`(?<!(?:${LATIN_LETTER}|[0-9_])${LETTER_MARK}*)`;
-const LATIN_GRAPHEME_AFTER = String.raw`(?!\p{M}|${LATIN_LETTER}|[0-9_])`;
+const LATIN_GRAPHEME_AFTER = String.raw`(?!${LETTER_MARK}|${LATIN_LETTER}|[0-9_])`;
 
 
 /**
