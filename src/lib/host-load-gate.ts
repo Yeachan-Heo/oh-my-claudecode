@@ -101,7 +101,7 @@ export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLo
 
   const config: HostLoadGateConfig = {
     cpuLoadThreshold: parseFloatEnv('OMC_HOST_LOAD_THRESHOLD') ?? defaults.cpuLoadThreshold,
-    freeMemoryThreshold: freeMemoryMb
+    freeMemoryThreshold: freeMemoryMb !== null
       ? freeMemoryMb * 1024 * 1024
       : defaults.freeMemoryThreshold,
     maxSiblingSessions: parseIntEnv('OMC_MAX_SIBLING_SESSIONS') ?? defaults.maxSiblingSessions,
@@ -115,23 +115,25 @@ export function parseGateConfig(overrides?: Partial<HostLoadGateConfig>): HostLo
 }
 
 /**
- * Parse a finite float from the environment, or null when unset/unparseable.
+ * Parse a finite non-negative float from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
  *
  * Uses Number() rather than parseFloat() because parseFloat() stops at the first
  * character it cannot read: it turns '0.5abc' into 0.5 and 'off' into NaN, so a
  * typo silently becomes a real threshold instead of falling back to the default.
- * A negative value is passed through -- the gate reads a negative threshold as
- * "this check is disabled".
+ * Negative environment values are invalid; a negative threshold supplied in a
+ * config override can still disable that check.
  */
 function parseFloatEnv(key: string): number | null {
   const val = process.env[key];
   if (!val || val.trim() === '') return null;
   const parsed = Number(val);
-  return Number.isFinite(parsed) ? parsed : null;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 /**
- * Parse a safe integer from the environment, or null when unset/unparseable.
+ * Parse a non-negative safe integer from the environment, or null when
+ * unset/unparseable. Invalid values fall back to the documented default.
  *
  * Uses Number() rather than parseInt(), which stops at the first character it
  * cannot read and so silently truncates: parseInt('1e3', 10) and
@@ -139,9 +141,9 @@ function parseFloatEnv(key: string): number | null {
  * configured a 1MB floor instead of 1000MB and quietly stopped gating on
  * memory. Number() parses the whole value, so an unambiguous form is honoured
  * ('1e3' -> 1000) and an ambiguous one is rejected in favour of the documented
- * default ('12abc', '8.9') instead of being truncated. A negative value is
- * passed through -- the gate reads a negative threshold as "this check is
- * disabled".
+ * default ('12abc', '8.9') instead of being truncated. Exact integrality is
+ * checked from the text before converting to Number so binary rounding cannot
+ * turn a fractional literal into a safe integer.
  */
 /** A radix-prefixed magnitude: integral by construction. */
 const RADIX_MAGNITUDE = /^0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)$/;
@@ -181,19 +183,24 @@ function parseIntegerEnvValue(value: string): number | null {
     const shift = fractionDigits.length - exponent;
     if (shift > 0) {
       const significand = integerDigits + fractionDigits;
-      const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
-      if (trailingZeros < shift) return null;
+      // Zero is integral at every scale, including negative exponents.
+      if (/[1-9]/.test(significand)) {
+        const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+        if (trailingZeros < shift) return null;
+      }
     }
   }
 
   const parsed = sign * Number(magnitude);
-  return Number.isSafeInteger(parsed) ? parsed : null;
+  if (!Number.isSafeInteger(parsed)) return null;
+  return parsed === 0 ? 0 : parsed;
 }
 
 function parseIntEnv(key: string): number | null {
   const val = process.env[key];
   if (!val || val.trim() === '') return null;
-  return parseIntegerEnvValue(val.trim());
+  const parsed = parseIntegerEnvValue(val.trim());
+  return parsed !== null && parsed >= 0 ? parsed : null;
 }
 
 /**
@@ -323,7 +330,6 @@ export async function waitForHostLoadGate(
   const gateConfig = config ?? parseGateConfig();
   const deadline = Date.now() + (timeoutMs ?? gateConfig.gateTimeoutMs);
 
-   
   while (true) {
     const result = checkHostLoadGate(gateConfig);
 
