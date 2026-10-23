@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-23T23:39:03.276Z",
+  "generatedAt": "2026-10-23T23:54:45.055Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "9e4323363f374e4d27aa248ec4cf8e1466ec56ce",
-    "sourceSha256": "b7941e11703cbe830c909b97d102b5744bcba2ae7e186866ad4fb107a6440041",
-    "generatedAt": "2026-10-23T23:39:03.276Z",
+    "head": "1f217cc8d1df2983bf065d391109c9f4b70036da",
+    "sourceSha256": "7dd4eedbab0441c71acbab68914e81d58b8b7aa8ee72fc818bd8e1d3df2a3a84",
+    "generatedAt": "2026-10-23T23:54:45.055Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "9e4323363f374e4d27aa248ec4cf8e1466ec56ce",
-  "sourceSha256": "b7941e11703cbe830c909b97d102b5744bcba2ae7e186866ad4fb107a6440041",
+  "head": "1f217cc8d1df2983bf065d391109c9f4b70036da",
+  "sourceSha256": "7dd4eedbab0441c71acbab68914e81d58b8b7aa8ee72fc818bd8e1d3df2a3a84",
   "counts": {
     "public": {
       "skills": 48,
@@ -89802,5 +89802,5 @@
     }
   },
   "inventorySha256": "1f508f9f5188f38a57ea5be77cb76abb7e9ccad934bad8d5ea68d8504f9e372c",
-  "manifestSha256": "e5cdad0e7d68f2ba0297e3da2e76e70c131a560bbfd974edd7bd0f67e90cc641"
+  "manifestSha256": "625e771417ed925efbc53576eed02d02458aa9a4e45c379915e90157a7f7bfc9"
 }
