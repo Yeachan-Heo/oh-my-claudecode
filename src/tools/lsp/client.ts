@@ -21,6 +21,9 @@ import { getServerForFile, commandExists } from './servers.js';
 /** Decimal magnitude whose integrality can be decided from the text. */
 const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
 
+/** Largest timeout delay Node.js timers preserve without overflowing to 1 ms. */
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
+
 /**
  * Read one exact integer from an environment value.
  *
@@ -60,7 +63,7 @@ function readPositiveIntEnv(name: string, fallback: number): number {
   }
 
   const parsed = parseExactInteger(env);
-  return parsed !== null && parsed > 0 ? parsed : fallback;
+  return parsed !== null && parsed > 0 && parsed <= MAX_NODE_TIMER_DELAY_MS ? parsed : fallback;
 }
 
 /** Default timeout (ms) for LSP requests. Override with OMC_LSP_TIMEOUT_MS env var. */

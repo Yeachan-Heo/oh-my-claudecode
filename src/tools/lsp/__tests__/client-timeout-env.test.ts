@@ -59,6 +59,18 @@ describe('DEFAULT_LSP_REQUEST_TIMEOUT_MS', () => {
     expect(timeout).toBe(15_000);
   });
 
+  it('should accept the maximum delay supported by Node timers', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '2147483647';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(2_147_483_647);
+  });
+
+  it('should fall back when the timeout exceeds the Node timer limit', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '2147483648';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(15_000);
+  });
+
   it('should read a scientific integer instead of stopping at the exponent', async () => {
     process.env.OMC_LSP_TIMEOUT_MS = '1e5';
     const timeout = await importTimeout();
