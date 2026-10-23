@@ -29,6 +29,12 @@ describe('DEFAULT_LSP_REQUEST_TIMEOUT_MS', () => {
     expect(timeout).toBe(30_000);
   });
 
+  it('should trim surrounding whitespace from a valid timeout', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = ' 30000 \t';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(30_000);
+  });
+
   it('should fall back to 15000 for non-numeric env var', async () => {
     process.env.OMC_LSP_TIMEOUT_MS = 'not-a-number';
     const timeout = await importTimeout();
@@ -43,6 +49,12 @@ describe('DEFAULT_LSP_REQUEST_TIMEOUT_MS', () => {
 
   it('should fall back to 15000 for negative values', async () => {
     process.env.OMC_LSP_TIMEOUT_MS = '-5000';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(15_000);
+  });
+
+  it('should fall back for integers outside the safe numeric range', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '9007199254740992';
     const timeout = await importTimeout();
     expect(timeout).toBe(15_000);
   });
