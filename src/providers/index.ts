@@ -121,7 +121,10 @@ export function detectProvider(remoteUrl: string): ProviderName {
  * Supports HTTPS, SSH (SCP-style), and provider-specific formats.
  */
 export function parseRemoteUrl(url: string): RemoteUrlInfo | null {
-  const trimmed = url.trim();
+  // Browser addresses and some `git remote set-url` values keep a trailing
+  // slash. Git still fetches them. The matchers below require the URL to end
+  // on the repo name, so drop only trailing slashes before they run.
+  const trimmed = url.trim().replace(/\/+$/, '');
 
   // Azure DevOps HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
   const azureHttpsMatch = trimmed.match(

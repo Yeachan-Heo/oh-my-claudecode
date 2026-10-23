@@ -169,6 +169,42 @@ describe('parseRemoteUrl', () => {
     expect(result?.repo).toBe('my-repo');
   });
 
+  it('parses a GitHub HTTPS URL with a trailing slash', () => {
+    expect(parseRemoteUrl('https://github.com/user/repo.git/')).toEqual({
+      provider: 'github',
+      host: 'github.com',
+      owner: 'user',
+      repo: 'repo',
+    });
+  });
+
+  it('parses a browser URL with a trailing slash and no .git suffix', () => {
+    expect(parseRemoteUrl('https://github.com/user/my-repo/')).toEqual({
+      provider: 'github',
+      host: 'github.com',
+      owner: 'user',
+      repo: 'my-repo',
+    });
+  });
+
+  it('parses an SSH URL with a trailing slash', () => {
+    expect(parseRemoteUrl('git@github.com:user/repo.git/')).toEqual({
+      provider: 'github',
+      host: 'github.com',
+      owner: 'user',
+      repo: 'repo',
+    });
+  });
+
+  it('parses an Azure DevOps URL with a trailing slash', () => {
+    expect(parseRemoteUrl('https://dev.azure.com/org/project/_git/repo/')).toEqual({
+      provider: 'azure-devops',
+      host: 'dev.azure.com',
+      owner: 'org/project',
+      repo: 'repo',
+    });
+  });
+
   it('returns null for invalid URLs', () => {
     expect(parseRemoteUrl('not-a-url')).toBeNull();
     expect(parseRemoteUrl('')).toBeNull();
