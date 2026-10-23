@@ -447,7 +447,7 @@ lsp_servers()
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OMC_LSP_TIMEOUT_MS` | `15000` | LSP request timeout in ms. Increase for large repos or slow servers. |
+| `OMC_LSP_TIMEOUT_MS` | `15000` | LSP timeout in positive whole milliseconds (maximum `2147483647`; invalid or out-of-range values use the default). Increase for large repos or slow servers. |
 
 ### Troubleshooting
 
