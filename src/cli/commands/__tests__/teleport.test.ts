@@ -184,6 +184,29 @@ describe('teleportCommand', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('could not read package.json'));
     expect(execFileSync).toHaveBeenCalledWith('yarn', ['install'], expect.objectContaining({ cwd: '/root/issue/repo-1' }));
   });
+
+  it.each([
+    ['https://github.com/owner/repo/issues/7/', 7],
+    ['https://github.com/owner/repo/pull/8/files', 8],
+    ['https://github.com/owner/repo/pull/9/commits?w=1', 9],
+    ['https://gitlab.com/group/sub/repo/-/merge_requests/10/diffs', 10],
+    ['https://bitbucket.org/ws/repo/pull-requests/11/diff', 11],
+  ])('reads the number from %s instead of treating it as a feature name', async (ref, number) => {
+    const { getProvider } = await import('../../../providers/index.js');
+    const viewPR = vi.fn(() => ({ title: 'a pr', headBranch: `topic-${number}` }));
+    (getProvider as ReturnType<typeof vi.fn>).mockReturnValue({
+      displayName: 'Provider',
+      getRequiredCLI: () => null,
+      viewPR,
+      viewIssue: () => null,
+      prRefspec: null,
+    });
+
+    const result = await teleportCommand(ref, { worktreePath: '/root', json: true });
+
+    expect(viewPR).toHaveBeenCalledWith(number, expect.any(String), 'repo');
+    expect(result.branch).toBe(`topic-${number}`);
+  });
 });
 
 describe('teleportRemoveCommand', () => {
