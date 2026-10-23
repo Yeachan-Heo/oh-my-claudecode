@@ -14,7 +14,8 @@ describe('worker launch ack timeout env', () => {
   const previous = process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS;
 
   afterEach(async () => {
-    if (previous === undefined) delete process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS;
+    if (previous === undefined)
+      delete process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS;
     else process.env.OMC_TEAM_START_ACK_DECISION_TIMEOUT_MS = previous;
     if (cwd) await rm(cwd, { recursive: true, force: true });
     cwd = '';
@@ -32,7 +33,8 @@ describe('worker launch ack timeout env', () => {
       provider: 'codex',
       runtimeCliPath: '/runtime-cli.cjs',
     });
-    return buildWorkerLaunchBootstrapSpec(attempt, ['codex'], cwd).decision_timeout_ms;
+    return buildWorkerLaunchBootstrapSpec(attempt, ['codex'], cwd)
+      .decision_timeout_ms;
   }
 
   it('reads a plain millisecond value', async () => {
@@ -49,5 +51,27 @@ describe('worker launch ack timeout env', () => {
 
   it('ignores trailing junk instead of keeping the truncated prefix', async () => {
     await expect(decisionTimeout('12abc')).resolves.toBe(15_000);
+  });
+
+  it.each([
+    '0',
+    '-1',
+    'not-a-number',
+    '1.5',
+    '   ',
+    '9007199254740992',
+    '1e309',
+  ])('uses the default for invalid timeout %s', async (raw) => {
+    await expect(decisionTimeout(raw)).resolves.toBe(15_000);
+  });
+
+  it('trims surrounding whitespace around a valid timeout', async () => {
+    await expect(decisionTimeout(' \t20000\n ')).resolves.toBe(20_000);
+  });
+
+  it('accepts the largest safe integer timeout', async () => {
+    await expect(decisionTimeout('9007199254740991')).resolves.toBe(
+      Number.MAX_SAFE_INTEGER,
+    );
   });
 });
