@@ -47,6 +47,30 @@ describe('DEFAULT_LSP_REQUEST_TIMEOUT_MS', () => {
     expect(timeout).toBe(15_000);
   });
 
+  it('should read a scientific integer instead of stopping at the exponent', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '1e5';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(100_000);
+  });
+
+  it('should ignore a fractional timeout instead of keeping the truncated prefix', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '8.9';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(15_000);
+  });
+
+  it('should ignore trailing junk instead of keeping the truncated prefix', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '12abc';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(15_000);
+  });
+
+  it('should ignore a numeric separator instead of keeping the digits before it', async () => {
+    process.env.OMC_LSP_TIMEOUT_MS = '15_000';
+    const timeout = await importTimeout();
+    expect(timeout).toBe(15_000);
+  });
+
   it('should keep non-initialize requests on the base timeout', async () => {
     const mod = await importClientModule();
     expect(mod.getLspRequestTimeout({}, 'hover')).toBe(15_000);
