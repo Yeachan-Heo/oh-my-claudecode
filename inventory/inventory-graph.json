@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "68919a765bebc688f322dc9e48068255bcd9f01f",
-    "sourceSha256": "b182c9845324bac6115867e7a327fb6abd5d93bd216766419c7822fa287f8990",
+    "head": "83c1eee4030472c5660882b2c1390c0be299c9a2",
+    "sourceSha256": "b5e1d5ea6be713ba4fb24b3dea1728adb65dff1f7c43850f00a392f44ba9824a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "68919a765bebc688f322dc9e48068255bcd9f01f",
-  "sourceSha256": "b182c9845324bac6115867e7a327fb6abd5d93bd216766419c7822fa287f8990",
+  "head": "83c1eee4030472c5660882b2c1390c0be299c9a2",
+  "sourceSha256": "b5e1d5ea6be713ba4fb24b3dea1728adb65dff1f7c43850f00a392f44ba9824a",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1481,
-      "total": 1505
+      "srcFiles": 1480,
+      "total": 1504
     },
     "generated": {
       "distFiles": 5739,
@@ -44627,11 +44627,6 @@
         "path": "src/skills/__tests__/skill-config-dir.test.ts"
       },
       {
-        "id": "src/team/__tests__/ack-timeout-env.test.ts",
-        "kind": "src",
-        "path": "src/team/__tests__/ack-timeout-env.test.ts"
-      },
-      {
         "id": "src/team/__tests__/activity-log.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/activity-log.test.ts"
@@ -78049,36 +78044,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "external:node:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "external:node:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/ack-timeout-env.test.ts",
-        "to": "src/team/worker-launch-ack.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/team/__tests__/activity-log.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -89815,12 +89780,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7888,
-      "edgeCount": 8626,
-      "importEdgeCount": 7183,
+      "nodeCount": 7887,
+      "edgeCount": 8620,
+      "importEdgeCount": 7177,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "896f83d52a3fcc7b023f520922a55ade725c799d4403c3620f6f56658b071a5b",
-  "manifestSha256": "6ae989e172e4ee6d85e6fc0a305fd99ed902d9eec7f98032946f7ba6ef92deeb"
+  "inventorySha256": "80eefbacad83b4daaa363aefb87df1c7d45439c49c4bf0f7fe6f509ccfb112b0",
+  "manifestSha256": "9bda62c20d1feb1a56760d8626753162b91cc0518768d046cd671a54099f2b64"
 }
