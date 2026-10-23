@@ -104,7 +104,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
     const containedByDurableBootstrap = containedByBootstrap === '1';
     const providerEnv = { ...providerProcessEnv, ...gate.env };
     delete providerEnv[WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV];
-    const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv), {
+    const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv, process.platform, providerEnv), {
       superviseProcessTree: true,
       completionIdentity: buildWorkerLaunchBootstrapSpec(
         launchAttempt,
@@ -115,8 +115,9 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
     });
     const child = spawn(invocation.command, invocation.args, {
       cwd: gate.cwd,
-      env: providerEnv,
+      env: { ...providerEnv, ...invocation.env },
       stdio: 'inherit',
+      windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       // A recovery gate already runs inside the durable worker-launch
       // bootstrap group. Keep the actual provider in that group so teardown's
       // group-absence proof covers the provider rather than only the gate.
