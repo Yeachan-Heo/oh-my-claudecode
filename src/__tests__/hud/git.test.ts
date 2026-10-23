@@ -38,6 +38,21 @@ describe('git elements', () => {
       expect(getGitRepoName()).toBe('my-repo');
     });
 
+    it('extracts repo name from an HTTPS URL with a trailing slash', () => {
+      mockExecFileSync.mockReturnValue('https://github.com/user/my-repo.git/\n');
+      expect(getGitRepoName()).toBe('my-repo');
+    });
+
+    it('extracts repo name from a browser URL with a trailing slash and no .git', () => {
+      mockExecFileSync.mockReturnValue('https://github.com/user/my-repo/\n');
+      expect(getGitRepoName()).toBe('my-repo');
+    });
+
+    it('extracts repo name from an SSH URL with a trailing slash', () => {
+      mockExecFileSync.mockReturnValue('git@github.com:user/my-repo.git/\n');
+      expect(getGitRepoName()).toBe('my-repo');
+    });
+
     it('returns null when git command fails', () => {
       mockExecFileSync.mockImplementation(() => {
         throw new Error('Not a git repository');

@@ -81,7 +81,11 @@ export function getGitRepoName(cwd?: string): string | null {
     } else {
       // Extract repo name from URL
       // Handles: https://github.com/user/repo.git, git@github.com:user/repo.git
-      const match = url.match(/\/([^/]+?)(?:\.git)?$/) || url.match(/:([^/]+?)(?:\.git)?$/);
+      // A browser URL pasted into `git remote set-url` keeps its trailing
+      // slash. Git still fetches that remote; drop the slash before parsing
+      // so the HUD shows the repo instead of nothing.
+      const normalized = url.replace(/\/+$/, '');
+      const match = normalized.match(/\/([^/]+?)(?:\.git)?$/) || normalized.match(/:([^/]+?)(?:\.git)?$/);
       result = match ? match[1].replace(/\.git$/, '') : null;
     }
   } catch {
