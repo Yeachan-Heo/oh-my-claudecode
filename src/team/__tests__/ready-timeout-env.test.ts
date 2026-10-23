@@ -10,6 +10,17 @@ describe('resolveWorkerReadyTimeoutMs', () => {
     expect(resolveWorkerReadyTimeoutMs({ OMC_TEAM_READY_TIMEOUT_MS: '1000' })).toBe(45_000);
   });
 
+  it.each(['0', '-60000', 'not-a-number', '1.5', ' ', '9007199254740992'])(
+    'keeps the default for invalid, below-floor, or unsafe value %j',
+    (raw) => {
+      expect(resolveWorkerReadyTimeoutMs({ OMC_TEAM_READY_TIMEOUT_MS: raw })).toBe(45_000);
+    },
+  );
+
+  it('trims surrounding whitespace around an integer value', () => {
+    expect(resolveWorkerReadyTimeoutMs({ OMC_TEAM_READY_TIMEOUT_MS: ' 60000 ' })).toBe(60_000);
+  });
+
   it('reads a scientific integer instead of stopping at the exponent', () => {
     expect(resolveWorkerReadyTimeoutMs({ OMC_TEAM_READY_TIMEOUT_MS: '5000e2' })).toBe(500_000);
   });
