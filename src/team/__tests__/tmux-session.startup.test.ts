@@ -273,6 +273,7 @@ import {
   spawnWorkerInPane,
   spawnOwnedWorkerInPane,
   retryStartupInboxSubmit,
+  injectToLeaderPane,
   sendToWorker,
   paneHasActiveTask,
   paneHasTrustPrompt,
@@ -853,6 +854,29 @@ describe('worker pane startup safety', () => {
       expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
     },
   );
+
+  strictTmuxIt.each([
+    ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
+    ['Claude files trust', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n'],
+    ['Claude quick safety check', 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n'],
+    ['directory trust', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n'],
+    ['Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n'],
+  ] as const)('guarded direct send refuses to type into a %s prompt', async (_label, capture) => {
+    const context = await acceptedContext('claude');
+    const identity = context.ownership.tmuxServerIdentity;
+    const senders = [
+      () => sendToWorker('', '%2', 'List files and report the result.', identity),
+      () => injectToLeaderPane('', '%1', 'List files and report the result.', identity),
+    ];
+    for (const send of senders) {
+      tmuxState.args = [];
+      tmuxState.captures = [capture];
+
+      await expect(send()).resolves.toBe(false);
+      expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(true);
+      expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+    }
+  });
 
   strictTmuxIt('handles the exact Codex directory and hooks selectors in order before delivery', async () => {
     const context = await acceptedContext('codex');

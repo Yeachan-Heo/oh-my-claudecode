@@ -3295,16 +3295,25 @@ async function paneInputBlockReason(
   paneId: string,
   tmuxServerIdentity: TmuxServerIdentity,
   serverIdentityDependencies?: TmuxServerIdentityDependencies,
-): Promise<'mailbox_membership_unresolvable' | 'codex_workspace_untrusted' | undefined> {
+): Promise<
+  | 'mailbox_membership_unresolvable'
+  | 'codex_workspace_untrusted'
+  | 'cursor_workspace_untrusted'
+  | 'trust_prompt_pending'
+  | undefined
+> {
   const observation = await capturePaneObservation(paneId, {
     operation: 'guarded-notification',
     tmuxServerIdentity,
     ...(serverIdentityDependencies ? { serverIdentityDependencies } : {}),
   });
   if (!observation.ok || !observation.captured.trim()) return 'mailbox_membership_unresolvable';
-  if (detectPaneTrustPromptKind(observation.captured) === 'codex_directory') {
-    return 'codex_workspace_untrusted';
-  }
+  // Guarded input never answers a trust dialog: typed text and Enter would
+  // land on whatever choice is focused (Claude focuses "No, exit").
+  const trustPrompt = detectPaneTrustPromptKind(observation.captured);
+  if (trustPrompt === 'codex_directory') return 'codex_workspace_untrusted';
+  if (trustPrompt === 'cursor_workspace_trust') return 'cursor_workspace_untrusted';
+  if (trustPrompt) return 'trust_prompt_pending';
   return undefined;
 }
 
@@ -3358,9 +3367,15 @@ export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promi
   }
 }
 
-type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_directory' | 'codex_hooks' | 'cursor_workspace_trust';
+/**
+ * @internal Exported for testing only.
+ */
+export type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_directory' | 'codex_hooks' | 'cursor_workspace_trust';
 
-function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null {
+/**
+ * @internal Exported for testing only.
+ */
+export function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
   const tail = lines.slice(-12);
   const lastCodexPromptIndex = lines.findLastIndex(line => paneLineLooksLikeIdlePrompt(line, 'codex'));
@@ -3398,7 +3413,7 @@ function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): P
   );
   const hasClaudeDirectoryNoChoice = tail.some(l => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some(l => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
-  if (provider === 'claude' && hasClaudeDirectoryQuestion
+  if ((provider === undefined || provider === 'claude') && hasClaudeDirectoryQuestion
     && hasClaudeDirectoryNoChoice && hasClaudeDirectoryYesChoice) {
     return 'claude_directory';
   }
@@ -3884,12 +3899,6 @@ export async function sendToWorker(
     const paneBusy = paneHasActiveTask(initialCapture);
 
     const trustPromptKind = detectPaneTrustPromptKind(initialCapture);
-    if (trustPromptKind === 'codex_directory') return false;
-    if (trustPromptKind === 'cursor_workspace_trust') {
-      // Nothing to dismiss: cursor-agent printed the banner and exited. Sending
-      // keys here would type into a dead pane.
-      return false;
-    }
     if (trustPromptKind === 'directory') {
       await sendKey('C-m');
       await sleep(120);
@@ -3903,6 +3912,10 @@ export async function sendToWorker(
       await sleep(120);
       await sendKey('C-m');
       await sleep(200);
+    } else if (trustPromptKind) {
+      // Every other kind is refused: Codex and Claude directory trust are the
+      // user's decision, and cursor-agent has already exited behind its banner.
+      return false;
     }
 
     // Send text in literal mode with -- separator
