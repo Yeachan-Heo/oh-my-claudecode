@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e81008e56c5af3a6b92b7e2da1c41577d4bf4825",
-    "sourceSha256": "53aae631e0c351d17264629dad9f6671b71ca37166c256f653bcf85eb9b211b6",
+    "head": "5dcfa30af3b643e6bdbf30832518095f786280b1",
+    "sourceSha256": "4393ba0a7f82610098836f209cf7b9ce6e820bea4e848c545f788deadeff1563",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e81008e56c5af3a6b92b7e2da1c41577d4bf4825",
-  "sourceSha256": "53aae631e0c351d17264629dad9f6671b71ca37166c256f653bcf85eb9b211b6",
+  "head": "5dcfa30af3b643e6bdbf30832518095f786280b1",
+  "sourceSha256": "4393ba0a7f82610098836f209cf7b9ce6e820bea4e848c545f788deadeff1563",
   "counts": {
     "public": {
-      "skills": 48,
+      "skills": 52,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 97
+      "total": 101
     },
     "internal": {
       "hookFiles": 335,
-      "featureFiles": 88,
+      "featureFiles": 94,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1485,
-      "total": 1509
+      "srcFiles": 1491,
+      "total": 1515
     },
     "generated": {
       "distFiles": 5741,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 48,
+    "skills": 52,
     "commands": 21,
     "hookFiles": 335,
     "workflows": 8,
@@ -55,6 +55,7 @@
       "ask-navigator",
       "autopilot",
       "autoresearch",
+      "babysit",
       "cancel",
       "configure-notifications",
       "debug",
@@ -64,6 +65,9 @@
       "drydock",
       "execute",
       "external-context",
+      "fix-ci",
+      "fix-merge-conflicts",
+      "get-pr-comments",
       "graph",
       "harbor",
       "hud",
@@ -577,9 +581,15 @@
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
+      "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
+      "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
-      "src/features/verification/types.ts"
+      "src/features/verification/types.ts",
+      "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
+      "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
       "src/tools/AGENTS.md",
@@ -802,6 +812,7 @@
       "scripts/build-skill-bridge.mjs",
       "scripts/build-team-server.mjs",
       "scripts/build-workflow-stage-prompts.mjs",
+      "scripts/check-omc-playbooks.mjs",
       "scripts/ci/check-multirepo-paths.mjs",
       "scripts/ci/check-no-committed-build-artifacts.mjs",
       "scripts/ci/multirepo-patterns.yml",
@@ -7169,9 +7180,15 @@
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
+      "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
+      "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
-      "src/features/verification/types.ts"
+      "src/features/verification/types.ts",
+      "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
+      "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
       "src/tools/AGENTS.md",
@@ -36899,6 +36916,11 @@
         "path": "docs/COMPATIBILITY.md"
       },
       {
+        "id": "docs/CREDITS.md",
+        "kind": "other",
+        "path": "docs/CREDITS.md"
+      },
+      {
         "id": "docs/DELEGATION-ENFORCER.md",
         "kind": "other",
         "path": "docs/DELEGATION-ENFORCER.md"
@@ -37764,6 +37786,11 @@
         "path": "scripts/build-workflow-stage-prompts.mjs"
       },
       {
+        "id": "scripts/check-omc-playbooks.mjs",
+        "kind": "script",
+        "path": "scripts/check-omc-playbooks.mjs"
+      },
+      {
         "id": "scripts/ci/check-multirepo-paths.mjs",
         "kind": "script",
         "path": "scripts/ci/check-multirepo-paths.mjs"
@@ -38449,6 +38476,11 @@
         "path": "skills/autoresearch/SKILL.md"
       },
       {
+        "id": "skills/babysit/SKILL.md",
+        "kind": "skill",
+        "path": "skills/babysit/SKILL.md"
+      },
+      {
         "id": "skills/cancel/SKILL.md",
         "kind": "skill",
         "path": "skills/cancel/SKILL.md"
@@ -38492,6 +38524,21 @@
         "id": "skills/external-context/SKILL.md",
         "kind": "skill",
         "path": "skills/external-context/SKILL.md"
+      },
+      {
+        "id": "skills/fix-ci/SKILL.md",
+        "kind": "skill",
+        "path": "skills/fix-ci/SKILL.md"
+      },
+      {
+        "id": "skills/fix-merge-conflicts/SKILL.md",
+        "kind": "skill",
+        "path": "skills/fix-merge-conflicts/SKILL.md"
+      },
+      {
+        "id": "skills/get-pr-comments/SKILL.md",
+        "kind": "skill",
+        "path": "skills/get-pr-comments/SKILL.md"
       },
       {
         "id": "skills/graph/SKILL.md",
@@ -41504,6 +41551,21 @@
         "path": "src/features/task-decomposer/types.ts"
       },
       {
+        "id": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/__tests__/ledger.test.ts"
+      },
+      {
+        "id": "src/features/verification-ledger/index.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/index.ts"
+      },
+      {
+        "id": "src/features/verification-ledger/ledger.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/ledger.ts"
+      },
+      {
         "id": "src/features/verification/README.md",
         "kind": "feature",
         "path": "src/features/verification/README.md"
@@ -41517,6 +41579,21 @@
         "id": "src/features/verification/types.ts",
         "kind": "feature",
         "path": "src/features/verification/types.ts"
+      },
+      {
+        "id": "src/features/watch-pr/__tests__/policy.test.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/__tests__/policy.test.ts"
+      },
+      {
+        "id": "src/features/watch-pr/index.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/index.ts"
+      },
+      {
+        "id": "src/features/watch-pr/policy.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/policy.ts"
       },
       {
         "id": "src/goal-workflows/__tests__/claude-goal-snapshot.test.ts",
@@ -46639,6 +46716,16 @@
         "path": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts"
       },
       {
+        "id": "tests/lint/omc-playbooks.test.ts",
+        "kind": "other",
+        "path": "tests/lint/omc-playbooks.test.ts"
+      },
+      {
+        "id": "tests/lint/plugin-manifest-parity.test.ts",
+        "kind": "other",
+        "path": "tests/lint/plugin-manifest-parity.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -47378,6 +47465,26 @@
       {
         "from": "scripts/build-workflow-stage-prompts.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
       {
@@ -49461,6 +49568,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/babysit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/cancel/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49502,6 +49614,21 @@
       },
       {
         "from": "skills/external-context/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/fix-ci/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/fix-merge-conflicts/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/get-pr-comments/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -61422,12 +61549,32 @@
       },
       {
         "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
         "kind": "exports"
       },
       {
         "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
         "kind": "type-exports"
       },
       {
@@ -62226,6 +62373,56 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
         "from": "src/features/verification/index.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -62244,6 +62441,31 @@
         "from": "src/features/verification/index.ts",
         "to": "src/features/verification/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "type-exports"
       },
       {
         "from": "src/goal-workflows/__tests__/claude-goal-snapshot.test.ts",
@@ -89681,6 +89903,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -89887,12 +90149,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7894,
-      "edgeCount": 8634,
-      "importEdgeCount": 7191,
-      "registerEdgeCount": 69
+      "nodeCount": 7908,
+      "edgeCount": 8669,
+      "importEdgeCount": 7213,
+      "registerEdgeCount": 73
     }
   },
-  "inventorySha256": "5ed1779df9780ddd15b7160a6e998a10a8a14eb675a80c2382a0260110bd59a4",
-  "manifestSha256": "31fa4221ad4ae04038d3502ec4eb7dc3ea5970498547366c4746df3f11360a59"
+  "inventorySha256": "e9018b6882cda11b533e0a1ccf898b35afd0675d98e44ada8a7b42ff62e29193",
+  "manifestSha256": "7a5a7ba7e78b9329898b4d4eda9ed95e1e873abb7dd1c93ce8a150d98eb22cd6"
 }
