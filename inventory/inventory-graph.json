@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": null,
+  "generatedAt": "2026-10-24T04:24:21.576Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "73335ed8ec57e0a7a21f98d1252f770f43483c97",
-    "sourceSha256": "101b195e9dc866cc4285939512d5d2e0c513414be4e75bc61cb9eaecf7577ba1",
-    "generatedAt": null,
+    "sourceSha256": "dd31f0ef3e629523fa3f063a262988a217eabf99a806cede5e2203a84a35303c",
+    "generatedAt": "2026-10-24T04:24:21.576Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "73335ed8ec57e0a7a21f98d1252f770f43483c97",
-  "sourceSha256": "101b195e9dc866cc4285939512d5d2e0c513414be4e75bc61cb9eaecf7577ba1",
+  "sourceSha256": "dd31f0ef3e629523fa3f063a262988a217eabf99a806cede5e2203a84a35303c",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1484,
-      "total": 1508
+      "srcFiles": 1485,
+      "total": 1509
     },
     "generated": {
       "distFiles": 5739,
@@ -45107,6 +45107,11 @@
         "path": "src/team/__tests__/stage-router.test.ts"
       },
       {
+        "id": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/start-submit-timeout-env.test.ts"
+      },
+      {
         "id": "src/team/__tests__/startup-claim-error.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/startup-claim-error.test.ts"
@@ -81154,6 +81159,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/startup-claim-error.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -89860,12 +89875,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7891,
-      "edgeCount": 8632,
-      "importEdgeCount": 7189,
+      "nodeCount": 7892,
+      "edgeCount": 8634,
+      "importEdgeCount": 7191,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "da20900b09d9f868d68f247aded219bd036f829d47eb0e2fd5ee8810e55838b5",
-  "manifestSha256": "0ad66ce6fbc17ce650452ae64dc1ff5bd98b02b29e8b45bba9c8e5e946c9dc31"
+  "inventorySha256": "5ed1779df9780ddd15b7160a6e998a10a8a14eb675a80c2382a0260110bd59a4",
+  "manifestSha256": "8485ef3685e32ada51aff1be51c5cd792da74fd4a8a4c2b1489405f7d5b8871f"
 }
