@@ -64,7 +64,7 @@ describe('alias-retirement registry', () => {
     }
   });
 
-  it('built-in loader exposes 62 entries (60 canonical + 2 aliases) after the 5.0.0 retirement', () => {
+  it('built-in loader exposes 77 entries (75 canonical + 2 aliases) after the 5.0.0 retirement', () => {
     // This is the baseline that retirement must not silently change without an eligibility receipt.
     // Raised 37 -> 40 canonical when execute/review/research shipped as real
     // skill directories; this is an addition, not an alias retirement.
@@ -96,11 +96,13 @@ describe('alias-retirement registry', () => {
     // fix-merge-conflicts, get-pr-comments) shipped; addition, not retirement.
     // Raised 52 -> 60 canonical when why, how, correct, blast-radius, architect, figure-it-out, show-me-your-work, models shipped as real
     // skill directories; this is an addition, not an alias retirement.
+    // Raised 60 -> 75 canonical when arena, interrogate, create-formal-verification-skill, maintain-formal-verification-skill, create-verification-skill, maintain-verification-skill, technical-writing, typescript-best-practices, teach, bro, sharpen, in-your-own-words, recall, ketchup, what-did-i-get-done shipped as real
+    // skill directories; this is an addition, not an alias retirement.
     const all = createBuiltinSkills();
-    expect(all).toHaveLength(62);
+    expect(all).toHaveLength(77);
     const canonical = all.filter((s) => !s.aliasOf);
     const aliases = all.filter((s) => !!s.aliasOf);
-    expect(canonical).toHaveLength(60);
+    expect(canonical).toHaveLength(75);
     expect(aliases).toHaveLength(2);
     expect(aliases.map((s) => s.name).sort()).toEqual(['cancel-ralph', 'psm'].sort());
   });

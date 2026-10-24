@@ -36,3 +36,18 @@ upstream license file at the repo root when the upstream license requires it.
 | `architect` skill | idea | pstack architect | parallel design exploration with accepted-deviations register |
 | `figure-it-out` skill | idea | pstack figure-it-out | bespoke playbook designer, stored under `.omc/playbooks/` |
 | `show-me-your-work` skill | idea | pstack show-me-your-work | TSV decision trail with formula-cell guard |
+| `arena` skill | idea | pstack arena | N-candidate bakeoff re-expressed on OMC's Task fan-out and `omc team` worktree isolation |
+| `interrogate` skill | idea | pstack interrogate | adversarial multi-reviewer panel re-expressed on OMC agents and providers |
+| `create-formal-verification-skill` skill | idea | pstack create-formal-verification-skill | TLA+/Lean/Kani selection method and one-property-per-skill discipline |
+| `maintain-formal-verification-skill` skill | idea | pstack maintain-formal-verification-skill | drift re-sync procedure for formal verification skills |
+| `create-verification-skill` skill | idea | pstack create-verification-skill | project verify-skill generation, commands discovered by execution, feature map |
+| `maintain-verification-skill` skill | idea | pstack maintain-verification-skill | verify-skill drift re-sync |
+| `technical-writing` skill | idea | pstack technical-writing | layered prose standard for shipping surfaces |
+| `typescript-best-practices` skill | idea | pstack typescript-best-practices | TS syntax grounding for type-system discipline |
+| `teach` skill | idea | pstack teach | how+why composition with a landing check |
+| `bro` skill | idea | pstack bro | plain-language restatement keeping every fact |
+| `sharpen` skill | idea | pstack sharpen | task aiming: consumer, done-check, non-goals |
+| `in-your-own-words` skill | idea | pstack in-your-own-words | goal/problem/success playback before work starts |
+| `recall` skill | idea | pstack recall | artifact-first context recovery in trust order |
+| `ketchup` skill | idea | pstack ketchup | session catch-up with executive summary and status lines |
+| `what-did-i-get-done` skill | idea | pstack what-did-i-get-done | authored-commit summaries grouped by theme |
