@@ -40,14 +40,19 @@ agent mistake into an enforcement the mistake cannot survive.
 4. **Implement** the enforcement with its exception path documented (how a
    legitimate case opts out).
 5. **Prove it fires.** Reproduce the mistake deliberately and show the
-   enforcement catching it, with real output. An enforcement you have not
-   seen fire is a hypothesis (`benchmark-checklist` discipline applies).
+  enforcement catching it, with real output. An enforcement you have not
+  seen fire is a hypothesis (`benchmark-checklist` discipline applies).
+6. **Record honestly**: the ledger verdict matches what the repro actually
+   exercised — a lint rule or type guard firing is `enforcement-verified`,
+   a runtime check exercised by a test is `unit-test-verified`, a proof is
+   `formally-verified`. Never record a stronger verdict than the evidence.
 
 ## Rules
 
 - Never weaken an enforcement to make a test pass; the enforcement is the
   requirement now.
-- Record what was encoded in `.omc/state/verification-ledger.tsv` with
-  verdict `unit-test-verified` and the repro command as evidence.
+- Record what was encoded in `.omc/state/verification-ledger.tsv` with the
+  verdict the repro actually exercised (see workflow step 6) and the repro
+  command as evidence.
 - Text added at level 5 references this skill, so the next occurrence tries
   to climb the ladder again.

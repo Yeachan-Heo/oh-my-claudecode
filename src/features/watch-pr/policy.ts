@@ -13,8 +13,8 @@
  * sighting of "no checks" is never readiness.
  */
 
-/** Check run state as normalized by the caller. */
-export type WatchCheckState = 'pass' | 'fail' | 'pending' | 'skipping';
+/** Check run state as normalized by the caller (gh pr checks `bucket` values). */
+export type WatchCheckState = 'pass' | 'fail' | 'pending' | 'skipping' | 'cancel';
 
 export interface WatchCheckRun {
   readonly name: string;
@@ -83,6 +83,10 @@ export function decideWatchVerdict(facts: WatchPrFacts, options: WatchOptions): 
   const failed = facts.checks.filter((c) => c.state === 'fail');
   if (failed.length > 0) {
     blocked.push(`failing checks: ${failed.map((c) => c.name).join(', ')}`);
+  }
+  const canceled = facts.checks.filter((c) => c.state === 'cancel');
+  if (canceled.length > 0) {
+    blocked.push(`canceled checks: ${canceled.map((c) => c.name).join(', ')} — rerun or clear them`);
   }
   if (facts.reviewDecision === 'changes_requested') {
     blocked.push('changes requested in review');

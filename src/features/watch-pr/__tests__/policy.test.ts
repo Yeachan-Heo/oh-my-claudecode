@@ -46,6 +46,15 @@ describe('decideWatchVerdict', () => {
     expect(verdict.reasons.join(' ')).toContain('lint');
   });
 
+  it('canceled checks block instead of falling through to ready', () => {
+    const verdict = decideWatchVerdict(
+      facts({ checks: [{ name: 'ci', state: 'cancel' }] }),
+      { nowMs: NOW },
+    );
+    expect(verdict.kind).toBe('blocked');
+    expect(verdict.reasons.join(' ')).toContain('canceled checks');
+  });
+
   it('requested changes block', () => {
     expect(decideWatchVerdict(facts({ reviewDecision: 'changes_requested' }), { nowMs: NOW }).kind).toBe('blocked');
   });

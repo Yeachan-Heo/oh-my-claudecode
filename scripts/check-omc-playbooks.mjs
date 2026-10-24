@@ -88,20 +88,29 @@ function main() {
       problems.push(`${file}: frontmatter is missing a "when:" field`);
     }
     const baseNames = extendsValue.split(',').map((s) => s.trim()).filter(Boolean);
+    // Collect every base body first: an anchor belongs to whichever extended
+    // skill contains it, so each anchor is checked against the union — an
+    // anchor quoting one base must not be demanded of the others.
+    const baseBodies = new Map();
+    let allBasesFound = true;
     for (const base of baseNames) {
       const skillPath = join(skillsRoot, base, 'SKILL.md');
       if (!existsSync(skillPath)) {
         problems.push(`${file}: extends "${base}" but no bundled skill named "${base}" exists (skills root: ${skillsRoot})`);
+        allBasesFound = false;
         continue;
       }
-      const skillBody = readFileSync(skillPath, 'utf8');
+      baseBodies.set(base, readFileSync(skillPath, 'utf8'));
+    }
+    if (allBasesFound) {
       ANCHOR_RE.lastIndex = 0;
       let anchor;
       while ((anchor = ANCHOR_RE.exec(source)) !== null) {
         const quoted = anchor[2];
-        if (!skillBody.includes(quoted)) {
+        const presentIn = [...baseBodies.entries()].filter(([, body]) => body.includes(quoted)).map(([name]) => name);
+        if (presentIn.length === 0) {
           problems.push(
-            `${file}: ${anchor[1]} anchor "${quoted}" does not appear in ${base}/SKILL.md — the bundled step text changed; re-anchor the change`,
+            `${file}: ${anchor[1]} anchor "${quoted}" does not appear in any extended skill (${baseNames.join(', ')}) — the bundled step text changed; re-anchor the change`,
           );
         }
       }

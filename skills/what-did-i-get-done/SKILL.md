@@ -21,8 +21,10 @@ Summarize authored work from the record, not from memory.
 1. **Establish identity and window**: which author(s) and what period
    (default: the last 7 days; take the user's override).
 2. **Collect**: `git log --author=<you> --since=<window> --stat` across the
-   repos in play; include merged PRs via `gh pr list --author` where the
-   user cares about review surface.
+   repos in play; include merged PRs via
+   `gh pr list --author <you> --state merged --search "merged:>=<window-start>"`
+   where the user cares about review surface (`--state` defaults to `open`,
+   so it must be named; `--author` needs its value).
 3. **Group by theme**, not by commit: a theme line names the outcome ("auth
    retry hardening"), the commits underneath are the evidence.
 4. **Count honestly**: commits, net lines, tests added. Mechanical churn

@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
-    "sourceSha256": "46a338406b92f2d6675348bc517a731a15db351ac983a33283f482b5c3b71edc",
+    "head": "aa92be7f0be05922af02056fe020f53880f49817",
+    "sourceSha256": "4c3605ad582bdfba0b17390bef1407eab6dd8370060a60a182bbfcd59a4eb7a4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
-  "sourceSha256": "46a338406b92f2d6675348bc517a731a15db351ac983a33283f482b5c3b71edc",
+  "head": "aa92be7f0be05922af02056fe020f53880f49817",
+  "sourceSha256": "4c3605ad582bdfba0b17390bef1407eab6dd8370060a60a182bbfcd59a4eb7a4",
   "counts": {
     "public": {
       "skills": 77,
@@ -24,12 +24,12 @@
     },
     "internal": {
       "hookFiles": 335,
-      "featureFiles": 92,
+      "featureFiles": 94,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1488,
-      "total": 1512
+      "srcFiles": 1490,
+      "total": 1514
     },
     "generated": {
       "distFiles": 5739,
@@ -607,11 +607,13 @@
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
       "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
       "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
       "src/features/verification/types.ts",
       "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
       "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
@@ -7202,11 +7204,13 @@
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
       "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
       "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
       "src/features/verification/types.ts",
       "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
       "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
@@ -41690,6 +41694,11 @@
         "path": "src/features/verification-ledger/__tests__/ledger.test.ts"
       },
       {
+        "id": "src/features/verification-ledger/index.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/index.ts"
+      },
+      {
         "id": "src/features/verification-ledger/ledger.ts",
         "kind": "feature",
         "path": "src/features/verification-ledger/ledger.ts"
@@ -41713,6 +41722,11 @@
         "id": "src/features/watch-pr/__tests__/policy.test.ts",
         "kind": "feature",
         "path": "src/features/watch-pr/__tests__/policy.test.ts"
+      },
+      {
+        "id": "src/features/watch-pr/index.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/index.ts"
       },
       {
         "id": "src/features/watch-pr/policy.ts",
@@ -46838,6 +46852,11 @@
         "id": "tests/lint/omc-playbooks.test.ts",
         "kind": "other",
         "path": "tests/lint/omc-playbooks.test.ts"
+      },
+      {
+        "id": "tests/lint/plugin-manifest-parity.test.ts",
+        "kind": "other",
+        "path": "tests/lint/plugin-manifest-parity.test.ts"
       },
       {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
@@ -61783,12 +61802,32 @@
       },
       {
         "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
         "kind": "exports"
       },
       {
         "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
         "kind": "type-exports"
       },
       {
@@ -62612,6 +62651,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "type-exports"
+      },
+      {
         "from": "src/features/verification-ledger/ledger.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -62660,6 +62709,16 @@
         "from": "src/features/watch-pr/__tests__/policy.test.ts",
         "to": "src/features/watch-pr/policy.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "type-exports"
       },
       {
         "from": "src/goal-workflows/__tests__/claude-goal-snapshot.test.ts",
@@ -90112,6 +90171,21 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -90318,12 +90392,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7927,
-      "edgeCount": 8680,
-      "importEdgeCount": 7207,
+      "nodeCount": 7930,
+      "edgeCount": 8691,
+      "importEdgeCount": 7210,
       "registerEdgeCount": 98
     }
   },
-  "inventorySha256": "3e66fd8d2a7f67cedcad2ceef4942968061d6c87c282cbbbc08fdba85eb75fc0",
-  "manifestSha256": "55d810733e7faa380401f8522a20befd67037963d412d49b00b776f04cdb14cd"
+  "inventorySha256": "5dec23d150540e5ac024feb21905d638545295554b88ffa4ba35626af30942da",
+  "manifestSha256": "0298dd4f647eee5bccd2e50759cacbb919b4d26f9de8b1172814a15715c9256e"
 }

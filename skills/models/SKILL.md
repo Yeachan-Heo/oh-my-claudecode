@@ -73,5 +73,8 @@ out before the run starts.
 
 - This skill only writes configuration. It never starts a team, spawns
   agents, or changes model routing for an already-running team.
-- `delegationRouting` is deprecated; if found, tell the user to migrate its
-  roles into `team.roleRouting` instead.
+- `delegationRouting` is partially deprecated: entries routing to the
+  external Codex/Gemini providers should migrate into `team.roleRouting`;
+  valid Claude Task routes (including `agentType` and fallback settings)
+  are a separate subsystem and must stay where they are — `team.roleRouting`
+  governs `/team` only, Task delegation is not moved by this skill.

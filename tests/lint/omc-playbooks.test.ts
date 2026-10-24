@@ -92,7 +92,7 @@ describe('check-omc-playbooks', () => {
     );
     const r = runChecker(root, skillsRoot);
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('does not appear in tdd/SKILL.md');
+    expect(r.stderr).toContain('does not appear in any extended skill');
     rmSync(root, { recursive: true, force: true });
   });
 
@@ -102,6 +102,52 @@ describe('check-omc-playbooks', () => {
     const r = runChecker(root, skillsRoot);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('missing an "extends:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('matches each multi-base anchor against any extended skill, not every one', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'verify', ''), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'verify', 'SKILL.md'),
+      '---\nname: verify\n---\n\n# Verify\n\nDemand real command output as evidence. Evidence must be fresh.\n',
+    );
+    // One anchor quotes tdd, the other quotes verify; both must pass against the union.
+    writePlaybook(
+      root,
+      'both.md',
+      [
+        '---',
+        'extends: tdd, verify',
+        'when: TDD work whose evidence must satisfy the verify bar.',
+        '---',
+        '',
+        '**After** "Write the failing test first." keep the output artifact path.',
+        '',
+        '**In** "Demand real command output as evidence." name the freshness window.',
+      ].join('\n'),
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stdout).toContain('1 project playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects a multi-base anchor absent from every extended skill', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'verify', ''), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'verify', 'SKILL.md'),
+      '---\nname: verify\n---\n\n# Verify\n\nDemand real command output as evidence.\n',
+    );
+    writePlaybook(
+      root,
+      'drifted-both.md',
+      '---\nextends: tdd, verify\nwhen: Drifted.\n---\n\n**After** "Write the failing test second." nothing.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('does not appear in any extended skill');
     rmSync(root, { recursive: true, force: true });
   });
 });

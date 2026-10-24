@@ -18,6 +18,7 @@ export const VERIFICATION_VERDICTS = [
   'live-ui-verified',
   'unit-test-verified',
   'type-check-only',
+  'enforcement-verified',
   'formally-verified',
   'verifier-blocked',
   'verifier-failed',

@@ -37,9 +37,9 @@ rebases, or force-pushes.
 Declare the mode before the first poll: which PR, and whether bot comments
 are in scope.
 
-1. **Read state** via `gh`: `gh pr view <N> --json state,headRefOmit,mergeable,reviewDecision,isDraft,headRefOid`
-   and `gh pr checks <N> --json` (when supported) or the plain table. Confirm
-   the first read reports the requested PR before acting on it.
+1. **Read state** via `gh`: `gh pr view <N> --json state,mergeable,reviewDecision,isDraft,headRefOid,headRefName`
+   and `gh pr checks <N> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`).
+   Confirm the first read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
 3. **Act on the verdict**:
@@ -47,15 +47,20 @@ are in scope.
    - requested changes → `get-pr-comments` to triage threads, then address
      each through the review lane; reply to threads you resolve; dismiss
      bot noise with a concrete reason instead of churning code
-   - conflicts → `fix-merge-conflicts` when the branch is ours to resolve;
-     otherwise report to the branch owner
+   - conflicts → `fix-merge-conflicts` **in its no-rebase mode**: resolve
+     with a merge commit only. Never rebase and never force-push here —
+     this constraint overrides that skill's own-branch rebase option,
+     because babysit's contract forbids both. If the branch is not ours to
+     resolve, report to the branch owner instead
    - mergeability unknown → wait one interval and re-read; it is never an
      error
    - draft or missing review → report what is missing; do not self-approve
-4. **Record the verdict** in the verification ledger
-   (`.omc/state/verification-ledger.tsv`) when a check cycle completes: PR,
-   head SHA, verdict word, evidence command. One row per observed verdict
-   transition, never per poll.
+4. **Ledger discipline**: watch verdicts (`ready`/`waiting`/`blocked`/`gone`)
+   are gate states, not verification — never write them into the
+   verification ledger, whose vocabulary is separate. Append a
+   `.omc/state/verification-ledger.tsv` row only when *you* executed a check
+   yourself — e.g. a `fix-ci` rerun went green (`unit-test-verified`, with
+   the command as evidence). One row per executed check, never per poll.
 5. **Report**: verdict, what changed since the last poll, what is still
    blocking, and the exact commands you ran. Every claim carries its
    evidence.

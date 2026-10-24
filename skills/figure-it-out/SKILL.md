@@ -57,9 +57,15 @@ when: <one sentence naming the requests this playbook serves>
 
 Anchor every modification of a bundled step with `**After** "<quoted step
 text>"` / `**Before**` / `**Replace**` / `**In**`, quoting the bundled skill
-verbatim. Then run `node scripts/check-omc-playbooks.mjs` from the repo
-root: it fails when an OMC upgrade rewrites a step you anchored to. Report
-what it prints; never guess where an unanchored change belongs.
+verbatim. Then run the checker from its installed location — from a target
+project the script does not exist at `./scripts/`:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/check-omc-playbooks.mjs" .
+```
+
+It fails when an OMC upgrade rewrites a step you anchored to. Report what it
+prints; never guess where an unanchored change belongs.
 
 ## Rules
 

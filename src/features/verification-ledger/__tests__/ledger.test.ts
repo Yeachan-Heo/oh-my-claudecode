@@ -18,6 +18,7 @@ describe('verification ledger', () => {
   it('accepts the canonical verdict words and rejects others', () => {
     expect(isVerificationVerdict('unit-test-verified')).toBe(true);
     expect(isVerificationVerdict('formally-verified')).toBe(true);
+    expect(isVerificationVerdict('enforcement-verified')).toBe(true);
     expect(isVerificationVerdict('definitely-fine')).toBe(false);
   });
 

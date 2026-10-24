@@ -19,8 +19,10 @@ Bring the review surface into one list a human (or a fix lane) can act on.
 ## Workflow
 
 1. **Fetch**: `gh pr view --comments` for top-level, and
-   `gh api repos/{owner}/{repo}/pulls/{n}/comments` for inline review
-   threads (they are different surfaces; both needed).
+   `gh api --paginate repos/{owner}/{repo}/pulls/{n}/comments` for inline
+   review threads (they are different surfaces; both needed, and every page
+   of the inline list is required — without `--paginate`, later pages are
+   silently dropped).
 2. **Dedupe into threads**: one thread per root comment, replies nested;
    resolved threads folded to a count unless the user asks for all.
 3. **Summarize each open thread**: author, file:line, the request in one
