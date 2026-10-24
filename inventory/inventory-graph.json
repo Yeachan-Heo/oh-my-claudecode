@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-24T01:17:11.084Z",
+  "generatedAt": "2026-10-24T02:09:02.185Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6b542d3846cd8824f6345070551cdf52ccd20e92",
-    "sourceSha256": "d883363f3ac401da1d6c8c256886625e7e13ff39bbb78926c1d469e3e4695566",
-    "generatedAt": "2026-10-24T01:17:11.084Z",
+    "head": "11817905a98e823e8f0e59951d40341082e392b8",
+    "sourceSha256": "3876ef3ec048beff4b765adb48b4a0b62590e7780b884ef5a23c49aafdf445df",
+    "generatedAt": "2026-10-24T02:09:02.185Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6b542d3846cd8824f6345070551cdf52ccd20e92",
-  "sourceSha256": "d883363f3ac401da1d6c8c256886625e7e13ff39bbb78926c1d469e3e4695566",
+  "head": "11817905a98e823e8f0e59951d40341082e392b8",
+  "sourceSha256": "3876ef3ec048beff4b765adb48b4a0b62590e7780b884ef5a23c49aafdf445df",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1483,
-      "total": 1507
+      "srcFiles": 1484,
+      "total": 1508
     },
     "generated": {
       "distFiles": 5739,
@@ -89860,12 +89860,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7890,
-      "edgeCount": 8630,
-      "importEdgeCount": 7187,
+      "nodeCount": 7891,
+      "edgeCount": 8632,
+      "importEdgeCount": 7189,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "c8d2a9b6a5ad65fa844c198133e560868654be502fefcd008c823e0ed84e374e",
-  "manifestSha256": "cc6bbb87917a66828d386310dd9fde3825b02074801aa5ad68cf1cb2b1302732"
+  "inventorySha256": "da20900b09d9f868d68f247aded219bd036f829d47eb0e2fd5ee8810e55838b5",
+  "manifestSha256": "0ca1f8d4bb6da0fab753979fb342c2f3ac638fef2099571204772e33196ae9a6"
 }
