@@ -6,21 +6,21 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
-    "sourceSha256": "4b66eaeccc096971bdd43620879550b8fb26b721dc96afe8d7424ecd9276b228",
+    "sourceSha256": "46a338406b92f2d6675348bc517a731a15db351ac983a33283f482b5c3b71edc",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
-  "sourceSha256": "4b66eaeccc096971bdd43620879550b8fb26b721dc96afe8d7424ecd9276b228",
+  "sourceSha256": "46a338406b92f2d6675348bc517a731a15db351ac983a33283f482b5c3b71edc",
   "counts": {
     "public": {
-      "skills": 75,
+      "skills": 77,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 124
+      "total": 126
     },
     "internal": {
       "hookFiles": 335,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 75,
+    "skills": 77,
     "commands": 21,
     "hookFiles": 335,
     "workflows": 8,
@@ -65,6 +65,7 @@
       "configure-notifications",
       "correct",
       "create-formal-verification-skill",
+      "create-verification-skill",
       "debug",
       "deep-interview",
       "deepinit",
@@ -87,6 +88,7 @@
       "launch",
       "loft",
       "maintain-formal-verification-skill",
+      "maintain-verification-skill",
       "map",
       "minimal-code-discipline",
       "minimal-prose-discipline",
@@ -38533,6 +38535,11 @@
         "path": "skills/create-formal-verification-skill/SKILL.md"
       },
       {
+        "id": "skills/create-verification-skill/SKILL.md",
+        "kind": "skill",
+        "path": "skills/create-verification-skill/SKILL.md"
+      },
+      {
         "id": "skills/debug/SKILL.md",
         "kind": "skill",
         "path": "skills/debug/SKILL.md"
@@ -38641,6 +38648,11 @@
         "id": "skills/maintain-formal-verification-skill/SKILL.md",
         "kind": "skill",
         "path": "skills/maintain-formal-verification-skill/SKILL.md"
+      },
+      {
+        "id": "skills/maintain-verification-skill/SKILL.md",
+        "kind": "skill",
+        "path": "skills/maintain-verification-skill/SKILL.md"
       },
       {
         "id": "skills/map/SKILL.md",
@@ -49715,6 +49727,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/create-verification-skill/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/debug/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49821,6 +49838,11 @@
       },
       {
         "from": "skills/maintain-formal-verification-skill/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/maintain-verification-skill/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -90296,12 +90318,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7925,
-      "edgeCount": 8678,
+      "nodeCount": 7927,
+      "edgeCount": 8680,
       "importEdgeCount": 7207,
-      "registerEdgeCount": 96
+      "registerEdgeCount": 98
     }
   },
-  "inventorySha256": "4147109f4dd65a07bd6d24dbcfafb92d86c53bf5523f337ae7922ab163c66e0d",
-  "manifestSha256": "cd67d69ce0806687edc94b4b3780b6cb43126d45f3e41e4a4a668aaaf8114bb5"
+  "inventorySha256": "3e66fd8d2a7f67cedcad2ceef4942968061d6c87c282cbbbc08fdba85eb75fc0",
+  "manifestSha256": "55d810733e7faa380401f8522a20befd67037963d412d49b00b776f04cdb14cd"
 }

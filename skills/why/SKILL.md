@@ -38,9 +38,10 @@ own lane.
    commit messages, `gh issue list --search`, PR review threads) — acceptance
    criteria and rejected alternatives live here.
 4. **Incident and observability sources.** When configured, query them
-   through their own tools (Sentry, Datadog, dashboards) or MCP servers
-   (Slack, Linear, Notion). Cite the alert, thread, or ticket. If a source
-   needs credentials you do not have, say so and move on.
+   through their own tools (Sentry, Datadog, Databricks, dashboards,
+   incident postmortems) or MCP servers (Slack, Linear, Notion). Cite the
+   alert, thread, ticket, or postmortem. If a source needs credentials you
+   do not have, say so and move on.
 
 ## Method
 

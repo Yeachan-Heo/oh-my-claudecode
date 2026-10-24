@@ -121,7 +121,7 @@ unrepresentable, brand primitives, parse external data at boundaries; in
 TypeScript, `typescript-best-practices` grounds this in syntax. Carried by
 `architect` and `executor`.
 
-### Make operations converge
+### Make operations idempotent
 
 Design commands, lifecycle steps, and loops that run amid crashes and
 retries to converge to the same end state. OMC's team recovery replays
@@ -214,7 +214,7 @@ brief.
 | `test-engineer` | Test behavior, not implementation |
 | `architect` | Foundational Thinking, Redesign from First Principles, Model the domain, Exhaust the design space |
 | `planner` | Foundational Thinking, Outcome-oriented execution, Sequence work into verifiable units |
-| `executor` | Laziness Protocol, Subtract before you add, Make operations converge, Boundary discipline, Type system discipline, Migrate callers, Separate before serializing, Build the lever |
+| `executor` | Laziness Protocol, Subtract before you add, Make operations idempotent, Boundary discipline, Type system discipline, Migrate callers, Separate before serializing, Build the lever |
 | `scientist` | Explain the number |
 | `designer` | Experience first |
 | `code-simplifier` | Laziness Protocol, Subtract before you add, Minimize reader load |
