@@ -130,6 +130,68 @@ describe('drainPendingTeamDispatch cooldown stamping', () => {
     expect(await readIssueCooldownKeys()).not.toContain('ABC-200');
   });
 
+  it.each(['9e5', '900_000', '900000ms'])(
+    'keeps the default issue cooldown when the env value is %j instead of reading its leading digits',
+    async (value) => {
+      process.env.OMC_TEAM_DISPATCH_ISSUE_COOLDOWN_MS = value;
+      process.env.OMC_TEAM_DISPATCH_TRIGGER_COOLDOWN_MS = '0';
+      await writeFile(
+        join(teamDir, 'dispatch', 'issue-cooldown.json'),
+        JSON.stringify({ by_issue: { 'ABC-400': Date.now() - 60_000 } }),
+      );
+      await writeRequests([makeRequest({ request_id: 'a', trigger_message: 'Resolve ABC-400 now' })]);
+
+      const calls: string[] = [];
+      const result = await drain(async (request) => {
+        calls.push(request.request_id);
+        return { ok: true, reason: 'tmux_injected' };
+      });
+
+      expect(calls).toEqual([]);
+      expect(result.skipped).toBe(1);
+    },
+  );
+
+  it.each(['3e4', '30_000'])(
+    'keeps the default trigger cooldown when the env value is %j instead of reading its leading digits',
+    async (value) => {
+      process.env.OMC_TEAM_DISPATCH_ISSUE_COOLDOWN_MS = '0';
+      process.env.OMC_TEAM_DISPATCH_TRIGGER_COOLDOWN_MS = value;
+      await writeFile(
+        join(teamDir, 'dispatch', 'trigger-cooldown.json'),
+        JSON.stringify({ by_trigger: { 'work item': { at: Date.now() - 1_000, last_request_id: 'earlier' } } }),
+      );
+      await writeRequests([makeRequest({ request_id: 'a', trigger_message: 'work item' })]);
+
+      const calls: string[] = [];
+      const result = await drain(async (request) => {
+        calls.push(request.request_id);
+        return { ok: true, reason: 'tmux_injected' };
+      });
+
+      expect(calls).toEqual([]);
+      expect(result.skipped).toBe(1);
+    },
+  );
+
+  it('still lets a plain zero disable the issue cooldown', async () => {
+    process.env.OMC_TEAM_DISPATCH_ISSUE_COOLDOWN_MS = '0';
+    process.env.OMC_TEAM_DISPATCH_TRIGGER_COOLDOWN_MS = '0';
+    await writeFile(
+      join(teamDir, 'dispatch', 'issue-cooldown.json'),
+      JSON.stringify({ by_issue: { 'ABC-500': Date.now() - 60_000 } }),
+    );
+    await writeRequests([makeRequest({ request_id: 'a', trigger_message: 'Resolve ABC-500 now' })]);
+
+    const calls: string[] = [];
+    await drain(async (request) => {
+      calls.push(request.request_id);
+      return { ok: true, reason: 'tmux_injected' };
+    });
+
+    expect(calls).toEqual(['a']);
+  });
+
   it('does not self-gate an unconfirmed dispatch awaiting retry', async () => {
     await writeRequests([makeRequest({ request_id: 'a', trigger_message: 'Resolve ABC-300 now' })]);
 
