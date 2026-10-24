@@ -431,6 +431,52 @@ describe('tmux-detector', () => {
       });
     });
 
+    it('keeps the pane id when the session name contains spaces', () => {
+      vi.mocked(tmuxSpawn).mockReturnValue({
+        status: 0,
+        stdout: '/usr/bin/tmux',
+        stderr: '',
+        signal: null,
+        pid: 1234,
+        output: [],
+      });
+
+      vi.mocked(tmuxExec).mockReturnValue('my project:2.1 %7 1 dev Claude\n');
+
+      expect(listTmuxPanes()).toEqual([{
+        id: '%7',
+        session: 'my project',
+        windowIndex: 2,
+        windowName: 'dev',
+        paneIndex: 1,
+        title: 'Claude',
+        isActive: true,
+      }]);
+    });
+
+    it('preserves leading and trailing spaces in a session name', () => {
+      vi.mocked(tmuxSpawn).mockReturnValue({
+        status: 0,
+        stdout: '/usr/bin/tmux',
+        stderr: '',
+        signal: null,
+        pid: 1234,
+        output: [],
+      });
+
+      vi.mocked(tmuxExec).mockReturnValue(' my project :2.1 %7 1 dev Claude\n');
+
+      expect(listTmuxPanes()).toEqual([{
+        id: '%7',
+        session: ' my project ',
+        windowIndex: 2,
+        windowName: 'dev',
+        paneIndex: 1,
+        title: 'Claude',
+        isActive: true,
+      }]);
+    });
+
     it('should return empty array when tmux not available', () => {
       vi.mocked(tmuxSpawn).mockReturnValue({
         status: 1,

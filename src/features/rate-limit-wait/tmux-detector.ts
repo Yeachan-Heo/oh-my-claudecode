@@ -281,15 +281,15 @@ export function isInsideTmux(): boolean {
 function parseTmuxPanes(result: string): TmuxPane[] {
   const panes: TmuxPane[] = [];
 
-  for (const line of result.trim().split('\n')) {
+  for (const line of result.split(/\r?\n/)) {
     if (!line.trim()) continue;
 
-    const parts = line.split(' ');
-    if (parts.length < 4) continue;
+    // Session names may contain spaces; tmux replaces ':' with '_' in names.
+    const match = line.match(/^([^:]*):(\d+)\.(\d+) (%\d+) ([01]) (.*)$/);
+    if (!match) continue;
 
-    const [location, paneId, activeStr, windowName, ...titleParts] = parts;
-    const [sessionWindow, paneIndexStr] = location.split('.');
-    const [session, windowIndexStr] = sessionWindow.split(':');
+    const [, session, windowIndexStr, paneIndexStr, paneId, activeStr, rest] = match;
+    const [windowName, ...titleParts] = rest.split(' ');
 
     panes.push({
       id: paneId,
