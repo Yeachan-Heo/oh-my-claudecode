@@ -178,6 +178,21 @@ describe('parseRemoteUrl', () => {
     });
   });
 
+  it('parses multiple trailing slashes on HTTPS and SSH URL-style remotes', () => {
+    expect(parseRemoteUrl('https://github.com/user/repo.git///')).toEqual({
+      provider: 'github',
+      host: 'github.com',
+      owner: 'user',
+      repo: 'repo',
+    });
+    expect(parseRemoteUrl('ssh://git@github.com/user/repo.git///')).toEqual({
+      provider: 'github',
+      host: 'github.com',
+      owner: 'user',
+      repo: 'repo',
+    });
+  });
+
   it('parses a browser URL with a trailing slash and no .git suffix', () => {
     expect(parseRemoteUrl('https://github.com/user/my-repo/')).toEqual({
       provider: 'github',
@@ -263,6 +278,15 @@ describe('parseRemoteUrl', () => {
   it('parses GitLab nested group SSH URL-style', () => {
     const result = parseRemoteUrl('ssh://git@gitlab.com/group/subgroup/repo.git');
     expect(result).toEqual({
+      provider: 'gitlab',
+      host: 'gitlab.com',
+      owner: 'group/subgroup',
+      repo: 'repo',
+    });
+  });
+
+  it('parses an SSH URL-style .git URL with multiple trailing slashes', () => {
+    expect(parseRemoteUrl('ssh://git@gitlab.com/group/subgroup/repo.git///')).toEqual({
       provider: 'gitlab',
       host: 'gitlab.com',
       owner: 'group/subgroup',
