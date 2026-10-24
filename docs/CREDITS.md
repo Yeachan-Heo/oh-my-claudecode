@@ -28,3 +28,11 @@ upstream license file at the repo root when the upstream license requires it.
 | `fix-ci` skill | idea | pstack fix-ci | real/flaky/environmental CI failure classification |
 | `fix-merge-conflicts` skill | idea | pstack fix-merge-conflicts | both-intent-preserving non-interactive resolution |
 | `get-pr-comments` skill | idea | pstack get-pr-comments | review-thread dedupe and fix/dismiss/ask triage |
+| `models` skill | idea | pstack setup-pstack | setup wizard for OMC's existing `team.roleRouting` plus panel-diversity guidance |
+| `why` skill | idea | pstack why | multi-source investigation epistemics; human-rulings-verbatim rule |
+| `how` skill | idea | pstack how | explorer/explainer two-pass subsystem walkthrough |
+| `correct` skill | idea | pstack correct | repeated-mistake elimination ladder (lint > type > runtime > script > text) |
+| `blast-radius` skill | idea | pstack blast-radius | dependents mapping and classification with executed proof |
+| `architect` skill | idea | pstack architect | parallel design exploration with accepted-deviations register |
+| `figure-it-out` skill | idea | pstack figure-it-out | bespoke playbook designer, stored under `.omc/playbooks/` |
+| `show-me-your-work` skill | idea | pstack show-me-your-work | TSV decision trail with formula-cell guard |

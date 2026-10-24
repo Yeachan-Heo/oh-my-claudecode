@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""Shorten over-budget skill descriptions to <=240 chars (compact plugin shim budget).
-Usage: python _descriptions.py skill1[:desc] ... — desc omitted => skip. Reads/writes skills/<name>/SKILL.md."""
-import io, re, sys
+"""Shorten over-budget skill descriptions to <=240 chars, double-quoted YAML."""
+import io, re
 
 DESCS = {
 "principles": "Twenty-four engineering principles in five groups, mapped to the lane carrying each — premise testing, root causes, honest verification, domain modeling, convergence, context discipline. For design, debugging, or delegation briefs.",

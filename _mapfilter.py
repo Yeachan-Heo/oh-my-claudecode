@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Filter skills/map/SKILL.md table rows: drop any row referencing a skill
-directory that does not exist in the current tree. Usage: python _mapfilter.py"""
+directory that does not exist in the current tree."""
 import io, os, re
 
 have = {d for d in os.listdir('skills') if os.path.isdir(os.path.join('skills', d))}

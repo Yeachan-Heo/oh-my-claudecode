@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ffe7d04af88cefb95db446aabbf7cf8689c364a4",
-    "sourceSha256": "d9fa2d654b142ab61f91c7baff9162932b42ae5b7673ae9a5b481d6825def4ee",
+    "head": "38a420919d6af8ba97fa330dabda268acf96eddb",
+    "sourceSha256": "5f42674e52326bc03376b7eb0b531a53c759983c833999ba69f7c8f4c4a7b631",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ffe7d04af88cefb95db446aabbf7cf8689c364a4",
-  "sourceSha256": "d9fa2d654b142ab61f91c7baff9162932b42ae5b7673ae9a5b481d6825def4ee",
+  "head": "38a420919d6af8ba97fa330dabda268acf96eddb",
+  "sourceSha256": "5f42674e52326bc03376b7eb0b531a53c759983c833999ba69f7c8f4c4a7b631",
   "counts": {
     "public": {
-      "skills": 52,
+      "skills": 60,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 101
+      "total": 109
     },
     "internal": {
       "hookFiles": 335,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 62
     },
-    "skills": 52,
+    "skills": 60,
     "commands": 21,
     "hookFiles": 335,
     "workflows": 8,
@@ -50,14 +50,17 @@
     "skills": [
       "agent-doc-discipline",
       "ai-slop-cleaner",
+      "architect",
       "architecture-survey",
       "ask",
       "ask-navigator",
       "autopilot",
       "autoresearch",
       "babysit",
+      "blast-radius",
       "cancel",
       "configure-notifications",
+      "correct",
       "debug",
       "deep-interview",
       "deepinit",
@@ -65,11 +68,13 @@
       "drydock",
       "execute",
       "external-context",
+      "figure-it-out",
       "fix-ci",
       "fix-merge-conflicts",
       "get-pr-comments",
       "graph",
       "harbor",
+      "how",
       "hud",
       "intent",
       "launch",
@@ -77,6 +82,7 @@
       "map",
       "minimal-code-discipline",
       "minimal-prose-discipline",
+      "models",
       "omc-doctor",
       "omc-setup",
       "plan",
@@ -91,6 +97,7 @@
       "review",
       "self-improve",
       "session-flow",
+      "show-me-your-work",
       "skill",
       "skillify",
       "tdd",
@@ -99,6 +106,7 @@
       "ultragoal",
       "verify",
       "visual-verdict",
+      "why",
       "wiki"
     ],
     "commands": [
@@ -38461,6 +38469,11 @@
         "path": "skills/ai-slop-cleaner/SKILL.md"
       },
       {
+        "id": "skills/architect/SKILL.md",
+        "kind": "skill",
+        "path": "skills/architect/SKILL.md"
+      },
+      {
         "id": "skills/architecture-survey/SKILL.md",
         "kind": "skill",
         "path": "skills/architecture-survey/SKILL.md"
@@ -38491,6 +38504,11 @@
         "path": "skills/babysit/SKILL.md"
       },
       {
+        "id": "skills/blast-radius/SKILL.md",
+        "kind": "skill",
+        "path": "skills/blast-radius/SKILL.md"
+      },
+      {
         "id": "skills/cancel/SKILL.md",
         "kind": "skill",
         "path": "skills/cancel/SKILL.md"
@@ -38499,6 +38517,11 @@
         "id": "skills/configure-notifications/SKILL.md",
         "kind": "skill",
         "path": "skills/configure-notifications/SKILL.md"
+      },
+      {
+        "id": "skills/correct/SKILL.md",
+        "kind": "skill",
+        "path": "skills/correct/SKILL.md"
       },
       {
         "id": "skills/debug/SKILL.md",
@@ -38536,6 +38559,11 @@
         "path": "skills/external-context/SKILL.md"
       },
       {
+        "id": "skills/figure-it-out/SKILL.md",
+        "kind": "skill",
+        "path": "skills/figure-it-out/SKILL.md"
+      },
+      {
         "id": "skills/fix-ci/SKILL.md",
         "kind": "skill",
         "path": "skills/fix-ci/SKILL.md"
@@ -38559,6 +38587,11 @@
         "id": "skills/harbor/SKILL.md",
         "kind": "skill",
         "path": "skills/harbor/SKILL.md"
+      },
+      {
+        "id": "skills/how/SKILL.md",
+        "kind": "skill",
+        "path": "skills/how/SKILL.md"
       },
       {
         "id": "skills/hud/SKILL.md",
@@ -38594,6 +38627,11 @@
         "id": "skills/minimal-prose-discipline/SKILL.md",
         "kind": "skill",
         "path": "skills/minimal-prose-discipline/SKILL.md"
+      },
+      {
+        "id": "skills/models/SKILL.md",
+        "kind": "skill",
+        "path": "skills/models/SKILL.md"
       },
       {
         "id": "skills/omc-doctor/SKILL.md",
@@ -38846,6 +38884,11 @@
         "path": "skills/session-flow/SKILL.md"
       },
       {
+        "id": "skills/show-me-your-work/SKILL.md",
+        "kind": "skill",
+        "path": "skills/show-me-your-work/SKILL.md"
+      },
+      {
         "id": "skills/skill/SKILL.md",
         "kind": "skill",
         "path": "skills/skill/SKILL.md"
@@ -38884,6 +38927,11 @@
         "id": "skills/visual-verdict/SKILL.md",
         "kind": "skill",
         "path": "skills/visual-verdict/SKILL.md"
+      },
+      {
+        "id": "skills/why/SKILL.md",
+        "kind": "skill",
+        "path": "skills/why/SKILL.md"
       },
       {
         "id": "skills/wiki/SKILL.md",
@@ -49553,6 +49601,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/architect/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/architecture-survey/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49583,12 +49636,22 @@
         "kind": "registers"
       },
       {
+        "from": "skills/blast-radius/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/cancel/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
       {
         "from": "skills/configure-notifications/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/correct/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -49628,6 +49691,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/figure-it-out/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/fix-ci/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49649,6 +49717,11 @@
       },
       {
         "from": "skills/harbor/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/how/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -49684,6 +49757,11 @@
       },
       {
         "from": "skills/minimal-prose-discipline/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/models/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -49778,6 +49856,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/show-me-your-work/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/skill/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49814,6 +49897,11 @@
       },
       {
         "from": "skills/visual-verdict/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/why/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -90159,12 +90247,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7910,
-      "edgeCount": 8669,
+      "nodeCount": 7918,
+      "edgeCount": 8677,
       "importEdgeCount": 7213,
-      "registerEdgeCount": 73
+      "registerEdgeCount": 81
     }
   },
-  "inventorySha256": "f0486d64b5cad4a092807cf8b35a88d73d9e71205b6338a41c73c86fb76a02f8",
-  "manifestSha256": "163ad24f4cbc9ea3f4ab86e641a9e6ae3990802415f7c1d8ae553a6358cace91"
+  "inventorySha256": "6f1f44cc158418d7b4bd3c5bec1e8c134103b94a75495c308f40dea4e2f8f5d3",
+  "manifestSha256": "1de9ea2091d69900b518c4262317deaed147c94c7086272229344271898f2f76"
 }

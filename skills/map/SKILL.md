@@ -23,11 +23,11 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Hands-off idea-to-code | `autopilot` |
 | Work needs coordinated parallel workers | `team` |
 | One approved task carried through verified code | `execute` |
+| Code crosses a function boundary; designs should compete first | `architect` |
 | A design question prose cannot settle | `loft` |
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
-| An open PR needs driving to merge-ready | `babysit` |
 | An open PR needs driving to merge-ready | `babysit` |
 | The run taught the environment something | `refit` |
 
@@ -36,6 +36,12 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Job | Skill |
 |---|---|
 | A bug needs its root cause | `debug`; competing-hypothesis tracing: `trace` |
+| The question is why the code is this way | `why` |
+| A risky change needs its blast radius mapped | `blast-radius` |
+| The same agent mistake keeps recurring | `correct` |
+| Long autonomous work needs an audit trail | `show-me-your-work` |
+| No bundled skill fits the task shape | `figure-it-out` (designs one, validated against anchors) |
+| Roles should run on chosen models | `models` |
 | Tests should drive the implementation | `tdd` |
 | The codebase is getting harder to change | `architecture-survey` |
 | AI-generated slop needs cleanup | `ai-slop-cleaner` |
@@ -53,7 +59,6 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Manage skills themselves | `skill` (local); `skillify` (extract from session) |
 | Inspect orchestration state | `trace` (also the tracing lane); `graph` (DAG runtime) |
 | Cancel a mode | `cancel` |
-| CI is red on a PR you own | `fix-ci`; review threads: `get-pr-comments`; conflicts: `fix-merge-conflicts` |
 | CI is red on a PR you own | `fix-ci`; review threads: `get-pr-comments`; conflicts: `fix-merge-conflicts` |
 
 ## Rules
