@@ -45087,6 +45087,11 @@
         "path": "src/team/__tests__/shell-affinity.test.ts"
       },
       {
+        "id": "src/team/__tests__/shell-ready-timeout-env.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/shell-ready-timeout-env.test.ts"
+      },
+      {
         "id": "src/team/__tests__/split-pane-cleanup-evidence.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/split-pane-cleanup-evidence.test.ts"
@@ -81050,6 +81055,16 @@
       },
       {
         "from": "src/team/__tests__/shell-affinity.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/shell-ready-timeout-env.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/shell-ready-timeout-env.test.ts",
         "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
