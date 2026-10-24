@@ -3478,10 +3478,6 @@ export function paneHasTrustPrompt(captured: string, provider?: CliAgentType): b
   return detectPaneTrustPromptKind(captured, provider) !== null;
 }
 
-export function paneHasCursorWorkspaceTrustPrompt(captured: string): boolean {
-  return detectPaneTrustPromptKind(captured, 'cursor') === 'cursor_workspace_trust';
-}
-
 function paneHasClaudeStartupBanner(captured: string, provider?: CliAgentType): boolean {
   const lines = captured
     .split('\n')

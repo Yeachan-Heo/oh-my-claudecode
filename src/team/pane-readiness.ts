@@ -12,11 +12,6 @@ const PROVIDER_IDLE_PROMPT_LINES: Readonly<Record<CliAgentType, RegExp>> = {
   antigravity: LEGACY_IDLE_PROMPT_LINE,
 };
 
-export function isCliAgentType(value: unknown): value is CliAgentType {
-  return typeof value === 'string'
-    && Object.prototype.hasOwnProperty.call(PROVIDER_IDLE_PROMPT_LINES, value);
-}
-
 export function paneLineLooksLikeIdlePrompt(
   line: string,
   provider?: CliAgentType,
