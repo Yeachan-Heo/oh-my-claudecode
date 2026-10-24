@@ -16,12 +16,13 @@ metadata:
 
 Setup wizard for role-based model routing. OMC resolves each agent role to a
 provider, model, and reasoning effort through `team.roleRouting` in the
-project config (`.claude/omc.jsonc`) or the user config — at the path OMC
-resolves for this machine (run `omc config` to print it; it honors
-`$XDG_CONFIG_HOME` and `%APPDATA%`), never a hard-coded `~/.config` path.
-This skill reads the current routing, walks the user through changes,
-writes the block, and checks panel diversity. It never edits config
-silently.
+project config (`.claude/omc.jsonc`) or the user config at
+`claude-omc/config.jsonc` under OMC's platform config dir — `$XDG_CONFIG_HOME`
+(default `~/.config`) on POSIX, `%APPDATA%` on Windows, the same resolver
+`getConfigPaths()` uses — never a hard-coded `~/.config` path. Run
+`omc config` to see the effective values before editing. This skill reads
+the current routing, walks the user through changes, writes the block, and
+checks panel diversity. It never edits config silently.
 
 ## What is configurable
 
