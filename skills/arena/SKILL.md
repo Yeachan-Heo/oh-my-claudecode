@@ -45,9 +45,11 @@ Every candidate gets the same brief, so the brief is the contract.
 3. Pick the runtime:
    - **In-session**: parallel `Task` dispatches to `oh-my-claudecode:executor`,
      one per candidate, each given its own output location.
-   - **Multi-provider**: `omc team 1:claude,1:codex,1:gemini "<brief>"` with
-     worktree isolation (`OMC_TEAM_WORKTREE_MODE`) so each candidate owns a
-     separate worktree — one writer per worktree.
+   - **Multi-provider**: `OMC_TEAM_WORKTREE_MODE=detached omc team --no-decompose 1:claude,1:codex,1:gemini "<brief>"`.
+     Worktree isolation must be on — an unset mode resolves to `disabled`
+     and all candidates would share one checkout — and `--no-decompose`
+     keeps every candidate on the same brief instead of splitting a
+     multi-point brief across workers (one writer per worktree).
    Use diverse models when the work is judgment-sensitive; the same model N
    times when it is generation-bound.
 4. Give each candidate an exclusive output location — a git worktree when

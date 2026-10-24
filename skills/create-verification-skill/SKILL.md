@@ -45,8 +45,10 @@ by guessing from a README.
    short enough that a fresh session reads it whole.
 5. **Prove it.** Run the generated skill's own flow once end to end on a
    real change and record the result in
-   `.omc/state/verification-ledger.tsv` (verdict `unit-test-verified`,
-   evidence = the commands run).
+   `.omc/state/verification-ledger.tsv` — with the verdict the flow actually
+   earned: a real UI exercised is `live-ui-verified`, a test suite run is
+   `unit-test-verified`, only build/lint/typecheck passed is
+   `type-check-only`, and nothing runnable is no positive row at all.
 
 ## Rules
 

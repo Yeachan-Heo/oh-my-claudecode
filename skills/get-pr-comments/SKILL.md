@@ -20,9 +20,12 @@ Bring the review surface into one list a human (or a fix lane) can act on.
 
 1. **Fetch**: `gh pr view --comments` for top-level, and
    `gh api --paginate repos/{owner}/{repo}/pulls/{n}/comments` for inline
-   review threads (they are different surfaces; both needed, and every page
-   of the inline list is required — without `--paginate`, later pages are
-   silently dropped).
+   review comment bodies (both surfaces needed, and every page of the
+   inline list is required). Resolution state is not on those REST objects:
+   fetch threads with `isResolved` through the GraphQL API
+   (`pullRequest { reviewThreads(first: 100) { nodes { isResolved
+   comments(first: 50) { nodes { author { login } path line body } } } } }`)
+   so resolved threads can actually be folded.
 2. **Dedupe into threads**: one thread per root comment, replies nested;
    resolved threads folded to a count unless the user asks for all.
 3. **Summarize each open thread**: author, file:line, the request in one

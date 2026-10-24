@@ -41,9 +41,12 @@ attack those first.
 Spawn three reviewers in one message, in the background, each read-only:
 
 - prefer different models, and where available different provider families
-  (Claude + Codex + Gemini via `omc team 1:claude,1:codex,1:gemini`, or
-  in-session `Task` dispatches to `oh-my-claudecode:code-reviewer` and
-  `oh-my-claudecode:security-reviewer` on different models)
+  (Claude + Codex + Gemini via
+  `OMC_TEAM_WORKTREE_MODE=detached omc team --no-decompose 1:claude,1:codex,1:gemini "<the framed target, the invariants, and one lens per seat>"`,
+  or in-session `Task` dispatches to `oh-my-claudecode:code-reviewer` and
+  `oh-my-claudecode:security-reviewer` on different models) — the team
+  command needs the task text; pass target, invariants, and lens allocation
+  as that task
 - each reviewer gets the same target by path, the invariants, and one lens:
   correctness, security and trust boundaries, or edge cases and failure modes
 - instruct each to return findings as `{severity: blocker|major|minor, claim, evidence, location}`

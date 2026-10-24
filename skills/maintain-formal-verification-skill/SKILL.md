@@ -42,8 +42,10 @@ to the code it models.
    capture real output.
 5. **Update the project skill** in place: new citations, new assumption
    list, same run command — and append the resync to
-   `.omc/state/verification-ledger.tsv` (verdict `formally-verified`,
-   evidence = the rerun command).
+   `.omc/state/verification-ledger.tsv`: `formally-verified` with the rerun
+   command as evidence only when the rerun is green; a counterexample during
+   resync records `verifier-failed` with the counterexample as evidence and
+   is reported before any model change.
 
 ## Rules
 

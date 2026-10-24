@@ -88,12 +88,23 @@ function main() {
       problems.push(`${file}: frontmatter is missing a "when:" field`);
     }
     const baseNames = extendsValue.split(',').map((s) => s.trim()).filter(Boolean);
+    if (baseNames.length === 0) {
+      problems.push(`${file}: "extends:" lists no skills (empty or separators only)`);
+      continue;
+    }
     // Collect every base body first: an anchor belongs to whichever extended
     // skill contains it, so each anchor is checked against the union — an
     // anchor quoting one base must not be demanded of the others.
     const baseBodies = new Map();
     let allBasesFound = true;
     for (const base of baseNames) {
+      // A canonical bundled-skill name only — no separators, no dots, so the
+      // resolved path cannot leave the skills root.
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(base)) {
+        problems.push(`${file}: invalid extended skill name "${base}" (must be a bundled skill name, not a path)`);
+        allBasesFound = false;
+        continue;
+      }
       const skillPath = join(skillsRoot, base, 'SKILL.md');
       if (!existsSync(skillPath)) {
         problems.push(`${file}: extends "${base}" but no bundled skill named "${base}" exists (skills root: ${skillsRoot})`);

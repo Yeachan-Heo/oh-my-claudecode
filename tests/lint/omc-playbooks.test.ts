@@ -105,6 +105,29 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('rejects an extends list that names no skills', () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(root, 'empty.md', '---\nextends: ,\nwhen: Bypass.\n---\n\nBody.\n');
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('lists no skills');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects a path-like extends value that would leave the skills root', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(root, 'outside'), { recursive: true });
+    writeFileSync(
+      join(root, 'outside', 'SKILL.md'),
+      '---\nname: outside\n---\n\nWrite the failing test first.\n',
+    );
+    writePlaybook(root, 'escape.md', '---\nextends: ../outside\nwhen: Escape.\n---\n\nBody.\n');
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('invalid extended skill name');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('matches each multi-base anchor against any extended skill, not every one', () => {
     const { root, skillsRoot } = buildProject();
     mkdirSync(join(skillsRoot, 'verify', ''), { recursive: true });

@@ -59,8 +59,11 @@ verify it, and leave the verification behind as structure.
    property in one sentence, the spec file path, the exact run command, the
    pass criteria, the assumption list, and the source lines the model
    tracks. The next agent reruns the command; it never re-derives the model.
-6. **Record** the verification in `.omc/state/verification-ledger.tsv` with
-   verdict `formally-verified` and the run command as evidence.
+6. **Record** the verification in `.omc/state/verification-ledger.tsv` —
+   `formally-verified` only after a green rerun with the run command as
+   evidence; a counterexample records `verifier-failed` with the
+   counterexample as evidence, and no positive row is written until the
+   finding is resolved.
 
 ## Maintenance
 

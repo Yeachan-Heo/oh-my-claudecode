@@ -48,5 +48,7 @@ inside a cell become spaces. Append only — the trail is never rewritten.
 - Routine mechanical steps are not decisions; judgment calls, scope changes,
   and risk acceptances are.
 - The final reply summarizes the trail and links it; the trail itself stays
-  the auditable artifact. Commit it to the branch when stakes justify an
-  immutable record, keep it local otherwise.
+  the auditable artifact. It is local runtime state under `.omc/` — by
+  repository policy it is not committed; when stakes need an immutable
+  record, quote the decisive rows into the PR description or the linked
+  issue instead of force-adding runtime state.

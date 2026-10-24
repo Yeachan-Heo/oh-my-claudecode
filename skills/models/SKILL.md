@@ -16,10 +16,12 @@ metadata:
 
 Setup wizard for role-based model routing. OMC resolves each agent role to a
 provider, model, and reasoning effort through `team.roleRouting` in the
-project config (`.claude/omc.jsonc`) or the user config
-(`~/.config/claude-omc/config.jsonc`). This skill reads the current routing,
-walks the user through changes, writes the block, and checks panel diversity.
-It never edits config silently.
+project config (`.claude/omc.jsonc`) or the user config — at the path OMC
+resolves for this machine (run `omc config` to print it; it honors
+`$XDG_CONFIG_HOME` and `%APPDATA%`), never a hard-coded `~/.config` path.
+This skill reads the current routing, walks the user through changes,
+writes the block, and checks panel diversity. It never edits config
+silently.
 
 ## What is configurable
 
@@ -41,8 +43,11 @@ Per role (canonical names: `orchestrator`, `planner`, `analyst`, `architect`,
 
 - `provider`: `claude` | `codex` | `gemini` | `grok` | `cursor` | `antigravity`
 - `model`: tier `HIGH` | `MEDIUM` | `LOW`, or an explicit model ID
-- `reasoningEffort`: `low` | `medium` | `high` | `xhigh` | `max` (per provider support;
-  not allowed on `orchestrator`, which stays on Claude with only a model knob)
+- `reasoningEffort`: per-provider only — Claude `low|medium|high|xhigh|max`,
+  Codex `low|medium|high|xhigh|max|ultra`, Antigravity
+  `low|medium|high|max`; Gemini, Grok, and Cursor accept no effort field.
+  Offer only the seated provider's set — an off-list effort fails closed at
+  team start
 - unset roles keep their defaults; routing is resolved once at team start and
   frozen for that run
 
