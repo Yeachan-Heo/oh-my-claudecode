@@ -1,19 +1,19 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-24T00:50:54.853Z",
+  "generatedAt": "2026-10-24T01:17:11.084Z",
   "repository": "Yeachan-Heo/oh-my-claudecode",
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "3f76a9f19164aea5ac9f5db14286162cd4a876a9",
-    "sourceSha256": "398da946dc1c55eba021c6fa138bd8bff1989c307a5d8698493b5c286c72b930",
-    "generatedAt": "2026-10-24T00:50:54.853Z",
+    "head": "6b542d3846cd8824f6345070551cdf52ccd20e92",
+    "sourceSha256": "d883363f3ac401da1d6c8c256886625e7e13ff39bbb78926c1d469e3e4695566",
+    "generatedAt": "2026-10-24T01:17:11.084Z",
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "3f76a9f19164aea5ac9f5db14286162cd4a876a9",
-  "sourceSha256": "398da946dc1c55eba021c6fa138bd8bff1989c307a5d8698493b5c286c72b930",
+  "head": "6b542d3846cd8824f6345070551cdf52ccd20e92",
+  "sourceSha256": "d883363f3ac401da1d6c8c256886625e7e13ff39bbb78926c1d469e3e4695566",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1482,
-      "total": 1506
+      "srcFiles": 1483,
+      "total": 1507
     },
     "generated": {
       "distFiles": 5739,
@@ -89845,12 +89845,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7889,
-      "edgeCount": 8624,
-      "importEdgeCount": 7181,
+      "nodeCount": 7890,
+      "edgeCount": 8630,
+      "importEdgeCount": 7187,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "98d24290c5518fb7f867266428bf2bd1a219a5caff3ef876aa5824474cc6fa49",
-  "manifestSha256": "04f127213a23df9ee7a05d02973b8d5e38b0d6ccab4d2dca00ea4f8acc6968c7"
+  "inventorySha256": "c8d2a9b6a5ad65fa844c198133e560868654be502fefcd008c823e0ed84e374e",
+  "manifestSha256": "cc6bbb87917a66828d386310dd9fde3825b02074801aa5ad68cf1cb2b1302732"
 }
