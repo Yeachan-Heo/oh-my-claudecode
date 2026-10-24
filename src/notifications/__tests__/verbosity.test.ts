@@ -188,6 +188,12 @@ describe("getTmuxTailLines", () => {
     },
   );
 
+  it("falls back for env integers outside the safe range", () => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "9007199254740992");
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 22 };
+    expect(getTmuxTailLines(config)).toBe(22);
+  });
+
   it("trims whitespace around a valid env value", () => {
     vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", " 40\n");
     expect(getTmuxTailLines(baseConfig)).toBe(40);
