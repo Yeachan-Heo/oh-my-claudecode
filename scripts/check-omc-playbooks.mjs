@@ -80,8 +80,8 @@ function parseFrontmatter(source) {
   return fields;
 }
 
-function main() {
-  const playbooksDir = join(projectRoot, '.omc', 'playbooks');
+async function main() {
+  const playbooksDir = join(await resolveOmcStateRoot(projectRoot), 'playbooks');
   if (!existsSync(playbooksDir)) {
     console.log('check-omc-playbooks: no .omc/playbooks directory — nothing to check');
     return 0;
@@ -158,4 +158,4 @@ function main() {
   return 0;
 }
 
-process.exit(main());
+process.exit(await main());

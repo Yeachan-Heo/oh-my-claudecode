@@ -1,6 +1,6 @@
 ---
 name: get-pr-comments
-description: Fetch and summarize the review comments on the active PR — threads deduplicated, each with author, file, unresolved status, and a fix/dismiss/ask triage recommendation. Use before addressing review feedback or when asked what reviewers said.
+description: "Fetch and triage review threads on a PR: threads deduped with resolution state, each with a fix/dismiss/ask recommendation, bot findings read skeptically. Before addressing review feedback."
 aliases: []
 metadata:
   credits:

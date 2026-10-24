@@ -1,6 +1,6 @@
 ---
 name: babysit
-description: Drive an open PR to merge-ready — watch checks and review state with the watch-pr verdict policy (green is not safe), fix CI failures and address review comments through the right lane, record verification verdicts in the ledger, and never merge on its own. Use for "get this PR green", "address the review comments", or "babysit PR #N".
+description: "Drive an open PR to merge-ready on the watch-pr verdict policy — watch checks and review state, fix CI, address comments; never merges, rebases, or force-pushes. For 'get this green' or 'babysit PR #N'."
 aliases: []
 metadata:
   credits:

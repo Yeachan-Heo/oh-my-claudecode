@@ -1,6 +1,6 @@
 ---
 name: fix-merge-conflicts
-description: Resolve merge conflicts non-interactively — read both sides' intent from their commits, resolve preserving both intents where compatible, run the checks, and finalize without force-push to shared branches. Use when a branch conflicts with its base and you own the branch.
+description: "Resolve merge conflicts non-interactively: start the integration, read both sides' intent from their commits, preserve both intents, validate on the resolved tree. Never force-pushes shared branches."
 aliases: []
 metadata:
   credits:
