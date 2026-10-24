@@ -44627,6 +44627,11 @@
         "path": "src/skills/__tests__/skill-config-dir.test.ts"
       },
       {
+        "id": "src/team/__tests__/ack-timeout-env.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/ack-timeout-env.test.ts"
+      },
+      {
         "id": "src/team/__tests__/activity-log.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/activity-log.test.ts"
@@ -78051,6 +78056,36 @@
       {
         "from": "src/skills/__tests__/skill-config-dir.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/ack-timeout-env.test.ts",
+        "to": "src/team/worker-launch-ack.ts",
         "kind": "imports"
       },
       {
