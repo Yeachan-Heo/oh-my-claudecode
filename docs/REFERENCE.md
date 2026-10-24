@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (75 Total)](#skills-75-total)
+- [Skills (77 Total)](#skills-77-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -962,7 +962,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (75 Total)
+## Skills (77 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -990,7 +990,9 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
 | `correct`                 | Make repeated agent mistakes impossible at the highest enforcing level         | `/oh-my-claudecode:correct`                 |
 | `create-formal-verification-skill` | Generate a project-local skill that formally verifies one high-risk property (TLA+/Lean/Kani) | `/oh-my-claudecode:create-formal-verification-skill` |
+| `create-verification-skill` | Generate the project's own verify skill: commands discovered by execution, with a feature map | `/oh-my-claudecode:create-verification-skill` |
 | `maintain-formal-verification-skill` | Re-sync an existing formal verification skill after the covered code changed | `/oh-my-claudecode:maintain-formal-verification-skill` |
+| `maintain-verification-skill` | Re-sync the project verify skill when its commands drift | `/oh-my-claudecode:maintain-verification-skill` |
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/oh-my-claudecode:deep-interview`                |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
@@ -1075,7 +1077,9 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:cancel-ralph [--force] [--all]`      | Deprecated alias with the same force/scope distinction                                         |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
 | `/oh-my-claudecode:create-formal-verification-skill`     | Generate a project skill that formally verifies one high-risk property                        |
+| `/oh-my-claudecode:create-verification-skill`            | Generate the project's own verify skill, commands proven by running them                      |
 | `/oh-my-claudecode:maintain-formal-verification-skill`   | Re-sync a formal verification skill after the covered code changed                            |
+| `/oh-my-claudecode:maintain-verification-skill`          | Re-sync the project verify skill when its commands drift                                      |
 | `/oh-my-claudecode:correct`                              | Make repeated agent mistakes impossible at the highest enforcing level                        |
 | `/oh-my-claudecode:compact [note]`                       | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |

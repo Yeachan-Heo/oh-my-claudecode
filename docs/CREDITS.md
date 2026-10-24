@@ -29,6 +29,8 @@ upstream license file at the repo root when the upstream license requires it.
 | `models` skill | idea | pstack setup-pstack | setup wizard for OMC's existing `team.roleRouting` plus panel-diversity guidance |
 | `create-formal-verification-skill` skill | idea | pstack create-formal-verification-skill | TLA+/Lean/Kani selection method and one-property-per-skill discipline |
 | `maintain-formal-verification-skill` skill | idea | pstack maintain-formal-verification-skill | drift re-sync procedure for formal verification skills |
+| `create-verification-skill` skill | idea | pstack create-verification-skill | project verify-skill generation, commands discovered by execution, feature map |
+| `maintain-verification-skill` skill | idea | pstack maintain-verification-skill | verify-skill drift re-sync |
 | `why` skill | idea | pstack why | multi-source investigation epistemics; human-rulings-verbatim rule |
 | `how` skill | idea | pstack how | explorer/explainer two-pass subsystem walkthrough |
 | `correct` skill | idea | pstack correct | repeated-mistake elimination ladder (lint > type > runtime > script > text) |

@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 75 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 77 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -201,6 +201,8 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'models', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in setup wizard for team.roleRouting role-based model routing (idea credit: pstack setup-pstack); writes config only, never routes a live team.' }),
   entry({ name: 'create-formal-verification-skill', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in generator of project-local formal verification skills, TLA+/Lean/Kani by property shape (idea credit: pstack); one property per generated skill.' }),
   entry({ name: 'maintain-formal-verification-skill', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in drift re-sync for existing formal verification skills (idea credit: pstack); the rerun is the resync.' }),
+  entry({ name: 'create-verification-skill', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in generator of the project-local verify skill, commands discovered by execution with a feature map (idea credit: pstack).' }),
+  entry({ name: 'maintain-verification-skill', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in re-sync of the project verify skill when its commands drift (idea credit: pstack); the rerun is the resync.' }),
   entry({ name: 'why', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in evidence-first investigation with human-rulings epistemics (idea credit: pstack); answers, never edits.' }),
   entry({ name: 'how', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in explorer/explainer subsystem walkthrough (idea credit: pstack); cites file:line.' }),
   entry({ name: 'correct', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in repeated-mistake elimination ladder, lint over type over runtime over script over text (idea credit: pstack).' }),
