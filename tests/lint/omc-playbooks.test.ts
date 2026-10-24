@@ -21,12 +21,6 @@ interface Fixture {
 
 function buildProject(): { root: string; skillsRoot: string } & Fixture {
   const root = mkdtempSync(join(tmpdir(), 'omc-playbooks-'));
-  // The checker resolves the playbooks dir through resolveOmcStateRoot(),
-  // which returns <project>/.omc for a git repo and redirects elsewhere for
-  // a bare directory — so the fixture models a real project with git init.
-  spawnSync('git', ['init', '-q'], { cwd: root });
-  spawnSync('git', ['config', 'user.email', 'fixture@example.com'], { cwd: root });
-  spawnSync('git', ['config', 'user.name', 'fixture'], { cwd: root });
   const skillsRoot = join(root, 'skills');
   mkdirSync(join(skillsRoot, 'tdd', ''), { recursive: true });
   writeFileSync(

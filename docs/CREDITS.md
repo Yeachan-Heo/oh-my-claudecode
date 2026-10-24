@@ -24,3 +24,7 @@ upstream license file at the repo root when the upstream license requires it.
 | `src/features/watch-pr/policy.ts` | mechanism | pstack watch-pr | gate ordering, mergeability-unknown wait, no-checks confirmation window; pure reimplementation |
 | `src/features/verification-ledger/ledger.ts` | mechanism | pstack orch ledger | verdict vocabulary, append-only TSV shape, formula-cell guard |
 | `scripts/check-omc-playbooks.mjs` | mechanism | pstack check-playbooks | extends/anchor validation for project playbook extensions |
+| `babysit` skill | idea | pstack babysit | PR watch-and-fix loop; merge authority stays with the human |
+| `fix-ci` skill | idea | pstack fix-ci | real/flaky/environmental CI failure classification |
+| `fix-merge-conflicts` skill | idea | pstack fix-merge-conflicts | both-intent-preserving non-interactive resolution |
+| `get-pr-comments` skill | idea | pstack get-pr-comments | review-thread dedupe and fix/dismiss/ask triage |
