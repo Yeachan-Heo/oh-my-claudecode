@@ -51,3 +51,5 @@ upstream license file at the repo root when the upstream license requires it.
 | `recall` skill | idea | pstack recall | artifact-first context recovery in trust order |
 | `ketchup` skill | idea | pstack ketchup | session catch-up with executive summary and status lines |
 | `what-did-i-get-done` skill | idea | pstack what-did-i-get-done | authored-commit summaries grouped by theme |
+| `principles` skill | idea | [pstack](https://github.com/cursor/plugins/tree/main/pstack) (Lauren Tan), via the [pstack-claude](https://github.com/michael-denyer/pstack-claude) port (Michael Denyer) | principle library re-expressed against OMC lanes |
+| `benchmark-checklist` skill | idea | pstack benchmark-checklist / explain-the-number | measurement discipline rewritten for the verify protocol |

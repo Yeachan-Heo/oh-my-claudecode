@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (75 Total)](#skills-75-total)
+- [Skills (77 Total)](#skills-77-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -962,7 +962,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (75 Total)
+## Skills (77 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -1014,6 +1014,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `omc-review`              | Evaluate finished work for defects, risk, and simplification                   | `/oh-my-claudecode:omc-review`             |
 | `omc-setup`               | Install or refresh OMC for plugin, npm, and local-development setups           | `/oh-my-claudecode:omc-setup`              |
 | `pr`                      | PR body assembly from OMC's paper trail: smallest visual, verify evidence, ADR-test reversibility | `/oh-my-claudecode:pr` |
+| `principles`              | Ten cross-cutting engineering principles for lane delegation and judgment      | `/oh-my-claudecode:principles`              |
 | `project-session-manager` | Manage isolated development environments (git worktrees + tmux)                | `/oh-my-claudecode:project-session-manager` |
 | `psm`                     | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                     |
 | `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
@@ -1457,6 +1458,7 @@ Additional `omcHud` layout and label options (top-level):
 | `locale`   | HUD label preset. Supported values: `en`, `zh-CN`                                 | `en`       |
 | `labels`   | Per-label HUD text overrides; supported keys only                                 | unset      |
 | `correct`                 | Make repeated agent mistakes impossible at the highest enforcing level         | `/oh-my-claudecode:correct`                 |
+| `benchmark-checklist`     | Vet a measured speedup or regression before reporting or acting on it          | `/oh-my-claudecode:benchmark-checklist`     |
 | `blast-radius`            | Map what a change could break beyond the diff; prove safety by running code     | `/oh-my-claudecode:blast-radius`            |
 | `interrogate`             | Adversarial three-reviewer panel over a diff or design; severity-merged verdict | `/oh-my-claudecode:interrogate`             |
 | `create-formal-verification-skill` | Generate a project-local skill that formally verifies one high-risk property (TLA+/Lean/Kani) | `/oh-my-claudecode:create-formal-verification-skill` |

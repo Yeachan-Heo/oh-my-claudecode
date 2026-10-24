@@ -43,6 +43,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | A risky change needs its blast radius mapped | `blast-radius` |
 | The same agent mistake keeps recurring | `correct` |
 | Long autonomous work needs an audit trail | `show-me-your-work` |
+| A number is about to be reported or acted on | `benchmark-checklist`; standing judgment rules: `principles` |
 | No bundled skill fits the task shape | `figure-it-out` (designs one, validated against anchors) |
 | A property tests cannot reach needs formal proof | `create-formal-verification-skill`; drifted spec: `maintain-formal-verification-skill` |
 | The repo needs its own verification commands recorded | `create-verification-skill`; drifted commands: `maintain-verification-skill` |
