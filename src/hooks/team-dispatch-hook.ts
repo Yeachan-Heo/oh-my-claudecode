@@ -62,20 +62,21 @@ const MAX_UNCONFIRMED_ATTEMPTS = 3;
 
 // ── Env resolvers ──────────────────────────────────────────────────────────
 
+// parseInt would read "6e5" as 6 and "30_000" as 30, silently shrinking the
+// cooldown; only a plain non-negative integer is accepted.
+function resolveCooldownMs(value: unknown, fallback: number): number {
+  const raw = safeString(value).trim();
+  if (!/^\d+$/.test(raw)) return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
 function resolveIssueDispatchCooldownMs(env = process.env): number {
-  const raw = safeString(env[ISSUE_DISPATCH_COOLDOWN_ENV]).trim();
-  if (raw === '') return DEFAULT_ISSUE_DISPATCH_COOLDOWN_MS;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_ISSUE_DISPATCH_COOLDOWN_MS;
-  return parsed;
+  return resolveCooldownMs(env[ISSUE_DISPATCH_COOLDOWN_ENV], DEFAULT_ISSUE_DISPATCH_COOLDOWN_MS);
 }
 
 function resolveDispatchTriggerCooldownMs(env = process.env): number {
-  const raw = safeString(env[DISPATCH_TRIGGER_COOLDOWN_ENV]).trim();
-  if (raw === '') return DEFAULT_DISPATCH_TRIGGER_COOLDOWN_MS;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_DISPATCH_TRIGGER_COOLDOWN_MS;
-  return parsed;
+  return resolveCooldownMs(env[DISPATCH_TRIGGER_COOLDOWN_ENV], DEFAULT_DISPATCH_TRIGGER_COOLDOWN_MS);
 }
 
 function extractIssueKey(triggerMessage: string): string | null {
