@@ -47,6 +47,19 @@ function resolveSkillsRoot() {
 
 const ANCHOR_RE = /\*\*(After|Before|Replace|In)\*\*\s+"([^"]+)"/g;
 
+/**
+ * Resolve a bundled skill's full body. Marketplace/plugin installs compact
+ * `skills/<name>/SKILL.md` into registry shims and archive the full text
+ * under `skill-bodies/<name>/SKILL.md`; anchors must validate against the
+ * full body, so prefer the archive when it exists and fall back to the
+ * skills tree for source and standalone layouts.
+ */
+function resolveSkillBodyPath(skillsRoot, base) {
+  const archived = join(skillsRoot, 'skill-bodies', base, 'SKILL.md');
+  if (existsSync(archived)) return archived;
+  return join(skillsRoot, base, 'SKILL.md');
+}
+
 function parseFrontmatter(source) {
   const match = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) return {};
@@ -105,7 +118,7 @@ function main() {
         allBasesFound = false;
         continue;
       }
-      const skillPath = join(skillsRoot, base, 'SKILL.md');
+      const skillPath = resolveSkillBodyPath(skillsRoot, base);
       if (!existsSync(skillPath)) {
         problems.push(`${file}: extends "${base}" but no bundled skill named "${base}" exists (skills root: ${skillsRoot})`);
         allBasesFound = false;

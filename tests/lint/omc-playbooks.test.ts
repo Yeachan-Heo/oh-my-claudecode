@@ -128,6 +128,28 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('validates anchors against archived skill bodies on installed layouts', () => {
+    const { root, skillsRoot } = buildProject();
+    // Marketplace/plugin install layout: skills/ holds the compact registry
+    // shim (no step text); the full body lives under skill-bodies/.
+    const fullBody = '---\nname: tdd\n---\n\n# TDD\n\nWrite the failing test first. Watch it fail for the intended reason.\n';
+    mkdirSync(join(skillsRoot, 'skill-bodies', 'tdd'), { recursive: true });
+    writeFileSync(join(skillsRoot, 'skill-bodies', 'tdd', 'SKILL.md'), fullBody);
+    writeFileSync(
+      join(skillsRoot, 'tdd', 'SKILL.md'),
+      '---\nname: tdd\ndescription: Registry shim; full body archived under skill-bodies.\n---\n\nLoad on demand.\n',
+    );
+    writePlaybook(
+      root,
+      'installed.md',
+      '---\nextends: tdd\nwhen: Resync after a compacting setup.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status, `stderr: ${r.stderr}`).toBe(0);
+    expect(r.stdout).toContain('1 project playbook(s) valid');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('matches each multi-base anchor against any extended skill, not every one', () => {
     const { root, skillsRoot } = buildProject();
     mkdirSync(join(skillsRoot, 'verify', ''), { recursive: true });

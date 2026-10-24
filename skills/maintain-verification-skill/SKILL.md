@@ -38,8 +38,11 @@ project's `verify` skill to the repo's current reality.
    gap as uncovered — the map stays honest.
 4. **Update the skill and feature map in place**: same file, corrected
    commands, corrected coverage table, dated revision line at the top.
-5. **Record** the resync in `.omc/state/verification-ledger.tsv` (verdict
-   `unit-test-verified`, evidence = the re-run commands).
+5. **Record** the resync in `.omc/state/verification-ledger.tsv` with the
+   verdict the rerun actually earned — `unit-test-verified` when the test
+   suite ran, `live-ui-verified` for a live-UI flow, `type-check-only`
+   when only build/lint/typecheck commands were rerun — and those commands
+   as evidence. Never claim a test ran that did not.
 
 ## Rules
 

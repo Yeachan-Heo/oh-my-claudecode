@@ -75,6 +75,7 @@ Classification order, first match wins:
 
 - conflicts → **blocked** (merge conflicts; the branch owner decides the resolution)
 - any failed check → **blocked** (fix lane)
+- any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
 - mergeability not yet computed → **waiting** (re-poll; not an error)

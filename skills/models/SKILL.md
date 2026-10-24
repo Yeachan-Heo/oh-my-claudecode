@@ -42,7 +42,11 @@ Per role (canonical names: `orchestrator`, `planner`, `analyst`, `architect`,
 ```
 
 - `provider`: `claude` | `codex` | `gemini` | `grok` | `cursor` | `antigravity`
+  — except `orchestrator`, which is pinned to Claude
 - `model`: tier `HIGH` | `MEDIUM` | `LOW`, or an explicit model ID
+  — the **only** key `orchestrator` accepts; provider and reasoningEffort
+  are rejected for it (config validation fails closed at team start), so
+  the wizard offers model-only for that role
 - `reasoningEffort`: per-provider only — Claude `low|medium|high|xhigh|max`,
   Codex `low|medium|high|xhigh|max|ultra`, Antigravity
   `low|medium|high|max`; Gemini, Grok, and Cursor accept no effort field.
