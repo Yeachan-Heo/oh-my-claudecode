@@ -43,11 +43,12 @@ are in scope.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
 3. **Act on the verdict**:
-   - failing check → read the log, delegate a focused fix to
-     `oh-my-claudecode:debugger` or `executor`, push, and resume watching
-   - requested changes → address each thread through the review lane; reply
-     to threads you resolve; dismiss bot noise with a concrete reason
-     instead of churning code
+   - failing check → `fix-ci` (classify real/flaky/environmental, then fix)
+   - requested changes → `get-pr-comments` to triage threads, then address
+     each through the review lane; reply to threads you resolve; dismiss
+     bot noise with a concrete reason instead of churning code
+   - conflicts → `fix-merge-conflicts` when the branch is ours to resolve;
+     otherwise report to the branch owner
    - mergeability unknown → wait one interval and re-read; it is never an
      error
    - draft or missing review → report what is missing; do not self-approve

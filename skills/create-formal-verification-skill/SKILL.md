@@ -65,10 +65,10 @@ verify it, and leave the verification behind as structure.
 ## Maintenance
 
 When the modeled code changes shape (lines move, protocol steps change),
-re-sync the model before trusting a green run: re-check each assumption
-against the current code, update cited lines, rerun. A spec that cites lines
-that no longer exist is stale, and a stale spec's green is worthless — say so
-out loud in the session.
+hand to the `maintain-formal-verification-skill` skill: it re-checks each
+assumption against current code, updates cited lines, and reruns. A spec
+that cites lines that no longer exist is stale, and a stale spec's green is
+worthless — say so out loud in the session.
 
 ## Rules
 
