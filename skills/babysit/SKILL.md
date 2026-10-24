@@ -39,6 +39,13 @@ are in scope.
 
 1. **Read state** via `gh`: `gh pr view <N> --json state,mergeable,reviewDecision,isDraft,headRefOid,headRefName`
    and `gh pr checks <N> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`).
+   Normalize before classifying: `mergeable` arrives uppercased
+   (`MERGEABLE`/`CONFLICTING`, `UNKNOWN` or empty while GitHub computes it),
+   and `reviewDecision` is an **empty string** when no review exists — not
+   `none`. Exit codes: `gh pr checks --json` exits 0 even when checks
+   **fail** — judge by `bucket`, never the exit code; with no checks
+   configured it exits 1 printing "no checks reported", which is the
+   no-checks path, not an error.
    Confirm the first read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.

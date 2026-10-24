@@ -51,8 +51,8 @@ Per role (canonical names: `orchestrator`, `planner`, `analyst`, `architect`,
 - `reasoningEffort`: per-provider only — Claude `low|medium|high|xhigh|max`,
   Codex `low|medium|high|xhigh|max|ultra`, Antigravity
   `low|medium|high|max`; Gemini, Grok, and Cursor accept no effort field.
-  Offer only the seated provider's set — an off-list effort fails closed at
-  team start
+  Offer only the seated provider's set — an off-list value is rejected at
+  config load by `validateTeamConfig`, before any team starts
 - unset roles keep their defaults; routing is resolved once at team start and
   frozen for that run
 
