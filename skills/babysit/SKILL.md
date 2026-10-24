@@ -89,7 +89,13 @@ Classification order, first match wins:
 - pending checks → **waiting**
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
-  real. A first sighting of "no checks" is never readiness.
+  real. A first sighting of "no checks" is never readiness. Before serving
+  that window, check whether the repo has PR-triggered workflows at all
+  (`.github/workflows/`, or a run on another PR): when workflows exist but
+  this head shows none — observed in the wild on path-filtered and
+  skipped-event pushes — cross-check `gh run list --branch <head>`; a
+  persistent zero-run anomaly is **blocked (investigate: path filters,
+  base mismatch, skipped events)**, not a no-checks repo.
 - otherwise → **ready**, with the head SHA recorded in the proof
 
 "Ready" means the gates you can see are green. It is not permission to
