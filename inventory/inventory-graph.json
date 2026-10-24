@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "eb7b118b9690e28889d75d88240a439a2f92f7e0",
-    "sourceSha256": "dd041944429959f6605f1329ad168f50dacc10accca301f03f768d9152e428d9",
+    "head": "fdcf8b74b2ec4f27415d2352c53c5983224f6f95",
+    "sourceSha256": "3745a3f9563989bd3380ef09216b80de9c24dadd23eaba1c94b19db4f95ae567",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "eb7b118b9690e28889d75d88240a439a2f92f7e0",
-  "sourceSha256": "dd041944429959f6605f1329ad168f50dacc10accca301f03f768d9152e428d9",
+  "head": "fdcf8b74b2ec4f27415d2352c53c5983224f6f95",
+  "sourceSha256": "3745a3f9563989bd3380ef09216b80de9c24dadd23eaba1c94b19db4f95ae567",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1480,
-      "total": 1504
+      "srcFiles": 1481,
+      "total": 1505
     },
     "generated": {
       "distFiles": 5739,
@@ -46182,6 +46182,11 @@
         "path": "src/utils/string-width.ts"
       },
       {
+        "id": "src/utils/url.ts",
+        "kind": "src",
+        "path": "src/utils/url.ts"
+      },
+      {
         "id": "src/utils/user-skill-compat.ts",
         "kind": "src",
         "path": "src/utils/user-skill-compat.ts"
@@ -72604,6 +72609,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hud/elements/git.ts",
+        "to": "src/utils/url.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hud/elements/hostname.ts",
         "to": "external:node:os",
         "kind": "imports"
@@ -77772,6 +77782,11 @@
         "from": "src/providers/index.ts",
         "to": "src/providers/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/providers/index.ts",
+        "to": "src/utils/url.ts",
+        "kind": "imports"
       },
       {
         "from": "src/ralphthon/__tests__/cli.test.ts",
@@ -89780,12 +89795,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7887,
-      "edgeCount": 8620,
-      "importEdgeCount": 7177,
+      "nodeCount": 7888,
+      "edgeCount": 8622,
+      "importEdgeCount": 7179,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "80eefbacad83b4daaa363aefb87df1c7d45439c49c4bf0f7fe6f509ccfb112b0",
-  "manifestSha256": "559d72b2d9b71973eeca9925ff28ddcbf7aa467e89a78c08cc32bfd45703387f"
+  "inventorySha256": "99d4b91f9273f76a1f3d0fed696d179ba36022d68782408a7448c3e3aacec924",
+  "manifestSha256": "d435b6db6dab26cc73109f4a785820db190c94db9b6df40ca38def16437989c2"
 }
