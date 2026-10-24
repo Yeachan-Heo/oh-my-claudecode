@@ -46197,6 +46197,11 @@
         "path": "src/utils/string-width.ts"
       },
       {
+        "id": "src/utils/url.ts",
+        "kind": "src",
+        "path": "src/utils/url.ts"
+      },
+      {
         "id": "src/utils/user-skill-compat.ts",
         "kind": "src",
         "path": "src/utils/user-skill-compat.ts"
@@ -72619,6 +72624,11 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hud/elements/git.ts",
+        "to": "src/utils/url.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hud/elements/hostname.ts",
         "to": "external:node:os",
         "kind": "imports"
@@ -77787,6 +77797,11 @@
         "from": "src/providers/index.ts",
         "to": "src/providers/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/providers/index.ts",
+        "to": "src/utils/url.ts",
+        "kind": "imports"
       },
       {
         "from": "src/ralphthon/__tests__/cli.test.ts",
