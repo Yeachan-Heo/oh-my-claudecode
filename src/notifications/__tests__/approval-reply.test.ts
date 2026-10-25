@@ -40,7 +40,16 @@ describe("parseApprovalReply", () => {
     expect(parseApprovalReply("拒绝")).toBe("denied");
   });
 
+  it("ignores punctuation trailing the decision keyword", () => {
+    expect(parseApprovalReply("Yes, ship it")).toBe("approved");
+    expect(parseApprovalReply("approved.")).toBe("approved");
+    expect(parseApprovalReply("批准。")).toBe("approved");
+    expect(parseApprovalReply("No!")).toBe("denied");
+    expect(parseApprovalReply("拒绝，先修测试")).toBe("denied");
+  });
+
   it("returns null for non-decision text", () => {
+    expect(parseApprovalReply("yes?")).toBeNull();
     expect(parseApprovalReply("maybe later")).toBeNull();
     expect(parseApprovalReply("")).toBeNull();
     expect(parseApprovalReply("fix the tests first")).toBeNull();
