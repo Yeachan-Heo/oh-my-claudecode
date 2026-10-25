@@ -52,6 +52,17 @@ function readPositiveIntegerEnv(name, fallback) {
   return Number.isSafeInteger(parsed) ? parsed : fallback;
 }
 
+function readPercentThresholdEnv(name, fallback) {
+  const raw = process.env[name];
+  if (typeof raw !== 'string' || raw.trim() === '') return fallback;
+  const trimmed = raw.trim();
+  // parseInt('1e2', 10) is 1 and parseInt('85.9', 10) is 85. Either spelling
+  // moved the compaction warning to a percent the user did not set.
+  if (!/^[+-]?\d+$/.test(trimmed)) return fallback;
+  const parsed = Number(trimmed);
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
 const AGENT_OUTPUT_ANALYSIS_LIMIT = readPositiveIntegerEnv(
   'OMC_AGENT_OUTPUT_ANALYSIS_LIMIT',
   DEFAULT_AGENT_OUTPUT_ANALYSIS_LIMIT,
@@ -60,8 +71,14 @@ const AGENT_OUTPUT_SUMMARY_LIMIT = readPositiveIntegerEnv(
   'OMC_AGENT_OUTPUT_SUMMARY_LIMIT',
   DEFAULT_AGENT_OUTPUT_SUMMARY_LIMIT,
 );
-const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
-const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT || '90', 10);
+const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = readPercentThresholdEnv(
+  'OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT',
+  70,
+);
+const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = readPercentThresholdEnv(
+  'OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT',
+  90,
+);
 // Unlike the two percent thresholds above, this value has no clamp downstream:
 // `now - lastWarningTime >= NaN` is false, so a malformed override made the
 // cooldown never expire and suppressed preemptive warnings for the session.
