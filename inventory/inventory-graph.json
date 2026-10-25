@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "20fa228dfb7815cbb01f4025688dcef603373963",
-    "sourceSha256": "3a072b2143dfe0e20912c8f6f2ea7a0aa133e08797034a92552297195bb501b9",
+    "head": "de4026249a3057d099c2000e70d2974d68c1d62b",
+    "sourceSha256": "a9c3ede66ee790428b6fac67505c78a30b0dcc0434e3ba9655cc6757894bce7f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "20fa228dfb7815cbb01f4025688dcef603373963",
-  "sourceSha256": "3a072b2143dfe0e20912c8f6f2ea7a0aa133e08797034a92552297195bb501b9",
+  "head": "de4026249a3057d099c2000e70d2974d68c1d62b",
+  "sourceSha256": "a9c3ede66ee790428b6fac67505c78a30b0dcc0434e3ba9655cc6757894bce7f",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 332,
+      "hookFiles": 333,
       "featureFiles": 88,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1482,
-      "total": 1506
+      "srcFiles": 1483,
+      "total": 1507
     },
     "generated": {
       "distFiles": 5729,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 332,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -291,6 +291,7 @@
       "src/hooks/non-interactive-env/index.ts",
       "src/hooks/non-interactive-env/types.ts",
       "src/hooks/notepad/index.ts",
+      "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
       "src/hooks/omc-orchestrator/audit.ts",
       "src/hooks/omc-orchestrator/constants.ts",
       "src/hooks/omc-orchestrator/index.ts",
@@ -6793,6 +6794,7 @@
       "src/hooks/non-interactive-env/index.ts",
       "src/hooks/non-interactive-env/types.ts",
       "src/hooks/notepad/index.ts",
+      "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
       "src/hooks/omc-orchestrator/audit.ts",
       "src/hooks/omc-orchestrator/constants.ts",
       "src/hooks/omc-orchestrator/index.ts",
@@ -42339,6 +42341,11 @@
         "path": "src/hooks/notepad/index.ts"
       },
       {
+        "id": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts"
+      },
+      {
         "id": "src/hooks/omc-orchestrator/audit.ts",
         "kind": "hook",
         "path": "src/hooks/omc-orchestrator/audit.ts"
@@ -66901,6 +66908,36 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "src/hooks/omc-orchestrator/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/omc-orchestrator/audit.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -89682,12 +89719,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7879,
-      "edgeCount": 8612,
-      "importEdgeCount": 7173,
+      "nodeCount": 7880,
+      "edgeCount": 8618,
+      "importEdgeCount": 7179,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "35be75a35748d33849f01070f9cf6e1bd77534e51b164eb449614a8e11c55f10",
-  "manifestSha256": "c7f58d48837ed97fc878d417711934e904a56e08d175c174f3fc21ab5d9b0878"
+  "inventorySha256": "488f7c7e5157d3140da616f61731c5cbacbb8f2588680330adf1eabcfe21d408",
+  "manifestSha256": "2ffd571c81918a45a88fa35ac5b8b0fce1e334384e454374462b51275a84c47e"
 }
