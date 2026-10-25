@@ -368,7 +368,7 @@ const APPROVAL_DENY_WORDS = new Set([
  * not look like a decision (the message is then left for normal handling).
  */
 export function parseApprovalReply(text: string): 'approved' | 'denied' | null {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || '';
+  const firstWord = text.trim().toLowerCase().split(/[\s.,!;:。，！；：、]+/)[0] || '';
   if (APPROVAL_APPROVE_WORDS.has(firstWord)) return 'approved';
   if (APPROVAL_DENY_WORDS.has(firstWord)) return 'denied';
   return null;
