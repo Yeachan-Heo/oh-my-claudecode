@@ -350,7 +350,9 @@ export function buildProviderEnvironment(
 ): Record<string, string> {
   const normalized = normalizeProviderEnvironment(providerEnv, platform);
   const baseline: Record<string, string> = {};
-  for (const key of SAFE_BASELINE_ENV_KEYS) {
+  // claude finds its macOS keychain login through USER; without it the worker starts logged out.
+  const identityKeys = platform === 'win32' ? ['USERPROFILE'] : ['HOME', 'USER'];
+  for (const key of [...SAFE_BASELINE_ENV_KEYS, ...identityKeys]) {
     const value = sourceEnv[key];
     if (typeof value === 'string' && value.length > 0) baseline[key] = value;
   }
@@ -359,9 +361,6 @@ export function buildProviderEnvironment(
       .find(value => typeof value === 'string' && /^[A-Za-z]:\\/.test(value));
     if (typeof systemRoot === 'string') baseline.SystemRoot = systemRoot;
   }
-  const homeKey = platform === 'win32' ? 'USERPROFILE' : 'HOME';
-  const home = sourceEnv[homeKey];
-  if (typeof home === 'string' && home.length > 0) baseline[homeKey] = home;
 
   // Resolve passthrough environment variables from the source environment
   const passthroughList = envPassthrough ?? parseEnvPassthrough(sourceEnv.OMC_TEAM_WORKER_ENV_PASSTHROUGH);
