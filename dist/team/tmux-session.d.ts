@@ -219,6 +219,8 @@ export interface WaitForShellReadyOptions {
     pollIntervalMs?: number;
     tmuxServerIdentity?: TmuxServerIdentity;
 }
+export declare function resolveTeamShellReadyTimeoutMs(env?: NodeJS.ProcessEnv, explicitTimeoutMs?: number): number;
+export declare function resolveTeamStartSubmitTimeoutMs(env?: NodeJS.ProcessEnv, explicitTimeoutMs?: number): number;
 export interface WorkerPaneShell {
     /** Shell command argv appended to new-session/new-window/split-window. */
     args: string[];
@@ -374,7 +376,6 @@ export type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_dire
  */
 export declare function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null;
 export declare function paneHasTrustPrompt(captured: string, provider?: CliAgentType): boolean;
-export declare function paneHasCursorWorkspaceTrustPrompt(captured: string): boolean;
 export declare function paneHasActiveTask(captured: string, provider?: CliAgentType): boolean;
 export declare function paneLooksReady(captured: string, provider?: CliAgentType): boolean;
 export interface WaitForPaneReadyOptions {

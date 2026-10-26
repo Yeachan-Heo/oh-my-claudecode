@@ -77,4 +77,5 @@ export declare function scaleUp(teamName: string, count: number, agentType: stri
 }>, cwd: string, env?: NodeJS.ProcessEnv): Promise<ScaleUpResult | ScaleError>;
 /** Public scale-down facade; force and drain behavior are delegated unchanged. */
 export declare function scaleDown(teamName: string, cwd: string, options?: ScaleDownOptions, env?: NodeJS.ProcessEnv): Promise<ScaleDownResult | ScaleError>;
+export declare function resolveWorkerReadyTimeoutMs(env: NodeJS.ProcessEnv): number;
 //# sourceMappingURL=scaling.d.ts.map

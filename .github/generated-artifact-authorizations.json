@@ -34273,6 +34273,1600 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4554,
+      "targetRef": "main",
+      "mergeBaseSha": "cb3a97350d568a33b392a69fbde745843f240362",
+      "headSha": "ba44a65a09cf7fef2c32c3c858c0b345dc1b0d5a",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-20T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 43,
+        "sha256": "6b425d9c4b3ef8944ca0d986197d59da101f8528ad4eea72f5ec5193d0090c42"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "92922cbf3d4a49369a1cb6be710d36bd944f5f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "2b5fc002051236d0d47f5bef87d79c994b9f7191",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "ad0eb0567fb086808ab4fd9b8cc0d83f67208d1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "bb8baadb0439d47819aba3744f21334b83f840b1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "1ba9eb3a0cd411e6faa4afd1f56d3700311e5979",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "1b8720f0f9cbf6c70ed73ae85788348373c91495",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js",
+          "sha": "65a8b5195835428580c46e3ce02b2c3fdf4c2e73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js.map",
+          "sha": "fca20df45f1f73af6ec4b2a2b452dd723e2afb1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js",
+          "sha": "958f542b7ded2fd4670e20e4e8070e47a49c5e3e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js.map",
+          "sha": "e32fe54379ca63ec7f5f43cade8f70e1b732e911",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js",
+          "sha": "4d473c91ef9aafef96edb76e0033164051d09245",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js.map",
+          "sha": "b2f8cbdb16687817769200ba0298662dc48d151e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js",
+          "sha": "24b7de06492cdf4dabe33edabae7d8196fc441d6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js.map",
+          "sha": "c016d5d9a0f4fa72918da37b21bc8a03f6ba6698",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.d.ts.map",
+          "sha": "54853f50d8e0e4856ba6680de1db588029f8df85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js",
+          "sha": "66b835fe95700bee81699b7a3f2410ff6aa8dce0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js.map",
+          "sha": "fc54597207c88a3f650c6440441788cdfd3230ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js",
+          "sha": "bf0de79ce09897e4936f3d020186208b8f947fba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js.map",
+          "sha": "c29ade1589c453733a5287a3d790f04950b7b46c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.d.ts.map",
+          "sha": "74d1d8bc092cfd9b6e3861fd6c6b3a6300ffbee5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js",
+          "sha": "341ec5ac9ef93f3b3430f608e921c677fc0d8d2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js.map",
+          "sha": "db77abaea2e0983914a1687865c0e6acf6a822f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.d.ts.map",
+          "sha": "9a1ba49e0d0518d25f1cd2576e01d1f81c6b59da",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js",
+          "sha": "16fa48b9d81d61fad7c18ede0835dc9bcc329bd2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js.map",
+          "sha": "2a151dfe32231b592f571d8add045494894304c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts",
+          "sha": "3651e24b30feb368b3bcade2b198e9062e56f4de",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts.map",
+          "sha": "79a5b993b8b008f4e2cb0e5c8bcf01be7cb58ba9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js",
+          "sha": "42057f6380aca8a253379ad9a3d461228cc14176",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js.map",
+          "sha": "76d7c8a0ca552f06185ba3e720ba37d4d72c0463",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "ed6a4d719b1f9bb4164ddb2e1bafe9965c866139",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "213b028ba6769ea82f04d760cab61b2e35f634f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "30955f436b6887e80dc7b28140d8342a66755d7c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "18a61d224ee28e6f001ebaf431fb8255144d7e07",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.d.ts.map",
+          "sha": "213c540506ab110adec4a09a0eef5e6da7dc947d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js",
+          "sha": "c9b25fdbfc3c21b2ac4dbe86f83a1c36360f69f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js.map",
+          "sha": "7c4739a30716176e00fbe97b1d8e82a6dfb94638",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js",
+          "sha": "abfe8bbf10be6203b8e3dc03aa01664d51473a9f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js.map",
+          "sha": "425c5e4000aaf48e70dff1394427f8f130c0d677",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.d.ts.map",
+          "sha": "1519d6918a41f7e044f04012c278e6ff44848f96",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js",
+          "sha": "72f2482c466eb0ffd22d9ea394660bb8aee91036",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js.map",
+          "sha": "13d751d5230c9f83860f67afbf75c8ec18c4b62a",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.d.ts",
+          "sha": "5de357b7522857ddebe8ab04e060834eb48052a6",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.js",
+          "sha": "723f1d94f2c5e59b52401d0b8e778d18ed9ff334",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4562,
+      "targetRef": "dev",
+      "mergeBaseSha": "8acea2bed0512b85fc5c3410de59a2cf1db9ebca",
+      "headSha": "1258ed47514fe55e1fc37ba4763590dfce77423e",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 43,
+        "sha256": "6b425d9c4b3ef8944ca0d986197d59da101f8528ad4eea72f5ec5193d0090c42"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "92922cbf3d4a49369a1cb6be710d36bd944f5f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "2b5fc002051236d0d47f5bef87d79c994b9f7191",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "ad0eb0567fb086808ab4fd9b8cc0d83f67208d1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "bb8baadb0439d47819aba3744f21334b83f840b1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "1ba9eb3a0cd411e6faa4afd1f56d3700311e5979",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "1b8720f0f9cbf6c70ed73ae85788348373c91495",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js",
+          "sha": "65a8b5195835428580c46e3ce02b2c3fdf4c2e73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js.map",
+          "sha": "fca20df45f1f73af6ec4b2a2b452dd723e2afb1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js",
+          "sha": "958f542b7ded2fd4670e20e4e8070e47a49c5e3e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js.map",
+          "sha": "e32fe54379ca63ec7f5f43cade8f70e1b732e911",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js",
+          "sha": "4d473c91ef9aafef96edb76e0033164051d09245",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js.map",
+          "sha": "b2f8cbdb16687817769200ba0298662dc48d151e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js",
+          "sha": "24b7de06492cdf4dabe33edabae7d8196fc441d6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js.map",
+          "sha": "c016d5d9a0f4fa72918da37b21bc8a03f6ba6698",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.d.ts.map",
+          "sha": "54853f50d8e0e4856ba6680de1db588029f8df85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js",
+          "sha": "66b835fe95700bee81699b7a3f2410ff6aa8dce0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js.map",
+          "sha": "fc54597207c88a3f650c6440441788cdfd3230ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js",
+          "sha": "bf0de79ce09897e4936f3d020186208b8f947fba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js.map",
+          "sha": "c29ade1589c453733a5287a3d790f04950b7b46c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.d.ts.map",
+          "sha": "74d1d8bc092cfd9b6e3861fd6c6b3a6300ffbee5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js",
+          "sha": "341ec5ac9ef93f3b3430f608e921c677fc0d8d2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js.map",
+          "sha": "db77abaea2e0983914a1687865c0e6acf6a822f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.d.ts.map",
+          "sha": "9a1ba49e0d0518d25f1cd2576e01d1f81c6b59da",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js",
+          "sha": "16fa48b9d81d61fad7c18ede0835dc9bcc329bd2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js.map",
+          "sha": "2a151dfe32231b592f571d8add045494894304c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts",
+          "sha": "3651e24b30feb368b3bcade2b198e9062e56f4de",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts.map",
+          "sha": "79a5b993b8b008f4e2cb0e5c8bcf01be7cb58ba9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js",
+          "sha": "42057f6380aca8a253379ad9a3d461228cc14176",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js.map",
+          "sha": "76d7c8a0ca552f06185ba3e720ba37d4d72c0463",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "ed6a4d719b1f9bb4164ddb2e1bafe9965c866139",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "213b028ba6769ea82f04d760cab61b2e35f634f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "30955f436b6887e80dc7b28140d8342a66755d7c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "18a61d224ee28e6f001ebaf431fb8255144d7e07",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.d.ts.map",
+          "sha": "213c540506ab110adec4a09a0eef5e6da7dc947d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js",
+          "sha": "c9b25fdbfc3c21b2ac4dbe86f83a1c36360f69f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js.map",
+          "sha": "7c4739a30716176e00fbe97b1d8e82a6dfb94638",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js",
+          "sha": "abfe8bbf10be6203b8e3dc03aa01664d51473a9f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js.map",
+          "sha": "425c5e4000aaf48e70dff1394427f8f130c0d677",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.d.ts.map",
+          "sha": "1519d6918a41f7e044f04012c278e6ff44848f96",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js",
+          "sha": "72f2482c466eb0ffd22d9ea394660bb8aee91036",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js.map",
+          "sha": "13d751d5230c9f83860f67afbf75c8ec18c4b62a",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.d.ts",
+          "sha": "5de357b7522857ddebe8ab04e060834eb48052a6",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.js",
+          "sha": "723f1d94f2c5e59b52401d0b8e778d18ed9ff334",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4569,
+      "targetRef": "dev",
+      "mergeBaseSha": "e80f124aee88f3c235a7d6082c8e24fd98c977cf",
+      "headSha": "dedab13a1649fcb4d385713376ab5102f9ef16de",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 43,
+        "sha256": "6b425d9c4b3ef8944ca0d986197d59da101f8528ad4eea72f5ec5193d0090c42"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "92922cbf3d4a49369a1cb6be710d36bd944f5f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "2b5fc002051236d0d47f5bef87d79c994b9f7191",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "ad0eb0567fb086808ab4fd9b8cc0d83f67208d1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "bb8baadb0439d47819aba3744f21334b83f840b1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "1ba9eb3a0cd411e6faa4afd1f56d3700311e5979",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "1b8720f0f9cbf6c70ed73ae85788348373c91495",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js",
+          "sha": "65a8b5195835428580c46e3ce02b2c3fdf4c2e73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud/git.test.js.map",
+          "sha": "fca20df45f1f73af6ec4b2a2b452dd723e2afb1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js",
+          "sha": "958f542b7ded2fd4670e20e4e8070e47a49c5e3e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/providers/detection.test.js.map",
+          "sha": "e32fe54379ca63ec7f5f43cade8f70e1b732e911",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js",
+          "sha": "4d473c91ef9aafef96edb76e0033164051d09245",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/rate-limit-wait/tmux-detector.test.js.map",
+          "sha": "b2f8cbdb16687817769200ba0298662dc48d151e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js",
+          "sha": "24b7de06492cdf4dabe33edabae7d8196fc441d6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/teleport.test.js.map",
+          "sha": "c016d5d9a0f4fa72918da37b21bc8a03f6ba6698",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.d.ts.map",
+          "sha": "54853f50d8e0e4856ba6680de1db588029f8df85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js",
+          "sha": "66b835fe95700bee81699b7a3f2410ff6aa8dce0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js.map",
+          "sha": "fc54597207c88a3f650c6440441788cdfd3230ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js",
+          "sha": "bf0de79ce09897e4936f3d020186208b8f947fba",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/rate-limit-wait/tmux-detector.js.map",
+          "sha": "c29ade1589c453733a5287a3d790f04950b7b46c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.d.ts.map",
+          "sha": "74d1d8bc092cfd9b6e3861fd6c6b3a6300ffbee5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js",
+          "sha": "341ec5ac9ef93f3b3430f608e921c677fc0d8d2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/git.js.map",
+          "sha": "db77abaea2e0983914a1687865c0e6acf6a822f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.d.ts.map",
+          "sha": "9a1ba49e0d0518d25f1cd2576e01d1f81c6b59da",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js",
+          "sha": "16fa48b9d81d61fad7c18ede0835dc9bcc329bd2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/providers/index.js.map",
+          "sha": "2a151dfe32231b592f571d8add045494894304c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts",
+          "sha": "3651e24b30feb368b3bcade2b198e9062e56f4de",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.d.ts.map",
+          "sha": "79a5b993b8b008f4e2cb0e5c8bcf01be7cb58ba9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js",
+          "sha": "42057f6380aca8a253379ad9a3d461228cc14176",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/scaling.js.map",
+          "sha": "76d7c8a0ca552f06185ba3e720ba37d4d72c0463",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "ed6a4d719b1f9bb4164ddb2e1bafe9965c866139",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "213b028ba6769ea82f04d760cab61b2e35f634f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "30955f436b6887e80dc7b28140d8342a66755d7c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "18a61d224ee28e6f001ebaf431fb8255144d7e07",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.d.ts.map",
+          "sha": "213c540506ab110adec4a09a0eef5e6da7dc947d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js",
+          "sha": "c9b25fdbfc3c21b2ac4dbe86f83a1c36360f69f4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js.map",
+          "sha": "7c4739a30716176e00fbe97b1d8e82a6dfb94638",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js",
+          "sha": "abfe8bbf10be6203b8e3dc03aa01664d51473a9f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/__tests__/client-timeout-env.test.js.map",
+          "sha": "425c5e4000aaf48e70dff1394427f8f130c0d677",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.d.ts.map",
+          "sha": "1519d6918a41f7e044f04012c278e6ff44848f96",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js",
+          "sha": "72f2482c466eb0ffd22d9ea394660bb8aee91036",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/lsp/client.js.map",
+          "sha": "13d751d5230c9f83860f67afbf75c8ec18c4b62a",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.d.ts",
+          "sha": "5de357b7522857ddebe8ab04e060834eb48052a6",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/url.js",
+          "sha": "723f1d94f2c5e59b52401d0b8e778d18ed9ff334",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4576,
+      "targetRef": "dev",
+      "mergeBaseSha": "6f3841a212ed9bb848a051ec9c1d346fa7b5c642",
+      "headSha": "187b2c60865445d56e44b42800ae933800b7767f",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-10-31T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 12,
+        "sha256": "3855b865f4c5a55ace1e4473ba7cad6b2199e82a10edc7aaac910a8eaa499953"
+      },
+      "generatedFiles": [
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts",
+          "sha": "fcb5adf2e4bbf42f507ff703c5aed44a8378f9ff",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map",
+          "sha": "a5dfd1ee2272f685a7d038403a7ea022092bb5ae",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js",
+          "sha": "6de9eac96c5ed07e5b3992515296b6c461380cf6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map",
+          "sha": "c5e5ec2494155029972060d0ed6793af5995e3d3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts",
+          "sha": "3c48d14f97d38ccf6a319b6c087466f9cbc6169c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map",
+          "sha": "b847714ae7b742705065eb52d56c1b6365a1a679",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js",
+          "sha": "04c41c7d2a8386844cfc0c567042708d356abb71",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map",
+          "sha": "69c22532e89668efa5624153328045bc840091fc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts",
+          "sha": "c5c864abc1cd229f7ab61a67696ee6b59d3719db",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts.map",
+          "sha": "040f8b5ad593c67d2b19d78ecbd8815bf5771696",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js",
+          "sha": "d2fa5a9dc10c4851e84184bfe96de69bb4006d41",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js.map",
+          "sha": "bf66de2c69a281ee7ddcf367789fd2a0e2d0281e",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4581,
+      "targetRef": "dev",
+      "mergeBaseSha": "cd6455012e6f843323166800bece18b4d394dc91",
+      "headSha": "c973acb102e702cdb1d7b3d7b396a95bdd3af319",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 12,
+        "sha256": "3855b865f4c5a55ace1e4473ba7cad6b2199e82a10edc7aaac910a8eaa499953"
+      },
+      "generatedFiles": [
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts",
+          "sha": "fcb5adf2e4bbf42f507ff703c5aed44a8378f9ff",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map",
+          "sha": "a5dfd1ee2272f685a7d038403a7ea022092bb5ae",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js",
+          "sha": "6de9eac96c5ed07e5b3992515296b6c461380cf6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map",
+          "sha": "c5e5ec2494155029972060d0ed6793af5995e3d3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts",
+          "sha": "3c48d14f97d38ccf6a319b6c087466f9cbc6169c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map",
+          "sha": "b847714ae7b742705065eb52d56c1b6365a1a679",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js",
+          "sha": "04c41c7d2a8386844cfc0c567042708d356abb71",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map",
+          "sha": "69c22532e89668efa5624153328045bc840091fc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts",
+          "sha": "c5c864abc1cd229f7ab61a67696ee6b59d3719db",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts.map",
+          "sha": "040f8b5ad593c67d2b19d78ecbd8815bf5771696",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js",
+          "sha": "d2fa5a9dc10c4851e84184bfe96de69bb4006d41",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js.map",
+          "sha": "bf66de2c69a281ee7ddcf367789fd2a0e2d0281e",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4583,
+      "targetRef": "main",
+      "mergeBaseSha": "102696d721dbabfe0e5e455c48c1f09d48044d42",
+      "headSha": "649d2061b6b245adbacc904d578962a561a2b6ed",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-20T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 10,
+        "sha256": "3445370ba8f33549b91926184bd0d804ef5009ebd8896dbdc88c0de9089fa6ab"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "52c369d22676db3ab651fbf92e73d9b7ee76556c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "84b8efea4cc693745cc29805d71f71473dead444",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "09982acb12f2a137c9627a5328af54ea72b9a8fa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "d25dd3db30936c112923bb24072cb3c4fb95ecd7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "1acc29d088d0e44c4e00aad1ab71ccc02e230d54",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "9814451a0241a26d88dcb1ad69206d6bd7a23706",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/team-dispatch-hook.js",
+          "sha": "303f9426ce1482a6f876063ce22ce8dd379cc385",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/config.js",
+          "sha": "e5260f19f86c34f7f7ec757f9903aefa42e295f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "55cf35d64919acf565f1f5ce6981d18111985b3c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "f433876384fbd9a0e52be8df2ced1afecd66a46b",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4590,
+      "targetRef": "dev",
+      "mergeBaseSha": "23956cd1cbf84f922f59390f4def59dc9911dcfa",
+      "headSha": "b0c2d2259cc9ed2d51b931732097c746e2617b8c",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 9,
+        "sha256": "5e82fe76ae84c87991a76984ee9e4ed2822d693da926dbc3435efc79b4bf981f"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "52c369d22676db3ab651fbf92e73d9b7ee76556c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "84b8efea4cc693745cc29805d71f71473dead444",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "09982acb12f2a137c9627a5328af54ea72b9a8fa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "d25dd3db30936c112923bb24072cb3c4fb95ecd7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "1acc29d088d0e44c4e00aad1ab71ccc02e230d54",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "9814451a0241a26d88dcb1ad69206d6bd7a23706",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/config.js",
+          "sha": "e5260f19f86c34f7f7ec757f9903aefa42e295f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "55cf35d64919acf565f1f5ce6981d18111985b3c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "f433876384fbd9a0e52be8df2ced1afecd66a46b",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4593,
+      "targetRef": "main",
+      "mergeBaseSha": "f6f9d080b2d4333a02b9081d7f73e3c2f72844e0",
+      "headSha": "7122821240e7c7854984347a542181dd3a67580d",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 36,
+        "sha256": "97b6d6985264e903fb58f26162649ca152c96686315ec353341c4f1cfc23007a"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "79f61855b51c83b9d2d1715ab73c7f4de0657163",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "ae56b2e060458119c4b438e909d581797cb48ff6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "da6500298d3a2657539d2d38e545f7c5f9593b9d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "57e4f07319a9511c689db9d575ed1b978f954f32",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "e93e8f7c12d7b4884c7b3ce115945274caf39c16",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "6dcf18b4e135389236bc27770cde818691407f73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "c657276f821817b34c96e16d59818bb636335512",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts",
+          "sha": "fcb5adf2e4bbf42f507ff703c5aed44a8378f9ff",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map",
+          "sha": "a5dfd1ee2272f685a7d038403a7ea022092bb5ae",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js",
+          "sha": "6de9eac96c5ed07e5b3992515296b6c461380cf6",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map",
+          "sha": "c5e5ec2494155029972060d0ed6793af5995e3d3",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts",
+          "sha": "3c48d14f97d38ccf6a319b6c087466f9cbc6169c",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map",
+          "sha": "b847714ae7b742705065eb52d56c1b6365a1a679",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js",
+          "sha": "04c41c7d2a8386844cfc0c567042708d356abb71",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map",
+          "sha": "69c22532e89668efa5624153328045bc840091fc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js",
+          "sha": "6561da8ee0eedcb96cbb0e666a503c94c9321eef",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js.map",
+          "sha": "ec7c5e584c55f6f84fc158718fff190c897267ad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "e9a85f868d99c83ac0f195d73c66eee944880dee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "70a6defbc7b3ef3b2508cd6a8c367b34a640f686",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts",
+          "sha": "c5c864abc1cd229f7ab61a67696ee6b59d3719db",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.d.ts.map",
+          "sha": "040f8b5ad593c67d2b19d78ecbd8815bf5771696",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js",
+          "sha": "303f9426ce1482a6f876063ce22ce8dd379cc385",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-dispatch-hook.js.map",
+          "sha": "bf66de2c69a281ee7ddcf367789fd2a0e2d0281e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/verbosity.test.js",
+          "sha": "ba013dddeacfae833ec152ddc87c285da1a18b7c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/verbosity.test.js.map",
+          "sha": "13a120488969fd22a60d67843f247e0771f944fe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/config.js.map",
+          "sha": "9e571a615a6661a888813a8d283370c825864b4c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.test.js",
+          "sha": "a0665a03023132e566209c02043a49c2ac70d552",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.test.js.map",
+          "sha": "164a68f8d32071c528d47de7d7b93702624a7b95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.d.ts",
+          "sha": "88ce037f2b574c5b8f33a9ffc69ae20e70633e90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.d.ts.map",
+          "sha": "09d52c0f14a23a3ee8ee68d3064a1cf1418a9821",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js",
+          "sha": "40373eabed9612f53906983c1e201886c15470bb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js.map",
+          "sha": "478c72a001f8339338f2ec771020bbbd335a194f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "9549bddb661eb4e1cd2eaf89b5a4f55f8a63cf6a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "77fe94d59def41a73fcbdfff864aa5a93aba979f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "1cf0f090c97b79c61e518cb3b0883b61b0096abe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "1700c48632885e98af75f2706944d4c065444931",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4596,
+      "targetRef": "dev",
+      "mergeBaseSha": "128fd39ef4ee5540cb02f6365baa2318e2b5681e",
+      "headSha": "45bb2c37a51b715173571402259b43314371220c",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-23T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 24,
+        "sha256": "6cd33f463efe89fb4967fb04163d988462f4e156667225dfa1d740980b602daf"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "79f61855b51c83b9d2d1715ab73c7f4de0657163",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "ae56b2e060458119c4b438e909d581797cb48ff6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "da6500298d3a2657539d2d38e545f7c5f9593b9d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "57e4f07319a9511c689db9d575ed1b978f954f32",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "e93e8f7c12d7b4884c7b3ce115945274caf39c16",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "6dcf18b4e135389236bc27770cde818691407f73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "c657276f821817b34c96e16d59818bb636335512",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js",
+          "sha": "6561da8ee0eedcb96cbb0e666a503c94c9321eef",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js.map",
+          "sha": "ec7c5e584c55f6f84fc158718fff190c897267ad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "e9a85f868d99c83ac0f195d73c66eee944880dee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "70a6defbc7b3ef3b2508cd6a8c367b34a640f686",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/verbosity.test.js",
+          "sha": "ba013dddeacfae833ec152ddc87c285da1a18b7c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/__tests__/verbosity.test.js.map",
+          "sha": "13a120488969fd22a60d67843f247e0771f944fe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/config.js.map",
+          "sha": "9e571a615a6661a888813a8d283370c825864b4c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.test.js",
+          "sha": "a0665a03023132e566209c02043a49c2ac70d552",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/tmux-session.test.js.map",
+          "sha": "164a68f8d32071c528d47de7d7b93702624a7b95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.d.ts",
+          "sha": "88ce037f2b574c5b8f33a9ffc69ae20e70633e90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.d.ts.map",
+          "sha": "09d52c0f14a23a3ee8ee68d3064a1cf1418a9821",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js",
+          "sha": "40373eabed9612f53906983c1e201886c15470bb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/pane-readiness.js.map",
+          "sha": "478c72a001f8339338f2ec771020bbbd335a194f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "9549bddb661eb4e1cd2eaf89b5a4f55f8a63cf6a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "77fe94d59def41a73fcbdfff864aa5a93aba979f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "1cf0f090c97b79c61e518cb3b0883b61b0096abe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "1700c48632885e98af75f2706944d4c065444931",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4605,
+      "targetRef": "main",
+      "mergeBaseSha": "5632614b75cc7833f74604be65d26a62a5b773de",
+      "headSha": "f9e4229dc4266d0ca6716d9bb16e93c66ebf28d5",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-24T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 4,
+        "sha256": "b607f919ee428647a32e1574fce1ed9d0bb8e7ad9bf57e3674be15a24ade6f5c"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "cfe1cba73a8fec98b7ebd5e331e009b6d2eab85e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "06c988a4ec924cc9280cf2b5f3b71367202b4ccb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js",
+          "sha": "48d31a0d2790058157184bde2d7bfa5fd861b49e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/utils/formatting.js",
+          "sha": "087bb4b93b6f3658bf21759ae5373e5b3fced56c",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4609,
+      "targetRef": "dev",
+      "mergeBaseSha": "146af74abf00f9794dddcdbb1a3ccf87a0bd8ac3",
+      "headSha": "54c56eca90f371ea9a45952ac616bd2e12efe58d",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-24T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 4,
+        "sha256": "b607f919ee428647a32e1574fce1ed9d0bb8e7ad9bf57e3674be15a24ade6f5c"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "cfe1cba73a8fec98b7ebd5e331e009b6d2eab85e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "06c988a4ec924cc9280cf2b5f3b71367202b4ccb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/teleport.js",
+          "sha": "48d31a0d2790058157184bde2d7bfa5fd861b49e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/utils/formatting.js",
+          "sha": "087bb4b93b6f3658bf21759ae5373e5b3fced56c",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }

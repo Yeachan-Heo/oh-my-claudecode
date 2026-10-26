@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "be4a5986fdf5634d3b6702ea81e29c2df69fb410",
-    "sourceSha256": "cdc599fa12037b51c955d19bc6a67aa3f16c67612c99d2f2d5646ee0f3d227df",
+    "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
+    "sourceSha256": "a3985b293bba9f5f3867d66b1ac4cba8099a99b6e8c5579ce2aa84a5f8650778",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "be4a5986fdf5634d3b6702ea81e29c2df69fb410",
-  "sourceSha256": "cdc599fa12037b51c955d19bc6a67aa3f16c67612c99d2f2d5646ee0f3d227df",
+  "head": "a9e2255c9209c4a23c77801cbbba8846218dcaa6",
+  "sourceSha256": "a3985b293bba9f5f3867d66b1ac4cba8099a99b6e8c5579ce2aa84a5f8650778",
   "counts": {
     "public": {
       "skills": 77,
@@ -23,28 +23,28 @@
       "total": 126
     },
     "internal": {
-      "hookFiles": 335,
+      "hookFiles": 333,
       "featureFiles": 94,
       "toolFiles": 65,
       "libFiles": 48,
       "templateHooks": 24,
-      "srcFiles": 1490,
-      "total": 1514
+      "srcFiles": 1489,
+      "total": 1513
     },
     "generated": {
-      "distFiles": 5739,
+      "distFiles": 5729,
       "bridgeFiles": 9,
-      "total": 5748
+      "total": 5738
     },
     "prompt": {
-      "promptLikeFiles": 62
+      "promptLikeFiles": 61
     },
     "skills": 77,
     "commands": 21,
-    "hookFiles": 335,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 62
+    "promptLikeFiles": 61
   },
   "public": {
     "skills": [
@@ -201,8 +201,6 @@
       "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
-      "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-      "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
       "src/hooks/__tests__/team-worker-heartbeat.test.ts",
       "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
       "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
@@ -322,6 +320,7 @@
       "src/hooks/non-interactive-env/index.ts",
       "src/hooks/non-interactive-env/types.ts",
       "src/hooks/notepad/index.ts",
+      "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
       "src/hooks/omc-orchestrator/audit.ts",
       "src/hooks/omc-orchestrator/constants.ts",
       "src/hooks/omc-orchestrator/index.ts",
@@ -480,7 +479,6 @@
       "src/hooks/task-size-detector/index.ts",
       "src/hooks/task-size-detector/jev-shadow.ts",
       "src/hooks/team-canonical-state.ts",
-      "src/hooks/team-dispatch-hook.ts",
       "src/hooks/team-leader-nudge-hook.ts",
       "src/hooks/team-pipeline/__tests__/transitions.test.ts",
       "src/hooks/team-pipeline/index.ts",
@@ -802,7 +800,6 @@
       "src/features/model-routing/prompts/opus.ts",
       "src/features/model-routing/prompts/sonnet.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
-      "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
       "src/hooks/autopilot/__tests__/prompts.test.ts",
       "src/hooks/autopilot/prompts.ts",
       "src/hooks/persistent-mode/__tests__/prompt-truncation.test.ts",
@@ -3246,14 +3243,6 @@
       "dist/hooks/__tests__/stop-hook-openclaw-cooldown.test.d.ts.map",
       "dist/hooks/__tests__/stop-hook-openclaw-cooldown.test.js",
       "dist/hooks/__tests__/stop-hook-openclaw-cooldown.test.js.map",
-      "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts",
-      "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map",
-      "dist/hooks/__tests__/team-dispatch-cooldown.test.js",
-      "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map",
-      "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts",
-      "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map",
-      "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js",
-      "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map",
       "dist/hooks/__tests__/team-worker-heartbeat.test.d.ts",
       "dist/hooks/__tests__/team-worker-heartbeat.test.d.ts.map",
       "dist/hooks/__tests__/team-worker-heartbeat.test.js",
@@ -4355,10 +4344,6 @@
       "dist/hooks/team-canonical-state.d.ts.map",
       "dist/hooks/team-canonical-state.js",
       "dist/hooks/team-canonical-state.js.map",
-      "dist/hooks/team-dispatch-hook.d.ts",
-      "dist/hooks/team-dispatch-hook.d.ts.map",
-      "dist/hooks/team-dispatch-hook.js",
-      "dist/hooks/team-dispatch-hook.js.map",
       "dist/hooks/team-leader-nudge-hook.d.ts",
       "dist/hooks/team-leader-nudge-hook.d.ts.map",
       "dist/hooks/team-leader-nudge-hook.js",
@@ -6660,6 +6645,8 @@
       "dist/utils/string-width.d.ts.map",
       "dist/utils/string-width.js",
       "dist/utils/string-width.js.map",
+      "dist/utils/url.d.ts",
+      "dist/utils/url.js",
       "dist/utils/user-skill-compat.d.ts",
       "dist/utils/user-skill-compat.d.ts.map",
       "dist/utils/user-skill-compat.js",
@@ -6724,8 +6711,6 @@
       "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
-      "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-      "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
       "src/hooks/__tests__/team-worker-heartbeat.test.ts",
       "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
       "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
@@ -6845,6 +6830,7 @@
       "src/hooks/non-interactive-env/index.ts",
       "src/hooks/non-interactive-env/types.ts",
       "src/hooks/notepad/index.ts",
+      "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
       "src/hooks/omc-orchestrator/audit.ts",
       "src/hooks/omc-orchestrator/constants.ts",
       "src/hooks/omc-orchestrator/index.ts",
@@ -7003,7 +6989,6 @@
       "src/hooks/task-size-detector/index.ts",
       "src/hooks/task-size-detector/jev-shadow.ts",
       "src/hooks/team-canonical-state.ts",
-      "src/hooks/team-dispatch-hook.ts",
       "src/hooks/team-leader-nudge-hook.ts",
       "src/hooks/team-pipeline/__tests__/transitions.test.ts",
       "src/hooks/team-pipeline/index.ts",
@@ -7096,7 +7081,6 @@
       "src/features/model-routing/prompts/opus.ts",
       "src/features/model-routing/prompts/sonnet.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
-      "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
       "src/hooks/autopilot/__tests__/prompts.test.ts",
       "src/hooks/autopilot/prompts.ts",
       "src/hooks/persistent-mode/__tests__/prompt-truncation.test.ts",
@@ -19674,46 +19658,6 @@
         "path": "dist/hooks/__tests__/stop-hook-openclaw-cooldown.test.js.map"
       },
       {
-        "id": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-cooldown.test.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-cooldown.test.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-cooldown.test.js"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-cooldown.test.js.map"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js"
-      },
-      {
-        "id": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/__tests__/team-dispatch-prompt-readiness.test.js.map"
-      },
-      {
         "id": "dist/hooks/__tests__/team-worker-heartbeat.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/__tests__/team-worker-heartbeat.test.d.ts"
@@ -25217,26 +25161,6 @@
         "id": "dist/hooks/team-canonical-state.js.map",
         "kind": "generated-dist",
         "path": "dist/hooks/team-canonical-state.js.map"
-      },
-      {
-        "id": "dist/hooks/team-dispatch-hook.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-dispatch-hook.d.ts"
-      },
-      {
-        "id": "dist/hooks/team-dispatch-hook.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-dispatch-hook.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/team-dispatch-hook.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-dispatch-hook.js"
-      },
-      {
-        "id": "dist/hooks/team-dispatch-hook.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-dispatch-hook.js.map"
       },
       {
         "id": "dist/hooks/team-leader-nudge-hook.d.ts",
@@ -36744,6 +36668,16 @@
         "path": "dist/utils/string-width.js.map"
       },
       {
+        "id": "dist/utils/url.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/utils/url.d.ts"
+      },
+      {
+        "id": "dist/utils/url.js",
+        "kind": "generated-dist",
+        "path": "dist/utils/url.js"
+      },
+      {
         "id": "dist/utils/user-skill-compat.d.ts",
         "kind": "generated-dist",
         "path": "dist/utils/user-skill-compat.d.ts"
@@ -42039,16 +41973,6 @@
         "path": "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts"
       },
       {
-        "id": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/__tests__/team-dispatch-cooldown.test.ts"
-      },
-      {
-        "id": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts"
-      },
-      {
         "id": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
         "kind": "hook",
         "path": "src/hooks/__tests__/team-worker-heartbeat.test.ts"
@@ -42642,6 +42566,11 @@
         "id": "src/hooks/notepad/index.ts",
         "kind": "hook",
         "path": "src/hooks/notepad/index.ts"
+      },
+      {
+        "id": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts"
       },
       {
         "id": "src/hooks/omc-orchestrator/audit.ts",
@@ -43432,11 +43361,6 @@
         "id": "src/hooks/team-canonical-state.ts",
         "kind": "hook",
         "path": "src/hooks/team-canonical-state.ts"
-      },
-      {
-        "id": "src/hooks/team-dispatch-hook.ts",
-        "kind": "hook",
-        "path": "src/hooks/team-dispatch-hook.ts"
       },
       {
         "id": "src/hooks/team-leader-nudge-hook.ts",
@@ -45332,6 +45256,11 @@
         "id": "src/team/__tests__/stage-router.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/stage-router.test.ts"
+      },
+      {
+        "id": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "kind": "src",
+        "path": "src/team/__tests__/start-submit-timeout-env.test.ts"
       },
       {
         "id": "src/team/__tests__/startup-claim-error.test.ts",
@@ -64356,71 +64285,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "external:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "src/hooks/team-dispatch-hook.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "src/hooks/team-dispatch-hook.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-cooldown.test.ts",
-        "to": "src/team/dispatch-queue.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "external:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "src/hooks/team-dispatch-hook.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-dispatch-prompt-readiness.test.ts",
-        "to": "src/team/dispatch-queue.ts",
-        "kind": "type-imports"
-      },
-      {
         "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -67533,6 +67397,36 @@
       {
         "from": "src/hooks/notepad/index.ts",
         "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/omc-orchestrator/__tests__/git-diff-stats.test.ts",
+        "to": "src/hooks/omc-orchestrator/index.ts",
         "kind": "imports"
       },
       {
@@ -71928,51 +71822,6 @@
       {
         "from": "src/hooks/team-canonical-state.ts",
         "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "external:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/cli/tmux-utils.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/lib/swallowed-error.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/team/model-contract.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/team/pane-readiness.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-dispatch-hook.ts",
-        "to": "src/team/tmux-session.ts",
         "kind": "imports"
       },
       {
@@ -81646,6 +81495,16 @@
         "kind": "imports"
       },
       {
+        "from": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/team/__tests__/start-submit-timeout-env.test.ts",
+        "to": "src/team/tmux-session.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/team/__tests__/startup-claim-error.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -90392,12 +90251,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7930,
-      "edgeCount": 8691,
-      "importEdgeCount": 7210,
+      "nodeCount": 7919,
+      "edgeCount": 8677,
+      "importEdgeCount": 7200,
       "registerEdgeCount": 98
     }
   },
-  "inventorySha256": "5dec23d150540e5ac024feb21905d638545295554b88ffa4ba35626af30942da",
-  "manifestSha256": "93685ba0e150a02ece3784162ebfdecbd99c38bfffc48435575dfe83b270ad82"
+  "inventorySha256": "a55721553636bfcdbe8d38890096e6ef2c41219faf464861eda941b1ff008037",
+  "manifestSha256": "25470d3516c496be5e481a40fcf01ecb31ff423a043d05500d3df75fce33462e"
 }

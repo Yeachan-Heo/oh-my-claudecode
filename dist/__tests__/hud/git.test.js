@@ -22,6 +22,10 @@ describe('git elements', () => {
             mockExecFileSync.mockReturnValue('https://github.com/user/my-repo\n');
             expect(getGitRepoName()).toBe('my-repo');
         });
+        it('extracts repo name from HTTPS URL with multiple trailing slashes', () => {
+            mockExecFileSync.mockReturnValue('https://github.com/user/my-repo.git///\n');
+            expect(getGitRepoName()).toBe('my-repo');
+        });
         it('extracts repo name from SSH URL', () => {
             mockExecFileSync.mockReturnValue('git@github.com:user/my-repo.git\n');
             expect(getGitRepoName()).toBe('my-repo');

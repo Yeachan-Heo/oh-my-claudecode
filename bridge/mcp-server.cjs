@@ -20010,6 +20010,37 @@ function getAllServers() {
 }
 
 // src/tools/lsp/client.ts
+var DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+var MAX_NODE_TIMER_DELAY_MS = 2147483647;
+function parseExactInteger(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const negative = trimmed.startsWith("-");
+  const magnitude = negative || trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
+  const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
+  if (!match) return null;
+  const integerDigits = match[1] ?? "";
+  const fractionDigits = match[2] ?? match[3] ?? "";
+  const exponent = match[4] === void 0 ? 0 : Number(match[4]);
+  const shift = fractionDigits.length - exponent;
+  if (shift > 0) {
+    const significand = integerDigits + fractionDigits;
+    if (/[1-9]/.test(significand)) {
+      const trailingZeros = significand.length - significand.replace(/0+$/, "").length;
+      if (trailingZeros < shift) return null;
+    }
+  }
+  const parsed = (negative ? -1 : 1) * Number(magnitude);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+function readPositiveIntEnv(name, fallback) {
+  const env = process.env[name];
+  if (!env || !env.trim()) {
+    return fallback;
+  }
+  const parsed = parseExactInteger(env);
+  return parsed !== null && parsed > 0 && parsed <= MAX_NODE_TIMER_DELAY_MS ? parsed : fallback;
+}
 var DEFAULT_LSP_REQUEST_TIMEOUT_MS = (() => {
   return readPositiveIntEnv("OMC_LSP_TIMEOUT_MS", 15e3);
 })();
@@ -20018,14 +20049,6 @@ function getLspRequestTimeout(serverConfig, method, baseTimeout = DEFAULT_LSP_RE
     return Math.max(baseTimeout, serverConfig.initializeTimeoutMs);
   }
   return baseTimeout;
-}
-function readPositiveIntEnv(name, fallback) {
-  const env = process.env[name];
-  if (!env) {
-    return fallback;
-  }
-  const parsed = parseInt(env, 10);
-  return !isNaN(parsed) && parsed > 0 ? parsed : fallback;
 }
 function fileUri(filePath) {
   return (0, import_url3.pathToFileURL)((0, import_path9.resolve)(filePath)).href;

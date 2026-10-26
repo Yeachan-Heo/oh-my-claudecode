@@ -8,6 +8,7 @@ import { realpathSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { dim, cyan, green, red } from '../colors.js';
 import { DEFAULT_HUD_LABELS } from '../types.js';
+import { stripTrailingSlashes } from '../../utils/url.js';
 const CACHE_TTL_MS = 30_000;
 const repoCache = new Map();
 const branchCache = new Map();
@@ -53,9 +54,10 @@ export function getGitRepoName(cwd) {
             result = null;
         }
         else {
+            const normalizedUrl = stripTrailingSlashes(url);
             // Extract repo name from URL
             // Handles: https://github.com/user/repo.git, git@github.com:user/repo.git
-            const match = url.match(/\/([^/]+?)(?:\.git)?$/) || url.match(/:([^/]+?)(?:\.git)?$/);
+            const match = normalizedUrl.match(/\/([^/]+?)(?:\.git)?$/) || normalizedUrl.match(/:([^/]+?)(?:\.git)?$/);
             result = match ? match[1].replace(/\.git$/, '') : null;
         }
     }

@@ -161,8 +161,8 @@ function parseRef(ref: string): {
   provider?: ProviderName;
 } {
   // GitHub PR URL: github.com/owner/repo/pull/N
-  // Provider URLs may carry a trailing slash or a sub-page (/files, /diffs, ...) copied from the browser.
-  const ghPrUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
+  // Provider URLs may carry a trailing slash, a sub-page (/files, /diffs), or a .diff/.patch suffix.
+  const ghPrUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\.(?:diff|patch))?(?:\/[^?#]*)?(?:[?#].*)?$/);
   if (ghPrUrlMatch) {
     return {
       type: 'pr',
@@ -186,7 +186,7 @@ function parseRef(ref: string): {
   }
 
   // GitLab MR URL: gitlab.*/namespace/-/merge_requests/N (supports nested groups and self-hosted)
-  const glMrUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/merge_requests\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
+  const glMrUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/merge_requests\/(\d+)(?:\.(?:diff|patch))?(?:\/[^?#]*)?(?:[?#].*)?$/);
   if (glMrUrlMatch) {
     const namespaceParts = glMrUrlMatch[1].split('/');
     const repo = namespaceParts.pop()!;

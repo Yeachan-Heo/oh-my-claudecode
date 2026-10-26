@@ -274,12 +274,13 @@ export function getGitDiffStats(directory: string): GitFileStat[] {
 
     if (!output) return [];
 
+    // Only trim the end: a leading space is the index column of the first entry.
     const statusOutput = execFileSync('git', ['status', '--porcelain'], {
       cwd: directory,
       encoding: 'utf-8',
       timeout: 5000,
       windowsHide: true,
-    }).trim();
+    }).trimEnd();
 
     const statusMap = new Map<string, 'modified' | 'added' | 'deleted'>();
     for (const line of statusOutput.split('\n')) {

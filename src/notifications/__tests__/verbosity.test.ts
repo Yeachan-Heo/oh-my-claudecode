@@ -179,6 +179,26 @@ describe("getTmuxTailLines", () => {
     expect(getTmuxTailLines(config)).toBe(22);
   });
 
+  it.each(["1e5", "30_000", "12abc", "2.5"])(
+    "ignores env value %j instead of keeping the digits before the first non-digit",
+    (value) => {
+      vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", value);
+      const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 22 };
+      expect(getTmuxTailLines(config)).toBe(22);
+    },
+  );
+
+  it("falls back for env integers outside the safe range", () => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", "9007199254740992");
+    const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 22 };
+    expect(getTmuxTailLines(config)).toBe(22);
+  });
+
+  it("trims whitespace around a valid env value", () => {
+    vi.stubEnv("OMC_NOTIFY_TMUX_TAIL_LINES", " 40\n");
+    expect(getTmuxTailLines(baseConfig)).toBe(40);
+  });
+
   it("falls back to default for invalid config values", () => {
     const config: NotificationConfig = { ...baseConfig, tmuxTailLines: 0 };
     expect(getTmuxTailLines(config)).toBe(15);

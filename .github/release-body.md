@@ -1,17 +1,31 @@
-# oh-my-claudecode v5.7.11: Safer guarded input around trust prompts
+# oh-my-claudecode v5.7.15: More reliable timeout handling and clearer token counts
 
 ## Release Notes
 
-This release prevents guarded pane input from typing into any trust prompt or selecting a trust decision. Thanks to @iyoda for the contribution to #4528.
+This release preserves whole-integer timeout values in persistent mode and pre-tool advisory cooldowns, shows near-million token counts in millions, and accepts GitHub and GitLab pull request diff and patch URLs. Thanks to @rudycelekli for #4599, #4600, #4601, and #4604.
+
+### Highlights
+
+- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
+- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
+- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
+- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
 
 ### Bug Fixes
 
-- **fix(team): refuse guarded pane input on every trust prompt kind** (#4528, @iyoda)
+- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
+- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
+- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
+- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
 
 ### Other Changes
 
-- **chore(sync): merge main v5.7.10 release into dev** (#4532)
-- **ci: authorize generated artifacts for sync PR #4532** (#4533)
+- **chore(sync): merge the v5.7.14 main release into dev** (#4596)
+- **ci: authorize generated artifacts for the v5.7.14 main-to-dev sync** (#4597)
+
+### Stats
+
+- **6 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **2 other changes**
 
 ### Install / Update
 
@@ -20,7 +34,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.11
+npm install -g oh-my-claude-sisyphus@5.7.15
 ```
 
 **Claude Code plugin:**
@@ -29,10 +43,10 @@ npm install -g oh-my-claude-sisyphus@5.7.11
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.10...v5.7.11
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.14...v5.7.15
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @Yeachan-Heo
+@rudycelekli @Yeachan-Heo

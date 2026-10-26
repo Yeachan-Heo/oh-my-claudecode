@@ -329,6 +329,24 @@ Final draft.`);
         expect(detectKeywordsWithType('랄프 켜').find((r) => r.type === 'ralph')).toBeDefined();
       });
 
+      it.each([
+        ['ralph: fix the cron.\nRead the workflow docs first.', 'ralph'],
+        ['/oh-my-claudecode:ralph fix the cron.\nRead the workflow docs first.', 'ralph'],
+        ['autopilot: lot 2.\nRead the docs first.', 'autopilot'],
+        ['ralplan: plan the lot.\nRead the docs first.', 'ralplan'],
+        ['ralph: fix M-4.\nSteps: red → green.', 'ralph'],
+      ] as const)('should honor a leading direct invocation in %s', (prompt, type) => {
+        expect(detectKeywordsWithType(prompt).find((result) => result.type === type)).toBeDefined();
+      });
+
+      it('should suppress reference prose that mentions modes mid-sentence', () => {
+        expect(
+          detectKeywordsWithType(
+            'The article compares ralph and autopilot workflows, and explains how they differ.',
+          ),
+        ).toEqual([]);
+      });
+
       it('should NOT detect informational English questions about ralph', () => {
         const result = detectKeywordsWithType('What is ralph and how do I use it?');
         expect(result).toEqual([]);
@@ -499,6 +517,79 @@ Final draft.`);
         const result = detectKeywordsWithType('Keep going until done');
         const ralphMatch = result.find((r) => r.type === 'ralph');
         expect(ralphMatch).toBeUndefined();
+      });
+
+      // Regression tests for #4551 regressions
+      it('should detect colon-invocation with execution verb even if followed by help-like text', () => {
+        // Issue 1: 'ralph: fix the bug.\nExplain the change.' must activate (not suppress as informational)
+        const result1 = detectKeywordsWithType('ralph: fix the bug.\nExplain the change.');
+        expect(result1.find((r) => r.type === 'ralph')).toBeDefined();
+
+        // Issue 1: 'autopilot: build an API.\nDescribe the endpoints.' must activate
+        const result2 = detectKeywordsWithType('autopilot: build an API.\nDescribe the endpoints.');
+        expect(result2.find((r) => r.type === 'autopilot')).toBeDefined();
+      });
+
+      it('should suppress leading invocations whose own line is a multilingual help request', () => {
+        expect(detectKeywordsWithType('ralph: 설명해줘')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 알려줘')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 解释一下')).toEqual([]);
+      });
+
+      it('should judge a bare prefix line by the next request line', () => {
+        expect(detectKeywordsWithType('ralph:\nExplain how this mode works')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot:\n如何使用')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot:\nbuild 사용법 알려줘')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot:\n사용법 페이지를 만들어줘').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph:\n使い方ページの誤字を修正して').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph:\nfix the login bug').find((r) => r.type === 'ralph')).toBeDefined();
+      });
+
+      it('should keep multilingual help requests that mention a command word informational', () => {
+        expect(detectKeywordsWithType('autopilot: 如何使用 build 命令')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: build 사용법 알려줘')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: とは')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: what are the build options?')).toEqual([]);
+        expect(detectKeywordsWithType('ralph: what are the results of the last run?')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: what are the build options')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: how to use build and explain the results')).toEqual([]);
+        expect(detectKeywordsWithType('ralph: how do I use run and describe the results')).toEqual([]);
+        expect(detectKeywordsWithType('ralph: how to use run and describe the results')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 解释如何修复登录问题')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 说明一下如何使用 build')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 請解釋修復登入問題的步驟')).toEqual([]);
+        expect(detectKeywordsWithType('autopilot: 请解释修复登录问题的步骤')).toEqual([]);
+      });
+
+      it('should keep a leading invocation actionable despite help-looking task text', () => {
+        expect(detectKeywordsWithType('ralph: fix 説明文の誤字').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('autopilot: build 사용법 페이지').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix 使い方ページの誤字').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix the login bug; あとはテストを実行して').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix the login bug; 결과 알려줘').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix the login bug; 変更内容を説明して').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix the login bug; 解释一下结果').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('autopilot: build a 说明 component').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix 说明文档中的拼写错误').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('autopilot: build a button labelled "教えて"').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: fix the "알려줘" button').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('autopilot: build a button labelled "how to use"').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph fix 説明文の誤字').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('autopilot build a 说明 component').find((r) => r.type === 'autopilot')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: update the explanation in README').find((r) => r.type === 'ralph')).toBeDefined();
+        expect(detectKeywordsWithType('ralph: remove the explanation section').find((r) => r.type === 'ralph')).toBeDefined();
+      });
+
+      it('should suppress colon-invocation with multilingual help queries', () => {
+        // Issue 2: Multilingual help queries with colon prefix should NOT activate
+        // Korean: "기능 알려줘" (tell me about the feature)
+        expect(detectKeywordsWithType('autopilot: 기능 알려줘')).toEqual([]);
+
+        // Japanese: "機能を説明して" (explain the feature)
+        expect(detectKeywordsWithType('ralph: 機能を説明して')).toEqual([]);
+
+        // Thai: "คืออะไร ใช้งานยังไง" (what is it, how to use it)
+        expect(detectKeywordsWithType('autopilot: คืออะไร ใช้งานยังไง')).toEqual([]);
       });
     });
 

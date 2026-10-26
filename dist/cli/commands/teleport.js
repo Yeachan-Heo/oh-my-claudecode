@@ -107,7 +107,8 @@ function bootstrapTeleportDependencies(parentRepoRoot, worktreePath, options) {
  */
 function parseRef(ref) {
     // GitHub PR URL: github.com/owner/repo/pull/N
-    const ghPrUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[?#].*)?$/);
+    // Provider URLs may carry a trailing slash, a sub-page (/files, /diffs), or a .diff/.patch suffix.
+    const ghPrUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\.(?:diff|patch))?(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (ghPrUrlMatch) {
         return {
             type: 'pr',
@@ -118,7 +119,7 @@ function parseRef(ref) {
         };
     }
     // GitHub Issue URL: github.com/owner/repo/issues/N
-    const ghIssueUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[?#].*)?$/);
+    const ghIssueUrlMatch = ref.match(/^https?:\/\/[^/]*github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (ghIssueUrlMatch) {
         return {
             type: 'issue',
@@ -129,7 +130,7 @@ function parseRef(ref) {
         };
     }
     // GitLab MR URL: gitlab.*/namespace/-/merge_requests/N (supports nested groups and self-hosted)
-    const glMrUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/merge_requests\/(\d+)(?:[?#].*)?$/);
+    const glMrUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/merge_requests\/(\d+)(?:\.(?:diff|patch))?(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (glMrUrlMatch) {
         const namespaceParts = glMrUrlMatch[1].split('/');
         const repo = namespaceParts.pop();
@@ -143,7 +144,7 @@ function parseRef(ref) {
         };
     }
     // GitLab Issue URL: gitlab.*/namespace/-/issues/N (supports nested groups and self-hosted)
-    const glIssueUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/issues\/(\d+)(?:[?#].*)?$/);
+    const glIssueUrlMatch = ref.match(/^https?:\/\/[^/]*gitlab[^/]*\/(.+)\/-\/issues\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (glIssueUrlMatch) {
         const namespaceParts = glIssueUrlMatch[1].split('/');
         const repo = namespaceParts.pop();
@@ -157,7 +158,7 @@ function parseRef(ref) {
         };
     }
     // Bitbucket PR URL: bitbucket.org/workspace/repo/pull-requests/N
-    const bbPrUrlMatch = ref.match(/^https?:\/\/[^/]*bitbucket\.org\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)(?:[?#].*)?$/);
+    const bbPrUrlMatch = ref.match(/^https?:\/\/[^/]*bitbucket\.org\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (bbPrUrlMatch) {
         return {
             type: 'pr',
@@ -168,7 +169,7 @@ function parseRef(ref) {
         };
     }
     // Bitbucket Issue URL: bitbucket.org/workspace/repo/issues/N
-    const bbIssueUrlMatch = ref.match(/^https?:\/\/[^/]*bitbucket\.org\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:[?#].*)?$/);
+    const bbIssueUrlMatch = ref.match(/^https?:\/\/[^/]*bitbucket\.org\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (bbIssueUrlMatch) {
         return {
             type: 'issue',
@@ -179,7 +180,7 @@ function parseRef(ref) {
         };
     }
     // Azure DevOps PR URL: dev.azure.com/org/project/_git/repo/pullrequest/N
-    const azPrUrlMatch = ref.match(/^https?:\/\/[^/]*dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/(\d+)(?:[?#].*)?$/);
+    const azPrUrlMatch = ref.match(/^https?:\/\/[^/]*dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/([^/]+)\/pullrequest\/(\d+)(?:\/[^?#]*)?(?:[?#].*)?$/);
     if (azPrUrlMatch) {
         return {
             type: 'pr',

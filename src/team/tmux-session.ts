@@ -1592,9 +1592,16 @@ async function verifyWorkerStartCommandDelivered(
   return false;
 }
 
-function resolvePositiveIntegerEnv(name: string, fallback: number): number {
-  const value = Number.parseInt(process.env[name] ?? '', 10);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+export function resolveTeamStartSubmitTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+  explicitTimeoutMs?: number,
+): number {
+  if (Number.isFinite(explicitTimeoutMs) && (explicitTimeoutMs ?? 0) > 0) {
+    return Number(explicitTimeoutMs);
+  }
+  const raw = env.OMC_TEAM_START_SUBMIT_TIMEOUT_MS;
+  const parsed = raw == null || String(raw).trim() === '' ? null : parseExactInteger(String(raw));
+  return parsed !== null && parsed > 0 ? parsed : 8_000;
 }
 
 
@@ -1614,9 +1621,7 @@ async function verifyWorkerStartCommandSubmitted(
   if (!opts.tmuxServerIdentity) return false;
   const expected = normalizeTmuxCapture(startCmd);
   const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
-    ? Number(opts.timeoutMs)
-    : resolvePositiveIntegerEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', 8_000);
+  const timeoutMs = resolveTeamStartSubmitTimeoutMs(process.env, opts.timeoutMs);
   const maxPollIntervalMs = Number.isFinite(opts.maxPollIntervalMs) && (opts.maxPollIntervalMs ?? 0) > 0
     ? Number(opts.maxPollIntervalMs)
     : 500;
@@ -3441,8 +3446,12 @@ export function detectPaneTrustPromptKind(captured: string, provider?: CliAgentT
     return 'cursor_workspace_trust';
   }
 
-  const hasClaudeDirectoryQuestion = tail.some(l =>
-    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l),
+  // Claude Code wraps the question to the pane width. In a 35-column pane it
+  // starts 13 lines from the bottom and reaches "trust?" within 3 lines.
+  const claudeQuestionLines = lines.slice(-20);
+  const hasClaudeDirectoryQuestion = claudeQuestionLines.some((_, index) =>
+    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i
+      .test(claudeQuestionLines.slice(index, index + 3).join(' ')),
   );
   const hasClaudeDirectoryNoChoice = tail.some(l => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some(l => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
@@ -3471,10 +3480,6 @@ export function detectPaneTrustPromptKind(captured: string, provider?: CliAgentT
 
 export function paneHasTrustPrompt(captured: string, provider?: CliAgentType): boolean {
   return detectPaneTrustPromptKind(captured, provider) !== null;
-}
-
-export function paneHasCursorWorkspaceTrustPrompt(captured: string): boolean {
-  return detectPaneTrustPromptKind(captured, 'cursor') === 'cursor_workspace_trust';
 }
 
 function paneHasClaudeStartupBanner(captured: string, provider?: CliAgentType): boolean {
@@ -3555,10 +3560,9 @@ export async function waitForPaneReady(
   opts: WaitForPaneReadyOptions = {}
 ): Promise<boolean> {
   if (!isCmuxSurfaceTarget(paneId) && !opts.tmuxServerIdentity) return false;
-  const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
   const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
     ? Number(opts.timeoutMs)
-    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
+    : 30_000;
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
     ? Number(opts.pollIntervalMs)
     : 250;
@@ -3576,7 +3580,7 @@ export async function waitForPaneReady(
 
   console.warn(
     `[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms ` +
-    `(set OMC_SHELL_READY_TIMEOUT_MS to tune)`
+    `(set OMC_TEAM_READY_TIMEOUT_MS to tune)`
   );
   return false;
 }

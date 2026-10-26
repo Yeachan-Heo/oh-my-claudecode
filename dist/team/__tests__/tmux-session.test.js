@@ -1129,8 +1129,9 @@ describe('pane readiness startup banners', () => {
 });
 describe('sendToWorker implementation guards', () => {
     const source = readFileSync(join(__dirname, '..', 'tmux-session.ts'), 'utf-8');
-    it('uses a longer default readiness timeout for worker startup', () => {
-        expect(source).toContain('OMC_SHELL_READY_TIMEOUT_MS');
+    it('points the readiness timeout hint at the env var the worker wait reads', () => {
+        expect(source).not.toContain('OMC_SHELL_READY_TIMEOUT_MS');
+        expect(source).toContain('set OMC_TEAM_READY_TIMEOUT_MS to tune');
         expect(source).toContain('30_000');
     });
     it('checks and exits tmux copy-mode before injection', () => {

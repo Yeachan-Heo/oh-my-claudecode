@@ -409,10 +409,14 @@ describe.each(['plugin', 'installed-template'])('workflow profile stop transitio
     expect(state.pipelineTracking.trackingRevision).toBe(1);
     expect(state.pipelineTracking.currentStageIndex).toBe(1);
     expect(state.pipelineTracking.completionObservations).toHaveLength(1);
-    expect(results.map(result => result.reason)).toEqual([
-      expectedStagePrompt('execution'),
-      expectedStagePrompt('execution'),
-    ]);
+    const outputPrompts = results.map(result => result.reason).sort();
+    const currentStagePrompt = expectedStagePrompt('ralplan');
+    const nextStagePrompt = expectedStagePrompt('execution');
+    // A contender may either observe the committed stage or report its own uncommitted stage.
+    expect([
+      [currentStagePrompt, nextStagePrompt].sort(),
+      [nextStagePrompt, nextStagePrompt].sort(),
+    ]).toContainEqual(outputPrompts);
   });
 
   it('recovers an abandoned lock before Stop advancement', () => {

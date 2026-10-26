@@ -403,8 +403,8 @@ export function getVerbosity(config) {
  * Invalid values are ignored (fall back to config or default).
  */
 export function getTmuxTailLines(config) {
-    const envValue = Number.parseInt(process.env.OMC_NOTIFY_TMUX_TAIL_LINES ?? "", 10);
-    if (Number.isInteger(envValue) && envValue >= 1) {
+    const envValue = parsePositiveInt(process.env.OMC_NOTIFY_TMUX_TAIL_LINES);
+    if (envValue !== undefined) {
         return envValue;
     }
     const configValue = config.tmuxTailLines;

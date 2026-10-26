@@ -1,17 +1,96 @@
-# oh-my-claudecode v5.7.11: Safer guarded input around trust prompts
+# oh-my-claudecode v5.7.15: More reliable timeouts and clearer token counts
 
 ## Release Notes
 
-This release prevents guarded pane input from typing into any trust prompt or selecting a trust decision. Thanks to @iyoda for the contribution to #4528.
+This release stops truncating whole-integer timeout settings in persistent mode and the pre-tool advisory cooldown, displays near-million HUD token counts in millions, and accepts GitHub and GitLab pull request `.diff` and `.patch` URLs. Thanks to @rudycelekli for #4599, #4600, #4601, and #4604.
 
 ### Bug Fixes
 
-- **fix(team): refuse guarded pane input on every trust prompt kind** (#4528, @iyoda)
+- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
+- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
+- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
+- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
 
 ### Other Changes
 
-- **chore(sync): merge main v5.7.10 release into dev** (#4532)
-- **ci: authorize generated artifacts for sync PR #4532** (#4533)
+- **chore(sync): merge the v5.7.14 main release into dev** (#4596)
+- **ci: authorize generated artifacts for the v5.7.14 main-to-dev sync** (#4597)
+
+### Stats
+
+- **6 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+
+---
+
+# oh-my-claudecode v5.7.14: More reliable Stop hooks and leaner team handling
+
+## Release Notes
+
+This release fixes Stop-hook shadow resolver cleanup and removes the unwired team-dispatch implementation. Thanks to @iyoda for #4581 and to @rolldav for reporting #4575.
+
+### Bug Fixes
+
+- **fix: detach shadow Jev resolver for Stop hooks** (#4580, fixes #4575; reported by @rolldav)
+
+### Other Changes
+
+- **chore(hooks): remove unwired team-dispatch hook and generated artifacts** (#4581, supersedes #4566; @iyoda)
+- **ci: authorize generated artifacts for the team-dispatch removal** (#4577, #4582, #4587)
+- **chore(sync): merge the v5.7.13 main release into dev** (#4590)
+- **ci: authorize generated artifacts for the v5.7.13 main-to-dev sync** (#4591)
+
+---
+
+# oh-my-claudecode v5.7.13: More reliable keyword prompts and team handling
+
+## Release Notes
+
+This release preserves explicit keyword invocations in reference prompts, keeps help requests informational across more prompt shapes, and corrects team and notification environment handling. Thanks to @rudycelekli and @iyoda for their fixes, and to @rolldav for reporting #4550.
+
+### Bug Fixes
+
+- **fix: preserve explicit keyword invocation in reference prompts** (#4551, fixes #4550; reported by @rolldav)
+- **fix: resolve #4551 regressions in keyword-detector** (#4553)
+- **fix(keyword-detector): keep leading help requests informational in two more shapes** (#4564)
+- **fix(notifications): stop truncating OMC_NOTIFY_TMUX_TAIL_LINES** (#4556, @rudycelekli)
+- **fix(team-dispatch): stop truncating cooldown environment values** (#4557, @rudycelekli)
+- **fix(team): read the start-submit timeout as a whole integer** (#4558, @rudycelekli)
+- **fix(team): point the pane-ready timeout hint at OMC_TEAM_READY_TIMEOUT_MS** (#4568, @iyoda)
+
+### Other Changes
+
+- **test: stabilize concurrent workflow-profile stops** (#4561, fixes #4560)
+- **ci: authorize generated artifacts during an earlier v5.7.12 main-to-dev sync attempt** (#4563, #4565, #4567)
+- **chore(sync): merge the v5.7.12 main release into dev** (#4569)
+- **ci: authorize and refresh generated artifacts for the v5.7.12 main-to-dev sync** (#4570, #4573, #4574)
+
+### Stats
+
+- **15 merged PRs** | **7 bug fixes** | **8 other changes**
+
+---
+
+# oh-my-claudecode v5.7.12: More reliable URL and timeout handling
+
+## Release Notes
+
+This release improves parsing of provider and issue URLs ending in slashes or sub-pages, hardens environment-based timeout handling, and preserves tmux pane IDs when session names contain spaces. Thanks to @rudycelekli for contributions to #4542, #4543, #4544, #4545, #4546, #4547, and #4549.
+
+### Bug Fixes
+
+- **fix(teleport): read PR and issue URLs with a trailing slash or sub-page** (#4542, @rudycelekli)
+- **fix(lsp): read whole-integer timeouts from the environment** (#4543, @rudycelekli)
+- **fix(rate-limit-wait): keep pane IDs for tmux sessions with spaces** (#4544, @rudycelekli)
+- **fix(team): read the shell-ready timeout as a whole integer** (#4545, @rudycelekli)
+- **fix(team): read launch-ack timeouts as whole integers** (#4546, @rudycelekli)
+- **fix(team): read the worker-ready timeout as a whole integer** (#4547, @rudycelekli)
+- **fix(providers): parse remote URLs that end in a slash** (#4549, @rudycelekli)
+
+### Other Changes
+
+- **chore(sync): merge main's v5.7.11 release into dev** (#4540)
+- **ci: authorize generated artifacts for sync PR #4540** (#4541)
+- **ci: authorize generated artifacts for an earlier main-to-dev sync attempt** (#4539)
 
 ---
 

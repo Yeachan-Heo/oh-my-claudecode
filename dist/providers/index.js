@@ -11,6 +11,7 @@ import { GitLabProvider } from './gitlab.js';
 import { BitbucketProvider } from './bitbucket.js';
 import { AzureDevOpsProvider, isAzureDevOpsHost } from './azure-devops.js';
 import { GiteaProvider } from './gitea.js';
+import { stripTrailingSlashes } from '../utils/url.js';
 // Singleton provider registry
 let providerRegistry = null;
 // TTL cache for git remote URL lookups keyed on resolved cwd
@@ -99,7 +100,10 @@ export function detectProvider(remoteUrl) {
  * Supports HTTPS, SSH (SCP-style), and provider-specific formats.
  */
 export function parseRemoteUrl(url) {
-    const trimmed = url.trim();
+    // Browser addresses and some `git remote set-url` values keep a trailing
+    // slash. Git still fetches them. The matchers below require the URL to end
+    // on the repo name, so drop only trailing slashes before they run.
+    const trimmed = stripTrailingSlashes(url.trim());
     // Azure DevOps HTTPS: https://dev.azure.com/{org}/{project}/_git/{repo}
     const azureHttpsMatch = trimmed.match(/^https?:\/\/(?:[^/@?#]+@)?dev\.azure\.com\.?\/([^/]+)\/([^/]+)\/_git\/([^/\s]+)$/i);
     if (azureHttpsMatch) {
