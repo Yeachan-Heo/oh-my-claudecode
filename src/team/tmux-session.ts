@@ -3446,8 +3446,12 @@ export function detectPaneTrustPromptKind(captured: string, provider?: CliAgentT
     return 'cursor_workspace_trust';
   }
 
-  const hasClaudeDirectoryQuestion = tail.some(l =>
-    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l),
+  // Claude Code wraps the question to the pane width. In a 35-column pane it
+  // starts 13 lines from the bottom and reaches "trust?" within 3 lines.
+  const claudeQuestionLines = lines.slice(-20);
+  const hasClaudeDirectoryQuestion = claudeQuestionLines.some((_, index) =>
+    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i
+      .test(claudeQuestionLines.slice(index, index + 3).join(' ')),
   );
   const hasClaudeDirectoryNoChoice = tail.some(l => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some(l => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));

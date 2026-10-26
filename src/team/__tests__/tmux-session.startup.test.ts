@@ -829,6 +829,8 @@ describe('worker pane startup safety', () => {
   strictTmuxIt.each([
     ['Do you trust the files in this folder?', 'Yes, proceed'],
     ['Quick safety check: Is this a project you created or one you trust?', 'Yes, I trust this folder'],
+    // Claude Code 2.1.310 wraps the question in a 59-column worker pane.
+    ['Quick safety check: Is this a project you created or one\n you trust? (Like your own code, a well-known open source', 'Yes, I trust this folder'],
   ] as const)(
     'selects Yes in Claude Code’s new directory trust dialog before delivering the inbox (%s)',
     async (question, affirmativeChoice) => {
