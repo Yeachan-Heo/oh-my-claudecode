@@ -1034,6 +1034,14 @@ describe('runtime-cli recovery intent cleanup', () => {
       { liveness: 'alive', providerLiveness: 'unknown' },
       { liveness: 'dead', providerLiveness: 'dead' },
     ] as never, true)).toBe('alive');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'alive', providerLiveness: 'dead' },
+      { liveness: 'unknown', providerLiveness: 'unknown' },
+    ] as never, true)).toBe('unknown');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'dead' },
+      { liveness: 'dead' },
+    ] as never, true)).toBe('all_dead');
   });
 
   it('suspends expired all-dead terminalization for a valid predeadline recovery intent', async () => {
