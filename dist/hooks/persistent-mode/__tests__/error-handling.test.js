@@ -47,6 +47,18 @@ describe('persistent-mode hook error handling (issue #319)', () => {
             expect(JSON.parse(result.output)).toEqual({ continue: true, suppressOutput: true });
         }
     });
+    it('does not truncate non-integer safety timeout values to a few milliseconds', async () => {
+        const runs = ['1e4', '30_000'].map((value) => runHook('{"cwd":"."}', {
+            hookPath: SCRIPT_HOOK_PATH,
+            closeStdin: false,
+            env: { OMC_PERSISTENT_MODE_TIMEOUT_MS: value },
+        }));
+        for (const result of await Promise.all(runs)) {
+            // Falls back to the default safety timeout, which outlives the harness.
+            expect(result.stderr).not.toContain('Safety timeout reached');
+            expect(result.timedOut).toBe(true);
+        }
+    }, 10_000);
     it('honors persistent-mode environment skip before reading stdin', async () => {
         const skipEnvs = [
             { DISABLE_OMC: '1' },

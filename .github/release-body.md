@@ -1,31 +1,29 @@
-# oh-my-claudecode v5.7.15: More reliable timeout handling and clearer token counts
+# oh-my-claudecode v5.7.16: Clearer change summaries and more reliable team startup
 
 ## Release Notes
 
-This release preserves whole-integer timeout values in persistent mode and pre-tool advisory cooldowns, shows near-million token counts in millions, and accepts GitHub and GitLab pull request diff and patch URLs. Thanks to @rudycelekli for #4599, #4600, #4601, and #4604.
+This release preserves the first Git status entry's path in subagent file-change summaries, reports modify/delete paths in team rebase conflict messages, and detects Claude's directory-trust question when it wraps in narrow panes, so workers no longer exit on first launch. Thanks to @rudycelekli for #4607 and #4608, and @iyoda for #4611, which addresses the same symptom as #4123.
 
 ### Highlights
 
-- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
-- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
-- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
-- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
+- **fix(omc-orchestrator): keep the first git status entry's path intact in the subagent FILE CHANGES SUMMARY** (#4607, @rudycelekli)
+- **fix(team): report modify/delete paths in rebase conflict messages** (#4608, @rudycelekli)
+- **fix(team): detect Claude's directory-trust dialog when its question wraps in narrow panes** (#4611, fixes #4123; @iyoda)
 
 ### Bug Fixes
 
-- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
-- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
-- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
-- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
+- **fix(omc-orchestrator): keep the first git status entry's path intact in the subagent FILE CHANGES SUMMARY** (#4607, @rudycelekli)
+- **fix(team): report modify/delete paths in rebase conflict messages** (#4608, @rudycelekli)
+- **fix(team): detect Claude's directory-trust dialog when its question wraps in narrow panes** (#4611, fixes #4123; @iyoda)
 
 ### Other Changes
 
-- **chore(sync): merge the v5.7.14 main release into dev** (#4596)
-- **ci: authorize generated artifacts for the v5.7.14 main-to-dev sync** (#4597)
+- **chore(sync): merge the v5.7.15 main release into dev** (#4609)
+- **ci: authorize generated artifacts for the v5.7.15 main-to-dev sync** (#4610)
 
 ### Stats
 
-- **6 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+- **5 PRs merged** | **0 new features** | **3 bug fixes** | **0 security/hardening improvements** | **2 other changes**
 
 ### Install / Update
 
@@ -34,7 +32,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.15
+npm install -g oh-my-claude-sisyphus@5.7.16
 ```
 
 **Claude Code plugin:**
@@ -43,10 +41,10 @@ npm install -g oh-my-claude-sisyphus@5.7.15
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.14...v5.7.15
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.15...v5.7.16
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@rudycelekli @Yeachan-Heo
+@rudycelekli @iyoda @Yeachan-Heo

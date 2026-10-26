@@ -12556,8 +12556,9 @@ function detectPaneTrustPromptKind(captured, provider) {
   if ((provider === void 0 || provider === "cursor") && hasCursorTrustBanner && (hasCursorTrustHint || tail.some((l) => /Do you trust the contents of this directory\?/i.test(l)))) {
     return "cursor_workspace_trust";
   }
-  const hasClaudeDirectoryQuestion = tail.some(
-    (l) => /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l)
+  const claudeQuestionLines = lines.slice(-20);
+  const hasClaudeDirectoryQuestion = claudeQuestionLines.some(
+    (_, index) => /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(claudeQuestionLines.slice(index, index + 3).join(" "))
   );
   const hasClaudeDirectoryNoChoice = tail.some((l) => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some((l) => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
@@ -16698,9 +16699,7 @@ function preflightMergerWorktree(mergerPath, leaderBranch) {
 function parseUUFiles(porcelainOutput) {
   const files = [];
   for (const line of porcelainOutput.split("\n")) {
-    if (line.startsWith("UU ")) {
-      files.push(line.slice(3).trim());
-    } else if (line.startsWith("AA ") || line.startsWith("DD ")) {
+    if (UNMERGED_STATUS.test(line)) {
       files.push(line.slice(3).trim());
     }
   }
@@ -17211,7 +17210,7 @@ Cadence resumes once the git rebase state is gone.`;
   }
   return { orphanedRebases, persistedShasLoaded };
 }
-var import_node_child_process5, import_node_fs10, import_promises15, import_node_path11, liveServiceOwners, DEFAULT_POLL_INTERVAL_MS2, DEFAULT_DRAIN_TIMEOUT_MS;
+var import_node_child_process5, import_node_fs10, import_promises15, import_node_path11, liveServiceOwners, DEFAULT_POLL_INTERVAL_MS2, DEFAULT_DRAIN_TIMEOUT_MS, UNMERGED_STATUS;
 var init_merge_orchestrator = __esm({
   "src/team/merge-orchestrator.ts"() {
     "use strict";
@@ -17232,6 +17231,7 @@ var init_merge_orchestrator = __esm({
     liveServiceOwners = /* @__PURE__ */ new Map();
     DEFAULT_POLL_INTERVAL_MS2 = 1e3;
     DEFAULT_DRAIN_TIMEOUT_MS = 1e4;
+    UNMERGED_STATUS = /^(?:DD|AU|UD|UA|DU|AA|UU) /;
   }
 });
 
