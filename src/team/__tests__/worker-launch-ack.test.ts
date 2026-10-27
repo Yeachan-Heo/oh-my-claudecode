@@ -2515,6 +2515,9 @@ describe('worker launch acknowledgement', () => {
     expect(buildProviderEnvironment({ HOME: '/home/explicit' }, {
       PATH: '/usr/bin:/bin', HOME: '/home/ambient',
     }, 'linux')).toMatchObject({ PATH: '/usr/bin:/bin', HOME: '/home/explicit' });
+    expect(buildProviderEnvironment({ USER: 'explicit' }, {
+      PATH: '/usr/bin:/bin', HOME: '/Users/ambient', USER: 'ambient',
+    }, 'darwin')).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/ambient', USER: 'explicit' });
     expect(buildProviderEnvironment({ USERPROFILE: 'D:\\Users\\explicit' }, {
       PATH: 'C:\\Windows\\System32', USERPROFILE: 'C:\\Users\\ambient',
     }, 'win32')).toMatchObject({ PATH: 'C:\\Windows\\System32', USERPROFILE: 'D:\\Users\\explicit' });
