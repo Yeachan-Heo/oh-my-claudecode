@@ -1,31 +1,22 @@
-# oh-my-claudecode v5.7.15: More reliable timeout handling and clearer token counts
+# oh-my-claudecode v5.7.17: More reliable recovery when providers exit
 
 ## Release Notes
 
-This release preserves whole-integer timeout values in persistent mode and pre-tool advisory cooldowns, shows near-million token counts in millions, and accepts GitHub and GitLab pull request diff and patch URLs. Thanks to @rudycelekli for #4599, #4600, #4601, and #4604.
-
-### Highlights
-
-- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
-- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
-- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
-- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
+This release reaches all-dead recovery when every team worker's provider exits while its tmux pane remains alive, so the job no longer stays running with stuck pending tasks. Thanks to @iyoda for #4618.
 
 ### Bug Fixes
 
-- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
-- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
-- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
-- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
+- **fix(team): reach all-dead recovery when every worker's provider exits inside a live pane** (#4618, @iyoda)
 
 ### Other Changes
 
-- **chore(sync): merge the v5.7.14 main release into dev** (#4596)
-- **ci: authorize generated artifacts for the v5.7.14 main-to-dev sync** (#4597)
+- **ci: authorize generated artifacts for an earlier v5.7.16 main-to-dev sync attempt** (#4615)
+- **chore(sync): merge main's v5.7.16 release into dev** (#4616)
+- **ci: authorize generated artifacts for the v5.7.16 main-to-dev sync** (#4617)
 
 ### Stats
 
-- **6 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+- **4 PRs merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **3 other changes**
 
 ### Install / Update
 
@@ -34,7 +25,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.15
+npm install -g oh-my-claude-sisyphus@5.7.17
 ```
 
 **Claude Code plugin:**
@@ -43,10 +34,10 @@ npm install -g oh-my-claude-sisyphus@5.7.15
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.14...v5.7.15
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.16...v5.7.17
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@rudycelekli @Yeachan-Heo
+@iyoda @Yeachan-Heo

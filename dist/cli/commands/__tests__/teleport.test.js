@@ -168,7 +168,10 @@ describe('teleportCommand', () => {
         ['https://github.com/owner/repo/issues/7/', 7],
         ['https://github.com/owner/repo/pull/8/files', 8],
         ['https://github.com/owner/repo/pull/9/commits?w=1', 9],
+        ['https://github.com/owner/repo/pull/12.diff', 12],
+        ['https://github.com/owner/repo/pull/13.patch', 13],
         ['https://gitlab.com/group/sub/repo/-/merge_requests/10/diffs', 10],
+        ['https://gitlab.com/group/sub/repo/-/merge_requests/14.patch', 14],
         ['https://bitbucket.org/ws/repo/pull-requests/11/diff', 11],
     ])('reads the number from %s instead of treating it as a feature name', async (ref, number) => {
         const { getProvider } = await import('../../../providers/index.js');

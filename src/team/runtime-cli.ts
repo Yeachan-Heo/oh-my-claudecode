@@ -111,9 +111,15 @@ export function classifyAllDeadRecoveryEvidence(
   if (!hasOutstanding) return 'clear';
   if (!refresh.allWorkerPaneIdsKnown || refresh.authoritativePaneIds.length === 0
     || workers.length !== refresh.authoritativePaneIds.length) return 'unknown';
-  if (workers.some(worker => worker.liveness === 'alive')) return 'alive';
-  if (workers.some(worker => worker.liveness === 'unknown')) return 'unknown';
-  return hasOutstanding && workers.every(worker => worker.liveness === 'dead') ? 'all_dead' : 'unknown';
+  // The pane is an interactive shell that outlives its provider, so a known
+  // provider state outranks pane liveness; unknown falls back to the pane.
+  const liveness = workers.map(worker =>
+    worker.providerLiveness === 'alive' || worker.providerLiveness === 'dead'
+      ? worker.providerLiveness
+      : worker.liveness);
+  if (liveness.includes('alive')) return 'alive';
+  if (liveness.includes('unknown')) return 'unknown';
+  return 'all_dead';
 }
 
 export function areAllAuthoritativeWorkersDead(
