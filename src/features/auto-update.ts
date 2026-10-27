@@ -45,6 +45,8 @@ interface GlobalClaudeCodeInstall {
   error?: string;
 }
 
+const UPDATE_RECONCILE_HANG_TIMEOUT_MS = 600000;
+
 function npmExecOptions(verbose: boolean = false): {
   encoding: 'utf-8';
   stdio: 'inherit' | 'pipe';
@@ -1141,20 +1143,24 @@ export async function performUpdate(options?: {
         const omcPath = resolveOmcBinaryPath();
 
         // Re-exec with reconcile subcommand
+        const reconcileArgs = ['update-reconcile', ...(options?.clean ? ['--skip-grace-period'] : [])];
         try {
-          execFileSync(omcPath, ['update-reconcile', ...(options?.clean ? ['--skip-grace-period'] : [])], {
+          execFileSync(omcPath, reconcileArgs, {
             encoding: 'utf-8',
             stdio: options?.verbose ? 'inherit' : 'pipe',
-            timeout: 60000,
+            timeout: UPDATE_RECONCILE_HANG_TIMEOUT_MS,
             env: { ...process.env, OMC_UPDATE_RECONCILE: '1' },
             ...(process.platform === 'win32' ? { windowsHide: true, shell: true } : {}),
           });
         } catch (reconcileError) {
+          const timedOut = (reconcileError as NodeJS.ErrnoException)?.code === 'ETIMEDOUT';
           return {
             success: false,
             previousVersion,
             newVersion,
-            message: `Updated to ${newVersion}, but runtime reconciliation failed`,
+            message: timedOut
+              ? `Updated to ${newVersion}, but runtime reconciliation timed out after ${UPDATE_RECONCILE_HANG_TIMEOUT_MS / 1000} seconds. Run "${['omc', ...reconcileArgs, '--verbose'].join(' ')}" to finish the update.`
+              : `Updated to ${newVersion}, but runtime reconciliation failed`,
             errors: [reconcileError instanceof Error ? reconcileError.message : String(reconcileError)],
           };
         }
