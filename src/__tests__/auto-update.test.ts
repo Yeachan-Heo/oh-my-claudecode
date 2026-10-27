@@ -40,6 +40,7 @@ import { install, isProjectScopedPlugin, checkNodeVersion, CLAUDE_CONFIG_DIR } f
 import {
   reconcileUpdateRuntime,
   performUpdate,
+  silentAutoUpdate,
   shouldBlockStandaloneUpdateInCurrentSession,
   syncPluginCache,
   fetchLatestRelease,
@@ -1869,9 +1870,30 @@ describe('auto-update reconciliation', () => {
       const result = await performUpdate({ verbose: false, ...options });
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain(`Run "${command}" to finish the update.`);
+      expect(result.message).toBe(
+        'Updated to 4.1.6, but runtime reconciliation timed out after 600 seconds. '
+        + `Wait until no "omc update-reconcile" process is running, then run "${command}" to finish runtime reconciliation.`,
+      );
       expect(result.errors).toEqual([TIMEOUT_MESSAGE]);
       expect(mockedWriteFileSync).not.toHaveBeenCalledWith(expect.stringContaining('.omc-version.json'), expect.anything());
+    });
+
+    it('bounds the child at 60 s when the unattended silent auto-update runs it', async () => {
+      arrangeReconcileChild(99_816);
+      const readFile = mockedReadFileSync.getMockImplementation()!;
+      mockedReadFileSync.mockImplementation(((path: Parameters<typeof readFileSync>[0], options?: Parameters<typeof readFileSync>[1]) =>
+        String(path).endsWith('.omc-config.json')
+          ? JSON.stringify({ silentAutoUpdate: true })
+          : readFile(path, options)) as typeof readFileSync);
+
+      const result = await silentAutoUpdate();
+
+      expect(result?.success).toBe(false);
+      expect(result?.message).toBe(
+        'Updated to 4.1.6, but runtime reconciliation timed out after 60 seconds. '
+        + 'Wait until no "omc update-reconcile" process is running, then run "omc update-reconcile --verbose" to finish runtime reconciliation.',
+      );
+      expect(mockedWriteFileSync).not.toHaveBeenCalledWith(expect.stringContaining('.omc-version.json'), expect.stringContaining('"version": "4.1.6"'));
     });
   });
 

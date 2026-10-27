@@ -45,7 +45,9 @@ interface GlobalClaudeCodeInstall {
   error?: string;
 }
 
-const UPDATE_RECONCILE_HANG_TIMEOUT_MS = 600000;
+const UPDATE_RECONCILE_TIMEOUT_MS = 600000;
+// The unattended path runs inside the SessionStart hook process, which stays alive until the synchronous child exits.
+const UNATTENDED_UPDATE_RECONCILE_TIMEOUT_MS = 60000;
 
 function npmExecOptions(verbose: boolean = false): {
   encoding: 'utf-8';
@@ -1082,6 +1084,7 @@ export async function performUpdate(options?: {
   verbose?: boolean;
   standalone?: boolean;
   clean?: boolean;
+  unattended?: boolean;
 }): Promise<UpdateResult> {
   const installed = getInstalledVersion();
   const previousVersion = installed?.version ?? null;
@@ -1144,11 +1147,14 @@ export async function performUpdate(options?: {
 
         // Re-exec with reconcile subcommand
         const reconcileArgs = ['update-reconcile', ...(options?.clean ? ['--skip-grace-period'] : [])];
+        const reconcileTimeoutMs = options?.unattended
+          ? UNATTENDED_UPDATE_RECONCILE_TIMEOUT_MS
+          : UPDATE_RECONCILE_TIMEOUT_MS;
         try {
           execFileSync(omcPath, reconcileArgs, {
             encoding: 'utf-8',
             stdio: options?.verbose ? 'inherit' : 'pipe',
-            timeout: UPDATE_RECONCILE_HANG_TIMEOUT_MS,
+            timeout: reconcileTimeoutMs,
             env: { ...process.env, OMC_UPDATE_RECONCILE: '1' },
             ...(process.platform === 'win32' ? { windowsHide: true, shell: true } : {}),
           });
@@ -1159,7 +1165,7 @@ export async function performUpdate(options?: {
             previousVersion,
             newVersion,
             message: timedOut
-              ? `Updated to ${newVersion}, but runtime reconciliation timed out after ${UPDATE_RECONCILE_HANG_TIMEOUT_MS / 1000} seconds. Run "${['omc', ...reconcileArgs, '--verbose'].join(' ')}" to finish the update.`
+              ? `Updated to ${newVersion}, but runtime reconciliation timed out after ${reconcileTimeoutMs / 1000} seconds. Wait until no "omc update-reconcile" process is running, then run "${['omc', ...reconcileArgs, '--verbose'].join(' ')}" to finish runtime reconciliation.`
               : `Updated to ${newVersion}, but runtime reconciliation failed`,
             errors: [reconcileError instanceof Error ? reconcileError.message : String(reconcileError)],
           };
@@ -1476,7 +1482,8 @@ export async function silentAutoUpdate(config: SilentUpdateConfig = {}): Promise
     // Perform the update silently
     const result = await performUpdate({
       skipConfirmation: true,
-      verbose: false
+      verbose: false,
+      unattended: true
     });
 
     if (result.success) {
