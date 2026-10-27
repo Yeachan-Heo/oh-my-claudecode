@@ -139,8 +139,8 @@ This loads agents, skills, and commands directly from your checkout without copy
 
 | Platform | Installation | Hook type |
 |----------|--------------|-----------|
-| macOS | Claude Code Plugin | Node.js (.mjs) |
-| Linux | Claude Code Plugin | Node.js (.mjs) |
+| macOS | Claude Code Plugin | Bash (.sh) |
+| Linux | Claude Code Plugin | Bash (.sh) |
 | Windows | WSL2 recommended | Node.js (.mjs) |
 
 > ℹ️ **Note:** Native Windows support is experimental. For tmux-backed Team workers, OMC checks for a tmux-compatible binary first; native [psmux](https://github.com/psmux/psmux) is supported for PowerShell 7+ users who want visible Claude Code teammate panes in interactive team workflows. WSL2 remains the fallback when no compatible tmux is available or native Windows behavior is insufficient. psmux does not force worktree agents, non-interactive/print-mode agents, or model-selected in-process agents into visible panes.

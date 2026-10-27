@@ -891,8 +891,8 @@ function executeClaudeMdTransaction(request) {
 
 // src/cli/claude-md-coordinator.ts
 var CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
-var COMPILED_ENGINE_VERSION = true ? "5.7.17" : "";
-var COMPILED_SOURCE_SHA256 = true ? "8411a50606315105268435fb7a665cfe5617a76a4e48788bf49b25ac46730786" : "";
+var COMPILED_ENGINE_VERSION = true ? "5.7.18" : "";
+var COMPILED_SOURCE_SHA256 = true ? "1e5fca096ad8d5dc9d5ad9dab3cf6982a1ee79f9abbe696a1862cf7c6c20773d" : "";
 function runClaudeMdCoordinatorHandshake() {
   if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) {
     return { exitCode: 2, response: coordinatorError(2, "Coordinator build handshake is unavailable") };

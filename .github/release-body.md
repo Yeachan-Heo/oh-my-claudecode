@@ -1,22 +1,21 @@
-# oh-my-claudecode v5.7.17: More reliable recovery when providers exit
+# oh-my-claudecode v5.7.18: Keep macOS team workers logged in
 
 ## Release Notes
 
-This release reaches all-dead recovery when every team worker's provider exits while its tmux pane remains alive, so the job no longer stays running with stuck pending tasks. Thanks to @iyoda for #4618.
+This release preserves Claude Code's macOS keychain OAuth login for team workers by passing `USER` through the POSIX provider environment, preventing workers from starting logged out and being retired with `startup_dispatch_failed`. Thanks to @iyoda for #4625.
 
 ### Bug Fixes
 
-- **fix(team): reach all-dead recovery when every worker's provider exits inside a live pane** (#4618, @iyoda)
+- **fix(team): pass `USER` through the POSIX provider environment so macOS workers retain their Claude login** (#4625, @iyoda)
 
 ### Other Changes
 
-- **ci: authorize generated artifacts for an earlier v5.7.16 main-to-dev sync attempt** (#4615)
-- **chore(sync): merge main's v5.7.16 release into dev** (#4616)
-- **ci: authorize generated artifacts for the v5.7.16 main-to-dev sync** (#4617)
+- **chore(sync): merge main's v5.7.17 release into dev** (#4623)
+- **ci: authorize generated artifacts for the v5.7.17 main-to-dev sync** (#4624)
 
 ### Stats
 
-- **4 PRs merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **3 other changes**
+- **3 PRs merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **2 other changes**
 
 ### Install / Update
 
@@ -25,7 +24,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.17
+npm install -g oh-my-claude-sisyphus@5.7.18
 ```
 
 **Claude Code plugin:**
@@ -34,7 +33,7 @@ npm install -g oh-my-claude-sisyphus@5.7.17
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.16...v5.7.17
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.17...v5.7.18
 
 ## Contributors
 

@@ -2183,10 +2183,12 @@ describe('worker launch acknowledgement', () => {
             .toEqual(['SystemRoot']);
         await expect(cleanupWorkerLaunchTransport(launchAttempt, 'windows_descriptor_round_trip')).resolves.toBe(true);
     });
-    it('propagates only the canonical home variable for each platform', () => {
+    it('propagates only the canonical identity variables for each platform', () => {
         const posix = buildProviderEnvironment(undefined, {
             PATH: '/usr/bin:/bin',
             HOME: '/home/provider',
+            USER: 'provider',
+            LOGNAME: 'provider',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             USERPROFILE: 'C:\\Users\\wrong-platform',
@@ -2195,18 +2197,21 @@ describe('worker launch acknowledgement', () => {
         expect(posix).toEqual({
             PATH: '/usr/bin:/bin',
             HOME: '/home/provider',
+            USER: 'provider',
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
         });
         const macos = buildProviderEnvironment(undefined, {
             PATH: '/usr/bin:/bin',
             HOME: '/Users/provider',
+            USER: 'provider',
             USERPROFILE: 'C:\\Users\\wrong-platform',
         }, 'darwin');
-        expect(macos).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/provider' });
+        expect(macos).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/provider', USER: 'provider' });
         const windows = buildProviderEnvironment(undefined, {
             PATH: 'C:\\Windows\\System32',
             HOME: '/home/wrong-platform',
+            USER: 'provider',
             USERPROFILE: 'C:\\Users\\provider',
             SystemRoot: 'C:\\Windows',
             GH_TOKEN: 'ambient-secret',
@@ -2224,11 +2229,17 @@ describe('worker launch acknowledgement', () => {
             PATH: '/usr/bin:/bin', HOME: '', USERPROFILE: 'C:\\Users\\wrong-platform',
         }, 'linux')).toEqual({ PATH: '/usr/bin:/bin' });
         expect(buildProviderEnvironment(undefined, {
+            PATH: '/usr/bin:/bin', HOME: '/Users/provider', USER: '',
+        }, 'darwin')).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/provider' });
+        expect(buildProviderEnvironment(undefined, {
             PATH: 'C:\\Windows\\System32', USERPROFILE: '', HOME: '/home/wrong-platform',
         }, 'win32')).toEqual({ PATH: 'C:\\Windows\\System32' });
         expect(buildProviderEnvironment({ HOME: '/home/explicit' }, {
             PATH: '/usr/bin:/bin', HOME: '/home/ambient',
         }, 'linux')).toMatchObject({ PATH: '/usr/bin:/bin', HOME: '/home/explicit' });
+        expect(buildProviderEnvironment({ USER: 'explicit' }, {
+            PATH: '/usr/bin:/bin', HOME: '/Users/ambient', USER: 'ambient',
+        }, 'darwin')).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/ambient', USER: 'explicit' });
         expect(buildProviderEnvironment({ USERPROFILE: 'D:\\Users\\explicit' }, {
             PATH: 'C:\\Windows\\System32', USERPROFILE: 'C:\\Users\\ambient',
         }, 'win32')).toMatchObject({ PATH: 'C:\\Windows\\System32', USERPROFILE: 'D:\\Users\\explicit' });

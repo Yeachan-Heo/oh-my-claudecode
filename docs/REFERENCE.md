@@ -1274,10 +1274,14 @@ stopomc
 | Platform    | Install Method              | Hook Type      |
 | ----------- | --------------------------- | -------------- |
 | **Windows** | WSL2 recommended (see note) | Node.js (.mjs) |
-| **macOS**   | Claude Code Plugin          | Node.js (.mjs) |
-| **Linux**   | Claude Code Plugin          | Node.js (.mjs) |
+| **macOS**   | Claude Code Plugin          | Bash (.sh)     |
+| **Linux**   | Claude Code Plugin          | Bash (.sh)     |
+
+> **Note**: Bash hooks are fully portable across macOS and Linux (no GNU-specific dependencies).
 
 > **Windows**: Native Windows (win32) support is experimental. Features that launch tmux-backed worker panes require a tmux-compatible binary. OMC supports native [psmux](https://github.com/psmux/psmux) for PowerShell 7+ users who want visible Claude Code teammate panes in interactive team workflows, and recommends WSL2 as the fallback when no compatible `tmux` command is installed or native Windows behavior is insufficient. psmux does not force worktree agents, non-interactive/print-mode agents, or model-selected in-process agents into visible panes. Native Windows issues may have limited support.
+
+> **Advanced**: Set `OMC_USE_NODE_HOOKS=1` to use Node.js hooks on macOS/Linux.
 
 ### Available Tools
 
@@ -1454,7 +1458,7 @@ Available presets: `minimal`, `focused`, `full`, `dense`, `analytics`, `opencode
 | Issue                 | Solution                                                                         |
 | --------------------- | -------------------------------------------------------------------------------- |
 | Commands not found    | Re-run `/oh-my-claudecode:omc-setup`                                             |
-| Hooks not executing   | Check that `node` 20+ is on `PATH`, then run `/oh-my-claudecode:omc-doctor`      |
+| Hooks not executing   | Check hook permissions: `chmod +x ~/.claude/hooks/**/*.sh`                       |
 | Agents not delegating | Verify CLAUDE.md is loaded: check `./.claude/CLAUDE.md` or `~/.claude/CLAUDE.md` |
 | LSP tools not working | Install language servers: `npm install -g typescript-language-server`            |
 | Token limit errors    | Use `/oh-my-claudecode:` for token-efficient execution                           |
