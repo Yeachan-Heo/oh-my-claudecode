@@ -995,6 +995,11 @@ function ensureStandaloneHookScripts(log: (msg: string) => void): void {
       }
 
       const targetPath = join(hooksLibDir, filename);
+      // The plugin setup hook links stdin.mjs into a versioned plugin cache that
+      // later disappears; copying through that link fails or mutates the cache.
+      if (lstatSync(targetPath, { throwIfNoEntry: false })?.isSymbolicLink()) {
+        unlinkSync(targetPath);
+      }
       copyFileSync(sourcePath, targetPath);
       if (!isWindows()) {
         chmodSync(targetPath, 0o755);
