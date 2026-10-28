@@ -4,6 +4,56 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4642,
+      "targetRef": "dev",
+      "mergeBaseSha": "8548cc470bf46d123d30cc205d502f64cc89d8b9",
+      "headSha": "fadd8c6ccc56c57be3b5f725e0a01e720491124a",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-10-29T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 6,
+        "sha256": "d2b79f0c7c5b445ab506e3ab1d012f6ea75307765da13a278066039523824140"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "e1b6d6ee48f6503be3c94bf2d3f6e8f5e977e89c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "8d6ec6fdee9f730d16c2a2e26d04601778fddae7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/state-tools-nongit-ownership.test.js",
+          "sha": "51de26989a4ea898aad2df373765212c7809a8bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/__tests__/state-tools-nongit-ownership.test.js.map",
+          "sha": "47b7a10dae5af642224ad90a5e87c3b86a372386",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/state-tools.js",
+          "sha": "bc1e54fbd145e4ad129f904c1bdfb377383ddc70",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/state-tools.js.map",
+          "sha": "2430fa08882212913c97752601bc414ab90e87cf",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4639,
       "targetRef": "dev",
       "mergeBaseSha": "2985d2a46c9cfe61d15883698127f52e8d1ce26a",
