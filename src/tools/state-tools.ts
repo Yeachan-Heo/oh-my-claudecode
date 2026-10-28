@@ -2367,8 +2367,8 @@ const stateMigrateNonGitTool: ToolDefinition<any> = {
       }
       const gitProbe = probeGitTopLevel(sourceRoot);
       if (gitProbe.status === 'ok') throw new Error('state_migrate_non_git only accepts a non-git source directory');
-      if (gitProbe.status !== 'not_a_repository') throw new Error('state_migrate_non_git refused a failed Git probe');
       if (findGitMetadataDir(sourceRoot)) throw new Error('state_migrate_non_git refuses a directory with Git metadata');
+      if (gitProbe.status !== 'not_a_repository') throw new Error('state_migrate_non_git refused a failed Git probe');
       const authorizedHome = realpathSync(homedir());
       const sourceFromHome = relative(authorizedHome, sourceRoot);
       if (sourceFromHome === '..' || sourceFromHome.startsWith(`..${sep}`) || isAbsolute(sourceFromHome)) {

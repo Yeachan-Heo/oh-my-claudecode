@@ -241,7 +241,31 @@ describe('#3873 real non-git state ownership', () => {
     expect(result.content[0].text).toContain('Git metadata');
   });
 
-  it('fails closed on a typed Git probe failure', async () => {
+  it('reports malformed Git metadata even when the Git probe fails', async () => {
+    const parent = join(osPaths.home, 'malformed-git-probe-failure-parent');
+    const sourceRoot = join(parent, 'legacy-child');
+    mkdirSync(sourceRoot, { recursive: true });
+    writeFileSync(join(parent, '.git'), 'gitdir: /missing-omc-gitdir');
+    setGitShowToplevelProbeForTests(() => {
+      const error = new Error('git unavailable') as NodeJS.ErrnoException;
+      error.code = 'EACCES';
+      throw error;
+    });
+
+    const beforeCwd = process.cwd();
+    process.chdir(sourceRoot);
+    let result;
+    try {
+      result = await stateMigrateTool.handler({ mode: 'ralph', workingDirectory: sourceRoot, session_id: 'malformed-probe-owner' });
+    } finally {
+      process.chdir(beforeCwd);
+    }
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Git metadata');
+  });
+
+  it('fails closed on a typed Git probe failure when no Git metadata exists', async () => {
     setGitShowToplevelProbeForTests(() => {
       const error = new Error('git unavailable') as NodeJS.ErrnoException;
       error.code = 'EACCES';
