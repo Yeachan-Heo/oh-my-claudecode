@@ -2969,6 +2969,46 @@ describe('state-tools', () => {
       expect(result.content[0].text).toContain(join(TEST_DIR, '.omc', 'state', 'sessions', sessionId, 'autopilot-state.json'));
     });
 
+    it('keeps session-scoped no-op diagnostics bounded with hundreds of unrelated sessions', async () => {
+      const sessionId = 'missing-ralph-state-session';
+      const sessionsRoot = join(TEST_DIR, '.omc', 'state', 'sessions');
+      for (let i = 0; i < 400; i++) {
+        mkdirSync(join(sessionsRoot, `unrelated-session-${String(i).padStart(3, '0')}`), { recursive: true });
+      }
+
+      const result = await stateClearTool.handler({
+        mode: 'ralph',
+        session_id: sessionId,
+        workingDirectory: TEST_DIR,
+      });
+      const text = result.content[0].text;
+
+      expect(text).toContain(`No state found to clear for mode: ralph in session: ${sessionId}`);
+      expect(text).toContain(join(sessionsRoot, sessionId, 'ralph-state.json'));
+      expect(text).not.toContain('unrelated-session-');
+      expect(text.split('\n')).toHaveLength(3);
+    });
+
+    it('caps unscoped no-op path diagnostics and reports the exact remainder', async () => {
+      const sessionIds = Array.from({ length: 12 }, (_, i) => `unrelated-session-${String(i).padStart(3, '0')}`);
+      const sessionsRoot = join(TEST_DIR, '.omc', 'state', 'sessions');
+      for (const sessionId of sessionIds) mkdirSync(join(sessionsRoot, sessionId), { recursive: true });
+
+      const result = await stateClearTool.handler({ mode: 'ralph', workingDirectory: TEST_DIR });
+      const text = result.content[0].text;
+      const listedPaths = text.split('\n').filter((line) => line.startsWith('  - ') && !line.includes('more checked paths'));
+      const remainder = text.match(/\s{2}- \.\.\. and (\d+) more checked paths/);
+      const expectedPaths = new Set([
+        resolveSessionStatePaths('ralph', undefined, TEST_DIR).legacy,
+        join(getOmcRoot(TEST_DIR), 'ralph-state.json'),
+        ...sessionIds.map((sessionId) => resolveSessionStatePaths('ralph', sessionId, TEST_DIR).sessionScoped),
+      ]);
+
+      expect(listedPaths).toHaveLength(10);
+      expect(remainder).not.toBeNull();
+      expect(Number(remainder?.[1])).toBe(expectedPaths.size - listedPaths.length);
+    });
+
     it('reports a captured candidate that survives a non-team session clear as a failure', async () => {
       // The workingDirectory-local cleanup only runs as a fallback, so with a
       // centralized session file present the local candidate is captured but

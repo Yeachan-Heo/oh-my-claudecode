@@ -121,6 +121,7 @@ const STATE_WRITE_MODES: [string, ...string[]] = [
 const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active', 'ultragoal'] as const;
 type StateToolMode = typeof STATE_TOOL_MODES[number];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const MAX_REPORTED_STATE_CLEAR_PATHS = 10;
 const TEAM_RUNTIME_PRESERVATION_NOTE = 'Native team runtimes and cleanup evidence are not removed by state_clear; use instance-validated team shutdown/job cleanup.';
 const OWNER_SESSION_FALLBACK_MODES = new Set<StateToolMode>(['ralph']);
 const CONVERGED_STATE_PATH_MODES = new Set<StateToolMode>(['ralph', 'ultrawork']);
@@ -789,20 +790,27 @@ function getStateClearCheckedPaths(
 
   if (sessionId) {
     paths.add(getSessionStatePath(mode, root, sessionId));
-  } else {
-    paths.add(getStatePath(mode, root));
+    if (CONVERGED_STATE_PATH_MODES.has(mode)) {
+      for (const omcRoot of getConvergedOmcRoots(root)) {
+        paths.add(join(omcRoot, 'state', 'sessions', sessionId, getStateFileName(mode)));
+      }
+    }
+    if (shouldCheckWorkingDirectoryLocalState(root)) {
+      paths.add(getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId));
+    }
+    return [...paths];
   }
 
+  paths.add(getStatePath(mode, root));
   for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
     paths.add(legacyPath);
   }
 
-  for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)) {
+  for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root)) {
     paths.add(localPath);
   }
 
-  const sessionIds = sessionId ? [sessionId, ...listSessionIds(root)] : listSessionIds(root);
-  for (const sid of new Set(sessionIds)) {
+  for (const sid of listSessionIds(root)) {
     paths.add(getSessionStatePath(mode, root, sid));
   }
 
@@ -816,8 +824,10 @@ function formatStateClearNoopMessage(
 ): string {
   const scope = sessionId ? ` in session: ${sessionId}` : '';
   const checkedPaths = getStateClearCheckedPaths(mode, root, sessionId);
+  const displayedPaths = checkedPaths.slice(0, MAX_REPORTED_STATE_CLEAR_PATHS);
+  const omittedPathCount = checkedPaths.length - displayedPaths.length;
   const checked = checkedPaths.length > 0
-    ? `\n- Checked paths:\n${checkedPaths.map((statePath) => `  - ${statePath}`).join('\n')}`
+    ? `\n- Checked paths:\n${displayedPaths.map((statePath) => `  - ${statePath}`).join('\n')}${omittedPathCount > 0 ? `\n  - ... and ${omittedPathCount} more checked paths` : ''}`
     : '';
 
   return `No state found to clear for mode: ${mode}${scope}${checked}`;
