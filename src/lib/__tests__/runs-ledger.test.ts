@@ -110,4 +110,79 @@ describe('runs ledger', () => {
     expect(closeoutWrittenFor(dir, 'ralph', undefined)).toBe(false);
     expect(closeoutWrittenFor(dir, 'ralph', 'not-a-date')).toBe(false);
   });
+
+  it('avoids false positive closeoutWritten when mode is resumed (notepad write between stale started_at and resume start)', () => {
+    // Simulates a mode being resumed: original run starts, notepad written, run ends,
+    // mode is resumed (started_at preserved), new ledger start edge logged.
+    // The closeout detection must use the latest start edge, not the stale started_at.
+    const dir = fixture();
+    const mode = 'ralph';
+    const path = statePath(dir, mode);
+    mkdirSync(join(path, '..'), { recursive: true });
+
+    // Original run: start at T0
+    const originalStartT0 = new Date(Date.now() - 7200_000).toISOString(); // 2 hours ago
+    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
+
+    // Write to notepad at T1 (between original start and resume start)
+    const notepadWriteT1 = new Date(Date.now() - 3600_000); // 1 hour ago
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- problem from first run\n');
+    utimesSync(notepad, notepadWriteT1, notepadWriteT1);
+
+    // Mode is resumed at T2: started_at is preserved from original run
+    // but a new 'start' ledger edge is logged
+    const resumeStartT2 = new Date(Date.now() - 1800_000).toISOString(); // 30 min ago
+    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
+    // Manually set the latest start edge to T2 (simulating the resume)
+    appendRunLedger(dir, {
+      ts: resumeStartT2,
+      run: mode,
+      event: 'start',
+      outcome: 'running',
+    });
+
+    // When the resumed run ends, closeoutWritten should be false because
+    // the notepad write at T1 is BEFORE the resume start at T2
+    observeModeStateClear(dir, path, { active: true, started_at: originalStartT0, current_phase: 'complete' });
+    const lines = ledgerLines(dir);
+    const endEdge = lines.find((l) => l.event === 'end');
+    expect(endEdge?.closeoutWritten).toBe(false);
+  });
+
+  it('correctly marks closeoutWritten when notepad is written after mode resume', () => {
+    const dir = fixture();
+    const mode = 'ralph';
+    const path = statePath(dir, mode);
+    mkdirSync(join(path, '..'), { recursive: true });
+
+    // Original run: start at T0
+    const originalStartT0 = new Date(Date.now() - 5400_000).toISOString(); // 90 min ago
+    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
+
+    // Mode is resumed at T1
+    const resumeStartT1 = new Date(Date.now() - 1800_000).toISOString(); // 30 min ago
+    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
+    appendRunLedger(dir, {
+      ts: resumeStartT1,
+      run: mode,
+      event: 'start',
+      outcome: 'running',
+    });
+
+    // Write to notepad at T2 (after resume start)
+    const notepadWriteT2 = new Date(Date.now() - 900_000); // 15 min ago
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- problem from resumed run\n');
+    utimesSync(notepad, notepadWriteT2, notepadWriteT2);
+
+    // When the resumed run ends, closeoutWritten should be true because
+    // the notepad write at T2 is AFTER the resume start at T1
+    observeModeStateClear(dir, path, { active: true, started_at: originalStartT0, current_phase: 'complete' });
+    const lines = ledgerLines(dir);
+    const endEdge = lines.find((l) => l.event === 'end');
+    expect(endEdge?.closeoutWritten).toBe(true);
+  });
 });
