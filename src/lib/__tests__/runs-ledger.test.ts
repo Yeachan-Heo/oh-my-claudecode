@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -30,7 +30,16 @@ function statePath(dir: string, mode = 'ralph', sessionId?: string): string {
 function ledgerLines(dir: string): Array<Record<string, unknown>> {
   const path = join(dir, 'state', 'runs', 'ledger.jsonl');
   if (!existsSyncSafe(path)) return [];
-  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).flatMap((line) => {
+    try {
+      const entry: unknown = JSON.parse(line);
+      return typeof entry === 'object' && entry !== null && !Array.isArray(entry)
+        ? [entry as Record<string, unknown>]
+        : [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function existsSyncSafe(path: string): boolean {
@@ -151,70 +160,137 @@ describe('runs ledger', () => {
     expect(endEdge?.closeoutWritten).toBe(false);
   });
 
-  it('correctly marks closeoutWritten when notepad is written after mode resume', () => {
+  it('uses a valid legacy start edge when the stored started_at is malformed', () => {
     const dir = fixture();
     const mode = 'ralph';
-    const path = statePath(dir, mode);
-    mkdirSync(join(path, '..'), { recursive: true });
-
-    // Original run: start at T0
-    const originalStartT0 = new Date(Date.now() - 5400_000).toISOString(); // 90 min ago
-    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
-
-    // Mode is resumed at T1
-    const resumeStartT1 = new Date(Date.now() - 1800_000).toISOString(); // 30 min ago
-    observeModeStateWrite(dir, path, { active: true, started_at: originalStartT0 });
+    const resumeStart = new Date(Date.now() - 1800_000).toISOString(); // 30 min ago
     appendRunLedger(dir, {
-      ts: resumeStartT1,
+      ts: resumeStart,
       run: mode,
       event: 'start',
       outcome: 'running',
     });
 
-    // Write to notepad at T2 (after resume start)
-    const notepadWriteT2 = new Date(Date.now() - 900_000); // 15 min ago
+    // Write to notepad after the legacy (unscoped) start edge.
+    const notepadWrite = new Date(Date.now() - 900_000); // 15 min ago
     const notepad = join(dir, 'notepads', mode, 'problems.md');
     mkdirSync(join(notepad, '..'), { recursive: true });
     writeFileSync(notepad, '- problem from resumed run\n');
-    utimesSync(notepad, notepadWriteT2, notepadWriteT2);
+    utimesSync(notepad, notepadWrite, notepadWrite);
 
-    // When the resumed run ends, closeoutWritten should be true because
-    // the notepad write at T2 is AFTER the resume start at T1
-    observeModeStateClear(dir, path, { active: true, started_at: originalStartT0, current_phase: 'complete' });
+    // Legacy state paths have no sessionId; their ledger key is unscoped too.
+    observeModeStateClear(dir, statePath(dir, mode), {
+      active: true,
+      started_at: 'not-a-date',
+      current_phase: 'complete',
+    });
     const lines = ledgerLines(dir);
     const endEdge = lines.find((l) => l.event === 'end');
     expect(endEdge?.closeoutWritten).toBe(true);
   });
 
-  it('skips a corrupt ledger line when locating the resume start edge', () => {
+  it('skips malformed and non-object ledger lines when finding a start edge', () => {
     const dir = fixture();
     const mode = 'ralph';
-    const path = statePath(dir, mode);
-    mkdirSync(join(path, '..'), { recursive: true });
-    const originalStart = new Date(Date.now() - 7200_000).toISOString();
+    const startedAt = new Date(Date.now() - 3 * 3600_000).toISOString();
+    const resumeStart = new Date(Date.now() - 3600_000).toISOString();
+    const ledger = join(dir, 'state', 'runs', 'ledger.jsonl');
+    mkdirSync(join(ledger, '..'), { recursive: true });
+    writeFileSync(ledger, [
+      JSON.stringify({ ts: resumeStart, run: mode, event: 'start' }),
+      '{malformed json',
+      'null',
+      '[]',
+    ].join('\n') + '\n');
+
+    const notepadWrite = new Date(Date.now() - 2 * 3600_000);
     const notepad = join(dir, 'notepads', mode, 'problems.md');
     mkdirSync(join(notepad, '..'), { recursive: true });
-    writeFileSync(notepad, '- problem from first run\n');
-    const beforeResume = new Date(Date.now() - 3600_000);
-    utimesSync(notepad, beforeResume, beforeResume);
-    appendRunLedger(dir, { ts: new Date(Date.now() - 1800_000).toISOString(), run: mode, event: 'start', outcome: 'running' });
-    appendFileSync(join(dir, 'state', 'runs', 'ledger.jsonl'), '{"torn":\n');
-    observeModeStateClear(dir, path, { active: true, started_at: originalStart, current_phase: 'complete' });
-    const raw = readFileSync(join(dir, 'state', 'runs', 'ledger.jsonl'), 'utf8').trim().split('\n');
-    expect(JSON.parse(raw[raw.length - 1])).toMatchObject({ event: 'end', closeoutWritten: false });
+    writeFileSync(notepad, '- problem before resumed run\n');
+    utimesSync(notepad, notepadWrite, notepadWrite);
+
+    observeModeStateClear(dir, statePath(dir, mode), { active: true, started_at: startedAt });
+    expect(ledgerLines(dir).find((line) => line.event === 'end')?.closeoutWritten).toBe(false);
   });
 
-  it('uses the start edge when the retained started_at is unparseable', () => {
+  it('does not use a start edge that is already matched by an end', () => {
     const dir = fixture();
     const mode = 'ralph';
-    const path = statePath(dir, mode);
-    mkdirSync(join(path, '..'), { recursive: true });
-    appendRunLedger(dir, { ts: new Date(Date.now() - 1800_000).toISOString(), run: mode, event: 'start', outcome: 'running' });
+    const sessionId = 'session-a';
+    const startedAt = new Date(Date.now() - 5 * 3600_000).toISOString();
+    appendRunLedger(dir, {
+      ts: new Date(Date.now() - 3 * 3600_000).toISOString(),
+      run: mode,
+      sessionId,
+      event: 'start',
+      outcome: 'running',
+    });
+    appendRunLedger(dir, {
+      ts: new Date(Date.now() - 150 * 60_000).toISOString(),
+      run: mode,
+      sessionId,
+      event: 'end',
+      outcome: 'completed',
+    });
+
+    const notepadWrite = new Date(Date.now() - 4 * 3600_000);
     const notepad = join(dir, 'notepads', mode, 'problems.md');
     mkdirSync(join(notepad, '..'), { recursive: true });
-    writeFileSync(notepad, '- closeout\n');
-    observeModeStateClear(dir, path, { active: true, started_at: 'not-a-date', current_phase: 'complete' });
-    const endEdge = ledgerLines(dir).find((l) => l.event === 'end');
-    expect(endEdge?.closeoutWritten).toBe(true);
+    writeFileSync(notepad, '- problem after state start\n');
+    utimesSync(notepad, notepadWrite, notepadWrite);
+
+    observeModeStateClear(dir, statePath(dir, mode, sessionId), { active: true, started_at: startedAt });
+    expect(
+      ledgerLines(dir).filter((line) => line.event === 'end').at(-1)?.closeoutWritten,
+    ).toBe(true);
+  });
+
+  it('does not use a start edge belonging to another session', () => {
+    const dir = fixture();
+    const mode = 'ralph';
+    appendRunLedger(dir, {
+      ts: new Date(Date.now() - 60 * 60_000).toISOString(),
+      run: mode,
+      sessionId: 'other-session',
+      event: 'start',
+      outcome: 'running',
+    });
+
+    const notepadWrite = new Date(Date.now() - 2 * 3600_000);
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- problem from target session\n');
+    utimesSync(notepad, notepadWrite, notepadWrite);
+
+    observeModeStateClear(dir, statePath(dir, mode, 'target-session'), {
+      active: true,
+      started_at: new Date(Date.now() - 3 * 3600_000).toISOString(),
+    });
+    expect(ledgerLines(dir).find((line) => line.event === 'end')?.closeoutWritten).toBe(true);
+  });
+
+  it('falls back to started_at when a newer start edge is only in the rotated archive', () => {
+    const dir = fixture();
+    const mode = 'ralph';
+    const ledger = join(dir, 'state', 'runs', 'ledger.jsonl');
+    mkdirSync(join(ledger, '..'), { recursive: true });
+    writeFileSync(ledger, '');
+    writeFileSync(`${ledger}.1`, `${JSON.stringify({
+      ts: new Date(Date.now() - 30 * 60_000).toISOString(),
+      run: mode,
+      event: 'start',
+    })}\n`);
+
+    const notepadWrite = new Date(Date.now() - 60 * 60_000);
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- problem after stored start\n');
+    utimesSync(notepad, notepadWrite, notepadWrite);
+
+    observeModeStateClear(dir, statePath(dir, mode), {
+      active: true,
+      started_at: new Date(Date.now() - 2 * 3600_000).toISOString(),
+    });
+    expect(ledgerLines(dir).find((line) => line.event === 'end')?.closeoutWritten).toBe(true);
   });
 });

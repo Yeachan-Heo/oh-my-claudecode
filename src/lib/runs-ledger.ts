@@ -40,39 +40,44 @@ function ledgerPath(omcRoot: string): string {
 }
 
 /**
- * Find the timestamp of the most recent 'start' edge for a given run+sessionId
- * in the main ledger file. Returns undefined if no start edge is found.
+ * Find the latest unmatched 'start' edge for a run+sessionId in the bounded
+ * main ledger file. Returns undefined when no usable start edge is found.
  */
 function findLatestStartEdge(omcRoot: string, mode: string, sessionId?: string): string | undefined {
-  let lines: string[];
   try {
     const path = ledgerPath(omcRoot);
     if (!existsSync(path)) return undefined;
-    lines = readFileSync(path, 'utf8').split('\n');
-  } catch {
-    return undefined;
-  }
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    let entry: RunLedgerEntry;
-    try {
-      entry = JSON.parse(line) as RunLedgerEntry;
-    } catch {
-      continue; // a torn or corrupt line must not hide earlier start edges
+    const lines = readFileSync(path, 'utf8').split('\n');
+    let unmatchedEnds = 0;
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (lines[i].trim().length === 0) continue;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(lines[i]);
+      } catch {
+        continue;
+      }
+
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) continue;
+      const entry = parsed as Partial<RunLedgerEntry>;
+      if (entry.run !== mode || entry.sessionId !== sessionId) continue;
+      if (entry.event === 'end') {
+        unmatchedEnds += 1;
+        continue;
+      }
+      if (entry.event !== 'start') continue;
+      if (unmatchedEnds > 0) {
+        unmatchedEnds -= 1;
+        continue;
+      }
+
+      return typeof entry.ts === 'string' && Number.isFinite(Date.parse(entry.ts)) ? entry.ts : undefined;
     }
-    if (entry.event === 'start' && entry.run === mode && entry.sessionId === sessionId) return entry.ts;
+  } catch {
+    // Unable to read the bounded main ledger; fall back to started_at.
   }
   return undefined;
-}
-
-/** The later of two ISO timestamps, ignoring unparseable values. */
-function laterTimestamp(a: string | undefined, b: string | undefined): string | undefined {
-  const ta = a ? Date.parse(a) : Number.NaN;
-  const tb = b ? Date.parse(b) : Number.NaN;
-  if (!Number.isFinite(ta)) return Number.isFinite(tb) ? b : undefined;
-  if (!Number.isFinite(tb)) return a;
-  return tb > ta ? b : a;
 }
 
 /** True when the mode's notepad gained a write after the run started. */
@@ -186,13 +191,18 @@ export function observeModeStateClear(omcRoot: string, filePath: string, previou
     if (!mode || !isWatchedRunMode(mode)) return;
     if (!previousState || previousState.active !== true) return;
     if (previousState.active === true) activeLoggedPaths.delete(filePath);
-    // Resumed runs keep their original started_at; bound the closeout by the
-    // later of it and this run's most recent start edge.
+    // Use the later of the stored start time and the latest unmatched ledger
+    // start edge. A resumed mode can retain a stale started_at value.
+    const staleStartedAt = typeof previousState.started_at === 'string' ? previousState.started_at : undefined;
     const sessionId = sessionIdFromStatePath(filePath);
-    const closeoutBoundary = laterTimestamp(
-      typeof previousState.started_at === 'string' ? previousState.started_at : undefined,
-      findLatestStartEdge(omcRoot, mode, sessionId),
-    );
+    const latestStartEdge = findLatestStartEdge(omcRoot, mode, sessionId);
+    const staleStartedAtMs = staleStartedAt ? Date.parse(staleStartedAt) : Number.NaN;
+    const latestStartEdgeMs = latestStartEdge ? Date.parse(latestStartEdge) : Number.NaN;
+    const closeoutBoundary = Number.isFinite(latestStartEdgeMs) &&
+      (!Number.isFinite(staleStartedAtMs) || latestStartEdgeMs > staleStartedAtMs)
+      ? latestStartEdge
+      : staleStartedAt;
+
     appendRunLedger(omcRoot, {
       ts: new Date().toISOString(),
       run: mode,
