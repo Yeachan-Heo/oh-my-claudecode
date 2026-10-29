@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -183,6 +183,38 @@ describe('runs ledger', () => {
     observeModeStateClear(dir, path, { active: true, started_at: originalStartT0, current_phase: 'complete' });
     const lines = ledgerLines(dir);
     const endEdge = lines.find((l) => l.event === 'end');
+    expect(endEdge?.closeoutWritten).toBe(true);
+  });
+
+  it('skips a corrupt ledger line when locating the resume start edge', () => {
+    const dir = fixture();
+    const mode = 'ralph';
+    const path = statePath(dir, mode);
+    mkdirSync(join(path, '..'), { recursive: true });
+    const originalStart = new Date(Date.now() - 7200_000).toISOString();
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- problem from first run\n');
+    const beforeResume = new Date(Date.now() - 3600_000);
+    utimesSync(notepad, beforeResume, beforeResume);
+    appendRunLedger(dir, { ts: new Date(Date.now() - 1800_000).toISOString(), run: mode, event: 'start', outcome: 'running' });
+    appendFileSync(join(dir, 'state', 'runs', 'ledger.jsonl'), '{"torn":\n');
+    observeModeStateClear(dir, path, { active: true, started_at: originalStart, current_phase: 'complete' });
+    const raw = readFileSync(join(dir, 'state', 'runs', 'ledger.jsonl'), 'utf8').trim().split('\n');
+    expect(JSON.parse(raw[raw.length - 1])).toMatchObject({ event: 'end', closeoutWritten: false });
+  });
+
+  it('uses the start edge when the retained started_at is unparseable', () => {
+    const dir = fixture();
+    const mode = 'ralph';
+    const path = statePath(dir, mode);
+    mkdirSync(join(path, '..'), { recursive: true });
+    appendRunLedger(dir, { ts: new Date(Date.now() - 1800_000).toISOString(), run: mode, event: 'start', outcome: 'running' });
+    const notepad = join(dir, 'notepads', mode, 'problems.md');
+    mkdirSync(join(notepad, '..'), { recursive: true });
+    writeFileSync(notepad, '- closeout\n');
+    observeModeStateClear(dir, path, { active: true, started_at: 'not-a-date', current_phase: 'complete' });
+    const endEdge = ledgerLines(dir).find((l) => l.event === 'end');
     expect(endEdge?.closeoutWritten).toBe(true);
   });
 });
