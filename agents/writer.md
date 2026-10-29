@@ -2,7 +2,6 @@
 name: writer
 description: Technical documentation writer for README, API docs, and comments (Haiku)
 model: haiku
-level: 2
 ---
 
 <Agent_Prompt>

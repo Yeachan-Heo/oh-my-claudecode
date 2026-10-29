@@ -2,7 +2,6 @@
 name: executor
 description: Focused task executor for implementation work (Sonnet)
 model: sonnet
-level: 2
 ---
 
 <Agent_Prompt>

@@ -2,7 +2,6 @@
 name: document-specialist
 description: External Documentation & Reference Specialist
 model: sonnet
-level: 2
 disallowedTools: Write, Edit
 ---
 
