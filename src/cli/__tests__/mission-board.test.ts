@@ -125,18 +125,23 @@ describe("mission-board CLI", () => {
     try {
       useWorkspace(workspace);
       addTeam(workspace, "team-with-session");
-      recordMissionAgentStart(
-        workspace,
-        {
-          sessionId: "session-with-snapshot",
-          agentId: "worker-2",
-          agentType: "oh-my-claudecode:test-engineer",
-          parentMode: "verification",
-          taskDescription: "Verify session mission aggregation",
-          at: "2026-10-29T18:05:00.000Z",
-        },
-        "session-with-snapshot",
-      );
+      for (const [sessionId, parentMode] of [
+        ["session-with-snapshot", "verification"],
+        ["second-session", "planning"],
+      ]) {
+        recordMissionAgentStart(
+          workspace,
+          {
+            sessionId,
+            agentId: "worker-2",
+            agentType: "oh-my-claudecode:test-engineer",
+            parentMode,
+            taskDescription: "Verify session mission aggregation",
+            at: "2026-10-29T18:05:00.000Z",
+          },
+          sessionId,
+        );
+      }
 
       const state = await runMissionBoard(workspace);
 
@@ -144,6 +149,7 @@ describe("mission-board CLI", () => {
         state.missions.filter((mission) => mission.source === "team"),
       ).toHaveLength(1);
       expect(state.missions.map((mission) => mission.id).sort()).toEqual([
+        "session:second-session:planning",
         "session:session-with-snapshot:verification",
         "team:team-with-session",
       ]);
