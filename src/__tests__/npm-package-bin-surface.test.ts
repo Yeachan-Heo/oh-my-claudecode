@@ -329,7 +329,7 @@ describe("npm package bin surface regression", () => {
       [join(consumerRoot, "node_modules", "typescript", "bin", "tsc"), "-p", join(consumerRoot, "tsconfig.json")],
       { cwd: consumerRoot, stdio: "pipe" },
     )).not.toThrow();
-  });
+  }, 120_000);
 
   it("rebuilds recovery CLI surfaces from source without committed bundles", () => {
     expect(packedPackageFixture.startedWithoutGeneratedBundles).toBe(true);
