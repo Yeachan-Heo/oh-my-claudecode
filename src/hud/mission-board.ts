@@ -586,10 +586,10 @@ function collectTeamMissions(directory: string, config: Required<MissionBoardCon
  */
 export function discoverTeamMissionBoardState(directory: string, rawConfig: MissionBoardConfig = DEFAULT_CONFIG): MissionBoardState {
   const config = resolveConfig(rawConfig);
-  return {
-    updatedAt: new Date().toISOString(),
-    missions: mergeMissions(null, collectTeamMissions(directory, config), config),
-  };
+  return mergeMissionBoardStates(
+    [{ updatedAt: new Date().toISOString(), missions: collectTeamMissions(directory, config) }],
+    config,
+  );
 }
 
 export function refreshMissionBoardState(directory: string, rawConfig: MissionBoardConfig = DEFAULT_CONFIG, sessionId?: string): MissionBoardState {

@@ -120,6 +120,36 @@ describe("mission-board CLI", () => {
     }
   });
 
+  it("expires completed team missions without persisted session snapshots", async () => {
+    const workspace = createWorkspace();
+    try {
+      useWorkspace(workspace);
+      addTeam(workspace, "live-team");
+      addTeam(workspace, "finished-team");
+      const finishedRoot = join(workspace, ".omc", "state", "team", "finished-team");
+      writeFileSync(
+        join(finishedRoot, "config.json"),
+        JSON.stringify({
+          name: "finished-team",
+          task: "Long-finished mission",
+          created_at: "2020-01-01T00:00:00.000Z",
+          workers: [{ name: "worker-1", role: "executor", assigned_tasks: ["1"] }],
+        }),
+      );
+      writeFileSync(
+        join(finishedRoot, "tasks", "1.json"),
+        JSON.stringify({ id: "1", subject: "Done long ago", status: "completed", owner: "worker-1" }),
+      );
+
+      const state = await runMissionBoard(workspace);
+
+      expect(state.missions.map((mission) => mission.id)).toEqual(["team:live-team"]);
+      expectNoProcessScopedSessionDirectories(workspace);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("aggregates session and team missions once without creating process-scoped state", async () => {
     const workspace = createWorkspace();
     try {
