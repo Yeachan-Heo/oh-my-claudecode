@@ -93,6 +93,29 @@ describe("quality gates", () => {
     }
   });
 
+  it("rejects workflow-controller skills in object-form gate entries, including dollar-prefixed aliases", () => {
+    const objectCases = [
+      ["ralplan", "ralplan", { skill: "ralplan", mode: "blocking" }],
+      ["omc-review", "ralplan", { skill: "$omc-review", mode: "advisory" }],
+      ["deep-interview", "omc-review", { skill: "$deep-interview", model: "sonnet" }],
+    ] as const;
+
+    for (const [skill, stage, entry] of objectCases) {
+      const { gates, errors } = readValidatedQualityGates(stage, {
+        qualityGates: { [stage]: [entry, { skill: "security-check", mode: "blocking" }] },
+      } as unknown as PluginConfig);
+
+      expect(gates).toEqual([{ skill: "security-check", mode: "blocking" }]);
+      expect(errors).toEqual([
+        expect.objectContaining({
+          stage,
+          skillIndex: 0,
+          error: `Workflow-controller skill '${skill}' is reserved and cannot be configured as a quality gate for stage '${stage}'`,
+        }),
+      ]);
+    }
+  });
+
   it("reports legacy stage keys with their exact replacement and does not accept them", () => {
     const config = {
       qualityGates: {
