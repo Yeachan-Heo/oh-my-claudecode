@@ -142,7 +142,7 @@ export function buildRouteTableFull(): RouteTable {
   return {
     'success:intake': { stage: 'intent', skill: 'intent' },
     'success:intent': { stage: 'launch', skill: 'launch' },
-    'success:launch': { stage: 'diagnose', skill: 'diagnose' },
+    'success:launch': { stage: 'diagnose', skill: 'debug' },
   };
 }
 
