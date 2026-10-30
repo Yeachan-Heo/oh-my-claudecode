@@ -687,3 +687,4 @@ Si Oh-My-ClaudeCode ayuda a tu flujo de trabajo, considera patrocinar:
 OmC incluye una especificación de producto [`geobench`](https://github.com/NomaDamas/geobench) para medir la tasa de aciertos en LLM, MRR, cuota de voz y citas.
 
 - Especificación: [`geobench/oh-my-claudecode.yaml`](geobench/oh-my-claudecode.yaml)
+- Guía de ejecución (runbook): [`docs/geobench.md`](docs/geobench.md)
