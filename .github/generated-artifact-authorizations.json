@@ -4,6 +4,170 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4678,
+      "targetRef": "dev",
+      "mergeBaseSha": "81171ccd8e55c5d6aeb48d034cd3da7f71f96b90",
+      "headSha": "8100fc660cb1f3f64ffbef697186b382160d0e44",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-29T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 25,
+        "sha256": "6e10b872dcdf1b96936512f5e8a92291c8119a0e6c46fa185e7cc4f2fc8d6b14"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "6db13f7d5f34bd6b607434901721bcd555d7150e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "d69e01ca9b8b5d922f6f7e59ae70a88a8f5aaca0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/cli-boot.test.js",
+          "sha": "c0d583eaebc0a5ece9a2197cf2d39a810e35bdf0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/cli-boot.test.js.map",
+          "sha": "91b356d8de624889e985ef4f30548a53c7b337f2",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/commands/quality-gates.d.ts",
+          "sha": "cd31be2bbe7258f0e4ad4b1d0b53a87a21ac92b1",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/commands/quality-gates.js",
+          "sha": "d1f86c782dbcefe0036129b44fc41ad74f93975d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.d.ts.map",
+          "sha": "3336cc3c2d534e946e57bced294ba0d037378666",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "f3a6267851ee3f05ffdebd36f899d07af3e407a1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js.map",
+          "sha": "807e0c248d337ea25b26068e9571aa890274ed5e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.d.ts",
+          "sha": "2e01dfd755b75b64d926730c33b1ab467842429a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.d.ts.map",
+          "sha": "63c5b0796eef7208cce4671a241d7669e3e80055",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.js",
+          "sha": "f14d0dfa434686dfb48f3d61830eef599e970a1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.js.map",
+          "sha": "6037f23eaee074c10db9b0d6c51d995ea1a46276",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.d.ts.map",
+          "sha": "3412eb0a636a7db6ca5940b084cc2885636c5598",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js",
+          "sha": "241f4c3f1fc5f0ead30619490b59bb07a5dd6cce",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js.map",
+          "sha": "1adeb036ce73ee01033adb27e3ed214fecf6b8ef",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/config/quality-gates.d.ts",
+          "sha": "ac3b2515b728e9ca85ac369a90696767acbc7ad5",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/config/quality-gates.js",
+          "sha": "f0d1679bb09b064e4f8578d61468e538762daf64",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.d.ts",
+          "sha": "5958ceea8271152b152eb0359dd9b8878fd25008",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.d.ts.map",
+          "sha": "50cc4f1b92da85b673fcfb09e1c5a4ebf0be8ed5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js",
+          "sha": "4a4acf76291f9f29a5baa2cab7f2f1a3a88f7ee8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js.map",
+          "sha": "8d51758c4cb6dadef70a1725da3a2369467f2f70",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts",
+          "sha": "6ea073be9d7aeb89b631171a379dff8525119389",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts.map",
+          "sha": "af0d2d534770389cc0e16776d6ffe933775b48e0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.js.map",
+          "sha": "ef9c4447735255ad883715b7860887d708b9d5e4",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 3537,
       "targetRef": "main",
       "mergeBaseSha": "76c90920b74494df6e34d6165be963bca8a9adf6",
@@ -36078,6 +36242,170 @@
           "status": "modified",
           "filename": "dist/hud/mission-board.js.map",
           "sha": "fe2225ba49832e07458558b5ecb36183ee490ad6",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
+      "pullNumber": 4674,
+      "targetRef": "main",
+      "mergeBaseSha": "ef8d0d3087a0bf73ac50abbdaa93f764dce89839",
+      "headSha": "b6cfb16f8028a1d30f472e805ce345d93592bff8",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-29T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 25,
+        "sha256": "6e10b872dcdf1b96936512f5e8a92291c8119a0e6c46fa185e7cc4f2fc8d6b14"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "6db13f7d5f34bd6b607434901721bcd555d7150e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "d69e01ca9b8b5d922f6f7e59ae70a88a8f5aaca0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/cli-boot.test.js",
+          "sha": "c0d583eaebc0a5ece9a2197cf2d39a810e35bdf0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/cli-boot.test.js.map",
+          "sha": "91b356d8de624889e985ef4f30548a53c7b337f2",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/commands/quality-gates.d.ts",
+          "sha": "cd31be2bbe7258f0e4ad4b1d0b53a87a21ac92b1",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/cli/commands/quality-gates.js",
+          "sha": "d1f86c782dbcefe0036129b44fc41ad74f93975d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.d.ts.map",
+          "sha": "3336cc3c2d534e946e57bced294ba0d037378666",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "f3a6267851ee3f05ffdebd36f899d07af3e407a1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js.map",
+          "sha": "807e0c248d337ea25b26068e9571aa890274ed5e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.d.ts",
+          "sha": "2e01dfd755b75b64d926730c33b1ab467842429a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.d.ts.map",
+          "sha": "63c5b0796eef7208cce4671a241d7669e3e80055",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.js",
+          "sha": "f14d0dfa434686dfb48f3d61830eef599e970a1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/index.js.map",
+          "sha": "6037f23eaee074c10db9b0d6c51d995ea1a46276",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.d.ts.map",
+          "sha": "3412eb0a636a7db6ca5940b084cc2885636c5598",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js",
+          "sha": "241f4c3f1fc5f0ead30619490b59bb07a5dd6cce",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/config/loader.js.map",
+          "sha": "1adeb036ce73ee01033adb27e3ed214fecf6b8ef",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/config/quality-gates.d.ts",
+          "sha": "ac3b2515b728e9ca85ac369a90696767acbc7ad5",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/config/quality-gates.js",
+          "sha": "f0d1679bb09b064e4f8578d61468e538762daf64",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.d.ts",
+          "sha": "5958ceea8271152b152eb0359dd9b8878fd25008",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.d.ts.map",
+          "sha": "50cc4f1b92da85b673fcfb09e1c5a4ebf0be8ed5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js",
+          "sha": "4a4acf76291f9f29a5baa2cab7f2f1a3a88f7ee8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/builtin-skills/skills.js.map",
+          "sha": "8d51758c4cb6dadef70a1725da3a2369467f2f70",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts",
+          "sha": "6ea073be9d7aeb89b631171a379dff8525119389",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.d.ts.map",
+          "sha": "af0d2d534770389cc0e16776d6ffe933775b48e0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/shared/types.js.map",
+          "sha": "ef9c4447735255ad883715b7860887d708b9d5e4",
           "previousFilename": null
         }
       ]

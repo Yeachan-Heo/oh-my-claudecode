@@ -1,23 +1,25 @@
-# oh-my-claudecode v5.7.21: Clearer state output and restored team missions
+# oh-my-claudecode v5.7.22: Configurable quality gates for workflow stages
 
 ## Release Notes
 
-This release bounds `state_clear` diagnostics, removes invalid agent frontmatter that caused startup warnings, and restores team mission discovery when no session snapshot exists. Thanks to @iyoda for the fixes; #4654 was reported by @conarti and #4657 by @fvegiard.
+This release adds configurable blocking and advisory quality gates for the deep-interview, ralplan, and review workflow stages, with settings in user or project OMC config and `omc quality-gates list` for inspecting gate configuration. It also prevents a stage from using its own controller skill as a gate and keeps stages without configured gates as strict no-ops. Thanks to @iyoda for #4670 and #4671, and to @iqdoctor for requesting the original port.
 
-### Bug Fixes
+### New Features
 
-- **fix(state): limit `state_clear` missing-state path output to the requested session, or cap checked paths with an `and N more` count** (#4654, fixes #4651; reported by @conarti)
-- **fix(agents): drop the unrecognized top-level `level` frontmatter key to prevent Claude Code startup warnings** (#4657, fixes #4656; reported by @fvegiard)
-- **fix(hud/cli): show team missions when no session mission snapshot exists and expire completed missions in that team-only view** (#4661, #4662; @iyoda)
+- **feat(quality-gates): configure blocking and advisory custom gates for deep-interview, ralplan, and review, and inspect them with `omc quality-gates list`** (#4670; ported from oh-my-codex#3956, issue #3955; requested by @iqdoctor; @iyoda)
+
+### Quality-Gate Safety
+
+- **fix(quality-gates): reject a stage's own controller skill as a gate to prevent self-recursion, and skip gate lookup and prompt-spec work for unconfigured stages** (#4671; @iyoda)
 
 ### Other Changes
 
-- **chore(sync): merge main's v5.7.20 release into dev** (#4658)
-- **ci: authorize and refresh generated artifacts for main-to-dev sync PR #4658** (#4659, #4660, #4663)
+- **chore(sync): merge main's v5.7.21 release into dev** (#4667)
+- **ci: authorize generated artifacts for main-to-dev sync PR #4667** (#4668)
 
 ### Stats
 
-- **8 PRs merged** | **0 new features** | **4 bug fixes** | **0 performance improvements** | **4 other changes**
+- **4 PRs merged** | **1 new feature** | **1 quality-gate safety improvement** | **2 other changes**
 
 ### Install / Update
 
@@ -26,7 +28,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.21
+npm install -g oh-my-claude-sisyphus@5.7.22
 ```
 
 **Claude Code plugin:**
@@ -35,10 +37,10 @@ npm install -g oh-my-claude-sisyphus@5.7.21
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.20...v5.7.21
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.21...v5.7.22
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @conarti @fvegiard @Yeachan-Heo
+@iqdoctor @iyoda @Yeachan-Heo

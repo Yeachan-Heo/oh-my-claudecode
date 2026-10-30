@@ -9,7 +9,7 @@
  * - config: Show or edit configuration
  * - setup: Sync all OMC components (hooks, agents, skills)
  */
-import { Command, CommanderError } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 import chalk from 'chalk';
 import { join } from 'path';
 import { writeFileSync, existsSync } from 'fs';
@@ -26,6 +26,7 @@ import { doctorTeamRoutingCommand } from './commands/doctor-team-routing.js';
 import { capabilitiesCheckCommand, capabilitiesLockCommand } from './commands/capabilities.js';
 import { sessionSearchCommand } from './commands/session-search.js';
 import { sessionFrictionReportCommand } from './commands/session-friction-report.js';
+import { qualityGatesListCommand } from './commands/quality-gates.js';
 import { teamCommand } from './commands/team.js';
 import { ralphthonCommand } from './commands/ralphthon.js';
 import { ultragoalCommand, ULTRAGOAL_HELP } from './commands/ultragoal.js';
@@ -1080,6 +1081,22 @@ sessionCmd
         json: options.json,
         workingDirectory: process.cwd(),
     });
+});
+/**
+ * Quality gates command - show normalized gate configuration and skill resolution.
+ */
+const qualityGatesCmd = program
+    .command('quality-gates')
+    .description('Inspect configured custom quality gates');
+qualityGatesCmd
+    .command('list')
+    .description('List normalized gates and report unavailable skills or configuration errors')
+    .addOption(new Option('--stage <stage>', 'Workflow stage')
+    .choices(['deep-interview', 'ralplan', 'omc-review'])
+    .makeOptionMandatory())
+    .option('--json', 'Output as JSON')
+    .action((options) => {
+    console.log(qualityGatesListCommand(options.stage, options.json));
 });
 /**
  * Capabilities command - deterministic tool/skill/capability lockfile preflight
