@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { execFileSync, spawnSync } from "child_process";
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { detectProjectEnvironment } from "../hooks/project-memory/detector.js";
@@ -48,6 +48,35 @@ describe("session-start with stale project memory", () => {
       expect(after.hotPaths).toEqual(seeded.hotPaths);
       expect(after.customNotes).toEqual(seeded.customNotes);
       expect(after.probeExtraKey).toBe(seeded.probeExtraKey);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it("shows detected context on a first run without writing project memory itself", () => {
+    const sandbox = mkdtempSync(join(tmpdir(), "omc-session-start-pm-first-"));
+    const projectDir = join(sandbox, "project");
+    mkdirSync(projectDir, { recursive: true });
+
+    try {
+      execFileSync("git", ["init"], { cwd: projectDir, stdio: "ignore" });
+      writeFileSync(join(projectDir, "package.json"), JSON.stringify({ name: "probe", scripts: { test: "vitest" } }));
+
+      const result = spawnSync(process.execPath, [SCRIPT_PATH], {
+        cwd: projectDir,
+        input: JSON.stringify({ cwd: projectDir, session_id: "sess-pm-first", hook_event_name: "SessionStart" }),
+        encoding: "utf-8",
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_ROOT: process.cwd(),
+          CLAUDE_CONFIG_DIR: join(sandbox, "claude"),
+          OMC_STATE_DIR: "",
+        },
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("<project-memory-context>");
+      expect(existsSync(join(projectDir, ".omc", "project-memory.json"))).toBe(false);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
