@@ -409,8 +409,8 @@ When ambiguity ≤ threshold (or hard cap / early exit):
    - Always use this exact final spec path. Do not write temporary working files to the repo root or other ad hoc paths; repos may allowlist `.omc/` for planning artifacts while protecting product branches.
    - For ephemeral artifacts during interview rounds (for example scoring intermediate results, prompt-safe summaries, question queues, or resume metadata), use `.omc/state/` or in-memory state via `state_write`.
    - Persist the final `spec_path` in state when available so downstream skills and resumed sessions can pass the artifact path explicitly.
-3. **Run quality gates before handoff:** call `omc quality-gates list --stage deep-interview --json` after writing the final spec and display any validation errors. For each available gate, spawn one independent Claude Code `Task` that loads the named skill from `resolvedPath`, reviews this spec, and returns `VERDICT: PASS` or `VERDICT: BLOCK` plus findings. Use its model override when present; keep and reuse the same gate lane if the spec is revised. Record `{ gate, mode, verdict }` in the spec's Quality Gates table; record unresolved skills as `gate_unavailable` with a visible warning, never as PASS.
-   - Advisory verdicts and `gate_unavailable` do not block handoff. A blocking `BLOCK` does: return to Phase 2 for clarification, revise and re-crystallize the spec, then rerun gates within the existing 20-round cap. If the cap is reached without a pass, record the block and do not hand off.
+3. **Run quality gates before handoff:** first check the existing merged OMC `qualityGates["deep-interview"]` entries (project stage entries replace the user list; see `docs/quality-gates-configuration.md`). If there are no entries, do not call `omc quality-gates list`, spawn gate tasks, or record gate results; omit the Quality Gates section from the spec entirely. If there is at least one entry, call `omc quality-gates list --stage deep-interview --json` after writing the final spec and display any validation errors. For each available gate, spawn one independent Claude Code `Task` that loads the named skill from `resolvedPath`, reviews this spec, and returns `VERDICT: PASS` or `VERDICT: BLOCK` plus findings. Use its model override when present; keep and reuse the same gate lane if the spec is revised. Record `{ gate, mode, verdict }` in the spec's Quality Gates table; record unresolved skills as `gate_unavailable` with a visible warning, never as PASS.
+   - When gates are configured, advisory verdicts and `gate_unavailable` do not block handoff. A blocking `BLOCK` does: return to Phase 2 for clarification, revise and re-crystallize the spec, then rerun the configured gates within the existing 20-round cap. If the cap is reached without a pass, record the block and do not hand off.
 
 Spec structure:
 
@@ -463,6 +463,7 @@ Spec structure:
 - [ ] {testable criterion 3}
 - ...
 
+<!-- Include this section only when the existing merged OMC qualityGates["deep-interview"] configuration has one or more entries; otherwise omit it entirely. -->
 ## Quality Gates
 | Gate | Mode | Verdict | Findings |
 |------|------|---------|----------|

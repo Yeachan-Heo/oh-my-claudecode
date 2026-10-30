@@ -53,6 +53,46 @@ describe("quality gates", () => {
     expect(validateSkillName("constructor").valid).toBe(true);
   });
 
+  it("rejects workflow-controller skills as gates on their matching stages", () => {
+    for (const skill of ["deep-interview", "ralplan", "omc-review"] as const) {
+      const { gates, errors } = readValidatedQualityGates(skill, {
+        qualityGates: { [skill]: [skill] },
+      } as unknown as PluginConfig);
+
+      expect(gates).toEqual([]);
+      expect(errors).toEqual([
+        expect.objectContaining({
+          stage: skill,
+          skillIndex: 0,
+          error: `Workflow-controller skill '${skill}' is reserved and cannot be configured as a quality gate for stage '${skill}'`,
+        }),
+      ]);
+    }
+  });
+
+  it("rejects dollar-prefixed workflow-controller aliases across stages", () => {
+    const crossStageCases = [
+      ["deep-interview", "ralplan"],
+      ["ralplan", "omc-review"],
+      ["omc-review", "deep-interview"],
+    ] as const;
+
+    for (const [skill, stage] of crossStageCases) {
+      const { gates, errors } = readValidatedQualityGates(stage, {
+        qualityGates: { [stage]: [`$${skill}`] },
+      } as unknown as PluginConfig);
+
+      expect(gates).toEqual([]);
+      expect(errors).toEqual([
+        expect.objectContaining({
+          stage,
+          skillIndex: 0,
+          error: `Workflow-controller skill '${skill}' is reserved and cannot be configured as a quality gate for stage '${stage}'`,
+        }),
+      ]);
+    }
+  });
+
   it("reports legacy stage keys with their exact replacement and does not accept them", () => {
     const config = {
       qualityGates: {

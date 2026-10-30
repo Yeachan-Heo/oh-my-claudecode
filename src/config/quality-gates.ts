@@ -90,6 +90,11 @@ const RETIRED_SKILL_REPLACEMENTS: Record<string, string | null> = {
 };
 
 const QUALITY_GATE_STAGE_SET = new Set<string>(QUALITY_GATE_STAGES);
+const RESERVED_WORKFLOW_CONTROLLER_SKILLS = new Set<string>([
+  "deep-interview",
+  "ralplan",
+  "omc-review",
+]);
 
 export function validateSkillName(skill: string): {
   valid: boolean;
@@ -118,6 +123,20 @@ export function validateSkillName(skill: string): {
   }
 
   return { valid: true };
+}
+
+function validateQualityGateSkillName(
+  skill: string,
+  stage: string,
+): string | undefined {
+  const error = validateSkillName(skill).error;
+  if (error) return error;
+
+  const normalized = skill.startsWith("$") ? skill.slice(1) : skill;
+  if (RESERVED_WORKFLOW_CONTROLLER_SKILLS.has(normalized)) {
+    return `Workflow-controller skill '${normalized}' is reserved and cannot be configured as a quality gate for stage '${stage}'`;
+  }
+  return undefined;
 }
 
 export function normalizeGate(entry: unknown): NormalizedGate | null {
@@ -218,7 +237,7 @@ export function readValidatedQualityGates(
     for (const [skillIndex, entry] of entries.entries()) {
       let error: string | undefined;
       if (typeof entry === "string") {
-        error = validateSkillName(entry).error;
+        error = validateQualityGateSkillName(entry, configuredStage);
       } else if (entry && typeof entry === "object" && !Array.isArray(entry)) {
         const gate = entry as Record<string, unknown>;
         if (typeof gate.skill !== "string" || gate.skill.length === 0) {
@@ -235,7 +254,7 @@ export function readValidatedQualityGates(
         ) {
           error = "Gate model must be a non-empty string when specified";
         } else {
-          error = validateSkillName(gate.skill).error;
+          error = validateQualityGateSkillName(gate.skill, configuredStage);
         }
       } else {
         error =
