@@ -63,14 +63,20 @@ function signedBody(payload: unknown): { body: string; signature: string } {
 
 describe('CI_ROUTE_TABLE', () => {
   it('routes failed:ci to the diagnose stage', () => {
-    expect(CI_ROUTE_TABLE).toEqual({ 'failed:ci': { stage: 'diagnose', skill: 'diagnose' } });
+    expect(CI_ROUTE_TABLE).toEqual({ 'failed:ci': { stage: 'diagnose', skill: 'debug' } });
+  });
+
+  it('routes only to skills that ship with the plugin', () => {
+    for (const { skill } of Object.values(CI_ROUTE_TABLE)) {
+      expect(fs.existsSync(join(__dirname, '..', '..', '..', 'skills', skill, 'SKILL.md'))).toBe(true);
+    }
   });
 });
 
 describe('routeCheckFailure', () => {
   it('routes a completed failure to the diagnose directive', () => {
     const r = routeCheckFailure(checkEvent(), WHITELIST);
-    expect(r).toEqual({ kind: 'routed', directive: { stage: 'diagnose', skill: 'diagnose' } });
+    expect(r).toEqual({ kind: 'routed', directive: { stage: 'diagnose', skill: 'debug' } });
   });
 
   it('discards a successful check run', () => {
@@ -100,7 +106,7 @@ describe('processCheckFailureEvent', () => {
     const cfg = config();
     const spawned: Array<{ cmd: string; args: string[]; ctx: unknown }> = [];
     const result = processCheckFailureEvent(checkEvent(), cfg, { spawner: (cmd, args, ctx) => spawned.push({ cmd, args, ctx }) });
-    expect(result).toMatchObject({ status: 202, kind: 'accepted', detail: 'spawned diagnose session (diagnose)' });
+    expect(result).toMatchObject({ status: 202, kind: 'accepted', detail: 'spawned diagnose session (debug)' });
     expect(spawned).toHaveLength(1);
     expect(spawned[0].cmd).toBe('claude');
     const args = spawned[0].args;
@@ -118,7 +124,7 @@ describe('processCheckFailureEvent', () => {
   it('builds the diagnose prompt for the failing repo and branch', () => {
     const spawned: Array<[string, string[]]> = [];
     processCheckFailureEvent(checkEvent(), config(), { spawner: (cmd, args) => spawned.push([cmd, args]) });
-    expect(spawned[0][1][1]).toBe(buildDiagnosePrompt({ stage: 'diagnose', skill: 'diagnose' }, 'pangpang778/factory-demo', 'main'));
+    expect(spawned[0][1][1]).toBe(buildDiagnosePrompt({ stage: 'diagnose', skill: 'debug' }, 'pangpang778/factory-demo', 'main'));
   });
 
   it('pre-writes a diagnose ledger without tracker fields', () => {
@@ -165,7 +171,7 @@ describe('check-run listener route', () => {
       const { body, signature } = signedBody(checkEvent());
       const res = await fetch(`http://127.0.0.1:${port}`, { method: 'POST', headers: { 'x-hub-signature-256': signature }, body });
       expect(res.status).toBe(202);
-      expect(((await res.json()) as { detail: string }).detail).toBe('spawned diagnose session (diagnose)');
+      expect(((await res.json()) as { detail: string }).detail).toBe('spawned diagnose session (debug)');
       expect(spawned).toHaveLength(1);
       expect(spawned[0].args.slice(4)).toEqual(AFK_SPAWN_FLAGS);
       expect(spawned[0].ctx).toEqual({ cwd: cfg.cwd });
