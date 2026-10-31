@@ -35,7 +35,12 @@ describe('buildRouteTableFull', () => {
         const table = buildRouteTableFull();
         expect(table['success:intake']).toEqual({ stage: 'intent', skill: 'intent' });
         expect(table['success:intent']).toEqual({ stage: 'launch', skill: 'launch' });
-        expect(table['success:launch']).toEqual({ stage: 'diagnose', skill: 'diagnose' });
+        expect(table['success:launch']).toEqual({ stage: 'diagnose', skill: 'debug' });
+    });
+    it('routes only to skills that ship with the plugin', () => {
+        for (const { skill } of Object.values(buildRouteTableFull())) {
+            expect(existsSync(join(__dirname, '..', '..', '..', '..', 'skills', skill, 'SKILL.md'))).toBe(true);
+        }
     });
 });
 describe('validateFactoryPrerequisites', () => {
