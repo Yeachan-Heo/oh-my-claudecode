@@ -21,7 +21,7 @@ import {
 } from './worktree-paths.js';
 import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { atomicWriteJsonSync, sameFileIdentity } from './atomic-write.js';
-import { observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
+import { observeModeStateActivation, observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
 
 /**
  * Derive the .omc root from a state file path itself: state files always
@@ -652,6 +652,15 @@ function processStartIdentity(pid: number): string | 'absent' | null {
   }
 }
 
+export function observeStateFileActivation(
+  filePath: string,
+  previous: Record<string, unknown> | null | undefined,
+  next: Record<string, unknown>,
+): void {
+  const omcRoot = omcRootFromStatePath(filePath);
+  if (omcRoot) observeModeStateActivation(omcRoot, filePath, previous, next);
+}
+
 export function writeStateFileLocked(filePath: string, state: Record<string, unknown>): boolean {
   if (!recoverEmergencyStateFile(filePath)) return false;
   const lock = acquireMutationLock(filePath);
@@ -808,8 +817,10 @@ export function writeStateFileLockedIf(
       } else if (!predicate(current)) {
         result = 'skipped';
       } else {
-        atomicWriteJsonSync(filePath, transform(current));
+        const next = transform(current);
+        atomicWriteJsonSync(filePath, next);
         result = 'written';
+        observeStateFileActivation(filePath, current, next);
       }
     }
   } catch {
@@ -848,8 +859,10 @@ export function writeStateFileLockedCreateIf(
     } else if (!predicate(current)) {
       result = 'skipped';
     } else {
-      atomicWriteJsonSync(filePath, transform(current));
+      const next = transform(current);
+      atomicWriteJsonSync(filePath, next);
       result = 'written';
+      observeStateFileActivation(filePath, current, next);
     }
   } catch (error) {
     if (process.env.OMC_LOCK_DEBUG) console.error(`[lock-debug] CreateIf caught-error ${filePath} ${(error as Error)?.message}`);

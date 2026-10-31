@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR;
@@ -145,6 +145,30 @@ describe('install() standalone hook reconciliation', () => {
         }
         expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).toContain('export function getClaudeConfigDir()');
         expect(readFileSync(join(hooksLibDir, 'config-dir.mjs'), 'utf-8')).not.toContain('/stale');
+    });
+    it('replaces a hooks/lib symlink whose plugin cache target was removed', async () => {
+        const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        const removedCacheTarget = join(testClaudeDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode', '5.7.7', 'templates', 'hooks', 'lib', 'stdin.mjs');
+        symlinkSync(removedCacheTarget, join(hooksLibDir, 'stdin.mjs'));
+        const { install } = await loadInstaller();
+        const result = install({ force: true, skipClaudeCheck: true });
+        expect(result.success).toBe(true);
+        expect(lstatSync(join(hooksLibDir, 'stdin.mjs')).isSymbolicLink()).toBe(false);
+        expect(readFileSync(join(hooksLibDir, 'stdin.mjs'), 'utf-8')).toBe(shippedStandaloneHookPayload('stdin.mjs', 'hooks/lib'));
+    });
+    it('replaces a live hooks/lib symlink without writing through to its target', async () => {
+        const hooksLibDir = join(testClaudeDir, 'hooks', 'lib');
+        mkdirSync(hooksLibDir, { recursive: true });
+        const pluginCacheFile = join(testClaudeDir, 'plugins', 'cache', 'stdin.mjs');
+        writePluginFile(pluginCacheFile, 'export const pluginCacheCopy = true;\n');
+        symlinkSync(pluginCacheFile, join(hooksLibDir, 'stdin.mjs'));
+        const { install } = await loadInstaller();
+        const result = install({ force: true, skipClaudeCheck: true });
+        expect(result.success).toBe(true);
+        expect(lstatSync(join(hooksLibDir, 'stdin.mjs')).isSymbolicLink()).toBe(false);
+        expect(readFileSync(join(hooksLibDir, 'stdin.mjs'), 'utf-8')).toBe(shippedStandaloneHookPayload('stdin.mjs', 'hooks/lib'));
+        expect(readFileSync(pluginCacheFile, 'utf-8')).toBe('export const pluginCacheCopy = true;\n');
     });
     it('installs standalone hooks with all runtime helper imports', async () => {
         const projectDir = mkdtempSync(join(tmpdir(), 'omc-standalone-hook-project-'));

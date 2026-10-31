@@ -3,7 +3,7 @@
 /**
  * SessionStart Hook: runs reconciler (P2 Part A).
  *
- * Reads the run ledger tail and surfaces completed unattended runs whose
+ * Reads the run ledger tail and surfaces ended unattended runs whose
  * closeout was never written — the advisory reconciliation that makes the
  * run ledger actionable. Doctrine: advisory only; it never mutates state
  * and never re-runs anything.
@@ -86,7 +86,7 @@ async function main() {
   }
 
   const lines = [
-    `[RUN RECONCILIATION] ${findings.length} completed unattended run(s) never wrote their closeout — the run's friction was not captured:`,
+    `[RUN RECONCILIATION] ${findings.length} unattended run(s) ended without a notepad closeout — the run's friction was not captured:`,
     ...findings.map((entry) => `- ${entry.run}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: ended ${entry.ts} without a notepad closeout`),
     'Nothing was changed automatically. If a lesson was learned in those runs, record it now (the notepad is the refit surface); otherwise acknowledge and move on.',
   ];

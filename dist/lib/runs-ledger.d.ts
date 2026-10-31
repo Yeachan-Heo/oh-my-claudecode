@@ -37,6 +37,13 @@ export declare function appendRunLedger(omcRoot: string, entry: RunLedgerEntry):
  */
 export declare function observeModeStateWrite(omcRoot: string, filePath: string, state: Record<string, unknown>): void;
 /**
+ * Observe a conditional state write: append a `start` edge when a watched
+ * mode goes from inactive (or absent) to active. The transition is the
+ * idempotency guard, so this does not consult the per-process map, which a
+ * clear in another process leaves stale.
+ */
+export declare function observeModeStateActivation(omcRoot: string, filePath: string, previous: Record<string, unknown> | null | undefined, next: Record<string, unknown>): void;
+/**
  * Observe a successful state clear: append an `end` edge when a watched
  * mode's previously-active state is removed, carrying the outcome and the
  * closeout flag computed against the run's notepad.

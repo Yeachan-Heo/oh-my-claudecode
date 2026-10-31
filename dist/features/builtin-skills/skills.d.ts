@@ -22,6 +22,8 @@ export declare function createBuiltinSkills(): BuiltinSkill[];
  * Get a skill by name
  */
 export declare function getBuiltinSkill(name: string): BuiltinSkill | undefined;
+/** Resolve a builtin skill name, including its frontmatter aliases, to its source file. */
+export declare function getBuiltinSkillPath(name: string): string | undefined;
 export interface ListBuiltinSkillNamesOptions {
     includeAliases?: boolean;
 }

@@ -48,6 +48,8 @@ export interface InstallOptions {
     refreshHooksInPlugin?: boolean;
     skipHud?: boolean;
     noPlugin?: boolean;
+    /** Skip payload repair only when update reconciliation already copied it. */
+    skipPluginPayloadSync?: boolean;
     /**
      * Dev plugin-dir mode: skip copying agents and bundled skills into
      * `<configDir>` because the user is launching OMC via

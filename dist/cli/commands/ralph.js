@@ -28,7 +28,7 @@ import { join } from 'path';
 import { getSkillsDir } from '../../features/builtin-skills/skills.js';
 import { getOmcRoot, validateSessionId } from '../../lib/worktree-paths.js';
 import { baselinePath, diffAgainstBaseline, readBaseline, signatureLines, writeBaseline, } from '../../hooks/ralph/feedback-baseline.js';
-import { readPrd } from '../../hooks/ralph/prd.js';
+import { findPrdPath, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
 import { executePlanActions, loadMapRecords, parseMapRef, planFromMap, renderActionOutcomes, renderMapPlan } from '../../factory/map-ingest.js';
 import { composeMapPrd, finalizeMapRun, launchGate, mapRunTaskPrompt, readMapRunSidecar } from '../../factory/map-run.js';
 import { defaultSpawnFn, factoryLinkArgv } from '../../hooks/session-end/spawn-next.js';
@@ -283,7 +283,7 @@ Examples:
             process.exitCode = 1;
             return;
         }
-        const feedbackCommands = resolveFeedbackCommands(process.cwd());
+        const { commands: feedbackCommands } = resolveFeedbackCommands(process.cwd());
         const composed = composeMapPrd(process.cwd(), sessionId, plan, records, { feedbackCommands });
         if (!composed.written) {
             report(`launch refused — PRD not composed: ${composed.error ?? 'unknown'}`);
@@ -311,33 +311,40 @@ Examples:
 /**
  * Feedback commands for judgment. Inside an `omc ralph afk` session only the
  * launcher-declared list counts; otherwise the PRD's declared list, else
- * package-script detection.
+ * package-script detection. A found but unreadable PRD returns its error
+ * instead of falling through to package-script detection.
  */
 export function resolveFeedbackCommands(directory, sessionId) {
     const afk = process.env[RALPH_AFK_FEEDBACK_ENV];
     if (afk !== undefined) {
         try {
             const parsed = JSON.parse(afk);
-            return Array.isArray(parsed) ? afkFeedbackCommands(parsed.filter((c) => typeof c === 'string')) : [];
+            return { commands: Array.isArray(parsed) ? afkFeedbackCommands(parsed.filter((c) => typeof c === 'string')) : [] };
         }
         catch {
-            return [];
+            return { commands: [] };
         }
     }
-    const declared = readPrd(directory, sessionId)?.feedbackCommands;
-    if (declared && declared.length > 0)
-        return [...declared];
+    const prdPath = findPrdPath(directory, sessionId);
+    if (prdPath) {
+        const { prd, error } = readPrdFromPath(prdPath);
+        if (error)
+            return { commands: [], prdError: error };
+        if (prd?.feedbackCommands?.length)
+            return { commands: [...prd.feedbackCommands] };
+    }
     try {
         const pkg = JSON.parse(readFileSync(join(directory, 'package.json'), 'utf8'));
         const scripts = pkg.scripts ?? {};
         // Script NAMES are not commands — `test` is not an executable; the
         // detected entries must be runnable invocations.
-        return ['build', 'typecheck', 'lint', 'test', 'test:run']
+        const commands = ['build', 'typecheck', 'lint', 'test', 'test:run']
             .filter((name) => typeof scripts[name] === 'string')
             .map((name) => `npm run ${name}`);
+        return { commands };
     }
     catch {
-        return [];
+        return { commands: [] };
     }
 }
 const SHELL_MISSING_COMMAND_PATTERN = /^(?:[^:\r\n]*\/)?(?:sh|bash):\s*(?:(?:line\s+)?\d+:\s*)?[^:\r\n]+:\s*(?:command not found|not found)\s*$|^(?:zsh:\s*)?(?:(?:line\s+)?\d+:\s*)?command not found:\s*\S+\s*$|^['"][^'"\r\n]+['"] is not recognized as an internal or external command\b/im;
@@ -416,11 +423,20 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
         }
     }
     const path = sessionId ? baselinePath(stateRoot, sessionId) : '';
-    const commands = resolveFeedbackCommands(directory, sessionId || undefined);
+    const baseline = path ? readBaseline(path) : null;
+    const resolution = resolveFeedbackCommands(directory, sessionId || undefined);
+    if (resolution.prdError) {
+        console.error(`omc ralph verify: ${resolution.prdError}`);
+        if (options.json) {
+            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], error: resolution.prdError }));
+        }
+        return 1;
+    }
+    const commands = resolution.commands;
     if (commands.length === 0) {
         const message = 'no feedback commands: declare feedbackCommands in the PRD or add package.json build/lint/test scripts';
         if (options.json)
-            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: false, commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
+            console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], note: message }));
         else
             console.log(`ralph verify: ${message}`);
         return 0;
@@ -438,7 +454,6 @@ export function ralphVerify(options, directory = process.cwd(), now = new Date()
             console.log(`ralph verify: ${note}`);
         return written ? 0 : 1;
     }
-    const baseline = path ? readBaseline(path) : null;
     const diff = diffAgainstBaseline(baseline, current);
     if (options.json) {
         console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(baseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands }));

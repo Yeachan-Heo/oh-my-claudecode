@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { gzipSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 // @ts-expect-error The release helper is intentionally dependency-free ESM without declarations.
 import * as releaseBoundary from '../../scripts/release-boundary.mjs';
 const { assertArchive, assertEvidence, assertNpmAbsent, assertSlsaProvenance, assertTrigger, buildEvidenceFromBytes, cliMain, decodeDssePayload, prepareStage, selectSlsaAttestation, verifyRegistry, writeEvidence, } = releaseBoundary;
@@ -659,6 +659,19 @@ describe('release-boundary.mjs', () => {
         finally {
             await server.close();
         }
+    });
+    it('runs the CLI when invoked by an absolute OS path', () => {
+        const script = resolve('scripts/release-boundary.mjs');
+        let status = 0;
+        let stderr = '';
+        try {
+            execFileSync(process.execPath, [script, 'no-such-command'], { encoding: 'utf8', stdio: 'pipe' });
+        }
+        catch (error) {
+            ({ status, stderr } = error);
+        }
+        expect(status).toBe(1);
+        expect(stderr).toContain('unknown command: no-such-command');
     });
 });
 //# sourceMappingURL=release-boundary.test.js.map

@@ -120,6 +120,7 @@ jobs:
           src/__tests__/windows-prompt-hook-runner.test.ts
           src/__tests__/run-cjs-generic-timeout.test.ts
           src/__tests__/run-cjs-windows-stdio-contract.test.ts
+          src/__tests__/release-boundary.test.ts
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts

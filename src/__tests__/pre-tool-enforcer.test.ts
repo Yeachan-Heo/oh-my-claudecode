@@ -228,6 +228,20 @@ describe('pre-tool-enforcer advisory throttling (issue #3163)', () => {
     );
   });
 
+  it('does not truncate non-integer cooldown values to a few milliseconds', () => {
+    for (const cooldown of ['1e4', '30_000']) {
+      const sessionId = `session-3163-${cooldown}`;
+      const run = (nowMs: string) => runPreToolEnforcerWithEnv(
+        { tool_name: 'Bash', cwd: tempDir, session_id: sessionId },
+        { OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS: cooldown, OMC_PRE_TOOL_ADVISORY_NOW_MS: nowMs },
+      );
+
+      run('1000');
+      // Falls back to the default cooldown, so a repeat 100ms later stays quiet.
+      expect(run('1100')).toEqual({ continue: true, suppressOutput: true });
+    }
+  });
+
   it('does not let a future throttle timestamp suppress an advisory', () => {
     runWithThrottle('Bash', '10000');
 

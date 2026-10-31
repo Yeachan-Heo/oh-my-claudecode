@@ -12,6 +12,7 @@ import {
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
+import { pathToFileURL } from 'node:url';
 
 const PACKAGE_NAME = 'oh-my-claude-sisyphus';
 const PLUGIN_NAME = 'oh-my-claudecode';
@@ -1147,7 +1148,7 @@ export async function cliMain(argv = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   cliMain().catch(error => {
     process.stderr.write(`release-boundary: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

@@ -14,6 +14,7 @@ export declare function withStateFileMutationLock<T>(filePath: string, callback:
     acquired: boolean;
     value: T | undefined;
 };
+export declare function observeStateFileActivation(filePath: string, previous: Record<string, unknown> | null | undefined, next: Record<string, unknown>): void;
 export declare function writeStateFileLocked(filePath: string, state: Record<string, unknown>): boolean;
 export declare function clearStateFileLocked(filePath: string, expectedGeneration?: StateFileGeneration): boolean;
 export type EmergencyStateAuthorization = (state: Record<string, unknown>) => boolean;

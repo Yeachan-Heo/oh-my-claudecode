@@ -611,6 +611,16 @@ describe('sendToWorker cmux trust guards', () => {
         expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-surface' || args[0] === 'send')).toBe(false);
         expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface' || args[0] === 'send-key')).toBe(false);
     });
+    it.each([
+        ['Do you trust the files in this folder?', 'Yes, proceed'],
+        ['Quick safety check: Is this a project you created or one you trust?', 'Yes, I trust this folder'],
+    ])('does not type into a Claude directory trust dialog on cmux (%s)', async (question, affirmativeChoice) => {
+        mockedCalls.cmuxCaptures = [`${question}\n❯ No, exit\n  ${affirmativeChoice}\n`];
+        await expect(sendToWorker('cmux:workspace-1', 'surface-worker-1', 'Read inbox.md, execute now.'))
+            .resolves.toBe(false);
+        expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-surface' || args[0] === 'send')).toBe(false);
+        expect(mockedCalls.cmuxArgs.some(args => args[0] === 'send-key-surface' || args[0] === 'send-key')).toBe(false);
+    });
     it('does not press Enter if a Codex trust selector appears after cmux text injection', async () => {
         const message = 'Read inbox.md, execute now.';
         const trustSelector = [

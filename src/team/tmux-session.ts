@@ -1499,15 +1499,48 @@ export interface WaitForShellReadyOptions {
   tmuxServerIdentity?: TmuxServerIdentity;
 }
 
+const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+
+function parseExactInteger(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const negative = trimmed.startsWith('-');
+  const magnitude = negative || trimmed.startsWith('+') ? trimmed.slice(1) : trimmed;
+  const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
+  if (!match) return null;
+  const integerDigits = match[1] ?? '';
+  const fractionDigits = match[2] ?? match[3] ?? '';
+  const exponent = match[4] === undefined ? 0 : Number(match[4]);
+  const shift = fractionDigits.length - exponent;
+  if (shift > 0) {
+    const significand = integerDigits + fractionDigits;
+    if (/[1-9]/.test(significand)) {
+      const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+      if (trailingZeros < shift) return null;
+    }
+  }
+  const parsed = (negative ? -1 : 1) * Number(magnitude);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+export function resolveTeamShellReadyTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+  explicitTimeoutMs?: number,
+): number {
+  if (Number.isFinite(explicitTimeoutMs) && (explicitTimeoutMs ?? 0) > 0) {
+    return Number(explicitTimeoutMs);
+  }
+  const raw = env.OMC_TEAM_SHELL_READY_TIMEOUT_MS;
+  const parsed = raw == null || String(raw).trim() === '' ? null : parseExactInteger(String(raw));
+  return parsed !== null && parsed > 0 ? parsed : 5_000;
+}
+
 async function waitForShellReady(paneId: string, opts: WaitForShellReadyOptions = {}): Promise<boolean> {
   if (isCmuxSurfaceTarget(paneId)) return true;
   if (!opts.tmuxServerIdentity) return false;
   if (!isValidTmuxServerIdentity(opts.tmuxServerIdentity)
     || await observeTmuxServerIdentity(opts.tmuxServerIdentity) !== 'matching') return false;
-  const envTimeout = Number.parseInt(process.env.OMC_TEAM_SHELL_READY_TIMEOUT_MS ?? '', 10);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
-    ? Number(opts.timeoutMs)
-    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 5_000);
+  const timeoutMs = resolveTeamShellReadyTimeoutMs(process.env, opts.timeoutMs);
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
     ? Number(opts.pollIntervalMs)
     : 50;
@@ -1559,9 +1592,16 @@ async function verifyWorkerStartCommandDelivered(
   return false;
 }
 
-function resolvePositiveIntegerEnv(name: string, fallback: number): number {
-  const value = Number.parseInt(process.env[name] ?? '', 10);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+export function resolveTeamStartSubmitTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+  explicitTimeoutMs?: number,
+): number {
+  if (Number.isFinite(explicitTimeoutMs) && (explicitTimeoutMs ?? 0) > 0) {
+    return Number(explicitTimeoutMs);
+  }
+  const raw = env.OMC_TEAM_START_SUBMIT_TIMEOUT_MS;
+  const parsed = raw == null || String(raw).trim() === '' ? null : parseExactInteger(String(raw));
+  return parsed !== null && parsed > 0 ? parsed : 8_000;
 }
 
 
@@ -1581,9 +1621,7 @@ async function verifyWorkerStartCommandSubmitted(
   if (!opts.tmuxServerIdentity) return false;
   const expected = normalizeTmuxCapture(startCmd);
   const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
-    ? Number(opts.timeoutMs)
-    : resolvePositiveIntegerEnv('OMC_TEAM_START_SUBMIT_TIMEOUT_MS', 8_000);
+  const timeoutMs = resolveTeamStartSubmitTimeoutMs(process.env, opts.timeoutMs);
   const maxPollIntervalMs = Number.isFinite(opts.maxPollIntervalMs) && (opts.maxPollIntervalMs ?? 0) > 0
     ? Number(opts.maxPollIntervalMs)
     : 500;
@@ -3295,16 +3333,25 @@ async function paneInputBlockReason(
   paneId: string,
   tmuxServerIdentity: TmuxServerIdentity,
   serverIdentityDependencies?: TmuxServerIdentityDependencies,
-): Promise<'mailbox_membership_unresolvable' | 'codex_workspace_untrusted' | undefined> {
+): Promise<
+  | 'mailbox_membership_unresolvable'
+  | 'codex_workspace_untrusted'
+  | 'cursor_workspace_untrusted'
+  | 'trust_prompt_pending'
+  | undefined
+> {
   const observation = await capturePaneObservation(paneId, {
     operation: 'guarded-notification',
     tmuxServerIdentity,
     ...(serverIdentityDependencies ? { serverIdentityDependencies } : {}),
   });
   if (!observation.ok || !observation.captured.trim()) return 'mailbox_membership_unresolvable';
-  if (detectPaneTrustPromptKind(observation.captured) === 'codex_directory') {
-    return 'codex_workspace_untrusted';
-  }
+  // Guarded input never answers a trust dialog: typed text and Enter would
+  // land on whatever choice is focused (Claude focuses "No, exit").
+  const trustPrompt = detectPaneTrustPromptKind(observation.captured);
+  if (trustPrompt === 'codex_directory') return 'codex_workspace_untrusted';
+  if (trustPrompt === 'cursor_workspace_trust') return 'cursor_workspace_untrusted';
+  if (trustPrompt) return 'trust_prompt_pending';
   return undefined;
 }
 
@@ -3358,9 +3405,15 @@ export async function killOwnedWorkerPane(ownership: WorkerPaneOwnership): Promi
   }
 }
 
-type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_directory' | 'codex_hooks' | 'cursor_workspace_trust';
+/**
+ * @internal Exported for testing only.
+ */
+export type PaneTrustPromptKind = 'directory' | 'claude_directory' | 'codex_directory' | 'codex_hooks' | 'cursor_workspace_trust';
 
-function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null {
+/**
+ * @internal Exported for testing only.
+ */
+export function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): PaneTrustPromptKind | null {
   const lines = captured.split('\n').map(l => l.replace(/\r/g, '').trim()).filter(l => l.length > 0);
   const tail = lines.slice(-12);
   const lastCodexPromptIndex = lines.findLastIndex(line => paneLineLooksLikeIdlePrompt(line, 'codex'));
@@ -3393,12 +3446,16 @@ function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): P
     return 'cursor_workspace_trust';
   }
 
-  const hasClaudeDirectoryQuestion = tail.some(l =>
-    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l),
+  // Claude Code wraps the question to the pane width. In a 35-column pane it
+  // starts 13 lines from the bottom and reaches "trust?" within 3 lines.
+  const claudeQuestionLines = lines.slice(-20);
+  const hasClaudeDirectoryQuestion = claudeQuestionLines.some((_, index) =>
+    /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i
+      .test(claudeQuestionLines.slice(index, index + 3).join(' ')),
   );
   const hasClaudeDirectoryNoChoice = tail.some(l => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some(l => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
-  if (provider === 'claude' && hasClaudeDirectoryQuestion
+  if ((provider === undefined || provider === 'claude') && hasClaudeDirectoryQuestion
     && hasClaudeDirectoryNoChoice && hasClaudeDirectoryYesChoice) {
     return 'claude_directory';
   }
@@ -3423,10 +3480,6 @@ function detectPaneTrustPromptKind(captured: string, provider?: CliAgentType): P
 
 export function paneHasTrustPrompt(captured: string, provider?: CliAgentType): boolean {
   return detectPaneTrustPromptKind(captured, provider) !== null;
-}
-
-export function paneHasCursorWorkspaceTrustPrompt(captured: string): boolean {
-  return detectPaneTrustPromptKind(captured, 'cursor') === 'cursor_workspace_trust';
 }
 
 function paneHasClaudeStartupBanner(captured: string, provider?: CliAgentType): boolean {
@@ -3507,10 +3560,9 @@ export async function waitForPaneReady(
   opts: WaitForPaneReadyOptions = {}
 ): Promise<boolean> {
   if (!isCmuxSurfaceTarget(paneId) && !opts.tmuxServerIdentity) return false;
-  const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? '', 10);
   const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0
     ? Number(opts.timeoutMs)
-    : (Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 30_000);
+    : 30_000;
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0
     ? Number(opts.pollIntervalMs)
     : 250;
@@ -3528,7 +3580,7 @@ export async function waitForPaneReady(
 
   console.warn(
     `[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms ` +
-    `(set OMC_SHELL_READY_TIMEOUT_MS to tune)`
+    `(set OMC_TEAM_READY_TIMEOUT_MS to tune)`
   );
   return false;
 }
@@ -3884,12 +3936,6 @@ export async function sendToWorker(
     const paneBusy = paneHasActiveTask(initialCapture);
 
     const trustPromptKind = detectPaneTrustPromptKind(initialCapture);
-    if (trustPromptKind === 'codex_directory') return false;
-    if (trustPromptKind === 'cursor_workspace_trust') {
-      // Nothing to dismiss: cursor-agent printed the banner and exited. Sending
-      // keys here would type into a dead pane.
-      return false;
-    }
     if (trustPromptKind === 'directory') {
       await sendKey('C-m');
       await sleep(120);
@@ -3903,6 +3949,10 @@ export async function sendToWorker(
       await sleep(120);
       await sendKey('C-m');
       await sleep(200);
+    } else if (trustPromptKind) {
+      // Every other kind is refused: Codex and Claude directory trust are the
+      // user's decision, and cursor-agent has already exited behind its banner.
+      return false;
     }
 
     // Send text in literal mode with -- separator

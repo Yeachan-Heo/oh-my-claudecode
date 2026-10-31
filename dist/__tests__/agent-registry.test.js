@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 import { getAgentDefinitions } from '../agents/definitions.js';
+import { parseFrontmatter } from '../utils/frontmatter.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const MODEL_ENV_KEYS = [
@@ -22,6 +23,29 @@ const MODEL_ENV_KEYS = [
     'OMC_MODEL_LOW',
     'OMC_ROUTING_FORCE_INHERIT',
 ];
+// Claude Code's supported subagent fields are documented at:
+// https://code.claude.com/docs/en/sub-agents#frontmatter-reference
+const CLAUDE_CODE_AGENT_FRONTMATTER_FIELDS = new Set([
+    'name',
+    'description',
+    'tools',
+    'disallowedTools',
+    'model',
+    'permissionMode',
+    'maxTurns',
+    'autoCompactWindow',
+    'skills',
+    'mcpServers',
+    'hooks',
+    'memory',
+    'background',
+    'omitClaudeMd',
+    'effort',
+    'isolation',
+    'color',
+    'initialPrompt',
+    'experimental',
+]);
 describe('Agent Registry Validation', () => {
     let savedEnv;
     beforeEach(() => {
@@ -45,6 +69,16 @@ describe('Agent Registry Validation', () => {
         const agentsDir = path.join(__dirname, '../../agents');
         const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
         expect(promptFiles.length).toBe(19);
+    });
+    test('bundled agent frontmatter uses only Claude Code-supported fields', () => {
+        const agentsDir = path.join(__dirname, '../../agents');
+        const promptFiles = fs.readdirSync(agentsDir).filter((file) => file.endsWith('.md') && file !== 'AGENTS.md');
+        for (const file of promptFiles) {
+            const content = fs.readFileSync(path.join(agentsDir, file), 'utf-8');
+            const { metadata } = parseFrontmatter(content);
+            const unsupportedFields = Object.keys(metadata).filter((key) => !CLAUDE_CODE_AGENT_FRONTMATTER_FIELDS.has(key));
+            expect(unsupportedFields, `${file} has unsupported Claude Code frontmatter fields`).toEqual([]);
+        }
     });
     test('agent count is always 19 (no conditional agents)', () => {
         const agents = getAgentDefinitions();

@@ -22,6 +22,50 @@ export function isWatchedRunMode(modeName) {
 function ledgerPath(omcRoot) {
     return join(omcRoot, 'state', 'runs', 'ledger.jsonl');
 }
+/**
+ * Find the latest unmatched 'start' edge for a run+sessionId in the bounded
+ * main ledger file. Returns undefined when no usable start edge is found.
+ */
+function findLatestStartEdge(omcRoot, mode, sessionId) {
+    try {
+        const path = ledgerPath(omcRoot);
+        if (!existsSync(path))
+            return undefined;
+        const lines = readFileSync(path, 'utf8').split('\n');
+        let unmatchedEnds = 0;
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+            if (lines[i].trim().length === 0)
+                continue;
+            let parsed;
+            try {
+                parsed = JSON.parse(lines[i]);
+            }
+            catch {
+                continue;
+            }
+            if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+                continue;
+            const entry = parsed;
+            if (entry.run !== mode || entry.sessionId !== sessionId)
+                continue;
+            if (entry.event === 'end') {
+                unmatchedEnds += 1;
+                continue;
+            }
+            if (entry.event !== 'start')
+                continue;
+            if (unmatchedEnds > 0) {
+                unmatchedEnds -= 1;
+                continue;
+            }
+            return typeof entry.ts === 'string' && Number.isFinite(Date.parse(entry.ts)) ? entry.ts : undefined;
+        }
+    }
+    catch {
+        // Unable to read the bounded main ledger; fall back to started_at.
+    }
+    return undefined;
+}
 /** True when the mode's notepad gained a write after the run started. */
 export function closeoutWrittenFor(omcRoot, mode, startedAt) {
     if (!startedAt || !Number.isFinite(Date.parse(startedAt)))
@@ -101,6 +145,32 @@ export function observeModeStateWrite(omcRoot, filePath, state) {
     }
 }
 /**
+ * Observe a conditional state write: append a `start` edge when a watched
+ * mode goes from inactive (or absent) to active. The transition is the
+ * idempotency guard, so this does not consult the per-process map, which a
+ * clear in another process leaves stale.
+ */
+export function observeModeStateActivation(omcRoot, filePath, previous, next) {
+    try {
+        if (previous?.active === true || next?.active !== true)
+            return;
+        const mode = modeFromStatePath(filePath);
+        if (!mode || !isWatchedRunMode(mode))
+            return;
+        activeLoggedPaths.set(filePath, true);
+        appendRunLedger(omcRoot, {
+            ts: new Date().toISOString(),
+            run: mode,
+            sessionId: sessionIdFromStatePath(filePath),
+            event: 'start',
+            outcome: 'running',
+        });
+    }
+    catch {
+        // evidence by contract
+    }
+}
+/**
  * Observe a successful state clear: append an `end` edge when a watched
  * mode's previously-active state is removed, carrying the outcome and the
  * closeout flag computed against the run's notepad.
@@ -114,15 +184,26 @@ export function observeModeStateClear(omcRoot, filePath, previousState) {
             return;
         if (previousState.active === true)
             activeLoggedPaths.delete(filePath);
+        // Use the later of the stored start time and the latest unmatched ledger
+        // start edge. A resumed mode can retain a stale started_at value.
+        const staleStartedAt = typeof previousState.started_at === 'string' ? previousState.started_at : undefined;
+        const sessionId = sessionIdFromStatePath(filePath);
+        const latestStartEdge = findLatestStartEdge(omcRoot, mode, sessionId);
+        const staleStartedAtMs = staleStartedAt ? Date.parse(staleStartedAt) : Number.NaN;
+        const latestStartEdgeMs = latestStartEdge ? Date.parse(latestStartEdge) : Number.NaN;
+        const closeoutBoundary = Number.isFinite(latestStartEdgeMs) &&
+            (!Number.isFinite(staleStartedAtMs) || latestStartEdgeMs > staleStartedAtMs)
+            ? latestStartEdge
+            : staleStartedAt;
         appendRunLedger(omcRoot, {
             ts: new Date().toISOString(),
             run: mode,
-            sessionId: sessionIdFromStatePath(filePath),
+            sessionId,
             event: 'end',
             outcome: typeof previousState.current_phase === 'string' && /complete|done/i.test(previousState.current_phase)
                 ? 'completed'
                 : 'cancelled',
-            closeoutWritten: closeoutWrittenFor(omcRoot, mode, typeof previousState.started_at === 'string' ? previousState.started_at : undefined),
+            closeoutWritten: closeoutWrittenFor(omcRoot, mode, closeoutBoundary),
         });
     }
     catch {

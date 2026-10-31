@@ -211,6 +211,26 @@ export interface PluginConfig {
         /** Filename template. Supported tokens: {{name}}, {{kind}}. Default: {{name}}.md */
         filenameTemplate?: string;
     };
+    qualityGates?: {
+        /** Quality gates for deep-interview final-spec stage */
+        'deep-interview'?: (string | {
+            skill: string;
+            mode?: 'blocking' | 'advisory';
+            model?: string;
+        })[];
+        /** Quality gates for ralplan Architect→Critic review stage */
+        'ralplan'?: (string | {
+            skill: string;
+            mode?: 'blocking' | 'advisory';
+            model?: string;
+        })[];
+        /** Quality gates for the omc-review stage */
+        'omc-review'?: (string | {
+            skill: string;
+            mode?: 'blocking' | 'advisory';
+            model?: string;
+        })[];
+    };
     startupCodebaseMap?: {
         /** Enable codebase map injection on session start. Default: true */
         enabled?: boolean;

@@ -260,7 +260,7 @@ vi.mock('../../cli/tmux-utils.js', async (importOriginal) => {
         }),
     };
 });
-import { deliverStartupInbox, adoptWorkerPaneOwnership, proveWorkerPaneOwnership, probeStartupPaneActivity, buildWorkerStartCommand, spawnWorkerInPane, spawnOwnedWorkerInPane, retryStartupInboxSubmit, sendToWorker, paneHasActiveTask, paneHasTrustPrompt, paneLooksReady, waitForStartupPaneReady, } from '../tmux-session.js';
+import { deliverStartupInbox, adoptWorkerPaneOwnership, proveWorkerPaneOwnership, probeStartupPaneActivity, buildWorkerStartCommand, spawnWorkerInPane, spawnOwnedWorkerInPane, retryStartupInboxSubmit, injectToLeaderPane, sendToWorker, paneHasActiveTask, paneHasTrustPrompt, paneLooksReady, waitForStartupPaneReady, } from '../tmux-session.js';
 import { paneLineLooksLikeIdlePrompt } from '../pane-readiness.js';
 import { awaitWorkerLaunchAcknowledgement, prepareWorkerLaunchAttempt, } from '../worker-launch-ack.js';
 let cwd = '';
@@ -772,6 +772,8 @@ describe('worker pane startup safety', () => {
     strictTmuxIt.each([
         ['Do you trust the files in this folder?', 'Yes, proceed'],
         ['Quick safety check: Is this a project you created or one you trust?', 'Yes, I trust this folder'],
+        // Claude Code 2.1.310 wraps the question in a 59-column worker pane.
+        ['Quick safety check: Is this a project you created or one\n you trust? (Like your own code, a well-known open source', 'Yes, I trust this folder'],
     ])('selects Yes in Claude Code’s new directory trust dialog before delivering the inbox (%s)', async (question, affirmativeChoice) => {
         const context = await acceptedContext('claude');
         tmuxState.captures = [
@@ -788,6 +790,27 @@ describe('worker pane startup safety', () => {
         expect(selectYesIndex).toBeGreaterThanOrEqual(0);
         expect(confirmYesIndex).toBeGreaterThan(selectYesIndex);
         expect(inboxIndex).toBeGreaterThan(confirmYesIndex);
+    });
+    strictTmuxIt.each([
+        ['Cursor workspace trust', 'Workspace Trust Required\nDo you trust the contents of this directory?\nPass --trust, --yolo, or -f to skip this prompt.\n'],
+        ['Claude files trust', 'Do you trust the files in this folder?\n❯ No, exit\n  Yes, proceed\n'],
+        ['Claude quick safety check', 'Quick safety check: Is this a project you created or one you trust?\n❯ No, exit\n  Yes, I trust this folder\n'],
+        ['directory trust', 'Do you trust the contents of this directory?\n› 1. Yes, continue\n  2. No, quit\n'],
+        ['Codex hooks review', 'Hooks need review\n› 3. Continue without trusting\nPress enter to confirm or esc to go back\n'],
+    ])('guarded direct send refuses to type into a %s prompt', async (_label, capture) => {
+        const context = await acceptedContext('claude');
+        const identity = context.ownership.tmuxServerIdentity;
+        const senders = [
+            () => sendToWorker('', '%2', 'List files and report the result.', identity),
+            () => injectToLeaderPane('', '%1', 'List files and report the result.', identity),
+        ];
+        for (const send of senders) {
+            tmuxState.args = [];
+            tmuxState.captures = [capture];
+            await expect(send()).resolves.toBe(false);
+            expect(tmuxState.args.some(args => args[0] === 'capture-pane')).toBe(true);
+            expect(tmuxState.args.some(args => args.includes('send-keys'))).toBe(false);
+        }
     });
     strictTmuxIt('handles the exact Codex directory and hooks selectors in order before delivery', async () => {
         const context = await acceptedContext('codex');

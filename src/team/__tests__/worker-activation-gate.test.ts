@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,8 +18,19 @@ import { isProcessAlive } from '../../platform/process-utils.js';
 
 let cwd: string;
 const INSTANCE_ID = '11111111-1111-4111-8111-111111111111';
-beforeEach(() => { cwd = mkdtempSync(join(tmpdir(), 'recovery-gate-')); });
-afterEach(() => { rmSync(cwd, { recursive: true, force: true }); });
+beforeEach(() => {
+  cwd = mkdtempSync(join(tmpdir(), 'recovery-gate-'));
+  vi.stubEnv('OMC_STATE_DIR', join(cwd, 'state'));
+  // The gate runs under the bootstrap's sanitized env. npm exports keys like npm_package_bin_oh-my-claudecode,
+  // which a bash /bin/sh (macOS) passes on to tests and dash drops.
+  for (const key of Object.keys(process.env)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) vi.stubEnv(key, undefined);
+  }
+});
+afterEach(() => {
+  rmSync(cwd, { recursive: true, force: true });
+  vi.unstubAllEnvs();
+});
 
 async function acceptedAttempt(workerName: string, paneId: string, recoveryId: string, generation: number, paneAttemptId: string) {
   const attempt = await prepareWorkerLaunchAttempt({

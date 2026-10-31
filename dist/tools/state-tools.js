@@ -12,7 +12,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'pat
 import { resolveStatePath, ensureOmcDir, resolveStateWorkingDirectory, isSensitiveStateLocation, probeGitTopLevel, resolveSessionStatePath, resolveSessionStatePaths, ensureSessionStateDir, listSessionIds, validateSessionId, getOmcRoot, findGitMetadataDir, OmcPaths, } from '../lib/worktree-paths.js';
 import { resolveSessionId } from '../lib/session-id.js';
 import { validatePayload } from '../lib/payload-limits.js';
-import { canClearStateForSession, findCompletedSessionStateFiles, findCompletedSessionStateCandidates, findSessionOwnedStateCandidates, getStateSessionOwner, writeStateFileLocked, writeStateFileLockedIf, writeStateFileLockedCreateIf, withStateFileMutationLock, clearStateFileLockedIf, emergencyMutateStateFileIf, recoverEmergencyStateFile, getStateMutationLockDiagnostic, getStateMutationLockFailureMessage, } from '../lib/mode-state-io.js';
+import { canClearStateForSession, findCompletedSessionStateFiles, findCompletedSessionStateCandidates, findSessionOwnedStateCandidates, getStateSessionOwner, writeStateFileLocked, writeStateFileLockedIf, writeStateFileLockedCreateIf, withStateFileMutationLock, clearStateFileLockedIf, emergencyMutateStateFileIf, recoverEmergencyStateFile, getStateMutationLockDiagnostic, getStateMutationLockFailureMessage, observeStateFileActivation, } from '../lib/mode-state-io.js';
 import { isModeActive, getActiveModes, getAllModeStatuses, clearModeState, getStateFilePath, MODE_CONFIGS, getActiveSessionsForMode } from '../hooks/mode-registry/index.js';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { namedWorkflowRuntimeSupported, validateNamedWorkflowStateStructure } from '../hooks/autopilot/named-workflow-resume-validator.js';
@@ -74,6 +74,7 @@ const STATE_WRITE_MODES = [
 ];
 const EXTRA_STATE_ONLY_MODES = ['ralplan', 'omc-teams', 'skill-active', 'ultragoal'];
 const CANCEL_SIGNAL_TTL_MS = 30_000;
+const MAX_REPORTED_STATE_CLEAR_PATHS = 10;
 const TEAM_RUNTIME_PRESERVATION_NOTE = 'Native team runtimes and cleanup evidence are not removed by state_clear; use instance-validated team shutdown/job cleanup.';
 const OWNER_SESSION_FALLBACK_MODES = new Set(['ralph']);
 const CONVERGED_STATE_PATH_MODES = new Set(['ralph', 'ultrawork']);
@@ -123,6 +124,7 @@ async function writeTeamState(statePath, sessionId, patch) {
             if (!existsSync(statePath)) {
                 try {
                     atomicWriteJsonSync(statePath, patch);
+                    observeStateFileActivation(statePath, null, patch);
                     return { result: 'written', state: patch };
                 }
                 catch (error) {
@@ -147,6 +149,7 @@ async function writeTeamState(statePath, sessionId, patch) {
             };
             try {
                 atomicWriteJsonSync(statePath, merged);
+                observeStateFileActivation(statePath, current, merged);
                 return { result: 'written', state: merged };
             }
             catch (error) {
@@ -545,18 +548,24 @@ function getStateClearCheckedPaths(mode, root, sessionId) {
     const paths = new Set();
     if (sessionId) {
         paths.add(getSessionStatePath(mode, root, sessionId));
+        if (CONVERGED_STATE_PATH_MODES.has(mode)) {
+            for (const omcRoot of getConvergedOmcRoots(root)) {
+                paths.add(join(omcRoot, 'state', 'sessions', sessionId, getStateFileName(mode)));
+            }
+        }
+        if (shouldCheckWorkingDirectoryLocalState(root)) {
+            paths.add(getWorkingDirectoryLocalSessionStatePath(mode, root, sessionId));
+        }
+        return [...paths];
     }
-    else {
-        paths.add(getStatePath(mode, root));
-    }
+    paths.add(getStatePath(mode, root));
     for (const legacyPath of getLegacyStateFileCandidates(mode, root)) {
         paths.add(legacyPath);
     }
-    for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root, sessionId)) {
+    for (const localPath of getWorkingDirectoryLocalStateClearCandidates(mode, root)) {
         paths.add(localPath);
     }
-    const sessionIds = sessionId ? [sessionId, ...listSessionIds(root)] : listSessionIds(root);
-    for (const sid of new Set(sessionIds)) {
+    for (const sid of listSessionIds(root)) {
         paths.add(getSessionStatePath(mode, root, sid));
     }
     return [...paths];
@@ -564,8 +573,10 @@ function getStateClearCheckedPaths(mode, root, sessionId) {
 function formatStateClearNoopMessage(mode, root, sessionId) {
     const scope = sessionId ? ` in session: ${sessionId}` : '';
     const checkedPaths = getStateClearCheckedPaths(mode, root, sessionId);
+    const displayedPaths = checkedPaths.slice(0, MAX_REPORTED_STATE_CLEAR_PATHS);
+    const omittedPathCount = checkedPaths.length - displayedPaths.length;
     const checked = checkedPaths.length > 0
-        ? `\n- Checked paths:\n${checkedPaths.map((statePath) => `  - ${statePath}`).join('\n')}`
+        ? `\n- Checked paths:\n${displayedPaths.map((statePath) => `  - ${statePath}`).join('\n')}${omittedPathCount > 0 ? `\n  - ... and ${omittedPathCount} more checked paths` : ''}`
         : '';
     return `No state found to clear for mode: ${mode}${scope}${checked}`;
 }
@@ -1970,10 +1981,10 @@ const stateMigrateNonGitTool = {
             const gitProbe = probeGitTopLevel(sourceRoot);
             if (gitProbe.status === 'ok')
                 throw new Error('state_migrate_non_git only accepts a non-git source directory');
-            if (gitProbe.status !== 'not_a_repository')
-                throw new Error('state_migrate_non_git refused a failed Git probe');
             if (findGitMetadataDir(sourceRoot))
                 throw new Error('state_migrate_non_git refuses a directory with Git metadata');
+            if (gitProbe.status !== 'not_a_repository')
+                throw new Error('state_migrate_non_git refused a failed Git probe');
             const authorizedHome = realpathSync(homedir());
             const sourceFromHome = relative(authorizedHome, sourceRoot);
             if (sourceFromHome === '..' || sourceFromHome.startsWith(`..${sep}`) || isAbsolute(sourceFromHome)) {

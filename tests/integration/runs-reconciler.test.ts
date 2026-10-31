@@ -60,7 +60,7 @@ describe('runs reconciler hook', () => {
   const recentEnd = new Date(now - 1 * 60 * 60 * 1000).toISOString();
   const recentEnd2 = new Date(now - 30 * 60 * 1000).toISOString();
 
-  it('reports completed runs missing their closeout as advisory context', async () => {
+  it('reports ended runs missing their closeout as advisory context', async () => {
     const dir = fixture();
     writeLedger(dir, [
       { ts: recentStart, run: 'ralph', sessionId: 's1', event: 'start', outcome: 'running' },
@@ -70,7 +70,19 @@ describe('runs reconciler hook', () => {
     const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
     expect(ctx).toContain('[RUN RECONCILIATION]');
     expect(ctx).toContain('ralph (session s1)');
-    expect(ctx).toContain('never wrote their closeout');
+    expect(ctx).toContain('unattended run(s) ended without a notepad closeout');
+    expect(ctx).not.toContain('completed unattended');
+  });
+
+  it('reports a cancelled run without claiming it completed', async () => {
+    const dir = fixture();
+    writeLedger(dir, [
+      { ts: recentEnd, run: 'team', sessionId: 's2', event: 'end', outcome: 'cancelled', closeoutWritten: false },
+    ]);
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('1 unattended run(s) ended without a notepad closeout');
+    expect(ctx).toContain('- team (session s2): ended');
   });
 
   it('stays silent when every ended run wrote its closeout', async () => {

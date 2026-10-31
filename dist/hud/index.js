@@ -369,7 +369,7 @@ async function mainImpl(watchMode = false, skipInit = false) {
         }
         const missionBoardEnabled = config.missionBoard?.enabled ?? config.elements.missionBoard ?? false;
         const missionBoard = missionBoardEnabled
-            ? await refreshMissionBoardState(cwd, config.missionBoard)
+            ? await refreshMissionBoardState(cwd, config.missionBoard, currentSessionId ?? undefined)
             : null;
         const contextPercent = getContextPercent(stdin);
         const payloadEstimate = estimatePayloadFromTranscriptPath(resolvedTranscriptPath);

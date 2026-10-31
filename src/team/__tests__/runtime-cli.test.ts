@@ -1016,6 +1016,34 @@ describe('runtime-cli recovery intent cleanup', () => {
     }
   });
 
+  it('classifies all-dead evidence from provider liveness before pane liveness', () => {
+    const refresh = { authoritativePaneIds: ['%worker-1', '%worker-2'], allWorkerPaneIdsKnown: true };
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'alive', providerLiveness: 'dead' },
+      { liveness: 'alive', providerLiveness: 'dead' },
+    ] as never, true)).toBe('all_dead');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'alive', providerLiveness: 'dead' },
+      { liveness: 'dead', providerLiveness: 'unknown' },
+    ] as never, true)).toBe('all_dead');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'dead', providerLiveness: 'alive' },
+      { liveness: 'dead', providerLiveness: 'dead' },
+    ] as never, true)).toBe('alive');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'alive', providerLiveness: 'unknown' },
+      { liveness: 'dead', providerLiveness: 'dead' },
+    ] as never, true)).toBe('alive');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'alive', providerLiveness: 'dead' },
+      { liveness: 'unknown', providerLiveness: 'unknown' },
+    ] as never, true)).toBe('unknown');
+    expect(classifyAllDeadRecoveryEvidence(refresh, [
+      { liveness: 'dead' },
+      { liveness: 'dead' },
+    ] as never, true)).toBe('all_dead');
+  });
+
   it('suspends expired all-dead terminalization for a valid predeadline recovery intent', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'runtime-cli-grace-pending-intent-'));
     try {
@@ -1492,7 +1520,7 @@ describe('detached persistent recovery owner', () => {
         writeFileSync(configPath, JSON.stringify(ownerLoopConfig(teamName, { state_revision: 4,
           lifecycle_state: 'stopped', runtime_owner_epoch: { ...owner, state_revision: 2 } })));
       });
-      const monitor = vi.fn(async () => ({ workers: [{ liveness: 'dead' }],
+      const monitor = vi.fn(async () => ({ workers: [{ liveness: 'alive', providerLiveness: 'dead' }],
         tasks: { pending: 1, in_progress: 0 } } as never));
       await runPersistentRecoveryOwnerLoop({
         teamName, cwd, workerName: 'worker-1', requestId: 'request-1', instanceId: INSTANCE_ID,

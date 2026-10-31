@@ -20,6 +20,7 @@ export declare function shouldBlockStandaloneUpdateInCurrentSession(): boolean;
 export declare function syncPluginCache(verbose?: boolean): {
     synced: boolean;
     skipped: boolean;
+    activeRootsSynced: boolean;
     errors: string[];
 };
 /** Installation paths (respects CLAUDE_CONFIG_DIR env var) */
@@ -223,6 +224,7 @@ export declare function checkForUpdates(): Promise<UpdateCheckResult>;
 export declare function reconcileUpdateRuntime(options?: {
     verbose?: boolean;
     skipGracePeriod?: boolean;
+    pluginCacheAlreadySynced?: boolean;
 }): UpdateReconcileResult;
 /**
  * Download and execute the install script to perform an update
@@ -232,6 +234,7 @@ export declare function performUpdate(options?: {
     verbose?: boolean;
     standalone?: boolean;
     clean?: boolean;
+    unattended?: boolean;
 }): Promise<UpdateResult>;
 /**
  * Get a formatted update notification message

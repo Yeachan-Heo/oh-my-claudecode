@@ -333,8 +333,10 @@ export function recordJevShadow({ point, state, questions, heuristic, permission
           requestFile,
         ],
         {
+          detached: true,
           stdio: ["ignore", "ignore", "ignore"],
           env: process.env,
+          windowsHide: true,
         },
       );
       child.on("error", () => {

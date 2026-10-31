@@ -12835,7 +12835,8 @@ function parseEnvPassthrough(value) {
 function buildProviderEnvironment(providerEnv, sourceEnv = process.env, platform = process.platform, envPassthrough) {
   const normalized = normalizeProviderEnvironment(providerEnv, platform);
   const baseline = {};
-  for (const key of SAFE_BASELINE_ENV_KEYS) {
+  const identityKeys = platform === "win32" ? ["USERPROFILE"] : ["HOME", "USER"];
+  for (const key of [...SAFE_BASELINE_ENV_KEYS, ...identityKeys]) {
     const value = sourceEnv[key];
     if (typeof value === "string" && value.length > 0) baseline[key] = value;
   }
@@ -12843,9 +12844,6 @@ function buildProviderEnvironment(providerEnv, sourceEnv = process.env, platform
     const systemRoot = [sourceEnv.SystemRoot, sourceEnv.SYSTEMROOT].find((value) => typeof value === "string" && /^[A-Za-z]:\\/.test(value));
     if (typeof systemRoot === "string") baseline.SystemRoot = systemRoot;
   }
-  const homeKey = platform === "win32" ? "USERPROFILE" : "HOME";
-  const home = sourceEnv[homeKey];
-  if (typeof home === "string" && home.length > 0) baseline[homeKey] = home;
   const passthroughList = envPassthrough ?? parseEnvPassthrough(sourceEnv.OMC_TEAM_WORKER_ENV_PASSTHROUGH);
   for (const key of passthroughList) {
     if (!isValidEnvironmentKey(key)) throw new Error("worker_launch_env_passthrough_key_invalid");
@@ -12935,9 +12933,31 @@ async function writeExclusiveTextAtomic(path4, value) {
     await (0, import_promises7.unlink)(candidate).catch(() => void 0);
   }
 }
+function parseExactInteger(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const negative = trimmed.startsWith("-");
+  const magnitude = negative || trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
+  const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
+  if (!match) return null;
+  const integerDigits = match[1] ?? "";
+  const fractionDigits = match[2] ?? match[3] ?? "";
+  const exponent = match[4] === void 0 ? 0 : Number(match[4]);
+  const shift = fractionDigits.length - exponent;
+  if (shift > 0) {
+    const significand = integerDigits + fractionDigits;
+    if (/[1-9]/.test(significand)) {
+      const trailingZeros = significand.length - significand.replace(/0+$/, "").length;
+      if (trailingZeros < shift) return null;
+    }
+  }
+  const parsed = (negative ? -1 : 1) * Number(magnitude);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
 function resolvePositiveInteger(value, fallback) {
-  const parsed = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  if (value == null || value.trim() === "") return fallback;
+  const parsed = parseExactInteger(value);
+  return parsed !== null && parsed > 0 ? parsed : fallback;
 }
 async function prepareWorkerLaunchAttempt(input) {
   const instanceId = input.instanceId;
@@ -13578,7 +13598,7 @@ function quoteWindowsCmdArgument(value) {
   if (/[\r\n]/.test(value)) throw new Error("worker_launch_provider_argv_invalid");
   return `"${value.replace(/%/g, "%%").replace(/"/g, '""')}"`;
 }
-var import_node_crypto5, import_node_fs4, import_promises7, import_node_path4, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, WORKER_LAUNCH_INTERNAL_ENV_KEYS, WORKER_LAUNCH_AUTHORITY_PROTOCOL, WINDOWS_SUPERVISOR_PROTOCOL, WINDOWS_RESERVED_ENV_KEYS, SAFE_BASELINE_ENV_KEYS;
+var import_node_crypto5, import_node_fs4, import_promises7, import_node_path4, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, WORKER_LAUNCH_INTERNAL_ENV_KEYS, WORKER_LAUNCH_AUTHORITY_PROTOCOL, WINDOWS_SUPERVISOR_PROTOCOL, WINDOWS_RESERVED_ENV_KEYS, SAFE_BASELINE_ENV_KEYS, DECIMAL_INTEGER_TEXT;
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
@@ -13610,6 +13630,7 @@ var init_worker_launch_ack = __esm({
     WINDOWS_SUPERVISOR_PROTOCOL = "worker-launch-windows-supervisor-v1";
     WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, "SystemRoot"].map((key) => key.toUpperCase()));
     SAFE_BASELINE_ENV_KEYS = ["PATH", "TEMP", "TMP", "TERM", "COLORTERM"];
+    DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
   }
 });
 
@@ -13670,6 +13691,7 @@ __export(tmux_session_exports, {
   captureTmuxServerIdentity: () => captureTmuxServerIdentity,
   createTeamSession: () => createTeamSession,
   deliverStartupInbox: () => deliverStartupInbox,
+  detectPaneTrustPromptKind: () => detectPaneTrustPromptKind,
   detectTeamMultiplexerContext: () => detectTeamMultiplexerContext,
   getDefaultShell: () => getDefaultShell,
   getOwnedWorkerLiveness: () => getOwnedWorkerLiveness,
@@ -13688,7 +13710,6 @@ __export(tmux_session_exports, {
   observeTeamSessionTargetPresence: () => observeTeamSessionTargetPresence,
   observeTmuxServerIdentity: () => observeTmuxServerIdentity,
   paneHasActiveTask: () => paneHasActiveTask,
-  paneHasCursorWorkspaceTrustPrompt: () => paneHasCursorWorkspaceTrustPrompt,
   paneHasTrustPrompt: () => paneHasTrustPrompt,
   paneLooksReady: () => paneLooksReady,
   powershellQuote: () => powershellQuote,
@@ -13698,6 +13719,8 @@ __export(tmux_session_exports, {
   resolveShellFromCandidates: () => resolveShellFromCandidates,
   resolveSplitPaneWorkerPaneIds: () => resolveSplitPaneWorkerPaneIds,
   resolveSupportedShellAffinity: () => resolveSupportedShellAffinity,
+  resolveTeamShellReadyTimeoutMs: () => resolveTeamShellReadyTimeoutMs,
+  resolveTeamStartSubmitTimeoutMs: () => resolveTeamStartSubmitTimeoutMs,
   retryStartupInboxSubmit: () => retryStartupInboxSubmit,
   runTmuxServerIdentityGuard: () => runTmuxServerIdentityGuard,
   sanitizeName: () => sanitizeName,
@@ -14624,12 +14647,40 @@ async function getPaneCurrentCommandStatus(paneId, tmuxServerIdentity) {
 function paneCurrentCommandLooksSubmitted(command) {
   return command.length > 0 && !paneCurrentCommandLooksReady(command);
 }
+function parseExactInteger2(raw) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const negative = trimmed.startsWith("-");
+  const magnitude = negative || trimmed.startsWith("+") ? trimmed.slice(1) : trimmed;
+  const match = DECIMAL_INTEGER_TEXT2.exec(magnitude);
+  if (!match) return null;
+  const integerDigits = match[1] ?? "";
+  const fractionDigits = match[2] ?? match[3] ?? "";
+  const exponent = match[4] === void 0 ? 0 : Number(match[4]);
+  const shift = fractionDigits.length - exponent;
+  if (shift > 0) {
+    const significand = integerDigits + fractionDigits;
+    if (/[1-9]/.test(significand)) {
+      const trailingZeros = significand.length - significand.replace(/0+$/, "").length;
+      if (trailingZeros < shift) return null;
+    }
+  }
+  const parsed = (negative ? -1 : 1) * Number(magnitude);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+function resolveTeamShellReadyTimeoutMs(env = process.env, explicitTimeoutMs) {
+  if (Number.isFinite(explicitTimeoutMs) && (explicitTimeoutMs ?? 0) > 0) {
+    return Number(explicitTimeoutMs);
+  }
+  const raw = env.OMC_TEAM_SHELL_READY_TIMEOUT_MS;
+  const parsed = raw == null || String(raw).trim() === "" ? null : parseExactInteger2(String(raw));
+  return parsed !== null && parsed > 0 ? parsed : 5e3;
+}
 async function waitForShellReady(paneId, opts = {}) {
   if (isCmuxSurfaceTarget(paneId)) return true;
   if (!opts.tmuxServerIdentity) return false;
   if (!isValidTmuxServerIdentity(opts.tmuxServerIdentity) || await observeTmuxServerIdentity(opts.tmuxServerIdentity) !== "matching") return false;
-  const envTimeout = Number.parseInt(process.env.OMC_TEAM_SHELL_READY_TIMEOUT_MS ?? "", 10);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0 ? Number(opts.timeoutMs) : Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 5e3;
+  const timeoutMs = resolveTeamShellReadyTimeoutMs(process.env, opts.timeoutMs);
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0 ? Number(opts.pollIntervalMs) : 50;
   const deadline = Date.now() + timeoutMs;
   let lastStatus = "";
@@ -14670,16 +14721,20 @@ async function verifyWorkerStartCommandDelivered(paneId, startCmd, tmuxServerIde
   }
   return false;
 }
-function resolvePositiveIntegerEnv(name, fallback) {
-  const value = Number.parseInt(process.env[name] ?? "", 10);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
+function resolveTeamStartSubmitTimeoutMs(env = process.env, explicitTimeoutMs) {
+  if (Number.isFinite(explicitTimeoutMs) && (explicitTimeoutMs ?? 0) > 0) {
+    return Number(explicitTimeoutMs);
+  }
+  const raw = env.OMC_TEAM_START_SUBMIT_TIMEOUT_MS;
+  const parsed = raw == null || String(raw).trim() === "" ? null : parseExactInteger2(String(raw));
+  return parsed !== null && parsed > 0 ? parsed : 8e3;
 }
 async function verifyWorkerStartCommandSubmitted(paneId, startCmd, opts = {}) {
   if (isCmuxSurfaceTarget(paneId)) return true;
   if (!opts.tmuxServerIdentity) return false;
   const expected = normalizeTmuxCapture(startCmd);
   const compactExpected = normalizeTmuxCaptureForDelivery(startCmd);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0 ? Number(opts.timeoutMs) : resolvePositiveIntegerEnv("OMC_TEAM_START_SUBMIT_TIMEOUT_MS", 8e3);
+  const timeoutMs = resolveTeamStartSubmitTimeoutMs(process.env, opts.timeoutMs);
   const maxPollIntervalMs = Number.isFinite(opts.maxPollIntervalMs) && (opts.maxPollIntervalMs ?? 0) > 0 ? Number(opts.maxPollIntervalMs) : 500;
   let pollIntervalMs = Number.isFinite(opts.initialPollIntervalMs) && (opts.initialPollIntervalMs ?? 0) > 0 ? Number(opts.initialPollIntervalMs) : 50;
   const deadline = Date.now() + timeoutMs;
@@ -15994,9 +16049,10 @@ async function paneInputBlockReason(paneId, tmuxServerIdentity, serverIdentityDe
     ...serverIdentityDependencies ? { serverIdentityDependencies } : {}
   });
   if (!observation.ok || !observation.captured.trim()) return "mailbox_membership_unresolvable";
-  if (detectPaneTrustPromptKind(observation.captured) === "codex_directory") {
-    return "codex_workspace_untrusted";
-  }
+  const trustPrompt = detectPaneTrustPromptKind(observation.captured);
+  if (trustPrompt === "codex_directory") return "codex_workspace_untrusted";
+  if (trustPrompt === "cursor_workspace_trust") return "cursor_workspace_untrusted";
+  if (trustPrompt) return "trust_prompt_pending";
   return void 0;
 }
 async function killTeamPane(paneId) {
@@ -16066,12 +16122,13 @@ function detectPaneTrustPromptKind(captured, provider) {
   if ((provider === void 0 || provider === "cursor") && hasCursorTrustBanner && (hasCursorTrustHint || tail.some((l) => /Do you trust the contents of this directory\?/i.test(l)))) {
     return "cursor_workspace_trust";
   }
-  const hasClaudeDirectoryQuestion = tail.some(
-    (l) => /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(l)
+  const claudeQuestionLines = lines.slice(-20);
+  const hasClaudeDirectoryQuestion = claudeQuestionLines.some(
+    (_, index) => /(?:Do you trust the files in this folder|Quick safety check:\s*Is this a project you created or one you trust)\?/i.test(claudeQuestionLines.slice(index, index + 3).join(" "))
   );
   const hasClaudeDirectoryNoChoice = tail.some((l) => /\bNo,\s*exit\b/i.test(l));
   const hasClaudeDirectoryYesChoice = tail.some((l) => /\bYes,\s*(?:proceed|I trust this folder)\b/i.test(l));
-  if (provider === "claude" && hasClaudeDirectoryQuestion && hasClaudeDirectoryNoChoice && hasClaudeDirectoryYesChoice) {
+  if ((provider === void 0 || provider === "claude") && hasClaudeDirectoryQuestion && hasClaudeDirectoryNoChoice && hasClaudeDirectoryYesChoice) {
     return "claude_directory";
   }
   const hasDirectoryQuestion = tail.some((l) => /Do you trust the contents of this directory\?/i.test(l));
@@ -16085,9 +16142,6 @@ function detectPaneTrustPromptKind(captured, provider) {
 }
 function paneHasTrustPrompt(captured, provider) {
   return detectPaneTrustPromptKind(captured, provider) !== null;
-}
-function paneHasCursorWorkspaceTrustPrompt(captured) {
-  return detectPaneTrustPromptKind(captured, "cursor") === "cursor_workspace_trust";
 }
 function paneHasClaudeStartupBanner(captured, provider) {
   const lines = captured.split("\n").map((line) => line.replace(/\r/g, "").trim()).filter((line) => line.length > 0).slice(-20);
@@ -16130,8 +16184,7 @@ function paneLooksReady(captured, provider) {
 }
 async function waitForPaneReady(paneId, opts = {}) {
   if (!isCmuxSurfaceTarget(paneId) && !opts.tmuxServerIdentity) return false;
-  const envTimeout = Number.parseInt(process.env.OMC_SHELL_READY_TIMEOUT_MS ?? "", 10);
-  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0 ? Number(opts.timeoutMs) : Number.isFinite(envTimeout) && envTimeout > 0 ? envTimeout : 3e4;
+  const timeoutMs = Number.isFinite(opts.timeoutMs) && (opts.timeoutMs ?? 0) > 0 ? Number(opts.timeoutMs) : 3e4;
   const pollIntervalMs = Number.isFinite(opts.pollIntervalMs) && (opts.pollIntervalMs ?? 0) > 0 ? Number(opts.pollIntervalMs) : 250;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -16144,7 +16197,7 @@ async function waitForPaneReady(paneId, opts = {}) {
     await sleep3(pollIntervalMs);
   }
   console.warn(
-    `[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms (set OMC_SHELL_READY_TIMEOUT_MS to tune)`
+    `[tmux-session] waitForPaneReady: pane ${paneId} timed out after ${timeoutMs}ms (set OMC_TEAM_READY_TIMEOUT_MS to tune)`
   );
   return false;
 }
@@ -16386,10 +16439,6 @@ async function sendToWorker(_sessionName, paneId, message, tmuxServerIdentity) {
     }
     const paneBusy = paneHasActiveTask(initialCapture);
     const trustPromptKind = detectPaneTrustPromptKind(initialCapture);
-    if (trustPromptKind === "codex_directory") return false;
-    if (trustPromptKind === "cursor_workspace_trust") {
-      return false;
-    }
     if (trustPromptKind === "directory") {
       await sendKey("C-m");
       await sleep3(120);
@@ -16400,6 +16449,8 @@ async function sendToWorker(_sessionName, paneId, message, tmuxServerIdentity) {
       await sleep3(120);
       await sendKey("C-m");
       await sleep3(200);
+    } else if (trustPromptKind) {
+      return false;
     }
     if (isCmuxSurfaceTarget(paneId)) {
       await cmuxSendSurface(paneId, message);
@@ -16920,7 +16971,7 @@ async function killTeamSession(sessionName2, workerPaneIds, leaderPaneId, option
   if (result.outcome === "executed") return true;
   return await observeTmuxServerIdentity(identity) === "dead";
 }
-var import_fs20, import_crypto6, import_child_process6, import_util7, import_path21, import_os5, sleep3, execFileAsync2, TMUX_SESSION_PREFIX, TMUX_LIVENESS_SERVER_RECHECK_ATTEMPTS, TMUX_LIVENESS_SERVER_RECHECK_DELAY_MS, CMUX_MEMBERSHIP_RETRY_ATTEMPTS, CMUX_MEMBERSHIP_RETRY_INTERVAL_MS, defaultTmuxServerIdentityDependencies, guardMarkerCounter, TMUX_MAILBOX_PANE_ID, TMUX_MAILBOX_TARGET, defaultMailboxTargetOwnershipDependencies, defaultDirectMailboxEffectDependencies, TeamSessionCreationError, SUPPORTED_POSIX_SHELLS, ZSH_CANDIDATES, BASH_CANDIDATES, DANGEROUS_LAUNCH_BINARY_CHARS;
+var import_fs20, import_crypto6, import_child_process6, import_util7, import_path21, import_os5, sleep3, execFileAsync2, TMUX_SESSION_PREFIX, TMUX_LIVENESS_SERVER_RECHECK_ATTEMPTS, TMUX_LIVENESS_SERVER_RECHECK_DELAY_MS, CMUX_MEMBERSHIP_RETRY_ATTEMPTS, CMUX_MEMBERSHIP_RETRY_INTERVAL_MS, defaultTmuxServerIdentityDependencies, guardMarkerCounter, TMUX_MAILBOX_PANE_ID, TMUX_MAILBOX_TARGET, defaultMailboxTargetOwnershipDependencies, defaultDirectMailboxEffectDependencies, TeamSessionCreationError, SUPPORTED_POSIX_SHELLS, ZSH_CANDIDATES, BASH_CANDIDATES, DECIMAL_INTEGER_TEXT2, DANGEROUS_LAUNCH_BINARY_CHARS;
 var init_tmux_session = __esm({
   "src/team/tmux-session.ts"() {
     "use strict";
@@ -16988,6 +17039,7 @@ var init_tmux_session = __esm({
     SUPPORTED_POSIX_SHELLS = /* @__PURE__ */ new Set(["sh", "bash", "zsh", "fish", "ksh"]);
     ZSH_CANDIDATES = ["/bin/zsh", "/usr/bin/zsh", "/usr/local/bin/zsh", "/opt/homebrew/bin/zsh"];
     BASH_CANDIDATES = ["/bin/bash", "/usr/bin/bash"];
+    DECIMAL_INTEGER_TEXT2 = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
     DANGEROUS_LAUNCH_BINARY_CHARS = /[;&|`$()<>\n\r\t\0]/;
   }
 });

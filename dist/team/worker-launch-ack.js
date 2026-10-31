@@ -199,7 +199,9 @@ function parseEnvPassthrough(value) {
 export function buildProviderEnvironment(providerEnv, sourceEnv = process.env, platform = process.platform, envPassthrough) {
     const normalized = normalizeProviderEnvironment(providerEnv, platform);
     const baseline = {};
-    for (const key of SAFE_BASELINE_ENV_KEYS) {
+    // claude finds its macOS keychain login through USER; without it the worker starts logged out.
+    const identityKeys = platform === 'win32' ? ['USERPROFILE'] : ['HOME', 'USER'];
+    for (const key of [...SAFE_BASELINE_ENV_KEYS, ...identityKeys]) {
         const value = sourceEnv[key];
         if (typeof value === 'string' && value.length > 0)
             baseline[key] = value;
@@ -210,10 +212,6 @@ export function buildProviderEnvironment(providerEnv, sourceEnv = process.env, p
         if (typeof systemRoot === 'string')
             baseline.SystemRoot = systemRoot;
     }
-    const homeKey = platform === 'win32' ? 'USERPROFILE' : 'HOME';
-    const home = sourceEnv[homeKey];
-    if (typeof home === 'string' && home.length > 0)
-        baseline[homeKey] = home;
     // Resolve passthrough environment variables from the source environment
     const passthroughList = envPassthrough ?? parseEnvPassthrough(sourceEnv.OMC_TEAM_WORKER_ENV_PASSTHROUGH);
     for (const key of passthroughList) {
@@ -414,9 +412,36 @@ async function writeExclusiveTextAtomic(path, value) {
         await unlink(candidate).catch(() => undefined);
     }
 }
+const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+function parseExactInteger(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed)
+        return null;
+    const negative = trimmed.startsWith('-');
+    const magnitude = negative || trimmed.startsWith('+') ? trimmed.slice(1) : trimmed;
+    const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
+    if (!match)
+        return null;
+    const integerDigits = match[1] ?? '';
+    const fractionDigits = match[2] ?? match[3] ?? '';
+    const exponent = match[4] === undefined ? 0 : Number(match[4]);
+    const shift = fractionDigits.length - exponent;
+    if (shift > 0) {
+        const significand = integerDigits + fractionDigits;
+        if (/[1-9]/.test(significand)) {
+            const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+            if (trailingZeros < shift)
+                return null;
+        }
+    }
+    const parsed = (negative ? -1 : 1) * Number(magnitude);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+}
 function resolvePositiveInteger(value, fallback) {
-    const parsed = Number.parseInt(value ?? '', 10);
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+    if (value == null || value.trim() === '')
+        return fallback;
+    const parsed = parseExactInteger(value);
+    return parsed !== null && parsed > 0 ? parsed : fallback;
 }
 export async function prepareWorkerLaunchAttempt(input) {
     const instanceId = input.instanceId;

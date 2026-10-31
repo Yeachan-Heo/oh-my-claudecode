@@ -1,9 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, URL } from 'node:url';
+import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -49,6 +49,50 @@ function runHook(context, script, input, point, overrides = {}) {
     env: hookEnv(context, point, overrides),
   });
   return stdout.trim() ? JSON.parse(stdout) : null;
+}
+
+async function runHookWithProcessGroupTeardown(context, input, point) {
+  const loaderPath = join(context.root, 'delay-jev-resolver.mjs');
+  writeFileSync(loaderPath, `
+    if (process.argv.some((argument) => argument.endsWith('/scripts/jev-resolve.mjs'))) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+    }
+  `);
+  const nodeOptions = [
+    process.env.NODE_OPTIONS,
+    `--import=${pathToFileURL(loaderPath).href}`,
+  ].filter(Boolean).join(' ');
+  const child = spawn(NODE, [join(ROOT, 'scripts', 'persistent-mode.mjs')], {
+    cwd: context.cwd,
+    detached: true,
+    env: hookEnv(context, point, {
+      NODE_OPTIONS: nodeOptions,
+      TMPDIR: context.root,
+      TMP: context.root,
+      TEMP: context.root,
+      OMC_JEV_ENDPOINT: 'http://127.0.0.1:1/v1/systemone',
+      OMC_JEV_TIMEOUT_MS: '100',
+    }),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stdin.end(JSON.stringify(input));
+
+  const exit = await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+
+  try {
+    // Simulate a host that tears down the Stop hook's process group as soon as
+    // the hook exits. The resolver's startup delay keeps this deterministic.
+    process.kill(-child.pid, 'SIGTERM');
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+  return { ...exit, stdout };
 }
 
 function readPoint(context, point) {
@@ -226,6 +270,30 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       state: { assistant_message: expect.stringContaining('race condition') },
       heuristic: { detected: true },
     });
+  });
+
+  it.skipIf(process.platform === 'win32')('lets Stop-hook resolvers survive process-group teardown', async () => {
+    for (const point of ['loop-continuation', 'learner-extraction']) {
+      const context = makeContext();
+      const sessionId = point === 'loop-continuation' ? createRalphState(context) : 'jev-session';
+      const result = await runHookWithProcessGroupTeardown(context, {
+        cwd: context.cwd,
+        session_id: sessionId,
+        last_assistant_message: 'The issue was caused by a race condition. I fixed it by adding proper locking.',
+      }, point);
+
+      expect(result.code).toBe(0);
+      expect(JSON.parse(result.stdout.trim())).toMatchObject(
+        point === 'loop-continuation' ? { decision: 'block' } : { continue: true },
+      );
+      expect(readPoint(context, point)).toMatchObject({
+        point,
+        heuristic: point === 'loop-continuation'
+          ? { mode: 'ralph', shouldBlock: true }
+          : { detected: true },
+      });
+      expect(readdirSync(context.root).filter((entry) => entry.startsWith('omc-jev-'))).toEqual([]);
+    }
   });
 
   it('records context-pruning from the PostToolUse context heuristic', () => {

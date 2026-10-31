@@ -204,14 +204,13 @@ function preflightMergerWorktree(mergerPath, leaderBranch) {
         windowsHide: true,
     });
 }
+// Every unmerged status `git status --porcelain` can report, including
+// modify/delete (UD, DU) and add conflicts (AU, UA).
+const UNMERGED_STATUS = /^(?:DD|AU|UD|UA|DU|AA|UU) /;
 function parseUUFiles(porcelainOutput) {
     const files = [];
     for (const line of porcelainOutput.split('\n')) {
-        if (line.startsWith('UU ')) {
-            files.push(line.slice(3).trim());
-        }
-        else if (line.startsWith('AA ') || line.startsWith('DD ')) {
-            // Both-modified variants count as conflicts too.
+        if (UNMERGED_STATUS.test(line)) {
             files.push(line.slice(3).trim());
         }
     }

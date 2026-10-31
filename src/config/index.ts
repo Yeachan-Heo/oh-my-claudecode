@@ -25,3 +25,23 @@ export {
   resolveAutopilotPlanPath,
   resolveOpenQuestionsPlanPath,
 } from "./plan-output.js";
+
+export {
+  validateSkillName,
+  normalizeGate,
+  readQualityGatesConfig,
+  readValidatedQualityGates,
+  getGatesForStage,
+  getAdvisoryGatesForStage,
+  getBlockingGatesForStage,
+  resolveQualityGateSkillPath,
+  QUALITY_GATE_STAGES,
+  type QualityGateStage,
+  type QualityGateMode,
+  type QualityGateEntry,
+  type QualityGateObject,
+  type NormalizedGate,
+  type QualityGatesConfig,
+  type QualityGateValidationError,
+  type QualityGateSkillResolutionOptions,
+} from "./quality-gates.js";

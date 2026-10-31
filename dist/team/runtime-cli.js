@@ -81,11 +81,16 @@ export function classifyAllDeadRecoveryEvidence(refresh, workers, hasOutstanding
     if (!refresh.allWorkerPaneIdsKnown || refresh.authoritativePaneIds.length === 0
         || workers.length !== refresh.authoritativePaneIds.length)
         return 'unknown';
-    if (workers.some(worker => worker.liveness === 'alive'))
+    // The pane is an interactive shell that outlives its provider, so a known
+    // provider state outranks pane liveness; unknown falls back to the pane.
+    const liveness = workers.map(worker => worker.providerLiveness === 'alive' || worker.providerLiveness === 'dead'
+        ? worker.providerLiveness
+        : worker.liveness);
+    if (liveness.includes('alive'))
         return 'alive';
-    if (workers.some(worker => worker.liveness === 'unknown'))
+    if (liveness.includes('unknown'))
         return 'unknown';
-    return hasOutstanding && workers.every(worker => worker.liveness === 'dead') ? 'all_dead' : 'unknown';
+    return 'all_dead';
 }
 export function areAllAuthoritativeWorkersDead(refresh, workers) {
     return classifyAllDeadRecoveryEvidence(refresh, workers, true) === 'all_dead';

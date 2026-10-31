@@ -33,14 +33,14 @@ function makeStdin(withRateLimits = false, rateLimitOverrides = {}) {
             : {}),
     };
 }
-function makeConfig(rateLimits = false) {
+function makeConfig(rateLimits = false, missionBoardEnabled = false) {
     return {
         preset: 'focused',
         elements: {
             rateLimits,
             apiKeySource: false,
             safeMode: false,
-            missionBoard: false,
+            missionBoard: missionBoardEnabled,
         },
         thresholds: {
             contextWarning: 70,
@@ -52,7 +52,7 @@ function makeConfig(rateLimits = false) {
             threshold: 90,
         },
         missionBoard: {
-            enabled: false,
+            enabled: missionBoardEnabled,
         },
         usageApiPollIntervalMs: 300000,
     };
@@ -63,6 +63,7 @@ describe('HUD watch mode initialization', () => {
     let readRalphStateForHud;
     let readAutopilotStateForHud;
     let getUsage;
+    let refreshMissionBoardState;
     let render;
     let consoleLogSpy;
     let consoleErrorSpy;
@@ -74,6 +75,7 @@ describe('HUD watch mode initialization', () => {
         readRalphStateForHud = vi.fn(() => null);
         readAutopilotStateForHud = vi.fn(() => null);
         getUsage = vi.fn(async () => overrides.getUsageResult ?? null);
+        refreshMissionBoardState = vi.fn(async () => null);
         render = vi.fn(async () => '[HUD] ok');
         vi.doMock('../../hud/stdin.js', () => ({
             readStdin: vi.fn(async () => null),
@@ -141,7 +143,7 @@ describe('HUD watch mode initialization', () => {
             detectApiKeySource: vi.fn(() => null),
         }));
         vi.doMock('../../hud/mission-board.js', () => ({
-            refreshMissionBoardState: vi.fn(async () => null),
+            refreshMissionBoardState,
         }));
         vi.doMock('../../hud/sanitize.js', () => ({
             sanitizeOutput: vi.fn((value) => value),
@@ -216,6 +218,15 @@ describe('HUD watch mode initialization', () => {
         await hud.main(true, false);
         expect(readRalphStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
         expect(readAutopilotStateForHud).toHaveBeenCalledWith('/tmp/worktree', '123e4567-e89b-12d3-a456-426614174000');
+    });
+    it('passes the current session id to the mission board reader', async () => {
+        const stdin = makeStdin();
+        stdin.transcript_path = '/tmp/worktree/transcripts/123e4567-e89b-12d3-a456-426614174000.jsonl';
+        const hud = await importHudModule({ stdin, config: makeConfig(false, true) });
+        await hud.main(true, false);
+        // Without the session id the reader falls back to a per-process scratch id and
+        // always renders an empty board.
+        expect(refreshMissionBoardState).toHaveBeenCalledWith('/tmp/worktree', { enabled: true }, '123e4567-e89b-12d3-a456-426614174000');
     });
     it('merges stdin generic rate limits over usage API data when available', async () => {
         const hud = await importHudModule({

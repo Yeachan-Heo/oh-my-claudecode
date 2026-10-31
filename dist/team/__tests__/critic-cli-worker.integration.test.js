@@ -1,45 +1,25 @@
 import { describe, it, expect, vi } from 'vitest';
-import { existsSync } from 'fs';
-import { execSync } from 'child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { absPath, TeamPaths } from '../state-paths.js';
 import { activateTeamInstanceUnderLock, createTeamInstanceBinding, reserveTeamInstanceUnderLock, withTeamInstanceLifecycleLock, } from '../team-instance.js';
-const tmuxMocks = vi.hoisted(() => ({ getWorkerLiveness: vi.fn(async () => 'dead') }));
 vi.mock('../tmux-session.js', async (importOriginal) => ({
     ...await importOriginal(),
-    getWorkerLiveness: tmuxMocks.getWorkerLiveness,
+    getOwnedWorkerLiveness: vi.fn(async () => 'dead'),
 }));
 import { processCliWorkerVerdicts } from '../runtime-v2.js';
 /**
  * AC-7 integration smoke: simulate a critic CLI worker by writing a verdict.json
  * to disk (as the codex CLI worker would on exit), then drive the post-exit
  * handler to confirm the task transitions correctly + verdict metadata persists.
- *
- * Skipped when codex CLI binary is not present — keeps CI green on machines
- * without codex installed while still exercising the contract end-to-end when
- * the binary is available.
  */
-function codexAvailable() {
-    try {
-        execSync('which codex', { stdio: 'ignore' });
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-const SHOULD_RUN = codexAvailable();
-describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
+describe('critic CLI worker integration (AC-7)', () => {
     it('verdict.json from codex critic worker drives task to completed', async () => {
         const cwd = mkdtempSync(join(tmpdir(), 'omc-critic-integration-'));
-        const previousHome = process.env.HOME;
-        const previousUserProfile = process.env.USERPROFILE;
-        const previousStateDir = process.env.OMC_STATE_DIR;
-        process.env.HOME = cwd;
-        process.env.USERPROFILE = cwd;
-        process.env.OMC_STATE_DIR = join(cwd, 'omc-state');
+        vi.stubEnv('HOME', cwd);
+        vi.stubEnv('USERPROFILE', cwd);
+        vi.stubEnv('OMC_STATE_DIR', join(cwd, 'omc-state'));
         try {
             const teamName = 'critic-int';
             const instance = createTeamInstanceBinding({ teamName, cwd });
@@ -74,6 +54,7 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
                 ],
                 created_at: new Date().toISOString(),
                 tmux_session: 'critic-int:0',
+                tmux_server_identity: { socket_path: '/tmp/omc-test-tmux.sock', server_pid: 4242, process_started_at: 'test:1700000000' },
                 leader_pane_id: '%1',
                 hud_pane_id: null,
                 resize_hook_name: null,
@@ -106,7 +87,6 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
             const { readTeamConfig } = await import('../monitor.js');
             expect((await readTeamConfig(teamName, cwd))?.workers[0]?.output_file).toBe(outputFile);
             const results = await processCliWorkerVerdicts(teamName, cwd, instance.instance_id);
-            expect(tmuxMocks.getWorkerLiveness).toHaveBeenCalledWith('%dead');
             expect(results).toHaveLength(1);
             expect(results[0].status).toBe('completed');
             const finalTask = JSON.parse(readFileSync(taskPath, 'utf-8'));
@@ -117,25 +97,9 @@ describe.skipIf(!SHOULD_RUN)('critic CLI worker integration (AC-7)', () => {
             expect(existsSync(outputFile + '.processed')).toBe(true);
         }
         finally {
-            if (previousHome === undefined)
-                delete process.env.HOME;
-            else
-                process.env.HOME = previousHome;
-            if (previousUserProfile === undefined)
-                delete process.env.USERPROFILE;
-            else
-                process.env.USERPROFILE = previousUserProfile;
-            if (previousStateDir === undefined)
-                delete process.env.OMC_STATE_DIR;
-            else
-                process.env.OMC_STATE_DIR = previousStateDir;
+            vi.unstubAllEnvs();
             rmSync(cwd, { recursive: true, force: true });
         }
-    });
-});
-describe('critic CLI worker integration (AC-7) — guard', () => {
-    it(`reports codex CLI presence: ${SHOULD_RUN ? 'available' : 'missing (integration skipped)'}`, () => {
-        expect(typeof SHOULD_RUN).toBe('boolean');
     });
 });
 //# sourceMappingURL=critic-cli-worker.integration.test.js.map

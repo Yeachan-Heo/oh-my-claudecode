@@ -1,3 +1,260 @@
+# oh-my-claudecode v5.7.23: Preserve project memory during session start
+
+## Release Notes
+
+This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
+
+### Bug Fixes
+
+- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
+
+### Documentation
+
+- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
+
+### Stats
+
+- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
+
+---
+
+# oh-my-claudecode v5.7.21: Clearer state output and restored team missions
+
+## Release Notes
+
+This release bounds `state_clear` diagnostics, removes invalid agent frontmatter that caused startup warnings, and restores team mission discovery when no session snapshot exists. Thanks to @iyoda for #4654, #4657, #4661, and #4662; #4654 was reported by @conarti and #4657 by @fvegiard.
+
+### Bug Fixes
+
+- **fix(state): limit `state_clear` missing-state path output to the requested session, or cap checked paths with an `and N more` count** (#4654, fixes #4651; reported by @conarti)
+- **fix(agents): drop the unrecognized top-level `level` frontmatter key to prevent Claude Code startup warnings** (#4657, fixes #4656; reported by @fvegiard)
+- **fix(hud/cli): show team missions when no session mission snapshot exists and expire completed missions in that team-only view** (#4661, #4662; @iyoda)
+
+### Other Changes
+
+- **chore(sync): merge main's v5.7.20 release into dev** (#4658)
+- **ci: authorize and refresh generated artifacts for main-to-dev sync PR #4658** (#4659, #4660, #4663)
+
+### Stats
+
+- **8 PRs merged** | **0 new features** | **4 bug fixes** | **0 performance improvements** | **4 other changes**
+
+---
+
+# oh-my-claudecode v5.7.20: Mission board sessions and reliable run closeouts
+
+## Release Notes
+
+This release makes persisted missions visible in the mission board, improves run-ledger start and resumed-run closeout tracking, and clarifies Windows release-boundary and state-migration failures. Thanks to @Jack11111eee for #4649 (first contribution), @LukeTheoJohnson for #4645 and #4646, @iyoda for #4641 and #4647, and @Yeachan-Heo for #4642 and #4650.
+
+### New Features
+
+- **feat(hud/cli): show persisted missions across the newest sessions by default and add `-s/--session` for an explicit session** (#4649, fixes #4648; @Jack11111eee, first contribution)
+
+### Bug Fixes
+
+- **fix(runs-ledger): record start edges for session-scoped runs and report unattended runs ended without a notepad closeout** (#4646; @LukeTheoJohnson)
+- **fix(runs-ledger): bound a resumed run's closeout by its latest unmatched start edge, so a pre-resume notepad write no longer counts** (#4650; @Yeachan-Heo)
+- **fix(release): run release-boundary checks when invoked through a Windows path** (#4645; @LukeTheoJohnson)
+- **fix(state): report the specific Git metadata refusal before a generic failed-probe refusal in `state_migrate_non_git`** (#4642; @Yeachan-Heo)
+
+### Other Changes
+
+- **test(team): make the activation-gate and critic-verdict tests independent of the host environment** (#4641; @iyoda)
+- **test(npm-package): allow the clean-tarball install test up to 120 seconds** (#4647; @iyoda)
+- **chore(sync): merge main's v5.7.19 release into dev** (#4639)
+- **ci: authorize generated artifacts for main-to-dev sync PR #4639** (#4640)
+
+### Stats
+
+- **9 PRs merged** | **1 new feature** | **4 bug fixes** | **0 security/hardening improvements** | **4 other changes**
+
+---
+
+# oh-my-claudecode v5.7.19: Faster reconciliation and safer reinstalls
+
+## Release Notes
+
+This release makes interactive updates more reliable on slow-I/O hosts, repairs reinstalls when a hook library is a dangling symlink, and reduces unnecessary work during successful update reconciliation. Thanks to @kaneyxx for #4629 and the #4630 report, and to @iyoda for #4631.
+
+### Bug Fixes
+
+- **fix(update): wait up to 600 seconds for interactive update reconciliation while keeping silent auto-updates bounded to 60 seconds, and name the recovery command on timeout** (#4629, fixes #4628; @kaneyxx)
+- **fix(installer): replace dangling `hooks/lib/stdin.mjs` symlinks before copying so reinstalls recover hook imports** (#4631, @iyoda)
+
+### Performance Improvements
+
+- **perf(update): sync the plugin payload once per target during reconciliation, cutting measured reconcile time by about 67%** (#4634, fixes #4630; reported by @kaneyxx)
+
+### Other Changes
+
+- **ci: authorize generated files for sync PR #4632 during the superseded v5.7.18 sync attempt** (#4633)
+- **chore(sync): merge main's v5.7.18 release into dev** (#4635)
+- **ci: authorize generated artifacts for sync PR #4635** (#4636)
+
+### Stats
+
+- **6 PRs merged** | **0 new features** | **2 bug fixes** | **1 performance improvement** | **0 security/hardening improvements** | **3 other changes**
+
+---
+
+# oh-my-claudecode v5.7.18: Keep macOS team workers logged in
+
+## Release Notes
+
+This release preserves Claude Code's macOS keychain OAuth login for team workers by passing `USER` through the POSIX provider environment, preventing workers from starting logged out and being retired with `startup_dispatch_failed`. Thanks to @iyoda for #4625.
+
+### Bug Fixes
+
+- **fix(team): pass `USER` through the POSIX provider environment so macOS workers retain their Claude login** (#4625, @iyoda)
+
+### Other Changes
+
+- **chore(sync): merge main's v5.7.17 release into dev** (#4623)
+- **ci: authorize generated artifacts for the v5.7.17 main-to-dev sync** (#4624)
+
+### Stats
+
+- **3 PRs merged** | **0 new features** | **1 bug fix** | **0 security/hardening improvements** | **2 other changes**
+
+---
+
+# oh-my-claudecode v5.7.16: Clearer change summaries and more reliable team startup
+
+## Release Notes
+
+This release preserves the first Git status entry's path in subagent file-change summaries, reports modify/delete paths in team rebase conflict messages, and detects Claude's directory-trust question when it wraps in narrow panes, so workers no longer exit on first launch. Thanks to @rudycelekli for #4607 and #4608, and @iyoda for #4611, which addresses the same symptom as #4123.
+
+### Bug Fixes
+
+- **fix(omc-orchestrator): keep the first git status entry's path intact in the subagent FILE CHANGES SUMMARY** (#4607, @rudycelekli)
+- **fix(team): report modify/delete paths in rebase conflict messages** (#4608, @rudycelekli)
+- **fix(team): detect Claude's directory-trust dialog when its question wraps in narrow panes** (#4611, fixes #4123; @iyoda)
+
+### Other Changes
+
+- **chore(sync): merge the v5.7.15 main release into dev** (#4609)
+- **ci: authorize generated artifacts for the v5.7.15 main-to-dev sync** (#4610)
+
+### Stats
+
+- **5 PRs merged** | **0 new features** | **3 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+
+---
+
+# oh-my-claudecode v5.7.15: More reliable timeouts and clearer token counts
+
+## Release Notes
+
+This release stops truncating whole-integer timeout settings in persistent mode and the pre-tool advisory cooldown, displays near-million HUD token counts in millions, and accepts GitHub and GitLab pull request `.diff` and `.patch` URLs. Thanks to @rudycelekli for #4599, #4600, #4601, and #4604.
+
+### Bug Fixes
+
+- **fix(persistent-mode): stop truncating OMC_PERSISTENT_MODE_TIMEOUT_MS** (#4599, @rudycelekli)
+- **fix(pre-tool-enforcer): stop truncating OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS** (#4600, @rudycelekli)
+- **fix(hud): show token counts that round up to 1000k in millions** (#4601, @rudycelekli)
+- **fix(teleport): read pull request patch and diff URLs** (#4604, @rudycelekli)
+
+### Other Changes
+
+- **chore(sync): merge the v5.7.14 main release into dev** (#4596)
+- **ci: authorize generated artifacts for the v5.7.14 main-to-dev sync** (#4597)
+
+### Stats
+
+- **6 PRs merged** | **0 new features** | **4 bug fixes** | **0 security/hardening improvements** | **2 other changes**
+
+---
+
+# oh-my-claudecode v5.7.14: More reliable Stop hooks and leaner team handling
+
+## Release Notes
+
+This release fixes Stop-hook shadow resolver cleanup and removes the unwired team-dispatch implementation. Thanks to @iyoda for #4581 and to @rolldav for reporting #4575.
+
+### Bug Fixes
+
+- **fix: detach shadow Jev resolver for Stop hooks** (#4580, fixes #4575; reported by @rolldav)
+
+### Other Changes
+
+- **chore(hooks): remove unwired team-dispatch hook and generated artifacts** (#4581, supersedes #4566; @iyoda)
+- **ci: authorize generated artifacts for the team-dispatch removal** (#4577, #4582, #4587)
+- **chore(sync): merge the v5.7.13 main release into dev** (#4590)
+- **ci: authorize generated artifacts for the v5.7.13 main-to-dev sync** (#4591)
+
+---
+
+# oh-my-claudecode v5.7.13: More reliable keyword prompts and team handling
+
+## Release Notes
+
+This release preserves explicit keyword invocations in reference prompts, keeps help requests informational across more prompt shapes, and corrects team and notification environment handling. Thanks to @rudycelekli and @iyoda for their fixes, and to @rolldav for reporting #4550.
+
+### Bug Fixes
+
+- **fix: preserve explicit keyword invocation in reference prompts** (#4551, fixes #4550; reported by @rolldav)
+- **fix: resolve #4551 regressions in keyword-detector** (#4553)
+- **fix(keyword-detector): keep leading help requests informational in two more shapes** (#4564)
+- **fix(notifications): stop truncating OMC_NOTIFY_TMUX_TAIL_LINES** (#4556, @rudycelekli)
+- **fix(team-dispatch): stop truncating cooldown environment values** (#4557, @rudycelekli)
+- **fix(team): read the start-submit timeout as a whole integer** (#4558, @rudycelekli)
+- **fix(team): point the pane-ready timeout hint at OMC_TEAM_READY_TIMEOUT_MS** (#4568, @iyoda)
+
+### Other Changes
+
+- **test: stabilize concurrent workflow-profile stops** (#4561, fixes #4560)
+- **ci: authorize generated artifacts during an earlier v5.7.12 main-to-dev sync attempt** (#4563, #4565, #4567)
+- **chore(sync): merge the v5.7.12 main release into dev** (#4569)
+- **ci: authorize and refresh generated artifacts for the v5.7.12 main-to-dev sync** (#4570, #4573, #4574)
+
+### Stats
+
+- **15 merged PRs** | **7 bug fixes** | **8 other changes**
+
+---
+
+# oh-my-claudecode v5.7.12: More reliable URL and timeout handling
+
+## Release Notes
+
+This release improves parsing of provider and issue URLs ending in slashes or sub-pages, hardens environment-based timeout handling, and preserves tmux pane IDs when session names contain spaces. Thanks to @rudycelekli for contributions to #4542, #4543, #4544, #4545, #4546, #4547, and #4549.
+
+### Bug Fixes
+
+- **fix(teleport): read PR and issue URLs with a trailing slash or sub-page** (#4542, @rudycelekli)
+- **fix(lsp): read whole-integer timeouts from the environment** (#4543, @rudycelekli)
+- **fix(rate-limit-wait): keep pane IDs for tmux sessions with spaces** (#4544, @rudycelekli)
+- **fix(team): read the shell-ready timeout as a whole integer** (#4545, @rudycelekli)
+- **fix(team): read launch-ack timeouts as whole integers** (#4546, @rudycelekli)
+- **fix(team): read the worker-ready timeout as a whole integer** (#4547, @rudycelekli)
+- **fix(providers): parse remote URLs that end in a slash** (#4549, @rudycelekli)
+
+### Other Changes
+
+- **chore(sync): merge main's v5.7.11 release into dev** (#4540)
+- **ci: authorize generated artifacts for sync PR #4540** (#4541)
+- **ci: authorize generated artifacts for an earlier main-to-dev sync attempt** (#4539)
+
+---
+
+# oh-my-claudecode v5.7.10: Fail-closed Ralph PRD verification
+
+## Release Notes
+
+This release makes `omc ralph verify` fail closed when an existing PRD is invalid or unreadable, instead of incorrectly reporting that no feedback commands exist. Thanks to Get-bot for reporting #4526.
+
+### Bug Fixes
+
+- **fix(ralph): fail closed for invalid PRDs** (#4527, fixes #4526; reported by Get-bot)
+
+### Other Changes
+
+- **chore(sync): merge the v5.7.9 main release into dev** (#4524)
+- **ci: authorize generated artifacts for sync PR #4524** (#4525)
+
+---
+
 # oh-my-claudecode v5.7.9: Safer Windows startup, Codex TOML output, and aligned Jev timeouts
 
 ## Release Notes

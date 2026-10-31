@@ -292,11 +292,13 @@ function loadSkillFromFile(skillPath: string, skillName: string): BuiltinSkill[]
  */
 function loadSkillsFromDirectory(): BuiltinSkill[] {
   if (!existsSync(SKILLS_DIR)) {
+    cachedSkillPaths = new Map();
     return [];
   }
 
   const skills: BuiltinSkill[] = [];
   const seenNames = new Set<string>();
+  const skillPaths = new Map<string, string>();
 
   try {
     const entries = readdirSync(SKILLS_DIR, { withFileTypes: true })
@@ -321,21 +323,25 @@ function loadSkillsFromDirectory(): BuiltinSkill[] {
           const key = skill.name.toLowerCase();
           if (seenNames.has(key)) continue;
           seenNames.add(key);
+          skillPaths.set(key, skillPath);
           skills.push(skill);
         }
       }
     }
   } catch {
     // Return empty array if directory read fails
+    cachedSkillPaths = new Map();
     return [];
   }
 
+  cachedSkillPaths = skillPaths;
   return skills;
 }
 
 // Cache loaded skills to avoid repeated file reads
 let cachedSkills: BuiltinSkill[] | null = null;
 let cachedSkillsKey: string | null = null;
+let cachedSkillPaths: Map<string, string> | null = null;
 
 function getBuiltinSkillsCacheKey(): string {
   return JSON.stringify({
@@ -366,6 +372,12 @@ export function getBuiltinSkill(name: string): BuiltinSkill | undefined {
   return skills.find(s => s.name.toLowerCase() === name.toLowerCase());
 }
 
+/** Resolve a builtin skill name, including its frontmatter aliases, to its source file. */
+export function getBuiltinSkillPath(name: string): string | undefined {
+  createBuiltinSkills();
+  return cachedSkillPaths?.get(name.toLowerCase());
+}
+
 export interface ListBuiltinSkillNamesOptions {
   includeAliases?: boolean;
 }
@@ -388,6 +400,7 @@ export function listBuiltinSkillNames(options?: ListBuiltinSkillNamesOptions): s
 export function clearSkillsCache(): void {
   cachedSkills = null;
   cachedSkillsKey = null;
+  cachedSkillPaths = null;
 }
 
 /**

@@ -1,19 +1,20 @@
-# oh-my-claudecode v5.7.9: Safer Windows startup, Codex TOML output, and aligned Jev timeouts
+# oh-my-claudecode v5.7.23: Preserve project memory during session start
 
 ## Release Notes
 
-This release fixes Windows startup trust-prompt handling, escaping unpaired surrogates in Codex MCP TOML output, and aligning Jev active parent timeouts with resolver behavior. Thanks to @rudycelekli and @alw51307 for their contributions.
+This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
 
 ### Bug Fixes
 
-- **fix(team): guard Windows startup trust prompts** (#4502)
-- **fix(mcp-registry): escape unpaired surrogates in Codex TOML output** (#4512, @rudycelekli)
-- **fix(jev): align active parent timeout with resolver** (#4515, @alw51307)
+- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
 
-### Other Changes
+### Documentation
 
-- **chore(sync): merge v5.7.8 main release into dev and rebuild the inventory** (#4519)
-- **ci: authorize generated artifacts for the v5.7.8 main-to-dev sync** (#4520)
+- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
+
+### Stats
+
+- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
 
 ### Install / Update
 
@@ -22,7 +23,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.9
+npm install -g oh-my-claude-sisyphus@5.7.23
 ```
 
 **Claude Code plugin:**
@@ -31,10 +32,10 @@ npm install -g oh-my-claude-sisyphus@5.7.9
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.8...v5.7.9
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.22...v5.7.23
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@rudycelekli @alw51307
+@DeadY2J @iyoda @Yeachan-Heo

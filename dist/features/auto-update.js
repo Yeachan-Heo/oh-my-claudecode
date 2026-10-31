@@ -10,10 +10,10 @@
  * - Configurable update notifications
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { execSync, execFileSync } from 'child_process';
 import { compareVersions as compareSemver } from '../utils/semver-compare.js';
-import { install as installOmc, HOOKS_DIR, isProjectScopedPlugin, isRunningAsPlugin, copyPluginSyncPayload, syncInstalledPluginPayload, } from '../installer/index.js';
+import { install as installOmc, HOOKS_DIR, getInstalledOmcPluginRoots, isProjectScopedPlugin, isRunningAsPlugin, copyPluginSyncPayload, syncInstalledPluginPayload, } from '../installer/index.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { purgeStalePluginCacheVersions } from '../utils/paths.js';
 import { isAutoUpdateDisabled } from '../lib/security-config.js';
@@ -24,6 +24,9 @@ export const REPO_NAME = 'oh-my-claudecode';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
 const CLAUDE_CODE_NPM_PACKAGE = '@anthropic-ai/claude-code';
+const UPDATE_RECONCILE_TIMEOUT_MS = 600000;
+// The unattended path runs inside the SessionStart hook process, which stays alive until the synchronous child exits.
+const UNATTENDED_UPDATE_RECONCILE_TIMEOUT_MS = 60000;
 function npmExecOptions(verbose = false) {
     return {
         encoding: 'utf-8',
@@ -367,7 +370,7 @@ export function shouldBlockStandaloneUpdateInCurrentSession() {
 export function syncPluginCache(verbose = false) {
     const pluginCacheRoot = join(getClaudeConfigDir(), 'plugins', 'cache', 'omc', 'oh-my-claudecode');
     if (!existsSync(pluginCacheRoot)) {
-        return { synced: false, skipped: true, errors: [] };
+        return { synced: false, skipped: true, activeRootsSynced: false, errors: [] };
     }
     try {
         const npmRoot = String(execSync('npm root -g', {
@@ -390,6 +393,7 @@ export function syncPluginCache(verbose = false) {
         const versionedPluginCacheRoot = join(pluginCacheRoot, version);
         mkdirSync(versionedPluginCacheRoot, { recursive: true });
         const result = copyPluginSyncPayload(sourceRoot, [versionedPluginCacheRoot]);
+        let activeRootsSynced = false;
         if (result.errors.length > 0) {
             for (const error of result.errors) {
                 console.warn(`[omc update] Plugin cache sync warning: ${error}`);
@@ -401,6 +405,11 @@ export function syncPluginCache(verbose = false) {
             // not point at a partially refreshed version directory.
             const registryResult = syncInstalledPluginRegistryVersion(version, versionedPluginCacheRoot);
             result.errors.push(...registryResult.errors);
+            if (registryResult.updated && result.errors.length === 0) {
+                const activeRoots = getInstalledOmcPluginRoots();
+                activeRootsSynced = activeRoots.length > 0
+                    && activeRoots.every(root => resolve(root) === resolve(versionedPluginCacheRoot));
+            }
             if (registryResult.updated && verbose) {
                 console.log('[omc update] Updated Claude plugin registry');
             }
@@ -408,7 +417,7 @@ export function syncPluginCache(verbose = false) {
         if (result.synced) {
             console.log('[omc update] Plugin cache synced');
         }
-        return { ...result, skipped: false };
+        return { ...result, skipped: false, activeRootsSynced };
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -418,7 +427,7 @@ export function syncPluginCache(verbose = false) {
         else {
             console.warn('[omc update] Plugin cache sync warning:', message);
         }
-        return { synced: false, skipped: false, errors: [message] };
+        return { synced: false, skipped: false, activeRootsSynced: false, errors: [message] };
     }
 }
 /** Installation paths (respects CLAUDE_CONFIG_DIR env var) */
@@ -669,6 +678,8 @@ export async function checkForUpdates() {
  */
 export function reconcileUpdateRuntime(options) {
     const errors = [];
+    const pluginCacheAlreadySynced = options?.pluginCacheAlreadySynced
+        ?? (process.env.OMC_UPDATE_RECONCILE === '1' && process.env.OMC_UPDATE_PLUGIN_CACHE_SYNCED === '1');
     const projectScopedPlugin = isProjectScopedPlugin();
     // Plugin installs execute hooks from <pluginRoot>/hooks/hooks.json. Re-running
     // the standalone settings.json hook merge during `omc update` re-injects the
@@ -697,6 +708,7 @@ export function reconcileUpdateRuntime(options) {
             skipClaudeCheck: true,
             forceHooks: shouldRefreshPluginHooks,
             refreshHooksInPlugin: shouldRefreshPluginHooks,
+            ...(pluginCacheAlreadySynced ? { skipPluginPayloadSync: true } : {}),
         });
         if (!installResult.success) {
             errors.push(...installResult.errors);
@@ -706,22 +718,24 @@ export function reconcileUpdateRuntime(options) {
         const message = error instanceof Error ? error.message : String(error);
         errors.push(`Failed to refresh installer artifacts: ${message}`);
     }
-    try {
-        const pluginSyncResult = syncActivePluginCache();
-        if (pluginSyncResult.errors.length > 0) {
-            errors.push(...pluginSyncResult.errors.map(err => `Plugin cache sync failed: ${err}`));
-            if (options?.verbose) {
-                for (const err of pluginSyncResult.errors) {
-                    console.warn(`[omc] Plugin cache sync error: ${err}`);
+    if (!pluginCacheAlreadySynced) {
+        try {
+            const pluginSyncResult = syncActivePluginCache();
+            if (pluginSyncResult.errors.length > 0) {
+                errors.push(...pluginSyncResult.errors.map(err => `Plugin cache sync failed: ${err}`));
+                if (options?.verbose) {
+                    for (const err of pluginSyncResult.errors) {
+                        console.warn(`[omc] Plugin cache sync error: ${err}`);
+                    }
                 }
             }
         }
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        errors.push(`Plugin cache sync failed: ${message}`);
-        if (options?.verbose) {
-            console.warn(`[omc] Plugin cache sync error: ${message}`);
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            errors.push(`Plugin cache sync failed: ${message}`);
+            if (options?.verbose) {
+                console.warn(`[omc] Plugin cache sync error: ${message}`);
+            }
         }
     }
     // Purge stale plugin cache versions (non-fatal)
@@ -823,6 +837,7 @@ export async function performUpdate(options) {
                     console.warn(`[omc update] Plugin cache sync warning: ${error}`);
                 }
             }
+            const pluginCacheAlreadySynced = pluginCacheSync.activeRootsSynced && pluginCacheSync.errors.length === 0;
             // CRITICAL FIX: After npm updates the global package, the current process
             // still has OLD code loaded in memory. We must re-exec to run reconciliation
             // with the NEW code. Otherwise, installOmc() runs OLD logic against NEW files.
@@ -832,21 +847,32 @@ export async function performUpdate(options) {
                 // Find the omc binary path
                 const omcPath = resolveOmcBinaryPath();
                 // Re-exec with reconcile subcommand
+                const reconcileArgs = ['update-reconcile', ...(options?.clean ? ['--skip-grace-period'] : [])];
+                const reconcileTimeoutMs = options?.unattended
+                    ? UNATTENDED_UPDATE_RECONCILE_TIMEOUT_MS
+                    : UPDATE_RECONCILE_TIMEOUT_MS;
                 try {
-                    execFileSync(omcPath, ['update-reconcile', ...(options?.clean ? ['--skip-grace-period'] : [])], {
+                    execFileSync(omcPath, reconcileArgs, {
                         encoding: 'utf-8',
                         stdio: options?.verbose ? 'inherit' : 'pipe',
-                        timeout: 60000,
-                        env: { ...process.env, OMC_UPDATE_RECONCILE: '1' },
+                        timeout: reconcileTimeoutMs,
+                        env: {
+                            ...process.env,
+                            OMC_UPDATE_RECONCILE: '1',
+                            OMC_UPDATE_PLUGIN_CACHE_SYNCED: pluginCacheAlreadySynced ? '1' : '0',
+                        },
                         ...(process.platform === 'win32' ? { windowsHide: true, shell: true } : {}),
                     });
                 }
                 catch (reconcileError) {
+                    const timedOut = reconcileError?.code === 'ETIMEDOUT';
                     return {
                         success: false,
                         previousVersion,
                         newVersion,
-                        message: `Updated to ${newVersion}, but runtime reconciliation failed`,
+                        message: timedOut
+                            ? `Updated to ${newVersion}, but runtime reconciliation timed out after ${reconcileTimeoutMs / 1000} seconds. Wait until no "omc update-reconcile" process is running, then run "${['omc', ...reconcileArgs, '--verbose'].join(' ')}" to finish runtime reconciliation.`
+                            : `Updated to ${newVersion}, but runtime reconciliation failed`,
                         errors: [reconcileError instanceof Error ? reconcileError.message : String(reconcileError)],
                     };
                 }
@@ -866,7 +892,11 @@ export async function performUpdate(options) {
             }
             else {
                 // We're in the re-exec'd process - run reconciliation directly
-                const reconcileResult = reconcileUpdateRuntime({ verbose: options?.verbose, skipGracePeriod: options?.clean });
+                const reconcileResult = reconcileUpdateRuntime({
+                    verbose: options?.verbose,
+                    skipGracePeriod: options?.clean,
+                    pluginCacheAlreadySynced,
+                });
                 if (!reconcileResult.success) {
                     return {
                         success: false,
@@ -1106,7 +1136,8 @@ export async function silentAutoUpdate(config = {}) {
         // Perform the update silently
         const result = await performUpdate({
             skipConfirmation: true,
-            verbose: false
+            verbose: false,
+            unattended: true
         });
         if (result.success) {
             silentLog(`Update successful: ${result.previousVersion} -> ${result.newVersion}`, logFile);

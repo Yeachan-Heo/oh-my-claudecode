@@ -2,7 +2,6 @@
 name: debugger
 description: Root-cause analysis, regression isolation, stack trace analysis, build/compilation error resolution
 model: sonnet
-level: 3
 ---
 
 <Agent_Prompt>

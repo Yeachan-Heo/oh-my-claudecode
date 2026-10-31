@@ -206,6 +206,16 @@ export interface PluginConfig {
     filenameTemplate?: string;
   };
 
+  // Custom quality gates configuration (per-stage skill gates)
+  qualityGates?: {
+    /** Quality gates for deep-interview final-spec stage */
+    'deep-interview'?: (string | { skill: string; mode?: 'blocking' | 'advisory'; model?: string })[];
+    /** Quality gates for ralplan Architect→Critic review stage */
+    'ralplan'?: (string | { skill: string; mode?: 'blocking' | 'advisory'; model?: string })[];
+    /** Quality gates for the omc-review stage */
+    'omc-review'?: (string | { skill: string; mode?: 'blocking' | 'advisory'; model?: string })[];
+  };
+
   // Startup codebase map injection (issue #804)
   startupCodebaseMap?: {
     /** Enable codebase map injection on session start. Default: true */

@@ -33,8 +33,10 @@ const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
 
 
 function getSafetyTimeoutMs() {
-  const parsed = Number.parseInt(process.env.OMC_PERSISTENT_MODE_TIMEOUT_MS || "", 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SAFETY_TIMEOUT_MS;
+  const raw = (process.env.OMC_PERSISTENT_MODE_TIMEOUT_MS || "").trim();
+  if (!/^\d+$/.test(raw)) return DEFAULT_SAFETY_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_SAFETY_TIMEOUT_MS;
 }
 
 function writeSafeContinue(onFlushed) {

@@ -236,6 +236,28 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         expect(context).toContain('Preferred invocation: /oh-my-claudecode:ralplan');
         expect(context).not.toContain('name: ralplan');
     });
+    it.each([
+        ['ralph: fix the cron.\nRead the workflow docs first.', 'RALPH'],
+        ['/oh-my-claudecode:ralph fix the cron.\nRead the workflow docs first.', 'RALPH'],
+        ['autopilot: lot 2.\nRead the docs first.', 'AUTOPILOT'],
+        ['ralplan: plan the lot.\nRead the docs first.', 'RALPLAN'],
+        ['ralph: fix M-4.\nSteps: red → green.', 'RALPH'],
+    ])('routes leading explicit invocation %s in both shipped hooks', (prompt, keyword) => {
+        for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+            const output = runKeywordDetector(prompt, process.cwd(), `session-4550-${keyword}`, {}, detectorPath);
+            const context = output.hookSpecificOutput?.additionalContext ?? '';
+            expect(context).toContain(`[MAGIC KEYWORD: ${keyword}]`);
+        }
+    });
+    it('continues suppressing reference prose that mentions modes mid-sentence in both shipped hooks', () => {
+        const prompt = 'The article compares ralph and autopilot workflows, and explains how they differ.';
+        for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+            const output = runKeywordDetector(prompt, process.cwd(), 'session-4550-reference', {}, detectorPath);
+            const context = output.hookSpecificOutput?.additionalContext ?? '';
+            expect(context).not.toContain('[MAGIC KEYWORD: RALPH]');
+            expect(context).not.toContain('[MAGIC KEYWORD: AUTOPILOT]');
+        }
+    });
     it('does not emit or activate ralplan for informational/question mentions', () => {
         const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralplan-info-'));
         const sessionId = 'session-2619-info';
@@ -1091,6 +1113,99 @@ describe('keyword-detector.mjs global disable values', () => {
             DISABLE_OMC: value,
         });
         expect(output.hookSpecificOutput?.additionalContext).toContain('<search-mode>');
+    });
+});
+// Regression tests for #4551 regressions
+describe('keyword-detector.mjs #4551 regression tests', () => {
+    it('should detect colon-invocation with execution verb even if followed by help-like text', () => {
+        // Issue 1: 'ralph: fix the bug.\nExplain the change.' must activate (not suppress as informational)
+        const result1 = runKeywordDetector('ralph: fix the bug.\nExplain the change.', process.cwd(), 'test-4551-1');
+        expect(result1.hookSpecificOutput?.additionalContext).toContain('[MAGIC KEYWORD: RALPH]');
+        expect(result1.hookSpecificOutput?.additionalContext).toContain('IMPORTANT: Start the ralph workflow immediately');
+        // Issue 1: 'autopilot: build an API.\nDescribe the endpoints.' must activate
+        const result2 = runKeywordDetector('autopilot: build an API.\nDescribe the endpoints.', process.cwd(), 'test-4551-2');
+        expect(result2.hookSpecificOutput?.additionalContext).toContain('[MAGIC KEYWORD: AUTOPILOT]');
+        expect(result2.hookSpecificOutput?.additionalContext).toContain('IMPORTANT: Start the autopilot workflow immediately');
+    });
+    it.each(['ralph: 설명해줘', 'autopilot: 알려줘', 'autopilot: 解释一下'])('should suppress a leading invocation whose own line is a help request: %s', (prompt) => {
+        const output = runKeywordDetector(prompt, process.cwd(), 'test-4553-help');
+        expect(output.continue).toBe(true);
+        expect(output.hookSpecificOutput).toBeUndefined();
+    });
+    it.each([
+        'ralph:\nExplain how this mode works',
+        'autopilot:\n如何使用',
+        'autopilot:\nbuild 사용법 알려줘',
+        'autopilot: 如何使用 build 命令',
+        'autopilot: build 사용법 알려줘',
+        'autopilot: とは',
+        'autopilot: what are the build options?',
+        'ralph: what are the results of the last run?',
+        'autopilot: what are the build options',
+        'autopilot: how to use build and explain the results',
+        'ralph: how do I use run and describe the results',
+        'autopilot: 解释如何修复登录问题',
+        'autopilot: 说明一下如何使用 build',
+        'autopilot: 請解釋修復登入問題的步驟',
+        'autopilot: 请解释修复登录问题的步骤',
+    ])('should keep a leading help request informational: %s', (prompt) => {
+        for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+            const output = runKeywordDetector(prompt, process.cwd(), 'test-4553-followup-help', {}, detectorPath);
+            expect(output.continue).toBe(true);
+            expect(output.hookSpecificOutput).toBeUndefined();
+        }
+    });
+    it('should activate a bare prefix line followed by a command', () => {
+        const output = runKeywordDetector('ralph:\nfix the login bug', process.cwd(), 'test-4553-followup-fix');
+        expect(output.hookSpecificOutput?.additionalContext).toContain('[MAGIC KEYWORD: RALPH]');
+    });
+    it('should keep a leading invocation actionable when its task text contains a help word', () => {
+        const output = runKeywordDetector('ralph: fix 説明文の誤字', process.cwd(), 'test-4553-fix');
+        expect(output.hookSpecificOutput?.additionalContext).toContain('[MAGIC KEYWORD: RALPH]');
+    });
+    it.each([
+        ['autopilot: build 사용법 페이지', 'AUTOPILOT'],
+        ['ralph: fix 使い方ページの誤字', 'RALPH'],
+        ['ralph: fix the login bug; あとはテストを実行して', 'RALPH'],
+        ['autopilot:\n사용법 페이지를 만들어줘', 'AUTOPILOT'],
+        ['ralph:\n使い方ページの誤字を修正して', 'RALPH'],
+        ['ralph: fix the login bug; 결과 알려줘', 'RALPH'],
+        ['ralph: fix the login bug; 変更内容を説明して', 'RALPH'],
+        ['ralph: fix the login bug; 解释一下结果', 'RALPH'],
+        ['autopilot: build a 说明 component', 'AUTOPILOT'],
+        ['ralph: fix 说明文档中的拼写错误', 'RALPH'],
+        ['autopilot: build a button labelled "教えて"', 'AUTOPILOT'],
+        ['ralph: fix the "알려줘" button', 'RALPH'],
+        ['autopilot: build a button labelled "how to use"', 'AUTOPILOT'],
+    ])('should keep a leading command actionable despite help-looking task text: %s', (prompt, mode) => {
+        for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
+            const output = runKeywordDetector(prompt, process.cwd(), `test-4564-help-noun-${mode}`, {}, detectorPath);
+            expect(output.hookSpecificOutput?.additionalContext).toContain(`[MAGIC KEYWORD: ${mode}]`);
+        }
+    });
+    it.each([
+        ['ralph fix 説明文の誤字', 'RALPH'],
+        ['autopilot build a 说明 component', 'AUTOPILOT'],
+        ['ralph: update the explanation in README', 'RALPH'],
+        ['ralph: remove the explanation section', 'RALPH'],
+    ])('should keep a leading command actionable: %s', (prompt, mode) => {
+        const output = runKeywordDetector(prompt, process.cwd(), 'test-4553-colonless');
+        expect(output.hookSpecificOutput?.additionalContext).toContain(`[MAGIC KEYWORD: ${mode}]`);
+    });
+    it('should suppress colon-invocation with multilingual help queries', () => {
+        // Issue 2: Multilingual help queries with colon prefix should NOT activate
+        // Korean: "기능 알려줘" (tell me about the feature)
+        const result1 = runKeywordDetector('autopilot: 기능 알려줘', process.cwd(), 'test-4551-kr');
+        expect(result1.continue).toBe(true);
+        expect(result1.hookSpecificOutput).toBeUndefined();
+        // Japanese: "機能を説明して" (explain the feature)
+        const result2 = runKeywordDetector('ralph: 機能を説明して', process.cwd(), 'test-4551-ja');
+        expect(result2.continue).toBe(true);
+        expect(result2.hookSpecificOutput).toBeUndefined();
+        // Thai: "คืออะไร ใช้งานยังไง" (what is it, how to use it)
+        const result3 = runKeywordDetector('autopilot: คืออะไร ใช้งานยังไง', process.cwd(), 'test-4551-th');
+        expect(result3.continue).toBe(true);
+        expect(result3.hookSpecificOutput).toBeUndefined();
     });
 });
 //# sourceMappingURL=keyword-detector-script.test.js.map

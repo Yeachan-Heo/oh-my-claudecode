@@ -69,9 +69,13 @@ export declare function ralphCommand(program: Command): Command;
 /**
  * Feedback commands for judgment. Inside an `omc ralph afk` session only the
  * launcher-declared list counts; otherwise the PRD's declared list, else
- * package-script detection.
+ * package-script detection. A found but unreadable PRD returns its error
+ * instead of falling through to package-script detection.
  */
-export declare function resolveFeedbackCommands(directory: string, sessionId?: string): string[];
+export declare function resolveFeedbackCommands(directory: string, sessionId?: string): {
+    commands: string[];
+    prdError?: string;
+};
 /** Run one feedback command on the current tree and fingerprint its failures. */
 export declare function runFeedbackCommand(command: string, directory: string): CommandBaseline;
 /** The verify action, extracted so tests can drive it directly. Exit code is the contract. */

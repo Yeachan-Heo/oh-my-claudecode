@@ -1,8 +1,8 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readMissionBoardState, recordMissionAgentStart, recordMissionAgentStop, refreshMissionBoardState, } from '../../hud/mission-board.js';
+import { listMissionBoardSessionIds, mergeMissionBoardStates, readMissionBoardState, recordMissionAgentStart, recordMissionAgentStop, refreshMissionBoardState, } from '../../hud/mission-board.js';
 import { resolveSessionStatePaths } from '../../lib/worktree-paths.js';
 const tempDirs = [];
 const originalHome = process.env.HOME;
@@ -312,6 +312,105 @@ describe('mission board state tracking', () => {
         expect(mission?.agents).toHaveLength(1);
         expect(mission?.agents[0]?.name).toBe('worker-1');
         expect(mission?.workerCount).toBe(1);
+    });
+    it('lists only real session ids with mission state, newest first', () => {
+        const cwd = makeTempDir();
+        const sessionsRoot = join(cwd, '.omc', 'state', 'sessions');
+        const older = '11111111-1111-4111-8111-111111111111';
+        const newer = '22222222-2222-4222-8222-222222222222';
+        recordMissionAgentStart(cwd, {
+            sessionId: older,
+            agentId: 'agent-old',
+            agentType: 'oh-my-claudecode:executor',
+            parentMode: 'none',
+            at: '2026-03-09T07:00:00.000Z',
+        }, older);
+        recordMissionAgentStart(cwd, {
+            sessionId: newer,
+            agentId: 'agent-new',
+            agentType: 'oh-my-claudecode:executor',
+            parentMode: 'none',
+            at: '2026-03-09T08:00:00.000Z',
+        }, newer);
+        // A per-process scratch directory, as left behind by getProcessSessionId().
+        const pidDir = join(sessionsRoot, 'pid-4242-1700000000000');
+        mkdirSync(pidDir, { recursive: true });
+        writeFileSync(join(pidDir, 'mission-state.json'), JSON.stringify({
+            updatedAt: '2026-03-09T09:00:00.000Z',
+            missions: [],
+        }));
+        // Malformed directory names must not be passed to session-scoped readers.
+        const invalidDir = join(sessionsRoot, 'invalid.session');
+        mkdirSync(invalidDir, { recursive: true });
+        writeFileSync(join(invalidDir, 'mission-state.json'), JSON.stringify({
+            updatedAt: '2026-03-09T10:00:00.000Z',
+            missions: [],
+        }));
+        // Pin mtimes so ordering does not depend on filesystem timestamp resolution.
+        utimesSync(join(sessionsRoot, older, 'mission-state.json'), new Date('2026-03-09T07:00:00Z'), new Date('2026-03-09T07:00:00Z'));
+        utimesSync(join(sessionsRoot, newer, 'mission-state.json'), new Date('2026-03-09T08:00:00Z'), new Date('2026-03-09T08:00:00Z'));
+        expect(listMissionBoardSessionIds(cwd)).toEqual([newer, older]);
+    });
+    it('merges per-session snapshots without dropping either session', () => {
+        const cwd = makeTempDir();
+        const sessionA = 'merge-session-a';
+        const sessionB = 'merge-session-b';
+        const config = {
+            enabled: true,
+            maxMissions: 5,
+            maxAgentsPerMission: 5,
+            maxTimelineEvents: 5,
+            persistCompletedForMinutes: 60,
+        };
+        recordMissionAgentStart(cwd, {
+            sessionId: sessionA,
+            agentId: 'agent-a',
+            agentType: 'oh-my-claudecode:executor',
+            parentMode: 'none',
+            at: '2026-03-09T07:00:00.000Z',
+        }, sessionA);
+        recordMissionAgentStart(cwd, {
+            sessionId: sessionB,
+            agentId: 'agent-b',
+            agentType: 'oh-my-claudecode:planner',
+            parentMode: 'none',
+            at: '2026-03-09T07:05:00.000Z',
+        }, sessionB);
+        const merged = mergeMissionBoardStates([
+            refreshMissionBoardState(cwd, config, sessionA),
+            refreshMissionBoardState(cwd, config, sessionB),
+        ], config);
+        expect(merged.missions.map((mission) => mission.id).sort()).toEqual([
+            `session:${sessionA}:none`,
+            `session:${sessionB}:none`,
+        ]);
+    });
+    it('drops completed missions older than the persistence window when merging', () => {
+        const cwd = makeTempDir();
+        const stale = 'stale-session';
+        const config = {
+            enabled: true,
+            maxMissions: 5,
+            maxAgentsPerMission: 5,
+            maxTimelineEvents: 5,
+            persistCompletedForMinutes: 20,
+        };
+        recordMissionAgentStart(cwd, {
+            sessionId: stale,
+            agentId: 'agent-stale',
+            agentType: 'oh-my-claudecode:executor',
+            parentMode: 'none',
+            at: '2026-03-09T07:00:00.000Z',
+        }, stale);
+        recordMissionAgentStop(cwd, {
+            sessionId: stale,
+            agentId: 'agent-stale',
+            success: true,
+            at: '2026-03-09T07:05:00.000Z',
+        }, stale);
+        const snapshot = refreshMissionBoardState(cwd, config, stale);
+        expect(snapshot.missions).toHaveLength(1);
+        expect(mergeMissionBoardStates([snapshot], config).missions).toHaveLength(0);
     });
 });
 //# sourceMappingURL=mission-board-state.test.js.map

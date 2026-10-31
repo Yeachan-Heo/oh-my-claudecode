@@ -1,8 +1,8 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { atomicWriteJsonSync } from '../lib/atomic-write.js';
 import { withFileLockSync } from '../lib/file-lock.js';
-import { getOmcRoot, getProcessSessionId, isLegacyStateMigrationEnabled, resolveSessionStatePaths, } from '../lib/worktree-paths.js';
+import { getOmcRoot, getProcessSessionId, isLegacyStateMigrationEnabled, resolveSessionStatePaths, validateSessionId, } from '../lib/worktree-paths.js';
 import { truncateToWidth } from '../utils/string-width.js';
 import { canonicalizeWorkers } from '../team/worker-canonicalization.js';
 const DEFAULT_CONFIG = {
@@ -415,22 +415,99 @@ function mergeMissions(previous, teamMissions, config) {
     })
         .slice(0, config.maxMissions);
 }
-export function refreshMissionBoardState(directory, rawConfig = DEFAULT_CONFIG, sessionId) {
-    const effectiveSessionId = sessionId ?? getProcessSessionId();
-    const config = resolveConfig(rawConfig);
-    const previous = readMissionBoardState(directory, effectiveSessionId);
+function collectTeamMissions(directory, config) {
     const teamsRoot = join(getOmcRoot(directory), 'state', 'team');
-    const teamMissions = existsSync(teamsRoot)
+    return existsSync(teamsRoot)
         ? readdirSync(teamsRoot, { withFileTypes: true })
             .filter((entry) => entry.isDirectory())
             .map((entry) => collectTeamMission(join(teamsRoot, entry.name), entry.name, config))
             .filter((mission) => Boolean(mission))
         : [];
+}
+/**
+ * Build a team-only board view without reading or persisting session snapshots.
+ * Used by readers that have no session ids to aggregate.
+ */
+export function discoverTeamMissionBoardState(directory, rawConfig = DEFAULT_CONFIG) {
+    const config = resolveConfig(rawConfig);
+    return mergeMissionBoardStates([{ updatedAt: new Date().toISOString(), missions: collectTeamMissions(directory, config) }], config);
+}
+export function refreshMissionBoardState(directory, rawConfig = DEFAULT_CONFIG, sessionId) {
+    const effectiveSessionId = sessionId ?? getProcessSessionId();
+    const config = resolveConfig(rawConfig);
+    const previous = readMissionBoardState(directory, effectiveSessionId);
+    const teamMissions = collectTeamMissions(directory, config);
     const state = {
         updatedAt: new Date().toISOString(),
         missions: mergeMissions(previous, teamMissions, config),
     };
     return writeState(directory, state, effectiveSessionId);
+}
+/**
+ * List session ids that have a persisted mission board state, newest first.
+ *
+ * Process-scoped ids (`pid-<pid>-<timestamp>`) are excluded. Those come from
+ * `getProcessSessionId()`, which mints a fresh id per process, so their
+ * directories are per-process scratch files that never name a [CC] session.
+ */
+export function listMissionBoardSessionIds(directory) {
+    const sessionsRoot = join(getOmcRoot(directory), 'state', 'sessions');
+    if (!existsSync(sessionsRoot))
+        return [];
+    const sessions = [];
+    for (const entry of readdirSync(sessionsRoot, { withFileTypes: true })) {
+        if (!entry.isDirectory() || entry.name.startsWith('pid-'))
+            continue;
+        try {
+            validateSessionId(entry.name);
+        }
+        catch {
+            // Ignore malformed directories rather than letting one break aggregation.
+            continue;
+        }
+        const file = join(sessionsRoot, entry.name, 'mission-state.json');
+        try {
+            sessions.push({ sessionId: entry.name, updatedAt: statSync(file).mtimeMs });
+        }
+        catch {
+            // No persisted mission state for this session (or it was removed mid-scan).
+        }
+    }
+    return sessions
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .map((entry) => entry.sessionId);
+}
+/**
+ * Merge per-session mission board snapshots into a single view.
+ *
+ * Mission ids are already session-scoped (`session:<sessionId>:<parentMode>`), so
+ * concatenating them is lossless and no cross-session dedupe is needed. Completed
+ * missions older than `persistCompletedForMinutes` are dropped so snapshots from
+ * long-finished sessions do not linger on the board.
+ */
+export function mergeMissionBoardStates(states, rawConfig = DEFAULT_CONFIG) {
+    const config = resolveConfig(rawConfig);
+    const cutoff = Date.now() - (config.persistCompletedForMinutes * 60_000);
+    const byId = new Map();
+    for (const state of states) {
+        for (const mission of state.missions) {
+            if (mission.status === 'done' && parseTime(mission.updatedAt) < cutoff)
+                continue;
+            const existing = byId.get(mission.id);
+            if (!existing || parseTime(mission.updatedAt) >= parseTime(existing.updatedAt)) {
+                byId.set(mission.id, mission);
+            }
+        }
+    }
+    const missions = [...byId.values()]
+        .sort((left, right) => {
+        const statusDelta = STATUS_ORDER[left.status] - STATUS_ORDER[right.status];
+        if (statusDelta !== 0)
+            return statusDelta;
+        return parseTime(right.updatedAt) - parseTime(left.updatedAt);
+    })
+        .slice(0, config.maxMissions);
+    return { updatedAt: new Date().toISOString(), missions };
 }
 export function renderMissionBoard(state, rawConfig = DEFAULT_CONFIG) {
     if (!state || !Array.isArray(state.missions) || state.missions.length === 0)

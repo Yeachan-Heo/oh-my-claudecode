@@ -679,10 +679,9 @@ const ADVISORY_THROTTLE_MIN_PRUNE_WINDOW_MS = 60 * 60 * 1000;
 
 function getAdvisoryThrottleCooldownMs() {
   const raw = process.env.OMC_PRE_TOOL_ADVISORY_COOLDOWN_MS;
-  if (raw == null || raw === '') return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed)) return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
-  return Math.max(0, parsed);
+  if (raw == null || !/^\d+$/.test(raw.trim())) return ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
+  const parsed = Number(raw.trim());
+  return Number.isSafeInteger(parsed) ? parsed : ADVISORY_THROTTLE_DEFAULT_COOLDOWN_MS;
 }
 
 function getAdvisoryThrottleNowMs() {

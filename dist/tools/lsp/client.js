@@ -10,6 +10,50 @@ import { resolve, dirname, parse, join } from 'path';
 import { pathToFileURL } from 'url';
 import { resolveDevContainerContext, hostUriToContainerUri, containerUriToHostUri } from './devcontainer.js';
 import { getServerForFile, commandExists } from './servers.js';
+/** Decimal magnitude whose integrality can be decided from the text. */
+const DECIMAL_INTEGER_TEXT = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
+/** Largest timeout delay Node.js timers preserve without overflowing to 1 ms. */
+const MAX_NODE_TIMER_DELAY_MS = 2_147_483_647;
+/**
+ * Read one exact integer from an environment value.
+ *
+ * parseInt stops at the first character it cannot read, so "1e5" becomes 1,
+ * "8.9" becomes 8, and "15_000" becomes 15. Number() consumes the whole
+ * token, and the digit check rejects values that are not integers even when
+ * the nearest double would round onto one.
+ */
+function parseExactInteger(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed)
+        return null;
+    const negative = trimmed.startsWith('-');
+    const magnitude = negative || trimmed.startsWith('+') ? trimmed.slice(1) : trimmed;
+    const match = DECIMAL_INTEGER_TEXT.exec(magnitude);
+    if (!match)
+        return null;
+    const integerDigits = match[1] ?? '';
+    const fractionDigits = match[2] ?? match[3] ?? '';
+    const exponent = match[4] === undefined ? 0 : Number(match[4]);
+    const shift = fractionDigits.length - exponent;
+    if (shift > 0) {
+        const significand = integerDigits + fractionDigits;
+        if (/[1-9]/.test(significand)) {
+            const trailingZeros = significand.length - significand.replace(/0+$/, '').length;
+            if (trailingZeros < shift)
+                return null;
+        }
+    }
+    const parsed = (negative ? -1 : 1) * Number(magnitude);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+}
+function readPositiveIntEnv(name, fallback) {
+    const env = process.env[name];
+    if (!env || !env.trim()) {
+        return fallback;
+    }
+    const parsed = parseExactInteger(env);
+    return parsed !== null && parsed > 0 && parsed <= MAX_NODE_TIMER_DELAY_MS ? parsed : fallback;
+}
 /** Default timeout (ms) for LSP requests. Override with OMC_LSP_TIMEOUT_MS env var. */
 export const DEFAULT_LSP_REQUEST_TIMEOUT_MS = (() => {
     return readPositiveIntEnv('OMC_LSP_TIMEOUT_MS', 15_000);
@@ -19,14 +63,6 @@ export function getLspRequestTimeout(serverConfig, method, baseTimeout = DEFAULT
         return Math.max(baseTimeout, serverConfig.initializeTimeoutMs);
     }
     return baseTimeout;
-}
-function readPositiveIntEnv(name, fallback) {
-    const env = process.env[name];
-    if (!env) {
-        return fallback;
-    }
-    const parsed = parseInt(env, 10);
-    return !isNaN(parsed) && parsed > 0 ? parsed : fallback;
 }
 /** Convert a file path to a valid file:// URI (cross-platform) */
 function fileUri(filePath) {

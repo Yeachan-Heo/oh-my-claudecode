@@ -136,6 +136,9 @@ describe("HUD token usage rendering", () => {
     it("includes reasoning and reliable session totals when available", () => {
         expect(renderTokenUsage({ inputTokens: 1530, outputTokens: 987, reasoningTokens: 321 }, 8765)).toBe("tok:i1.5k/o987 r321 s8.8k");
     });
+    it("switches to millions when a count rounds up to 1000k", () => {
+        expect(renderTokenUsage({ inputTokens: 999_950, outputTokens: 999_949 }, 999_999)).toBe("tok:i1.00M/o999.9k s1.00M");
+    });
     it("returns null when no last-request token usage is available", () => {
         expect(renderTokenUsage(null)).toBeNull();
     });

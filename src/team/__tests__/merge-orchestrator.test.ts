@@ -763,6 +763,84 @@ describe('M1 existing-rebase short-circuit', () => {
   });
 });
 
+describe('rebase conflict report', () => {
+  it('lists every unmerged path, including modify/delete conflicts', async () => {
+    const repoRoot = makeRepoRoot();
+    try {
+      const cfg = defaultConfig(repoRoot);
+      defaultHappyPath(repoRoot, cfg.leaderBranch);
+
+      const bobWtPath = omcPath(
+        repoRoot,
+        'team',
+        sanitizeName(cfg.teamName),
+        'worktrees',
+        sanitizeName('bob'),
+      );
+      const branchA = `omc-team/demo-team/${sanitizeName('alice')}`;
+      const branchB = `omc-team/demo-team/${sanitizeName('bob')}`;
+      let aCount = 0;
+      on(
+        (args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchA}`,
+        () => {
+          aCount += 1;
+          return aCount === 1 ? 'a-0\n' : 'a-1\n';
+        },
+      );
+      on(
+        (args) => args[0] === 'rev-parse' && args[1] === `refs/heads/${branchB}`,
+        () => 'b-0\n',
+      );
+      on((args) => args[0] === 'merge-tree', () => '');
+      on(
+        (args, cwd) => args[0] === 'rebase' && cwd === bobWtPath,
+        () => ({ throwStatus: 1 }),
+      );
+      on(
+        (args, cwd) => args[0] === 'status' && cwd === bobWtPath,
+        () => [
+          'UU src/both-edited.ts',
+          'UD src/deleted-upstream.ts',
+          'DU src/deleted-by-worker.ts',
+          'AU src/added-here.ts',
+          'UA src/added-upstream.ts',
+          'M  src/clean-staged.ts',
+          '',
+        ].join('\n'),
+      );
+
+      const handle = await startMergeOrchestrator(cfg);
+      await handle.registerWorker('alice');
+      await handle.registerWorker('bob');
+
+      await new Promise((r) => setTimeout(r, 250));
+      await handle.drainAndStop();
+
+      const eventLog = omcPath(
+        repoRoot,
+        'state',
+        'team',
+        sanitizeName(cfg.teamName),
+        'orchestrator-events.jsonl',
+      );
+      const conflict = readFileSync(eventLog, 'utf-8')
+        .trim()
+        .split('\n')
+        .map((l) => JSON.parse(l) as { type: string; worker?: string; data?: { conflictingFiles?: string[] } })
+        .find((e) => e.type === 'rebase_conflict' && e.worker === 'bob');
+      expect(conflict?.data?.conflictingFiles).toEqual([
+        'src/both-edited.ts',
+        'src/deleted-upstream.ts',
+        'src/deleted-by-worker.ts',
+        'src/added-here.ts',
+        'src/added-upstream.ts',
+      ]);
+    } finally {
+      rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // M4: dirty-tree audit on rebase resolution
 // ---------------------------------------------------------------------------

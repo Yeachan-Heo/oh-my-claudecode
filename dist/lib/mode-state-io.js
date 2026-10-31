@@ -12,7 +12,7 @@ import { createRequire } from 'module';
 import { getOmcRoot, probeGitTopLevel, resolveStatePath, resolveSessionStatePath, ensureSessionStateDir, ensureOmcDir, listSessionIds, } from './worktree-paths.js';
 import { getProcessStartIdentitySync } from '../platform/process-utils.js';
 import { atomicWriteJsonSync, sameFileIdentity } from './atomic-write.js';
-import { observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
+import { observeModeStateActivation, observeModeStateClear, observeModeStateWrite } from './runs-ledger.js';
 /**
  * Derive the .omc root from a state file path itself: state files always
  * live under `<omcRoot>/state/...`, so the last `/state/` boundary is the
@@ -688,6 +688,11 @@ function processStartIdentity(pid) {
         return code === 'ESRCH' ? 'absent' : null;
     }
 }
+export function observeStateFileActivation(filePath, previous, next) {
+    const omcRoot = omcRootFromStatePath(filePath);
+    if (omcRoot)
+        observeModeStateActivation(omcRoot, filePath, previous, next);
+}
 export function writeStateFileLocked(filePath, state) {
     if (!recoverEmergencyStateFile(filePath))
         return false;
@@ -852,8 +857,10 @@ export function writeStateFileLockedIf(filePath, predicate, transform) {
                 result = 'skipped';
             }
             else {
-                atomicWriteJsonSync(filePath, transform(current));
+                const next = transform(current);
+                atomicWriteJsonSync(filePath, next);
                 result = 'written';
+                observeStateFileActivation(filePath, current, next);
             }
         }
     }
@@ -905,8 +912,10 @@ export function writeStateFileLockedCreateIf(filePath, predicate, transform) {
             result = 'skipped';
         }
         else {
-            atomicWriteJsonSync(filePath, transform(current));
+            const next = transform(current);
+            atomicWriteJsonSync(filePath, next);
             result = 'written';
+            observeStateFileActivation(filePath, current, next);
         }
     }
     catch (error) {
