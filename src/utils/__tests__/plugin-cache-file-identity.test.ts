@@ -16,7 +16,7 @@ vi.mock('fs', async (importOriginal) => {
   return { ...actual, lstatSync };
 });
 
-const { isUsableVersionPath, sameFileSystemIdentity } = await import('../plugin-cache-validation.js');
+const { isUsableGenericPluginTarget, isUsableVersionPath, sameFileSystemIdentity } = await import('../plugin-cache-validation.js');
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); lossyIds.clear(); });
 
@@ -63,5 +63,16 @@ describe('sameFileSystemIdentity with 64-bit file IDs', () => {
 
   it('never matches a zero inode', () => {
     expect(sameFileSystemIdentity(stats(0n), stats(0n))).toBe(false);
+  });
+});
+
+describe('stale identity must be BigInt', () => {
+  it('rejects a Number-stat identity instead of comparing lossy ids', () => {
+    const root = mkdtempSync(join(tmpdir(), 'omc-cache-number-')); roots.push(root);
+    const stale = join(root, 'stale'); pluginTree(stale);
+    const candidate = join(root, 'candidate'); pluginTree(candidate);
+    const numberIdentity = statSync(stale) as unknown as BigIntStats;
+    expect(isUsableVersionPath(candidate, numberIdentity)).toBe(false);
+    expect(isUsableGenericPluginTarget(candidate, numberIdentity)).toBe(false);
   });
 });

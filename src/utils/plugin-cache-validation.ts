@@ -169,6 +169,7 @@ function pathTraversesFileSystemIdentity(path: string, identity: BigIntStats): b
  * also prevents required paths from traversing the version being demoted.
  */
 export function isUsableVersionPath(path: string, staleVersionIdentity?: BigIntStats): boolean {
+  if (staleVersionIdentity !== undefined && typeof staleVersionIdentity.ino !== 'bigint') return false;
   let stats;
   try {
     stats = lstatSync(path);
@@ -279,6 +280,7 @@ function hasResolvablePluginSymlinks(
 }
 
 export function isUsableGenericPluginTarget(target: string, staleVersionIdentity: BigIntStats): boolean {
+  if (staleVersionIdentity !== undefined && typeof staleVersionIdentity.ino !== 'bigint') return false;
   const payload = { found: false };
   return hasResolvablePluginSymlinks(target, staleVersionIdentity, [], payload) && payload.found;
 }
