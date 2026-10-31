@@ -442,6 +442,27 @@ describe('permission-handler', () => {
         expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
       });
 
+      it('should not auto-approve private-key files while allowing public keys and ordinary files', () => {
+        fs.mkdirSync(path.join(testDir, 'keys'), { recursive: true });
+        fs.writeFileSync(path.join(testDir, 'id_rsa'), 'private key');
+        fs.writeFileSync(path.join(testDir, 'keys', 'server.PEM'), 'private key');
+        fs.writeFileSync(path.join(testDir, 'id_rsa.pub'), 'public key');
+        fs.writeFileSync(path.join(testDir, 'README.md'), 'documentation');
+        initializeGitRepo(testDir);
+
+        for (const command of ['cat id_rsa', 'cat keys/server.PEM']) {
+          const result = processPermissionRequest(createInput(command));
+          expect(result.continue).toBe(true);
+          expect(result.hookSpecificOutput?.decision?.behavior, command).not.toBe('allow');
+        }
+
+        for (const command of ['cat id_rsa.pub', 'cat README.md']) {
+          const result = processPermissionRequest(createInput(command));
+          expect(result.continue).toBe(true);
+          expect(result.hookSpecificOutput?.decision?.behavior, command).toBe('allow');
+        }
+      });
+
       it('should not auto-approve ripgrep directory or hidden sweeps', () => {
         fs.mkdirSync(path.join(testDir, 'src'), { recursive: true });
         fs.writeFileSync(path.join(testDir, 'src', 'safe.ts'), 'export const SECRET = 1;\n');
