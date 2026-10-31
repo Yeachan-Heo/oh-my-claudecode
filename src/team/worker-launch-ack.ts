@@ -75,6 +75,15 @@ export function buildWindowsSupervisorSource(): string {
     int error = Marshal.GetLastWin32Error();
     return new System.ComponentModel.Win32Exception(error, operation + ": Win32=" + error);
   }
+  public static void RequireBatchProvider(string app) {
+    // cmd.exe runs a batch argv[0] as part of its command line and would
+    // search the cwd and PATH for a relative one; hold it to the same rule.
+    if (String.IsNullOrWhiteSpace(app)
+        || !System.Text.RegularExpressions.Regex.IsMatch(app, @"^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+[\\/])")
+        || !System.IO.File.Exists(app)) {
+      throw new ArgumentException("worker_launch_provider_executable_invalid");
+    }
+  }
   public static void CreateConsoleProcess(string app, string commandLine, IntPtr environment, string cwd, out PROCESS_INFORMATION pi) {
     pi = new PROCESS_INFORMATION();
     // lpApplicationName must never search a provider-controlled cwd or PATH.
@@ -137,7 +146,7 @@ export function buildWindowsSupervisorSource(): string {
     // cmd-quoted provider line once from its environment block and clears
     // the variable before the provider runs.
     '  $argv = [string[]]$payload.provider_argv; $app = [string]$argv[0]; $providerLine = $null',
-    `  if ($app -match '\\.(cmd|bat)[. ]*$') { $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
+    `  if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine =[O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
     `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
     '  [O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)',
     '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; $jobAssigned = $true; if ([O]::ResumeThread($pi.hThread) -eq [uint32]::MaxValue) { throw "worker_launch_resume_failed" }',

@@ -31,7 +31,7 @@ describe('generated Windows worker supervisor', () => {
   it('routes a batch argv[0] through system cmd.exe with the line in the environment block', () => {
     const source = buildWindowsSupervisorSource();
 
-    expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
+    expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine =[O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
     expect(source).toContain(`$cmd = '"' + $app + '" /d /v:off /s /c "set "_OMC_PROVIDER_LINE=" & %_OMC_PROVIDER_LINE%"' } else { $cmd = [O]::BuildCommandLine($argv) }`);
     expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' }");
     expect(source).toContain('[O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)');
@@ -140,6 +140,10 @@ foreach ($app in $invalidProviders) {
     $rejected = $true
   }
   if (-not $rejected -or $pi.hProcess -ne [IntPtr]::Zero) { throw 'Invalid provider was not rejected before native process creation' }
+}
+foreach ($app in @('codex.cmd', '.\codex.cmd', 'C:codex.cmd', '\codex.bat', ($env:SystemRoot + '\System32\omc-nonexistent-provider.cmd'))) {
+  try { [O]::RequireBatchProvider($app); throw 'Unqualified batch provider was not rejected' }
+  catch { if ($_.Exception.InnerException -isnot [ArgumentException] -or $_.Exception.InnerException.Message -ne 'worker_launch_provider_executable_invalid') { throw } }
 }
 [O]::BuildCommandLine([string[]]@('', 'plain', 'space value', 'a"b', 'C:\dir with space\')) | ConvertTo-Json -Compress
 `;
