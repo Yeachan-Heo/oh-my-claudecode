@@ -221,10 +221,18 @@ const ANTI_SLOP_EXPLICIT_PATTERN = /\b(ai[\s-]?slop|anti[\s-]?slop|deslop|de[\s-
 const ANTI_SLOP_ACTION_PATTERN = /\b(clean(?:\s*up)?|cleanup|refactor|simplify|dedupe|de-duplicate|prune)\b/i;
 const ANTI_SLOP_SMELL_PATTERN = /\b(slop|duplicate(?:d|s)?|duplication|dead\s+code|unused\s+code|over[\s-]?abstract(?:ion|ed)?|wrapper\s+layers?|boundary\s+violations?|needless\s+abstractions?|unnecessary\s+abstractions?|ai[\s-]?generated|generated\s+code|tech\s+debt)\b/i;
 
+// Action + smell must share one sentence: a long review prompt can say
+// "duplicate execution" in one place and "simplify the architecture" far later.
+// Explicit "ai-slop"/"deslop" still goes through the informational-mention filter.
 function isAntiSlopCleanupRequest(text) {
-  return ANTI_SLOP_EXPLICIT_PATTERN.test(text) ||
-    (ANTI_SLOP_ACTION_PATTERN.test(text) && ANTI_SLOP_SMELL_PATTERN.test(text));
+  if (hasActionableKeyword(text, ANTI_SLOP_EXPLICIT_PATTERN)) return true;
+  return text.split(/[.!?;\n]+/).some((sentence) =>
+    ANTI_SLOP_ACTION_PATTERN.test(sentence) && ANTI_SLOP_SMELL_PATTERN.test(sentence));
 }
+
+// Skills that edit code; never auto-routed when the prompt forbids implementation.
+const CODE_EDITING_SKILLS = new Set(['ai-slop-cleaner', 'autopilot', 'ralph', 'ultragoal', 'tdd']);
+const NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
 
 /** Review-outcome labels that appear together in seeded review instruction text. */
 const REVIEW_SEED_OUTCOME_RES = [
@@ -2030,6 +2038,9 @@ async function main() {
 
     // Resolve conflicts
     let resolved = resolveConflicts(uniqueMatches);
+    if (NO_IMPLEMENT_PATTERN.test(cleanPrompt) && !/^\s*\//.test(prompt)) {
+      resolved = resolved.filter((m) => !CODE_EDITING_SKILLS.has(m.name));
+    }
 
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
