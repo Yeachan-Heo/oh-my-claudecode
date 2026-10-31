@@ -277,6 +277,29 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     expect(context).not.toContain('name: ralplan');
   });
 
+  it('routes ai-slop-cleaner only when cleanup action and smell share a sentence, never on no-implement prompts', () => {
+    const slop = (p: string) => runKeywordDetector(p).hookSpecificOutput?.additionalContext ?? '';
+    // Long review prompt: smell and action words far apart, implementation forbidden.
+    const review = [
+      'INDEPENDENT ARCHITECTURE CHALLENGE',
+      'Failure modes to cover:',
+      '* Duplicate execution',
+      ...Array(40).fill('* Another requirement line'),
+      'Identify opportunities to simplify the architecture.',
+      'Do not implement anything until the architecture review is complete.',
+    ].join('\n');
+    expect(slop(review)).not.toContain('AI-SLOP-CLEANER');
+    expect(slop('Clean up the duplicated code in utils. Do not implement anything new.')).not.toContain('AI-SLOP-CLEANER');
+    expect(slop('clean up the duplicated code in utils')).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
+    expect(slop('deslop this file')).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
+  });
+
+  it('drops code-editing modes when the prompt forbids implementation, unless it is a slash command', () => {
+    const ctx = (p: string) => runKeywordDetector(p).hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx('ralph: review the auth module. Read-only review, no code changes.')).not.toContain('RALPH');
+    expect(ctx('/oh-my-claudecode:ralph review auth, no code changes')).toContain('RALPH');
+  });
+
   it.each([
     ['ralph: fix the cron.\nRead the workflow docs first.', 'RALPH'],
     ['/oh-my-claudecode:ralph fix the cron.\nRead the workflow docs first.', 'RALPH'],

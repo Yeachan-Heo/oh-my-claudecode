@@ -962,6 +962,9 @@ export function hasKeyword(text: string): boolean {
   return detectKeywordsWithType(text).length > 0;
 }
 
+const CODE_EDITING_KEYWORDS = new Set<KeywordType>(['autopilot', 'ralph', 'tdd']);
+const NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
+
 /**
  * Get all detected keywords with conflict resolution applied
  */
@@ -978,6 +981,12 @@ export function getAllKeywords(text: string): KeywordType[] {
   // Mutual exclusion: team beats autopilot
   if (types.includes('team') && types.includes('autopilot')) {
     types = types.filter(t => t !== 'autopilot');
+  }
+
+  // A prompt that forbids implementation never auto-routes to a code-editing mode
+  // (slash commands are explicit and keep their mode).
+  if (NO_IMPLEMENT_PATTERN.test(removeCodeBlocks(text)) && !/^\s*\//.test(text)) {
+    types = types.filter(t => !CODE_EDITING_KEYWORDS.has(t));
   }
 
   // Sort by priority order
