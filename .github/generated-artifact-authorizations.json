@@ -4,6 +4,116 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4692,
+      "targetRef": "dev",
+      "mergeBaseSha": "f5f46c0c19cc431582dad3a2772e9f6707e53cd2",
+      "headSha": "46bf8d20ddbaf30921f1a4f0ece65027b73e5206",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-30T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 16,
+        "sha256": "f1a8b328290cafd8fb0bbaa4dc3ee8cadc6825bc0f62c5cc2fe76254fcc7f609"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "ba4d8a113f98d3facc04adb59f2b53759481b422",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "561e34c5c6aee593075804e4202460a0b9d35eab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/factory-init.test.js",
+          "sha": "7ad683e74d944033bf53b8693a2d252e78029c05",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/__tests__/factory-init.test.js.map",
+          "sha": "e77fea8201a59bb465661210ad80348e2cdbaef2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/factory.js",
+          "sha": "f955b7d773507b7b5b049796703260c76bec61bd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/commands/factory.js.map",
+          "sha": "029290c4a0b88b9db28bb912fb794c7b258c791a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/factory/__tests__/check-run.test.js",
+          "sha": "921095a74653e6942c4058abc6211b7b770716b5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/factory/__tests__/check-run.test.js.map",
+          "sha": "8f94cea5922ff6329bc0b0a4ef8d4c1e9639be38",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/factory/listener.d.ts.map",
+          "sha": "c11b55bff374452b8eaeef6977187ce93a29c0b4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/factory/listener.js",
+          "sha": "f0bee5137a7535ce351d32512cdeb5412c0070c6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/factory/listener.js.map",
+          "sha": "e879712bbe6fe841f3b80dbf9866b17ba92740fe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/chain-enqueuer.test.js",
+          "sha": "5f1da25103903446a9468e76952cf154da3f2d96",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/chain-enqueuer.test.js.map",
+          "sha": "f31e72450aafcc330fe683d99c5719cce0ed183d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/chain-enqueuer.d.ts.map",
+          "sha": "1a287e9b58458f396a5838bf6bc5bd55f86c550c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/chain-enqueuer.js",
+          "sha": "7cda4ca28321d5a664d7cf51e77b2d738e99dcb5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/chain-enqueuer.js.map",
+          "sha": "3abb169ff05a4d10224c0c16d2410d14b37f0dfa",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4684,
       "targetRef": "dev",
       "mergeBaseSha": "8503924d993da128f3b25ae50e2a56459bfbcc74",
