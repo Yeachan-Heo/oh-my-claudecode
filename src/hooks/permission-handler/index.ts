@@ -290,7 +290,7 @@ function tokenizeShellCommand(command: string): string[] | null {
 }
 
 function isSensitiveRepoRelativePath(repoRelativePath: string): boolean {
-  const normalized = repoRelativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+  const normalized = repoRelativePath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
   if (!normalized || normalized === '.') {
     return false;
   }
