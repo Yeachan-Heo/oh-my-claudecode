@@ -54126,9 +54126,13 @@ function tokenizeShellCommand(command) {
   return tokens.length > 0 ? tokens : null;
 }
 function isSensitiveRepoRelativePath(repoRelativePath) {
-  const normalized = repoRelativePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const normalized = repoRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
   if (!normalized || normalized === ".") {
     return false;
+  }
+  const basename44 = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (SENSITIVE_REPO_BASENAMES.has(basename44) || SENSITIVE_REPO_EXTENSIONS.some((extension) => basename44.endsWith(extension))) {
+    return true;
   }
   return normalized === ".git" || normalized.startsWith(".git/") || normalized.includes("/.git/") || normalized === ".ssh" || normalized.startsWith(".ssh/") || normalized.includes("/.ssh/") || normalized === "secrets" || normalized.startsWith("secrets/") || normalized.includes("/secrets/") || normalized === ".env" || normalized.startsWith(".env.") || normalized.includes("/.env") || normalized.includes("/.env.") || normalized === "node_modules/.cache" || normalized.startsWith("node_modules/.cache/") || normalized.includes("/node_modules/.cache/");
 }
@@ -54305,7 +54309,7 @@ function processPermissionRequest(input) {
 async function handlePermissionRequest(input) {
   return processPermissionRequest(input);
 }
-var fs10, path15, SAFE_PATTERNS, DANGEROUS_SHELL_CHARS, SAFE_RIPGREP_FLAGS, BACKGROUND_MUTATION_SUBAGENTS;
+var fs10, path15, SAFE_PATTERNS, DANGEROUS_SHELL_CHARS, SAFE_RIPGREP_FLAGS, BACKGROUND_MUTATION_SUBAGENTS, SENSITIVE_REPO_BASENAMES, SENSITIVE_REPO_EXTENSIONS;
 var init_permission_handler = __esm({
   "src/hooks/permission-handler/index.ts"() {
     "use strict";
@@ -54341,6 +54345,16 @@ var init_permission_handler = __esm({
       "qa-tester",
       "document-specialist"
     ]);
+    SENSITIVE_REPO_BASENAMES = /* @__PURE__ */ new Set([
+      "id_rsa",
+      "id_dsa",
+      "id_ecdsa",
+      "id_ed25519",
+      ".npmrc",
+      ".netrc",
+      ".pgpass"
+    ]);
+    SENSITIVE_REPO_EXTENSIONS = [".pem", ".key", ".p12", ".pfx"];
   }
 });
 

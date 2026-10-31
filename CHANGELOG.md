@@ -1,3 +1,20 @@
+# oh-my-claudecode v5.7.25: Protect sensitive repository paths and credential files
+
+## Release Notes
+
+This release closes case-insensitive bypasses in sensitive repository path protection and prevents safe-read inspection from auto-approving private-key and credential files. Thanks to @LukeTheoJohnson for #4693.
+
+### Security Fixes
+
+- **fix(permission-handler): match sensitive repo paths case-insensitively** (#4693; @LukeTheoJohnson)
+- **fix(permission-handler): treat private-key and credential files as sensitive** (#4694)
+
+### Stats
+
+- **2 PRs merged** | **0 new features** | **2 security fixes**
+
+---
+
 # oh-my-claudecode v5.7.24: Route factory CI failures to the shipped debug skill
 
 ## Release Notes
