@@ -1,25 +1,20 @@
-# oh-my-claudecode v5.7.22: Configurable quality gates for workflow stages
+# oh-my-claudecode v5.7.23: Preserve project memory during session start
 
 ## Release Notes
 
-This release adds configurable blocking and advisory quality gates for the deep-interview, ralplan, and review workflow stages, with settings in user or project OMC config and `omc quality-gates list` for inspecting gate configuration. It also prevents a stage from using its own controller skill as a gate and keeps stages without configured gates as strict no-ops. Thanks to @iyoda for #4670 and #4671, and to @iqdoctor for requesting the original port.
+This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
 
-### New Features
+### Bug Fixes
 
-- **feat(quality-gates): configure blocking and advisory custom gates for deep-interview, ralplan, and review, and inspect them with `omc quality-gates list`** (#4670; ported from oh-my-codex#3956, issue #3955; requested by @iqdoctor; @iyoda)
+- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
 
-### Quality-Gate Safety
+### Documentation
 
-- **fix(quality-gates): reject a stage's own controller skill as a gate to prevent self-recursion, and skip gate lookup and prompt-spec work for unconfigured stages** (#4671; @iyoda)
-
-### Other Changes
-
-- **chore(sync): merge main's v5.7.21 release into dev** (#4667)
-- **ci: authorize generated artifacts for main-to-dev sync PR #4667** (#4668)
+- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
 
 ### Stats
 
-- **4 PRs merged** | **1 new feature** | **1 quality-gate safety improvement** | **2 other changes**
+- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
 
 ---
 
