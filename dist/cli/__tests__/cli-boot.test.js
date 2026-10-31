@@ -13,17 +13,17 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_ENTRY = join(__dirname, '../../../bridge/cli.cjs');
 const CLI_SOURCE = join(__dirname, '../index.ts');
 // ---------------------------------------------------------------------------
-// Static: no duplicate command names in src/cli/index.ts
+// Static: no duplicate sibling command names in src/cli/index.ts
 // ---------------------------------------------------------------------------
 describe('CLI command registration — no duplicates', () => {
-    it('has no duplicate .command() names in src/cli/index.ts', () => {
+    it('has no duplicate sibling .command() registrations in src/cli/index.ts', () => {
         const source = readFileSync(CLI_SOURCE, 'utf-8');
-        // Match program.command('name') or .command('name') — capture the command name
-        const commandPattern = /\.command\(\s*['"]([^'"[\s]+)/g;
+        // Track the receiver so different parents may both have a `list` command.
+        const commandPattern = /\b(program|[A-Za-z_$][\w$]*Cmd)\s*\.command\(\s*['"]([^'"[\s]+)/g;
         const names = [];
         let match;
         while ((match = commandPattern.exec(source)) !== null) {
-            names.push(match[1]);
+            names.push(`${match[1]}.${match[2]}`);
         }
         const seen = new Set();
         const duplicates = [];
@@ -33,7 +33,7 @@ describe('CLI command registration — no duplicates', () => {
             }
             seen.add(name);
         }
-        expect(duplicates, `Duplicate command names found: ${duplicates.join(', ')}`).toEqual([]);
+        expect(duplicates, `Duplicate sibling command registrations found: ${duplicates.join(', ')}`).toEqual([]);
     });
 });
 // ---------------------------------------------------------------------------

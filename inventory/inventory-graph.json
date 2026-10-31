@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "81171ccd8e55c5d6aeb48d034cd3da7f71f96b90",
-    "sourceSha256": "760b83ddb738b307bdbae433d7948a960f5d68ed8333ad75e3155a92e2c2d6ea",
+    "head": "8503924d993da128f3b25ae50e2a56459bfbcc74",
+    "sourceSha256": "5fdd89022a0ff6246edb5a2ceeea1e5a215cf9963ccd99bbd0073801be3f475e",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "81171ccd8e55c5d6aeb48d034cd3da7f71f96b90",
-  "sourceSha256": "760b83ddb738b307bdbae433d7948a960f5d68ed8333ad75e3155a92e2c2d6ea",
+  "head": "8503924d993da128f3b25ae50e2a56459bfbcc74",
+  "sourceSha256": "5fdd89022a0ff6246edb5a2ceeea1e5a215cf9963ccd99bbd0073801be3f475e",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,13 +28,13 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1490,
-      "total": 1514
+      "srcFiles": 1491,
+      "total": 1515
     },
     "generated": {
-      "distFiles": 5729,
+      "distFiles": 5733,
       "bridgeFiles": 9,
-      "total": 5738
+      "total": 5742
     },
     "prompt": {
       "promptLikeFiles": 61
@@ -2468,6 +2468,8 @@
       "dist/cli/commands/intake.d.ts.map",
       "dist/cli/commands/intake.js",
       "dist/cli/commands/intake.js.map",
+      "dist/cli/commands/quality-gates.d.ts",
+      "dist/cli/commands/quality-gates.js",
       "dist/cli/commands/ralph.d.ts",
       "dist/cli/commands/ralph.d.ts.map",
       "dist/cli/commands/ralph.js",
@@ -2585,6 +2587,8 @@
       "dist/config/plan-output.d.ts.map",
       "dist/config/plan-output.js",
       "dist/config/plan-output.js.map",
+      "dist/config/quality-gates.d.ts",
+      "dist/config/quality-gates.js",
       "dist/constants/index.d.ts",
       "dist/constants/index.d.ts.map",
       "dist/constants/index.js",
@@ -15914,6 +15918,16 @@
         "path": "dist/cli/commands/intake.js.map"
       },
       {
+        "id": "dist/cli/commands/quality-gates.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/cli/commands/quality-gates.d.ts"
+      },
+      {
+        "id": "dist/cli/commands/quality-gates.js",
+        "kind": "generated-dist",
+        "path": "dist/cli/commands/quality-gates.js"
+      },
+      {
         "id": "dist/cli/commands/ralph.d.ts",
         "kind": "generated-dist",
         "path": "dist/cli/commands/ralph.d.ts"
@@ -16497,6 +16511,16 @@
         "id": "dist/config/plan-output.js.map",
         "kind": "generated-dist",
         "path": "dist/config/plan-output.js.map"
+      },
+      {
+        "id": "dist/config/quality-gates.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/config/quality-gates.d.ts"
+      },
+      {
+        "id": "dist/config/quality-gates.js",
+        "kind": "generated-dist",
+        "path": "dist/config/quality-gates.js"
       },
       {
         "id": "dist/constants/index.d.ts",
@@ -40009,6 +40033,11 @@
         "path": "src/__tests__/session-start-precompact-restore.test.ts"
       },
       {
+        "id": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "kind": "src",
+        "path": "src/__tests__/session-start-project-memory-rescan.test.ts"
+      },
+      {
         "id": "src/__tests__/session-start-script-context.test.ts",
         "kind": "src",
         "path": "src/__tests__/session-start-script-context.test.ts"
@@ -55523,6 +55552,36 @@
       {
         "from": "src/__tests__/session-start-precompact-restore.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/session-start-project-memory-rescan.test.ts",
+        "to": "src/hooks/project-memory/detector.ts",
         "kind": "imports"
       },
       {
@@ -89992,12 +90051,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7888,
-      "edgeCount": 8664,
-      "importEdgeCount": 7218,
+      "nodeCount": 7893,
+      "edgeCount": 8670,
+      "importEdgeCount": 7224,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "14f8b82c5883192395d60bd0f8ec641f5a0d77fe74e26886856d8e70b18ea0af",
-  "manifestSha256": "aa63cb76afae2891a39e55ac1ce21f521994cd0550ab20dff01534f65c997526"
+  "inventorySha256": "80ba7d4216f30f1f836289c5b3f63db4e02df4e7d09c0b8331219419b1efaca1",
+  "manifestSha256": "0afc77818b652c469a0faf61700edd0391ba8439cb7db80eb52d9b7b2fc37930"
 }

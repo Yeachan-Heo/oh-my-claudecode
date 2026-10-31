@@ -68585,10 +68585,12 @@ function loadSkillFromFile(skillPath, skillName) {
 }
 function loadSkillsFromDirectory() {
   if (!(0, import_fs78.existsSync)(SKILLS_DIR2)) {
+    cachedSkillPaths = /* @__PURE__ */ new Map();
     return [];
   }
   const skills = [];
   const seenNames = /* @__PURE__ */ new Set();
+  const skillPaths = /* @__PURE__ */ new Map();
   try {
     const entries = (0, import_fs78.readdirSync)(SKILLS_DIR2, { withFileTypes: true }).sort((a, b) => {
       if (a.name === "skillify") return -1;
@@ -68607,13 +68609,16 @@ function loadSkillsFromDirectory() {
           const key = skill.name.toLowerCase();
           if (seenNames.has(key)) continue;
           seenNames.add(key);
+          skillPaths.set(key, skillPath);
           skills.push(skill);
         }
       }
     }
   } catch {
+    cachedSkillPaths = /* @__PURE__ */ new Map();
     return [];
   }
+  cachedSkillPaths = skillPaths;
   return skills;
 }
 function getBuiltinSkillsCacheKey() {
@@ -68629,6 +68634,10 @@ function createBuiltinSkills() {
   }
   return cachedSkills;
 }
+function getBuiltinSkillPath(name) {
+  createBuiltinSkills();
+  return cachedSkillPaths?.get(name.toLowerCase());
+}
 function listBuiltinSkillNames(options) {
   const { includeAliases = false } = options ?? {};
   const skills = createBuiltinSkills();
@@ -68640,7 +68649,7 @@ function listBuiltinSkillNames(options) {
 function getSkillsDir() {
   return SKILLS_DIR2;
 }
-var import_fs78, import_path97, import_url14, SKILLS_DIR2, CC_NATIVE_COMMANDS2, SKININTHEGAMEBROS_ONLY_SKILLS2, DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD, cachedSkills, cachedSkillsKey;
+var import_fs78, import_path97, import_url14, SKILLS_DIR2, CC_NATIVE_COMMANDS2, SKININTHEGAMEBROS_ONLY_SKILLS2, DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD, cachedSkills, cachedSkillsKey, cachedSkillPaths;
 var init_skills = __esm({
   "src/features/builtin-skills/skills.ts"() {
     "use strict";
@@ -68674,6 +68683,7 @@ var init_skills = __esm({
     DEFAULT_DEEP_INTERVIEW_AMBIGUITY_THRESHOLD = 0.2;
     cachedSkills = null;
     cachedSkillsKey = null;
+    cachedSkillPaths = null;
   }
 });
 
@@ -100898,9 +100908,9 @@ function pathToFileUrl(absPath2) {
     const segments = absPath2.replace(/\\/g, "/").split("/");
     return `file:///${segments.map((segment, index) => index === 0 ? segment : encodeURIComponent(segment)).join("/")}`;
   }
-  const normalized = (0, import_node_path34.resolve)(absPath2);
-  if (normalized.endsWith(import_node_path34.sep)) return (0, import_node_url4.pathToFileURL)(normalized).href;
-  const url = (0, import_node_url4.pathToFileURL)(`${normalized}${import_node_path34.sep}`).href;
+  const normalized = (0, import_node_path35.resolve)(absPath2);
+  if (normalized.endsWith(import_node_path35.sep)) return (0, import_node_url4.pathToFileURL)(normalized).href;
+  const url = (0, import_node_url4.pathToFileURL)(`${normalized}${import_node_path35.sep}`).href;
   return url.slice(0, -1);
 }
 function renderCwd(cwd2, format = "relative", useHyperlinks = false) {
@@ -100923,8 +100933,8 @@ function renderCwd(cwd2, format = "relative", useHyperlinks = false) {
       displayPath = cwd2;
       break;
     case "folder": {
-      const parent = (0, import_node_path34.basename)((0, import_node_path34.dirname)(cwd2));
-      const folder = (0, import_node_path34.basename)(cwd2);
+      const parent = (0, import_node_path35.basename)((0, import_node_path35.dirname)(cwd2));
+      const folder = (0, import_node_path35.basename)(cwd2);
       displayPath = parent ? `${parent}/${folder}` : folder;
       break;
     }
@@ -100942,12 +100952,12 @@ function renderCwd(cwd2, format = "relative", useHyperlinks = false) {
   }
   return rendered;
 }
-var import_node_os6, import_node_path34, import_node_url4;
+var import_node_os6, import_node_path35, import_node_url4;
 var init_cwd = __esm({
   "src/hud/elements/cwd.ts"() {
     "use strict";
     import_node_os6 = require("node:os");
-    import_node_path34 = require("node:path");
+    import_node_path35 = require("node:path");
     import_node_url4 = require("node:url");
     init_colors();
   }
@@ -100981,7 +100991,7 @@ function git3(args, cwd2) {
   }).trim();
 }
 function getGitRepoName(cwd2) {
-  const key = cwd2 ? (0, import_node_path35.resolve)(cwd2) : process.cwd();
+  const key = cwd2 ? (0, import_node_path36.resolve)(cwd2) : process.cwd();
   const cached2 = repoCache.get(key);
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
@@ -101003,7 +101013,7 @@ function getGitRepoName(cwd2) {
   return result;
 }
 function getGitBranch(cwd2) {
-  const key = cwd2 ? (0, import_node_path35.resolve)(cwd2) : process.cwd();
+  const key = cwd2 ? (0, import_node_path36.resolve)(cwd2) : process.cwd();
   const cached2 = branchCache.get(key);
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
@@ -101019,7 +101029,7 @@ function getGitBranch(cwd2) {
   return result;
 }
 function getWorktreeInfo(cwd2) {
-  const key = cwd2 ? (0, import_node_path35.resolve)(cwd2) : process.cwd();
+  const key = cwd2 ? (0, import_node_path36.resolve)(cwd2) : process.cwd();
   const cached2 = worktreeCache.get(key);
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
@@ -101028,18 +101038,18 @@ function getWorktreeInfo(cwd2) {
   try {
     const gitDir = git3(["rev-parse", "--git-dir"], cwd2);
     const gitCommonDir = git3(["rev-parse", "--git-common-dir"], cwd2);
-    let resolvedGitDir = (0, import_node_path35.resolve)(key, gitDir);
-    let resolvedCommonDir = (0, import_node_path35.resolve)(key, gitCommonDir);
+    let resolvedGitDir = (0, import_node_path36.resolve)(key, gitDir);
+    let resolvedCommonDir = (0, import_node_path36.resolve)(key, gitCommonDir);
     try {
-      resolvedGitDir = (0, import_node_fs27.realpathSync)(resolvedGitDir);
+      resolvedGitDir = (0, import_node_fs28.realpathSync)(resolvedGitDir);
     } catch {
     }
     try {
-      resolvedCommonDir = (0, import_node_fs27.realpathSync)(resolvedCommonDir);
+      resolvedCommonDir = (0, import_node_fs28.realpathSync)(resolvedCommonDir);
     } catch {
     }
     if (resolvedGitDir !== resolvedCommonDir) {
-      result = { isWorktree: true, worktreeName: (0, import_node_path35.basename)(resolvedGitDir) };
+      result = { isWorktree: true, worktreeName: (0, import_node_path36.basename)(resolvedGitDir) };
     }
   } catch {
   }
@@ -101061,7 +101071,7 @@ function renderGitBranch(cwd2) {
   return `${dim("branch:")}${cyan(branch)}`;
 }
 function getGitStatusCounts(cwd2) {
-  const key = cwd2 ? (0, import_node_path35.resolve)(cwd2) : process.cwd();
+  const key = cwd2 ? (0, import_node_path36.resolve)(cwd2) : process.cwd();
   const cached2 = statusCache.get(key);
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
@@ -101112,13 +101122,13 @@ function renderGitStatus(cwd2, labels = DEFAULT_HUD_LABELS) {
   if (behind > 0) parts.push(`${red(labels.behind)}${behind}`);
   return parts.join(" ");
 }
-var import_node_child_process15, import_node_fs27, import_node_path35, CACHE_TTL_MS3, repoCache, branchCache, worktreeCache, statusCache;
+var import_node_child_process15, import_node_fs28, import_node_path36, CACHE_TTL_MS3, repoCache, branchCache, worktreeCache, statusCache;
 var init_git = __esm({
   "src/hud/elements/git.ts"() {
     "use strict";
     import_node_child_process15 = require("node:child_process");
-    import_node_fs27 = require("node:fs");
-    import_node_path35 = require("node:path");
+    import_node_fs28 = require("node:fs");
+    import_node_path36 = require("node:path");
     init_colors();
     init_types8();
     init_url();
@@ -101146,27 +101156,27 @@ function isGitRepo(dir) {
   }
 }
 function looksLikeRepo(entryPath) {
-  return (0, import_node_fs28.existsSync)((0, import_node_path36.join)(entryPath, ".git"));
+  return (0, import_node_fs29.existsSync)((0, import_node_path37.join)(entryPath, ".git"));
 }
 function countActiveSessions(cwd2) {
-  const sessionsDir = (0, import_node_path36.join)(getOmcRoot(cwd2), "state", "sessions");
-  if (!(0, import_node_fs28.existsSync)(sessionsDir)) return 0;
+  const sessionsDir = (0, import_node_path37.join)(getOmcRoot(cwd2), "state", "sessions");
+  if (!(0, import_node_fs29.existsSync)(sessionsDir)) return 0;
   const now = Date.now();
   let active = 0;
   try {
-    const entries = (0, import_node_fs28.readdirSync)(sessionsDir, { withFileTypes: true });
+    const entries = (0, import_node_fs29.readdirSync)(sessionsDir, { withFileTypes: true });
     for (const entry2 of entries) {
       if (!entry2.isDirectory()) continue;
       if (!SESSION_ID_PATTERN.test(entry2.name)) continue;
-      const dirPath = (0, import_node_path36.join)(sessionsDir, entry2.name);
+      const dirPath = (0, import_node_path37.join)(sessionsDir, entry2.name);
       let fresh = false;
       try {
-        if (now - (0, import_node_fs28.statSync)(dirPath).mtimeMs < ACTIVITY_WINDOW_MS) {
+        if (now - (0, import_node_fs29.statSync)(dirPath).mtimeMs < ACTIVITY_WINDOW_MS) {
           fresh = true;
         } else {
-          for (const f of (0, import_node_fs28.readdirSync)(dirPath)) {
+          for (const f of (0, import_node_fs29.readdirSync)(dirPath)) {
             try {
-              if (now - (0, import_node_fs28.statSync)((0, import_node_path36.join)(dirPath, f)).mtimeMs < ACTIVITY_WINDOW_MS) {
+              if (now - (0, import_node_fs29.statSync)((0, import_node_path37.join)(dirPath, f)).mtimeMs < ACTIVITY_WINDOW_MS) {
                 fresh = true;
                 break;
               }
@@ -101184,7 +101194,7 @@ function countActiveSessions(cwd2) {
   return active;
 }
 function detectMultiRepo(cwd2) {
-  const key = cwd2 ? (0, import_node_path36.resolve)(cwd2) : process.cwd();
+  const key = cwd2 ? (0, import_node_path37.resolve)(cwd2) : process.cwd();
   const cached2 = multiRepoCache.get(key);
   if (cached2 && Date.now() < cached2.expiresAt) {
     return cached2.value;
@@ -101197,11 +101207,11 @@ function detectMultiRepo(cwd2) {
     }
     let subrepoCount = 0;
     try {
-      const entries = (0, import_node_fs28.readdirSync)(key, { withFileTypes: true });
+      const entries = (0, import_node_fs29.readdirSync)(key, { withFileTypes: true });
       for (const entry2 of entries) {
         if (!entry2.isDirectory()) continue;
         if (entry2.name.startsWith(".")) continue;
-        if (looksLikeRepo((0, import_node_path36.join)(key, entry2.name))) subrepoCount++;
+        if (looksLikeRepo((0, import_node_path37.join)(key, entry2.name))) subrepoCount++;
       }
     } catch {
     }
@@ -101209,12 +101219,12 @@ function detectMultiRepo(cwd2) {
       multiRepoCache.set(key, { value: null, expiresAt: Date.now() + CACHE_TTL_MS4 });
       return null;
     }
-    const hasMarker = (0, import_node_fs28.existsSync)((0, import_node_path36.join)(key, ".omc-workspace"));
+    const hasMarker = (0, import_node_fs29.existsSync)((0, import_node_path37.join)(key, ".omc-workspace"));
     const activeSessions = hasMarker ? countActiveSessions(key) : 0;
     result = {
       isMultiRepo: true,
       hasMarker,
-      parentName: (0, import_node_path36.basename)(key),
+      parentName: (0, import_node_path37.basename)(key),
       subrepoCount,
       activeSessions
     };
@@ -101233,13 +101243,13 @@ function renderMultiRepo(cwd2) {
   const sessionsPart = info.activeSessions > 0 ? ` ${dim("sessions:~")}${green(String(info.activeSessions))}` : ` ${dim("sessions:~")}${dim("0")}`;
   return `${dim("mr:")}${cyan(info.parentName)} ${dim("repos:")}${cyan(String(info.subrepoCount))}` + sessionsPart;
 }
-var import_node_child_process16, import_node_fs28, import_node_path36, ACTIVITY_WINDOW_MS, SESSION_ID_PATTERN, CACHE_TTL_MS4, multiRepoCache;
+var import_node_child_process16, import_node_fs29, import_node_path37, ACTIVITY_WINDOW_MS, SESSION_ID_PATTERN, CACHE_TTL_MS4, multiRepoCache;
 var init_multi_repo = __esm({
   "src/hud/elements/multi-repo.ts"() {
     "use strict";
     import_node_child_process16 = require("node:child_process");
-    import_node_fs28 = require("node:fs");
-    import_node_path36 = require("node:path");
+    import_node_fs29 = require("node:fs");
+    import_node_path37 = require("node:path");
     init_colors();
     init_worktree_paths();
     ACTIVITY_WINDOW_MS = 5 * 60 * 1e3;
@@ -125895,6 +125905,265 @@ async function sessionFrictionReportCommand(options, logger = console) {
   return report;
 }
 
+// src/config/quality-gates.ts
+var import_node_fs20 = require("node:fs");
+var import_node_path27 = require("node:path");
+init_loader();
+init_config_dir();
+init_worktree_paths();
+init_skills();
+var QUALITY_GATE_STAGES = [
+  "deep-interview",
+  "ralplan",
+  "omc-review"
+];
+var LEGACY_STAGE_KEYS = {
+  "code-review": "omc-review",
+  interview: "deep-interview",
+  plan: "ralplan",
+  codeReview: "omc-review"
+};
+var RETIRED_SKILL_REPLACEMENTS = {
+  pipeline: "execute",
+  ultraqa: "verify",
+  "merge-readiness": "omc-review",
+  "deep-dive": "research",
+  sciomc: "research",
+  ccg: "ask or team",
+  "omc-teams": "team",
+  setup: "omc-setup",
+  "mcp-setup": "Claude Code MCP configuration",
+  "omc-reference": "wiki",
+  learner: "remember",
+  "writer-memory": "remember",
+  "local-build-reminder": null,
+  "understanding-gate": "omc-review",
+  swarm: "team",
+  "cancel-autopilot": "cancel",
+  "cancel-ultrawork": "cancel",
+  "cancel-ultraqa": "cancel",
+  "omc-default": "omc-setup --local",
+  "omc-default-global": "omc-setup --global",
+  planner: "omc-plan"
+};
+var QUALITY_GATE_STAGE_SET = new Set(QUALITY_GATE_STAGES);
+var RESERVED_WORKFLOW_CONTROLLER_SKILLS = /* @__PURE__ */ new Set([
+  "deep-interview",
+  "ralplan",
+  "omc-review"
+]);
+function validateSkillName(skill) {
+  if (!skill || typeof skill !== "string") {
+    return { valid: false, error: "Skill name must be a non-empty string" };
+  }
+  const normalized = skill.startsWith("$") ? skill.slice(1) : skill;
+  if (!normalized || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalized)) {
+    return {
+      valid: false,
+      error: `Skill name must be kebab-case (e.g. 'design-audit'); got '${skill}'`
+    };
+  }
+  const replacement = RETIRED_SKILL_REPLACEMENTS[normalized];
+  if (Object.hasOwn(RETIRED_SKILL_REPLACEMENTS, normalized)) {
+    return {
+      valid: false,
+      error: replacement ? `Skill name '${normalized}' is retired; use '${replacement}' instead` : `Skill name '${normalized}' is retired with no replacement; choose a new skill name`
+    };
+  }
+  return { valid: true };
+}
+function validateQualityGateSkillName(skill, stage) {
+  const error2 = validateSkillName(skill).error;
+  if (error2) return error2;
+  const normalized = skill.startsWith("$") ? skill.slice(1) : skill;
+  if (RESERVED_WORKFLOW_CONTROLLER_SKILLS.has(normalized)) {
+    return `Workflow-controller skill '${normalized}' is reserved and cannot be configured as a quality gate for stage '${stage}'`;
+  }
+  return void 0;
+}
+function normalizeGate(entry2) {
+  if (typeof entry2 === "string") {
+    return { skill: entry2, mode: "advisory" };
+  }
+  if (!entry2 || typeof entry2 !== "object" || Array.isArray(entry2)) {
+    return null;
+  }
+  const gate = entry2;
+  return {
+    skill: gate.skill,
+    mode: gate.mode ?? "advisory",
+    ...gate.model === void 0 ? {} : { model: gate.model }
+  };
+}
+function readQualityGatesConfig(config2 = loadConfig()) {
+  return config2.qualityGates;
+}
+function validationError(stage, error2, skillIndex, entry2) {
+  const serializedEntry = entry2 === void 0 ? void 0 : JSON.stringify(entry2) ?? String(entry2);
+  return {
+    stage,
+    ...skillIndex === void 0 ? {} : { skillIndex },
+    ...serializedEntry === void 0 ? {} : { entry: serializedEntry },
+    error: error2
+  };
+}
+function readValidatedQualityGates(stage, config2 = loadConfig()) {
+  const raw = readQualityGatesConfig(config2);
+  if (raw === void 0) return { gates: [], errors: [] };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {
+      gates: [],
+      errors: [
+        validationError(
+          "qualityGates",
+          "Expected an object keyed by deep-interview, ralplan, or omc-review"
+        )
+      ]
+    };
+  }
+  const gates = [];
+  const errors = [];
+  for (const [configuredStage, entries] of Object.entries(raw)) {
+    const legacyStage = LEGACY_STAGE_KEYS[configuredStage];
+    if (Object.hasOwn(LEGACY_STAGE_KEYS, configuredStage)) {
+      errors.push(
+        validationError(
+          configuredStage,
+          `Legacy stage key '${configuredStage}' is not accepted; use '${legacyStage}'`
+        )
+      );
+      continue;
+    }
+    if (!QUALITY_GATE_STAGE_SET.has(configuredStage)) {
+      errors.push(
+        validationError(
+          configuredStage,
+          `Unknown quality-gate stage '${configuredStage}'; valid keys are ${QUALITY_GATE_STAGES.join(", ")}`
+        )
+      );
+      continue;
+    }
+    if (!Array.isArray(entries)) {
+      errors.push(
+        validationError(
+          configuredStage,
+          `Expected '${configuredStage}' to be an array of gate entries`
+        )
+      );
+      continue;
+    }
+    for (const [skillIndex, entry2] of entries.entries()) {
+      let error2;
+      if (typeof entry2 === "string") {
+        error2 = validateQualityGateSkillName(entry2, configuredStage);
+      } else if (entry2 && typeof entry2 === "object" && !Array.isArray(entry2)) {
+        const gate = entry2;
+        if (typeof gate.skill !== "string" || gate.skill.length === 0) {
+          error2 = 'Gate object must have a non-empty string "skill" property';
+        } else if (gate.mode !== void 0 && gate.mode !== "blocking" && gate.mode !== "advisory") {
+          error2 = `Invalid mode '${String(gate.mode)}'; must be 'blocking' or 'advisory'`;
+        } else if (gate.model !== void 0 && (typeof gate.model !== "string" || gate.model.length === 0)) {
+          error2 = "Gate model must be a non-empty string when specified";
+        } else {
+          error2 = validateQualityGateSkillName(gate.skill, configuredStage);
+        }
+      } else {
+        error2 = "Gate entry must be a skill name or an object with {skill, mode?, model?}";
+      }
+      if (error2) {
+        errors.push(validationError(configuredStage, error2, skillIndex, entry2));
+        continue;
+      }
+      if (configuredStage === stage) {
+        const normalized = normalizeGate(entry2);
+        if (normalized) gates.push(normalized);
+      }
+    }
+  }
+  return { gates, errors };
+}
+function getSkillRoots(options) {
+  const cwd2 = options.cwd ?? process.cwd();
+  const omcRoot = options.omcRoot ?? getOmcRoot(cwd2);
+  const userConfigDir = options.userConfigDir ?? getClaudeConfigDir();
+  const bundledSkillsDir = options.bundledSkillsDir ?? getSkillsDir();
+  const pluginRoot = options.pluginRoot === void 0 ? process.env.CLAUDE_PLUGIN_ROOT || process.env.OMC_PLUGIN_ROOT || null : options.pluginRoot;
+  return [
+    (0, import_node_path27.join)(cwd2, ".claude", "skills"),
+    (0, import_node_path27.join)(omcRoot, "skills"),
+    (0, import_node_path27.join)(cwd2, ".agents", "skills"),
+    (0, import_node_path27.join)(userConfigDir, "skills"),
+    ...pluginRoot ? [(0, import_node_path27.join)(pluginRoot, "skills")] : [],
+    bundledSkillsDir,
+    (0, import_node_path27.join)(cwd2, "skills")
+  ];
+}
+function resolveQualityGateSkillPath(skillName, options = {}) {
+  const skill = skillName.startsWith("$") ? skillName.slice(1) : skillName;
+  const roots = getSkillRoots(options);
+  for (const root2 of roots) {
+    const skillPath = (0, import_node_path27.join)(root2, skill, "SKILL.md");
+    if ((0, import_node_fs20.existsSync)(skillPath)) return skillPath;
+  }
+  if (options.bundledSkillsDir === void 0) {
+    return getBuiltinSkillPath(skill) ?? null;
+  }
+  return null;
+}
+
+// src/cli/commands/quality-gates.ts
+init_loader();
+function buildQualityGatesListReport(stage, options = {}) {
+  const { gates, errors } = readValidatedQualityGates(
+    stage,
+    options.config ?? loadConfig()
+  );
+  const warnings = [];
+  const listedGates = gates.map((gate) => {
+    let resolvedPath = null;
+    try {
+      resolvedPath = resolveQualityGateSkillPath(
+        gate.skill,
+        options.skillResolution
+      );
+    } catch {
+    }
+    if (resolvedPath) {
+      return { ...gate, resolvedPath };
+    }
+    const message2 = `Quality gate skill '${gate.skill}' could not be resolved; status is gate_unavailable and it will not block the stage.`;
+    warnings.push({ gate: gate.skill, status: "gate_unavailable", message: message2 });
+    return { ...gate, status: "gate_unavailable" };
+  });
+  return {
+    stage,
+    gates: listedGates,
+    warnings,
+    validationErrors: errors
+  };
+}
+function qualityGatesListCommand(stage, json = false, options = {}) {
+  const report = buildQualityGatesListReport(stage, options);
+  if (json) return JSON.stringify(report, null, 2);
+  const lines = [`Quality gates for ${report.stage}:`];
+  if (report.gates.length === 0) lines.push("  (none configured)");
+  for (const gate of report.gates) {
+    const details = [
+      `mode=${gate.mode}`,
+      ...gate.model ? [`model=${gate.model}`] : [],
+      gate.resolvedPath ? `path=${gate.resolvedPath}` : `status=${gate.status}`
+    ];
+    lines.push(`  - ${gate.skill} (${details.join(", ")})`);
+  }
+  for (const warning of report.warnings)
+    lines.push(`Warning: ${warning.message}`);
+  for (const error2 of report.validationErrors) {
+    const location = error2.skillIndex === void 0 ? `qualityGates.${error2.stage}` : `qualityGates.${error2.stage}[${error2.skillIndex}]`;
+    lines.push(`Validation error: ${location}: ${error2.error}`);
+  }
+  return lines.join("\n");
+}
+
 // src/team/delegation-evidence.ts
 var BROAD_TASK_VERBS_RE = /\b(?:investigate|analy[sz]e|debug|review|audit|refactor|cleanup|research|design|build|implement|improve)\b/i;
 var BROAD_FIX_RE = /\bfix\b/i;
@@ -125924,8 +126193,8 @@ function inferDelegationPlanForTeamTask(text) {
 // src/cli/commands/team.ts
 init_types9();
 init_loader();
-var import_node_fs20 = require("node:fs");
-var import_node_path27 = require("node:path");
+var import_node_fs21 = require("node:fs");
+var import_node_path28 = require("node:path");
 init_tmux_utils();
 init_worktree_paths();
 var HELP_TOKENS = /* @__PURE__ */ new Set(["--help", "-h", "help"]);
@@ -126112,13 +126381,13 @@ function slugifyTask(task) {
 }
 function resolveAvailableTeamName(baseName, cwd2) {
   const sanitizedBase = slugifyTask(baseName);
-  const stateRoot2 = (0, import_node_path27.join)(getOmcRoot(cwd2), "state", "team");
-  const teamDir3 = (name) => (0, import_node_path27.join)(stateRoot2, name);
-  if (!(0, import_node_fs20.existsSync)(teamDir3(sanitizedBase))) return sanitizedBase;
+  const stateRoot2 = (0, import_node_path28.join)(getOmcRoot(cwd2), "state", "team");
+  const teamDir3 = (name) => (0, import_node_path28.join)(stateRoot2, name);
+  if (!(0, import_node_fs21.existsSync)(teamDir3(sanitizedBase))) return sanitizedBase;
   for (let suffix = 2; suffix <= 99; suffix++) {
     const suffixText = `-${suffix}`;
     const candidate = `${sanitizedBase.slice(0, 30 - suffixText.length).replace(/-$/g, "")}${suffixText}`;
-    if (!(0, import_node_fs20.existsSync)(teamDir3(candidate))) return candidate;
+    if (!(0, import_node_fs21.existsSync)(teamDir3(candidate))) return candidate;
   }
   throw new Error(`Unable to allocate a fresh team name for ${sanitizedBase}; remove stale .omc/state/team entries or choose a more specific launch task.`);
 }
@@ -127683,9 +127952,9 @@ function sleep6(ms) {
 var import_promises31 = require("node:fs/promises");
 
 // src/goal-workflows/claude-goal-snapshot.ts
-var import_node_fs21 = require("node:fs");
+var import_node_fs22 = require("node:fs");
 var import_promises29 = require("node:fs/promises");
-var import_node_path28 = require("node:path");
+var import_node_path29 = require("node:path");
 var ClaudeGoalSnapshotError = class extends Error {
 };
 function safeObject(value) {
@@ -127738,8 +128007,8 @@ async function readClaudeGoalSnapshotInput(raw, cwd2 = process.cwd()) {
   try {
     return parseClaudeGoalSnapshot(JSON.parse(trimmed));
   } catch {
-    const path30 = (0, import_node_path28.resolve)(cwd2, trimmed);
-    if (!(0, import_node_fs21.existsSync)(path30)) {
+    const path30 = (0, import_node_path29.resolve)(cwd2, trimmed);
+    if (!(0, import_node_fs22.existsSync)(path30)) {
       throw new ClaudeGoalSnapshotError(`Claude goal snapshot is neither valid JSON nor a readable path: ${trimmed}`);
     }
     try {
@@ -127782,9 +128051,9 @@ function formatClaudeGoalReconciliation(reconciliation) {
 }
 
 // src/ultragoal/artifacts.ts
-var import_node_fs22 = require("node:fs");
+var import_node_fs23 = require("node:fs");
 var import_promises30 = require("node:fs/promises");
-var import_node_path29 = require("node:path");
+var import_node_path30 = require("node:path");
 init_worktree_paths();
 var ULTRAGOAL_DIR = ".omc/ultragoal";
 var ULTRAGOAL_BRIEF = "brief.md";
@@ -127798,20 +128067,20 @@ function iso(now = /* @__PURE__ */ new Date()) {
 }
 function ultragoalDir(cwd2, planId) {
   const omcRoot = getOmcRoot(cwd2);
-  if (planId) return (0, import_node_path29.join)(omcRoot, "ultragoal", ULTRAGOAL_PLANS_SUBDIR, planId);
-  return (0, import_node_path29.join)(omcRoot, "ultragoal");
+  if (planId) return (0, import_node_path30.join)(omcRoot, "ultragoal", ULTRAGOAL_PLANS_SUBDIR, planId);
+  return (0, import_node_path30.join)(omcRoot, "ultragoal");
 }
 function ultragoalBriefPath(cwd2, planId) {
-  return (0, import_node_path29.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_BRIEF);
+  return (0, import_node_path30.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_BRIEF);
 }
 function ultragoalGoalsPath(cwd2, planId) {
-  return (0, import_node_path29.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_GOALS);
+  return (0, import_node_path30.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_GOALS);
 }
 function ultragoalLedgerPath(cwd2, planId) {
-  return (0, import_node_path29.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_LEDGER);
+  return (0, import_node_path30.join)(ultragoalDir(cwd2, planId), ULTRAGOAL_LEDGER);
 }
 async function listUltragoalPlanIds(cwd2) {
-  const dir = (0, import_node_path29.join)(getOmcRoot(cwd2), "ultragoal", ULTRAGOAL_PLANS_SUBDIR);
+  const dir = (0, import_node_path30.join)(getOmcRoot(cwd2), "ultragoal", ULTRAGOAL_PLANS_SUBDIR);
   try {
     const entries = await (0, import_promises30.readdir)(dir, { withFileTypes: true });
     return entries.filter((entry2) => entry2.isDirectory()).filter((entry2) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(entry2.name)).map((entry2) => entry2.name).sort();
@@ -127826,7 +128095,7 @@ async function resolveActivePlanId(cwd2, explicitPlanId) {
     }
     return explicitPlanId;
   }
-  if ((0, import_node_fs22.existsSync)((0, import_node_path29.join)(getOmcRoot(cwd2), "ultragoal", ULTRAGOAL_GOALS))) return void 0;
+  if ((0, import_node_fs23.existsSync)((0, import_node_path30.join)(getOmcRoot(cwd2), "ultragoal", ULTRAGOAL_GOALS))) return void 0;
   const plans = await listUltragoalPlanIds(cwd2);
   if (plans.length === 1) return plans[0];
   if (plans.length === 0) return void 0;
@@ -127841,7 +128110,7 @@ function makePlanId(brief, now) {
   return `${ts}-${slug}`;
 }
 function repoRelative(cwd2, path30) {
-  return (0, import_node_path29.relative)(cwd2, path30).split("\\").join("/");
+  return (0, import_node_path30.relative)(cwd2, path30).split("\\").join("/");
 }
 function cleanLine(line) {
   return line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, "").trim();
@@ -127982,7 +128251,7 @@ async function createUltragoalPlan(cwd2, options) {
   if (planId && !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(planId)) {
     throw new UltragoalError(`Invalid plan id: ${planId}. Allowed chars: a-z, 0-9, dot, underscore, hyphen.`);
   }
-  if (!options.force && (0, import_node_fs22.existsSync)(ultragoalGoalsPath(cwd2, planId))) {
+  if (!options.force && (0, import_node_fs23.existsSync)(ultragoalGoalsPath(cwd2, planId))) {
     const label = planId ? `${ULTRAGOAL_DIR}/${ULTRAGOAL_PLANS_SUBDIR}/${planId}/${ULTRAGOAL_GOALS}` : `${ULTRAGOAL_DIR}/${ULTRAGOAL_GOALS}`;
     throw new UltragoalError(`Refusing to overwrite existing ${label}; pass --force to recreate it.`);
   }
@@ -128667,8 +128936,8 @@ ${ULTRAGOAL_HELP}`);
 }
 
 // src/cli/commands/alias-retirement.ts
-var import_node_fs25 = require("node:fs");
-var import_node_path32 = require("node:path");
+var import_node_fs26 = require("node:fs");
+var import_node_path33 = require("node:path");
 
 // src/alias-retirement/registry.ts
 var ALIAS_RETIREMENT_SCHEMA_VERSION = 1;
@@ -128720,8 +128989,8 @@ function assertAliasRegistryIntegrity() {
 }
 
 // src/alias-retirement/verifier.ts
-var import_node_fs23 = require("node:fs");
-var import_node_path30 = require("node:path");
+var import_node_fs24 = require("node:fs");
+var import_node_path31 = require("node:path");
 var import_node_url3 = require("node:url");
 function evaluateAlias(input) {
   const { record: record2, currentVersion, now, usageHistory, criticalIntegrations } = input;
@@ -128778,14 +129047,14 @@ function evaluateAlias(input) {
 }
 function getPackageVersionFallback() {
   try {
-    let dir = (0, import_node_path30.dirname)((0, import_node_url3.fileURLToPath)(importMetaUrl));
+    let dir = (0, import_node_path31.dirname)((0, import_node_url3.fileURLToPath)(importMetaUrl));
     for (let i = 0; i < 6; i++) {
       try {
-        const pkg = JSON.parse((0, import_node_fs23.readFileSync)((0, import_node_path30.join)(dir, "package.json"), "utf-8"));
+        const pkg = JSON.parse((0, import_node_fs24.readFileSync)((0, import_node_path31.join)(dir, "package.json"), "utf-8"));
         if (pkg.version) return pkg.version;
       } catch {
       }
-      const parent = (0, import_node_path30.dirname)(dir);
+      const parent = (0, import_node_path31.dirname)(dir);
       if (parent === dir) break;
       dir = parent;
     }
@@ -128823,11 +129092,11 @@ function summarizeReceipts(receipts) {
 }
 
 // src/alias-retirement/closure.ts
-var import_node_fs24 = require("node:fs");
-var import_node_path31 = require("node:path");
+var import_node_fs25 = require("node:fs");
+var import_node_path32 = require("node:path");
 function buildClosureReport(receipts, options = {}) {
   const cwd2 = options.cwd ?? process.cwd();
-  const exists = options.exists ?? ((p) => (0, import_node_fs24.existsSync)((0, import_node_path31.join)(cwd2, p)));
+  const exists = options.exists ?? ((p) => (0, import_node_fs25.existsSync)((0, import_node_path32.join)(cwd2, p)));
   const byAlias = new Map(receipts.map((r) => [r.alias.toLowerCase(), r]));
   const entries = receipts.flatMap(
     (r) => r.generatedArtifacts.map((p) => {
@@ -128920,7 +129189,7 @@ function readJsonMaybePath(raw) {
   const looksLikePath = raw.endsWith(".json") || raw.includes("/") || raw.includes("\\") || /^[\w.-]+\.json$/.test(raw);
   if (looksLikePath) {
     try {
-      const text = (0, import_node_fs25.readFileSync)(raw, "utf-8");
+      const text = (0, import_node_fs26.readFileSync)(raw, "utf-8");
       return JSON.parse(text);
     } catch {
     }
@@ -129020,8 +129289,8 @@ async function aliasRetirementCommand(args) {
     };
     const text = JSON.stringify(payload, null, 2);
     if (outPath) {
-      (0, import_node_fs25.mkdirSync)((0, import_node_path32.dirname)((0, import_node_path32.join)(process.cwd(), outPath)), { recursive: true });
-      (0, import_node_fs25.writeFileSync)((0, import_node_path32.join)(process.cwd(), outPath), `${text}
+      (0, import_node_fs26.mkdirSync)((0, import_node_path33.dirname)((0, import_node_path33.join)(process.cwd(), outPath)), { recursive: true });
+      (0, import_node_fs26.writeFileSync)((0, import_node_path33.join)(process.cwd(), outPath), `${text}
 `);
       console.log(`wrote ${outPath}`);
     }
@@ -131040,8 +131309,8 @@ ${parsed.prompt}`;
 }
 
 // src/cli/graph.ts
-var import_node_fs26 = require("node:fs");
-var import_node_path33 = require("node:path");
+var import_node_fs27 = require("node:fs");
+var import_node_path34 = require("node:path");
 init_descriptor();
 init_types10();
 
@@ -131615,12 +131884,12 @@ async function loadSealedDescriptor(descriptorPath, runsRoot) {
   let runDirHandle;
   try {
     runDirHandle = resolveRunDirHandle(runsRoot, fresh.run_id);
-    storedPath = (0, import_node_path33.join)(runDirHandle.path, "descriptor.json");
+    storedPath = (0, import_node_path34.join)(runDirHandle.path, "descriptor.json");
   } catch (error2) {
     fail3(`invalid run directory for run "${fresh.run_id}": ${errorMessage2(error2)}`, 1);
     return null;
   }
-  if (!(0, import_node_fs26.existsSync)(storedPath)) {
+  if (!(0, import_node_fs27.existsSync)(storedPath)) {
     return fresh;
   }
   let stored;
@@ -133644,6 +133913,12 @@ sessionCmd.command("friction").description("Report local session context-bloat a
     json: options.json,
     workingDirectory: process.cwd()
   });
+});
+var qualityGatesCmd = program2.command("quality-gates").description("Inspect configured custom quality gates");
+qualityGatesCmd.command("list").description("List normalized gates and report unavailable skills or configuration errors").addOption(
+  new Option("--stage <stage>", "Workflow stage").choices(["deep-interview", "ralplan", "omc-review"]).makeOptionMandatory()
+).option("--json", "Output as JSON").action((options) => {
+  console.log(qualityGatesListCommand(options.stage, options.json));
 });
 var capabilitiesCmd = program2.command("capabilities").description("Create or verify deterministic tool/skill/capability lockfiles").addHelpText("after", `
 Examples:

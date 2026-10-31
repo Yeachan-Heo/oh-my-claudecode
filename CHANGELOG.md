@@ -1,3 +1,23 @@
+# oh-my-claudecode v5.7.23: Preserve project memory during session start
+
+## Release Notes
+
+This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
+
+### Bug Fixes
+
+- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
+
+### Documentation
+
+- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
+
+### Stats
+
+- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
+
+---
+
 # oh-my-claudecode v5.7.21: Clearer state output and restored team missions
 
 ## Release Notes

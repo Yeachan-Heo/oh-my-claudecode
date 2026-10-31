@@ -1,23 +1,20 @@
-# oh-my-claudecode v5.7.21: Clearer state output and restored team missions
+# oh-my-claudecode v5.7.23: Preserve project memory during session start
 
 ## Release Notes
 
-This release bounds `state_clear` diagnostics, removes invalid agent frontmatter that caused startup warnings, and restores team mission discovery when no session snapshot exists. Thanks to @iyoda for the fixes; #4654 was reported by @conarti and #4657 by @fvegiard.
+This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
 
 ### Bug Fixes
 
-- **fix(state): limit `state_clear` missing-state path output to the requested session, or cap checked paths with an `and N more` count** (#4654, fixes #4651; reported by @conarti)
-- **fix(agents): drop the unrecognized top-level `level` frontmatter key to prevent Claude Code startup warnings** (#4657, fixes #4656; reported by @fvegiard)
-- **fix(hud/cli): show team missions when no session mission snapshot exists and expire completed missions in that team-only view** (#4661, #4662; @iyoda)
+- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
 
-### Other Changes
+### Documentation
 
-- **chore(sync): merge main's v5.7.20 release into dev** (#4658)
-- **ci: authorize and refresh generated artifacts for main-to-dev sync PR #4658** (#4659, #4660, #4663)
+- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
 
 ### Stats
 
-- **8 PRs merged** | **0 new features** | **4 bug fixes** | **0 performance improvements** | **4 other changes**
+- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
 
 ### Install / Update
 
@@ -26,7 +23,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.21
+npm install -g oh-my-claude-sisyphus@5.7.23
 ```
 
 **Claude Code plugin:**
@@ -35,10 +32,10 @@ npm install -g oh-my-claude-sisyphus@5.7.21
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.20...v5.7.21
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.22...v5.7.23
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @conarti @fvegiard @Yeachan-Heo
+@DeadY2J @iyoda @Yeachan-Heo
