@@ -2666,6 +2666,7 @@ describe('worker launch acknowledgement', () => {
       batchScript: `@echo off\r\nif not defined ${lineVar} exit /b 87\r\n"C:\\Windows\\System32\\cmd.exe" /d /v:off /s /c "set "${lineVar}=" & %%${lineVar}%%"\r\n`,
       env: {
         [lineVar!]: '"C:\\Program Files\\Codex\\codex.cmd" "--label=100% ready" "--home=%USERPROFILE%" "--encoded=%25" "say ""hello"" & continue" "--literal=bang! caret^" "trail\\\\"',
+        NoDefaultCurrentDirectoryInExePath: '1',
       },
     });
     // Each launch gets its own variable name, so an inherited value never matches.
@@ -2724,7 +2725,7 @@ describe('worker launch acknowledgement', () => {
     expect(() => buildProviderSpawnInvocation(['C:\\Tools\\provider.cmd', 'A'.repeat(8000)], 'win32', env))
       .toThrow('worker_launch_provider_argv_too_long');
     expect(Object.values(buildProviderSpawnInvocation(['C:\\Tools\\provider.cmd', 'A'.repeat(7900)], 'win32', env).env ?? {}))
-      .toEqual([`"C:\\Tools\\provider.cmd" "${'A'.repeat(7900)}"`]);
+      .toEqual([`"C:\\Tools\\provider.cmd" "${'A'.repeat(7900)}"`, '1']);
     // The bootstrap spec refuses the same argv before the supervisor runs.
     const launchAttempt = await attempt();
     expect(() => buildWorkerLaunchBootstrapSpec(launchAttempt, ['C:\\Tools\\provider.cmd', 'x\x1Ay'], cwd, { platform: 'win32' }))
