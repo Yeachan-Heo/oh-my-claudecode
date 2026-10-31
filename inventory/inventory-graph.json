@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b0991399e51c8c68d6a89bc0a81795b307fd883c",
-    "sourceSha256": "3e2ad4f1ce5ae0d5fa710de05a098a2a4fd245b89d50ce989a6159f1632012f1",
+    "head": "f5f46c0c19cc431582dad3a2772e9f6707e53cd2",
+    "sourceSha256": "a6ada9841dc767b8c3edd8d18952ba19e5ec229eac1274b03bfa540ba7462c59",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b0991399e51c8c68d6a89bc0a81795b307fd883c",
-  "sourceSha256": "3e2ad4f1ce5ae0d5fa710de05a098a2a4fd245b89d50ce989a6159f1632012f1",
+  "head": "f5f46c0c19cc431582dad3a2772e9f6707e53cd2",
+  "sourceSha256": "a6ada9841dc767b8c3edd8d18952ba19e5ec229eac1274b03bfa540ba7462c59",
   "counts": {
     "public": {
       "skills": 48,
@@ -25,11 +25,11 @@
     "internal": {
       "hookFiles": 333,
       "featureFiles": 89,
-      "toolFiles": 65,
+      "toolFiles": 66,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1491,
-      "total": 1515
+      "srcFiles": 1493,
+      "total": 1517
     },
     "generated": {
       "distFiles": 5733,
@@ -583,6 +583,7 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
+      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -7165,6 +7166,7 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
+      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -45728,6 +45730,11 @@
         "path": "src/tools/__tests__/cancel-integration.test.ts"
       },
       {
+        "id": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "kind": "tool",
+        "path": "src/tools/__tests__/deepinit-file-identity.test.ts"
+      },
+      {
         "id": "src/tools/__tests__/deepinit-manifest.test.ts",
         "kind": "tool",
         "path": "src/tools/__tests__/deepinit-manifest.test.ts"
@@ -46096,6 +46103,11 @@
         "id": "src/utils/__tests__/paths.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/paths.test.ts"
+      },
+      {
+        "id": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/plugin-cache-file-identity.test.ts"
       },
       {
         "id": "src/utils/__tests__/semver-compare.test.ts",
@@ -86000,6 +86012,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "src/tools/deepinit-manifest.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/tools/__tests__/deepinit-manifest.test.ts",
         "to": "external:node:crypto",
         "kind": "imports"
@@ -87937,6 +87974,36 @@
       {
         "from": "src/utils/__tests__/paths.test.ts",
         "to": "src/utils/paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "src/utils/plugin-cache-validation.ts",
         "kind": "imports"
       },
       {
@@ -90051,12 +90118,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7893,
-      "edgeCount": 8670,
-      "importEdgeCount": 7224,
+      "nodeCount": 7895,
+      "edgeCount": 8681,
+      "importEdgeCount": 7234,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "80ba7d4216f30f1f836289c5b3f63db4e02df4e7d09c0b8331219419b1efaca1",
-  "manifestSha256": "c62718a870e8e5d7c62bed688ea956daa8ba6c94ffe0eda0fddea3e81ef97493"
+  "inventorySha256": "6e2ba726be1c720453510cabec18925e1d725761b00529877d4282a74b56fa17",
+  "manifestSha256": "0b1a764e42fe6cbc1fc756706209ef5ebf178199251ea8ff545f7a86517dd4fe"
 }
