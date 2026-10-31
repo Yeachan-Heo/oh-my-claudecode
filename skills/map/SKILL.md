@@ -27,6 +27,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
+| An open PR needs driving to merge-ready | `babysit` |
 | The run taught the environment something | `refit` |
 
 ## On-ramps (off the main loop)
@@ -51,6 +52,9 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Manage skills themselves | `skill` (local); `skillify` (extract from session) |
 | Inspect orchestration state | `trace` (also the tracing lane); `graph` (DAG runtime) |
 | Cancel a mode | `cancel` |
+| CI is red on a PR you own | `fix-ci` |
+| Review threads need triage | `get-pr-comments` |
+| PR conflicts need resolution | `fix-merge-conflicts` |
 
 ## Rules
 
