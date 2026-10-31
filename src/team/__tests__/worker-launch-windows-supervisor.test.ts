@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, link, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -33,8 +33,8 @@ describe('generated Windows worker supervisor', () => {
 
     expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
     expect(source).toContain(`$cmd = '"' + $app + '" /d /v:off /s /c "set "_OMC_PROVIDER_LINE=" & %_OMC_PROVIDER_LINE%"' } else { $cmd = [O]::BuildCommandLine($argv) }`);
-    expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' -and ($null -eq $providerLine -or $_.Name -ne 'NoDefaultCurrentDirectoryInExePath') }");
-    expect(source).toContain("$envPairs += [pscustomobject]@{ Name = 'NoDefaultCurrentDirectoryInExePath'; Value = '1' }");
+    expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' -and $_.Name -ne 'NoDefaultCurrentDirectoryInExePath' }");
+    expect(source).toContain("$envPairs += [pscustomobject]@{ Name = 'NoDefaultCurrentDirectoryInExePath'; Value = '1' }; if ($null -ne $providerLine) {");
     expect(source).toContain('[O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)');
     expect(source).toContain(`if (c < ' ') throw new ArgumentException("worker_launch_provider_argv_invalid")`);
     expect(source).toContain('if (b.Length > 8000) throw new ArgumentException("worker_launch_provider_argv_too_long")');
@@ -117,30 +117,16 @@ $rejections = @(@('a', ('x' + [char]0x1A + 'y')), @('a', ('A' * 8000))) | ForEac
     }
   }, 65_000);
 
-  it.runIf(process.platform === 'win32')('runs the PATH node for an npm-style shim even when the cwd holds a planted node.cmd', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-cwd-'));
-    try {
-      const shimDir = join(root, 'npm');
-      await mkdir(shimDir, { recursive: true });
-      const shimPath = join(shimDir, 'codex.cmd');
-      const outputPath = join(root, 'ran.txt');
-      const canaryPath = join(root, 'planted.txt');
-      // npm's cmd-shim falls back to a bare `node` when no node.exe sits beside it.
-      await writeFile(shimPath, `@ECHO off\r\nSETLOCAL\r\nIF EXIST "%~dp0\\node.exe" (SET "_prog=%~dp0\\node.exe") ELSE (SET "_prog=node")\r\n"%_prog%" -e "require('fs').writeFileSync(process.argv[1],'real')" %*\r\n`, 'utf8');
-      await writeFile(join(root, 'node.cmd'), `@echo off\r\necho planted>"${canaryPath}"\r\n`, 'utf8');
-      const source = buildWindowsSupervisorSource();
-      const lines = source.split('\n');
-      const launchLines = ['  $argv = ', '  if ($app -match ', '  $envPairs = '].map(prefix => lines.find(candidate => candidate.startsWith(prefix))!);
-      const harnessInput = JSON.stringify({
-        source,
-        launchLines,
-        payload: {
-          provider_argv: [shimPath, outputPath],
-          provider_env: { SystemRoot: process.env.SystemRoot, PATH: `${dirname(process.execPath)};${join(process.env.SystemRoot!, 'System32')}` },
-          cwd: root,
-        },
-      });
-      const harness = String.raw`
+  // Runs the supervisor's own launch lines, then CreateProcessW exactly as the
+  // supervisor does minus the console handles a test runner does not have.
+  // The provider environment is only what the payload carries, so the test
+  // host's own NoDefaultCurrentDirectoryInExePath never leaks in.
+  function runLaunchLines(payload: { provider_argv: string[]; provider_env: Record<string, string>; cwd: string }): void {
+    const source = buildWindowsSupervisorSource();
+    const lines = source.split('\n');
+    const launchLines = ['  $argv = ', '  if ($app -match ', '  $envPairs = '].map(prefix => lines.find(candidate => candidate.startsWith(prefix))!);
+    const harnessInput = JSON.stringify({ source, launchLines, payload });
+    const harness = String.raw`
 $ErrorActionPreference = 'Stop'
 $in = [Console]::In.ReadToEnd() | ConvertFrom-Json
 $tokens = $null; $errors = $null
@@ -162,13 +148,66 @@ $si = New-Object H+SI; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si); 
 if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr]::Zero, [IntPtr]::Zero, $false, 0x08000400, $envPtr, $payload.cwd, [ref]$si, [ref]$pi)) { throw 'create_process_failed' }
 [H]::WaitForSingleObject($pi.hProcess, 30000) | Out-Null
 `;
-      execFileSync(
-        join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
-        ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(harness, 'utf16le').toString('base64')],
-        { input: harnessInput, encoding: 'utf8', windowsHide: true, timeout: 60_000 },
-      );
+    execFileSync(
+      join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(harness, 'utf16le').toString('base64')],
+      { input: harnessInput, encoding: 'utf8', windowsHide: true, timeout: 60_000 },
+    );
+  }
+
+  const minimalPath = () => `${dirname(process.execPath)};${join(process.env.SystemRoot!, 'System32')}`;
+
+  it.runIf(process.platform === 'win32')('runs the PATH node for an npm-style shim even when the cwd holds a planted node.cmd', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-cwd-'));
+    try {
+      const shimDir = join(root, 'npm');
+      await mkdir(shimDir, { recursive: true });
+      const shimPath = join(shimDir, 'codex.cmd');
+      const outputPath = join(root, 'ran.txt');
+      const canaryPath = join(root, 'planted.txt');
+      // npm's cmd-shim falls back to a bare `node` when no node.exe sits beside it.
+      await writeFile(shimPath, `@ECHO off\r\nSETLOCAL\r\nIF EXIST "%~dp0\\node.exe" (SET "_prog=%~dp0\\node.exe") ELSE (SET "_prog=node")\r\n"%_prog%" -e "require('fs').writeFileSync(process.argv[1],'real')" %*\r\n`, 'utf8');
+      await writeFile(join(root, 'node.cmd'), `@echo off\r\necho planted>"${canaryPath}"\r\n`, 'utf8');
+      runLaunchLines({ provider_argv: [shimPath, outputPath], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
       expect(existsSync(canaryPath)).toBe(false);
       expect(await readFile(outputPath, 'utf8')).toBe('real');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 65_000);
+
+  it.runIf(process.platform === 'win32')('keeps the bare-name children of an .exe provider from running a git planted in the cwd', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-child-'));
+    try {
+      const canaryPath = join(root, 'planted.txt');
+      const donePath = join(root, 'done.txt');
+      const plant = `require('fs').writeFileSync(${JSON.stringify(canaryPath)},'exe')`;
+      // A node.exe named git.exe runs the -e script the child hands it.
+      await link(process.execPath, join(root, 'git.exe')).catch(() => copyFile(process.execPath, join(root, 'git.exe')));
+      await writeFile(join(root, 'git.cmd'), `@echo off\r\necho cmd>"${canaryPath}"\r\n`, 'utf8');
+      const cmdPath = join(process.env.SystemRoot!, 'System32', 'cmd.exe');
+      // The child runs a bare git both through libuv's own search and through cmd.exe.
+      const script = `const cp=require('child_process');cp.spawnSync('git',['-e',${JSON.stringify(plant)}]);cp.spawnSync(${JSON.stringify(cmdPath)},['/d','/c','git -e x']);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
+      runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
+      expect(await readFile(donePath, 'utf8')).toBe('done');
+      expect(existsSync(canaryPath)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 65_000);
+
+  it.runIf(process.platform === 'win32')('sets NoDefaultCurrentDirectoryInExePath for every launch even when the provider clears it', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-nodefault-'));
+    try {
+      const shimPath = join(root, 'provider.cmd');
+      await writeFile(shimPath, `@echo off\r\n>"%~1" echo [%NoDefaultCurrentDirectoryInExePath%]\r\n`, 'utf8');
+      const batchOut = join(root, 'batch.txt');
+      const exeOut = join(root, 'exe.txt');
+      const providerEnv = { SystemRoot: process.env.SystemRoot!, PATH: minimalPath(), nodefaultcurrentdirectoryinexepath: '' };
+      runLaunchLines({ provider_argv: [shimPath, batchOut], provider_env: providerEnv, cwd: root });
+      runLaunchLines({ provider_argv: [process.execPath, '-e', `require('fs').writeFileSync(${JSON.stringify(exeOut)},String(process.env.NoDefaultCurrentDirectoryInExePath))`], provider_env: providerEnv, cwd: root });
+      expect((await readFile(batchOut, 'utf8')).trim()).toBe('[1]');
+      expect(await readFile(exeOut, 'utf8')).toBe('1');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

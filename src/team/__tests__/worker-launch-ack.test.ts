@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { copyFile, link, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 
@@ -2497,7 +2497,21 @@ describe('worker launch acknowledgement', () => {
       PATH: 'C:\\Windows\\System32',
       SystemRoot: 'C:\\Windows',
       USERPROFILE: 'C:\\Users\\provider',
+      NoDefaultCurrentDirectoryInExePath: '1',
     });
+  });
+
+  it('always sets NoDefaultCurrentDirectoryInExePath on win32 and lets no provider value clear it', () => {
+    const windows = buildProviderEnvironment(
+      { nodefaultcurrentdirectoryinexepath: '' },
+      { PATH: 'C:\\Windows\\System32', SystemRoot: 'C:\\Windows', NoDefaultCurrentDirectoryInExePath: '' },
+      'win32',
+      ['NoDefaultCurrentDirectoryInExePath'],
+    );
+    expect(Object.entries(windows).filter(([key]) => key.toUpperCase() === 'NODEFAULTCURRENTDIRECTORYINEXEPATH'))
+      .toEqual([['NoDefaultCurrentDirectoryInExePath', '1']]);
+    expect(buildProviderEnvironment(undefined, { PATH: '/usr/bin:/bin', NoDefaultCurrentDirectoryInExePath: '1' }, 'linux'))
+      .toEqual({ PATH: '/usr/bin:/bin' });
   });
 
   it('omits missing or empty ambient homes while preserving explicit overrides', () => {
@@ -2689,9 +2703,9 @@ describe('worker launch acknowledgement', () => {
       args: providerArgv.slice(1),
     });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\codex.exe', '--version'], 'win32', { SystemRoot: 'C:\\Windows' }))
-      .toEqual({ command: 'C:\\Tools\\codex.exe', args: ['--version'] });
+      .toEqual({ command: 'C:\\Tools\\codex.exe', args: ['--version'], env: { NoDefaultCurrentDirectoryInExePath: '1' } });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\CODEX.COM', '100%'], 'win32', { SystemRoot: 'C:\\Windows' }))
-      .toEqual({ command: 'C:\\Tools\\CODEX.COM', args: ['100%'] });
+      .toEqual({ command: 'C:\\Tools\\CODEX.COM', args: ['100%'], env: { NoDefaultCurrentDirectoryInExePath: '1' } });
     // A bare name or a trailing-dot batch path keeps the cmd route.
     for (const command of ['codex', 'C:\\Tools\\codex.cmd.', 'C:\\Tools\\CODEX.BAT']) {
       expect(buildProviderSpawnInvocation([command], 'win32', { SystemRoot: 'C:\\Windows' }))
@@ -3035,6 +3049,60 @@ describe('worker launch acknowledgement', () => {
         expect(exitCode).toBe(0);
         expect(existsSync(canaryPath)).toBe(false);
         expect(await readFile(outputPath, 'utf8')).toBe('real');
+      } finally {
+        await invocation.cleanup();
+      }
+    });
+
+    it('keeps the bare-name children of an .exe provider from running a git planted in the cwd', async () => {
+      cwd = await createFixture('worker-launch-native-child-');
+      const canaryPath = join(cwd, 'planted.txt');
+      const donePath = join(cwd, 'done.txt');
+      const plant = `require('fs').writeFileSync(${JSON.stringify(canaryPath)},'exe')`;
+      // A node.exe named git.exe runs the -e script the child hands it.
+      await link(process.execPath, join(cwd, 'git.exe')).catch(() => copyFile(process.execPath, join(cwd, 'git.exe')));
+      await writeFile(join(cwd, 'git.cmd'), `@echo off\r\necho cmd>"${canaryPath}"\r\n`, 'utf8');
+      const cmdPath = join(process.env.SystemRoot!, 'System32', 'cmd.exe');
+      const script = `const cp=require('child_process');cp.spawnSync('git',['-e',${JSON.stringify(plant)}]);cp.spawnSync(${JSON.stringify(cmdPath)},['/d','/c','git -e x']);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
+      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(
+        [process.execPath, '-e', script], 'win32', { SystemRoot: process.env.SystemRoot },
+      ));
+      try {
+        const exitCode = await new Promise<number | null>((resolve, reject) => {
+          const child = spawn(invocation.command, invocation.args, {
+            cwd, stdio: 'pipe', windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+            // A minimal env: the host may already set NoDefaultCurrentDirectoryInExePath.
+            env: { SystemRoot: process.env.SystemRoot, PATH: `${dirname(process.execPath)};${join(process.env.SystemRoot!, 'System32')}`, ...invocation.env },
+          });
+          child.once('error', reject);
+          child.once('exit', code => resolve(code));
+        });
+        expect(exitCode).toBe(0);
+        expect(await readFile(donePath, 'utf8')).toBe('done');
+        expect(existsSync(canaryPath)).toBe(false);
+      } finally {
+        await invocation.cleanup();
+      }
+    });
+
+    it('sets NoDefaultCurrentDirectoryInExePath for a batch provider even when the spawn env clears it', async () => {
+      cwd = await createFixture('worker-launch-native-nodefault-');
+      const shimPath = join(cwd, 'provider.cmd');
+      const outputPath = join(cwd, 'value.txt');
+      await writeFile(shimPath, `@echo off\r\n>"%~1" echo [%NoDefaultCurrentDirectoryInExePath%]\r\n`, 'utf8');
+      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(
+        [shimPath, outputPath], 'win32', { SystemRoot: process.env.SystemRoot },
+      ));
+      try {
+        await new Promise<number | null>((resolve, reject) => {
+          const child = spawn(invocation.command, invocation.args, {
+            cwd, stdio: 'pipe', windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+            env: { SystemRoot: process.env.SystemRoot, NoDefaultCurrentDirectoryInExePath: '', ...invocation.env },
+          });
+          child.once('error', reject);
+          child.once('exit', code => resolve(code));
+        });
+        expect((await readFile(outputPath, 'utf8')).trim()).toBe('[1]');
       } finally {
         await invocation.cleanup();
       }

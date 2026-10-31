@@ -146,12 +146,13 @@ export function buildWindowsSupervisorSource(): string {
     // it through cmd.exe with the MSVC-quoted line. cmd.exe from the system
     // directory is started instead with a fixed command line; it expands the
     // cmd-quoted provider line once from its environment block and clears
-    // the variable before the provider runs. NoDefaultCurrentDirectoryInExePath
-    // keeps that cmd (and a shim's bare `node`) from running a command
-    // planted in the worker cwd.
+    // the variable before the provider runs. Every launch sets
+    // NoDefaultCurrentDirectoryInExePath so neither that cmd (and a shim's
+    // bare `node`) nor a provider's bare-name child runs a command planted in
+    // the worker cwd.
     '  $argv = [string[]]$payload.provider_argv; $app = [string]$argv[0]; $providerLine = $null',
     `  if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
-    `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' -and ($null -eq $providerLine -or $_.Name -ne '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}') } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine }; $envPairs += [pscustomobject]@{ Name = '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}'; Value = '1' } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
+    `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' -and $_.Name -ne '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}' } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); $envPairs += [pscustomobject]@{ Name = '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}'; Value = '1' }; if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
     '  [O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)',
     '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; $jobAssigned = $true; if ([O]::ResumeThread($pi.hThread) -eq [uint32]::MaxValue) { throw "worker_launch_resume_failed" }',
     '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
@@ -406,6 +407,13 @@ export function buildProviderEnvironment(
       const baselineKey = Object.keys(baseline).find(candidate => candidate.toUpperCase() === key.toUpperCase());
       if (baselineKey) delete baseline[baselineKey];
     }
+    // cmd.exe and a bare-name spawn search the cwd (the worktree) before
+    // PATH unless this is set; no provider value may clear it.
+    const env: Record<string, string> = { ...baseline, ...normalized };
+    for (const key of Object.keys(env)) {
+      if (key.toUpperCase() === WINDOWS_NO_CWD_EXE_SEARCH_VAR.toUpperCase()) delete env[key];
+    }
+    return { ...env, [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' };
   }
   return { ...baseline, ...normalized };
 }
@@ -2102,6 +2110,8 @@ export function buildProviderSpawnInvocation(
       env: { [lineVar]: buildWindowsBatchProviderLine(providerArgv), [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' },
     };
   }
+  // A provider's bare-name children must not run a command planted in the cwd either.
+  if (platform === 'win32') return { command, args, env: { [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' } };
   return { command, args };
 }
 
@@ -2153,7 +2163,7 @@ export async function materializeProviderSpawnInvocation(
     throw new Error('worker_launch_completion_supervision_required');
   }
   if (!invocation.batchScript && !superviseProcessTree) {
-    return { command: invocation.command, args: invocation.args, cleanup: async () => {} };
+    return { command: invocation.command, args: invocation.args, ...(invocation.env ? { env: invocation.env } : {}), cleanup: async () => {} };
   }
   const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
   try {
