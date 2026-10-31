@@ -46,8 +46,14 @@ are in scope.
    **fail** — judge by `bucket`, never the exit code; with no checks
    configured it exits 1 printing "no checks reported", which is the
    no-checks path, not an error.
-   `mergeStateStatus` is an aggregate merge gate; classify `BLOCKED` or
-   `BEHIND` as blocked and `UNKNOWN` as waiting before allowing ready. Confirm the first
+   Normalize every GraphQL enum before passing facts to the policy: `state`
+   `OPEN|CLOSED|MERGED` → `open|closed|merged`, `reviewDecision`
+   `APPROVED|CHANGES_REQUESTED|''` → `approved|changes_requested|none`,
+   `mergeable` and `mergeStateStatus` to their lowercase policy values.
+   Map `DIRTY` to blocked; map `BEHIND` to waiting when strict branch
+   protection requires a base update; treat `HAS_HOOKS` as mergeable; map
+   `UNSTABLE` to waiting; map `BLOCKED` as blocked and `UNKNOWN` as waiting before allowing
+   ready. Confirm the first
    read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
@@ -74,14 +80,14 @@ are in scope.
    validation are enforced:
 
    ```sh
-   node --input-type=module -e "const root=process.env.CLAUDE_PLUGIN_ROOT||process.env.OMC_PLUGIN_ROOT; if(!root) throw new Error('set CLAUDE_PLUGIN_ROOT or OMC_PLUGIN_ROOT, or use the installed omc writer'); const {pathToFileURL}=await import('node:url'); const {appendLedgerEntry}=await import(pathToFileURL(root+'/dist/features/verification-ledger/index.js').href); await appendLedgerEntry('.omc/state/verification-ledger.tsv',{ts:new Date().toISOString(),kind:'babysit',ref:'<N>',sha:'<HEAD_SHA>',verdict:'unit-test-verified',evidence:'<command>',verifier:'babysit'});"
+   node --input-type=module -e "const root=process.env.CLAUDE_PLUGIN_ROOT||process.env.OMC_PLUGIN_ROOT; const {appendLedgerEntry}=await import(root+'/dist/features/verification-ledger/index.js'); await appendLedgerEntry('.omc/state/verification-ledger.tsv',{ts:new Date().toISOString(),kind:'babysit',ref:'<N>',sha:'<HEAD_SHA>',verdict:'unit-test-verified',evidence:'<command>',verifier:'babysit'});"
    ```
    The writer owns the exact seven-column TSV layout; do not append raw rows.
 5. **Report**: verdict, what changed since the last poll, what is still
    blocking, and the exact commands you ran. Every claim carries its
    evidence.
 
-Poll with `gh pr checks <N> --repo <OWNER/REPO> --watch` or a sleep loop at a stated interval; state
+Poll with `gh pr checks --watch` or a sleep loop at a stated interval; state
 the interval. Stop when the PR is merge-ready, merged, closed, or the user
 says stop, and say which.
 
@@ -89,15 +95,13 @@ says stop, and say which.
 
 Classification order, first match wins:
 
-- conflicts, `mergeStateStatus=BLOCKED` or `DIRTY` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
+- conflicts or `mergeStateStatus=BLOCKED` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
 - any failed check → **blocked** (fix lane)
 - any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
 - mergeability or `mergeStateStatus=UNKNOWN` → **waiting** (re-poll; not an error)
 - pending checks → **waiting**
-- `mergeStateStatus=UNSTABLE` → **waiting** until visible checks settle
-- `mergeStateStatus=BEHIND` → **waiting** for a base update when strict branch protection requires it
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
   real. A first sighting of "no checks" is never readiness. Before serving
