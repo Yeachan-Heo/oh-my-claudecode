@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (60 canonical + 2 aliases)', () => {
+    it('should return correct number of skills (75 canonical + 2 aliases)', () => {
       const skills = createBuiltinSkills();
-      // 62 entries: 60 canonical skills + 2 aliases (cancel-ralph, psm)
-      expect(skills).toHaveLength(62);
+      // 77 entries: 75 canonical skills + 2 aliases (cancel-ralph, psm)
+      expect(skills).toHaveLength(77);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -128,16 +128,22 @@ describe('Builtin Skills', () => {
         'agent-doc-discipline',
         'architect',
         'architecture-survey',
+        'arena',
         'ask',
         'ask-navigator',
         'autopilot',
         'autoresearch',
         'babysit',
         'blast-radius',
+        'bro',
         'cancel',
         'cancel-ralph',
         'configure-notifications',
         'correct',
+        'create-formal-verification-skill',
+        'create-verification-skill',
+        'maintain-formal-verification-skill',
+        'maintain-verification-skill',
         'debug',
         'deep-interview',
         'deepinit',
@@ -153,6 +159,9 @@ describe('Builtin Skills', () => {
         'how',
         'hud',
         'intent',
+        'interrogate',
+        'in-your-own-words',
+        'ketchup',
         'minimal-code-discipline',
         'minimal-prose-discipline',
         'launch',
@@ -169,21 +178,27 @@ describe('Builtin Skills', () => {
         'psm',
         'ralph',
         'ralplan',
+        'recall',
         'release',
         'refit',
         'remember',
         'research',
         'self-improve',
         'session-flow',
+        'sharpen',
         'show-me-your-work',
         'skill',
         'skillify',
         'team',
+        'technical-writing',
         'tdd',
+        'teach',
         'trace',
+        'typescript-best-practices',
         'ultragoal',
         'verify',
         'visual-verdict',
+        'what-did-i-get-done',
         'why',
         'wiki',
     
@@ -852,7 +867,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(60);
+      expect(names).toHaveLength(75);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('minimal-code-discipline');
       expect(names).toContain('launch');
@@ -894,7 +909,7 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131; learner retired in 5.0.0; cancel-ralph and psm remain
-      expect(names).toHaveLength(62);
+      expect(names).toHaveLength(77);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('autoresearch');
       expect(names).toContain('self-improve');

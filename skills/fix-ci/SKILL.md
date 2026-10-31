@@ -18,9 +18,9 @@ Red CI has exactly three causes; classify before touching anything.
 
 ## Workflow
 
-1. **List the failures**: first read `gh pr view <N> --repo <OWNER/REPO> --json headRefOid`,
-   then run `gh pr checks <N> --repo <OWNER/REPO>` and record that head SHA with
-   the failures before reading logs or changing anything.
+1. **List the failures**: `gh pr checks <N> --repo <OWNER/REPO>` (or the CI's
+   own view) — which checks failed, on which SHA. Verify the returned head is
+   the requested PR's expected SHA before reading or changing anything.
 2. **Read the actual log** for each failure, to the first error line that
    names a cause. Summaries lie; stack traces do not.
 3. **Classify**:

@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (60 Total)](#skills-60-total)
+- [Skills (75 Total)](#skills-75-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -960,7 +960,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (60 Total)
+## Skills (75 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -974,15 +974,21 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `agent-doc-discipline`    | Writing-time discipline for agent-facing documents: checkable rules with a why, steps first, one meaning one home | `/oh-my-claudecode:agent-doc-discipline` |
 | `architect`               | Parallel design exploration before cross-boundary code; decision with rejected alternatives | `/oh-my-claudecode:architect`             |
 | `architecture-survey`     | Shipyard survey: report ranked architecture-deepening candidates with evidence, never edit code | `/oh-my-claudecode:architecture-survey`     |
+| `arena`                   | N-candidate bakeoff: parallel attempts, cross-judge, pick by rubric, graft the best parts      | `/oh-my-claudecode:arena`                   |
 | `ask`                     | Ask Claude, Codex, Gemini, Antigravity, Grok, or Cursor via local CLI          | `/oh-my-claudecode:ask`                     |
 | `ask-navigator`           | Shipyard navigator: chart foggy efforts into decision-ticket maps, hand off to launch | `/oh-my-claudecode:ask-navigator`    |
 | `autopilot`               | Full autonomous execution from idea to working code                            | `/oh-my-claudecode:autopilot`               |
 | `autoresearch`            | Stateful evaluator-driven improvement loop                                     | `/oh-my-claudecode:autoresearch`            |
 | `babysit`                 | Drive an open PR to merge-ready: watch-pr verdicts, fix CI, address comments; never merges | `/oh-my-claudecode:babysit`       |
 | `blast-radius`            | Map what a change could break beyond the diff; prove safety by running code     | `/oh-my-claudecode:blast-radius`            |
+| `bro`                     | Restate the last message in plain language, keeping every fact                  | `/oh-my-claudecode:bro`                     |
 | `cancel`                  | Unified cancellation for active modes                                          | `/oh-my-claudecode:cancel`                  |
 | `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
 | `correct`                 | Make repeated agent mistakes impossible at the highest enforcing level         | `/oh-my-claudecode:correct`                 |
+| `create-formal-verification-skill` | Generate a project-local skill that formally verifies one high-risk property (TLA+/Lean/Kani) | `/oh-my-claudecode:create-formal-verification-skill` |
+| `create-verification-skill` | Generate the project's own verify skill: commands discovered by execution, with a feature map | `/oh-my-claudecode:create-verification-skill` |
+| `maintain-formal-verification-skill` | Re-sync an existing formal verification skill after the covered code changed | `/oh-my-claudecode:maintain-formal-verification-skill` |
+| `maintain-verification-skill` | Re-sync the project verify skill when its commands drift | `/oh-my-claudecode:maintain-verification-skill` |
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/oh-my-claudecode:deep-interview`                |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
@@ -991,6 +997,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
 | `figure-it-out`           | Design a bespoke playbook for tasks no bundled skill fits                      | `/oh-my-claudecode:figure-it-out`           |
+| `graph`                   | Inspect and run graph workflows                                                | `/oh-my-claudecode:graph`                  |
 | `fix-ci`                  | Classify CI failures (real/flaky/environmental) and fix the real ones          | `/oh-my-claudecode:fix-ci`                  |
 | `fix-merge-conflicts`     | Resolve conflicts preserving both sides' intent, non-interactively             | `/oh-my-claudecode:fix-merge-conflicts`     |
 | `get-pr-comments`         | Fetch and triage review threads: fix / dismiss / ask                           | `/oh-my-claudecode:get-pr-comments`         |
@@ -998,6 +1005,9 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `how`                     | Two-pass subsystem walkthrough: explore, then explain with file:line citations | `/oh-my-claudecode:how`                     |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
 | `intent`                  | Internal requirements intake for non-engineer contributors                      | `/oh-my-claudecode:intent`                  |
+| `interrogate`             | Adversarial three-reviewer panel over a diff or design; severity-merged verdict | `/oh-my-claudecode:interrogate`             |
+| `in-your-own-words`       | Play back the goal, problem, and success check before work starts              | `/oh-my-claudecode:in-your-own-words`       |
+| `ketchup`                 | Catch up on everything since your last message, with status lines              | `/oh-my-claudecode:ketchup`                 |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
 | `map`                     | The yard's skill map: which skill owns which job, in delivery-loop order; routes, never executes | `/oh-my-claudecode:map`                  |
@@ -1009,23 +1019,31 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `pr`                      | PR body assembly from OMC's paper trail: smallest visual, verify evidence, ADR-test reversibility | `/oh-my-claudecode:pr` |
 | `project-session-manager` | Manage isolated development environments (git worktrees + tmux)                | `/oh-my-claudecode:project-session-manager` |
 | `psm`                    | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                    |
+| `plan`                    | Create a strategic execution plan                                               | `/oh-my-claudecode:plan`                   |
 | `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
 | `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
+| `recall`                  | Reconstruct working context from artifacts in trust order                      | `/oh-my-claudecode:recall`                  |
 | `release`                 | Automated release workflow                                                      | `/oh-my-claudecode:release`                 |
 | `refit`                   | Cross-session retrospective; instrument evidence to user-approved environment fixes | `/oh-my-claudecode:refit` |
 | `remember`                | Save and retrieve durable session memory                                        | `/oh-my-claudecode:remember`                |
 | `research`                | Investigate an open question and return grounded findings                       | `/oh-my-claudecode:research`               |
+| `review`                  | Review changes for correctness and risk                                         | `/oh-my-claudecode:review`                 |
 | `self-improve`            | Autonomous evolutionary code improvement engine                                | `/oh-my-claudecode:self-improve`           |
 | `session-flow`            | Reorient in the current session with an evidence-backed map of its flow        | `/oh-my-claudecode:session-flow`           |
+| `sharpen`                 | Aim a task at its real objective: consumer, done-check, non-goals              | `/oh-my-claudecode:sharpen`                 |
 | `show-me-your-work`       | Append-only TSV decision trail for auditable autonomous work                   | `/oh-my-claudecode:show-me-your-work`       |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                              | `/oh-my-claudecode:skill`                   |
 | `skillify`                | Extract a reusable skill from the current session                              | `/oh-my-claudecode:skillify`                |
 | `team`                    | Coordinated multi-agent workflow                                               | `/oh-my-claudecode:team`                    |
+| `teach`                   | Explain a subsystem by composing how and why, with a landing check             | `/oh-my-claudecode:teach`                   |
+| `technical-writing`       | Layered prose standard for docs, RFCs, PR descriptions, commit messages        | `/oh-my-claudecode:technical-writing`       |
 | `tdd`                     | Test-first discipline at pre-agreed seams                                     | `/oh-my-claudecode:tdd`                     |
 | `trace`                   | Evidence-driven tracing lane with parallel tracer hypotheses                   | `/oh-my-claudecode:trace`                  |
+| `typescript-best-practices` | TS syntax grounding for type-system discipline                               | `/oh-my-claudecode:typescript-best-practices` |
 | `ultragoal`               | Durable multi-goal workflow with checkpointed artifacts                        | `/oh-my-claudecode:ultragoal`              |
 | `verify`                  | Verify that a change really works before claiming completion                    | `/oh-my-claudecode:verify`                 |
 | `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons              | `/oh-my-claudecode:visual-verdict`        |
+| `what-did-i-get-done`     | Summarize authored commits over a period, grouped by theme                     | `/oh-my-claudecode:what-did-i-get-done`    |
 | `why`                     | Evidence-first investigation of why code is the way it is                      | `/oh-my-claudecode:why`                     |
 | `wiki`                    | Persistent markdown knowledge base that compounds across sessions              | `/oh-my-claudecode:wiki`                   |
 
@@ -1045,11 +1063,17 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ask-navigator <idea\|map>`            | Chart a foggy effort into a map of decision tickets (or work the open map), then hand off to launch |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:autoresearch <task>`                  | Run a bounded evaluator-driven improvement mission                                             |
+| `/oh-my-claudecode:arena <brief>`                        | N-candidate bakeoff: fan out, cross-judge, pick by rubric, graft                               |
 | `/oh-my-claudecode:architect`                            | Parallel design exploration before cross-boundary code                                        |
 | `/oh-my-claudecode:blast-radius [path]`                  | Map what a change could break and prove safety by running code                                |
+| `/oh-my-claudecode:bro`                                  | Restate the last message in plain language                                                    |
 | `/oh-my-claudecode:babysit <PR>`                         | Drive an open PR to merge-ready; watch verdicts, fix CI, never merges                          |
 | `/oh-my-claudecode:cancel [--force] [--all]`            | Cancel current-session modes; `--force` skips graceful waits, `--all` explicitly selects all sessions |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
+| `/oh-my-claudecode:create-formal-verification-skill`     | Generate a project skill that formally verifies one high-risk property                        |
+| `/oh-my-claudecode:create-verification-skill`            | Generate the project's own verify skill, commands proven by running them                      |
+| `/oh-my-claudecode:maintain-formal-verification-skill`   | Re-sync a formal verification skill after the covered code changed                            |
+| `/oh-my-claudecode:maintain-verification-skill`          | Re-sync the project verify skill when its commands drift                                      |
 | `/oh-my-claudecode:correct`                              | Make repeated agent mistakes impossible at the highest enforcing level                        |
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
@@ -1065,6 +1089,9 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
 | `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (two faces seeded day one; every other surface appears on first use); --check audits drift |
 | `/oh-my-claudecode:launch <brief\|spec-path> [--serial]` | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |
+| `/oh-my-claudecode:interrogate [path]`                   | Adversarial three-reviewer panel over a diff or design                                        |
+| `/oh-my-claudecode:in-your-own-words`                     | Play back the goal, problem, and success check before starting                                |
+| `/oh-my-claudecode:ketchup`                               | Catch up on everything since your last message                                                |
 | `/oh-my-claudecode:how <subsystem>`                       | Two-pass subsystem walkthrough with file:line citations                                       |
 | `/oh-my-claudecode:loft <design-question>`               | Loft the shape before cutting steel: a throwaway artifact answers a design question prose cannot settle |
 | `/oh-my-claudecode:minimal-code-discipline`              | Apply the YAGNI-ladder writing-time discipline while implementing                              |
@@ -1076,6 +1103,8 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:project-session-manager <arguments>`  | Manage isolated dev environments with git worktrees + tmux                                    |
 | `/oh-my-claudecode:ralph <task>`                         | Persistence loop until task completion (`--critic=architect \| critic \| codex`)             |
 | `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation                                     |
+| `/oh-my-claudecode:recall`                               | Reconstruct working context from artifacts in trust order                                     |
+| `/oh-my-claudecode:sharpen <brief>`                      | Aim a task at its real objective: consumer, done-check, non-goals                             |
 | `/oh-my-claudecode:show-me-your-work`                    | Start (or read) the append-only decision trail                                                |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
 | `/oh-my-claudecode:refit [--scope <area>] [--last <N sessions>]` | Retrospect on OMC instrumentation and propose user-approved environment fixes            |
@@ -1085,10 +1114,14 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:skill <action>`                       | Manage local skills                                                                           |
 | `/oh-my-claudecode:skillify`                             | Extract a reusable skill from the current session                                             |
 | `/oh-my-claudecode:team <N>:<agent> <task>`               | Coordinated native team workflow                                                              |
+| `/oh-my-claudecode:teach <subsystem>`                    | Explain a subsystem by composing how and why                                                 |
+| `/oh-my-claudecode:technical-writing`                    | Write shipping prose to the layered standard                                                  |
+| `/oh-my-claudecode:typescript-best-practices`            | Ground type-system discipline in TypeScript syntax                                            |
 | `/oh-my-claudecode:tdd`                                  | Test-first discipline at pre-agreed seams                                                     |
 | `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane                                                                  |
 | `/oh-my-claudecode:ultragoal <condition>`                | Track a durable multi-goal workflow                                                           |
 | `/oh-my-claudecode:verify <target>`                      | Verify that a change really works before claiming completion                                  |
+| `/oh-my-claudecode:what-did-i-get-done [period]`         | Summarize authored commits, grouped by theme                                                  |
 | `/oh-my-claudecode:why <question>`                       | Investigate why code is the way it is, from evidence                                          |
 | `/oh-my-claudecode:visual-verdict <task>`                | Structured visual QA verdict for screenshot/reference comparisons                             |
 | `/oh-my-claudecode:wiki <action>`                        | Query or update the persistent markdown knowledge base                                         |

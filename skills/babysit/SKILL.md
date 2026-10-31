@@ -95,9 +95,9 @@ Classification order, first match wins:
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
 - mergeability or `mergeStateStatus=UNKNOWN` → **waiting** (re-poll; not an error)
+- pending checks → **waiting**
 - `mergeStateStatus=UNSTABLE` → **waiting** until visible checks settle
 - `mergeStateStatus=BEHIND` → **waiting** for a base update when strict branch protection requires it
-- pending checks → **waiting**
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
   real. A first sighting of "no checks" is never readiness. Before serving
