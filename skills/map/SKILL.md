@@ -23,17 +23,32 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Hands-off idea-to-code | `autopilot` |
 | Work needs coordinated parallel workers | `team` |
 | One approved task carried through verified code | `execute` |
+| One attempt risks locking in the wrong shape | `arena` |
+| Code crosses a function boundary; designs should compete first | `architect` |
+| Finished work needs attack before it ships | `interrogate` |
 | A design question prose cannot settle | `loft` |
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
+| A queue must land as one stacked PR chain | `stacked-delivery`; watch state: `babysit` |
+| An open PR needs driving to merge-ready | `babysit` |
 | The run taught the environment something | `refit` |
 
 ## On-ramps (off the main loop)
 
 | Job | Skill |
 |---|---|
+| A measured target needs climbing over multiple rounds | `hillclimb` |
 | A bug needs its root cause | `debug`; competing-hypothesis tracing: `trace` |
+| The question is why the code is this way | `why` |
+| A subsystem needs explaining | `how`; as a lesson: `teach` |
+| A risky change needs its blast radius mapped | `blast-radius` |
+| The same agent mistake keeps recurring | `correct` |
+| Long autonomous work needs an audit trail | `show-me-your-work` |
+| No bundled skill fits the task shape | `figure-it-out` (designs one, validated against anchors) |
+| A property tests cannot reach needs formal proof | `create-formal-verification-skill`; drifted spec: `maintain-formal-verification-skill` |
+| The repo needs its own verification commands recorded | `create-verification-skill`; drifted commands: `maintain-verification-skill` |
+| Roles should run on chosen models | `models` |
 | Tests should drive the implementation | `tdd` |
 | The codebase is getting harder to change | `architecture-survey` |
 | AI-generated slop needs cleanup | `ai-slop-cleaner` |
@@ -48,9 +63,17 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Job | Skill |
 |---|---|
 | Install, diagnose, configure | `omc-setup`; `omc-doctor`; `configure-notifications` |
+| A long session's lessons should be banked as skill edits | `reflect`; extraction: `skillify` |
+| A cross-project personal behavior profile is wanted | `personal-mode`; single facts: `remember` |
 | Manage skills themselves | `skill` (local); `skillify` (extract from session) |
 | Inspect orchestration state | `trace` (also the tracing lane); `graph` (DAG runtime) |
 | Cancel a mode | `cancel` |
+| CI is red on a PR you own | `fix-ci`; review threads: `get-pr-comments`; conflicts: `fix-merge-conflicts` |
+| The user missed the session | `ketchup`; after a break or crash: `recall` |
+| A brief is vague | `sharpen`; playback before starting: `in-your-own-words` |
+| A reply was too dense | `bro` |
+| Shipping prose needs the standard | `technical-writing`; TS type discipline: `typescript-best-practices` |
+| The period's authored work needs summarizing | `what-did-i-get-done` |
 
 ## Rules
 
