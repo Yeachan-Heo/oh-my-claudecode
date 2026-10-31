@@ -48,9 +48,8 @@ either intent is a bug with a clean git status.
    explicitly reported.
 6. **Finalize**: for a rebase, stage each resolved file and run
    `git rebase --continue` repeatedly until `git status` shows no active
-   rebase. Validate that final tree before pushing; edit the replayed commit
-   message during continuation if needed. For a merge, commit the resolution
-   with a message naming what each side wanted. No force-push to shared branches, ever; a rebased own-branch
+   rebase. Validate that final tree before pushing. Then commit the resolution with a message naming what each side
+   wanted. No force-push to shared branches, ever; a rebased own-branch
    uses `--force-with-lease` — unless a caller (e.g. `babysit`) forbids
    rebase and force-push entirely, in which case merge-commit resolution is
    the only path.

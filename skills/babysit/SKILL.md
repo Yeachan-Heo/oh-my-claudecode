@@ -52,7 +52,7 @@ are in scope.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
 3. **Act on the verdict**:
-   - failing check → `fix-ci` (classify real/flaky/environmental, then fix; pass the target repo, PR number, head SHA, and base branch)
+   - failing check → `fix-ci` (classify real/flaky/environmental, then fix)
    - requested changes → `get-pr-comments` to triage threads, then address
      each through the review lane; reply to threads you resolve; dismiss
      bot noise with a concrete reason instead of churning code
@@ -64,19 +64,24 @@ are in scope.
    - mergeability unknown → wait one interval and re-read; it is never an
      error
    - draft or missing review → report what is missing; do not self-approve
-   - aggregate `BLOCKED` without requested changes → inspect unresolved review
-     threads with `get-pr-comments <N>` before reporting an unactionable block
 4. **Ledger discipline**: watch verdicts (`ready`/`waiting`/`blocked`/`gone`)
    are gate states, not verification — never write them into the
    verification ledger, whose vocabulary is separate. Append a
    `.omc/state/verification-ledger.tsv` row only when *you* executed a check
    yourself — e.g. a `fix-ci` rerun went green (`unit-test-verified`, with
    the command as evidence). One row per executed check, never per poll.
+   Write it through the repository writer so header creation, locking, and
+   validation are enforced:
+
+   ```sh
+   node --input-type=module -e "const root=process.env.CLAUDE_PLUGIN_ROOT||process.env.OMC_PLUGIN_ROOT; if(!root) throw new Error('set CLAUDE_PLUGIN_ROOT or OMC_PLUGIN_ROOT, or use the installed omc writer'); const {pathToFileURL}=await import('node:url'); const {appendLedgerEntry}=await import(pathToFileURL(root+'/dist/features/verification-ledger/index.js').href); await appendLedgerEntry('.omc/state/verification-ledger.tsv',{ts:new Date().toISOString(),kind:'babysit',ref:'<N>',sha:'<HEAD_SHA>',verdict:'unit-test-verified',evidence:'<command>',verifier:'babysit'});"
+   ```
+   The writer owns the exact seven-column TSV layout; do not append raw rows.
 5. **Report**: verdict, what changed since the last poll, what is still
    blocking, and the exact commands you ran. Every claim carries its
    evidence.
 
-Poll with `gh pr checks <N> --watch` or a sleep loop at a stated interval; state
+Poll with `gh pr checks <N> --repo <OWNER/REPO> --watch` or a sleep loop at a stated interval; state
 the interval. Stop when the PR is merge-ready, merged, closed, or the user
 says stop, and say which.
 
@@ -84,12 +89,14 @@ says stop, and say which.
 
 Classification order, first match wins:
 
-- conflicts, `mergeStateStatus=BLOCKED`, or `BEHIND` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
+- conflicts, `mergeStateStatus=BLOCKED` or `DIRTY` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
 - any failed check → **blocked** (fix lane)
 - any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
 - mergeability or `mergeStateStatus=UNKNOWN` → **waiting** (re-poll; not an error)
+- `mergeStateStatus=UNSTABLE` → **waiting** until visible checks settle
+- `mergeStateStatus=BEHIND` → **waiting** for a base update when strict branch protection requires it
 - pending checks → **waiting**
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
