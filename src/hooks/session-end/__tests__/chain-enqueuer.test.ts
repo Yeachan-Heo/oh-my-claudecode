@@ -89,6 +89,35 @@ describe('readChainLedger / readProjectRoutes', () => {
     writeProjectRoutes(dir, 'not-an-object' as unknown as Record<string, unknown>);
     expect(readProjectRoutes(dir)).toBeNull();
   });
+
+  it('remaps the legacy full-template success:launch diagnose skill to debug (#4676)', () => {
+    const dir = tempDir();
+    const legacy = {
+      'success:intake': { stage: 'intent', skill: 'intent' },
+      'success:intent': { stage: 'launch', skill: 'launch' },
+      'success:launch': { stage: 'diagnose', skill: 'diagnose' },
+    };
+    writeProjectRoutes(dir, legacy);
+    expect(readProjectRoutes(dir)).toEqual({ ...legacy, 'success:launch': { stage: 'diagnose', skill: 'debug' } });
+    // The file on disk is never rewritten.
+    expect(JSON.parse(readFileSync(join(dir, '.omc', 'factory-routes.json'), 'utf8'))).toEqual(legacy);
+  });
+
+  it('leaves custom diagnose routes alone', () => {
+    const dir = tempDir();
+    const custom = {
+      'success:launch': { stage: 'diagnose', skill: 'diagnose', verify: ['npm test'] },
+      'failed:*': { stage: 'diagnose', skill: 'diagnose' },
+    };
+    writeProjectRoutes(dir, custom);
+    expect(readProjectRoutes(dir)).toEqual(custom);
+
+    const ownSkill = tempDir();
+    mkdirSync(join(ownSkill, '.claude', 'skills', 'diagnose'), { recursive: true });
+    writeFileSync(join(ownSkill, '.claude', 'skills', 'diagnose', 'SKILL.md'), '# diagnose\n', 'utf8');
+    writeProjectRoutes(ownSkill, { 'success:launch': { stage: 'diagnose', skill: 'diagnose' } });
+    expect(readProjectRoutes(ownSkill)).toEqual({ 'success:launch': { stage: 'diagnose', skill: 'diagnose' } });
+  });
 });
 
 describe('planChainEnqueue', () => {

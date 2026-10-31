@@ -64,11 +64,26 @@ export function readChainLedger(directory: string, sessionId: string): ChainLedg
   }
 }
 
+/**
+ * `omc factory init --no-narrow` used to seed `success:launch` with a
+ * `diagnose` skill that never shipped (#4676), and init never overwrites an
+ * existing table. Remap exactly that legacy default to the shipped `debug`
+ * skill at read time; any other value is a custom route and stays as written,
+ * and a project that ships its own `diagnose` skill keeps it.
+ */
+function migrateLegacyRoutes(directory: string, table: RouteTable): RouteTable {
+  const launch = table['success:launch'];
+  if (!launch || launch.stage !== 'diagnose' || launch.skill !== 'diagnose' || launch.verify) return table;
+  if (fs.existsSync(join(directory, '.claude', 'skills', 'diagnose', 'SKILL.md'))) return table;
+  return { ...table, 'success:launch': { stage: 'diagnose', skill: 'debug' } };
+}
+
 /** Project-level route table: `.omc/factory-routes.json`. The single source of truth. */
 export function readProjectRoutes(directory: string): RouteTable | null {
   try {
     const parsed: unknown = JSON.parse(fs.readFileSync(join(getOmcRoot(directory), 'factory-routes.json'), 'utf8'));
-    return normalizeRouteTable(parsed);
+    const table = normalizeRouteTable(parsed);
+    return table ? migrateLegacyRoutes(directory, table) : null;
   } catch {
     return null;
   }
