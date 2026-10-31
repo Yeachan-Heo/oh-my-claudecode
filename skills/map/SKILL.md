@@ -30,6 +30,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
 | Work is landing as a PR | `pr` |
+| A queue must land as one stacked PR chain | `stacked-delivery`; watch state: `babysit` |
 | An open PR needs driving to merge-ready | `babysit` |
 | The run taught the environment something | `refit` |
 
@@ -37,6 +38,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 
 | Job | Skill |
 |---|---|
+| A measured target needs climbing over multiple rounds | `hillclimb` |
 | A bug needs its root cause | `debug`; competing-hypothesis tracing: `trace` |
 | The question is why the code is this way | `why` |
 | A subsystem needs explaining | `how`; as a lesson: `teach` |
@@ -61,6 +63,8 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Job | Skill |
 |---|---|
 | Install, diagnose, configure | `omc-setup`; `omc-doctor`; `configure-notifications` |
+| A long session's lessons should be banked as skill edits | `reflect`; extraction: `skillify` |
+| A cross-project personal behavior profile is wanted | `personal-mode`; single facts: `remember` |
 | Manage skills themselves | `skill` (local); `skillify` (extract from session) |
 | Inspect orchestration state | `trace` (also the tracing lane); `graph` (DAG runtime) |
 | Cancel a mode | `cancel` |

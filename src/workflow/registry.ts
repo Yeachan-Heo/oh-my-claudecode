@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 77 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 81 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -195,6 +195,10 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'minimal-code-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline; never a default gate.' }),
   entry({ name: 'principles', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in cross-cutting principle library (idea credit: pstack); travels with lane delegation briefs; never a default gate.' }),
   entry({ name: 'benchmark-checklist', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in measurement discipline before reporting or acting on any measured number (idea credit: pstack); never a default gate.' }),
+  entry({ name: 'hillclimb', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in single-metric climbing loop with a fixed baseline, one commit per verified win, and a decision trail (idea credit: pstack); never a default gate.' }),
+  entry({ name: 'reflect', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in three-reviewer transcript audit proposing skill edits; proposes only, applies with user go (idea credit: pstack).' }),
+  entry({ name: 'personal-mode', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in user-level behavior profile drafted from transcripts with cited evidence; layers under project skills, never holds secrets (idea credit: pstack).' }),
+  entry({ name: 'stacked-delivery', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in linear stacked-PR delivery with patch-id verdicts and bottom-up landing; never merges (idea credit: pstack).' }),
   entry({ name: 'arena', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in multi-candidate bakeoff on Task fan-out or team worktree isolation (idea credit: pstack); never a default gate.' }),
   entry({ name: 'interrogate', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in adversarial multi-reviewer panel (idea credit: pstack); advisory verdict to review, never gates or merges on its own.' }),
   entry({ name: 'babysit', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in PR watch-and-fix loop on the watch-pr verdict policy (idea credit: pstack); never merges, rebases, force-pushes, or self-approves.' }),

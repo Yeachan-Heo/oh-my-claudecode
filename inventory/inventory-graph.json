@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "539bde01397343611672916533c68b8c67afe72e",
-    "sourceSha256": "918dc6448544be4e99bb41cfbed36d7710700f515d43b5c73a685993b6966f4f",
+    "head": "4f1edc79c0efd4259b76dfe2c52e76dbbb750ee5",
+    "sourceSha256": "7444bf77595755126bf1b714d7c564cf0a86c812a04932273c9ed900abc1046a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "539bde01397343611672916533c68b8c67afe72e",
-  "sourceSha256": "918dc6448544be4e99bb41cfbed36d7710700f515d43b5c73a685993b6966f4f",
+  "head": "4f1edc79c0efd4259b76dfe2c52e76dbbb750ee5",
+  "sourceSha256": "7444bf77595755126bf1b714d7c564cf0a86c812a04932273c9ed900abc1046a",
   "counts": {
     "public": {
-      "skills": 77,
+      "skills": 81,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 126
+      "total": 130
     },
     "internal": {
       "hookFiles": 333,
@@ -37,14 +37,14 @@
       "total": 5742
     },
     "prompt": {
-      "promptLikeFiles": 61
+      "promptLikeFiles": 66
     },
-    "skills": 77,
+    "skills": 81,
     "commands": 21,
     "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 61
+    "promptLikeFiles": 66
   },
   "public": {
     "skills": [
@@ -79,6 +79,7 @@
       "get-pr-comments",
       "graph",
       "harbor",
+      "hillclimb",
       "how",
       "hud",
       "in-your-own-words",
@@ -95,6 +96,7 @@
       "models",
       "omc-doctor",
       "omc-setup",
+      "personal-mode",
       "plan",
       "pr",
       "principles",
@@ -103,6 +105,7 @@
       "ralplan",
       "recall",
       "refit",
+      "reflect",
       "release",
       "remember",
       "research",
@@ -113,6 +116,7 @@
       "show-me-your-work",
       "skill",
       "skillify",
+      "stacked-delivery",
       "tdd",
       "teach",
       "team",
@@ -780,7 +784,12 @@
       "scripts/generate-prompt-projections.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
       "scripts/measure-prompt-ssot.ts",
+      "skills/how/references/explainer-prompt.md",
+      "skills/how/references/explorer-prompt.md",
+      "skills/interrogate/references/reviewer-prompt.md",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
+      "skills/why/references/investigator-prompt.md",
+      "skills/why/references/synthesizer-prompt.md",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
       "src/__tests__/hud/prompt-time.test.ts",
@@ -7065,7 +7074,12 @@
       "scripts/generate-prompt-projections.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
       "scripts/measure-prompt-ssot.ts",
+      "skills/how/references/explainer-prompt.md",
+      "skills/how/references/explorer-prompt.md",
+      "skills/interrogate/references/reviewer-prompt.md",
       "skills/project-session-manager/tests/test-psm-prompt-injection.sh",
+      "skills/why/references/investigator-prompt.md",
+      "skills/why/references/synthesizer-prompt.md",
       "src/__tests__/auto-upgrade-prompt.test.ts",
       "src/__tests__/helpers/prompt-test-helpers.ts",
       "src/__tests__/hud/prompt-time.test.ts",
@@ -38435,6 +38449,16 @@
         "path": "skills/architect/SKILL.md"
       },
       {
+        "id": "skills/architect/references/design-red-flags.md",
+        "kind": "other",
+        "path": "skills/architect/references/design-red-flags.md"
+      },
+      {
+        "id": "skills/architect/references/rationale-template.md",
+        "kind": "other",
+        "path": "skills/architect/references/rationale-template.md"
+      },
+      {
         "id": "skills/architecture-survey/SKILL.md",
         "kind": "skill",
         "path": "skills/architecture-survey/SKILL.md"
@@ -38468,6 +38492,16 @@
         "id": "skills/babysit/SKILL.md",
         "kind": "skill",
         "path": "skills/babysit/SKILL.md"
+      },
+      {
+        "id": "skills/babysit/references/bugbot-triage.md",
+        "kind": "other",
+        "path": "skills/babysit/references/bugbot-triage.md"
+      },
+      {
+        "id": "skills/babysit/references/merge-safety.md",
+        "kind": "other",
+        "path": "skills/babysit/references/merge-safety.md"
       },
       {
         "id": "skills/benchmark-checklist/SKILL.md",
@@ -38575,9 +38609,24 @@
         "path": "skills/harbor/SKILL.md"
       },
       {
+        "id": "skills/hillclimb/SKILL.md",
+        "kind": "skill",
+        "path": "skills/hillclimb/SKILL.md"
+      },
+      {
         "id": "skills/how/SKILL.md",
         "kind": "skill",
         "path": "skills/how/SKILL.md"
+      },
+      {
+        "id": "skills/how/references/explainer-prompt.md",
+        "kind": "other",
+        "path": "skills/how/references/explainer-prompt.md"
+      },
+      {
+        "id": "skills/how/references/explorer-prompt.md",
+        "kind": "other",
+        "path": "skills/how/references/explorer-prompt.md"
       },
       {
         "id": "skills/hud/SKILL.md",
@@ -38598,6 +38647,21 @@
         "id": "skills/interrogate/SKILL.md",
         "kind": "skill",
         "path": "skills/interrogate/SKILL.md"
+      },
+      {
+        "id": "skills/interrogate/references/lead-judgment.md",
+        "kind": "other",
+        "path": "skills/interrogate/references/lead-judgment.md"
+      },
+      {
+        "id": "skills/interrogate/references/reviewer-prompt.md",
+        "kind": "other",
+        "path": "skills/interrogate/references/reviewer-prompt.md"
+      },
+      {
+        "id": "skills/interrogate/references/rubric.md",
+        "kind": "other",
+        "path": "skills/interrogate/references/rubric.md"
       },
       {
         "id": "skills/ketchup/SKILL.md",
@@ -38678,6 +38742,11 @@
         "id": "skills/omc-setup/phases/04-welcome.md",
         "kind": "other",
         "path": "skills/omc-setup/phases/04-welcome.md"
+      },
+      {
+        "id": "skills/personal-mode/SKILL.md",
+        "kind": "skill",
+        "path": "skills/personal-mode/SKILL.md"
       },
       {
         "id": "skills/plan/SKILL.md",
@@ -38815,6 +38884,16 @@
         "path": "skills/refit/SKILL.md"
       },
       {
+        "id": "skills/reflect/SKILL.md",
+        "kind": "skill",
+        "path": "skills/reflect/SKILL.md"
+      },
+      {
+        "id": "skills/reflect/references/reviewer-lenses.md",
+        "kind": "other",
+        "path": "skills/reflect/references/reviewer-lenses.md"
+      },
+      {
         "id": "skills/release/SKILL.md",
         "kind": "skill",
         "path": "skills/release/SKILL.md"
@@ -38925,6 +39004,11 @@
         "path": "skills/skillify/SKILL.md"
       },
       {
+        "id": "skills/stacked-delivery/SKILL.md",
+        "kind": "skill",
+        "path": "skills/stacked-delivery/SKILL.md"
+      },
+      {
         "id": "skills/tdd/SKILL.md",
         "kind": "skill",
         "path": "skills/tdd/SKILL.md"
@@ -38955,6 +39039,11 @@
         "path": "skills/typescript-best-practices/SKILL.md"
       },
       {
+        "id": "skills/typescript-best-practices/references/patterns.md",
+        "kind": "other",
+        "path": "skills/typescript-best-practices/references/patterns.md"
+      },
+      {
         "id": "skills/ultragoal/SKILL.md",
         "kind": "skill",
         "path": "skills/ultragoal/SKILL.md"
@@ -38978,6 +39067,26 @@
         "id": "skills/why/SKILL.md",
         "kind": "skill",
         "path": "skills/why/SKILL.md"
+      },
+      {
+        "id": "skills/why/references/epistemics.md",
+        "kind": "other",
+        "path": "skills/why/references/epistemics.md"
+      },
+      {
+        "id": "skills/why/references/investigator-prompt.md",
+        "kind": "other",
+        "path": "skills/why/references/investigator-prompt.md"
+      },
+      {
+        "id": "skills/why/references/source-playbooks.md",
+        "kind": "other",
+        "path": "skills/why/references/source-playbooks.md"
+      },
+      {
+        "id": "skills/why/references/synthesizer-prompt.md",
+        "kind": "other",
+        "path": "skills/why/references/synthesizer-prompt.md"
       },
       {
         "id": "skills/wiki/SKILL.md",
@@ -49827,6 +49936,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/hillclimb/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/how/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49907,6 +50021,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/personal-mode/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/plan/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -49943,6 +50062,11 @@
       },
       {
         "from": "skills/refit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/reflect/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -50013,6 +50137,11 @@
       },
       {
         "from": "skills/skillify/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/stacked-delivery/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -90593,12 +90722,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7932,
-      "edgeCount": 8731,
+      "nodeCount": 7951,
+      "edgeCount": 8735,
       "importEdgeCount": 7247,
-      "registerEdgeCount": 98
+      "registerEdgeCount": 102
     }
   },
-  "inventorySha256": "307201e72a7a2250564d12577e024f1ddb218f8fc8897d61dbf5a117608f8d6f",
-  "manifestSha256": "1f94750d0cadef9768efbb830fe7e8de9ad5726c653b7bf3cf7dcdd0acb15d27"
+  "inventorySha256": "237b931b63e45595f3bf5b999c711978a222c5b92c74c0b6d298925e3bdc9acf",
+  "manifestSha256": "0a243823100407024922b5d1b57fee75487ecc39a2d4b4ac362dcd9ad388765d"
 }
