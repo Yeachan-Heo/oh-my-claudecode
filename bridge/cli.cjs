@@ -64245,10 +64245,17 @@ function readChainLedger(directory, sessionId) {
     return null;
   }
 }
+function migrateLegacyRoutes(directory, table) {
+  const launch = table["success:launch"];
+  if (!launch || launch.stage !== "diagnose" || launch.skill !== "diagnose" || launch.verify) return table;
+  if (fs17.existsSync((0, import_path90.join)(directory, ".claude", "skills", "diagnose", "SKILL.md"))) return table;
+  return { ...table, "success:launch": { stage: "diagnose", skill: "debug" } };
+}
 function readProjectRoutes(directory) {
   try {
     const parsed = JSON.parse(fs17.readFileSync((0, import_path90.join)(getOmcRoot(directory), "factory-routes.json"), "utf8"));
-    return normalizeRouteTable(parsed);
+    const table = normalizeRouteTable(parsed);
+    return table ? migrateLegacyRoutes(directory, table) : null;
   } catch {
     return null;
   }
@@ -132547,7 +132554,7 @@ function flagStall(stall, deps) {
 init_worktree_paths();
 var INTAKE_LABEL = "intake";
 var INTAKE_ROUTE_TABLE = { "success:intake": { stage: "intent", skill: "intent" } };
-var CI_ROUTE_TABLE = { "failed:ci": { stage: "diagnose", skill: "diagnose" } };
+var CI_ROUTE_TABLE = { "failed:ci": { stage: "diagnose", skill: "debug" } };
 function verifySignature(secret, rawBody, signatureHeader) {
   if (!signatureHeader?.startsWith("sha256=")) return false;
   const provided = signatureHeader.slice("sha256=".length);
@@ -132938,7 +132945,7 @@ function buildRouteTableFull() {
   return {
     "success:intake": { stage: "intent", skill: "intent" },
     "success:intent": { stage: "launch", skill: "launch" },
-    "success:launch": { stage: "diagnose", skill: "diagnose" }
+    "success:launch": { stage: "diagnose", skill: "debug" }
   };
 }
 function validateFactoryPrerequisites(cwd2) {
