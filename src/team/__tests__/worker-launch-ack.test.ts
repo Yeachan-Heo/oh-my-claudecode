@@ -2452,6 +2452,7 @@ describe('worker launch acknowledgement', () => {
       TMP: 'C:\\Temp',
       SystemRoot: 'C:\\Windows',
       USERPROFILE: 'C:\\Users\\provider',
+      NoDefaultCurrentDirectoryInExePath: '1',
     });
     expect(Object.keys(payload.provider_env).filter(key => key.toUpperCase() === 'SYSTEMROOT'))
       .toEqual(['SystemRoot']);
@@ -2525,7 +2526,7 @@ describe('worker launch acknowledgement', () => {
     }, 'darwin')).toEqual({ PATH: '/usr/bin:/bin', HOME: '/Users/provider' });
     expect(buildProviderEnvironment(undefined, {
       PATH: 'C:\\Windows\\System32', USERPROFILE: '', HOME: '/home/wrong-platform',
-    }, 'win32')).toEqual({ PATH: 'C:\\Windows\\System32' });
+    }, 'win32')).toEqual({ PATH: 'C:\\Windows\\System32', NoDefaultCurrentDirectoryInExePath: '1' });
 
     expect(buildProviderEnvironment({ HOME: '/home/explicit' }, {
       PATH: '/usr/bin:/bin', HOME: '/home/ambient',
@@ -2538,7 +2539,7 @@ describe('worker launch acknowledgement', () => {
     }, 'win32')).toMatchObject({ PATH: 'C:\\Windows\\System32', USERPROFILE: 'D:\\Users\\explicit' });
     expect(buildProviderEnvironment({ userprofile: 'D:\\Users\\mixed-case' }, {
       PATH: 'C:\\Windows\\System32', USERPROFILE: 'C:\\Users\\ambient',
-    }, 'win32')).toEqual({ PATH: 'C:\\Windows\\System32', userprofile: 'D:\\Users\\mixed-case' });
+    }, 'win32')).toEqual({ PATH: 'C:\\Windows\\System32', userprofile: 'D:\\Users\\mixed-case', NoDefaultCurrentDirectoryInExePath: '1' });
     expect(buildProviderEnvironment({ HOME: '' }, {
       PATH: '/usr/bin:/bin', HOME: '/home/ambient',
     }, 'linux')).toMatchObject({ PATH: '/usr/bin:/bin', HOME: '' });
@@ -3006,7 +3007,7 @@ describe('worker launch acknowledgement', () => {
         [process.execPath, '-e', "require('fs').writeFileSync(process.argv[1],JSON.stringify(process.argv.slice(2)))", outputPath, ...payload],
         'win32', { SystemRoot: process.env.SystemRoot },
       );
-      expect(invocation).toEqual({ command: process.execPath, args: expect.any(Array) });
+      expect(invocation).toEqual({ command: process.execPath, args: expect.any(Array), env: { NoDefaultCurrentDirectoryInExePath: '1' } });
       await new Promise<void>((resolve, reject) => {
         const child = spawn(invocation.command, invocation.args, { stdio: 'ignore' });
         child.once('error', reject);
