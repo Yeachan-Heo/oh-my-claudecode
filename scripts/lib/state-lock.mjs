@@ -572,14 +572,14 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
   }
 
   const openBusyTimeoutMs = boundedBusyTimeoutMs(busyTimeoutMs, operationDeadline);
-  const openStartedAt = Date.now();
+  const openStartedAt = process.hrtime.bigint();
   const db = openMutationDb(lockPath, bypassTestOverride, openBusyTimeoutMs);
   if (!db) {
     // Concurrent first-time setup (journal_mode/CREATE) can return SQLITE_BUSY
-    // without running the busy handler; only a BUSY that waited out the busy
-    // timeout is terminal contention.
+    // without running the busy handler; retry that while attempts remain. A BUSY
+    // that waited out the busy timeout, or one on the last attempt, is terminal.
     if (lastLockFailure === 'contention') {
-      return attempts > 1 && Date.now() - openStartedAt < openBusyTimeoutMs ? retryAcquisition() : null;
+      return attempts > 1 && Number(process.hrtime.bigint() - openStartedAt) / 1_000_000 < openBusyTimeoutMs ? retryAcquisition() : null;
     }
     if (sqliteBindingLoadError) return acquireFileLock(lockPath, attempts, processProbeDeadline, operationDeadline, testHooks);
     if (attempts <= 1) {

@@ -593,19 +593,21 @@ describe('atomicWriteJson', () => {
         return pragma.call(this, source, ...rest);
       };
       const { acquireStateFileLockAtPathSync, getStateFileLockFailureKind, releaseStateFileLockSync } = await import(process.argv[1]);
-      const lock = acquireStateFileLockAtPathSync(process.argv[2], 2, true, false, ${SQLITE_CONTENTION_BUSY_TIMEOUT_MS});
+      const lock = acquireStateFileLockAtPathSync(process.argv[2], Number(process.argv[4]), true, false, ${SQLITE_CONTENTION_BUSY_TIMEOUT_MS});
       const failure = getStateFileLockFailureKind();
       if (lock) releaseStateFileLockSync(lock);
       process.stdout.write(JSON.stringify({ lockAcquired: Boolean(lock), failure, journalModeCalls }));
     `;
-    const run = (busyDelayMs: number, name: string) => JSON.parse(execFileSync(
+    const run = (busyDelayMs: number, name: string, attempts = 2) => JSON.parse(execFileSync(
       process.execPath,
-      ['--input-type=module', '-e', script, stateLockUrl, join(directory, name), String(busyDelayMs)],
+      ['--input-type=module', '-e', script, stateLockUrl, join(directory, name), String(busyDelayMs), String(attempts)],
       { encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } },
     ));
 
     expect(run(0, 'early-busy.json.lock')).toEqual({ lockAcquired: true, failure: null, journalModeCalls: 2 });
     expect(run(SQLITE_CONTENTION_BUSY_TIMEOUT_MS + 25, 'timed-out-busy.json.lock'))
+      .toEqual({ lockAcquired: false, failure: 'contention', journalModeCalls: 1 });
+    expect(run(0, 'last-attempt-busy.json.lock', 1))
       .toEqual({ lockAcquired: false, failure: 'contention', journalModeCalls: 1 });
   });
 
