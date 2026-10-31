@@ -23,7 +23,7 @@ export const INTAKE_LABEL = 'intake';
 export const INTAKE_ROUTE_TABLE: RouteTable = { 'success:intake': { stage: 'intent', skill: 'intent' } };
 
 /** CI check-suite failures feed the diagnose stage of the same chain. */
-export const CI_ROUTE_TABLE: RouteTable = { 'failed:ci': { stage: 'diagnose', skill: 'diagnose' } };
+export const CI_ROUTE_TABLE: RouteTable = { 'failed:ci': { stage: 'diagnose', skill: 'debug' } };
 
 /** GitHub issue webhook payload subset the daemon needs. */
 export interface TrackerEvent {
