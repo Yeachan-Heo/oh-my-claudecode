@@ -4,10 +4,10 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
-      "pullNumber": 4690,
+      "pullNumber": 4692,
       "targetRef": "dev",
       "mergeBaseSha": "f5f46c0c19cc431582dad3a2772e9f6707e53cd2",
-      "headSha": "dff0ab561f3994ae1c44d8f21a97457fc70bf690",
+      "headSha": "46bf8d20ddbaf30921f1a4f0ece65027b73e5206",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-11-30T00:00:00.000Z",
       "generatedDelta": {
