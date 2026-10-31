@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, join, parse, resolve } from 'path';
-import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, statSync, type Stats } from 'fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, statSync, type BigIntStats } from 'fs';
 
 /**
  * The hook runner's required entry points. Keep this aligned with isPluginRoot()
@@ -14,30 +14,30 @@ export function isOmcPluginCacheIdentity(pluginName: string, marketplace: string
   return OMC_PLUGIN_CACHE_IDENTITIES.has(`${pluginName}@${marketplace}`.toLowerCase());
 }
 
-export function sameFileSystemIdentity(left: Stats, right: Stats): boolean {
+export function sameFileSystemIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return (
-    typeof left.dev === 'number' &&
-    typeof left.ino === 'number' &&
-    left.ino !== 0 &&
-    typeof right.dev === 'number' &&
-    typeof right.ino === 'number' &&
-    right.ino !== 0 &&
+    typeof left.dev === 'bigint' &&
+    typeof left.ino === 'bigint' &&
+    left.ino !== 0n &&
+    typeof right.dev === 'bigint' &&
+    typeof right.ino === 'bigint' &&
+    right.ino !== 0n &&
     left.dev === right.dev &&
     left.ino === right.ino
   );
 }
 
-export function hasAncestorWithIdentity(path: string, identity: Stats): boolean {
+export function hasAncestorWithIdentity(path: string, identity: BigIntStats): boolean {
   let currentPath = path;
   while (true) {
-    if (sameFileSystemIdentity(statSync(currentPath), identity)) return true;
+    if (sameFileSystemIdentity(statSync(currentPath, { bigint: true }), identity)) return true;
     const parentPath = dirname(currentPath);
     if (parentPath === currentPath) return false;
     currentPath = parentPath;
   }
 }
 
-export function firstChildBelowDirectoryIdentity(path: string, directoryIdentity: Stats): string | undefined {
+export function firstChildBelowDirectoryIdentity(path: string, directoryIdentity: BigIntStats): string | undefined {
   // Relative install paths retain the existing lexical-only matching semantics.
   if (!isAbsolute(path)) return undefined;
   let currentPath = resolve(path);
@@ -45,7 +45,7 @@ export function firstChildBelowDirectoryIdentity(path: string, directoryIdentity
     const parentPath = dirname(currentPath);
     if (parentPath === currentPath) return undefined;
     try {
-      if (sameFileSystemIdentity(statSync(parentPath), directoryIdentity)) return basename(currentPath);
+      if (sameFileSystemIdentity(statSync(parentPath, { bigint: true }), directoryIdentity)) return basename(currentPath);
     } catch {
       // The registered version can be missing while its namespace still exists.
     }
@@ -63,7 +63,7 @@ export function pathRootForTraversal(path: string): string {
   return parse(path).root;
 }
 
-function pathTraversesFileSystemIdentity(path: string, identity: Stats): boolean {
+function pathTraversesFileSystemIdentity(path: string, identity: BigIntStats): boolean {
   let currentPath: string;
   let components: string[];
   const splitComponents = (value: string, root: string): string[] =>
@@ -98,7 +98,7 @@ function pathTraversesFileSystemIdentity(path: string, identity: Stats): boolean
   const activeLinks = new Set<string>();
 
   try {
-    if (sameFileSystemIdentity(lstatSync(currentPath), identity)) return true;
+    if (sameFileSystemIdentity(lstatSync(currentPath, { bigint: true }), identity)) return true;
   } catch {
     return false;
   }
@@ -116,9 +116,9 @@ function pathTraversesFileSystemIdentity(path: string, identity: Stats): boolean
     }
 
     const nextPath = join(currentPath, step);
-    let nextStats: Stats;
+    let nextStats: BigIntStats;
     try {
-      nextStats = lstatSync(nextPath);
+      nextStats = lstatSync(nextPath, { bigint: true });
     } catch {
       // Earlier components have already been checked; a missing suffix cannot traverse a later link.
       return false;
@@ -130,7 +130,7 @@ function pathTraversesFileSystemIdentity(path: string, identity: Stats): boolean
     }
 
     const linkKey =
-      typeof nextStats.dev === 'number' && typeof nextStats.ino === 'number' && nextStats.ino !== 0
+      typeof nextStats.dev === 'bigint' && typeof nextStats.ino === 'bigint' && nextStats.ino !== 0n
         ? `inode:${nextStats.dev}:${nextStats.ino}`
         : `path:${process.platform === 'win32' ? nextPath.toLowerCase() : nextPath}`;
     if (activeLinks.has(linkKey)) return false;
@@ -168,7 +168,7 @@ function pathTraversesFileSystemIdentity(path: string, identity: Stats): boolean
  * True when `path` is a usable plugin root. When supplied, the stale identity
  * also prevents required paths from traversing the version being demoted.
  */
-export function isUsableVersionPath(path: string, staleVersionIdentity?: Stats): boolean {
+export function isUsableVersionPath(path: string, staleVersionIdentity?: BigIntStats): boolean {
   let stats;
   try {
     stats = lstatSync(path);
@@ -195,7 +195,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function hasUsableOmcHookTargets(path: string, staleVersionIdentity: Stats): boolean {
+function hasUsableOmcHookTargets(path: string, staleVersionIdentity: BigIntStats): boolean {
   let manifest: unknown;
   try {
     manifest = JSON.parse(readFileSync(join(path, 'hooks', 'hooks.json'), 'utf8'));
@@ -245,18 +245,18 @@ interface PayloadScan {
 
 function hasResolvablePluginSymlinks(
   directory: string,
-  staleVersionIdentity: Stats,
-  ancestors: Stats[] = [],
+  staleVersionIdentity: BigIntStats,
+  ancestors: BigIntStats[] = [],
   payload?: PayloadScan,
 ): boolean {
-  const directoryStats = statSync(directory);
+  const directoryStats = statSync(directory, { bigint: true });
   if (ancestors.some((identity) => sameFileSystemIdentity(directoryStats, identity))) return false;
   const branch = [...ancestors, directoryStats];
   const entries = readdirSync(directory, { withFileTypes: true });
   for (const entry of entries) {
     const entryPath = join(directory, entry.name);
     if (entry.isSymbolicLink()) {
-      const entryStats = statSync(entryPath);
+      const entryStats = statSync(entryPath, { bigint: true });
       if (pathTraversesFileSystemIdentity(entryPath, staleVersionIdentity)) return false;
       if (entryStats.isDirectory()) {
         if (branch.some((identity) => sameFileSystemIdentity(entryStats, identity))) continue;
@@ -264,7 +264,7 @@ function hasResolvablePluginSymlinks(
       } else if (
         payload &&
         entryStats.isFile() &&
-        entryStats.size > 0 &&
+        entryStats.size > 0n &&
         !FILESYSTEM_JUNK_NAMES.has(entry.name.toLowerCase())
       ) {
         payload.found = true;
@@ -278,7 +278,7 @@ function hasResolvablePluginSymlinks(
   return true;
 }
 
-export function isUsableGenericPluginTarget(target: string, staleVersionIdentity: Stats): boolean {
+export function isUsableGenericPluginTarget(target: string, staleVersionIdentity: BigIntStats): boolean {
   const payload = { found: false };
   return hasResolvablePluginSymlinks(target, staleVersionIdentity, [], payload) && payload.found;
 }
