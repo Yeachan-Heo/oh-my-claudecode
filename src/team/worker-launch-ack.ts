@@ -38,6 +38,8 @@ const WINDOWS_SUPERVISOR_PROTOCOL = 'worker-launch-windows-supervisor-v1';
 const WINDOWS_PROVIDER_LINE_MAX = 8000;
 /** The supervisor's fixed line variable; its environment block is built from scratch. */
 const WINDOWS_PROVIDER_LINE_VAR = '_OMC_PROVIDER_LINE';
+/** Set for cmd-hosted providers: cmd.exe then searches only PATH, never the cwd, for a bare command. */
+const WINDOWS_NO_CWD_EXE_SEARCH_VAR = 'NoDefaultCurrentDirectoryInExePath';
 
 export function buildWindowsSupervisorSource(): string {
   return [
@@ -144,10 +146,12 @@ export function buildWindowsSupervisorSource(): string {
     // it through cmd.exe with the MSVC-quoted line. cmd.exe from the system
     // directory is started instead with a fixed command line; it expands the
     // cmd-quoted provider line once from its environment block and clears
-    // the variable before the provider runs.
+    // the variable before the provider runs. NoDefaultCurrentDirectoryInExePath
+    // keeps that cmd (and a shim's bare `node`) from running a command
+    // planted in the worker cwd.
     '  $argv = [string[]]$payload.provider_argv; $app = [string]$argv[0]; $providerLine = $null',
-    `  if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine =[O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
-    `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
+    `  if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
+    `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' -and ($null -eq $providerLine -or $_.Name -ne '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}') } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine }; $envPairs += [pscustomobject]@{ Name = '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}'; Value = '1' } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
     '  [O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)',
     '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; $jobAssigned = $true; if ([O]::ResumeThread($pi.hThread) -eq [uint32]::MaxValue) { throw "worker_launch_resume_failed" }',
     '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
@@ -2082,7 +2086,9 @@ export function buildProviderSpawnInvocation(
     // cmd expands it exactly once: percent expansion never rescans its own
     // result, and the balanced quoting keeps every metacharacter inert. The
     // child clears the variable before the provider runs. A bare name keeps
-    // this route so cmd's PATHEXT search still finds a batch shim.
+    // this route so cmd's PATHEXT search still finds a batch shim;
+    // NoDefaultCurrentDirectoryInExePath limits that search, and a shim's
+    // own bare `node`, to PATH so a command planted in the cwd never runs.
     const batchScript = [
       '@echo off',
       `if not defined ${lineVar} exit /b 87`,
@@ -2093,7 +2099,7 @@ export function buildProviderSpawnInvocation(
       command: comSpec,
       args: ['/d', '/v:off', '/s', '/c'],
       batchScript,
-      env: { [lineVar]: buildWindowsBatchProviderLine(providerArgv) },
+      env: { [lineVar]: buildWindowsBatchProviderLine(providerArgv), [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' },
     };
   }
   return { command, args };

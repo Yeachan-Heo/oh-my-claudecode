@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { buildWindowsSupervisorSource } from '../worker-launch-ack.js';
@@ -31,9 +31,10 @@ describe('generated Windows worker supervisor', () => {
   it('routes a batch argv[0] through system cmd.exe with the line in the environment block', () => {
     const source = buildWindowsSupervisorSource();
 
-    expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine =[O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
+    expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
     expect(source).toContain(`$cmd = '"' + $app + '" /d /v:off /s /c "set "_OMC_PROVIDER_LINE=" & %_OMC_PROVIDER_LINE%"' } else { $cmd = [O]::BuildCommandLine($argv) }`);
-    expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' }");
+    expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' -and ($null -eq $providerLine -or $_.Name -ne 'NoDefaultCurrentDirectoryInExePath') }");
+    expect(source).toContain("$envPairs += [pscustomobject]@{ Name = 'NoDefaultCurrentDirectoryInExePath'; Value = '1' }");
     expect(source).toContain('[O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)');
     expect(source).toContain(`if (c < ' ') throw new ArgumentException("worker_launch_provider_argv_invalid")`);
     expect(source).toContain('if (b.Length > 8000) throw new ArgumentException("worker_launch_provider_argv_too_long")');
@@ -111,6 +112,63 @@ $rejections = @(@('a', ('x' + [char]0x1A + 'y')), @('a', ('A' * 8000))) | ForEac
       expect(result.rejections).toEqual(['worker_launch_provider_argv_invalid', 'worker_launch_provider_argv_too_long']);
       expect(JSON.parse(await readFile(outputPath, 'utf8'))).toEqual({ argv: payload, leaked: false });
       expect(existsSync(canaryPath)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 65_000);
+
+  it.runIf(process.platform === 'win32')('runs the PATH node for an npm-style shim even when the cwd holds a planted node.cmd', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-cwd-'));
+    try {
+      const shimDir = join(root, 'npm');
+      await mkdir(shimDir, { recursive: true });
+      const shimPath = join(shimDir, 'codex.cmd');
+      const outputPath = join(root, 'ran.txt');
+      const canaryPath = join(root, 'planted.txt');
+      // npm's cmd-shim falls back to a bare `node` when no node.exe sits beside it.
+      await writeFile(shimPath, `@ECHO off\r\nSETLOCAL\r\nIF EXIST "%~dp0\\node.exe" (SET "_prog=%~dp0\\node.exe") ELSE (SET "_prog=node")\r\n"%_prog%" -e "require('fs').writeFileSync(process.argv[1],'real')" %*\r\n`, 'utf8');
+      await writeFile(join(root, 'node.cmd'), `@echo off\r\necho planted>"${canaryPath}"\r\n`, 'utf8');
+      const source = buildWindowsSupervisorSource();
+      const lines = source.split('\n');
+      const launchLines = ['  $argv = ', '  if ($app -match ', '  $envPairs = '].map(prefix => lines.find(candidate => candidate.startsWith(prefix))!);
+      const harnessInput = JSON.stringify({
+        source,
+        launchLines,
+        payload: {
+          provider_argv: [shimPath, outputPath],
+          provider_env: { SystemRoot: process.env.SystemRoot, PATH: `${dirname(process.execPath)};${join(process.env.SystemRoot!, 'System32')}` },
+          cwd: root,
+        },
+      });
+      const harness = String.raw`
+$ErrorActionPreference = 'Stop'
+$in = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$tokens = $null; $errors = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseInput($in.source, [ref]$tokens, [ref]$errors)
+$commands = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Add-Type' }, $true))
+Invoke-Expression $commands[0].Extent.Text
+Add-Type @"
+using System; using System.Text; using System.Runtime.InteropServices;
+public static class H {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct SI { public int cb; public IntPtr r; public IntPtr d; public IntPtr t; public int x; public int y; public int xs; public int ys; public int xc; public int yc; public int fa; public int f; public short sw; public short r2; public IntPtr r3; public IntPtr i; public IntPtr o; public IntPtr e; }
+  [StructLayout(LayoutKind.Sequential)] public struct PI { public IntPtr hProcess; public IntPtr hThread; public uint pid; public uint tid; }
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool CreateProcessW(string app, StringBuilder cmd, IntPtr pa, IntPtr ta, bool inherit, uint flags, IntPtr env, string dir, ref SI si, out PI pi);
+  [DllImport("kernel32.dll")] public static extern uint WaitForSingleObject(IntPtr h, uint ms);
+}
+"@
+$payload = $in.payload
+foreach ($line in $in.launchLines) { Invoke-Expression $line }
+$si = New-Object H+SI; $si.cb = [Runtime.InteropServices.Marshal]::SizeOf($si); $pi = New-Object H+PI
+if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr]::Zero, [IntPtr]::Zero, $false, 0x08000400, $envPtr, $payload.cwd, [ref]$si, [ref]$pi)) { throw 'create_process_failed' }
+[H]::WaitForSingleObject($pi.hProcess, 30000) | Out-Null
+`;
+      execFileSync(
+        join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
+        ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(harness, 'utf16le').toString('base64')],
+        { input: harnessInput, encoding: 'utf8', windowsHide: true, timeout: 60_000 },
+      );
+      expect(existsSync(canaryPath)).toBe(false);
+      expect(await readFile(outputPath, 'utf8')).toBe('real');
     } finally {
       await rm(root, { recursive: true, force: true });
     }

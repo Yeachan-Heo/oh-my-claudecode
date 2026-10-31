@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 import * as processUtils from '../../platform/process-utils.js';
 import {
@@ -3006,6 +3006,37 @@ describe('worker launch acknowledgement', () => {
       await expect(runBatchProvider(join(cwd, 'bin'), payload, invocationEnv => ({
         ...process.env, ComSpec: process.execPath, COMSPEC: process.execPath, ...invocationEnv,
       }))).resolves.toEqual({ exitCode: 0, output: { argv: payload, leaked: false } });
+    });
+
+    it('runs the PATH node for an npm-style shim even when the cwd holds a planted node.cmd', async () => {
+      cwd = await createFixture('worker-launch-native-cwd-');
+      const shimDir = join(cwd, 'npm');
+      await mkdir(shimDir, { recursive: true });
+      const shimPath = join(shimDir, 'codex.cmd');
+      const outputPath = join(cwd, 'ran.txt');
+      const canaryPath = join(cwd, 'planted.txt');
+      // npm's cmd-shim falls back to a bare `node` when no node.exe sits beside it.
+      await writeFile(shimPath, `@ECHO off\r\nSETLOCAL\r\nIF EXIST "%~dp0\\node.exe" (SET "_prog=%~dp0\\node.exe") ELSE (SET "_prog=node")\r\n"%_prog%" -e "require('fs').writeFileSync(process.argv[1],'real')" %*\r\n`, 'utf8');
+      await writeFile(join(cwd, 'node.cmd'), `@echo off\r\necho planted>"${canaryPath}"\r\n`, 'utf8');
+      const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(
+        [shimPath, outputPath], 'win32', { SystemRoot: process.env.SystemRoot },
+      ));
+      try {
+        const exitCode = await new Promise<number | null>((resolve, reject) => {
+          const child = spawn(invocation.command, invocation.args, {
+            cwd, stdio: 'pipe', windowsVerbatimArguments: invocation.windowsVerbatimArguments,
+            // A minimal env: the host may already set NoDefaultCurrentDirectoryInExePath.
+            env: { SystemRoot: process.env.SystemRoot, PATH: `${dirname(process.execPath)};${join(process.env.SystemRoot!, 'System32')}`, ...invocation.env },
+          });
+          child.once('error', reject);
+          child.once('exit', code => resolve(code));
+        });
+        expect(exitCode).toBe(0);
+        expect(existsSync(canaryPath)).toBe(false);
+        expect(await readFile(outputPath, 'utf8')).toBe('real');
+      } finally {
+        await invocation.cleanup();
+      }
     });
 
     it('refuses to run the wrapper when the spawn env lacks its line variable', async () => {
