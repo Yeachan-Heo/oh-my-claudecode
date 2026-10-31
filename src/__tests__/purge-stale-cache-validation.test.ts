@@ -152,8 +152,8 @@ describe('purgeStalePluginCacheVersions validation', () => {
     const staleVersion = join(pluginDir, '4.15.6-BETA');
     const sameDirectoryStats = {
       ...staleStats(),
-      dev: 1,
-      ino: 12345,
+      dev: 1n,
+      ino: 12345n,
     } as ReturnType<typeof statSync>;
     const originalPlatform = process.platform;
     Object.defineProperty(process, 'platform', {
@@ -212,12 +212,12 @@ describe('purgeStalePluginCacheVersions validation', () => {
     const registeredActive = join(aliasedPluginDir, '4.15.10');
     const active = join(pluginDir, '4.15.10');
     const stale = join(pluginDir, '4.15.6');
-    const namespaceStats = { ...staleStats(), dev: 1, ino: 101 } as ReturnType<typeof statSync>;
-    const activeStats = { ...staleStats(), dev: 1, ino: 102 } as ReturnType<typeof statSync>;
+    const namespaceStats = { ...staleStats(), dev: 1n, ino: 101n } as ReturnType<typeof statSync>;
+    const activeStats = { ...staleStats(), dev: 1n, ino: 102n } as ReturnType<typeof statSync>;
     const staleVersionStats = {
       ...staleStats(),
-      dev: 1,
-      ino: 103,
+      dev: 1n,
+      ino: 103n,
     } as ReturnType<typeof statSync>;
     const originalPlatform = process.platform;
     Object.defineProperty(process, 'platform', {
