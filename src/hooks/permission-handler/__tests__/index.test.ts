@@ -228,6 +228,15 @@ describe('permission-handler', () => {
       expect(isSafeRepoInspectionCommand('sed -n 1,20p missing.ts', testDir)).toBe(false);
     });
 
+    it('rejects sensitive repo inspection paths regardless of case', () => {
+      fs.writeFileSync(path.join(testDir, '.ENV'), 'SECRET=1\n');
+      fs.mkdirSync(path.join(testDir, 'Secrets'));
+      fs.writeFileSync(path.join(testDir, 'Secrets', 'key.txt'), 'SECRET=1\n');
+
+      expect(isSafeRepoInspectionCommand('cat .ENV', testDir)).toBe(false);
+      expect(isSafeRepoInspectionCommand('head -n 5 Secrets/key.txt', testDir)).toBe(false);
+    });
+
     it('rejects repo inspection commands when cwd is not inside a git worktree', () => {
       const nonGitDir = fs.mkdtempSync('/tmp/omc-permission-safe-inspection-non-git-');
 
