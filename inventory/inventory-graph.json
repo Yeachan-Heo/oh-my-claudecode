@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4d728ec23c9a34bf5a8ce3b32f517468cc76445c",
-    "sourceSha256": "b5c2295a614ccc80972512518a3234589e08660a308baf5966ce75b701931521",
+    "head": "4f5d6c5ef2928c2857d970b39b3b3b5f5cdcaf73",
+    "sourceSha256": "165a27e97fdb771ca731e8e571ba809294eafe13394ea8cca6d42b5f2ed9da2f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4d728ec23c9a34bf5a8ce3b32f517468cc76445c",
-  "sourceSha256": "b5c2295a614ccc80972512518a3234589e08660a308baf5966ce75b701931521",
+  "head": "4f5d6c5ef2928c2857d970b39b3b3b5f5cdcaf73",
+  "sourceSha256": "165a27e97fdb771ca731e8e571ba809294eafe13394ea8cca6d42b5f2ed9da2f",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 64,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1482,
-      "total": 1506
+      "srcFiles": 1480,
+      "total": 1504
     },
     "generated": {
       "distFiles": 5733,
@@ -37,14 +37,14 @@
       "total": 5742
     },
     "prompt": {
-      "promptLikeFiles": 61
+      "promptLikeFiles": 59
     },
     "skills": 48,
     "commands": 21,
     "hookFiles": 330,
     "workflows": 8,
     "agentDefinitions": 18,
-    "promptLikeFiles": 61
+    "promptLikeFiles": 59
   },
   "public": {
     "skills": [
@@ -771,9 +771,7 @@
       "src/lib/__tests__/truncate-prompt.test.ts",
       "src/lib/truncate-prompt.ts",
       "src/mcp/__tests__/prompt-injection.test.ts",
-      "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
       "src/mcp/prompt-injection.ts",
-      "src/mcp/prompt-persistence.ts",
       "src/ralphthon/deep-interview-prompt.ts",
       "src/team/__tests__/pane-trust-prompt-kind.test.ts",
       "src/team/__tests__/prompt-sanitization.test.ts",
@@ -7052,9 +7050,7 @@
       "src/lib/__tests__/truncate-prompt.test.ts",
       "src/lib/truncate-prompt.ts",
       "src/mcp/__tests__/prompt-injection.test.ts",
-      "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
       "src/mcp/prompt-injection.ts",
-      "src/mcp/prompt-persistence.ts",
       "src/ralphthon/deep-interview-prompt.ts",
       "src/team/__tests__/pane-trust-prompt-kind.test.ts",
       "src/team/__tests__/prompt-sanitization.test.ts",
@@ -44090,11 +44086,6 @@
         "path": "src/mcp/__tests__/prompt-injection.test.ts"
       },
       {
-        "id": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "kind": "src",
-        "path": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts"
-      },
-      {
         "id": "src/mcp/__tests__/standalone-listtools.test.ts",
         "kind": "src",
         "path": "src/mcp/__tests__/standalone-listtools.test.ts"
@@ -44128,11 +44119,6 @@
         "id": "src/mcp/prompt-injection.ts",
         "kind": "src",
         "path": "src/mcp/prompt-injection.ts"
-      },
-      {
-        "id": "src/mcp/prompt-persistence.ts",
-        "kind": "src",
-        "path": "src/mcp/prompt-persistence.ts"
       },
       {
         "id": "src/mcp/servers.ts",
@@ -52733,7 +52719,7 @@
       },
       {
         "from": "src/__tests__/job-state-db.test.ts",
-        "to": "src/mcp/prompt-persistence.ts",
+        "to": "src/lib/job-state-db.ts",
         "kind": "type-imports"
       },
       {
@@ -53838,7 +53824,7 @@
       },
       {
         "from": "src/__tests__/pre-compact-cwd.test.ts",
-        "to": "src/mcp/prompt-persistence.ts",
+        "to": "src/lib/job-state-db.ts",
         "kind": "type-imports"
       },
       {
@@ -75432,11 +75418,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/lib/job-state-db.ts",
-        "to": "src/mcp/prompt-persistence.ts",
-        "kind": "type-imports"
-      },
-      {
         "from": "src/lib/mode-state-io.ts",
         "to": "external:better-sqlite3",
         "kind": "imports"
@@ -75644,31 +75625,6 @@
       {
         "from": "src/mcp/__tests__/prompt-injection.test.ts",
         "to": "src/mcp/prompt-injection.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/__tests__/prompt-persistence-artifacts.test.ts",
-        "to": "src/mcp/prompt-persistence.ts",
         "kind": "imports"
       },
       {
@@ -75910,41 +75866,6 @@
         "from": "src/mcp/prompt-injection.ts",
         "to": "src/agents/prompt-helpers.ts",
         "kind": "type-exports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "external:crypto",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "src/lib/job-state-db.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "src/shared/artifact-descriptor.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/prompt-persistence.ts",
-        "to": "src/shared/artifact-descriptor.ts",
-        "kind": "type-imports"
       },
       {
         "from": "src/mcp/standalone-server.ts",
@@ -89768,12 +89689,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7884,
-      "edgeCount": 8624,
-      "importEdgeCount": 7193,
+      "nodeCount": 7882,
+      "edgeCount": 8611,
+      "importEdgeCount": 7182,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "33b739a68a449528bcafd4906a2d6b673f50797020ce231c1903407338aba7a3",
-  "manifestSha256": "a9d2ca1f1e4bbc55596ec4ef16dd968eb31bb6ec263a91bca502d883db128292"
+  "inventorySha256": "377f3335a7ecbbdca143a135e61971e878b342dde8d72983e8087319707d209b",
+  "manifestSha256": "4e9b857b56a86839a73c616dd8db05ef091a5dda060838f56dcfb3b4b5a209cc"
 }
