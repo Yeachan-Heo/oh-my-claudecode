@@ -115,7 +115,9 @@ export function resolveCliBinaryPath(binary: string): string {
   if (cached) return cached;
 
   const finder = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(finder, [binary], {
+  // On Windows, use $PATH: prefix to exclude cwd from search (security: #4728)
+  const searchTarget = process.platform === 'win32' ? `$PATH:${binary}` : binary;
+  const result = spawnSync(finder, [searchTarget], {
     timeout: 5000,
     env: process.env,
   });
@@ -352,7 +354,9 @@ function resolveBinaryPath(binary: string): string {
 
   try {
     const resolver = process.platform === 'win32' ? 'where' : 'which';
-    const result = spawnSync(resolver, [binary], { timeout: 5000, encoding: 'utf8' });
+    // On Windows, use $PATH: prefix to exclude cwd from search (security: #4728)
+    const searchTarget = process.platform === 'win32' ? `$PATH:${binary}` : binary;
+    const result = spawnSync(resolver, [searchTarget], { timeout: 5000, encoding: 'utf8' });
     if (result.status !== 0) return binary;
 
     const lines = result.stdout
