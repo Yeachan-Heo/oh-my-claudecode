@@ -228,6 +228,15 @@ describe('permission-handler', () => {
       expect(isSafeRepoInspectionCommand('sed -n 1,20p missing.ts', testDir)).toBe(false);
     });
 
+    it('rejects sensitive repo inspection paths regardless of case', () => {
+      fs.writeFileSync(path.join(testDir, '.ENV'), 'SECRET=1\n');
+      fs.mkdirSync(path.join(testDir, 'Secrets'));
+      fs.writeFileSync(path.join(testDir, 'Secrets', 'key.txt'), 'SECRET=1\n');
+
+      expect(isSafeRepoInspectionCommand('cat .ENV', testDir)).toBe(false);
+      expect(isSafeRepoInspectionCommand('head -n 5 Secrets/key.txt', testDir)).toBe(false);
+    });
+
     it('rejects repo inspection commands when cwd is not inside a git worktree', () => {
       const nonGitDir = fs.mkdtempSync('/tmp/omc-permission-safe-inspection-non-git-');
 
@@ -431,6 +440,27 @@ describe('permission-handler', () => {
         const result = processPermissionRequest(createInput('cat src/safe.ts'));
         expect(result.continue).toBe(true);
         expect(result.hookSpecificOutput?.decision?.behavior).toBe('allow');
+      });
+
+      it('should not auto-approve private-key files while allowing public keys and ordinary files', () => {
+        fs.mkdirSync(path.join(testDir, 'keys'), { recursive: true });
+        fs.writeFileSync(path.join(testDir, 'id_rsa'), 'private key');
+        fs.writeFileSync(path.join(testDir, 'keys', 'server.PEM'), 'private key');
+        fs.writeFileSync(path.join(testDir, 'id_rsa.pub'), 'public key');
+        fs.writeFileSync(path.join(testDir, 'README.md'), 'documentation');
+        initializeGitRepo(testDir);
+
+        for (const command of ['cat id_rsa', 'cat keys/server.PEM']) {
+          const result = processPermissionRequest(createInput(command));
+          expect(result.continue).toBe(true);
+          expect(result.hookSpecificOutput?.decision?.behavior, command).not.toBe('allow');
+        }
+
+        for (const command of ['cat id_rsa.pub', 'cat README.md']) {
+          const result = processPermissionRequest(createInput(command));
+          expect(result.continue).toBe(true);
+          expect(result.hookSpecificOutput?.decision?.behavior, command).toBe('allow');
+        }
       });
 
       it('should not auto-approve ripgrep directory or hidden sweeps', () => {
