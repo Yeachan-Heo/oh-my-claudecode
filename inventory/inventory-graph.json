@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "871cc5bfae3e9ce3bf19e8e366eebcedfc572cfc",
-    "sourceSha256": "3d4856d8ed827b74dbcb93535b3bce7c91af9ccebf3100e04e6d8815674391db",
+    "head": "4d728ec23c9a34bf5a8ce3b32f517468cc76445c",
+    "sourceSha256": "b5c2295a614ccc80972512518a3234589e08660a308baf5966ce75b701931521",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "871cc5bfae3e9ce3bf19e8e366eebcedfc572cfc",
-  "sourceSha256": "3d4856d8ed827b74dbcb93535b3bce7c91af9ccebf3100e04e6d8815674391db",
+  "head": "4d728ec23c9a34bf5a8ce3b32f517468cc76445c",
+  "sourceSha256": "b5c2295a614ccc80972512518a3234589e08660a308baf5966ce75b701931521",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 330,
       "featureFiles": 89,
-      "toolFiles": 65,
+      "toolFiles": 64,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1491,
-      "total": 1515
+      "srcFiles": 1482,
+      "total": 1506
     },
     "generated": {
       "distFiles": 5733,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 330,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -172,8 +172,6 @@
       "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
-      "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-      "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
       "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
       "src/hooks/agent-usage-reminder/constants.ts",
       "src/hooks/agent-usage-reminder/index.ts",
@@ -456,7 +454,6 @@
       "src/hooks/team-pipeline/state.ts",
       "src/hooks/team-pipeline/transitions.ts",
       "src/hooks/team-pipeline/types.ts",
-      "src/hooks/team-worker-hook.ts",
       "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
       "src/hooks/think-mode/__tests__/index.test.ts",
       "src/hooks/think-mode/detector.ts",
@@ -638,7 +635,6 @@
       "src/tools/python-repl/socket-client.ts",
       "src/tools/python-repl/tool.ts",
       "src/tools/python-repl/types.ts",
-      "src/tools/resume-session.ts",
       "src/tools/session-history-tools.ts",
       "src/tools/shared-memory-tools.ts",
       "src/tools/skills-tools.ts",
@@ -6681,8 +6677,6 @@
       "src/hooks/__tests__/precompact-restore.test.ts",
       "src/hooks/__tests__/prompt-prerequisites.test.ts",
       "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts",
-      "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-      "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
       "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
       "src/hooks/agent-usage-reminder/constants.ts",
       "src/hooks/agent-usage-reminder/index.ts",
@@ -6965,7 +6959,6 @@
       "src/hooks/team-pipeline/state.ts",
       "src/hooks/team-pipeline/transitions.ts",
       "src/hooks/team-pipeline/types.ts",
-      "src/hooks/team-worker-hook.ts",
       "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
       "src/hooks/think-mode/__tests__/index.test.ts",
       "src/hooks/think-mode/detector.ts",
@@ -7220,7 +7213,6 @@
       "src/tools/python-repl/socket-client.ts",
       "src/tools/python-repl/tool.ts",
       "src/tools/python-repl/types.ts",
-      "src/tools/resume-session.ts",
       "src/tools/session-history-tools.ts",
       "src/tools/shared-memory-tools.ts",
       "src/tools/skills-tools.ts",
@@ -39468,16 +39460,6 @@
         "path": "src/__tests__/jev-resolve-script.test.mjs"
       },
       {
-        "id": "src/__tests__/job-management-sqlite.test.ts",
-        "kind": "src",
-        "path": "src/__tests__/job-management-sqlite.test.ts"
-      },
-      {
-        "id": "src/__tests__/job-management.test.ts",
-        "kind": "src",
-        "path": "src/__tests__/job-management.test.ts"
-      },
-      {
         "id": "src/__tests__/job-state-db.test.ts",
         "kind": "src",
         "path": "src/__tests__/job-state-db.test.ts"
@@ -41813,16 +41795,6 @@
         "path": "src/hooks/__tests__/stop-hook-openclaw-cooldown.test.ts"
       },
       {
-        "id": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/__tests__/team-worker-heartbeat.test.ts"
-      },
-      {
-        "id": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts"
-      },
-      {
         "id": "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
         "kind": "hook",
         "path": "src/hooks/__tests__/workflow-drift-guard-script.test.ts"
@@ -43233,11 +43205,6 @@
         "path": "src/hooks/team-pipeline/types.ts"
       },
       {
-        "id": "src/hooks/team-worker-hook.ts",
-        "kind": "hook",
-        "path": "src/hooks/team-worker-hook.ts"
-      },
-      {
         "id": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
         "kind": "hook",
         "path": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts"
@@ -44151,21 +44118,6 @@
         "id": "src/mcp/disable-tools.ts",
         "kind": "src",
         "path": "src/mcp/disable-tools.ts"
-      },
-      {
-        "id": "src/mcp/index.ts",
-        "kind": "src",
-        "path": "src/mcp/index.ts"
-      },
-      {
-        "id": "src/mcp/job-management.ts",
-        "kind": "src",
-        "path": "src/mcp/job-management.ts"
-      },
-      {
-        "id": "src/mcp/mcp-config.ts",
-        "kind": "src",
-        "path": "src/mcp/mcp-config.ts"
       },
       {
         "id": "src/mcp/omc-tools-server.ts",
@@ -46001,11 +45953,6 @@
         "id": "src/tools/python-repl/types.ts",
         "kind": "tool",
         "path": "src/tools/python-repl/types.ts"
-      },
-      {
-        "id": "src/tools/resume-session.ts",
-        "kind": "tool",
-        "path": "src/tools/resume-session.ts"
       },
       {
         "id": "src/tools/session-history-tools.ts",
@@ -52762,56 +52709,6 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "scripts/jev-resolve.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "src/lib/job-state-db.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "src/mcp/job-management.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management-sqlite.test.ts",
-        "to": "src/mcp/prompt-persistence.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/__tests__/job-management.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management.test.ts",
-        "to": "src/mcp/job-management.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/__tests__/job-management.test.ts",
-        "to": "src/mcp/prompt-persistence.ts",
         "kind": "imports"
       },
       {
@@ -64105,66 +64002,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "src/hooks/team-worker-hook.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-heartbeat.test.ts",
-        "to": "src/hooks/team-worker-hook.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "external:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "src/hooks/team-worker-hook.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/__tests__/team-worker-idle-outstanding.test.ts",
-        "to": "src/hooks/team-worker-hook.ts",
-        "kind": "type-imports"
-      },
-      {
         "from": "src/hooks/__tests__/workflow-drift-guard-script.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -71745,41 +71582,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "external:fs/promises",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "src/cli/tmux-utils.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "src/lib/swallowed-error.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "src/lib/worktree-paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/team-worker-hook.ts",
-        "to": "src/team/mailbox-outstanding.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/think-mode/__tests__/detector-boundaries.test.ts",
         "to": "external:vitest",
         "kind": "imports"
@@ -76007,81 +75809,6 @@
       {
         "from": "src/mcp/disable-tools.ts",
         "to": "src/constants/index.ts",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/agents/prompt-helpers.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/agents/prompt-helpers.ts",
-        "kind": "type-exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/job-management.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/mcp-config.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/mcp-config.ts",
-        "kind": "type-exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/omc-tools-server.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/prompt-persistence.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/prompt-persistence.ts",
-        "kind": "type-exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/servers.ts",
-        "kind": "exports"
-      },
-      {
-        "from": "src/mcp/index.ts",
-        "to": "src/mcp/servers.ts",
-        "kind": "type-exports"
-      },
-      {
-        "from": "src/mcp/job-management.ts",
-        "to": "external:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/job-management.ts",
-        "to": "external:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/job-management.ts",
-        "to": "src/lib/job-state-db.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/job-management.ts",
-        "to": "src/mcp/prompt-persistence.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/job-management.ts",
-        "to": "src/mcp/prompt-persistence.ts",
         "kind": "type-imports"
       },
       {
@@ -87425,16 +87152,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/tools/resume-session.ts",
-        "to": "src/features/background-agent/manager.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/resume-session.ts",
-        "to": "src/features/background-agent/types.ts",
-        "kind": "type-imports"
-      },
-      {
         "from": "src/tools/session-history-tools.ts",
         "to": "external:zod",
         "kind": "imports"
@@ -90051,12 +89768,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7893,
-      "edgeCount": 8670,
-      "importEdgeCount": 7224,
+      "nodeCount": 7884,
+      "edgeCount": 8624,
+      "importEdgeCount": 7193,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "80ba7d4216f30f1f836289c5b3f63db4e02df4e7d09c0b8331219419b1efaca1",
-  "manifestSha256": "56017187059869b552eba11ef73719818a4b0881890d46d3398443dafcbd3247"
+  "inventorySha256": "33b739a68a449528bcafd4906a2d6b673f50797020ce231c1903407338aba7a3",
+  "manifestSha256": "a9d2ca1f1e4bbc55596ec4ef16dd968eb31bb6ec263a91bca502d883db128292"
 }
