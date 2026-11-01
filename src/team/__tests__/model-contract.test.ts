@@ -703,7 +703,7 @@ describe('model-contract', () => {
 
       isCliAvailable('codex');
 
-      expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['codex'], { timeout: 5000, encoding: 'utf8' });
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['$PATH:codex'], { timeout: 5000, encoding: 'utf8' });
       expect(mockSpawnSync).toHaveBeenNthCalledWith(
         2,
         'C:\\Windows\\System32\\cmd.exe',
@@ -727,7 +727,7 @@ describe('model-contract', () => {
 
       isCliAvailable('gemini');
 
-      expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['gemini'], { timeout: 5000, encoding: 'utf8' });
+      expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['$PATH:gemini'], { timeout: 5000, encoding: 'utf8' });
       expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'gemini', ['--version'], { timeout: 5000, shell: true });
       restorePlatform();
       clearResolvedPathCache();
