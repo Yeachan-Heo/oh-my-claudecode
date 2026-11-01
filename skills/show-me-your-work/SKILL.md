@@ -25,8 +25,9 @@ the trail is. One row per non-obvious decision, written as it is made.
 
 ## The trail
 
-Append to `.omc/state/decision-trail.tsv` (create with a header row on first
-write; one file per task slug when sessions share a checkout):
+Append to `.omc/state/decision-trail-{task-slug}.tsv` (create with a header
+row on first write; one file per task slug when sessions share a checkout).
+The task slug is lowercase kebab-case and is part of the canonical path.
 
 ```
 ts <TAB> task <TAB> decision <TAB> rejected <TAB> evidence
