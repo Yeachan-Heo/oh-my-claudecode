@@ -2800,6 +2800,9 @@ This article argues that fake popularity signals damage trust in open source.`;
       '/oh-my-claudecode:ウルトラワーク ask codex to review',
       '/omc:씨씨지 build me an app',
       '/oh-my-claudecode:シーシージー ask codex to review',
+      '/ultraqa build me an app',
+      '/omc:ultraqa ask codex to review',
+      '/omc-teams 1:cursor autopilot fix tests',
     ])('passes retired slash command %s through without scanning active arguments', (prompt) => {
       expect(detectKeywordsWithType(prompt)).toEqual([]);
     });
@@ -2874,12 +2877,9 @@ This article argues that fake popularity signals damage trust in open source.`;
       expect(result!.args).toBe('');
     });
 
-    it('continues to parse UltraQA until #3826 owns its removal', () => {
-      expect(parseExplicitWorkflowSlashInvocation('/ultraqa run tests')?.skill).toBe('ultraqa');
-      expect(parseExplicitWorkflowSlashInvocation('/oh-my-claudecode:ultraqa run tests')?.skill).toBe('ultraqa');
-    });
-
     it('does not parse retired workflow invocations', () => {
+      expect(parseExplicitWorkflowSlashInvocation('/ultraqa run tests')).toBeNull();
+      expect(parseExplicitWorkflowSlashInvocation('/oh-my-claudecode:ultraqa run tests')).toBeNull();
       expect(parseExplicitWorkflowSlashInvocation('/ultrawork investigate this report')).toBeNull();
       expect(parseExplicitWorkflowSlashInvocation('/ulw investigate this report')).toBeNull();
       expect(parseExplicitWorkflowSlashInvocation('/uw investigate this report')).toBeNull();
