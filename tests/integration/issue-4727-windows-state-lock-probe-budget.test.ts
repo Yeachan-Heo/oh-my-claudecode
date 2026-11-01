@@ -136,6 +136,17 @@ describe('issue #4727: state-lock owner probe runs outside the write transaction
     expect(rowNonce(lockPath)).toBe(NONCE.replacement);
   });
 
+  it('keeps a replacement owner file published during the probe', () => {
+    const lockPath = join(stateDir, 'replaced-artifact.lock');
+    seedOwner(lockPath, NONCE.dead, { row: false });
+
+    const lock = acquire(lockPath, 1, hooks(() => 'absent', () => seedOwner(lockPath, NONCE.replacement, { row: false })));
+
+    expect(lock).toBeNull();
+    expect(getStateFileLockFailureKind()).toBe('contention');
+    expect(JSON.parse(readFileSync(lockPath, 'utf8')).nonce).toBe(NONCE.replacement);
+  });
+
   it('recovers a crashed holder that left both its row and its owner file', () => {
     const lockPath = join(stateDir, 'crashed-holder.lock');
     seedOwner(lockPath, NONCE.crashed);

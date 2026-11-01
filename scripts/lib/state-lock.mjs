@@ -692,26 +692,13 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         }
         return retryAcquisition();
       }
-      // Owner is dead; try to reclaim it
-      const identity = ownerArtifactIdentity(lockPath);
-      if (!identity) {
-        db.close();
-        recordFailure('unverifiable');
-        return null;
-      }
-      const reclaimed = reclaimDeadOwner(lockPath, artifactCopy, identity);
-      if (reclaimed !== 'removed') {
-        db.close();
-        if (reclaimed === 'changed' && attempts > 1) {
-          return retryAcquisition();
-        }
-        recordFailure(reclaimed === 'changed' ? 'contention' : 'unverifiable');
-        return null;
-      }
-      // Another waiter may have claimed the lock while the write lock was released.
+      // Owner is dead. Reclaim under the write lock, and only the exact owner
+      // file that was probed: another waiter may have reclaimed it and published
+      // a live owner while the probe ran without the lock.
       db.exec('BEGIN IMMEDIATE');
       const claimed = db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key);
-      if (claimed || readOwner(lockPath) !== 'absent') {
+      const current = readOwner(lockPath);
+      if (claimed || current === 'absent' || JSON.stringify(current) !== JSON.stringify(artifactCopy)) {
         db.exec('ROLLBACK');
         db.close();
         if (attempts <= 1) {
@@ -719,6 +706,23 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
           return null;
         }
         return retryAcquisition();
+      }
+      const identity = ownerArtifactIdentity(lockPath);
+      if (!identity) {
+        db.exec('ROLLBACK');
+        db.close();
+        recordFailure('unverifiable');
+        return null;
+      }
+      const reclaimed = reclaimDeadOwner(lockPath, artifactCopy, identity);
+      if (reclaimed !== 'removed') {
+        db.exec('ROLLBACK');
+        db.close();
+        if (reclaimed === 'changed' && attempts > 1) {
+          return retryAcquisition();
+        }
+        recordFailure(reclaimed === 'changed' ? 'contention' : 'unverifiable');
+        return null;
       }
     }
 
