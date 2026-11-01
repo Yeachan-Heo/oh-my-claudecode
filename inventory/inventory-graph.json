@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c4a4abe8871aa287c49e7e4e4be77733191bfc0c",
-    "sourceSha256": "337a869b7bcb26d8176b9ae52513de2a50133b5a7c919420a4d36268735ef84e",
+    "head": "4744b9ffb5d8f1424a1b4228ccf5a4fe798c6331",
+    "sourceSha256": "f5a524cb2d431d59f8d0e746cdf24f676a4ea6bbbf66278fabdbd60442afab6a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c4a4abe8871aa287c49e7e4e4be77733191bfc0c",
-  "sourceSha256": "337a869b7bcb26d8176b9ae52513de2a50133b5a7c919420a4d36268735ef84e",
+  "head": "4744b9ffb5d8f1424a1b4228ccf5a4fe798c6331",
+  "sourceSha256": "f5a524cb2d431d59f8d0e746cdf24f676a4ea6bbbf66278fabdbd60442afab6a",
   "counts": {
     "public": {
       "skills": 48,
@@ -46306,6 +46306,11 @@
         "path": "tests/integration/issue-4363-ralph-skill-start.test.ts"
       },
       {
+        "id": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -88803,6 +88808,41 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:better-sqlite3",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "scripts/lib/state-lock.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -89659,12 +89699,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7861,
-      "edgeCount": 8630,
-      "importEdgeCount": 7200,
+      "nodeCount": 7862,
+      "edgeCount": 8637,
+      "importEdgeCount": 7207,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "f53f5e1bf5666084182a051988dd984e7105f223522353c0bd69b8400c43c3db",
-  "manifestSha256": "b20f071fffec26c9d9ebd009024b315ff9e535ec767ba073e4a8387b3f79a5c0"
+  "inventorySha256": "0ee4eb1bbba064a1f6419f11342b23d135685f5d423b8a8f6c2ff3ade6815010",
+  "manifestSha256": "b79a12ed5327b9fdedf75c417858cff54f556c606c5379019c15413720d2aabf"
 }
