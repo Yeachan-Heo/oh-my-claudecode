@@ -5909,7 +5909,6 @@ var init_keyword_detector = __esm({
       "autopilot",
       "ralph",
       "team",
-      "ultraqa",
       "deep-interview",
       "ralplan",
       "self-improve"
