@@ -41,6 +41,7 @@
     "./skills/map/",
     "./skills/minimal-code-discipline/",
     "./skills/minimal-prose-discipline/",
+    "./skills/sdd/",
     "./skills/omc-doctor/",
     "./skills/omc-setup/",
     "./skills/plan/",

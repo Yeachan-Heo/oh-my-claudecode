@@ -87,7 +87,7 @@ describe('workflow registry — aliases and classification', () => {
     const skills = WORKFLOW_ENTRIES.filter((e) => e.kind === 'skill' && !e.declaredOnly);
     const commands = WORKFLOW_ENTRIES.filter((e) => e.kind === 'command' && !e.declaredOnly);
     // execute/review/research and graph ship as real skill directories.
-    expect(skills).toHaveLength(48);
+    expect(skills).toHaveLength(49);
     expect(getEntry('tdd', 'skill')).toMatchObject({ decision: 'keep', riskClass: 'advisory' });
     for (const name of ['pr', 'refit']) {
       expect(getEntry(name, 'skill')).toMatchObject({ decision: 'keep', riskClass: 'advisory' });
