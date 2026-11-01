@@ -52,6 +52,28 @@ describe('model-contract', () => {
             expect(mockSpawnSync).toHaveBeenCalledTimes(1);
             clearResolvedPathCache();
         });
+        it('resolveCliBinaryPath selects the PATHEXT candidate over an npm extensionless shim on win32', () => {
+            const mockSpawnSync = vi.mocked(spawnSync);
+            const restorePlatform = setProcessPlatform('win32');
+            vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD');
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => { });
+            mockSpawnSync.mockReturnValue({
+                status: 0,
+                stdout: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\codex\r\nC:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd\r\n',
+                stderr: '', pid: 0, output: [], signal: null,
+            });
+            try {
+                clearResolvedPathCache();
+                expect(resolveCliBinaryPath('codex')).toBe('C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd');
+            }
+            finally {
+                clearResolvedPathCache();
+                warn.mockRestore();
+                vi.unstubAllEnvs();
+                restorePlatform();
+                mockSpawnSync.mockRestore();
+            }
+        });
         it('resolveCliBinaryPath rejects unsafe names and paths', () => {
             const mockSpawnSync = vi.mocked(spawnSync);
             expect(() => resolveCliBinaryPath('../evil')).toThrow('Invalid CLI binary name');
@@ -640,7 +662,7 @@ describe('model-contract', () => {
                 .mockReturnValueOnce({ status: 0, stdout: 'C:\\Tools\\codex.cmd\n', stderr: '', pid: 0, output: [], signal: null })
                 .mockReturnValueOnce({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null });
             isCliAvailable('codex');
-            expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['codex'], { timeout: 5000, encoding: 'utf8' });
+            expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['$PATH:codex'], { timeout: 5000, encoding: 'utf8' });
             expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'C:\\Windows\\System32\\cmd.exe', ['/d', '/s', '/c', '"C:\\Tools\\codex.cmd" --version'], { timeout: 5000 });
             restorePlatform();
             clearResolvedPathCache();
@@ -655,7 +677,7 @@ describe('model-contract', () => {
                 .mockReturnValueOnce({ status: 1, stdout: '', stderr: '', pid: 0, output: [], signal: null })
                 .mockReturnValueOnce({ status: 0, stdout: '', stderr: '', pid: 0, output: [], signal: null });
             isCliAvailable('gemini');
-            expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['gemini'], { timeout: 5000, encoding: 'utf8' });
+            expect(mockSpawnSync).toHaveBeenNthCalledWith(1, 'where', ['$PATH:gemini'], { timeout: 5000, encoding: 'utf8' });
             expect(mockSpawnSync).toHaveBeenNthCalledWith(2, 'gemini', ['--version'], { timeout: 5000, shell: true });
             restorePlatform();
             clearResolvedPathCache();
