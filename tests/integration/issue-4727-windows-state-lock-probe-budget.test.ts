@@ -34,6 +34,7 @@ const NONCE = {
   dead: randomUUID(),
   replacement: randomUUID(),
   crashed: randomUUID(),
+  released: randomUUID(),
 };
 
 afterAll(() => {
@@ -145,6 +146,19 @@ describe('issue #4727: state-lock owner probe runs outside the write transaction
     expect(lock).toBeNull();
     expect(getStateFileLockFailureKind()).toBe('contention');
     expect(JSON.parse(readFileSync(lockPath, 'utf8')).nonce).toBe(NONCE.replacement);
+  });
+
+  it('retries when another waiter acquires and releases the lock during the probe', () => {
+    const lockPath = join(stateDir, 'released-during-probe.lock');
+    seedOwner(lockPath, NONCE.released, { row: false });
+    // The competitor reclaims the dead file, takes the lock, and releases it, leaving it free.
+    const competitorCycle = () => rmSync(lockPath, { force: true });
+
+    const lock = acquire(lockPath, 5, hooks(() => 'absent', competitorCycle));
+
+    expect(lock).not.toBeNull();
+    expect(JSON.parse(readFileSync(lockPath, 'utf8')).nonce).toBe(lock!.owner.nonce);
+    expect(releaseStateFileLockSync(lock!)).toBe(true);
   });
 
   it('recovers a crashed holder that left both its row and its owner file', () => {
