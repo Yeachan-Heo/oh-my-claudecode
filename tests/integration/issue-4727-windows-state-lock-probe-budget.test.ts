@@ -14,7 +14,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import { randomUUID } from 'crypto';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   acquireStateFileLockAtPathSync,
   getStateFileLockFailureKind,
@@ -197,6 +197,37 @@ describe('issue #4727: state-lock owner probe runs outside the write transaction
     } finally {
       if (blocker.inTransaction) blocker.exec('ROLLBACK');
       blocker.close();
+    }
+  });
+
+  it.each([
+    ['row owner', { artifact: false }],
+    ['owner file', { row: false }],
+  ] as const)('gives up without reacquiring the transaction when the %s probe exhausts the deadline', (_label, seed) => {
+    const lockPath = join(stateDir, `exhausted-${seed.row === false ? 'artifact' : 'row'}.lock`);
+    const nonce = randomUUID();
+    seedOwner(lockPath, nonce, seed);
+    const execSpy = vi.spyOn(Database.prototype, 'exec');
+    let begunAfterProbe = 0;
+    try {
+      const exhaustBudget = () => {
+        const start = Date.now();
+        while (Date.now() - start < 250) { /* simulated PowerShell probe latency */ }
+        execSpy.mockClear();
+      };
+      const lock = acquireStateFileLockAtPathSync(lockPath, 2, false, false, 2000, 3000, 200, hooks(() => 'absent', exhaustBudget));
+      begunAfterProbe = execSpy.mock.calls.filter(([sql]) => sql === 'BEGIN IMMEDIATE').length;
+
+      expect(lock).toBeNull();
+      expect(getStateFileLockFailureKind()).toBe('contention');
+    } finally {
+      execSpy.mockRestore();
+    }
+    expect(begunAfterProbe).toBe(0);
+    if (seed.row === false) {
+      expect(JSON.parse(readFileSync(lockPath, 'utf8')).nonce).toBe(nonce);
+    } else {
+      expect(rowNonce(lockPath)).toBe(nonce);
     }
   });
 
