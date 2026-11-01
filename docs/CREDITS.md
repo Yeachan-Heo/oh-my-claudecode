@@ -55,3 +55,7 @@ are summarized once per upstream source here rather than file-by-file.
 | `src/features/watch-pr/policy.ts` | mechanism | pstack watch-pr | gate ordering, mergeability-unknown wait, no-checks confirmation window; pure reimplementation |
 | `src/features/verification-ledger/ledger.ts` | mechanism | pstack orch ledger | verdict vocabulary, append-only TSV shape, formula-cell guard |
 | `scripts/check-omc-playbooks.mjs` | mechanism | pstack check-playbooks | extends/anchor validation for project playbook extensions |
+| `hillclimb` skill | idea | pstack hillclimb | single-metric climbing loop with fixed baseline and decision trail |
+| `reflect` skill | idea | pstack reflect | three-reviewer transcript audit feeding skill edits |
+| `personal-mode` skill | idea | pstack automate-me | cross-project user behavior profile drafted from transcript evidence |
+| `stacked-delivery` skill | idea | pstack autopilot-stack | linear stacked-PR delivery with patch-id verdicts and bottom-up landing |

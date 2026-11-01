@@ -56,8 +56,9 @@ Every candidate gets the same brief, so the brief is the contract.
    possible, otherwise a scratch directory. Candidates must not share
    writable state.
    After starting a multi-provider team, wait for every worker to reach a
-   terminal state, collect its artifact, then run the team shutdown/cleanup
-   command before judging results; never consume a startup snapshot.
+   terminal state and collect its artifact. Keep the worktrees alive through
+   judging and grafting; run team shutdown/cleanup only in the final cleanup
+   step after verification.
 
 ## Phase B — Fan out
 

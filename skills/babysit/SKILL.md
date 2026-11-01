@@ -46,17 +46,14 @@ are in scope.
    **fail** — judge by `bucket`, never the exit code; with no checks
    configured it exits 1 printing "no checks reported", which is the
    no-checks path, not an error.
-   Normalize every GraphQL enum before passing facts to the policy: `state`
-   `OPEN|CLOSED|MERGED` → `open|closed|merged`, `reviewDecision`
-   `APPROVED|CHANGES_REQUESTED|''` → `approved|changes_requested|none`,
-   `mergeable` and `mergeStateStatus` to their lowercase policy values.
-   Map `DIRTY` to blocked; map `BEHIND` to waiting when strict branch
-   protection requires a base update; treat `HAS_HOOKS` as mergeable; map
-   `UNSTABLE` to waiting; map `BLOCKED` as blocked and `UNKNOWN` as waiting before allowing
-   ready. Confirm the first
-   read reports the requested PR before acting on it.
+   Treat aggregate `mergeStateStatus=BLOCKED` as blocked and `UNKNOWN` as waiting before allowing ready. Confirm the first read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
+   Determine `reviewRequired` from the repository's branch-protection
+   settings (for example, `gh api repos/OWNER/REPO/branches/BRANCH/protection`
+   and the `required_pull_request_reviews` field). Pass that boolean into the
+   policy; do not treat an empty review decision as a blocker when the branch
+   does not require approval.
 3. **Act on the verdict**:
    - failing check → `fix-ci` (classify real/flaky/environmental, then fix)
    - requested changes → `get-pr-comments` to triage threads, then address

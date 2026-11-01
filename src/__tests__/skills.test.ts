@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (77 canonical + 2 aliases)', () => {
+    it('should return correct number of skills (81 canonical + 2 aliases)', () => {
       const skills = createBuiltinSkills();
-      // 79 entries: 77 canonical skills + 2 aliases (cancel-ralph, psm)
-      expect(skills).toHaveLength(79);
+      // 83 entries: 81 canonical skills + 2 aliases (cancel-ralph, psm)
+      expect(skills).toHaveLength(83);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -156,6 +156,7 @@ describe('Builtin Skills', () => {
         'get-pr-comments',
         'graph',
         'harbor',
+        'hillclimb',
         'how',
         'hud',
         'in-your-own-words',
@@ -175,12 +176,14 @@ describe('Builtin Skills', () => {
         'omc-review',
         'omc-setup',
         'pr',
+        'personal-mode',
         'principles',
         'project-session-manager',
         'psm',
         'ralph',
         'ralplan',
         'recall',
+        'reflect',
         'refit',
         'release',
         'remember',
@@ -188,6 +191,7 @@ describe('Builtin Skills', () => {
         'self-improve',
         'session-flow',
         'sharpen',
+        'stacked-delivery',
         'show-me-your-work',
         'skill',
         'skillify',
@@ -869,7 +873,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(77);
+      expect(names).toHaveLength(81);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('minimal-code-discipline');
       expect(names).toContain('launch');
@@ -911,7 +915,7 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131; learner retired in 5.0.0; cancel-ralph and psm remain
-      expect(names).toHaveLength(79);
+      expect(names).toHaveLength(83);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('autoresearch');
       expect(names).toContain('self-improve');
