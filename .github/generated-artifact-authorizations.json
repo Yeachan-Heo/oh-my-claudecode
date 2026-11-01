@@ -36023,6 +36023,230 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4704,
+      "targetRef": "main",
+      "mergeBaseSha": "98e2c163b307d870e7b18087806f5598d40bd0ce",
+      "headSha": "871cc5bfae3e9ce3bf19e8e366eebcedfc572cfc",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-01T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 35,
+        "sha256": "b44a01e0700e8ee50a5499394bcbddab02967b02322c029ab0d3eed6acfcd003"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "c48e65153bdc5aa56e8963aeae21bb57e2fb42ec",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "656674cd63f58deaa6044b38324848cf2fd46d27",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "cd3f9ec75147a6ae9ab2623f262b3ce7b68a2062",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "a97ba7c1dbe68b412066f57b3264be16ac8c51dd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "ce08123399c7efb49033644e602bfceebafe460d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "92ebd0783f7e2a937ef2b09528b3a3e7a4e96ef2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js",
+          "sha": "e63da48b3aef15bb2290767b40aeb94d6042676f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/keyword-detector-script.test.js.map",
+          "sha": "0da06bb35cd3a050afceabe45ecf24800fb6137d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/project-memory-merge.test.js",
+          "sha": "cc56079a4c006d925fb0c512822c09a0cf8b153a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/project-memory-merge.test.js.map",
+          "sha": "d1201ef70671280f3a8a1b53dae6560c106935c3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/pipeline.test.js",
+          "sha": "f6cd0be02e4180fe0827a3bf3e1d462eb2d97d92",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/__tests__/pipeline.test.js.map",
+          "sha": "3d077ad680d2caffaf7f96141ce4dd5fe571c712",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/adapters/execution-adapter.d.ts.map",
+          "sha": "d7252d5874cfed526661a6fa6701334ac36c69e3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/adapters/execution-adapter.js",
+          "sha": "c7696eb00dd5b044087978580020c679b12532b8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/autopilot/adapters/execution-adapter.js.map",
+          "sha": "e295272736806226ccca4b425b93bb104d7785e8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js",
+          "sha": "8d5c7f08c7aad2272f8961de1af4b2f0b4ba0117",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/index.test.js.map",
+          "sha": "7df48646b6993bdb813828efcda266f9aaddf6d3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts",
+          "sha": "18684300f01b006f511576278d2e1b07fe390fff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "eaa7c6e8397c6e5914a3061b560a249df41664c9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "dddaecbdbcc0de44ddf365f03f2cd6b6d8313fc4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "ee33bc765a7e6cebb4df5ef9a4aa2483ce19a32d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/formatter.test.js",
+          "sha": "0e677e3fb1bf1d65cc0ec04d6e67f21239bb6f6b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/formatter.test.js.map",
+          "sha": "5cc51aa9d9ff84109084c23ebe2cc40f3e3358c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/hot-path-tracker.test.js",
+          "sha": "9a3f73819f426ee3f7969ea36b9629f35405c6fb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/__tests__/hot-path-tracker.test.js.map",
+          "sha": "095ece654909564dc754dc746809342b4a4496ae",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/formatter.js",
+          "sha": "b2adba1a0a339ff6827ad4684014f4d863719676",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/formatter.js.map",
+          "sha": "bbd3ed73eabba92c9767b230fc7dc98b88049b3b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.d.ts.map",
+          "sha": "1f9fa996842c155169ee3d5cf1fc8fbb1f86495a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.js",
+          "sha": "f72807ec64546621f0943a515bdffb91494649db",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/project-memory/hot-path-tracker.js.map",
+          "sha": "710326a8bb0f8291864dc6a73780049fd1d7e2fe",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/prompt-prerequisites/index.js",
+          "sha": "a332cb15489bcf53755efd7af33a51a4f7446afa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/prompt-prerequisites/index.js.map",
+          "sha": "8feba84735fa22acd9823cf459df12fd48841695",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/project-memory-merge.d.ts.map",
+          "sha": "fe6004076262f961dcff18ffe2d5e9119ba44c38",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/project-memory-merge.js",
+          "sha": "d4c3b0c56a0faad89ba832021d240cd95aedbecc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/project-memory-merge.js.map",
+          "sha": "e9b2942cf1a66e880e7f664a9e100853361560b4",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
