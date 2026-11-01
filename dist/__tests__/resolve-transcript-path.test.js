@@ -219,7 +219,7 @@ describe('resolveTranscriptPath', () => {
         }
         writeFileSync(join(stale, 'scripts', 'session-start.mjs'), '// stale hook payload\n');
         symlinkSync(join(stale, 'scripts'), join(active, 'payload'), 'junction');
-        expect(isUsableVersionPath(active, statSync(stale))).toBe(false);
+        expect(isUsableVersionPath(active, statSync(stale, { bigint: true }))).toBe(false);
     });
 });
 //# sourceMappingURL=resolve-transcript-path.test.js.map
