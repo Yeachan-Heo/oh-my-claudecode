@@ -410,6 +410,19 @@ function boundedBusyTimeoutMs(timeoutMs, operationDeadline) {
   return Math.min(configuredTimeoutMs, Math.floor(remainingOperationTimeoutMs(operationDeadline)));
 }
 
+/**
+ * Reacquire the write transaction after an out-of-transaction owner probe. The
+ * probe consumed part of the operation budget, so the busy timeout is rebounded
+ * to what remains. False means the deadline has already passed; a busy timeout
+ * throws SQLITE_BUSY to the caller's retry handling.
+ */
+function beginWithinDeadline(db, busyTimeoutMs, operationDeadline) {
+  if (remainingOperationTimeoutMs(operationDeadline) <= 0) return false;
+  db.pragma(`busy_timeout = ${boundedBusyTimeoutMs(busyTimeoutMs, operationDeadline)}`);
+  db.exec('BEGIN IMMEDIATE');
+  return true;
+}
+
 function remainingProcessProbeMs(deadline, operationDeadline = null, testHooks) {
   return Math.max(0, Math.min(deadline - wallClockNowMs(testHooks), remainingOperationTimeoutMs(operationDeadline)));
 }
@@ -644,7 +657,11 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         return retryAcquisition();
       }
       // Owner is dead; reacquire the lock and delete it
-      db.exec('BEGIN IMMEDIATE');
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
       const recheck = db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(key);
       if (!recheck || recheck.nonce !== ownerInfo.nonce) {
         // Owner changed or was deleted while we were probing; retry
@@ -695,7 +712,11 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
       // Owner is dead. Reclaim under the write lock, and only the exact owner
       // file that was probed: another waiter may have reclaimed it and published
       // a live owner while the probe ran without the lock.
-      db.exec('BEGIN IMMEDIATE');
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
       const claimed = db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key);
       const current = readOwner(lockPath);
       if (claimed || current === 'absent' || JSON.stringify(current) !== JSON.stringify(artifactCopy)) {

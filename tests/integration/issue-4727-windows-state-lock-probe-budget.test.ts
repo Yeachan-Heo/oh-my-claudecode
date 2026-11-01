@@ -161,6 +161,45 @@ describe('issue #4727: state-lock owner probe runs outside the write transaction
     expect(releaseStateFileLockSync(lock!)).toBe(true);
   });
 
+  it.each([
+    ['row owner', { artifact: false }],
+    ['owner file', { row: false }],
+  ] as const)('retries an inconclusive %s probe while attempts remain', (_label, seed) => {
+    const lockPath = join(stateDir, `inconclusive-${seed.row === false ? 'artifact' : 'row'}.lock`);
+    seedOwner(lockPath, randomUUID(), seed);
+    const verdicts: Array<string | null> = [null, 'absent'];
+
+    const lock = acquire(lockPath, 2, hooks(() => verdicts.shift() as string));
+
+    expect(verdicts).toEqual([]);
+    expect(lock).not.toBeNull();
+    expect(rowNonce(lockPath)).toBe(lock!.owner.nonce);
+    expect(releaseStateFileLockSync(lock!)).toBe(true);
+  });
+
+  it('bounds the post-probe transaction wait by the remaining overall budget', () => {
+    const lockPath = join(stateDir, 'post-probe-deadline.lock');
+    seedOwner(lockPath, randomUUID(), { artifact: false });
+    const blocker = openDb();
+    try {
+      const slowProbeThenBlock = () => {
+        const start = Date.now();
+        while (Date.now() - start < 300) { /* simulated PowerShell probe latency */ }
+        blocker.exec('BEGIN IMMEDIATE');
+      };
+      const startedAt = Date.now();
+      const lock = acquireStateFileLockAtPathSync(lockPath, 1, false, false, 2000, 3000, 400, hooks(() => 'absent', slowProbeThenBlock));
+      const elapsedMs = Date.now() - startedAt;
+
+      expect(lock).toBeNull();
+      expect(getStateFileLockFailureKind()).toBe('contention');
+      expect(elapsedMs).toBeLessThan(550);
+    } finally {
+      if (blocker.inTransaction) blocker.exec('ROLLBACK');
+      blocker.close();
+    }
+  });
+
   it('recovers a crashed holder that left both its row and its owner file', () => {
     const lockPath = join(stateDir, 'crashed-holder.lock');
     seedOwner(lockPath, NONCE.crashed);
