@@ -36669,6 +36669,62 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4695,
+      "targetRef": "main",
+      "mergeBaseSha": "0c6335d3109b4361dee198a6ee0d1603ebf24ef6",
+      "headSha": "233e10b5591a3f1a1bb665b4980f58e2e6d898a6",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-11-30T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 7,
+        "sha256": "81d0ac4cf1cc086006a3e0034397cb47b70cd2794cefd0e54ba0a40d462e3011"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "59d68c6d8d05bd7057249c292756d62bbf57d522",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "8bca2c95a89e019cebc79fed59127f4557c4f0a2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/__tests__/index.test.js",
+          "sha": "e2129c2bd7506ebb5685f6bb7240e153a29238aa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/__tests__/index.test.js.map",
+          "sha": "6b6f39d936f1f8644546cc1c1a708e89fb205b46",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.d.ts.map",
+          "sha": "3a99374f604b0be6c1486ab2cd3616da2d6c2d3c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.js",
+          "sha": "3df6d1ccc704181aa4be370355ee748fa17a6b3e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/permission-handler/index.js.map",
+          "sha": "4d673ffa3e233e193a5b87e963a204d8f500e687",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }

@@ -193,10 +193,25 @@ function tokenizeShellCommand(command) {
     }
     return tokens.length > 0 ? tokens : null;
 }
+const SENSITIVE_REPO_BASENAMES = new Set([
+    'id_rsa',
+    'id_dsa',
+    'id_ecdsa',
+    'id_ed25519',
+    '.npmrc',
+    '.netrc',
+    '.pgpass',
+]);
+const SENSITIVE_REPO_EXTENSIONS = ['.pem', '.key', '.p12', '.pfx'];
 function isSensitiveRepoRelativePath(repoRelativePath) {
-    const normalized = repoRelativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+    const normalized = repoRelativePath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
     if (!normalized || normalized === '.') {
         return false;
+    }
+    const basename = normalized.slice(normalized.lastIndexOf('/') + 1);
+    if (SENSITIVE_REPO_BASENAMES.has(basename) ||
+        SENSITIVE_REPO_EXTENSIONS.some((extension) => basename.endsWith(extension))) {
+        return true;
     }
     return (normalized === '.git' ||
         normalized.startsWith('.git/') ||
