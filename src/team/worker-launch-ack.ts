@@ -2165,6 +2165,9 @@ export async function materializeProviderSpawnInvocation(
   if (!invocation.batchScript && !superviseProcessTree) {
     return { command: invocation.command, args: invocation.args, ...(invocation.env ? { env: invocation.env } : {}), cleanup: async () => {} };
   }
+  // Only the batch wrapper can hold and report a supervised Windows provider;
+  // never fall through to the POSIX shell wrapper.
+  if (process.platform === 'win32' && !invocation.batchScript) throw new Error('worker_launch_windows_supervision_unsupported');
   const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
   try {
     const completionPath = superviseProcessTree ? join(wrapperDir, 'provider-exit.txt') : undefined;

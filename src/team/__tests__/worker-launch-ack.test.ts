@@ -3109,6 +3109,13 @@ describe('worker launch acknowledgement', () => {
       }
     });
 
+    it('fails closed instead of using the POSIX wrapper for a supervised .exe provider', async () => {
+      const invocation = buildProviderSpawnInvocation([process.execPath, '-e', '0'], 'win32', { SystemRoot: process.env.SystemRoot });
+      await expect(materializeProviderSpawnInvocation(invocation, { superviseProcessTree: true }))
+        .rejects.toThrow('worker_launch_windows_supervision_unsupported');
+      await expect(materializeProviderSpawnInvocation(invocation)).resolves.toMatchObject({ command: process.execPath });
+    });
+
     it('refuses to run the wrapper when the spawn env lacks its line variable', async () => {
       cwd = await createFixture('worker-launch-native-noline-');
       const canaryPath = join(cwd, 'injected.txt');
