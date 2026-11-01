@@ -551,7 +551,7 @@ describe("autopilot team CLI worker configuration", () => {
         });
         expect(prompt).toContain("CLI Team Runtime Required");
         expect(prompt).toContain("omc team 1:cursor");
-        expect(prompt).toContain("/omc-teams 1:cursor");
+        expect(prompt).not.toContain("/omc-teams");
         expect(prompt).toContain("including reviewer-style roles");
         expect(prompt).toContain("structured verdict-output contract");
         expect(prompt).toContain("cursor-agent");

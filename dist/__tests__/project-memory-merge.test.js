@@ -224,7 +224,7 @@ describe('mergeProjectMemory', () => {
     // -------------------------------------------------------------------------
     // hotPaths merge
     // -------------------------------------------------------------------------
-    it('should merge hotPaths by path, taking max accessCount and lastAccessed', () => {
+    it('should merge hotPaths by path, keeping the more recently accessed entry', () => {
         const existing = baseMemory({
             hotPaths: [
                 { path: 'src/index.ts', accessCount: 10, lastAccessed: 100, type: 'file' },
@@ -239,8 +239,8 @@ describe('mergeProjectMemory', () => {
         });
         expect(merged.hotPaths).toHaveLength(3);
         const indexPath = merged.hotPaths.find(h => h.path === 'src/index.ts');
-        expect(indexPath.accessCount).toBe(10); // max
-        expect(indexPath.lastAccessed).toBe(200); // max
+        expect(indexPath.accessCount).toBe(3); // counts decay, so the newer entry already folds in the older one
+        expect(indexPath.lastAccessed).toBe(200);
         expect(merged.hotPaths.find(h => h.path === 'src/lib/')).toBeTruthy();
         expect(merged.hotPaths.find(h => h.path === 'src/utils/')).toBeTruthy();
     });
