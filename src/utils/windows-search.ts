@@ -5,7 +5,8 @@
  * the current directory before PATH unless NoDefaultCurrentDirectoryInExePath
  * is set, so a `git.exe` or `git.cmd` planted in the project folder runs
  * instead of the real one. libuv's own lookup (no shell) reads the parent's
- * environment; cmd.exe (`shell: true`, exec) reads the child's env block.
+ * environment (libuv 1.48+, i.e. Node 21.7+/22+; Node 20's libuv ignores it);
+ * cmd.exe (`shell: true`, exec) reads the child's env block.
  * Every entry point therefore hardens its own environment first, and any
  * explicit `env:` built without process.env goes through childEnv().
  * ESM evaluates every import before the entry's body calls the hardening, so

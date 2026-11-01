@@ -192,11 +192,12 @@ if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr
     }
   }, 65_000);
 
-  // Known gap (#4746): libuv's own executable search still looks in the cwd and ignores
-  // NoDefaultCurrentDirectoryInExePath, so a Node child's bare-name spawn runs a
-  // planted git.exe. This test fails until that route is closed; when it starts
-  // passing, drop `.fails`.
-  it.runIf(process.platform === 'win32').fails('keeps a libuv bare-name spawn from a provider child from running a git.exe planted in the cwd', async () => {
+  // libuv 1.48+ (Node 21.7+/22+) skips the cwd when the spawning process's own env sets
+  // NoDefaultCurrentDirectoryInExePath; libuv 1.46 (Node 20) always searches it (#4746).
+  const [uvMajor, uvMinor] = process.versions.uv.split('.').map(Number);
+  const libuvHonorsNoCwdSearch = uvMajor > 1 || uvMinor >= 48;
+  const libuvIt = libuvHonorsNoCwdSearch ? it.runIf(process.platform === 'win32') : it.runIf(process.platform === 'win32').fails;
+  libuvIt('keeps a libuv bare-name spawn from a provider child from running a git.exe planted in the cwd', async () => {
     const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-child-exe-'));
     try {
       const canaryPath = join(root, 'planted.txt');

@@ -9,6 +9,9 @@ import { childEnv, hardenWindowsExeSearch } from '../windows-search.js';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 const VARIABLE = 'NoDefaultCurrentDirectoryInExePath';
 const isWin = process.platform === 'win32';
+const [uvMajor, uvMinor] = process.versions.uv.split('.').map(Number);
+/** libuv 1.48+ (Node 21.7+/22+) reads the variable from the spawning process's own env. */
+const libuvHonorsNoCwdSearch = uvMajor > 1 || uvMinor >= 48;
 
 /** The env minus every case variant of the variable: Claude Code's shell sets it, which would make these tests pass vacuously. */
 function withoutVariable(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
@@ -54,9 +57,14 @@ describe.skipIf(!isWin)('hardenWindowsExeSearch / childEnv with real processes (
     return JSON.parse(res.stdout);
   }
 
-  it('a process that hardens does not run an exe planted in its cwd', () => {
+  it('a process that hardens does not run an exe planted in its cwd (libuv 1.48+)', () => {
     expect(probeChild(false).ran).toBe(true); // red control: without the call the plant runs
-    expect(probeChild(true)).toEqual({ ran: false, code: 'ENOENT' });
+    if (libuvHonorsNoCwdSearch) {
+      expect(probeChild(true)).toEqual({ ran: false, code: 'ENOENT' });
+    } else {
+      // libuv 1.46 (Node 20) ignores the variable; only the cmd.exe route is closed there (#4746).
+      expect(probeChild(true).ran).toBe(true);
+    }
   });
 
   it('childEnv keeps cmd.exe (shell: true) from running a planted .cmd', () => {
