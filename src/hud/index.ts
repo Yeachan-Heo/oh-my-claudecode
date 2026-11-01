@@ -6,6 +6,7 @@
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
 
+import { hardenWindowsExeSearch } from "../utils/windows-search.js";
 import {
   readStdin,
   writeStdinCache,
@@ -58,6 +59,8 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
 import { getClaudeConfigDir, getUpdateCheckCachePath } from "../utils/config-dir.js";
+
+hardenWindowsExeSearch();
 
 /**
  * Extract session ID (UUID) from a transcript path.

@@ -15,6 +15,9 @@ const path = require('path');
 const { join, basename, dirname } = path;
 const { pathToFileURL } = require('url');
 const { Worker } = require('worker_threads');
+const { hardenWindowsExeSearch } = require('./lib/windows-search.cjs');
+
+hardenWindowsExeSearch();
 
 
 function isPluginRoot(pluginRoot) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { spawnSync } from 'child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
@@ -6,6 +7,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import process from 'process';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+
+hardenWindowsExeSearch();
 
 const PROVIDER_BINARIES = {
   claude: 'claude',
