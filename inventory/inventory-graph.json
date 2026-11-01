@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-    "sourceSha256": "3ac1415072878a5cf567b58ebdb893d381f0230174be749b3217104a087a3dc1",
+    "sourceSha256": "04ca7ca6693551629bb566f222d3dae4e22034644d92370808189cc13f77b384",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-  "sourceSha256": "3ac1415072878a5cf567b58ebdb893d381f0230174be749b3217104a087a3dc1",
+  "sourceSha256": "04ca7ca6693551629bb566f222d3dae4e22034644d92370808189cc13f77b384",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 330,
+      "hookFiles": 331,
       "featureFiles": 89,
-      "toolFiles": 65,
+      "toolFiles": 64,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1482,
-      "total": 1506
+      "srcFiles": 1481,
+      "total": 1505
     },
     "generated": {
       "distFiles": 5709,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 330,
+    "hookFiles": 331,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 59
@@ -398,6 +398,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -580,7 +581,6 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
-      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -6878,6 +6878,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -7131,7 +7132,6 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
-      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -42784,6 +42784,11 @@
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts"
@@ -45529,11 +45534,6 @@
         "path": "src/tools/__tests__/cancel-integration.test.ts"
       },
       {
-        "id": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "kind": "tool",
-        "path": "src/tools/__tests__/deepinit-file-identity.test.ts"
-      },
-      {
         "id": "src/tools/__tests__/deepinit-manifest.test.ts",
         "kind": "tool",
         "path": "src/tools/__tests__/deepinit-manifest.test.ts"
@@ -45897,11 +45897,6 @@
         "id": "src/utils/__tests__/paths.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/paths.test.ts"
-      },
-      {
-        "id": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "kind": "src",
-        "path": "src/utils/__tests__/plugin-cache-file-identity.test.ts"
       },
       {
         "id": "src/utils/__tests__/semver-compare.test.ts",
@@ -69901,6 +69896,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -85521,31 +85541,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
-        "to": "src/tools/deepinit-manifest.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/tools/__tests__/deepinit-manifest.test.ts",
         "to": "external:node:crypto",
         "kind": "imports"
@@ -87473,36 +87468,6 @@
       {
         "from": "src/utils/__tests__/paths.test.ts",
         "to": "src/utils/paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "external:node:fs",
-        "kind": "type-imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
-        "to": "src/utils/plugin-cache-validation.ts",
         "kind": "imports"
       },
       {
@@ -89617,12 +89582,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7861,
-      "edgeCount": 8622,
-      "importEdgeCount": 7192,
+      "nodeCount": 7860,
+      "edgeCount": 8616,
+      "importEdgeCount": 7187,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "c0e2c3db568bd440f2d478a3076224b82fcec41e5acbfb92a0ec62c1462b6fb7",
-  "manifestSha256": "3cc7b9ff65e2fdfc49f1d70bf9ab3160f5ab0fc93467e97ddb61cac60cb7d9b8"
+  "inventorySha256": "a984044392da4be8d3e8fded3abdfb5d7b3d24bfd3ede396ef9acf4024a5ecee",
+  "manifestSha256": "9f38991bbf1590f41eebff603da23b9ea3ee0d8fb2806132ebcef81bf97dd2a0"
 }
