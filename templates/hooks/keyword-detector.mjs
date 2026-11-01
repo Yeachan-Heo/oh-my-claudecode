@@ -21,11 +21,14 @@
  * 13. analyze: Analysis mode (restricted patterns)
  */
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { writeFileSync, mkdirSync, existsSync, unlinkSync, readFileSync } from 'fs';
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { join, dirname, resolve, isAbsolute } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

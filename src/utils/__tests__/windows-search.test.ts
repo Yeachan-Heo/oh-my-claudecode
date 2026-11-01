@@ -122,6 +122,8 @@ describe('every Node entry point hardens the Windows executable search', () => {
         }
       }
     }
+    // Legacy installs copy templates/hooks/*.mjs to ~/.claude/hooks, and node runs each one directly.
+    for (const name of readdirSync(join(ROOT, 'templates', 'hooks')).filter((n) => n.endsWith('.mjs'))) found.add(`templates/hooks/${name}`);
     found.add('scripts/run-provider-advisor.js'); // `omc ask` spawns it
     found.add('src/hud/index.ts'); // the HUD statusline wrapper imports dist/hud/index.js
     return [...found].sort();
@@ -130,12 +132,16 @@ describe('every Node entry point hardens the Windows executable search', () => {
   it('finds the known entry points', () => {
     const found = entryPoints();
     for (const known of ['scripts/run.cjs', 'src/cli/index.ts', 'src/cli/team.ts', 'src/mcp/standalone-server.ts', 'src/mcp/team-server.ts',
-      'src/team/runtime-cli.ts', 'src/team/bridge-entry.ts', 'scripts/cleanup-orphans.mjs']) {
+      'src/team/runtime-cli.ts', 'src/team/bridge-entry.ts', 'scripts/cleanup-orphans.mjs', 'templates/hooks/pre-tool-use.mjs']) {
       expect(found).toContain(known);
     }
   });
 
   it('each entry point imports and calls hardenWindowsExeSearch()', () => {
     expect(entryPoints().filter((rel) => !hardens(rel))).toEqual([]);
+  });
+
+  it('the installed hook copy of the helper matches scripts/lib', () => {
+    expect(read('templates/hooks/lib/windows-search.mjs')).toBe(read('scripts/lib/windows-search.mjs'));
   });
 });

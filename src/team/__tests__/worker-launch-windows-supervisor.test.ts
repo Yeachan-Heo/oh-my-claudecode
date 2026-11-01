@@ -192,11 +192,12 @@ if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr
     }
   }, 65_000);
 
-  // Known gap (#4746): libuv's own executable search still looks in the cwd and ignores
-  // NoDefaultCurrentDirectoryInExePath, so a Node child's bare-name spawn runs a
-  // planted git.exe. This test fails until that route is closed; when it starts
-  // passing, drop `.fails`.
-  it.runIf(process.platform === 'win32').fails('keeps a libuv bare-name spawn from a provider child from running a git.exe planted in the cwd', async () => {
+  // libuv 1.48+ (Node 21.7+/22+) skips the cwd when the spawning process's own env sets
+  // NoDefaultCurrentDirectoryInExePath, which the supervisor gives the provider. libuv 1.46
+  // (Node 20) ignores the variable, so there the plant still runs: the known gap from #4746.
+  const [uvMajor, uvMinor] = process.versions.uv.split('.').map(Number);
+  const libuvHonorsNoCwdSearch = uvMajor > 1 || uvMinor >= 48;
+  it.runIf(process.platform === 'win32')('keeps a libuv bare-name spawn from a provider child from running a git.exe planted in the cwd (libuv 1.48+)', async () => {
     const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-child-exe-'));
     try {
       const canaryPath = join(root, 'planted.txt');
@@ -208,7 +209,7 @@ if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr
       const script = `require('child_process').spawnSync('git',['-e',${JSON.stringify(plant)}]);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
       runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
       expect(await readFile(donePath, 'utf8')).toBe('done');
-      expect(existsSync(canaryPath)).toBe(false);
+      expect(existsSync(canaryPath)).toBe(!libuvHonorsNoCwdSearch);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
