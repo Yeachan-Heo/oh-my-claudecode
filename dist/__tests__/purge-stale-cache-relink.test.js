@@ -68,16 +68,18 @@ function stubOwnerLiveness() {
 function dirent(name) {
     return { name, isDirectory: () => true, isSymbolicLink: () => false };
 }
+let nextIno = 0n;
 /** Return a stat result with mtime N ms ago.
- * Default must exceed STALE_THRESHOLD_MS (24 h) in src/utils/paths.ts. */
+ * Default must exceed STALE_THRESHOLD_MS (24 h) in src/utils/paths.ts.
+ * Each call gets its own bigint identity, so mocked paths never alias each other. */
 function staleStats(ageMs = 25 * 60 * 60 * 1000) {
-    return { mtimeMs: Date.now() - ageMs, isDirectory: () => true };
+    return { mtimeMs: Date.now() - ageMs, dev: 0n, ino: ++nextIno, isDirectory: () => true };
 }
 describe('purgeStalePluginCacheVersions relink and recovery', () => {
     beforeEach(() => {
         vi.clearAllMocks();
         // Default: statSync returns stale timestamps
-        mockedStatSync.mockReturnValue(staleStats());
+        mockedStatSync.mockImplementation(() => staleStats());
         // clearAllMocks() keeps implementations, so a test that makes an fs call
         // throw would leak into whichever test runs next.  Restore benign defaults
         // here so the file passes under --sequence.shuffle too.

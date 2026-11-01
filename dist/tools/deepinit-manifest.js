@@ -89,12 +89,14 @@ export function scanDirectories(projectRoot) {
         catch {
             return; // Skip inaccessible directories
         }
-        // Symlink loop protection via inode tracking
+        // Symlink loop protection via inode tracking. BigInt ids: NTFS file ids
+        // exceed 2^53, where a Number ino can merge two distinct directories.
         try {
-            const stat = statSync(absDir);
-            if (visitedInodes.has(stat.ino))
+            const stat = statSync(absDir, { bigint: true });
+            const identity = `${stat.dev}:${stat.ino}`;
+            if (visitedInodes.has(identity))
                 return;
-            visitedInodes.add(stat.ino);
+            visitedInodes.add(identity);
         }
         catch {
             return; // Skip inaccessible directories

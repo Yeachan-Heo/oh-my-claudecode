@@ -1,17 +1,19 @@
-# oh-my-claudecode v5.7.26: Keep project memory and workflow routing current
+# oh-my-claudecode v5.7.27: SQLITE_BUSY retry, BigInt file identities, and SessionEnd manifest drift handling
 
 ## Release Notes
 
-This release keeps project-memory hot paths aligned with the files users are working on and stops retired workflow names from being recommended or routed at runtime. Thanks to @iyoda for #4698 and #4699.
+This release introduces compatibility improvements for NTFS file systems with BigInt inode support, adds retry logic for early SQLITE_BUSY errors during state-lock setup, and improves SessionEnd action claim handling to prevent zombie claims. Thanks to the maintainers for #4717, #4719, #4721, and #4723.
 
 ### Bug Fixes
 
-- **fix(project-memory): make hot paths follow current work** (#4698; @iyoda)
-- **fix(workflows): drop retired ultraqa, omc-teams, and ultrawork names that still route** (#4699; @iyoda)
+- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
+- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
+- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
+- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
 
 ### Stats
 
-- **2 PRs merged** | **0 new features** | **2 bug fixes**
+- **4 PRs merged** | **0 new features** | **4 bug fixes**
 
 ### Install / Update
 
@@ -20,7 +22,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.26
+npm install -g oh-my-claude-sisyphus@5.7.27
 ```
 
 **Claude Code plugin:**
@@ -29,7 +31,7 @@ npm install -g oh-my-claude-sisyphus@5.7.26
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.25...v5.7.26
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.26...v5.7.27
 
 ## Contributors
 
