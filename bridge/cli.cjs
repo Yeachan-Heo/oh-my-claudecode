@@ -37582,16 +37582,10 @@ Before launching Cursor workers, verify \`cursor-agent\` is installed and authen
 
 Configured autopilot team worker types include CLI-backed workers: ${requested}. For executor-style implementation work, use the tmux CLI team runtime instead of in-process Claude-only Task subagents.
 
-Use one of these equivalent surfaces from the lead session:
+Launch them from the lead session:
 
 \`\`\`sh
 omc team ${agentSpec} "<implementation task from ${planPath}>"
-\`\`\`
-
-Or from Claude Code slash commands:
-
-\`\`\`text
-/omc-teams ${agentSpec} "<implementation task from ${planPath}>"
 \`\`\`
 
 Requested worker types: ${requested}. CLI workers may receive their assigned team roles, including reviewer-style roles. The roles \`critic\`, \`code-reviewer\`, \`security-reviewer\`, and \`test-engineer\` use the structured verdict-output contract, with the team leader owning the terminal task transition. Final approval remains a lead-session responsibility.${cursorGuidance}`;
@@ -37631,7 +37625,7 @@ Read the implementation plan at: \`${planPath}\`
 
 ${teamRuntimeGuidance}
 
-${useCliTeamRuntime ? `1. **Launch CLI executor workers** with \`omc team\` or \`/omc-teams\` using the requested agent types.
+${useCliTeamRuntime ? `1. **Launch CLI executor workers** with \`omc team\` using the requested agent types.
 2. **Decompose executor-style implementation tasks** from the implementation plan and pass them to CLI workers.
 3. **Monitor tmux/team output** and integrate completed implementation changes.
 4. **Keep review/critic/security/verdict work native**; do not assign those roles to Cursor/CLI workers.
@@ -49552,12 +49546,11 @@ var init_keyword_detector = __esm({
       "cursor",
       "antigravity"
     ];
-    RETIRED_WORKFLOW_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー)(?=\s|$|[?!.,;:])/i;
+    RETIRED_WORKFLOW_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー|ultraqa|omc-teams)(?=\s|$|[?!.,;:])/i;
     CANONICAL_WORKFLOW_SLASH_SKILLS = [
       "autopilot",
       "ralph",
       "team",
-      "ultraqa",
       "deep-interview",
       "ralplan",
       "self-improve"
@@ -110096,6 +110089,7 @@ var import_path48 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/hot-path-tracker.ts
 var import_path47 = __toESM(require("path"), 1);
+var ACCESS_HALF_LIFE_MS = 24 * 60 * 60 * 1e3;
 
 // src/hooks/project-memory/directive-detector.ts
 function addDirective(directives, newDirective) {
@@ -110205,11 +110199,8 @@ function mergeArrays(fieldName, base, incoming) {
         base,
         incoming,
         (hp) => hp.path,
-        (a, b) => ({
-          ...b,
-          accessCount: Math.max(a.accessCount, b.accessCount),
-          lastAccessed: Math.max(a.lastAccessed, b.lastAccessed)
-        })
+        // Counts decay on each touch, so the newer entry already folds in the older one.
+        (a, b) => b.lastAccessed >= a.lastAccessed ? b : a
       );
     case "languages":
     case "frameworks":
@@ -117014,7 +117005,7 @@ var DEFAULT_SECTION_NAMES = {
   context: ["CONTEXT"]
 };
 var DEFAULT_BLOCKING_TOOLS = ["Edit", "MultiEdit", "Write", "Agent", "Task"];
-var DEFAULT_EXECUTION_KEYWORDS = ["ralph", "ultrawork", "autopilot"];
+var DEFAULT_EXECUTION_KEYWORDS = ["ralph", "autopilot"];
 var HEADING_PATTERN = /^#{1,6}\s+(.+?)\s*$/gm;
 var FILE_PATH_PATTERN2 = /(?:(?:^|\s|["'`(]))(\.{1,2}\/[^\s"'`)<>\]]+|\/[^\s"'`)<>\]]+|(?:[A-Za-z0-9_.-]+\/){1,}[A-Za-z0-9_.-]+)(?=$|\s|["'`),:;\]])/gm;
 function normalizeHeading(value) {
