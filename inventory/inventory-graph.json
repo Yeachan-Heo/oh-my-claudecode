@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-    "sourceSha256": "04ca7ca6693551629bb566f222d3dae4e22034644d92370808189cc13f77b384",
+    "head": "ac643b0da4431d74e0e235e1690813bfb0bb493f",
+    "sourceSha256": "149c9d9d618fa266d709e17912fc5955b07d98562e9d957384783bd85c667e27",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-  "sourceSha256": "04ca7ca6693551629bb566f222d3dae4e22034644d92370808189cc13f77b384",
+  "head": "ac643b0da4431d74e0e235e1690813bfb0bb493f",
+  "sourceSha256": "149c9d9d618fa266d709e17912fc5955b07d98562e9d957384783bd85c667e27",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 331,
+      "hookFiles": 330,
       "featureFiles": 89,
-      "toolFiles": 64,
+      "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1481,
-      "total": 1505
+      "srcFiles": 1482,
+      "total": 1506
     },
     "generated": {
       "distFiles": 5709,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 331,
+    "hookFiles": 330,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 59
@@ -398,7 +398,6 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
-      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -581,6 +580,7 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
+      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -6878,7 +6878,6 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
-      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -7132,6 +7131,7 @@
     "toolFiles": [
       "src/tools/AGENTS.md",
       "src/tools/__tests__/cancel-integration.test.ts",
+      "src/tools/__tests__/deepinit-file-identity.test.ts",
       "src/tools/__tests__/deepinit-manifest.test.ts",
       "src/tools/__tests__/memory-tools.test.ts",
       "src/tools/__tests__/schema-conversion.test.ts",
@@ -37404,11 +37404,6 @@
         "path": "native/contained-fs.c"
       },
       {
-        "id": "oh-my-claude-sisyphus-5.7.25.tgz",
-        "kind": "other",
-        "path": "oh-my-claude-sisyphus-5.7.25.tgz"
-      },
-      {
         "id": "package-lock.json",
         "kind": "other",
         "path": "package-lock.json"
@@ -42784,11 +42779,6 @@
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
       },
       {
-        "id": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "kind": "hook",
-        "path": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts"
-      },
-      {
         "id": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts"
@@ -45534,6 +45524,11 @@
         "path": "src/tools/__tests__/cancel-integration.test.ts"
       },
       {
+        "id": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "kind": "tool",
+        "path": "src/tools/__tests__/deepinit-file-identity.test.ts"
+      },
+      {
         "id": "src/tools/__tests__/deepinit-manifest.test.ts",
         "kind": "tool",
         "path": "src/tools/__tests__/deepinit-manifest.test.ts"
@@ -45897,6 +45892,11 @@
         "id": "src/utils/__tests__/paths.test.ts",
         "kind": "src",
         "path": "src/utils/__tests__/paths.test.ts"
+      },
+      {
+        "id": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "kind": "src",
+        "path": "src/utils/__tests__/plugin-cache-file-identity.test.ts"
       },
       {
         "id": "src/utils/__tests__/semver-compare.test.ts",
@@ -69896,31 +69896,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
-        "to": "src/hooks/session-end/cleanup-manifest.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -85541,6 +85516,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/tools/__tests__/deepinit-file-identity.test.ts",
+        "to": "src/tools/deepinit-manifest.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/tools/__tests__/deepinit-manifest.test.ts",
         "to": "external:node:crypto",
         "kind": "imports"
@@ -87468,6 +87468,36 @@
       {
         "from": "src/utils/__tests__/paths.test.ts",
         "to": "src/utils/paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:fs",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/utils/__tests__/plugin-cache-file-identity.test.ts",
+        "to": "src/utils/plugin-cache-validation.ts",
         "kind": "imports"
       },
       {
@@ -89583,11 +89613,11 @@
     ],
     "stats": {
       "nodeCount": 7860,
-      "edgeCount": 8616,
-      "importEdgeCount": 7187,
+      "edgeCount": 8622,
+      "importEdgeCount": 7192,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "a984044392da4be8d3e8fded3abdfb5d7b3d24bfd3ede396ef9acf4024a5ecee",
-  "manifestSha256": "9f38991bbf1590f41eebff603da23b9ea3ee0d8fb2806132ebcef81bf97dd2a0"
+  "inventorySha256": "167e32aa367cca8c59dd903aa2479254f0540ad85539075ce939a6a14fe12245",
+  "manifestSha256": "d47ffc79f4038da454bdf5fdb5b615fa7866a9b275d89c2ea71f9968b273d036"
 }
