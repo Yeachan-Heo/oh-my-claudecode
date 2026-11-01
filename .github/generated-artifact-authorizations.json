@@ -4,6 +4,74 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4771,
+      "targetRef": "dev",
+      "mergeBaseSha": "a208f6b8a1b320e756ce7b33d724531c678443ee",
+      "headSha": "083ae63607512f1051c6a4d1d5cd26c2d77dc5a2",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-02T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 9,
+        "sha256": "6f2e07ed34e8a1b6390b7a308700a1b0e9642e2b1f16cfa84dea04212f936875"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "394958257812fab7864114532061e953dd3f01bd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "e44be2e504de023d08dc664a10ffb90e04b5e504",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "d449c161f9ffa54e5e78defd0ef254bdd4af73bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "0c453572ca3621a4210f727cc97000450966be55",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/model-contract.test.js",
+          "sha": "2dfafedee6c82133f85a4d1b00ded2a4bb827769",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/model-contract.test.js.map",
+          "sha": "5bbe50de7501b8d6b2311d3851f204bdf00cb296",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/model-contract.d.ts.map",
+          "sha": "7dc89c56cb3ba6c77b149fb865d0e6eb2f8c0bd2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/model-contract.js",
+          "sha": "bdcf3b82438103a57a3bcd3c0096033cf994fbe2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/model-contract.js.map",
+          "sha": "e0c25832f66eaf11c1a2d7d2775e619186013dc8",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4742,
       "targetRef": "main",
       "mergeBaseSha": "4a6c3e3405b126fb3eeb1956a0a37acd3acdf6a6",
