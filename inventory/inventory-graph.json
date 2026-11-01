@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4ed9d67891f2ae051184e5ef4d3d1f04848d2445",
-    "sourceSha256": "766f6dba323544dc148768a5738f32841d5b3c5020f88428a192df23af3784f3",
+    "head": "4b96fe721a4217e2b19afb404c86ed9d375a1e71",
+    "sourceSha256": "b1478d0f8d6ea901b7fc41ff5b6e0ce2f69bc638e77b7bd69ae23a0df7c9c8af",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4ed9d67891f2ae051184e5ef4d3d1f04848d2445",
-  "sourceSha256": "766f6dba323544dc148768a5738f32841d5b3c5020f88428a192df23af3784f3",
+  "head": "4b96fe721a4217e2b19afb404c86ed9d375a1e71",
+  "sourceSha256": "b1478d0f8d6ea901b7fc41ff5b6e0ce2f69bc638e77b7bd69ae23a0df7c9c8af",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 330,
+      "hookFiles": 331,
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1482,
-      "total": 1506
+      "srcFiles": 1483,
+      "total": 1507
     },
     "generated": {
       "distFiles": 5709,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 330,
+    "hookFiles": 331,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 59
@@ -398,6 +398,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -6878,6 +6879,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -42779,6 +42781,11 @@
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts"
@@ -46297,6 +46304,11 @@
         "id": "tests/integration/issue-4363-ralph-skill-start.test.ts",
         "kind": "other",
         "path": "tests/integration/issue-4363-ralph-skill-start.test.ts"
+      },
+      {
+        "id": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts"
       },
       {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
@@ -69896,6 +69908,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -88756,6 +88793,31 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "scripts/lib/state-lock.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -89612,12 +89674,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7860,
-      "edgeCount": 8622,
-      "importEdgeCount": 7192,
+      "nodeCount": 7862,
+      "edgeCount": 8632,
+      "importEdgeCount": 7202,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "167e32aa367cca8c59dd903aa2479254f0540ad85539075ce939a6a14fe12245",
-  "manifestSha256": "e48a929993ce9f63034a31ed18099081a46fd23ad72f537a481cc9dbbfbdac03"
+  "inventorySha256": "0ee4eb1bbba064a1f6419f11342b23d135685f5d423b8a8f6c2ff3ade6815010",
+  "manifestSha256": "2dc0338780a6d9c291519690a350e2bb3d284fdf1cdaa755d6e5b9e8055ae905"
 }
