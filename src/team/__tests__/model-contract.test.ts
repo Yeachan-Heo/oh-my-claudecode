@@ -79,6 +79,28 @@ describe('model-contract', () => {
       clearResolvedPathCache();
     });
 
+    it('resolveCliBinaryPath selects the PATHEXT candidate over an npm extensionless shim on win32', () => {
+      const mockSpawnSync = vi.mocked(spawnSync);
+      const restorePlatform = setProcessPlatform('win32');
+      vi.stubEnv('PATHEXT', '.COM;.EXE;.BAT;.CMD');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      mockSpawnSync.mockReturnValue({
+        status: 0,
+        stdout: 'C:\\Users\\dev\\AppData\\Roaming\\npm\\codex\r\nC:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd\r\n',
+        stderr: '', pid: 0, output: [], signal: null,
+      } as any);
+      try {
+        clearResolvedPathCache();
+        expect(resolveCliBinaryPath('codex')).toBe('C:\\Users\\dev\\AppData\\Roaming\\npm\\codex.cmd');
+      } finally {
+        clearResolvedPathCache();
+        warn.mockRestore();
+        vi.unstubAllEnvs();
+        restorePlatform();
+        mockSpawnSync.mockRestore();
+      }
+    });
+
     it('resolveCliBinaryPath rejects unsafe names and paths', () => {
       const mockSpawnSync = vi.mocked(spawnSync);
       expect(() => resolveCliBinaryPath('../evil')).toThrow('Invalid CLI binary name');
