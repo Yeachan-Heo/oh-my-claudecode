@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "2555f0950517f4fedd483f4aa28fb927cc59ed04",
-    "sourceSha256": "941acb2b13c0ab16173ac89195e1c47ab2a56d8cde28eef461ca1af4c80ea15f",
+    "head": "8d96bc08348ed31fbd30793d748653542bfe03f6",
+    "sourceSha256": "a0c9c656019816c7ad2c5912cbb94770b1d7e4dc4935999ed71b3adcb156a439",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "2555f0950517f4fedd483f4aa28fb927cc59ed04",
-  "sourceSha256": "941acb2b13c0ab16173ac89195e1c47ab2a56d8cde28eef461ca1af4c80ea15f",
+  "head": "8d96bc08348ed31fbd30793d748653542bfe03f6",
+  "sourceSha256": "a0c9c656019816c7ad2c5912cbb94770b1d7e4dc4935999ed71b3adcb156a439",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 334,
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1491,
-      "total": 1515
+      "srcFiles": 1492,
+      "total": 1516
     },
     "generated": {
       "distFiles": 5733,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 334,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 61
@@ -400,6 +400,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -6909,6 +6910,7 @@
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
+      "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -42953,6 +42955,11 @@
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts"
@@ -70205,6 +70212,31 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -90051,12 +90083,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7893,
-      "edgeCount": 8670,
-      "importEdgeCount": 7224,
+      "nodeCount": 7894,
+      "edgeCount": 8675,
+      "importEdgeCount": 7229,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "80ba7d4216f30f1f836289c5b3f63db4e02df4e7d09c0b8331219419b1efaca1",
-  "manifestSha256": "f33790d56b1b01996ae873dbf1d6ec3687955252877c1d45d7d608bbd6551ecf"
+  "inventorySha256": "c6108a67e5e2ad21502cfbe95d8714c0a7320ba40fffa2b5210633a89ebe0066",
+  "manifestSha256": "612b8783642d89fea27559927b0eff90efb543d2f0498222b779ead757771402"
 }
