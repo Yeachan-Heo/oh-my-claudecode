@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (52 Total)](#skills-52-total)
+- [Skills (60 Total)](#skills-60-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -789,13 +789,9 @@ Canonical descriptor fields:
 
 | Field          | Meaning                                                      |
 | -------------- | ------------------------------------------------------------ |
-| `kind`         | Artifact type such as `plan`, `prompt`, `result`, or `trace` |
-| `path`         | Durable artifact path                                        |
 | `contentHash?` | Optional integrity hint                                      |
 | `createdAt`    | Artifact creation timestamp                                  |
-| `producer`     | Owning worker/tool/skill                                     |
 | `sizeBytes?`   | Optional size for threshold checks                           |
-| `retention`    | Retention/ownership hint                                     |
 | `expiresAt?`   | Optional expiry for short-lived artifacts                    |
 
 Bounded handoff policy:
@@ -964,7 +960,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (52 Total)
+## Skills (60 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -976,26 +972,30 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | ------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------- |
 | `ai-slop-cleaner`         | Anti-slop cleanup workflow with optional reviewer-only `--review` pass        | `/oh-my-claudecode:ai-slop-cleaner`         |
 | `agent-doc-discipline`    | Writing-time discipline for agent-facing documents: checkable rules with a why, steps first, one meaning one home | `/oh-my-claudecode:agent-doc-discipline` |
+| `architect`               | Parallel design exploration before cross-boundary code; decision with rejected alternatives | `/oh-my-claudecode:architect`             |
 | `architecture-survey`     | Shipyard survey: report ranked architecture-deepening candidates with evidence, never edit code | `/oh-my-claudecode:architecture-survey`     |
 | `ask`                     | Ask Claude, Codex, Gemini, Antigravity, Grok, or Cursor via local CLI          | `/oh-my-claudecode:ask`                     |
 | `ask-navigator`           | Shipyard navigator: chart foggy efforts into decision-ticket maps, hand off to launch | `/oh-my-claudecode:ask-navigator`    |
 | `autopilot`               | Full autonomous execution from idea to working code                            | `/oh-my-claudecode:autopilot`               |
 | `autoresearch`            | Stateful evaluator-driven improvement loop                                     | `/oh-my-claudecode:autoresearch`            |
 | `babysit`                 | Drive an open PR to merge-ready: watch-pr verdicts, fix CI, address comments; never merges | `/oh-my-claudecode:babysit`       |
+| `blast-radius`            | Map what a change could break beyond the diff; prove safety by running code     | `/oh-my-claudecode:blast-radius`            |
 | `cancel`                  | Unified cancellation for active modes                                          | `/oh-my-claudecode:cancel`                  |
-| `cancel-ralph`            | Deprecated compatibility alias for `cancel`                                   | `/oh-my-claudecode:cancel-ralph`            |
 | `configure-notifications` | Configure Telegram, Discord, and Slack notification integrations               | `/oh-my-claudecode:configure-notifications` |
+| `correct`                 | Make repeated agent mistakes impossible at the highest enforcing level         | `/oh-my-claudecode:correct`                 |
 | `debug`                   | Diagnose the current OMC session or repository state                           | `/oh-my-claudecode:debug`                   |
-| `fix-ci`                  | Classify CI failures (real/flaky/environmental) and fix the real ones          | `/oh-my-claudecode:fix-ci`                  |
-| `fix-merge-conflicts`     | Resolve conflicts preserving both sides' intent, non-interactively             | `/oh-my-claudecode:fix-merge-conflicts`     |
-| `get-pr-comments`         | Fetch and triage review threads: fix / dismiss / ask                           | `/oh-my-claudecode:get-pr-comments`         |
 | `deep-interview`          | Socratic deep interview with ambiguity gating                                  | `/oh-my-claudecode:deep-interview`                |
 | `deepinit`                | Generate hierarchical AGENTS.md documentation                                  | `/oh-my-claudecode:deepinit`                |
 | `diagram`                 | Model-invoked visual explanations — smallest view (pseudocode, tree, Mermaid, diff) that carries the point | `/oh-my-claudecode:diagram`                |
 | `drydock`                 | Shipyard harness scaffold: 4-pillar shared environment, --check drift audit    | `/oh-my-claudecode:drydock`                 |
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
+| `figure-it-out`           | Design a bespoke playbook for tasks no bundled skill fits                      | `/oh-my-claudecode:figure-it-out`           |
+| `fix-ci`                  | Classify CI failures (real/flaky/environmental) and fix the real ones          | `/oh-my-claudecode:fix-ci`                  |
+| `fix-merge-conflicts`     | Resolve conflicts preserving both sides' intent, non-interactively             | `/oh-my-claudecode:fix-merge-conflicts`     |
+| `get-pr-comments`         | Fetch and triage review threads: fix / dismiss / ask                           | `/oh-my-claudecode:get-pr-comments`         |
 | `harbor`                  | Shipyard intake gate: verify external issues and PRs, hand a signature docket  | `/oh-my-claudecode:harbor`                  |
+| `how`                     | Two-pass subsystem walkthrough: explore, then explain with file:line citations | `/oh-my-claudecode:how`                     |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
 | `intent`                  | Internal requirements intake for non-engineer contributors                      | `/oh-my-claudecode:intent`                  |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
@@ -1003,13 +1003,12 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `map`                     | The yard's skill map: which skill owns which job, in delivery-loop order; routes, never executes | `/oh-my-claudecode:map`                  |
 | `minimal-code-discipline` | YAGNI-ladder writing-time discipline: reuse first, shortest correct diff        | `/oh-my-claudecode:minimal-code-discipline` |
 | `minimal-prose-discipline` | Writing-time discipline for the agent's own prose: protected core, no filler, close on the action | `/oh-my-claudecode:minimal-prose-discipline` |
+| `models`                  | Setup wizard for role-based model routing (`team.roleRouting`) and panel diversity | `/oh-my-claudecode:models`              |
 | `omc-doctor`              | Diagnose and fix installation issues                                           | `/oh-my-claudecode:omc-doctor`              |
-| `omc-plan`                | Strategic planning with optional interview and consensus modes                 | `/oh-my-claudecode:omc-plan`               |
-| `omc-review`              | Evaluate finished work for defects, risk, and simplification                   | `/oh-my-claudecode:omc-review`             |
 | `omc-setup`               | Install or refresh OMC for plugin, npm, and local-development setups           | `/oh-my-claudecode:omc-setup`              |
 | `pr`                      | PR body assembly from OMC's paper trail: smallest visual, verify evidence, ADR-test reversibility | `/oh-my-claudecode:pr` |
 | `project-session-manager` | Manage isolated development environments (git worktrees + tmux)                | `/oh-my-claudecode:project-session-manager` |
-| `psm`                     | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                     |
+| `psm`                    | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                    |
 | `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
 | `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
 | `release`                 | Automated release workflow                                                      | `/oh-my-claudecode:release`                 |
@@ -1018,6 +1017,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `research`                | Investigate an open question and return grounded findings                       | `/oh-my-claudecode:research`               |
 | `self-improve`            | Autonomous evolutionary code improvement engine                                | `/oh-my-claudecode:self-improve`           |
 | `session-flow`            | Reorient in the current session with an evidence-backed map of its flow        | `/oh-my-claudecode:session-flow`           |
+| `show-me-your-work`       | Append-only TSV decision trail for auditable autonomous work                   | `/oh-my-claudecode:show-me-your-work`       |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                              | `/oh-my-claudecode:skill`                   |
 | `skillify`                | Extract a reusable skill from the current session                              | `/oh-my-claudecode:skillify`                |
 | `team`                    | Coordinated multi-agent workflow                                               | `/oh-my-claudecode:team`                    |
@@ -1026,6 +1026,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `ultragoal`               | Durable multi-goal workflow with checkpointed artifacts                        | `/oh-my-claudecode:ultragoal`              |
 | `verify`                  | Verify that a change really works before claiming completion                    | `/oh-my-claudecode:verify`                 |
 | `visual-verdict`          | Structured visual QA verdict for screenshot/reference comparisons              | `/oh-my-claudecode:visual-verdict`        |
+| `why`                     | Evidence-first investigation of why code is the way it is                      | `/oh-my-claudecode:why`                     |
 | `wiki`                    | Persistent markdown knowledge base that compounds across sessions              | `/oh-my-claudecode:wiki`                   |
 
 
@@ -1044,33 +1045,38 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ask-navigator <idea\|map>`            | Chart a foggy effort into a map of decision tickets (or work the open map), then hand off to launch |
 | `/oh-my-claudecode:autopilot <task>`                     | Full autonomous execution                                                                     |
 | `/oh-my-claudecode:autoresearch <task>`                  | Run a bounded evaluator-driven improvement mission                                             |
+| `/oh-my-claudecode:architect`                            | Parallel design exploration before cross-boundary code                                        |
+| `/oh-my-claudecode:blast-radius [path]`                  | Map what a change could break and prove safety by running code                                |
 | `/oh-my-claudecode:babysit <PR>`                         | Drive an open PR to merge-ready; watch verdicts, fix CI, never merges                          |
 | `/oh-my-claudecode:cancel [--force] [--all]`            | Cancel current-session modes; `--force` skips graceful waits, `--all` explicitly selects all sessions |
-| `/oh-my-claudecode:cancel-ralph [--force] [--all]`      | Deprecated alias with the same force/scope distinction                                         |
 | `/oh-my-claudecode:configure-notifications`              | Configure notification integrations                                                           |
-| `/oh-my-claudecode:compact [note]`                       | Prepare an OMC-safe manual handoff telling the user to run bare `/compact [note]`              |
+| `/oh-my-claudecode:correct`                              | Make repeated agent mistakes impossible at the highest enforcing level                        |
 | `/oh-my-claudecode:debug`                                | Diagnose the current OMC session or repository state                                          |
 | `/deep-interview <idea>`                                 | Socratic interview with ambiguity scoring before execution                                    |
 | `/oh-my-claudecode:deepinit [path]`                      | Index codebase with hierarchical AGENTS.md files                                              |
 | `/oh-my-claudecode:diagram`                              | Explain the current topic with the smallest visual that carries it                            |
 | `/oh-my-claudecode:execute <task>`                      | Carry an approved task through to working, verified code                                      |
 | `/oh-my-claudecode:external-context <topic>`             | Run parallel document-specialist research                                                     |
+| `/oh-my-claudecode:figure-it-out <task-shape>`           | Design a bespoke playbook, validated against its anchors                                      |
+| `/oh-my-claudecode:fix-ci`                               | Classify CI failures and fix the real ones                                                    |
+| `/oh-my-claudecode:fix-merge-conflicts`                  | Resolve conflicts preserving both sides' intent                                               |
+| `/oh-my-claudecode:get-pr-comments`                       | Fetch and triage review threads                                                               |
 | `/oh-my-claudecode:harbor [sweep\|look at #N\|what's ready?]` | Sweep external issues and PRs, verify claims, hand a signature docket                    |
 | `/oh-my-claudecode:hud [setup\|minimal\|focused\|full\|status]` | Configure HUD/statusline                                                               |
 | `/oh-my-claudecode:drydock [--check]`                   | Lay the shipyard harness keel in a repo (two faces seeded day one; every other surface appears on first use); --check audits drift |
 | `/oh-my-claudecode:launch <brief\|spec-path> [--serial]` | Run the shipyard governed delivery pipeline (spec -> tickets -> frontier)                      |
+| `/oh-my-claudecode:how <subsystem>`                       | Two-pass subsystem walkthrough with file:line citations                                       |
 | `/oh-my-claudecode:loft <design-question>`               | Loft the shape before cutting steel: a throwaway artifact answers a design question prose cannot settle |
 | `/oh-my-claudecode:minimal-code-discipline`              | Apply the YAGNI-ladder writing-time discipline while implementing                              |
 | `/oh-my-claudecode:minimal-prose-discipline`             | Apply the writing-time discipline for the agent's own prose                                    |
 | `/oh-my-claudecode:omc-doctor`                           | Diagnose and fix installation issues                                                          |
-| `/oh-my-claudecode:omc-plan <description>`               | Start planning session (supports consensus structured deliberation)                           |
-| `/oh-my-claudecode:omc-review [path]`                    | Review finished work for defects and risk                                                       |
 | `/oh-my-claudecode:omc-setup`                            | Install or refresh OMC                                                                        |
 | `/oh-my-claudecode:pr`                                   | Assemble a PR body from existing paper-trail evidence                                           |
+| `/oh-my-claudecode:models`                               | Configure role-based model routing and check panel diversity                                  |
 | `/oh-my-claudecode:project-session-manager <arguments>`  | Manage isolated dev environments with git worktrees + tmux                                    |
-| `/oh-my-claudecode:psm <arguments>`                      | Deprecated alias for project session manager                                                  |
 | `/oh-my-claudecode:ralph <task>`                         | Persistence loop until task completion (`--critic=architect \| critic \| codex`)             |
 | `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation                                     |
+| `/oh-my-claudecode:show-me-your-work`                    | Start (or read) the append-only decision trail                                                |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
 | `/oh-my-claudecode:refit [--scope <area>] [--last <N sessions>]` | Retrospect on OMC instrumentation and propose user-approved environment fixes            |
 | `/oh-my-claudecode:remember <note>`                      | Save durable session memory                                                                   |
@@ -1083,6 +1089,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:trace`                                | Evidence-driven tracing lane                                                                  |
 | `/oh-my-claudecode:ultragoal <condition>`                | Track a durable multi-goal workflow                                                           |
 | `/oh-my-claudecode:verify <target>`                      | Verify that a change really works before claiming completion                                  |
+| `/oh-my-claudecode:why <question>`                       | Investigate why code is the way it is, from evidence                                          |
 | `/oh-my-claudecode:visual-verdict <task>`                | Structured visual QA verdict for screenshot/reference comparisons                             |
 | `/oh-my-claudecode:wiki <action>`                        | Query or update the persistent markdown knowledge base                                         |
 
@@ -1184,8 +1191,6 @@ explicitly enabled via the global OMC config file:
 
 | Option       | Type       | Default                                         | Description                        |
 | ------------ | ---------- | ----------------------------------------------- | ---------------------------------- |
-| `enabled`    | `boolean`  | `false`                                         | Opt-in to automatic simplification |
-| `extensions` | `string[]` | `[".ts",".tsx",".js",".jsx",".py",".go",".rs"]` | File extensions to consider        |
 | `maxFiles`   | `number`   | `10`                                            | Maximum files simplified per turn  |
 
 **How it works:**
@@ -1225,13 +1230,9 @@ The keyword detector recognizes localized aliases in addition to the English tri
 | `ralph`          | 랄프        | ラルフ             |
 | `autopilot`      | 오토파일럿  | オートパイロット   |
 | `ralplan`        | 랄플랜      | ラルプラン         |
-| `ultrathink`     | 울트라씽크  | ウルトラシンク     |
 | `deep-interview` | 딥인터뷰    | ディープインタビュー |
 | `tdd`            | 테스트 퍼스트 | テスト ファースト |
-| `code-review`    | 코드 리뷰   | コード レビュー    |
 | `security-review`| 보안 리뷰   | セキュリティ レビュー |
-| `deepsearch`     | 딥 서치     | ディープ サーチ    |
-| `analyze`        | 딥 분석     | ディープ アナライズ |
 
 `cancelomc` / `stopomc` have no localized alias (cancellation is matched only by the English tokens).
 
@@ -1412,6 +1413,8 @@ Configure HUD elements in `~/.claude/settings.json`:
     "preset": "focused",
     "elements": {
       "cwd": true,
+      "agents": true,
+      "todos": true,
       "gitRepo": true,
       "gitBranch": true,
       "showTokens": true
@@ -1422,14 +1425,11 @@ Configure HUD elements in `~/.claude/settings.json`:
 
 | Element      | Description                                                                                                          | Default |
 | ------------ | -------------------------------------------------------------------------------------------------------------------- | ------- |
-| `cwd`        | Show current working directory                                                                                       | `false` |
 | `gitRepo`    | Show git repository name                                                                                             | `false` |
 | `gitBranch`  | Show current git branch                                                                                              | `false` |
 | `omcLabel`   | Show [OMC] label                                                                                                     | `true`  |
 | `updateNotification` | Show available-update prompt text after the OMC label                                                                  | `true`  |
 | `contextBar` | Show context window usage                                                                                            | `true`  |
-| `agents`     | Show active agents count                                                                                             | `true`  |
-| `todos`      | Show todo progress                                                                                                   | `true`  |
 | `ralph`      | Show ralph loop status                                                                                               | `true`  |
 | `autopilot`  | Show autopilot status                                                                                                | `true`  |
 | `showTokens` | Show transcript-derived token usage (`tok:i1.2k/o340`, plus `r...` reasoning and `s...` session total when reliable) | `false` |
@@ -1440,8 +1440,6 @@ Additional `omcHud` layout and label options (top-level):
 | ---------- | --------------------------------------------------------------------------------- | ---------- |
 | `maxWidth` | Maximum HUD line width (terminal columns)                                         | unset      |
 | `wrapMode` | `truncate` (ellipsis) or `wrap` (break at `\|` boundaries) when `maxWidth` is set | `truncate` |
-| `locale`   | HUD label preset. Supported values: `en`, `zh-CN`                                 | `en`       |
-| `labels`   | Per-label HUD text overrides; supported keys only                                 | unset      |
 
 `locale` and `labels` affect only HUD labels. English remains the default, unsupported locale values and unknown label keys are ignored, and explicit `labels` override the locale preset. Supported label keys are `context`, `tokens`, `tool`, `agent`, `skill`, `ralph`, `background`, `thinking`, `staged`, `modified`, `untracked`, `ahead`, and `behind`.
 

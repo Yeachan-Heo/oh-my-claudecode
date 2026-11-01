@@ -23,6 +23,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Hands-off idea-to-code | `autopilot` |
 | Work needs coordinated parallel workers | `team` |
 | One approved task carried through verified code | `execute` |
+| Code crosses a function boundary; designs should compete first | `architect` |
 | A design question prose cannot settle | `loft` |
 | Finished work needs judgment | `review` |
 | Something claims to be done | `verify` |
@@ -35,6 +36,13 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Job | Skill |
 |---|---|
 | A bug needs its root cause | `debug`; competing-hypothesis tracing: `trace` |
+| The question is why the code is this way | `why` |
+| A subsystem needs explaining | `how` |
+| A risky change needs its blast radius mapped | `blast-radius` |
+| The same agent mistake keeps recurring | `correct` |
+| Long autonomous work needs an audit trail | `show-me-your-work` |
+| No bundled skill fits the task shape | `figure-it-out` (designs one, validated against anchors) |
+| Roles should run on chosen models | `models` |
 | Tests should drive the implementation | `tdd` |
 | The codebase is getting harder to change | `architecture-survey` |
 | AI-generated slop needs cleanup | `ai-slop-cleaner` |

@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 52 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 60 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -194,6 +194,14 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'ai-slop-cleaner', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review tool; never a default gate.' }),
   entry({ name: 'minimal-code-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline; never a default gate.' }),
   entry({ name: 'babysit', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in PR watch-and-fix loop on the watch-pr verdict policy (idea credit: pstack); never merges, rebases, force-pushes, or self-approves.' }),
+  entry({ name: 'models', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in setup wizard for team.roleRouting role-based model routing (idea credit: pstack setup-pstack); writes config only, never routes a live team.' }),
+  entry({ name: 'why', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in evidence-first investigation with human-rulings epistemics (idea credit: pstack); answers, never edits.' }),
+  entry({ name: 'how', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in explorer/explainer subsystem walkthrough (idea credit: pstack); cites file:line.' }),
+  entry({ name: 'correct', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in repeated-mistake elimination ladder, lint over type over runtime over script over text (idea credit: pstack).' }),
+  entry({ name: 'blast-radius', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in impact analysis with executed proof per certain/likely dependent (idea credit: pstack); reports, never edits.' }),
+  entry({ name: 'architect', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in parallel design exploration before cross-boundary code (idea credit: pstack); records decision with rejected alternatives.' }),
+  entry({ name: 'figure-it-out', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in bespoke playbook designer stored under .omc/playbooks/ and validated by check-omc-playbooks (idea credit: pstack).' }),
+  entry({ name: 'show-me-your-work', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in TSV decision trail for auditable autonomous work (idea credit: pstack); append-only.' }),
   entry({ name: 'fix-ci', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in CI failure triage: real/flaky/environmental before any fix (idea credit: pstack).' }),
   entry({ name: 'fix-merge-conflicts', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in both-intent-preserving conflict resolution (idea credit: pstack); no force-push to shared branches.' }),
   entry({ name: 'get-pr-comments', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review-thread dedupe and fix/dismiss/ask triage (idea credit: pstack); reports, never edits.' }),
