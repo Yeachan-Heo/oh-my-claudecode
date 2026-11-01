@@ -886,6 +886,7 @@ type TranscriptContentBlock = {
 };
 
 type TranscriptApprovalEntry = {
+  timestamp?: string;
   message?: {
     content?: TranscriptContentBlock[] | string;
   };
@@ -893,8 +894,20 @@ type TranscriptApprovalEntry = {
 
 type ReviewerApprovalPath = 'architect' | 'critic' | 'codex';
 
+/** One reviewer-authored tool result, with the transcript time it landed. */
+type ReviewerOutput = {
+  text: string;
+  at: number | null;
+};
+
 const REVIEWER_TASK_TOOL_NAMES = new Set(['Task', 'proxy_Task', 'Agent']);
 const REVIEWER_COMMAND_TOOL_NAMES = new Set(['Bash', 'proxy_Bash']);
+/**
+ * Cheap line filter before JSON.parse. Reviewer attribution needs a Task
+ * tool_use, a codex command, or the tool_result that answers one; everything
+ * else in a multi-megabyte transcript is skipped without parsing.
+ */
+const REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', '--agent-prompt'];
 
 function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | null {
   if (typeof subagentType !== 'string') {
@@ -953,27 +966,35 @@ function matchesVerificationReviewerPath(
   return reviewerPath === expected;
 }
 
-function checkReviewerAuthoredApprovalInMessages(
+/**
+ * Reviewer-authored tool results in the scanned window, in transcript order.
+ *
+ * Approval and rejection both have to be attributed to the reviewer that the
+ * current verification request spawned — a stale verdict left anywhere else in
+ * the transcript must not decide the current story. Attribution lives here so
+ * the two callers cannot drift apart.
+ */
+function collectReviewerOutputs(
   transcriptPath: string,
-  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>,
-  maxBytes = TRANSCRIPT_TAIL_BYTES
-): boolean {
-  const reviewerToolUses = new Map<string, ReviewerApprovalPath>();
-
-  // Cheap prefilter: the approval tag has to appear in the scanned window.
-  // Skips JSON-parsing megabytes of transcript when no reviewer approved.
+  verificationState: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'> | undefined,
+  maxBytes: number,
+  prefilter?: (content: string) => boolean
+): ReviewerOutput[] {
   let content: string;
   try {
     content = readTranscriptTail(transcriptPath, maxBytes);
   } catch {
-    return false;
+    return [];
   }
-  if (!content.includes('VERIFIED_COMPLETE')) {
-    return false;
+  if (prefilter && !prefilter(content)) {
+    return [];
   }
 
+  const reviewerToolUses = new Map<string, ReviewerApprovalPath>();
+  const outputs: ReviewerOutput[] = [];
+
   for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
-    if (!line.trim()) {
+    if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
       continue;
     }
 
@@ -984,12 +1005,15 @@ function checkReviewerAuthoredApprovalInMessages(
       continue;
     }
 
-    const content = entry.message?.content;
-    if (!Array.isArray(content)) {
+    const blocks = entry.message?.content;
+    if (!Array.isArray(blocks)) {
       continue;
     }
 
-    for (const block of content) {
+    const parsedAt = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
+    const at = Number.isFinite(parsedAt) ? parsedAt : null;
+
+    for (const block of blocks) {
       if (block?.type === 'tool_use' && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
           const reviewerPath = normalizeReviewerPath((block.input as Record<string, unknown> | undefined)?.subagent_type);
@@ -1017,14 +1041,32 @@ function checkReviewerAuthoredApprovalInMessages(
         continue;
       }
 
-      const reviewerOutput = extractTranscriptText(block.content);
-      if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
-        return true;
+      const text = extractTranscriptText(block.content);
+      if (text) {
+        outputs.push({ text, at });
       }
     }
   }
 
-  return false;
+  return outputs;
+}
+
+function checkReviewerAuthoredApprovalInMessages(
+  transcriptPath: string,
+  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>,
+  maxBytes = TRANSCRIPT_TAIL_BYTES
+): boolean {
+  // Cheap prefilter: the approval tag has to appear in the scanned window.
+  // Skips JSON-parsing megabytes of transcript when no reviewer approved.
+  // detectArchitectApproval() matches the marker case-insensitively, so this
+  // filter has to as well or valid reviewer output would stay pending.
+  const outputs = collectReviewerOutputs(
+    transcriptPath,
+    verificationState,
+    maxBytes,
+    (content) => /verified_complete/i.test(content),
+  );
+  return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
 }
 
 function estimateTranscriptContextPercent(transcriptPath?: string): number {
@@ -1135,10 +1177,17 @@ function checkArchitectApprovalInTranscript(
 }
 
 /**
- * Check for architect rejection in session transcript
+ * Check for architect rejection in session transcript.
+ *
+ * A rejection is only accepted from the reviewer that the active verification
+ * request spawned, and only from a turn at or after that request was created.
+ * `detectArchitectRejection()` matches loose wording without any correlation,
+ * so reading raw transcript text would let a previous story's rejection mark
+ * the story now under review as incomplete.
  */
 function checkArchitectRejectionInTranscript(
   sessionId: string,
+  verificationState?: Pick<VerificationState, 'story_id' | 'critic_mode' | 'requested_at'>,
   transcriptPath?: string
 ): { rejected: boolean; feedback: string } {
   const claudeDir = getClaudeConfigDir();
@@ -1149,20 +1198,47 @@ function checkArchitectRejectionInTranscript(
     join(claudeDir, 'transcripts', `${sessionId}.md`)
   ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
 
+  const requestedAt = verificationState?.requested_at
+    ? Date.parse(verificationState.requested_at)
+    : NaN;
+  const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
+
   for (const candidate of possiblePaths) {
-    if (existsSync(candidate)) {
-      try {
-        // Rejection detection is uncorrelated wording matching, so it keeps
-        // the small tail window: widening it would resurrect rejections from
-        // earlier stories and re-open finished work.
-        const content = readTranscriptTail(candidate);
-        const result = detectArchitectRejection(content);
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      if (candidate.endsWith('.md')) {
+        // Plain-text transcripts carry no reviewer attribution. They are a
+        // legacy non-[CC] shape, so keep the original tail heuristic there
+        // rather than silently dropping rejection support for those hosts.
+        const result = detectArchitectRejection(readTranscriptTail(candidate));
         if (result.rejected) {
           return result;
         }
-      } catch {
         continue;
       }
+
+      const outputs = collectReviewerOutputs(
+        candidate,
+        verificationState,
+        TRANSCRIPT_APPROVAL_SCAN_BYTES,
+        (content) => /reject|not complete|incomplete|issue|bug|error|missing/i.test(content),
+      );
+      for (const output of outputs) {
+        // An output with no timestamp cannot be placed relative to the request,
+        // so it is not treated as this request's verdict.
+        if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
+          continue;
+        }
+        const result = detectArchitectRejection(output.text);
+        if (result.rejected) {
+          return result;
+        }
+      }
+    } catch {
+      continue;
     }
   }
   return { rejected: false, feedback: '' };
@@ -1419,8 +1495,11 @@ async function checkRalphLoop(
         }
       }
 
-      // Check for architect rejection
-      const rejection = checkArchitectRejectionInTranscript(sessionId, transcriptPath);
+      // Check for architect rejection. Without a pending request there is no
+      // verdict to apply, so skip the scan entirely.
+      const rejection = verificationState
+        ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath)
+        : { rejected: false, feedback: '' };
       if (verificationState && rejection.rejected) {
         // Jev ralph-verdict shadow: the detected rejection is the twin;
         // in active mode, use Jev's verdict instead.

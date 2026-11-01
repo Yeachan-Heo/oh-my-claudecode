@@ -22,6 +22,7 @@ const {
   statSync,
 } = require("fs");
 const { execFileSync } = require("child_process");
+const { createHash } = require("node:crypto");
 const { homedir } = require("os");
 const { join, dirname, resolve, normalize } = require("path");
 const { getClaudeConfigDir } = require("./lib/config-dir.cjs");
@@ -905,8 +906,37 @@ function isScheduledWakeupStop(data) {
   return reasons.some((reason) => stopPatterns.some((pattern) => reason.includes(pattern)));
 }
 
+const PRD_FILENAME = "prd.json";
+const VERIFICATION_STATE_FILENAME = "ralph-verification-state.json";
+/** Shared budget for all bridge delegation attempts inside one Stop event. */
+const BRIDGE_DELEGATION_TIMEOUT_MS = 6000;
+
 /**
- * True when the PRD has a completion claim that still needs reviewer sign-off.
+ * Same PRD lookup order as findPrdPath() in src/hooks/ralph/prd.ts:
+ * session-scoped first, then the project root, then .omc/, then .omc/state/.
+ * Deriving the path from the Ralph state file alone misses every PRD that
+ * lives at one of the project-level locations.
+ */
+function resolvePrdPath(stateDir, omcRoot, directory, sessionId) {
+  const candidates = [];
+  if (sessionId) {
+    candidates.push(join(stateDir, "sessions", sessionId, PRD_FILENAME));
+  }
+  if (directory) {
+    candidates.push(join(directory, PRD_FILENAME));
+  }
+  candidates.push(join(omcRoot, PRD_FILENAME));
+  candidates.push(join(stateDir, PRD_FILENAME));
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * True when a story carries a completion claim that still needs reviewer
+ * sign-off.
  *
  * The skill tells the agent never to write `architectVerified` itself
  * (skills/ralph/SKILL.md, Step 5) — approval binds it separately. That binding
@@ -914,16 +944,81 @@ function isScheduledWakeupStop(data) {
  * script does not contain, so a story that passed stays unverified forever
  * unless we hand the stop event to the bridge.
  */
+function storyNeedsReviewerSignoff(story) {
+  if (!story || story.passes !== true || story.architectVerified === true) {
+    return false;
+  }
+  // Mirror normalizeStory()'s revision binding: `passes: true` without the
+  // matching completionCriteriaRevision is not a completion claim, and
+  // delegating for it would spawn the bridge on every Stop of a hand-edited
+  // PRD. The bridge reaches the same conclusion, so skipping is not a loss.
+  const acceptanceCriteria = Array.isArray(story.acceptanceCriteria) ? story.acceptanceCriteria : [];
+  const criterionAmendments = Array.isArray(story.criterionAmendments) ? story.criterionAmendments : [];
+  const governingCriteriaRevision = `sha256:${createHash("sha256")
+    .update(JSON.stringify({ acceptanceCriteria, criterionAmendments }))
+    .digest("hex")}`;
+  return story.completionCriteriaRevision === governingCriteriaRevision;
+}
+
 function hasPendingArchitectVerification(prd) {
   const stories = Array.isArray(prd && prd.userStories) ? prd.userStories : [];
-  return stories.some(
-    (story) => story && story.passes === true && story.architectVerified !== true,
-  );
+  return stories.some(storyNeedsReviewerSignoff);
+}
+
+/**
+ * A pending verification request also needs the bridge. Once the last story is
+ * signed off, checkRalphLoop() starts a run-level (completion) request, and no
+ * story is left in the passes-but-unverified state the predicate above watches.
+ */
+function hasPendingVerificationRequest(stateDir, omcRoot, sessionId) {
+  const candidates = [];
+  if (sessionId) {
+    candidates.push(join(stateDir, "sessions", sessionId, VERIFICATION_STATE_FILENAME));
+  }
+  candidates.push(join(omcRoot, "ralph-verification.json"));
+
+  for (const candidate of candidates) {
+    const state = readJsonFile(candidate);
+    if (state && state.pending === true) return true;
+  }
+  return false;
+}
+
+/**
+ * Translate the bridge's hook output into the Stop-hook protocol.
+ *
+ * createHookOutput() returns `{ continue, message }`, while Stop needs
+ * `{ decision: "block", reason }` to keep the agent running with a prompt.
+ * Passing `continue: false` through unchanged stops the agent silently and
+ * drops the reviewer prompt.
+ */
+function adaptBridgeOutput(stdout) {
+  const trimmed = (stdout || "").trim();
+  if (!trimmed) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  if (typeof parsed.decision === "string" && parsed.decision) {
+    return parsed;
+  }
+  if (typeof parsed.message === "string" && parsed.message.trim()) {
+    return { decision: "block", reason: parsed.message };
+  }
+  if (parsed.continue === true) {
+    return { continue: true, suppressOutput: true };
+  }
+  return null;
 }
 
 /**
  * Run the full persistent-mode implementation (bridge) for one stop event.
- * Returns its stdout on success, or null so the caller can fall back to the
+ * Returns a Stop-hook response, or null so the caller can fall back to the
  * plain continuation path — a missing or broken bridge must never wedge the
  * loop.
  */
@@ -937,15 +1032,28 @@ function delegateToBridge(input) {
   // bridge is not reachable; the npm bin shim is.
   candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
 
+  // One shared deadline. hooks.json allows 10s for this script and the run.cjs
+  // supervisor 9.5s, so a second candidate must not get a fresh budget; a
+  // synchronous spawn also blocks this script's own watchdog.
+  const deadline = Date.now() + BRIDGE_DELEGATION_TIMEOUT_MS;
+
   for (const { command, args } of candidates) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
     try {
       const stdout = execFileSync(command, args, {
         input: JSON.stringify(input),
         encoding: "utf-8",
-        timeout: 8000,
-        env: process.env,
-      }).trim();
-      if (stdout) return stdout;
+        timeout: remaining,
+        env: {
+          ...process.env,
+          // The bridge is also the interactive CLI. Without this it parses
+          // argv as a user command and refuses to run inside a [CC] session.
+          OMC_CLI_SKIP_PARSE: "1",
+        },
+      });
+      const adapted = adaptBridgeOutput(stdout);
+      if (adapted) return adapted;
     } catch {
       continue;
     }
@@ -1029,15 +1137,19 @@ async function main() {
       const iteration = ralph.state.iteration || 1;
       const maxIter = ralph.state.max_iterations || 100;
 
-      // A story that passed but was never signed off has to go through the
-      // reviewer gate before the loop can advance. Only the bridge holds that
-      // state machine, so hand this stop event to it and use its decision.
-      const prdPath = ralph.path ? join(dirname(ralph.path), "prd.json") : join(omcRoot, "prd.json");
-      const prd = readJsonFile(prdPath);
-      if (prd && hasPendingArchitectVerification(prd)) {
+      // A story that passed but was never signed off, or a pending
+      // verification request, has to go through the reviewer gate before the
+      // loop can advance. Only the bridge holds that state machine, so hand
+      // this stop event to it and use its decision.
+      const prdPath = resolvePrdPath(stateDir, omcRoot, directory, sessionId);
+      const prd = prdPath ? readJsonFile(prdPath) : null;
+      if (
+        hasPendingVerificationRequest(stateDir, omcRoot, sessionId) ||
+        hasPendingArchitectVerification(prd)
+      ) {
         const delegated = delegateToBridge(data);
         if (delegated) {
-          console.log(delegated);
+          console.log(JSON.stringify(delegated));
           return;
         }
       }

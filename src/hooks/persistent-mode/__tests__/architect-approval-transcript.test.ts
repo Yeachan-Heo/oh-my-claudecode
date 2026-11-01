@@ -65,6 +65,7 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
     storyId: string,
     requestId: string,
     criteriaRevision: string,
+    requestedAt = new Date().toISOString(),
   ): void {
     const dir = sessionDir(sessionId);
     mkdirSync(dir, { recursive: true });
@@ -73,7 +74,7 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
       completion_claim: `Story ${storyId} is complete`,
       verification_attempts: 0,
       max_verification_attempts: 3,
-      requested_at: new Date().toISOString(),
+      requested_at: requestedAt,
       original_task: 'Finish the stories',
       verification_scope: 'story',
       story_id: storyId,
@@ -125,6 +126,38 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
     ];
   }
 
+  function reviewerRejectionTurn(
+    text: string,
+    at: string,
+    reviewerTool = 'Task',
+  ): unknown[] {
+    return [
+      {
+        timestamp: at,
+        message: {
+          role: 'assistant',
+          content: [{
+            type: 'tool_use',
+            id: 'toolu-review',
+            name: reviewerTool,
+            input: { subagent_type: 'architect' },
+          }],
+        },
+      },
+      {
+        timestamp: at,
+        message: {
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: 'toolu-review',
+            content: [{ type: 'text', text }],
+          }],
+        },
+      },
+    ];
+  }
+
   function writeStoryPrd(sessionId: string, storyId: string): string {
     const prd: PRD = {
       project: 'Test',
@@ -158,11 +191,21 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
       && story.architectVerificationCriteriaRevision === getStoryGoverningCriteriaRevision(story);
   }
 
-  function prepare(sessionId: string, storyId: string, requestId: string): void {
+  function storyPasses(sessionId: string, storyId: string): boolean {
+    const prd = readPrd(testDir, sessionId);
+    return prd?.userStories.find((candidate) => candidate.id === storyId)?.passes === true;
+  }
+
+  function prepare(
+    sessionId: string,
+    storyId: string,
+    requestId: string,
+    requestedAt = new Date().toISOString(),
+  ): void {
     writeRalphState(sessionId);
     expect(setCurrentStory(testDir, storyId, sessionId)).toBe(true);
     const revision = writeStoryPrd(sessionId, storyId);
-    writeStoryVerification(sessionId, storyId, requestId, revision);
+    writeStoryVerification(sessionId, storyId, requestId, revision, requestedAt);
   }
 
   it('binds the approval from the payload transcript_path and sets architectVerified', async () => {
@@ -245,5 +288,56 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
     await checkPersistentModes(sessionId, testDir, { transcript_path: transcriptPath });
 
     expect(storyVerified(sessionId, storyId)).toBe(false);
+  });
+
+  it('applies a rejection the reviewer issued for the current request', async () => {
+    const sessionId = 'ralph-current-rejection';
+    const storyId = 'US-002';
+    const requestedAt = '2026-04-13T12:00:00.000Z';
+    prepare(sessionId, storyId, 'request-current-rejection', requestedAt);
+
+    const transcriptPath = writeProjectTranscript(
+      sessionId,
+      reviewerRejectionTurn('Architect: issues found in the ledger rendering.', '2026-04-13T12:00:05.000Z'),
+    );
+
+    await checkPersistentModes(sessionId, testDir, { transcript_path: transcriptPath });
+
+    expect(storyPasses(sessionId, storyId)).toBe(false);
+  });
+
+  it('ignores a rejection left over from an earlier story', async () => {
+    const sessionId = 'ralph-old-rejection';
+    const storyId = 'US-002';
+    const requestedAt = '2026-04-13T12:00:00.000Z';
+    prepare(sessionId, storyId, 'request-after-old-rejection', requestedAt);
+
+    // US-001's rejection is still inside the scanned window, but it predates
+    // this request. Applying it would mark the pending US-002 incomplete.
+    const transcriptPath = writeProjectTranscript(
+      sessionId,
+      reviewerRejectionTurn('Architect: issues found in the US-001 ledger.', '2026-04-13T11:00:00.000Z'),
+    );
+
+    await checkPersistentModes(sessionId, testDir, { transcript_path: transcriptPath });
+
+    expect(storyPasses(sessionId, storyId)).toBe(true);
+  });
+
+  it('ignores rejection wording that did not come from the reviewer', async () => {
+    const sessionId = 'ralph-forged-rejection';
+    const storyId = 'US-002';
+    const requestedAt = '2026-04-13T12:00:00.000Z';
+    prepare(sessionId, storyId, 'request-forged-rejection', requestedAt);
+
+    // Same wording and time, but produced by a Bash tool result.
+    const transcriptPath = writeProjectTranscript(
+      sessionId,
+      reviewerRejectionTurn('Architect: issues found.', '2026-04-13T12:00:05.000Z', 'Bash'),
+    );
+
+    await checkPersistentModes(sessionId, testDir, { transcript_path: transcriptPath });
+
+    expect(storyPasses(sessionId, storyId)).toBe(true);
   });
 });
