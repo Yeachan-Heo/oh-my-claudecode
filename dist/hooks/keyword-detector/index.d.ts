@@ -26,7 +26,7 @@ export declare function isRetiredWorkflowSlashInvocation(text: string): boolean;
  * removed-not-aliased workflows may retain legacy state readers, but must not
  * be parsed as active slash routes.
  */
-declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "team", "ultraqa", "deep-interview", "ralplan", "self-improve"];
+declare const CANONICAL_WORKFLOW_SLASH_SKILLS: readonly ["autopilot", "ralph", "team", "deep-interview", "ralplan", "self-improve"];
 export type CanonicalWorkflowSlashSkill = (typeof CANONICAL_WORKFLOW_SLASH_SKILLS)[number];
 export interface ExplicitWorkflowSlashInvocation {
     /** Canonical workflow skill name (lowercase, no `oh-my-claudecode:` prefix). */

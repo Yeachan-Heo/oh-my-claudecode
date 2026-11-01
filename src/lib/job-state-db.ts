@@ -17,8 +17,28 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "fs";
 import { join, resolve } from "path";
 import type BetterSqlite3 from "better-sqlite3";
-import type { JobStatus } from "../mcp/prompt-persistence.js";
 import { getOmcRoot } from "./worktree-paths.js";
+
+/**
+ * Job status for background execution tracking
+ */
+export interface JobStatus {
+  provider: "codex" | "gemini";
+  jobId: string;
+  slug: string;
+  status: "spawned" | "running" | "completed" | "failed" | "timeout";
+  pid?: number;
+  promptFile: string;
+  responseFile: string;
+  model: string;
+  agentRole: string;
+  spawnedAt: string;
+  completedAt?: string;
+  error?: string;
+  usedFallback?: boolean;
+  fallbackModel?: string;
+  killedByUser?: boolean;
+}
 
 // Schema version - bump when adding migrations
 const DB_SCHEMA_VERSION = 1;

@@ -62,10 +62,6 @@ Project-level type checking via `lsp_diagnostics_directory` tool.
 
 **Usage:** Check entire project for errors before commits or after refactoring.
 
-## Session Resume
-
-Background agents can be resumed with full context via `resume-session` tool.
-
 ## Pipeline (v3.4)
 
 Sequential agent chaining with data passing between stages.
