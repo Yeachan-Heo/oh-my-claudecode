@@ -5,14 +5,14 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4f5d6c5ef2928c2857d970b39b3b3b5f5cdcaf73",
+    "head": "fe5d7a86ae9d7f158e32b3b406233c1aeaa62f77",
     "sourceSha256": "165a27e97fdb771ca731e8e571ba809294eafe13394ea8cca6d42b5f2ed9da2f",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4f5d6c5ef2928c2857d970b39b3b3b5f5cdcaf73",
+  "head": "fe5d7a86ae9d7f158e32b3b406233c1aeaa62f77",
   "sourceSha256": "165a27e97fdb771ca731e8e571ba809294eafe13394ea8cca6d42b5f2ed9da2f",
   "counts": {
     "public": {
@@ -32,9 +32,9 @@
       "total": 1504
     },
     "generated": {
-      "distFiles": 5733,
+      "distFiles": 5709,
       "bridgeFiles": 9,
-      "total": 5742
+      "total": 5718
     },
     "prompt": {
       "promptLikeFiles": 59
@@ -4332,10 +4332,6 @@
       "dist/hooks/team-pipeline/types.d.ts.map",
       "dist/hooks/team-pipeline/types.js",
       "dist/hooks/team-pipeline/types.js.map",
-      "dist/hooks/team-worker-hook.d.ts",
-      "dist/hooks/team-worker-hook.d.ts.map",
-      "dist/hooks/team-worker-hook.js",
-      "dist/hooks/team-worker-hook.js.map",
       "dist/hooks/think-mode/__tests__/index.test.d.ts",
       "dist/hooks/think-mode/__tests__/index.test.d.ts.map",
       "dist/hooks/think-mode/__tests__/index.test.js",
@@ -5029,18 +5025,6 @@
       "dist/mcp/disable-tools.d.ts.map",
       "dist/mcp/disable-tools.js",
       "dist/mcp/disable-tools.js.map",
-      "dist/mcp/index.d.ts",
-      "dist/mcp/index.d.ts.map",
-      "dist/mcp/index.js",
-      "dist/mcp/index.js.map",
-      "dist/mcp/job-management.d.ts",
-      "dist/mcp/job-management.d.ts.map",
-      "dist/mcp/job-management.js",
-      "dist/mcp/job-management.js.map",
-      "dist/mcp/mcp-config.d.ts",
-      "dist/mcp/mcp-config.d.ts.map",
-      "dist/mcp/mcp-config.js",
-      "dist/mcp/mcp-config.js.map",
       "dist/mcp/omc-tools-server.d.ts",
       "dist/mcp/omc-tools-server.d.ts.map",
       "dist/mcp/omc-tools-server.js",
@@ -5049,10 +5033,6 @@
       "dist/mcp/prompt-injection.d.ts.map",
       "dist/mcp/prompt-injection.js",
       "dist/mcp/prompt-injection.js.map",
-      "dist/mcp/prompt-persistence.d.ts",
-      "dist/mcp/prompt-persistence.d.ts.map",
-      "dist/mcp/prompt-persistence.js",
-      "dist/mcp/prompt-persistence.js.map",
       "dist/mcp/servers.d.ts",
       "dist/mcp/servers.d.ts.map",
       "dist/mcp/servers.js",
@@ -6473,10 +6453,6 @@
       "dist/tools/python-repl/types.d.ts.map",
       "dist/tools/python-repl/types.js",
       "dist/tools/python-repl/types.js.map",
-      "dist/tools/resume-session.d.ts",
-      "dist/tools/resume-session.d.ts.map",
-      "dist/tools/resume-session.js",
-      "dist/tools/resume-session.js.map",
       "dist/tools/session-history-tools.d.ts",
       "dist/tools/session-history-tools.d.ts.map",
       "dist/tools/session-history-tools.js",
@@ -25256,26 +25232,6 @@
         "path": "dist/hooks/team-pipeline/types.js.map"
       },
       {
-        "id": "dist/hooks/team-worker-hook.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-worker-hook.d.ts"
-      },
-      {
-        "id": "dist/hooks/team-worker-hook.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-worker-hook.d.ts.map"
-      },
-      {
-        "id": "dist/hooks/team-worker-hook.js",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-worker-hook.js"
-      },
-      {
-        "id": "dist/hooks/team-worker-hook.js.map",
-        "kind": "generated-dist",
-        "path": "dist/hooks/team-worker-hook.js.map"
-      },
-      {
         "id": "dist/hooks/think-mode/__tests__/index.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/think-mode/__tests__/index.test.d.ts"
@@ -28741,66 +28697,6 @@
         "path": "dist/mcp/disable-tools.js.map"
       },
       {
-        "id": "dist/mcp/index.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/mcp/index.d.ts"
-      },
-      {
-        "id": "dist/mcp/index.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/index.d.ts.map"
-      },
-      {
-        "id": "dist/mcp/index.js",
-        "kind": "generated-dist",
-        "path": "dist/mcp/index.js"
-      },
-      {
-        "id": "dist/mcp/index.js.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/index.js.map"
-      },
-      {
-        "id": "dist/mcp/job-management.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/mcp/job-management.d.ts"
-      },
-      {
-        "id": "dist/mcp/job-management.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/job-management.d.ts.map"
-      },
-      {
-        "id": "dist/mcp/job-management.js",
-        "kind": "generated-dist",
-        "path": "dist/mcp/job-management.js"
-      },
-      {
-        "id": "dist/mcp/job-management.js.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/job-management.js.map"
-      },
-      {
-        "id": "dist/mcp/mcp-config.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/mcp/mcp-config.d.ts"
-      },
-      {
-        "id": "dist/mcp/mcp-config.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/mcp-config.d.ts.map"
-      },
-      {
-        "id": "dist/mcp/mcp-config.js",
-        "kind": "generated-dist",
-        "path": "dist/mcp/mcp-config.js"
-      },
-      {
-        "id": "dist/mcp/mcp-config.js.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/mcp-config.js.map"
-      },
-      {
         "id": "dist/mcp/omc-tools-server.d.ts",
         "kind": "generated-dist",
         "path": "dist/mcp/omc-tools-server.d.ts"
@@ -28839,26 +28735,6 @@
         "id": "dist/mcp/prompt-injection.js.map",
         "kind": "generated-dist",
         "path": "dist/mcp/prompt-injection.js.map"
-      },
-      {
-        "id": "dist/mcp/prompt-persistence.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/mcp/prompt-persistence.d.ts"
-      },
-      {
-        "id": "dist/mcp/prompt-persistence.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/prompt-persistence.d.ts.map"
-      },
-      {
-        "id": "dist/mcp/prompt-persistence.js",
-        "kind": "generated-dist",
-        "path": "dist/mcp/prompt-persistence.js"
-      },
-      {
-        "id": "dist/mcp/prompt-persistence.js.map",
-        "kind": "generated-dist",
-        "path": "dist/mcp/prompt-persistence.js.map"
       },
       {
         "id": "dist/mcp/servers.d.ts",
@@ -35959,26 +35835,6 @@
         "id": "dist/tools/python-repl/types.js.map",
         "kind": "generated-dist",
         "path": "dist/tools/python-repl/types.js.map"
-      },
-      {
-        "id": "dist/tools/resume-session.d.ts",
-        "kind": "generated-dist",
-        "path": "dist/tools/resume-session.d.ts"
-      },
-      {
-        "id": "dist/tools/resume-session.d.ts.map",
-        "kind": "generated-dist",
-        "path": "dist/tools/resume-session.d.ts.map"
-      },
-      {
-        "id": "dist/tools/resume-session.js",
-        "kind": "generated-dist",
-        "path": "dist/tools/resume-session.js"
-      },
-      {
-        "id": "dist/tools/resume-session.js.map",
-        "kind": "generated-dist",
-        "path": "dist/tools/resume-session.js.map"
       },
       {
         "id": "dist/tools/session-history-tools.d.ts",
@@ -89689,12 +89545,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7882,
+      "nodeCount": 7858,
       "edgeCount": 8611,
       "importEdgeCount": 7182,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "377f3335a7ecbbdca143a135e61971e878b342dde8d72983e8087319707d209b",
-  "manifestSha256": "4e9b857b56a86839a73c616dd8db05ef091a5dda060838f56dcfb3b4b5a209cc"
+  "manifestSha256": "4e6f594242902bb0ddd94cb99c70a41f1fbb3101c9447d43090679ac23145648"
 }
