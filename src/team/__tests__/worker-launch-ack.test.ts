@@ -1941,10 +1941,12 @@ describe('worker launch acknowledgement', () => {
       bootstrap = workerLaunch.runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
         launchAttempt,
         [process.execPath, '-e', [
-          "const fs=require('node:fs'),cp=require('node:child_process')",
+          "const fs=require('node:fs'),cp=require('node:child_process'),path=require('node:path')",
           "const descendant=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
           'descendant.unref()',
-          `fs.writeFileSync(${JSON.stringify(descendantPidPath)},String(descendant.pid))`,
+          "const actualCwd=process.env.OMC_PROVIDER_CWD||process.cwd()",
+          `const actualPath=path.join(actualCwd,'timer-transition-descendant.pid')`,
+          'fs.writeFileSync(actualPath,String(descendant.pid))',
           'process.exit(0)',
         ].join(';')],
         cwd,
@@ -2002,8 +2004,11 @@ describe('worker launch acknowledgement', () => {
     const providerScript = [
       "const fs=require('node:fs')",
       "const cp=require('node:child_process')",
+      "const path=require('node:path')",
       "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
-      `fs.writeFileSync(${JSON.stringify(pidMarker)},JSON.stringify({parent:process.pid,child:child.pid}))`,
+      "const actualCwd=process.env.OMC_PROVIDER_CWD||process.cwd()",
+      "const actualPath=path.join(actualCwd,'started-provider-tree-pids.json')",
+      'fs.writeFileSync(actualPath,JSON.stringify({parent:process.pid,child:child.pid}))',
       'setInterval(()=>{},1000)',
     ].join(';');
     const bootstrap = runWorkerLaunchBootstrap(buildWorkerLaunchBootstrapSpec(
