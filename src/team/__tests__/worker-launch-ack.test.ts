@@ -2704,9 +2704,9 @@ describe('worker launch acknowledgement', () => {
       args: providerArgv.slice(1),
     });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\codex.exe', '--version'], 'win32', { SystemRoot: 'C:\\Windows' }))
-      .toEqual({ command: 'C:\\Tools\\codex.exe', args: ['--version'], env: { NoDefaultCurrentDirectoryInExePath: '1' } });
+      .toEqual({ command: 'C:\\Tools\\codex.exe', args: ['--version'], env: { NoDefaultCurrentDirectoryInExePath: '1' }, windowsDirect: true });
     expect(buildProviderSpawnInvocation(['C:\\Tools\\CODEX.COM', '100%'], 'win32', { SystemRoot: 'C:\\Windows' }))
-      .toEqual({ command: 'C:\\Tools\\CODEX.COM', args: ['100%'], env: { NoDefaultCurrentDirectoryInExePath: '1' } });
+      .toEqual({ command: 'C:\\Tools\\CODEX.COM', args: ['100%'], env: { NoDefaultCurrentDirectoryInExePath: '1' }, windowsDirect: true });
     // A bare name or a trailing-dot batch path keeps the cmd route.
     for (const command of ['codex', 'C:\\Tools\\codex.cmd.', 'C:\\Tools\\CODEX.BAT']) {
       expect(buildProviderSpawnInvocation([command], 'win32', { SystemRoot: 'C:\\Windows' }))
@@ -2932,6 +2932,14 @@ describe('worker launch acknowledgement', () => {
     await expect(readFile(wrapperPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('fails closed instead of using the POSIX wrapper for a supervised .exe provider', async () => {
+    const exe = 'C:\\Tools\\codex.exe';
+    const invocation = buildProviderSpawnInvocation([exe, '--version'], 'win32', { SystemRoot: 'C:\\Windows' });
+    await expect(materializeProviderSpawnInvocation(invocation, { superviseProcessTree: true }))
+      .rejects.toThrow('worker_launch_windows_supervision_unsupported');
+    await expect(materializeProviderSpawnInvocation(invocation)).resolves.toMatchObject({ command: exe });
+  });
+
   describe.runIf(process.platform === 'win32')('native Windows batch provider hardening', () => {
     const recordArgv = `"${process.execPath}" -e "require('fs').writeFileSync(process.argv[1],JSON.stringify({argv:process.argv.slice(2),leaked:Object.keys(process.env).some(k=>k.toUpperCase().startsWith('_OMC_P'))}))" %*`;
 
@@ -3007,7 +3015,7 @@ describe('worker launch acknowledgement', () => {
         [process.execPath, '-e', "require('fs').writeFileSync(process.argv[1],JSON.stringify(process.argv.slice(2)))", outputPath, ...payload],
         'win32', { SystemRoot: process.env.SystemRoot },
       );
-      expect(invocation).toEqual({ command: process.execPath, args: expect.any(Array), env: { NoDefaultCurrentDirectoryInExePath: '1' } });
+      expect(invocation).toEqual({ command: process.execPath, args: expect.any(Array), env: { NoDefaultCurrentDirectoryInExePath: '1' }, windowsDirect: true });
       await new Promise<void>((resolve, reject) => {
         const child = spawn(invocation.command, invocation.args, { stdio: 'ignore' });
         child.once('error', reject);
@@ -3107,13 +3115,6 @@ describe('worker launch acknowledgement', () => {
       } finally {
         await invocation.cleanup();
       }
-    });
-
-    it('fails closed instead of using the POSIX wrapper for a supervised .exe provider', async () => {
-      const invocation = buildProviderSpawnInvocation([process.execPath, '-e', '0'], 'win32', { SystemRoot: process.env.SystemRoot });
-      await expect(materializeProviderSpawnInvocation(invocation, { superviseProcessTree: true }))
-        .rejects.toThrow('worker_launch_windows_supervision_unsupported');
-      await expect(materializeProviderSpawnInvocation(invocation)).resolves.toMatchObject({ command: process.execPath });
     });
 
     it('refuses to run the wrapper when the spawn env lacks its line variable', async () => {

@@ -302,6 +302,8 @@ export interface ProviderSpawnInvocation {
   batchScript?: string;
   /** Variables the spawn environment must carry on top of the provider environment. */
   env?: Record<string, string>;
+  /** A direct win32 launch (no batch wrapper), which only a plain spawn can run. */
+  windowsDirect?: true;
 }
 
 export interface MaterializedProviderSpawnInvocation {
@@ -2111,7 +2113,7 @@ export function buildProviderSpawnInvocation(
     };
   }
   // A provider's bare-name children must not run a command planted in the cwd either.
-  if (platform === 'win32') return { command, args, env: { [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' } };
+  if (platform === 'win32') return { command, args, env: { [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: '1' }, windowsDirect: true };
   return { command, args };
 }
 
@@ -2166,9 +2168,9 @@ export async function materializeProviderSpawnInvocation(
     return { command: invocation.command, args: invocation.args, ...(invocation.env ? { env: invocation.env } : {}), cleanup: async () => {} };
   }
   // Only the batch wrapper can hold and report a supervised Windows provider;
-  // a direct win32 invocation (the only kind that carries the cwd-search
-  // variable without a batch script) never falls through to the POSIX wrapper.
-  if (!invocation.batchScript && invocation.env?.[WINDOWS_NO_CWD_EXE_SEARCH_VAR] !== undefined) {
+  // a direct win32 invocation (marked windowsDirect) never falls
+  // through to the POSIX wrapper.
+  if (invocation.windowsDirect) {
     throw new Error('worker_launch_windows_supervision_unsupported');
   }
   const wrapperDir = await mkdtemp(join(tmpdir(), 'omc-provider-'));
