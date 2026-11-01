@@ -280,25 +280,6 @@ export class BackgroundManager {
         return existingTask;
     }
     /**
-     * Get resume context for a session
-     * Used by the resume_session tool to prepare continuation prompts
-     */
-    getResumeContext(sessionId) {
-        const task = this.findBySession(sessionId);
-        if (!task) {
-            return null;
-        }
-        return {
-            sessionId: task.sessionId,
-            previousPrompt: task.prompt,
-            toolCallCount: task.progress?.toolCalls ?? 0,
-            lastToolUsed: task.progress?.lastTool,
-            lastOutputSummary: task.progress?.lastMessage?.slice(0, 500),
-            startedAt: task.startedAt,
-            lastActivityAt: task.progress?.lastUpdate ?? task.startedAt,
-        };
-    }
-    /**
      * Get a task by ID
      */
     getTask(id) {
