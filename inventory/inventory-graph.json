@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-    "sourceSha256": "3ac1415072878a5cf567b58ebdb893d381f0230174be749b3217104a087a3dc1",
+    "head": "ac643b0da4431d74e0e235e1690813bfb0bb493f",
+    "sourceSha256": "149c9d9d618fa266d709e17912fc5955b07d98562e9d957384783bd85c667e27",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "d77240894b7a570e426b14e11ba141e83406e94b",
-  "sourceSha256": "3ac1415072878a5cf567b58ebdb893d381f0230174be749b3217104a087a3dc1",
+  "head": "ac643b0da4431d74e0e235e1690813bfb0bb493f",
+  "sourceSha256": "149c9d9d618fa266d709e17912fc5955b07d98562e9d957384783bd85c667e27",
   "counts": {
     "public": {
       "skills": 48,
@@ -37402,11 +37402,6 @@
         "id": "native/contained-fs.c",
         "kind": "other",
         "path": "native/contained-fs.c"
-      },
-      {
-        "id": "oh-my-claude-sisyphus-5.7.25.tgz",
-        "kind": "other",
-        "path": "oh-my-claude-sisyphus-5.7.25.tgz"
       },
       {
         "id": "package-lock.json",
@@ -89617,12 +89612,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7861,
+      "nodeCount": 7860,
       "edgeCount": 8622,
       "importEdgeCount": 7192,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "c0e2c3db568bd440f2d478a3076224b82fcec41e5acbfb92a0ec62c1462b6fb7",
-  "manifestSha256": "3cc7b9ff65e2fdfc49f1d70bf9ab3160f5ab0fc93467e97ddb61cac60cb7d9b8"
+  "inventorySha256": "167e32aa367cca8c59dd903aa2479254f0540ad85539075ce939a6a14fe12245",
+  "manifestSha256": "d47ffc79f4038da454bdf5fdb5b615fa7866a9b275d89c2ea71f9968b273d036"
 }
