@@ -112,11 +112,8 @@ function mergeArrays(fieldName: string, base: unknown[], incoming: unknown[]): u
         base as HotPath[],
         incoming as HotPath[],
         (hp: HotPath) => hp.path,
-        (a, b) => ({
-          ...b,
-          accessCount: Math.max(a.accessCount, b.accessCount),
-          lastAccessed: Math.max(a.lastAccessed, b.lastAccessed),
-        }),
+        // Counts decay on each touch, so the newer entry already folds in the older one.
+        (a, b) => (b.lastAccessed >= a.lastAccessed ? b : a),
       );
 
     case 'languages':

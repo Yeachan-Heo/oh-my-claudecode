@@ -20,7 +20,7 @@ import { getOmcRoot } from '../lib/worktree-paths.js';
 export const INTAKE_LABEL = 'intake';
 export const INTAKE_ROUTE_TABLE = { 'success:intake': { stage: 'intent', skill: 'intent' } };
 /** CI check-suite failures feed the diagnose stage of the same chain. */
-export const CI_ROUTE_TABLE = { 'failed:ci': { stage: 'diagnose', skill: 'diagnose' } };
+export const CI_ROUTE_TABLE = { 'failed:ci': { stage: 'diagnose', skill: 'debug' } };
 export function verifySignature(secret, rawBody, signatureHeader) {
     if (!signatureHeader?.startsWith('sha256='))
         return false;
