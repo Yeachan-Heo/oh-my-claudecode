@@ -52,6 +52,7 @@ import {
   getArchitectRejectionContinuationPrompt,
   detectArchitectApproval,
   detectArchitectRejection,
+  hasRejectionSignal,
   clearVerificationState,
   consumeVerificationRequest,
   restoreVerificationRequestIfAbsent,
@@ -805,6 +806,16 @@ export function recordIdleNotificationSent(
 
 /** Max bytes to read from the tail of a transcript for architect approval detection. */
 const TRANSCRIPT_TAIL_BYTES = 32 * 1024; // 32 KB
+/**
+ * Max bytes to scan when looking for a reviewer-authored approval marker.
+ *
+ * The 32 KB tail is enough for uncorrelated heuristics (rejection wording),
+ * but not for approval: the reviewer's tool_result is followed by more turns
+ * before the next Stop event, and a single large tool_result can exceed 32 KB
+ * on its own. Approvals are correlated by a unique request id, so widening the
+ * window cannot resurrect a stale approval from an earlier attempt.
+ */
+const TRANSCRIPT_APPROVAL_SCAN_BYTES = 32 * 1024 * 1024; // 32 MB
 const CRITICAL_CONTEXT_STOP_PERCENT = 95;
 const RALPLAN_TERMINAL_PHASES = new Set([
   'completed',
@@ -831,28 +842,28 @@ const RALPLAN_TERMINAL_PHASES = new Set([
  * Architect approval/rejection markers appear near the end of the conversation,
  * so reading only the last N bytes avoids loading megabyte-sized transcripts.
  */
-function readTranscriptTail(transcriptPath: string): string {
+function readTranscriptTail(transcriptPath: string, maxBytes = TRANSCRIPT_TAIL_BYTES): string {
   const size = statSync(transcriptPath).size;
-  if (size <= TRANSCRIPT_TAIL_BYTES) {
+  if (size <= maxBytes) {
     return readFileSync(transcriptPath, 'utf-8');
   }
   const fd = openSync(transcriptPath, 'r');
   try {
-    const offset = size - TRANSCRIPT_TAIL_BYTES;
-    const buf = Buffer.allocUnsafe(TRANSCRIPT_TAIL_BYTES);
-    const bytesRead = readSync(fd, buf, 0, TRANSCRIPT_TAIL_BYTES, offset);
+    const offset = size - maxBytes;
+    const buf = Buffer.allocUnsafe(maxBytes);
+    const bytesRead = readSync(fd, buf, 0, maxBytes, offset);
     return buf.subarray(0, bytesRead).toString('utf-8');
   } finally {
     closeSync(fd);
   }
 }
 
-function readTranscriptTailLines(transcriptPath: string): string[] {
-  const content = readTranscriptTail(transcriptPath);
+function splitTranscriptLines(transcriptPath: string, content: string, maxBytes: number): string[] {
   const lines = content.split('\n');
 
   try {
-    if (statSync(transcriptPath).size > TRANSCRIPT_TAIL_BYTES && lines.length > 0) {
+    // Drop the leading partial line when the window starts mid-file.
+    if (statSync(transcriptPath).size > maxBytes && lines.length > 0) {
       lines.shift();
     }
   } catch {
@@ -860,6 +871,10 @@ function readTranscriptTailLines(transcriptPath: string): string[] {
   }
 
   return lines;
+}
+
+function readTranscriptTailLines(transcriptPath: string, maxBytes = TRANSCRIPT_TAIL_BYTES): string[] {
+  return splitTranscriptLines(transcriptPath, readTranscriptTail(transcriptPath, maxBytes), maxBytes);
 }
 
 type TranscriptContentBlock = {
@@ -872,6 +887,7 @@ type TranscriptContentBlock = {
 };
 
 type TranscriptApprovalEntry = {
+  timestamp?: string;
   message?: {
     content?: TranscriptContentBlock[] | string;
   };
@@ -879,8 +895,20 @@ type TranscriptApprovalEntry = {
 
 type ReviewerApprovalPath = 'architect' | 'critic' | 'codex';
 
+/** One reviewer-authored tool result, with the transcript time it landed. */
+type ReviewerOutput = {
+  text: string;
+  at: number | null;
+};
+
 const REVIEWER_TASK_TOOL_NAMES = new Set(['Task', 'proxy_Task', 'Agent']);
 const REVIEWER_COMMAND_TOOL_NAMES = new Set(['Bash', 'proxy_Bash']);
+/**
+ * Cheap line filter before JSON.parse. Reviewer attribution needs a Task
+ * tool_use, a codex command, or the tool_result that answers one; everything
+ * else in a multi-megabyte transcript is skipped without parsing.
+ */
+const REVIEWER_LINE_HINTS = ['"tool_result"', '"subagent_type"', '--agent-prompt'];
 
 function normalizeReviewerPath(subagentType: unknown): ReviewerApprovalPath | null {
   if (typeof subagentType !== 'string') {
@@ -939,14 +967,35 @@ function matchesVerificationReviewerPath(
   return reviewerPath === expected;
 }
 
-function checkReviewerAuthoredApprovalInMessages(
+/**
+ * Reviewer-authored tool results in the scanned window, in transcript order.
+ *
+ * Approval and rejection both have to be attributed to the reviewer that the
+ * current verification request spawned — a stale verdict left anywhere else in
+ * the transcript must not decide the current story. Attribution lives here so
+ * the two callers cannot drift apart.
+ */
+function collectReviewerOutputs(
   transcriptPath: string,
-  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>
-): boolean {
-  const reviewerToolUses = new Map<string, ReviewerApprovalPath>();
+  verificationState: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'> | undefined,
+  maxBytes: number,
+  prefilter?: (content: string) => boolean
+): ReviewerOutput[] {
+  let content: string;
+  try {
+    content = readTranscriptTail(transcriptPath, maxBytes);
+  } catch {
+    return [];
+  }
+  if (prefilter && !prefilter(content)) {
+    return [];
+  }
 
-  for (const line of readTranscriptTailLines(transcriptPath)) {
-    if (!line.trim()) {
+  const reviewerToolUses = new Map<string, ReviewerApprovalPath>();
+  const outputs: ReviewerOutput[] = [];
+
+  for (const line of splitTranscriptLines(transcriptPath, content, maxBytes)) {
+    if (!line.trim() || !REVIEWER_LINE_HINTS.some((hint) => line.includes(hint))) {
       continue;
     }
 
@@ -957,12 +1006,15 @@ function checkReviewerAuthoredApprovalInMessages(
       continue;
     }
 
-    const content = entry.message?.content;
-    if (!Array.isArray(content)) {
+    const blocks = entry.message?.content;
+    if (!Array.isArray(blocks)) {
       continue;
     }
 
-    for (const block of content) {
+    const parsedAt = typeof entry.timestamp === 'string' ? Date.parse(entry.timestamp) : NaN;
+    const at = Number.isFinite(parsedAt) ? parsedAt : null;
+
+    for (const block of blocks) {
       if (block?.type === 'tool_use' && block.id && block.name) {
         if (REVIEWER_TASK_TOOL_NAMES.has(block.name)) {
           const reviewerPath = normalizeReviewerPath((block.input as Record<string, unknown> | undefined)?.subagent_type);
@@ -990,14 +1042,32 @@ function checkReviewerAuthoredApprovalInMessages(
         continue;
       }
 
-      const reviewerOutput = extractTranscriptText(block.content);
-      if (reviewerOutput && detectArchitectApproval(reviewerOutput, verificationState)) {
-        return true;
+      const text = extractTranscriptText(block.content);
+      if (text) {
+        outputs.push({ text, at });
       }
     }
   }
 
-  return false;
+  return outputs;
+}
+
+function checkReviewerAuthoredApprovalInMessages(
+  transcriptPath: string,
+  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>,
+  maxBytes = TRANSCRIPT_TAIL_BYTES
+): boolean {
+  // Cheap prefilter: the approval tag has to appear in the scanned window.
+  // Skips JSON-parsing megabytes of transcript when no reviewer approved.
+  // detectArchitectApproval() matches the marker case-insensitively, so this
+  // filter has to as well or valid reviewer output would stay pending.
+  const outputs = collectReviewerOutputs(
+    transcriptPath,
+    verificationState,
+    maxBytes,
+    (content) => /verified_complete/i.test(content),
+  );
+  return outputs.some((output) => detectArchitectApproval(output.text, verificationState));
 }
 
 function estimateTranscriptContextPercent(transcriptPath?: string): number {
@@ -1067,22 +1137,36 @@ function isAwaitingConfirmation(state: unknown): boolean {
 }
 
 /**
- * Check for architect approval in session transcript
+ * Check for architect approval in session transcript.
+ *
+ * `transcriptPath` comes from the Stop payload ([CC] writes
+ * `<CLAUDE_CONFIG_DIR>/projects/<slug>/<sessionId>.jsonl`). The legacy
+ * `sessions/<id>/messages.json` locations are kept as a fallback for hosts
+ * that still write them; nothing in OMC writes that file.
  */
 function checkArchitectApprovalInTranscript(
   sessionId: string,
-  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>
+  verificationState?: Pick<VerificationState, 'request_id' | 'story_id' | 'critic_mode'>,
+  transcriptPath?: string
 ): boolean {
   const claudeDir = getClaudeConfigDir();
-  const possiblePaths = [join(claudeDir, 'sessions', sessionId, 'messages.json')];
+  const candidates = [
+    transcriptPath,
+    join(claudeDir, 'sessions', sessionId, 'messages.json'),
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
 
-  for (const transcriptPath of possiblePaths) {
-    if (!existsSync(transcriptPath)) {
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    if (seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    if (!existsSync(candidate)) {
       continue;
     }
 
     try {
-      if (checkReviewerAuthoredApprovalInMessages(transcriptPath, verificationState)) {
+      if (checkReviewerAuthoredApprovalInMessages(candidate, verificationState, TRANSCRIPT_APPROVAL_SCAN_BYTES)) {
         return true;
       }
     } catch {
@@ -1094,27 +1178,70 @@ function checkArchitectApprovalInTranscript(
 }
 
 /**
- * Check for architect rejection in session transcript
+ * Check for architect rejection in session transcript.
+ *
+ * A rejection is only accepted from the reviewer that the active verification
+ * request spawned, and only from a turn at or after that request was created.
+ * `detectArchitectRejection()` matches loose wording without any correlation,
+ * so reading raw transcript text would let a previous story's rejection mark
+ * the story now under review as incomplete.
  */
-function checkArchitectRejectionInTranscript(sessionId: string): { rejected: boolean; feedback: string } {
+function checkArchitectRejectionInTranscript(
+  sessionId: string,
+  verificationState?: Pick<VerificationState, 'story_id' | 'critic_mode' | 'requested_at'>,
+  transcriptPath?: string
+): { rejected: boolean; feedback: string } {
   const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
+    transcriptPath,
     join(claudeDir, 'sessions', sessionId, 'transcript.md'),
     join(claudeDir, 'sessions', sessionId, 'messages.json'),
     join(claudeDir, 'transcripts', `${sessionId}.md`)
-  ];
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.length > 0);
 
-  for (const transcriptPath of possiblePaths) {
-    if (existsSync(transcriptPath)) {
-      try {
-        const content = readTranscriptTail(transcriptPath);
-        const result = detectArchitectRejection(content);
+  const requestedAt = verificationState?.requested_at
+    ? Date.parse(verificationState.requested_at)
+    : NaN;
+  const sinceMs = Number.isFinite(requestedAt) ? requestedAt : null;
+
+  for (const candidate of possiblePaths) {
+    if (!existsSync(candidate)) {
+      continue;
+    }
+
+    try {
+      if (candidate.endsWith('.md')) {
+        // Plain-text transcripts carry no reviewer attribution. They are a
+        // legacy non-[CC] shape, so keep the original tail heuristic there
+        // rather than silently dropping rejection support for those hosts.
+        const result = detectArchitectRejection(readTranscriptTail(candidate));
         if (result.rejected) {
           return result;
         }
-      } catch {
         continue;
       }
+
+      const outputs = collectReviewerOutputs(
+        candidate,
+        verificationState,
+        TRANSCRIPT_APPROVAL_SCAN_BYTES,
+        // Same pattern set the detector uses, so the prefilter cannot reject
+        // wording that detectArchitectRejection() would have accepted.
+        (content) => hasRejectionSignal(content),
+      );
+      for (const output of outputs) {
+        // An output with no timestamp cannot be placed relative to the request,
+        // so it is not treated as this request's verdict.
+        if (sinceMs !== null && (output.at === null || output.at < sinceMs)) {
+          continue;
+        }
+        const result = detectArchitectRejection(output.text);
+        if (result.rejected) {
+          return result;
+        }
+      }
+    } catch {
+      continue;
     }
   }
   return { rejected: false, feedback: '' };
@@ -1144,7 +1271,8 @@ function verificationCriteriaExcerpt(
 async function checkRalphLoop(
   sessionId?: string,
   directory?: string,
-  cancelInProgress?: boolean
+  cancelInProgress?: boolean,
+  transcriptPath?: string
 ): Promise<PersistentModeResult | null> {
   const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
@@ -1253,7 +1381,7 @@ async function checkRalphLoop(
     // Verification is in progress - check for architect's response
     if (sessionId) {
       // Check for architect approval
-      if (checkArchitectApprovalInTranscript(sessionId, verificationState)) {
+      if (checkArchitectApprovalInTranscript(sessionId, verificationState, transcriptPath)) {
         // Jev ralph-verdict shadow: the detected approval is the twin;
         // in active mode, use Jev's verdict instead.
         const verdict = await applyRalphVerdictShadow({
@@ -1370,8 +1498,11 @@ async function checkRalphLoop(
         }
       }
 
-      // Check for architect rejection
-      const rejection = checkArchitectRejectionInTranscript(sessionId);
+      // Check for architect rejection. Without a pending request there is no
+      // verdict to apply, so skip the scan entirely.
+      const rejection = verificationState
+        ? checkArchitectRejectionInTranscript(sessionId, verificationState, transcriptPath)
+        : { rejected: false, feedback: '' };
       if (verificationState && rejection.rejected) {
         // Jev ralph-verdict shadow: the detected rejection is the twin;
         // in active mode, use Jev's verdict instead.
@@ -2529,7 +2660,7 @@ async function resolvePersistentModeBlock(
     // restored/cache artifacts (including tombstoned workflow slots) after
     // cancel/state_clear has made the registry empty.
     if (tombstonedWorkflowModes.has('ralph') || !isModeActive('ralph', workingDir, sessionId)) return null;
-    return checkRalphLoop(sessionId, workingDir, cancelInProgress);
+    return checkRalphLoop(sessionId, workingDir, cancelInProgress, stopContext?.transcript_path ?? stopContext?.transcriptPath);
   };
 
   if (cancelInProgress) {
