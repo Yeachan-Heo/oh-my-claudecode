@@ -1283,6 +1283,14 @@
       }
     },
     {
+      "path": "templates/hooks/lib/windows-search.mjs",
+      "fingerprints": [],
+      "workingTree": {
+        "sha256": "77c1919624692f221be617bfad9763bf1af9c486bad6c24cfe621bc4f6b26109",
+        "state": "working-tree"
+      }
+    },
+    {
       "path": "templates/hooks/lib/workflow-profile-runtime.mjs",
       "fingerprints": [
         {

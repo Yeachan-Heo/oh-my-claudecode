@@ -21,7 +21,10 @@
  *   1 - Error during cleanup
  */
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { execSync } from 'node:child_process';
+
+hardenWindowsExeSearch();
 
 const args = process.argv.slice(2);
 const teamNameIdx = args.indexOf('--team-name');

@@ -11,6 +11,7 @@
  * - setup: Sync all OMC components (hooks, agents, skills)
  */
 
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { Command, CommanderError, Option } from 'commander';
 import chalk from 'chalk';
 import { join } from 'path';
@@ -74,6 +75,8 @@ import { warnIfWin32 } from './win32-warning.js';
 import { autoresearchCommand } from './autoresearch.js';
 import { parseHudWatchInterval, runHudWatchLoop } from './hud-watch.js';
 import { integerOption } from './utils/integer-option.js';
+
+hardenWindowsExeSearch();
 
 const version = getRuntimePackageVersion();
 

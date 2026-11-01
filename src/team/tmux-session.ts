@@ -1838,12 +1838,14 @@ export function buildWorkerStartCommand(config: WorkerPaneConfig): string {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, 'utf8').toString('base64');
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars)
+    // cmd.exe searches the cwd (the repo) before PATH; a caller value never turns that back on.
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars)
+      .filter(([key]) => key.toUpperCase() !== 'NODEFAULTCURRENTDIRECTORYINEXEPATH')
       .map(([key, value]) => {
         assertSafeEnvKey(key);
         assertSafeCmdValue(value);
         return `set "${key}=${escapeForCmdSet(value)}"`;
-      })
+      })]
       .join(' && ');
     const launch = launchWords.map(part => {
       assertSafeCmdValue(part);

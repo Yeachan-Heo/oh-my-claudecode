@@ -4,9 +4,12 @@
 // Writes last-tool-error-state.json (session-scoped) or last-tool-error.json (legacy)
 // with tool name, input preview, error, and retry count
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join, dirname, sep, resolve } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

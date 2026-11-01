@@ -1,3 +1,4 @@
+import { childEnv } from '../../utils/windows-search.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -61,7 +62,7 @@ export async function runSessionEndAction(context: ActionRunContext, _execute: (
     fs.mkdirSync(runPath, { recursive: true });
     if (Date.now() >= context.deadlineAt) return { code: 'deadline-before-arm', completed: false };
     const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: runnerEnvironment(context) });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: 'ignore', windowsHide: true, env: childEnv(runnerEnvironment(context)) });
     // Capture identity synchronously, in the same tick as spawn, before
     // child.unref() or any async operation. This eliminates the PID-reuse
     // window that an async identity lookup would create. If the child already
