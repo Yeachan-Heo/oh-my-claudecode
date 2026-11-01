@@ -79,6 +79,61 @@ process.stdin.on('end', () => {
 /** Never answers, so the delegation budget is the only thing that ends it. */
 const STALLING_BRIDGE = 'setTimeout(() => {}, 60000);\n';
 
+/**
+ * Mirrors createHookOutput() for a finished loop: an allow-stop that still
+ * carries the completion notice. Adapting the message before the `continue`
+ * flag would turn this into one more forced turn.
+ */
+const ALLOW_STOP_WITH_MESSAGE_BRIDGE = `
+let raw = '';
+process.stdin.on('data', (chunk) => { raw += chunk; });
+process.stdin.on('end', () => {
+  process.stdout.write(JSON.stringify({
+    continue: true,
+    message: '[RALPH LOOP VERIFIED COMPLETE] Architect verified task completion.',
+  }));
+});
+`;
+
+/**
+ * Mimics checkRalphLoop() consuming the story verdict and starting the
+ * run-level request: the pending request changes identity, so the re-entrant
+ * Stop has new work to deliver.
+ */
+const NEW_WORK_BRIDGE = `
+const fs = require('node:fs');
+const path = require('node:path');
+let raw = '';
+process.stdin.on('data', (chunk) => { raw += chunk; });
+process.stdin.on('end', () => {
+  const file = path.join(process.env.BRIDGE_STATE_DIR, 'ralph-verification-state.json');
+  const current = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({
+    ...current,
+    verification_scope: 'completion',
+    story_id: undefined,
+    request_id: 'completion-request',
+    verification_attempts: 0,
+  }));
+  process.stdout.write(JSON.stringify({
+    continue: false,
+    message: 'COMPLETION-REVIEW-PROMPT',
+  }));
+});
+`;
+
+/** Blocks without advancing the request, like a verdict the detector missed. */
+const SAME_REQUEST_BLOCK_BRIDGE = `
+let raw = '';
+process.stdin.on('data', (chunk) => { raw += chunk; });
+process.stdin.on('end', () => {
+  process.stdout.write(JSON.stringify({
+    continue: false,
+    message: 'STILL-PENDING-PROMPT',
+  }));
+});
+`;
+
 function makeFixture(kind: 'mjs' | 'cjs', bridgeBody: string) {
   const dir = mkdtempSync(join(tmpdir(), `ralph-approval-stop-${kind}-`));
   created.push(dir);
@@ -91,6 +146,11 @@ function makeFixture(kind: 'mjs' | 'cjs', bridgeBody: string) {
 
   // Standalone install layout: the hook sits in hooks/ next to its siblings and
   // lib/, and the bundled bridge is one directory up.
+  //
+  // The installer template is covered by the static parity check below only:
+  // templates/hooks/lib/ has drifted from scripts/lib/ (state-lock.mjs is
+  // missing acquireRecoveryClaim), so the template cannot even load here. That
+  // drift predates this change and is not what these tests are about.
   const hooksDir = join(dir, 'hooks');
   cpSync(join(root, 'scripts'), hooksDir, { recursive: true });
   writeFakeBridge(dir, bridgeBody);
@@ -251,6 +311,49 @@ describe.each(['mjs', 'cjs'] as const)('Stop hook architect verification hand-of
     expect(result.continue).toBe(true);
   });
 
+  // The re-entrant Stop is the only Stop that can carry the verdict for the
+  // prompt we just blocked with, and consuming it can also *create* the next
+  // piece of work (the next story, or the run-level request once the last
+  // story is signed off). Dropping that response strands the new request: the
+  // loop would only resume on some later user turn.
+  it.runIf(kind === 'mjs')('delivers follow-up verification work created on the re-entrant Stop', () => {
+    const f = makeFixture(kind, NEW_WORK_BRIDGE);
+    const sessionId = 'ralph-reentrant-new-work';
+    writeRalphState(f, sessionId);
+    writeVerificationRequest(f, sessionId, {
+      verification_scope: 'story',
+      story_id: 'US-001',
+      request_id: 'story-request',
+    });
+    const stateDir = join(f.project, '.omc', 'state', 'sessions', sessionId);
+
+    const result = invokeStop(f, sessionId, {
+      input: { stop_hook_active: true },
+      env: { BRIDGE_STATE_DIR: stateDir },
+    });
+
+    expect(result.decision).toBe('block');
+    expect(String(result.reason)).toContain('COMPLETION-REVIEW-PROMPT');
+  });
+
+  // Delivering new work must not become "deliver any block": re-emitting the
+  // request that was already pending is the re-block the guard prevents.
+  it.runIf(kind === 'mjs')('does not re-block when the re-entrant Stop changed nothing', () => {
+    const f = makeFixture(kind, SAME_REQUEST_BLOCK_BRIDGE);
+    const sessionId = 'ralph-reentrant-unchanged';
+    writeRalphState(f, sessionId);
+    writeVerificationRequest(f, sessionId, {
+      verification_scope: 'story',
+      story_id: 'US-001',
+      request_id: 'story-request',
+    });
+
+    const result = invokeStop(f, sessionId, { input: { stop_hook_active: true } });
+
+    expect(result.decision).toBeUndefined();
+    expect(result.continue).toBe(true);
+  });
+
   it('treats an approval for an older revision as still unverified', () => {
     const f = makeFixture(kind, REAL_SHAPE_BRIDGE);
     const sessionId = 'ralph-stale-approval-revision';
@@ -340,6 +443,21 @@ describe.each(['mjs', 'cjs'] as const)('Stop hook architect verification hand-of
     expect(result.decision).toBe('block');
     expect(result.continue).toBeUndefined();
     expect(String(result.reason)).toContain('BRIDGE-DELEGATED');
+  });
+
+  // createHookOutput() returns the completion notice together with
+  // `continue: true`. Reading the message first turned that allow-stop into a
+  // block, forcing one more turn after Ralph state was already cleared.
+  it('honours an allow-stop that carries a completion notice', () => {
+    const f = makeFixture(kind, ALLOW_STOP_WITH_MESSAGE_BRIDGE);
+    const sessionId = 'ralph-allow-stop-message';
+    writeRalphState(f, sessionId);
+    writeSessionPrd(f, sessionId, [story()]);
+
+    const result = invokeStop(f, sessionId);
+
+    expect(result.decision).toBeUndefined();
+    expect(result.continue).toBe(true);
   });
 
   it('bypasses the interactive CLI parser when spawning the bridge', () => {
@@ -499,10 +617,13 @@ describe('Stop hook architect verification parity', () => {
       expect(existsSync(variant), variant).toBe(true);
       const source = readFileSync(variant, 'utf8');
       expect(source, variant).toContain('storyNeedsReviewerSignoff');
-      expect(source, variant).toContain('hasPendingVerificationRequest');
+      expect(source, variant).toContain('readPendingVerificationRequest');
       expect(source, variant).toContain('resolvePrdPath');
       expect(source, variant).toContain('adaptBridgeOutput');
       expect(source, variant).toContain('OMC_CLI_SKIP_PARSE');
+      // The npm bin shim is a .cmd on Windows, which spawnSync cannot execute
+      // without an interpreter; every variant must route it through one.
+      expect(source, variant).toContain('process.env.ComSpec');
       expect(source, variant).toContain('--hook=persistent-mode');
     }
   });

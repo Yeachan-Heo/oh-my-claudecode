@@ -1133,7 +1133,7 @@ function hasPendingArchitectVerification(prd) {
  * session-scoped file only: falling back to the unscoped legacy file would
  * delegate for a request the bridge deliberately does not read.
  */
-async function hasPendingVerificationRequest(directory, omcRoot, sessionId) {
+async function readPendingVerificationRequest(directory, omcRoot, sessionId) {
   if (sessionId) {
     try {
       const { readPath } = await resolveSessionStatePathsForHook(
@@ -1142,23 +1142,33 @@ async function hasPendingVerificationRequest(directory, omcRoot, sessionId) {
         sessionId,
       );
       const state = readJsonFile(readPath);
-      return Boolean(state && state.pending === true);
+      return state && state.pending === true ? state : null;
     } catch {
-      return false;
+      return null;
     }
   }
 
   const state = readJsonFile(join(omcRoot, "ralph-verification.json"));
-  return Boolean(state && state.pending === true);
+  return state && state.pending === true ? state : null;
 }
 
 /**
  * Everything the delegation predicates need for one Stop event.
+ *
+ * The request identity is what lets the re-entrant path tell "the bridge
+ * produced new work" apart from "the bridge re-emitted the request that is
+ * already pending": a fresh request carries a new id, and a rejection keeps
+ * the id but advances verification_attempts.
  */
 async function reviewerWorkState({ directory, sessionId, omcRoot, stateDir }) {
-  const pendingRequest = await hasPendingVerificationRequest(directory, omcRoot, sessionId);
-  if (pendingRequest) {
-    return { pending: true };
+  const request = await readPendingVerificationRequest(directory, omcRoot, sessionId);
+  if (request) {
+    return {
+      pending: true,
+      requestId: request.request_id,
+      attempts: request.verification_attempts,
+      storyId: request.story_id,
+    };
   }
   const prdPath = resolvePrdPath(stateDir, omcRoot, directory, sessionId);
   const prd = prdPath ? readJsonFile(prdPath) : null;
@@ -1188,11 +1198,14 @@ function adaptBridgeOutput(stdout) {
   if (typeof parsed.decision === "string" && parsed.decision) {
     return parsed;
   }
-  if (typeof parsed.message === "string" && parsed.message.trim()) {
-    return { decision: "block", reason: parsed.message };
-  }
+  // createHookOutput() pairs `continue: true` with the loop-complete notice, so
+  // an allow-stop may carry a message. Honouring `continue` before the message
+  // keeps that notice from being converted into one more forced turn.
   if (parsed.continue === true) {
     return { continue: true, suppressOutput: true };
+  }
+  if (typeof parsed.message === "string" && parsed.message.trim()) {
+    return { decision: "block", reason: parsed.message };
   }
   return null;
 }
@@ -1210,8 +1223,17 @@ function delegateToBridge(input) {
     candidates.push({ command: process.execPath, args: [bundled, "--hook=persistent-mode"] });
   }
   // Standalone installs copy this script to ~/.claude/hooks/, where the bundled
-  // bridge is not reachable; the npm bin shim is.
-  candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
+  // bridge is not reachable; the npm bin shim is. On Windows that shim is
+  // `omc-cli.cmd`, which spawnSync cannot execute without an interpreter, so
+  // route it through the command processor.
+  if (process.platform === "win32") {
+    candidates.push({
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "omc-cli", "--hook=persistent-mode"],
+    });
+  } else {
+    candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
+  }
 
   // One shared deadline. hooks.json allows 10s for this script and the run.cjs
   // supervisor 9.5s, so a second candidate must not get a fresh budget; a
