@@ -970,6 +970,9 @@ describe('buildWorkerStartCommand', () => {
   it('turns off the cwd executable search in the cmd.exe startup even when the caller sets it to 0', () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
     vi.stubEnv('COMSPEC', 'C:\\Windows\\System32\\cmd.exe');
+    // Native cmd.exe path only: a Git Bash/MSYS test shell would select the bash startup.
+    vi.stubEnv('MSYSTEM', '');
+    vi.stubEnv('MINGW_PREFIX', '');
 
     const cmd = buildWorkerStartCommand({
       teamName: 't',
