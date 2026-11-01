@@ -4,6 +4,398 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4737,
+      "targetRef": "main",
+      "mergeBaseSha": "7285a5cec13bd8de7fc79cd6fac43acedbeacd79",
+      "headSha": "e680c59d488349e12b90db4c6531d3c5482988db",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-10-01T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 63,
+        "sha256": "f217ded52abbbaf41ca93087e6e642b14ae680c4607c91937d9b3e4b1de3cb22"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "dc1b4ddbc0e928b590a962293e0772147489bb1e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "b67ec0781a25b832fa5992b2901b77fc3656af15",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/mcp-server.cjs",
+          "sha": "34d0b37bc2938e62e0114fe410a46fbe92946a9f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/artifact-descriptor-integration.test.js",
+          "sha": "4caa531fa9f55b2e332cc6e66f29395484ee370c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/artifact-descriptor-integration.test.js.map",
+          "sha": "ac6b85515d8571db4a1ae95604384c277720dacf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache-relink.test.js",
+          "sha": "d5818cce288cea5402767ad305511233051bc2c3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache-relink.test.js.map",
+          "sha": "efaafbaa8ed441de97c1d50db687aa769f69cc2d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache-validation.test.js",
+          "sha": "a9b28a9826c0fad035193651ae54ba69781f5dfb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache-validation.test.js.map",
+          "sha": "925bb7224be45465dccabdded052f026cf548f7b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache.test.js",
+          "sha": "b566659faf3a2eadf7bcbeeeec561aa165c9765b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/purge-stale-cache.test.js.map",
+          "sha": "d55244e9f997d6745ef781442241ba4c5c9120c5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/resolve-transcript-path.test.js",
+          "sha": "69e1e35f8bf4e0f73a92f7a61cd77e4e942ac5cf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/resolve-transcript-path.test.js.map",
+          "sha": "1f5af5c6d824eda17bf3bd2eb551dc1d65cc6a0c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/manager.d.ts",
+          "sha": "9bb1f16ec483ce1762682880689383d1f10d9613",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/manager.d.ts.map",
+          "sha": "93371da1a356a8267cde2ba5ed23fb8ed9a98a7a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/manager.js",
+          "sha": "608da50596d4162e63bdf43df469e8c57a443473",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/manager.js.map",
+          "sha": "b3abd25de7e7fb1f52133bcced6f083430453202",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/types.d.ts",
+          "sha": "675f092c209346e64e448ad107f92e4ee18eac12",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/background-agent/types.d.ts.map",
+          "sha": "4d3b5eb05f5fb403b768cae2d7f05097966c2120",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js",
+          "sha": "6978ad2b26ee6c4a85c8a8d738debd5ed39f8d00",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js.map",
+          "sha": "e54919b09418c9c771cc757710eb420602d26312",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts",
+          "sha": "cc797cffafa44dfcb0508f51a332b08206597cdf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts.map",
+          "sha": "39732f345be7ce3b59dbb80ba7cdf6b667f26331",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js",
+          "sha": "16dfbcf9628a6406e0b84ca5015c56346ebb80d3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js.map",
+          "sha": "1d543d1cd102060324f2bc61cdd2374d56f3d248",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-worker-hook.d.ts",
+          "sha": "de7d7af7626b440e580ce773c4af0f7072dd21c8",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-worker-hook.d.ts.map",
+          "sha": "c9eb7cb48f9d8753b45965101939de83659f9044",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-worker-hook.js",
+          "sha": "6c59be84f9d68357495d935f7f9a57fc11c082c5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/hooks/team-worker-hook.js.map",
+          "sha": "23d07741cafb9e7ded8ea7fe5fe3dc4eacde0129",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/__tests__/atomic-write.test.js",
+          "sha": "b54eaed47bdf886ff4fe90a8d07a651a98f873fa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/__tests__/atomic-write.test.js.map",
+          "sha": "d984664012e262e177b520a0925f77b7ddefa00d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/job-state-db.d.ts",
+          "sha": "e0d07e8344950abab167b29f66feeb561385b163",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/job-state-db.d.ts.map",
+          "sha": "3d9f3c68a160eee984ebbca6f5200b3369ea5d9a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/lib/job-state-db.js.map",
+          "sha": "5069aa834ec1a955846f8ed45739ef42ed4ac050",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/index.d.ts",
+          "sha": "a91a9ddfe150ee82d756a69ccc3f00e18c7a1fc5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/index.d.ts.map",
+          "sha": "b9a620656939f95233357618530d24b0b435a1e7",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/index.js",
+          "sha": "777a75c80931f9bfbaed42e9aa56021f1bbe857e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/index.js.map",
+          "sha": "29444890beecc8df43e00f4698719abf1adcec4b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/job-management.d.ts",
+          "sha": "8e81bc698426564963507fdd2a08a9171ad60c2f",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/job-management.d.ts.map",
+          "sha": "0f1ad25786f0603edbd4973c45c4395308c93534",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/job-management.js",
+          "sha": "e4bb75bc4e1e1db3418c0c919207986fb085c91e",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/job-management.js.map",
+          "sha": "3ff52f5d30e2b7f9d62609981a73d6c3dc9b6f65",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/mcp-config.d.ts",
+          "sha": "db8e4ae8d73686a696001e4e5bca427c1be2ccd0",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/mcp-config.d.ts.map",
+          "sha": "e90aa9c57c1a4f7daf691549297cea0cad461430",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/mcp-config.js",
+          "sha": "e821d311d09cd5240a0b7b85f9ee6dcd54dfaa06",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/mcp-config.js.map",
+          "sha": "a8dac3d3227e77a1dbdeb853bbeb7873c29481bc",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/prompt-persistence.d.ts",
+          "sha": "e8491504dc45864ef8617619fe65c408a4c312bf",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/prompt-persistence.d.ts.map",
+          "sha": "2f19e4c14f08e902b0bb4af93071bda66eba4e1b",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/prompt-persistence.js",
+          "sha": "53c2d52a8f8c53625fe51f104731642962e2a659",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/mcp/prompt-persistence.js.map",
+          "sha": "aa66af14594fbf8fc474686320c286743539d212",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/deepinit-manifest.d.ts.map",
+          "sha": "d83d9dbcaac6a854aaf48e0ddafba989bbad6e23",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/deepinit-manifest.js",
+          "sha": "7b1181c2fef31f443c152fc452e400c351dc8ddf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/tools/deepinit-manifest.js.map",
+          "sha": "d7055c3a41b647c64981e8642aed18b0a63535a0",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/tools/resume-session.d.ts",
+          "sha": "e5c1e3682a423d70fee5fab928876582605f6d75",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/tools/resume-session.d.ts.map",
+          "sha": "b2330e5e6a298f55d0eaac215a539c4e8536d4d5",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/tools/resume-session.js",
+          "sha": "e8983d357057fb48f06a46efd64e4db58c5bc527",
+          "previousFilename": null
+        },
+        {
+          "status": "removed",
+          "filename": "dist/tools/resume-session.js.map",
+          "sha": "a3df2d203bdb3dcdaadc7778bb349a01f0685436",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/paths.js",
+          "sha": "cc68f58e62cac6f4001d1f9a978a76890168f98d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/paths.js.map",
+          "sha": "4e4a74633c0a215c5d25977fb74a654fb3335a30",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/plugin-cache-validation.d.ts",
+          "sha": "ee0825f1d8341801ffc3d74bc0539a31ec78ed65",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/plugin-cache-validation.d.ts.map",
+          "sha": "7795d46a701cc29cd0ac166b1c578775d5cbbaf9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/plugin-cache-validation.js",
+          "sha": "8ad0a3f42817c4d283af6c26cd75b2d2512641cf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/utils/plugin-cache-validation.js.map",
+          "sha": "edaacfb7b3df04660af630c37e07e129f6816b71",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4682,
       "targetRef": "main",
       "mergeBaseSha": "7e02a842ebf78086a9791e228c48bea60a821d07",
