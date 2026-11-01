@@ -657,6 +657,10 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         return retryAcquisition();
       }
       db.prepare('DELETE FROM state_mutation_locks WHERE lock_key = ?').run(key);
+      // Commit the stale-row removal on its own: the artifact branch below may
+      // ROLLBACK to probe outside the write lock, which must not resurrect it.
+      db.exec('COMMIT');
+      db.exec('BEGIN IMMEDIATE');
     }
 
     const artifact = readOwner(lockPath);
@@ -704,8 +708,18 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure(reclaimed === 'changed' ? 'contention' : 'unverifiable');
         return null;
       }
-      // Reacquire lock to verify artifact is still gone before continuing
+      // Another waiter may have claimed the lock while the write lock was released.
       db.exec('BEGIN IMMEDIATE');
+      const claimed = db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key);
+      if (claimed || readOwner(lockPath) !== 'absent') {
+        db.exec('ROLLBACK');
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('contention');
+          return null;
+        }
+        return retryAcquisition();
+      }
     }
 
     db.prepare('INSERT INTO state_mutation_locks (lock_key, version, pid, process_start, created_at, nonce) VALUES (?, 1, ?, ?, ?, ?)').run(key, owner.pid, owner.processStart, owner.createdAt, owner.nonce);
