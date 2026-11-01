@@ -38,3 +38,6 @@ __pycache__/
 
 # Node-API contained-filesystem build outputs
 native/*.node
+
+# npm pack output
+*.tgz
