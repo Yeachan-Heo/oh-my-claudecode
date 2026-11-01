@@ -34,4 +34,4 @@ npm install -g oh-my-claude-sisyphus@5.7.30
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @Yeachan-Heo
+@RobinNorberg @Yeachan-Heo
