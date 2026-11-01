@@ -20,6 +20,7 @@ import {
 } from "fs";
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -30,6 +31,8 @@ const __dirname = dirname(__filename);
 const SAFE_CONTINUE = { continue: true, suppressOutput: true };
 const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
 const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
+/** Keep bridge delegation inside the Stop hook's 10s budget. */
+const BRIDGE_DELEGATION_TIMEOUT_MS = 8000;
 
 
 function getSafetyTimeoutMs() {
@@ -1029,6 +1032,56 @@ function isScheduledWakeupStop(data) {
   return reasons.some((reason) => stopPatterns.some((pattern) => reason.includes(pattern)));
 }
 
+/**
+ * True when the PRD has a completion claim that still needs reviewer sign-off.
+ *
+ * The skill tells the agent never to write `architectVerified` itself
+ * (skills/ralph/SKILL.md, Step 5) — approval binds it separately. That binding
+ * lives in the full persistent-mode implementation, which this standalone
+ * script does not contain, so a story that passed stays unverified forever
+ * unless we hand the stop event to the bridge.
+ */
+function hasPendingArchitectVerification(prd) {
+  const stories = Array.isArray(prd?.userStories) ? prd.userStories : [];
+  return stories.some(
+    (story) => story && story.passes === true && story.architectVerified !== true,
+  );
+}
+
+/**
+ * Run the full persistent-mode implementation (bridge) for one stop event.
+ * Returns its stdout on success, or null so the caller can fall back to the
+ * plain continuation path — a missing or broken bridge must never wedge the
+ * loop.
+ */
+function delegateToBridge(input) {
+  const candidates = [];
+  const bundled = join(__dirname, "..", "bridge", "cli.cjs");
+  if (existsSync(bundled)) {
+    candidates.push({ command: process.execPath, args: [bundled, "--hook=persistent-mode"] });
+  }
+  // Standalone installs copy this script to ~/.claude/hooks/, where the bundled
+  // bridge is not reachable; the npm bin shim is.
+  candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
+
+  for (const { command, args } of candidates) {
+    try {
+      const result = spawnSync(command, args, {
+        input: JSON.stringify(input),
+        encoding: "utf-8",
+        timeout: BRIDGE_DELEGATION_TIMEOUT_MS,
+        env: process.env,
+      });
+      if (result.status !== 0) continue;
+      const stdout = (result.stdout || "").trim();
+      if (stdout) return stdout;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function main() {
   try {
     if (shouldSkipPersistentModeHook()) {
@@ -1179,6 +1232,19 @@ async function main() {
             }),
           );
           return;
+        }
+
+        // A story that passed but was never signed off has to go through the
+        // reviewer gate before the loop can advance. Only the bridge holds that
+        // state machine, so hand this stop event to it and use its decision.
+        const prdPath = ralph.path ? join(dirname(ralph.path), "prd.json") : join(omcRoot, "prd.json");
+        const prd = readJsonFile(prdPath);
+        if (prd && hasPendingArchitectVerification(prd)) {
+          const delegated = delegateToBridge(data);
+          if (delegated) {
+            console.log(delegated);
+            return;
+          }
         }
 
         if (iteration < maxIter) {
