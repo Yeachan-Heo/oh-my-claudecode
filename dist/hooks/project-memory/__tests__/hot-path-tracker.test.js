@@ -1,7 +1,7 @@
 /**
  * Tests for the Hot Path Tracker scope-affinity ranking.
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { getTopHotPaths, trackAccess } from "../hot-path-tracker.js";
 const NOW = Date.parse("2026-03-24T15:00:00Z");
 function hotPath(path, accessCount) {
@@ -44,6 +44,78 @@ describe("trackAccess separator normalization", () => {
         const result = trackAccess([], "src\\app\\index.ts", "/repo", "file");
         expect(result).toHaveLength(1);
         expect(result[0].path).toBe("src/app/index.ts");
+    });
+});
+describe("hot paths follow the current work", () => {
+    const HOUR = 60 * 60 * 1000;
+    const DAY = 24 * HOUR;
+    const ROOT = "/repo";
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+    function seed(count, accessCount, lastAccessed) {
+        return Array.from({ length: count }, (_, i) => ({
+            path: `src/old-${i}.ts`,
+            accessCount,
+            lastAccessed,
+            type: "file",
+        }));
+    }
+    function workOn(hotPaths, files, at, passes = 4) {
+        vi.setSystemTime(at);
+        for (let pass = 0; pass < passes; pass++) {
+            for (const file of files) {
+                hotPaths = trackAccess(hotPaths, `${ROOT}/${file}`, ROOT, "file");
+            }
+        }
+        return hotPaths;
+    }
+    const topPaths = (hotPaths, now) => getTopHotPaths(hotPaths, 3, { now }).map((hp) => hp.path).sort();
+    it("keeps a newly touched file when the list is full of entries touched more often today", () => {
+        const hotPaths = workOn(seed(50, 4, NOW), ["src/late.ts"], NOW, 1);
+        expect(hotPaths).toHaveLength(50);
+        expect(hotPaths.map((hp) => hp.path)).toContain("src/late.ts");
+    });
+    it("keeps every new file touched in the same millisecond on a full list", () => {
+        const newArea = ["src/b/one.ts", "src/b/two.ts", "src/b/three.ts"];
+        const hotPaths = workOn(seed(50, 1, NOW), newArea, NOW, 1);
+        expect(hotPaths.map((hp) => hp.path)).toEqual(expect.arrayContaining(newArea));
+    });
+    it("lets several new files build up counts while the list is full of recent heavy entries", () => {
+        const newArea = ["src/b/one.ts", "src/b/two.ts", "src/b/three.ts"];
+        const hotPaths = workOn(seed(50, 56, NOW - 2 * DAY), newArea, NOW);
+        const counts = newArea.map((file) => hotPaths.find((hp) => hp.path === file)?.accessCount);
+        expect(counts).toEqual([4, 4, 4]);
+    });
+    it("keeps decaying a count that is touched every hour", () => {
+        let hotPaths = [];
+        for (let hour = 0; hour < 24; hour++) {
+            hotPaths = workOn(hotPaths, ["src/hourly.ts"], NOW + hour * HOUR, 1);
+        }
+        const expected = Array.from({ length: 24 }, (_, age) => 0.5 ** (age / 24)).reduce((a, b) => a + b);
+        expect(hotPaths[0].accessCount).toBeCloseTo(expected, 6);
+    });
+    it("does not let one touch revive a count built weeks ago", () => {
+        let hotPaths = seed(1, 1000, NOW - 30 * DAY);
+        hotPaths = workOn(hotPaths, ["src/today.ts"], NOW, 8);
+        hotPaths = workOn(hotPaths, ["src/old-0.ts"], NOW, 1);
+        const [first] = getTopHotPaths(hotPaths, 1, { now: NOW });
+        expect(first.path).toBe("src/today.ts");
+    });
+    it("shows the new work area within two days of switching from a heavily used one", () => {
+        const oldArea = ["src/a/one.ts", "src/a/two.ts", "src/a/three.ts"];
+        const newArea = ["src/b/one.ts", "src/b/two.ts", "src/b/three.ts"];
+        let hotPaths = [];
+        for (let day = 0; day < 14; day++) {
+            hotPaths = workOn(hotPaths, oldArea, NOW + day * DAY, 40);
+        }
+        for (let day = 14; day < 16; day++) {
+            hotPaths = workOn(hotPaths, newArea, NOW + day * DAY, 40);
+        }
+        expect(topPaths(hotPaths, NOW + 16 * DAY)).toEqual([...newArea].sort());
     });
 });
 //# sourceMappingURL=hot-path-tracker.test.js.map

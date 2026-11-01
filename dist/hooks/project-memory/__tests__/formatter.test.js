@@ -69,6 +69,14 @@ describe("Project Memory Formatter", () => {
             expect(summary).not.toContain("[Directives]");
             expect(summary).not.toContain("[Recent Learnings]");
         });
+        it("shows hot path counts decayed to now as whole numbers", () => {
+            const memory = createBaseMemory({
+                hotPaths: [
+                    { path: "src/a.ts", accessCount: 35.12, lastAccessed: NOW - 24 * 60 * 60 * 1000, type: "file" },
+                ],
+            });
+            expect(formatContextSummary(memory, { now: NOW })).toContain("- src/a.ts (18x)");
+        });
         it("formats the summary in progressive disclosure order", () => {
             const memory = createBaseMemory({
                 techStack: {
