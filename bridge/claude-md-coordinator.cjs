@@ -891,7 +891,7 @@ function executeClaudeMdTransaction(request) {
 
 // src/cli/claude-md-coordinator.ts
 var CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
-var COMPILED_ENGINE_VERSION = true ? "5.7.26" : "";
+var COMPILED_ENGINE_VERSION = true ? "5.7.27" : "";
 var COMPILED_SOURCE_SHA256 = true ? "5bb600c564ddbed3be2f25404a85d9b9ce4b8b631f8199da114a95b3cfb4c603" : "";
 function runClaudeMdCoordinatorHandshake() {
   if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) {
