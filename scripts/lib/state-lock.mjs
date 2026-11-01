@@ -677,7 +677,22 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
       // Commit the stale-row removal on its own: the artifact branch below may
       // ROLLBACK to probe outside the write lock, which must not resurrect it.
       db.exec('COMMIT');
-      db.exec('BEGIN IMMEDIATE');
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
+      // Another waiter may have claimed the key between COMMIT and BEGIN, and may
+      // even have left a stale row of its own; resolve that row on a fresh attempt.
+      if (db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key)) {
+        db.exec('ROLLBACK');
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('contention');
+          return null;
+        }
+        return retryAcquisition();
+      }
     }
 
     const artifact = readOwner(lockPath);

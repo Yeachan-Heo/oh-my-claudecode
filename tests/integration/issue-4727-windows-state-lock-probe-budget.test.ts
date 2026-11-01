@@ -231,6 +231,35 @@ describe('issue #4727: state-lock owner probe runs outside the write transaction
     }
   });
 
+  it('retries when a crashed waiter leaves a new stale row between the row cleanup and the artifact check', () => {
+    const lockPath = join(stateDir, 'stale-after-cleanup.lock');
+    seedOwner(lockPath, randomUUID(), { artifact: false });
+    const intruderNonce = randomUUID();
+    const originalExec = Database.prototype.exec;
+    let intruded = false;
+    const execSpy = vi.spyOn(Database.prototype, 'exec').mockImplementation(function (this: Database.Database, sql: string) {
+      const result = originalExec.call(this, sql);
+      if (sql === 'COMMIT' && !intruded) {
+        intruded = true;
+        // Another waiter claims the key and crashes during release: its owner file
+        // is gone but its row was never deleted.
+        seedOwner(lockPath, intruderNonce, { artifact: false });
+      }
+      return result;
+    });
+    let lock: ReturnType<typeof acquire>;
+    try {
+      lock = acquire(lockPath, 3, hooks(() => 'absent'));
+    } finally {
+      execSpy.mockRestore();
+    }
+
+    expect(intruded).toBe(true);
+    expect(lock).not.toBeNull();
+    expect(rowNonce(lockPath)).toBe(lock!.owner.nonce);
+    expect(releaseStateFileLockSync(lock!)).toBe(true);
+  });
+
   it('recovers a crashed holder that left both its row and its owner file', () => {
     const lockPath = join(stateDir, 'crashed-holder.lock');
     seedOwner(lockPath, NONCE.crashed);
