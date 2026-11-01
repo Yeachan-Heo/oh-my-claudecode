@@ -1,19 +1,23 @@
-# oh-my-claudecode v5.7.27: SQLITE_BUSY retry, BigInt file identities, and SessionEnd manifest drift handling
+# oh-my-claudecode v5.7.28: Windows provider launch, PATHEXT resolution, and state-lock owner probe improvements
 
 ## Release Notes
 
-This release introduces compatibility improvements for NTFS file systems with BigInt inode support, adds retry logic for early SQLITE_BUSY errors during state-lock setup, and improves SessionEnd action claim handling to prevent zombie claims. Thanks to the maintainers for #4717, #4719, #4721, and #4723.
+This release improves Windows provider support with fixes for .cmd provider launch, PATHEXT candidate resolution, and state-lock owner probe contention. It also stabilizes the Windows where command behavior and includes test improvements for planted-git scenarios. These fixes build on PR #4726 (Windows .cmd provider launch), #4734 (Windows where command), #4736 (state-lock owner probe), #4739 (Windows planted-git test), and #4741 (PATHEXT candidate resolution).
 
 ### Bug Fixes
 
-- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
-- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
-- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
-- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
+- **fix(team): launch npm-installed (.cmd) providers on Windows and keep planted cwd binaries from running** (#4726)
+- **fix(team): prevent Windows where command from searching cwd** (#4734)
+- **fix(lib): state-lock owner probe outside BEGIN IMMEDIATE to avoid contention** (#4736)
+- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4741)
+
+### Test Improvements
+
+- **test(team): fix Windows planted-git test and expose the libuv cwd-search gap** (#4739)
 
 ### Stats
 
-- **4 PRs merged** | **0 new features** | **4 bug fixes**
+- **5 PRs merged** | **0 new features** | **4 bug fixes** | **1 test improvement**
 
 ---
 
