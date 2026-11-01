@@ -18,7 +18,7 @@ import {
   getJobStats,
   getJobSummaryForPreCompact,
 } from '../lib/job-state-db.js';
-import type { JobStatus } from '../mcp/prompt-persistence.js';
+import type { JobStatus } from '../lib/job-state-db.js';
 
 // Test fixtures
 const TEST_DIR = join(process.cwd(), '.test-job-state-db-' + process.pid);

@@ -8,7 +8,7 @@ const DEFAULT_SECTION_NAMES = {
     context: ["CONTEXT"],
 };
 const DEFAULT_BLOCKING_TOOLS = ["Edit", "MultiEdit", "Write", "Agent", "Task"];
-const DEFAULT_EXECUTION_KEYWORDS = ["ralph", "ultrawork", "autopilot"];
+const DEFAULT_EXECUTION_KEYWORDS = ["ralph", "autopilot"];
 const HEADING_PATTERN = /^#{1,6}\s+(.+?)\s*$/gm;
 const FILE_PATH_PATTERN = /(?:(?:^|\s|["'`(]))(\.{1,2}\/[^\s"'`)<>\]]+|\/[^\s"'`)<>\]]+|(?:[A-Za-z0-9_.-]+\/){1,}[A-Za-z0-9_.-]+)(?=$|\s|["'`),:;\]])/gm;
 function normalizeHeading(value) {

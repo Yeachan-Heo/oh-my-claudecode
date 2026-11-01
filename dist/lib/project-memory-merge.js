@@ -79,11 +79,9 @@ function mergeArrays(fieldName, base, incoming) {
         case 'userDirectives':
             return mergeByKey(base, incoming, (d) => d.directive, (a, b) => (b.timestamp >= a.timestamp ? b : a));
         case 'hotPaths':
-            return mergeByKey(base, incoming, (hp) => hp.path, (a, b) => ({
-                ...b,
-                accessCount: Math.max(a.accessCount, b.accessCount),
-                lastAccessed: Math.max(a.lastAccessed, b.lastAccessed),
-            }));
+            return mergeByKey(base, incoming, (hp) => hp.path, 
+            // Counts decay on each touch, so the newer entry already folds in the older one.
+            (a, b) => (b.lastAccessed >= a.lastAccessed ? b : a));
         case 'languages':
         case 'frameworks':
             return mergeByKey(base, incoming, (item) => item.name, (_a, b) => b);

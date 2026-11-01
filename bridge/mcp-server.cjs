@@ -30491,6 +30491,7 @@ var import_path38 = __toESM(require("path"), 1);
 
 // src/hooks/project-memory/hot-path-tracker.ts
 var import_path37 = __toESM(require("path"), 1);
+var ACCESS_HALF_LIFE_MS = 24 * 60 * 60 * 1e3;
 
 // src/hooks/project-memory/directive-detector.ts
 function addDirective(directives, newDirective) {
@@ -30600,11 +30601,8 @@ function mergeArrays(fieldName, base, incoming) {
         base,
         incoming,
         (hp) => hp.path,
-        (a, b) => ({
-          ...b,
-          accessCount: Math.max(a.accessCount, b.accessCount),
-          lastAccessed: Math.max(a.lastAccessed, b.lastAccessed)
-        })
+        // Counts decay on each touch, so the newer entry already folds in the older one.
+        (a, b) => b.lastAccessed >= a.lastAccessed ? b : a
       );
     case "languages":
     case "frameworks":
