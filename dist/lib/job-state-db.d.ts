@@ -14,7 +14,26 @@
  * - All functions return false/null on failure (no throws)
  */
 import type BetterSqlite3 from "better-sqlite3";
-import type { JobStatus } from "../mcp/prompt-persistence.js";
+/**
+ * Job status for background execution tracking
+ */
+export interface JobStatus {
+    provider: "codex" | "gemini";
+    jobId: string;
+    slug: string;
+    status: "spawned" | "running" | "completed" | "failed" | "timeout";
+    pid?: number;
+    promptFile: string;
+    responseFile: string;
+    model: string;
+    agentRole: string;
+    spawnedAt: string;
+    completedAt?: string;
+    error?: string;
+    usedFallback?: boolean;
+    fallbackModel?: string;
+    killedByUser?: boolean;
+}
 /**
  * Initialize the SQLite job state database.
  * Creates the database file and tables if they don't exist.

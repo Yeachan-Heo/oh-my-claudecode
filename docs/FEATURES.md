@@ -8,9 +8,8 @@
 3. [Directory Diagnostics](#directory-diagnostics)
 4. [Dynamic Prompt Generation](#dynamic-prompt-generation)
 5. [Agent Templates](#agent-templates)
-6. [Session Resume](#session-resume)
-7. [Autopilot](#autopilot)
-8. [lookout](#lookout)
+6. [Autopilot](#autopilot)
+7. [lookout](#lookout)
 
 ---
 
@@ -300,57 +299,6 @@ For code implementation, refactoring, or modification tasks.
 - **VERIFICATION CHECKLIST**: Pre-completion checks
 
 **Location:** `src/agents/templates/implementation-template.md`
-
----
-
-## Session Resume
-
-Wrapper for resuming background agent sessions with full context.
-
-### API
-
-```typescript
-resumeSession(input: ResumeSessionInput): ResumeSessionOutput
-```
-
-### Types
-
-```typescript
-export interface ResumeSessionInput {
-  sessionId: string;
-}
-
-export interface ResumeSessionOutput {
-  success: boolean;
-  context?: {
-    previousPrompt: string;
-    toolCallCount: number;
-    lastToolUsed?: string;
-    lastOutputSummary?: string;
-    continuationPrompt: string;
-  };
-  error?: string;
-}
-```
-
-### Usage Example
-
-```typescript
-import { resumeSession } from '@/tools/resume-session';
-
-const result = resumeSession({ sessionId: 'ses_abc123' });
-
-if (result.success && result.context) {
-  console.log(`Resuming session with ${result.context.toolCallCount} prior tool calls`);
-
-  // Continue with Task delegation
-  Task({
-    subagent_type: "oh-my-claudecode:executor",
-    model: "sonnet",
-    prompt: result.context.continuationPrompt
-  });
-}
-```
 
 ---
 

@@ -7,7 +7,7 @@
  *
  * Adapted from oh-my-opencode's background-agent feature.
  */
-import type { BackgroundTask, BackgroundTaskStatus, BackgroundTaskConfig, LaunchInput, ResumeInput, TaskProgress, ResumeContext } from './types.js';
+import type { BackgroundTask, BackgroundTaskStatus, BackgroundTaskConfig, LaunchInput, ResumeInput, TaskProgress } from './types.js';
 /**
  * Manages background tasks for the OMC system.
  */
@@ -67,11 +67,6 @@ export declare class BackgroundManager {
      * Resume an existing background task
      */
     resume(input: ResumeInput): Promise<BackgroundTask>;
-    /**
-     * Get resume context for a session
-     * Used by the resume_session tool to prepare continuation prompts
-     */
-    getResumeContext(sessionId: string): ResumeContext | null;
     /**
      * Get a task by ID
      */

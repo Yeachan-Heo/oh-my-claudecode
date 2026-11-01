@@ -242,6 +242,31 @@ describe('durable SessionEnd cleanup manifest', () => {
     });
   });
 
+  it('returns a reserved but never started action claim to the queue on release', () => {
+    const directory = project();
+    const sessionId = preparedAndSealed(directory, 'release-reserved-claim');
+    const owner = claimSessionEndJob(directory, sessionId, 'owner-1', 'identity', Date.now() + 5_000)!;
+    // worker.ts claims the action, then the lease renew fails before the runner starts.
+    expect(claimSessionEndAction(directory, sessionId, 'owner-1', 'team-cleanup', Date.now() + 5_000)?.actions['team-cleanup']).toMatchObject({
+      status: 'claimed', attempts: 1, claimantNonce: 'owner-1', runner: { phase: 'reserved' },
+    });
+    const started = claimSessionEndAction(directory, sessionId, 'owner-1', 'python-cleanup', Date.now() + 5_000)!;
+    expect(markSessionEndActionRunner(directory, sessionId, 'owner-1', 'python-cleanup', started.actions['python-cleanup'].runner!.runnerNonce, 'started')).not.toBeNull();
+
+    const released = releaseSessionEndJob(directory, sessionId, 'owner-1', owner.owner!.leaseGeneration, 'lease-renew-failed-before-action')!;
+    expect(released).toMatchObject({ owner: null, phase: 'recoverable-failure' });
+    expect(released.actions['team-cleanup']).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(released.actions['team-cleanup'].claimantNonce).toBeUndefined();
+    expect(released.actions['team-cleanup'].runner).toBeUndefined();
+    // A started runner may have done work, so release leaves it to the watchdog/reaper.
+    expect(released.actions['python-cleanup']).toMatchObject({ status: 'claimed', claimantNonce: 'owner-1', runner: { phase: 'started' } });
+
+    const next = claimSessionEndJob(directory, sessionId, 'owner-2', 'identity', Date.now() + 5_000)!;
+    expect(claimSessionEndAction(directory, sessionId, next.owner!.nonce, 'team-cleanup', Date.now() + 5_000)?.actions['team-cleanup']).toMatchObject({
+      status: 'claimed', attempts: 1, claimantNonce: 'owner-2', runner: { phase: 'reserved' },
+    });
+  });
+
   it('bounds required failures and never retries a failed remote delivery attempt', () => {
     const directory = project();
     const sessionId = preparedAndSealed(directory, 'bounded-failures');
