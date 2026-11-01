@@ -7,7 +7,7 @@ import { mkdirSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { createCompactCheckpoint } from '../hooks/pre-compact/index.js';
 import { initJobDb, upsertJob, closeAllJobDbs } from '../lib/job-state-db.js';
-import type { JobStatus } from '../mcp/prompt-persistence.js';
+import type { JobStatus } from '../lib/job-state-db.js';
 
 const TEST_BASE = join(process.cwd(), '.test-pre-compact-cwd-' + process.pid);
 const DIR_A = join(TEST_BASE, 'worktree-a');
