@@ -69,10 +69,10 @@ describe('Builtin Skills', () => {
   });
 
   describe('createBuiltinSkills()', () => {
-    it('should return correct number of skills (48 canonical + 2 aliases)', () => {
+    it('should return correct number of skills (60 canonical + 2 aliases)', () => {
       const skills = createBuiltinSkills();
-      // 50 entries: 48 canonical skills + 2 aliases (cancel-ralph, psm)
-      expect(skills).toHaveLength(50);
+      // 62 entries: 60 canonical skills + 2 aliases (cancel-ralph, psm)
+      expect(skills).toHaveLength(62);
     });
 
     it('should return an array of BuiltinSkill objects', () => {
@@ -126,22 +126,31 @@ describe('Builtin Skills', () => {
       const expectedSkills = [
         'ai-slop-cleaner',
         'agent-doc-discipline',
+        'architect',
         'architecture-survey',
         'ask',
         'ask-navigator',
         'autopilot',
         'autoresearch',
+        'babysit',
+        'blast-radius',
         'cancel',
         'cancel-ralph',
         'configure-notifications',
+        'correct',
         'debug',
         'deep-interview',
         'deepinit',
         'diagram',
         'execute',
         'external-context',
+        'figure-it-out',
+        'fix-ci',
+        'fix-merge-conflicts',
+        'get-pr-comments',
         'graph',
         'harbor',
+        'how',
         'hud',
         'intent',
         'minimal-code-discipline',
@@ -149,12 +158,13 @@ describe('Builtin Skills', () => {
         'launch',
         'loft',
         'map',
+        'models',
         'drydock',
         'omc-doctor',
-        'omc-plan',
-        'omc-review',
         'omc-setup',
         'pr',
+        'omc-plan',
+        'omc-review',
         'project-session-manager',
         'psm',
         'ralph',
@@ -165,6 +175,7 @@ describe('Builtin Skills', () => {
         'research',
         'self-improve',
         'session-flow',
+        'show-me-your-work',
         'skill',
         'skillify',
         'team',
@@ -173,7 +184,9 @@ describe('Builtin Skills', () => {
         'ultragoal',
         'verify',
         'visual-verdict',
+        'why',
         'wiki',
+    
       ];
 
       const actualSkillNames = skills.map((s) => s.name);
@@ -839,7 +852,7 @@ describe('Builtin Skills', () => {
     it('should return canonical skill names by default', () => {
       const names = listBuiltinSkillNames();
 
-      expect(names).toHaveLength(48);
+      expect(names).toHaveLength(60);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('minimal-code-discipline');
       expect(names).toContain('launch');
@@ -881,7 +894,7 @@ describe('Builtin Skills', () => {
       const names = listBuiltinSkillNames({ includeAliases: true });
 
       // swarm alias removed in #1131; learner retired in 5.0.0; cancel-ralph and psm remain
-      expect(names).toHaveLength(50);
+      expect(names).toHaveLength(62);
       expect(names).toContain('ai-slop-cleaner');
       expect(names).toContain('autoresearch');
       expect(names).toContain('self-improve');
