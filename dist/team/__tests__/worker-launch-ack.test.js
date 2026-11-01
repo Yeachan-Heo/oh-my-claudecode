@@ -1780,14 +1780,15 @@ describe('worker launch acknowledgement', () => {
     });
     it('terminates the exact started provider process group before failed-startup pane cleanup', async () => {
         const launchAttempt = await attempt();
-        const pidMarker = join(cwd, 'started-provider-tree-pids.json');
+        const pidMarkerName = 'started-provider-tree-pids.json';
+        const pidMarker = join(cwd, pidMarkerName);
         const providerScript = [
             "const fs=require('node:fs')",
             "const cp=require('node:child_process')",
             "const path=require('node:path')",
             "const child=cp.spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'})",
             "const actualCwd=process.env.OMC_PROVIDER_CWD||process.cwd()",
-            "const actualPath=path.join(actualCwd,'started-provider-tree-pids.json')",
+            `const actualPath=path.join(actualCwd,'${pidMarkerName}')`,
             'fs.writeFileSync(actualPath,JSON.stringify({parent:process.pid,child:child.pid}))',
             'setInterval(()=>{},1000)',
         ].join(';');
