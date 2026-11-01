@@ -1,16 +1,17 @@
-# oh-my-claudecode v5.7.24: Route factory CI failures to the shipped debug skill
+# oh-my-claudecode v5.7.25: Protect sensitive repository paths and credential files
 
 ## Release Notes
 
-This release routes factory CI failures to the shipped `debug` skill and migrates legacy full-template diagnose routes when they are read. Thanks to @RobinNorberg for #4677.
+This release closes case-insensitive bypasses in sensitive repository path protection and prevents safe-read inspection from auto-approving private-key and credential files. Thanks to @LukeTheoJohnson for #4693.
 
-### Bug Fixes
+### Security Fixes
 
-- **fix(factory): route CI failures to the shipped debug skill and migrate legacy full-template diagnose routes on read** (#4677; fixes #4676; @RobinNorberg)
+- **fix(permission-handler): match sensitive repo paths case-insensitively** (#4693; @LukeTheoJohnson)
+- **fix(permission-handler): treat private-key and credential files as sensitive** (#4694)
 
 ### Stats
 
-- **1 PR merged** | **0 new features** | **1 bug fix**
+- **2 PRs merged** | **0 new features** | **2 security fixes**
 
 ### Install / Update
 
@@ -19,7 +20,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.24
+npm install -g oh-my-claude-sisyphus@5.7.25
 ```
 
 **Claude Code plugin:**
@@ -28,10 +29,10 @@ npm install -g oh-my-claude-sisyphus@5.7.24
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.23...v5.7.24
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.24...v5.7.25
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@RobinNorberg @Yeachan-Heo
+@LukeTheoJohnson @Yeachan-Heo
