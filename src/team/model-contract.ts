@@ -51,6 +51,17 @@ export interface CliBinaryValidation {
 
 const resolvedPathCache = new Map<string, string>();
 
+const DEFAULT_PATHEXT = '.COM;.EXE;.BAT;.CMD';
+
+function windowsPathExtensions(): Set<string> {
+  return new Set(
+    (process.env.PATHEXT ?? DEFAULT_PATHEXT)
+      .split(';')
+      .map(extension => extension.trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
 const UNTRUSTED_PATH_PATTERNS: RegExp[] = [
   /^\/tmp(\/|$)/,
   /^\/var\/tmp(\/|$)/,
@@ -115,7 +126,9 @@ export function resolveCliBinaryPath(binary: string): string {
   if (cached) return cached;
 
   const finder = process.platform === 'win32' ? 'where' : 'which';
-  const result = spawnSync(finder, [binary], {
+  // On Windows, use $PATH: prefix to exclude cwd from search (security: #4728)
+  const searchTarget = process.platform === 'win32' ? `$PATH:${binary}` : binary;
+  const result = spawnSync(finder, [searchTarget], {
     timeout: 5000,
     env: process.env,
   });
@@ -125,13 +138,19 @@ export function resolveCliBinaryPath(binary: string): string {
   }
 
   const stdout = result.stdout?.toString().trim() ?? '';
-  const firstLine = stdout.split('\n').map(line => line.trim()).find(Boolean) ?? '';
-  if (!firstLine) {
+  const candidates = stdout.split('\n').map(line => line.trim()).filter(Boolean);
+  if (candidates.length === 0) {
     throw new Error(`CLI binary '${binary}' not found in PATH`);
   }
 
-  const resolvedPath = normalize(firstLine);
-  if (!isAbsolute(resolvedPath)) {
+  // `where` lists an npm bin's extensionless POSIX shim before its .cmd shim;
+  // only a PATHEXT candidate is launchable on Windows (see cli-detection.ts).
+  const windows = process.platform === 'win32';
+  const selected = windows
+    ? candidates.find(candidate => windowsPathExtensions().has(win32Path.extname(candidate).toLowerCase())) ?? candidates[0]
+    : candidates[0];
+  const resolvedPath = windows ? win32Path.normalize(selected) : normalize(selected);
+  if (!(windows ? win32Path.isAbsolute(resolvedPath) : isAbsolute(resolvedPath))) {
     throw new Error(`Resolved CLI binary '${binary}' to relative path`);
   }
 
@@ -352,7 +371,9 @@ function resolveBinaryPath(binary: string): string {
 
   try {
     const resolver = process.platform === 'win32' ? 'where' : 'which';
-    const result = spawnSync(resolver, [binary], { timeout: 5000, encoding: 'utf8' });
+    // On Windows, use $PATH: prefix to exclude cwd from search (security: #4728)
+    const searchTarget = process.platform === 'win32' ? `$PATH:${binary}` : binary;
+    const result = spawnSync(resolver, [searchTarget], { timeout: 5000, encoding: 'utf8' });
     if (result.status !== 0) return binary;
 
     const lines = result.stdout

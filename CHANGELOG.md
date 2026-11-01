@@ -1,23 +1,27 @@
-# oh-my-claudecode v5.7.28: Windows provider launch, PATHEXT resolution, and state-lock owner probe improvements
+# oh-my-claudecode v5.7.29: Windows provider resolution and state-lock contention fixes
 
 ## Release Notes
 
-This release improves Windows provider support with fixes for .cmd provider launch, PATHEXT candidate resolution, and state-lock owner probe contention. It also stabilizes the Windows where command behavior and includes test improvements for planted-git scenarios. These fixes build on PR #4726 (Windows .cmd provider launch), #4734 (Windows where command), #4736 (state-lock owner probe), #4739 (Windows planted-git test), and #4741 (PATHEXT candidate resolution).
+This release resolves Windows-specific provider resolution issues for both npm-installed and planted-cwd binaries, fixes state-lock contention from early probe attempts, and improves SessionEnd action claim and manifest handling. Note: v5.7.28 was cut from the wrong branch (main instead of dev) and contained only a version bump with no functionality changes; it was not published to npm or GitHub releases. This release incorporates all intended fixes from the 5.7.27→5.7.28→5.7.29 sequence.
 
 ### Bug Fixes
 
-- **fix(team): launch npm-installed (.cmd) providers on Windows and keep planted cwd binaries from running** (#4726)
-- **fix(team): prevent Windows where command from searching cwd** (#4734)
-- **fix(lib): state-lock owner probe outside BEGIN IMMEDIATE to avoid contention** (#4736)
-- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4741)
+- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4726 follow-up, #4741)
+- **fix: prevent Windows where command from searching cwd** (#4728) (#4734)
+- **fix: state-lock owner probe outside BEGIN IMMEDIATE to avoid contention** (#4727) (#4736)
+- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
+- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
+- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
+- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
+- **chore: remove src modules no runtime entry point reaches**
 
 ### Test Improvements
 
-- **test(team): fix Windows planted-git test and expose the libuv cwd-search gap** (#4739)
+- **test(team): fix the #4726 Windows planted-git test and expose the libuv cwd-search gap** (#4746) (#4739)
 
 ### Stats
 
-- **5 PRs merged** | **0 new features** | **4 bug fixes** | **1 test improvement**
+- **10 PRs merged** | **0 new features** | **8 bug fixes** | **1 test improvement** | **1 chore**
 
 ---
 
