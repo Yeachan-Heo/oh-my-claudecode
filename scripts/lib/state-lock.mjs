@@ -617,16 +617,41 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure('unverifiable');
         return null;
       }
+      // Issue #4727: Probe the owner outside BEGIN IMMEDIATE to avoid serializing
+      // multiple waiters on each other's PowerShell calls (Windows). Release the
+      // write lock before probing, then re-acquire it to verify the owner hasn't changed.
+      const ownerInfo = { pid: row.pid, processStart: row.process_start, nonce: row.nonce };
+      db.exec('ROLLBACK');
       const live = ownerLive(
-        { pid: row.pid, processStart: row.process_start },
+        { pid: ownerInfo.pid, processStart: ownerInfo.processStart },
         remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks),
         testHooks,
       );
-      if (live === null || live) {
+      if (live === null) {
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('unverifiable');
+          return null;
+        }
+        return retryAcquisition();
+      }
+      if (live) {
+        db.close();
+        recordFailure('contention');
+        if (attempts <= 1) {
+          return null;
+        }
+        return retryAcquisition();
+      }
+      // Owner is dead; reacquire the lock and delete it
+      db.exec('BEGIN IMMEDIATE');
+      const recheck = db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(key);
+      if (!recheck || recheck.nonce !== ownerInfo.nonce) {
+        // Owner changed or was deleted while we were probing; retry
         db.exec('ROLLBACK');
         db.close();
-        if (live === null || attempts <= 1) {
-          recordFailure(live === null ? 'unverifiable' : 'contention');
+        if (attempts <= 1) {
+          recordFailure('contention');
           return null;
         }
         return retryAcquisition();
@@ -643,26 +668,35 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
         return null;
       }
-      const live = ownerLive(artifact, remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks), testHooks);
-      if (live === null || live) {
-        db.exec('ROLLBACK');
+      // Issue #4727: Same fix as for SQLite row - probe outside BEGIN IMMEDIATE
+      const artifactCopy = artifact;
+      db.exec('ROLLBACK');
+      const live = ownerLive(artifactCopy, remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks), testHooks);
+      if (live === null) {
         db.close();
-        if (live === null || attempts <= 1) {
-          recordFailure(live === null ? 'unverifiable' : 'contention');
+        if (attempts <= 1) {
+          recordFailure('unverifiable');
           return null;
         }
         return retryAcquisition();
       }
+      if (live) {
+        db.close();
+        recordFailure('contention');
+        if (attempts <= 1) {
+          return null;
+        }
+        return retryAcquisition();
+      }
+      // Owner is dead; try to reclaim it
       const identity = ownerArtifactIdentity(lockPath);
       if (!identity) {
-        db.exec('ROLLBACK');
         db.close();
         recordFailure('unverifiable');
         return null;
       }
-      const reclaimed = reclaimDeadOwner(lockPath, artifact, identity);
+      const reclaimed = reclaimDeadOwner(lockPath, artifactCopy, identity);
       if (reclaimed !== 'removed') {
-        db.exec('ROLLBACK');
         db.close();
         if (reclaimed === 'changed' && attempts > 1) {
           return retryAcquisition();
@@ -670,6 +704,8 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure(reclaimed === 'changed' ? 'contention' : 'unverifiable');
         return null;
       }
+      // Reacquire lock to verify artifact is still gone before continuing
+      db.exec('BEGIN IMMEDIATE');
     }
 
     db.prepare('INSERT INTO state_mutation_locks (lock_key, version, pid, process_start, created_at, nonce) VALUES (?, 1, ?, ?, ?, ?)').run(key, owner.pid, owner.processStart, owner.createdAt, owner.nonce);
