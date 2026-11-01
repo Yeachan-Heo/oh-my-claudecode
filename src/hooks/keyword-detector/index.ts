@@ -96,7 +96,7 @@ export const KEYWORD_PRIORITY: KeywordType[] = [
 ];
 
 const RETIRED_WORKFLOW_SLASH_PATTERN =
-  /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー)(?=\s|$|[?!.,;:])/i;
+  /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー|ultraqa|omc-teams)(?=\s|$|[?!.,;:])/i;
 
 export function isRetiredWorkflowSlashInvocation(text: string): boolean {
   return RETIRED_WORKFLOW_SLASH_PATTERN.test(text);
@@ -112,7 +112,6 @@ const CANONICAL_WORKFLOW_SLASH_SKILLS = [
   'autopilot',
   'ralph',
   'team',
-  'ultraqa',
   'deep-interview',
   'ralplan',
   'self-improve',
