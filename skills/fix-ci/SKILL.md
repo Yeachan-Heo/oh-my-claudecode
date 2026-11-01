@@ -19,12 +19,17 @@ Red CI has exactly three causes; classify before touching anything.
 ## Workflow
 
 <<<<<<< ours
+<<<<<<< ours
 1. **List the failures**: `gh pr checks` (or the CI's own view) — which
    checks failed, on which SHA.
 =======
 1. **List the failures**: `gh pr checks <N> --repo <OWNER/REPO>` (or the CI's
    own view) — which checks failed, on which SHA. Verify the returned head is
    the requested PR's expected SHA before reading or changing anything.
+>>>>>>> theirs
+=======
+1. **List the failures**: `gh pr checks` (or the CI's own view) — which
+   checks failed, on which SHA.
 >>>>>>> theirs
 2. **Read the actual log** for each failure, to the first error line that
    names a cause. Summaries lie; stack traces do not.
