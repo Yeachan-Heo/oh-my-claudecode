@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { buildProviderSpawnInvocation, buildWorkerLaunchBootstrapSpec, materializeProviderSpawnInvocation, readProviderCompletionExitCode, withWorkerLaunchAttemptFence, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, } from './worker-launch-ack.js';
+import { buildProviderSpawnEnvironment, buildProviderSpawnInvocation, buildWorkerLaunchBootstrapSpec, materializeProviderSpawnInvocation, readProviderCompletionExitCode, withWorkerLaunchAttemptFence, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, } from './worker-launch-ack.js';
 import { captureOwnedProcessGroup, getProcessStartIdentitySync, isProcessAlive, terminateOwnedProcessTree } from '../platform/process-utils.js';
 async function writeAtomic(path, value) {
     await mkdir(dirname(path), { recursive: true });
@@ -65,14 +65,15 @@ export async function runWorkerActivationGate(gate) {
         const containedByDurableBootstrap = containedByBootstrap === '1';
         const providerEnv = { ...providerProcessEnv, ...gate.env };
         delete providerEnv[WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV];
-        const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv), {
+        const invocation = await materializeProviderSpawnInvocation(buildProviderSpawnInvocation(gate.providerArgv, process.platform, providerEnv), {
             superviseProcessTree: true,
             completionIdentity: buildWorkerLaunchBootstrapSpec(launchAttempt, gate.providerArgv, gate.cwd, { providerEnv }),
         });
         const child = spawn(invocation.command, invocation.args, {
             cwd: gate.cwd,
-            env: providerEnv,
+            env: buildProviderSpawnEnvironment(providerEnv, invocation),
             stdio: 'inherit',
+            windowsVerbatimArguments: invocation.windowsVerbatimArguments,
             // A recovery gate already runs inside the durable worker-launch
             // bootstrap group. Keep the actual provider in that group so teardown's
             // group-absence proof covers the provider rather than only the gate.
