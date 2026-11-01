@@ -34,8 +34,8 @@ describe('generated Windows worker supervisor', () => {
     expect(source).toContain("if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe';");
     expect(source).toContain(`$cmd = '"' + $app + '" /d /v:off /s /c "set "_OMC_PROVIDER_LINE=" & %_OMC_PROVIDER_LINE%"' } else { $cmd = [O]::BuildCommandLine($argv) }`);
     expect(source).toContain("Where-Object { $_.Name -ne '_OMC_PROVIDER_LINE' -and $_.Name -ne 'NoDefaultCurrentDirectoryInExePath' }");
-    expect(source).toContain("$envPairs += [pscustomobject]@{ Name = 'NoDefaultCurrentDirectoryInExePath'; Value = '1' }; if ($null -ne $providerLine) {");
-    expect(source).toContain('[O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)');
+    expect(source).toContain("$envPairs += [pscustomobject]@{ Name = 'NoDefaultCurrentDirectoryInExePath'; Value = '1' }; $envPairs += [pscustomobject]@{ Name = 'OMC_PROVIDER_CWD'; Value = $payload.cwd }; if ($null -ne $providerLine) {");
+    expect(source).toContain('[O]::CreateConsoleProcess($app, $cmd, $envPtr, [Environment]::SystemRoot, [ref]$pi)');
     expect(source).toContain(`if (c < ' ') throw new ArgumentException("worker_launch_provider_argv_invalid")`);
     expect(source).toContain('if (b.Length > 8000) throw new ArgumentException("worker_launch_provider_argv_too_long")');
   });
@@ -188,6 +188,26 @@ if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr
       const cmdPath = join(process.env.SystemRoot!, 'System32', 'cmd.exe');
       // The child runs a bare git both through libuv's own search and through cmd.exe.
       const script = `const cp=require('child_process');cp.spawnSync('git',['-e',${JSON.stringify(plant)}]);cp.spawnSync(${JSON.stringify(cmdPath)},['/d','/c','git -e x']);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
+      runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
+      expect(await readFile(donePath, 'utf8')).toBe('done');
+      expect(existsSync(canaryPath)).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, 65_000);
+
+  // Closes the libuv gap (#4746): when the provider is launched from a safe directory,
+  // libuv's executable search will not find binaries planted in the original cwd.
+  it.runIf(process.platform === 'win32')('prevents a Node provider child from running a git.exe planted in the original cwd', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-libuv-cwd-'));
+    try {
+      const canaryPath = join(root, 'planted.txt');
+      const donePath = join(root, 'done.txt');
+      const plant = `require('fs').writeFileSync(${JSON.stringify(canaryPath)},'exe')`;
+      // A copy of node.exe named git.exe would run the -e script the child hands it,
+      // but since the provider is launched from a safe directory, libuv won't find it.
+      await copyFile(process.execPath, join(root, 'git.exe'));
+      const script = `require('child_process').spawnSync('git',['-e',${JSON.stringify(plant)}]);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
       runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
       expect(await readFile(donePath, 'utf8')).toBe('done');
       expect(existsSync(canaryPath)).toBe(false);
