@@ -4,6 +4,68 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4751,
+      "targetRef": "dev",
+      "mergeBaseSha": "d2060bc524b10d422fb2379b7ad4efdb76f06e37",
+      "headSha": "a31ee0632df831a57a7fb837f3350eefe0a8ecac",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-11-01T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 8,
+        "sha256": "2733c4c1c71c18d98095ba2e6d757d1d24c908ade158c41d0ff68c1a2dfb13a8"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "a7c760e7784ccc9e77710ae9c657c1c9038b1480",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "433492265eba5d9f93ac440353b6cf69f6ceaddb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "b6566f3fcb4bcb79e47cc1ca1d3e6d9c175d37f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "08d46fc99a170cdc072116035ab32cbcb9f752c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/worker-launch-ack.test.js",
+          "sha": "fc27c2c13660e1e523d85337fc0df23be839d481",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/worker-launch-ack.test.js.map",
+          "sha": "34ee41e951f27eb67f66a245d08070977043fa62",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js",
+          "sha": "100cf77ae3f234d722471d68ef4255fb897e37c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/worker-launch-ack.js.map",
+          "sha": "44fffdffa99f764d4f70a8145d1a11f72e9036c1",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4742,
       "targetRef": "main",
       "mergeBaseSha": "4a6c3e3405b126fb3eeb1956a0a37acd3acdf6a6",
