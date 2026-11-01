@@ -3337,12 +3337,12 @@ function isOmcPluginCacheIdentity(pluginName, marketplace) {
   return OMC_PLUGIN_CACHE_IDENTITIES.has(`${pluginName}@${marketplace}`.toLowerCase());
 }
 function sameFileSystemIdentity(left, right) {
-  return typeof left.dev === "number" && typeof left.ino === "number" && left.ino !== 0 && typeof right.dev === "number" && typeof right.ino === "number" && right.ino !== 0 && left.dev === right.dev && left.ino === right.ino;
+  return typeof left.dev === "bigint" && typeof left.ino === "bigint" && left.ino !== 0n && typeof right.dev === "bigint" && typeof right.ino === "bigint" && right.ino !== 0n && left.dev === right.dev && left.ino === right.ino;
 }
 function hasAncestorWithIdentity(path30, identity) {
   let currentPath = path30;
   while (true) {
-    if (sameFileSystemIdentity((0, import_fs2.statSync)(currentPath), identity)) return true;
+    if (sameFileSystemIdentity((0, import_fs2.statSync)(currentPath, { bigint: true }), identity)) return true;
     const parentPath = (0, import_path3.dirname)(currentPath);
     if (parentPath === currentPath) return false;
     currentPath = parentPath;
@@ -3355,7 +3355,7 @@ function firstChildBelowDirectoryIdentity(path30, directoryIdentity) {
     const parentPath = (0, import_path3.dirname)(currentPath);
     if (parentPath === currentPath) return void 0;
     try {
-      if (sameFileSystemIdentity((0, import_fs2.statSync)(parentPath), directoryIdentity)) return (0, import_path3.basename)(currentPath);
+      if (sameFileSystemIdentity((0, import_fs2.statSync)(parentPath, { bigint: true }), directoryIdentity)) return (0, import_path3.basename)(currentPath);
     } catch {
     }
     currentPath = parentPath;
@@ -3395,7 +3395,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
   for (let index = components.length - 1; index >= 0; index--) steps.push(components[index]);
   const activeLinks = /* @__PURE__ */ new Set();
   try {
-    if (sameFileSystemIdentity((0, import_fs2.lstatSync)(currentPath), identity)) return true;
+    if (sameFileSystemIdentity((0, import_fs2.lstatSync)(currentPath, { bigint: true }), identity)) return true;
   } catch {
     return false;
   }
@@ -3413,7 +3413,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
     const nextPath = (0, import_path3.join)(currentPath, step);
     let nextStats;
     try {
-      nextStats = (0, import_fs2.lstatSync)(nextPath);
+      nextStats = (0, import_fs2.lstatSync)(nextPath, { bigint: true });
     } catch {
       return false;
     }
@@ -3422,7 +3422,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
       currentPath = nextPath;
       continue;
     }
-    const linkKey = typeof nextStats.dev === "number" && typeof nextStats.ino === "number" && nextStats.ino !== 0 ? `inode:${nextStats.dev}:${nextStats.ino}` : `path:${process.platform === "win32" ? nextPath.toLowerCase() : nextPath}`;
+    const linkKey = typeof nextStats.dev === "bigint" && typeof nextStats.ino === "bigint" && nextStats.ino !== 0n ? `inode:${nextStats.dev}:${nextStats.ino}` : `path:${process.platform === "win32" ? nextPath.toLowerCase() : nextPath}`;
     if (activeLinks.has(linkKey)) return false;
     let linkTarget;
     try {
@@ -3450,6 +3450,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
   return false;
 }
 function isUsableVersionPath(path30, staleVersionIdentity) {
+  if (staleVersionIdentity !== void 0 && typeof staleVersionIdentity.ino !== "bigint") return false;
   let stats;
   try {
     stats = (0, import_fs2.lstatSync)(path30);
@@ -3506,19 +3507,19 @@ function hasUsableOmcHookTargets(path30, staleVersionIdentity) {
   return true;
 }
 function hasResolvablePluginSymlinks(directory, staleVersionIdentity, ancestors = [], payload) {
-  const directoryStats = (0, import_fs2.statSync)(directory);
+  const directoryStats = (0, import_fs2.statSync)(directory, { bigint: true });
   if (ancestors.some((identity) => sameFileSystemIdentity(directoryStats, identity))) return false;
   const branch = [...ancestors, directoryStats];
   const entries = (0, import_fs2.readdirSync)(directory, { withFileTypes: true });
   for (const entry2 of entries) {
     const entryPath = (0, import_path3.join)(directory, entry2.name);
     if (entry2.isSymbolicLink()) {
-      const entryStats = (0, import_fs2.statSync)(entryPath);
+      const entryStats = (0, import_fs2.statSync)(entryPath, { bigint: true });
       if (pathTraversesFileSystemIdentity(entryPath, staleVersionIdentity)) return false;
       if (entryStats.isDirectory()) {
         if (branch.some((identity) => sameFileSystemIdentity(entryStats, identity))) continue;
         if (!hasResolvablePluginSymlinks(entryPath, staleVersionIdentity, branch, payload)) return false;
-      } else if (payload && entryStats.isFile() && entryStats.size > 0 && !FILESYSTEM_JUNK_NAMES.has(entry2.name.toLowerCase())) {
+      } else if (payload && entryStats.isFile() && entryStats.size > 0n && !FILESYSTEM_JUNK_NAMES.has(entry2.name.toLowerCase())) {
         payload.found = true;
       }
     } else if (entry2.isDirectory()) {
@@ -3530,6 +3531,7 @@ function hasResolvablePluginSymlinks(directory, staleVersionIdentity, ancestors 
   return true;
 }
 function isUsableGenericPluginTarget(target, staleVersionIdentity) {
+  if (staleVersionIdentity !== void 0 && typeof staleVersionIdentity.ino !== "bigint") return false;
   const payload = { found: false };
   return hasResolvablePluginSymlinks(target, staleVersionIdentity, [], payload) && payload.found;
 }
@@ -3812,7 +3814,7 @@ function purgeStalePluginCacheVersions(options) {
       const lexicalActiveVersionDirsHere = activePathIdentities.filter((ap) => ap.startsWith(pluginDirNorm + "/")).map((ap) => (0, import_path4.join)(pluginDir, ap.slice(pluginDirNorm.length + 1).split("/")[0]));
       const filesystemActiveVersionDirsHere = [];
       try {
-        const pluginDirStats = (0, import_fs3.statSync)(pluginDir);
+        const pluginDirStats = (0, import_fs3.statSync)(pluginDir, { bigint: true });
         for (const activePath of activePathsArray) {
           const versionName = firstChildBelowDirectoryIdentity(activePath, pluginDirStats);
           if (versionName) filesystemActiveVersionDirsHere.push((0, import_path4.join)(pluginDir, versionName));
@@ -3877,11 +3879,11 @@ function purgeStalePluginCacheVersions(options) {
             (a, b) => compareSemverDesc(versionLeaf(a), versionLeaf(b))
           )[0];
           try {
-            const targetStats = (0, import_fs3.statSync)(target);
+            const targetStats = (0, import_fs3.statSync)(target, { bigint: true });
             if (!targetStats.isDirectory()) {
               throw new Error("Registered active plugin target is not a directory");
             }
-            const staleVersionStats = (0, import_fs3.statSync)(versionDir);
+            const staleVersionStats = (0, import_fs3.statSync)(versionDir, { bigint: true });
             const resolvedTarget = (0, import_fs3.realpathSync)(target);
             const resolvedStaleVersion = (0, import_fs3.realpathSync)(versionDir);
             const targetPath = comparisonPath(resolvedTarget);
@@ -58173,12 +58175,17 @@ function readSessionEndJob(directory, sessionId) {
   }
 }
 function mutateSessionEndJob(directory, sessionId, expectedRevision, mutate) {
+  const result = casSessionEndJob(directory, sessionId, expectedRevision, mutate);
+  return result === "revision-mismatch" ? null : result;
+}
+function casSessionEndJob(directory, sessionId, expectedRevision, mutate) {
   let terminal = false;
   try {
     const jobPath = sessionEndJobPath(directory, sessionId);
     const result = withLock(jobPath, () => {
       const current = readPath(jobPath);
-      if (!current || current.revision !== expectedRevision) return null;
+      if (!current) return null;
+      if (current.revision !== expectedRevision) return "revision-mismatch";
       mutate(current);
       const next = { ...current, revision: current.revision + 1, updatedAt: nowIso() };
       if (isManifestTerminal(next) && next.phase !== "complete") {
@@ -58209,8 +58216,8 @@ function mutateLatest(directory, sessionId, mutate) {
   for (let i = 0; i < 8; i++) {
     const current = readSessionEndJob(directory, sessionId);
     if (!current) return null;
-    const result = mutateSessionEndJob(directory, sessionId, current.revision, mutate);
-    if (result) return result;
+    const result = casSessionEndJob(directory, sessionId, current.revision, mutate);
+    if (result !== "revision-mismatch") return result;
   }
   return null;
 }
@@ -58338,9 +58345,7 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   });
 }
 function renewSessionEndLease(directory, sessionId, nonce, generation, deadlineAt) {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     const owner = job.owner;
     if (!owner || owner.nonce !== nonce || owner.leaseGeneration !== generation) throw new Error("lease-conflict");
     owner.leaseGeneration++;
@@ -58368,10 +58373,17 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
   });
 }
 function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = "worker-released") {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
+    for (const action of Object.values(job.actions)) {
+      if (action.status === "claimed" && action.claimantNonce === nonce && action.runner?.phase === "reserved") {
+        action.attempts--;
+        action.status = action.attempts > 0 ? "retryable" : "pending";
+        action.claimantNonce = void 0;
+        action.claimedAt = void 0;
+        action.runner = void 0;
+      }
+    }
     job.owner = null;
     if (job.phase !== "complete") {
       job.phase = "recoverable-failure";
@@ -58380,9 +58392,7 @@ function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 
   });
 }
 function updateSessionEndJob(directory, sessionId, expectedOwner, mutate) {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     if (job.owner?.nonce !== expectedOwner || job.phase === "complete") throw new Error("owner-conflict");
     mutate(job);
   });
@@ -112821,9 +112831,10 @@ function scanDirectories(projectRoot) {
       return;
     }
     try {
-      const stat2 = (0, import_node_fs4.statSync)(absDir);
-      if (visitedInodes.has(stat2.ino)) return;
-      visitedInodes.add(stat2.ino);
+      const stat2 = (0, import_node_fs4.statSync)(absDir, { bigint: true });
+      const identity = `${stat2.dev}:${stat2.ino}`;
+      if (visitedInodes.has(identity)) return;
+      visitedInodes.add(identity);
     } catch {
       return;
     }
