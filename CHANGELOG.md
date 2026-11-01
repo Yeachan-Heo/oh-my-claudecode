@@ -1,3 +1,20 @@
+# oh-my-claudecode v5.7.26: Keep project memory and workflow routing current
+
+## Release Notes
+
+This release keeps project-memory hot paths aligned with the files users are working on and stops retired workflow names from being recommended or routed at runtime. Thanks to @iyoda for #4698 and #4699.
+
+### Bug Fixes
+
+- **fix(project-memory): make hot paths follow current work** (#4698; @iyoda)
+- **fix(workflows): drop retired ultraqa, omc-teams, and ultrawork names that still route** (#4699; @iyoda)
+
+### Stats
+
+- **2 PRs merged** | **0 new features** | **2 bug fixes**
+
+---
+
 # oh-my-claudecode v5.7.25: Protect sensitive repository paths and credential files
 
 ## Release Notes
