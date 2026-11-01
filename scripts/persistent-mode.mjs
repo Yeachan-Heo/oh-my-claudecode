@@ -158,7 +158,7 @@ const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib",
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
 );
-const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
+const { resolveOmcStateRoot, resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
 
 function readJsonFile(path) {
   try {
@@ -1251,7 +1251,6 @@ function isScheduledWakeupStop(data) {
 }
 
 const PRD_FILENAME = "prd.json";
-const VERIFICATION_STATE_FILENAME = "ralph-verification-state.json";
 
 /**
  * Same PRD lookup order as findPrdPath() in src/hooks/ralph/prd.ts:
@@ -1277,6 +1276,33 @@ function resolvePrdPath(stateDir, omcRoot, directory, sessionId) {
 }
 
 /**
+ * Rebuild amendment entries in normalizeCriterionAmendment()'s canonical field
+ * order before hashing. Hashing the raw JSON would make the digest depend on
+ * the key order a writer happened to use, so a PRD the loader accepts could
+ * look like a different revision here.
+ */
+function canonicalAmendments(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((amendment) => ({
+    kind: amendment?.kind,
+    original: amendment?.original,
+    replacement: amendment?.kind === "replaced" ? amendment?.replacement : undefined,
+    reason: amendment?.reason,
+    evidence: amendment?.evidence,
+    authority: amendment?.authority,
+    timestamp: amendment?.timestamp,
+  }));
+}
+
+function governingCriteriaRevisionOf(story) {
+  const acceptanceCriteria = Array.isArray(story?.acceptanceCriteria) ? story.acceptanceCriteria : [];
+  const criterionAmendments = canonicalAmendments(story?.criterionAmendments);
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify({ acceptanceCriteria, criterionAmendments }))
+    .digest("hex")}`;
+}
+
+/**
  * True when a story carries a completion claim that still needs reviewer
  * sign-off.
  *
@@ -1287,19 +1313,26 @@ function resolvePrdPath(stateDir, omcRoot, directory, sessionId) {
  * unless we hand the stop event to the bridge.
  */
 function storyNeedsReviewerSignoff(story) {
-  if (!story || story.passes !== true || story.architectVerified === true) {
+  if (!story || story.passes !== true) {
     return false;
   }
-  // Mirror normalizeStory()'s revision binding: `passes: true` without the
-  // matching completionCriteriaRevision is not a completion claim, and
-  // delegating for it would spawn the bridge on every Stop of a hand-edited
-  // PRD. The bridge reaches the same conclusion, so skipping is not a loss.
-  const acceptanceCriteria = Array.isArray(story.acceptanceCriteria) ? story.acceptanceCriteria : [];
-  const criterionAmendments = Array.isArray(story.criterionAmendments) ? story.criterionAmendments : [];
-  const governingCriteriaRevision = `sha256:${createHash("sha256")
-    .update(JSON.stringify({ acceptanceCriteria, criterionAmendments }))
-    .digest("hex")}`;
-  return story.completionCriteriaRevision === governingCriteriaRevision;
+  // Mirror normalizeStory()'s revision binding on both sides:
+  // - `passes: true` without the matching completionCriteriaRevision is not a
+  //   completion claim, and
+  // - `architectVerified: true` without the matching
+  //   architectVerificationCriteriaRevision is an approval for an older
+  //   revision, i.e. still unverified.
+  // Delegating for either would spawn the bridge on every Stop of a
+  // hand-edited PRD; the bridge reaches the same conclusion, so skipping is
+  // not a loss.
+  const governingCriteriaRevision = governingCriteriaRevisionOf(story);
+  if (story.completionCriteriaRevision !== governingCriteriaRevision) {
+    return false;
+  }
+  return !(
+    story.architectVerified === true
+    && story.architectVerificationCriteriaRevision === governingCriteriaRevision
+  );
 }
 
 function hasPendingArchitectVerification(prd) {
@@ -1311,19 +1344,42 @@ function hasPendingArchitectVerification(prd) {
  * A pending verification request also needs the bridge. Once the last story is
  * signed off, checkRalphLoop() starts a run-level (completion) request, and no
  * story is left in the passes-but-unverified state the predicate above watches.
+ *
+ * The path comes from the canonical resolver so this agrees with what
+ * readVerificationState() reads. With a session id that means the
+ * session-scoped file only: falling back to the unscoped legacy file would
+ * delegate for a request the bridge deliberately does not read.
  */
-function hasPendingVerificationRequest(stateDir, omcRoot, sessionId) {
-  const candidates = [];
+async function hasPendingVerificationRequest(directory, omcRoot, sessionId) {
   if (sessionId) {
-    candidates.push(join(stateDir, "sessions", sessionId, VERIFICATION_STATE_FILENAME));
+    try {
+      const { readPath } = await resolveSessionStatePathsForHook(
+        directory,
+        "ralph-verification",
+        sessionId,
+      );
+      const state = readJsonFile(readPath);
+      return Boolean(state && state.pending === true);
+    } catch {
+      return false;
+    }
   }
-  candidates.push(join(omcRoot, "ralph-verification.json"));
 
-  for (const candidate of candidates) {
-    const state = readJsonFile(candidate);
-    if (state && state.pending === true) return true;
+  const state = readJsonFile(join(omcRoot, "ralph-verification.json"));
+  return Boolean(state && state.pending === true);
+}
+
+/**
+ * Everything the delegation predicates need for one Stop event.
+ */
+async function reviewerWorkState({ directory, sessionId, omcRoot, stateDir }) {
+  const pendingRequest = await hasPendingVerificationRequest(directory, omcRoot, sessionId);
+  if (pendingRequest) {
+    return { pending: true };
   }
-  return false;
+  const prdPath = resolvePrdPath(stateDir, omcRoot, directory, sessionId);
+  const prd = prdPath ? readJsonFile(prdPath) : null;
+  return { pending: hasPendingArchitectVerification(prd) };
 }
 
 /**
@@ -1420,13 +1476,9 @@ async function main() {
       return;
     }
 
-    // Claude Code sets stop_hook_active when a Stop hook is already running.
-    // Never emit another decision:block in that re-entrant path: doing so trips
-    // Claude Code's safety override for repeatedly blocked Stop hooks.
-    if (data.stop_hook_active === true) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-      return;
-    }
+    // The stop_hook_active guard runs after the Ralph state read: a forced
+    // continuation re-enters here carrying the reviewer's verdict, and that
+    // verdict still has to be consumed. See the guard below.
 
     // Stop supplies the assistant response text directly; only load the
     // existing detector when this advisory point is explicitly enabled.
@@ -1483,6 +1535,25 @@ async function main() {
       "ralph-state.json",
       sessionId,
     );
+
+    // [CC] sets stop_hook_active when a Stop hook is already running.
+    // Never emit another decision:block in that re-entrant path: doing so trips
+    // [CC]'s safety override for repeatedly blocked Stop hooks.
+    //
+    // That re-entry is also the Stop that carries the reviewer verdict for the
+    // prompt we just blocked with, so it still has to be consumed: delegate for
+    // the state mutation only and ignore a block outcome. Returning a second
+    // block here is what the guard exists to prevent.
+    if (data.stop_hook_active === true) {
+      if (ralph.state && ralph.state.active === true && !isStaleState(ralph.state)) {
+        const work = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
+        if (work.pending) {
+          delegateToBridge(data);
+        }
+      }
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
     const ultragoal = readStateFileWithSession(
       stateDir,
       globalStateDir,
@@ -1587,12 +1658,8 @@ async function main() {
         // verification request, has to go through the reviewer gate before the
         // loop can advance. Only the bridge holds that state machine, so hand
         // this stop event to it and use its decision.
-        const prdPath = resolvePrdPath(stateDir, omcRoot, directory, sessionId);
-        const prd = prdPath ? readJsonFile(prdPath) : null;
-        if (
-          hasPendingVerificationRequest(stateDir, omcRoot, sessionId) ||
-          hasPendingArchitectVerification(prd)
-        ) {
+        const work = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
+        if (work.pending) {
           const delegated = delegateToBridge(data);
           if (delegated) {
             console.log(JSON.stringify(delegated));

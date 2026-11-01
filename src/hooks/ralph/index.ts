@@ -165,6 +165,7 @@ export {
   getArchitectRejectionContinuationPrompt,
   detectArchitectApproval,
   detectArchitectRejection,
+  hasRejectionSignal,
 
   // Types
   type VerificationState

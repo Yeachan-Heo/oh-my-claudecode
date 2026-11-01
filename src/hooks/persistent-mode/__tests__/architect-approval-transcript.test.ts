@@ -306,6 +306,24 @@ describe('Ralph architect approval via the Stop payload transcript', () => {
     expect(storyPasses(sessionId, storyId)).toBe(false);
   });
 
+  it('applies rejection wording that has no trigger word beyond "not yet complete"', async () => {
+    const sessionId = 'ralph-not-yet-complete';
+    const storyId = 'US-002';
+    const requestedAt = '2026-04-13T12:00:00.000Z';
+    prepare(sessionId, storyId, 'request-not-yet-complete', requestedAt);
+
+    // detectArchitectRejection() accepts this wording; the transcript
+    // prefilter has to be a superset of its patterns or the verdict is skipped.
+    const transcriptPath = writeProjectTranscript(
+      sessionId,
+      reviewerRejectionTurn('Architect: not yet complete.', '2026-04-13T12:00:05.000Z'),
+    );
+
+    await checkPersistentModes(sessionId, testDir, { transcript_path: transcriptPath });
+
+    expect(storyPasses(sessionId, storyId)).toBe(false);
+  });
+
   it('ignores a rejection left over from an earlier story', async () => {
     const sessionId = 'ralph-old-rejection';
     const storyId = 'US-002';

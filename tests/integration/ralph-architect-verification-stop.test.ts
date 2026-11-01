@@ -57,6 +57,25 @@ process.stdin.on('end', () => {
 
 const FAILING_BRIDGE = 'process.exit(1);\n';
 
+/**
+ * Records that it ran, then answers like the real bridge. Used where the
+ * delegation's side effect matters more than the response.
+ */
+const MARKER_BRIDGE = `
+const fs = require('node:fs');
+let raw = '';
+process.stdin.on('data', (chunk) => { raw += chunk; });
+process.stdin.on('end', () => {
+  fs.appendFileSync(process.env.BRIDGE_MARKER, 'called\\n');
+  let input = {};
+  try { input = JSON.parse(raw); } catch {}
+  process.stdout.write(JSON.stringify({
+    continue: false,
+    message: 'BRIDGE-DELEGATED session=' + (input.session_id || ''),
+  }));
+});
+`;
+
 /** Never answers, so the delegation budget is the only thing that ends it. */
 const STALLING_BRIDGE = 'setTimeout(() => {}, 60000);\n';
 
@@ -154,12 +173,12 @@ function writeVerificationRequest(f: Fixture, sessionId: string, extra: Record<s
   }));
 }
 
-function invokeStop(f: Fixture, sessionId: string) {
+function invokeStop(f: Fixture, sessionId: string, extra: { input?: Record<string, unknown>; env?: Record<string, string> } = {}) {
   const baseEnv = { ...process.env };
   delete baseEnv.CLAUDE_CODE_TASK_LIST_ID;
   const stdout = execFileSync(process.execPath, [f.hook], {
     cwd: f.project,
-    input: JSON.stringify({ hook_event_name: 'Stop', session_id: sessionId, cwd: f.project }),
+    input: JSON.stringify({ hook_event_name: 'Stop', session_id: sessionId, cwd: f.project, ...extra.input }),
     encoding: 'utf8',
     env: {
       ...baseEnv,
@@ -168,6 +187,7 @@ function invokeStop(f: Fixture, sessionId: string) {
       CLAUDE_CONFIG_DIR: f.claudeConfigDir,
       OMC_STATE_DIR: '',
       OMC_PERSISTENT_MODE_TIMEOUT_MS: '8000',
+      ...extra.env,
     },
     timeout: 25_000,
   });
@@ -189,6 +209,123 @@ describe.each(['mjs', 'cjs'] as const)('Stop hook architect verification hand-of
 
     expect(String(result.reason)).toContain('BRIDGE-DELEGATED');
     expect(String(result.reason)).toContain(sessionId);
+  });
+
+  // Only the plugin MJS variant guards re-entrant Stops; the CJS mirror and
+  // the installer template never had that guard, so they reach delegation on
+  // re-entry already. Pinning the guard's behavior here keeps the scope of
+  // this change to the variant that actually ships through hooks/hooks.json.
+  it.runIf(kind === 'mjs')('still consumes the reviewer verdict on the re-entrant Stop', () => {
+    const f = makeFixture(kind, MARKER_BRIDGE);
+    const sessionId = 'ralph-reentrant';
+    writeRalphState(f, sessionId);
+    writeSessionPrd(f, sessionId, [story()]);
+    const marker = join(f.dir, 'bridge-calls.txt');
+
+    // The forced continuation that carries the reviewer's verdict always
+    // re-enters with stop_hook_active set.
+    const result = invokeStop(f, sessionId, {
+      input: { stop_hook_active: true },
+      env: { BRIDGE_MARKER: marker },
+    });
+
+    expect(existsSync(marker) ? readFileSync(marker, 'utf8') : '').toContain('called');
+    // ...but a re-entrant Stop must never block a second time.
+    expect(result.decision).toBeUndefined();
+    expect(result.continue).toBe(true);
+  });
+
+  it.runIf(kind === 'mjs')('does not spawn the bridge on a re-entrant Stop with nothing pending', () => {
+    const f = makeFixture(kind, MARKER_BRIDGE);
+    const sessionId = 'ralph-reentrant-idle';
+    writeRalphState(f, sessionId);
+    writeSessionPrd(f, sessionId, [story({ passes: false, completionCriteriaRevision: undefined })]);
+    const marker = join(f.dir, 'bridge-calls.txt');
+
+    const result = invokeStop(f, sessionId, {
+      input: { stop_hook_active: true },
+      env: { BRIDGE_MARKER: marker },
+    });
+
+    expect(existsSync(marker)).toBe(false);
+    expect(result.continue).toBe(true);
+  });
+
+  it('treats an approval for an older revision as still unverified', () => {
+    const f = makeFixture(kind, REAL_SHAPE_BRIDGE);
+    const sessionId = 'ralph-stale-approval-revision';
+    writeRalphState(f, sessionId);
+    // architectVerified belongs to a previous revision: normalizeStory() does
+    // not count it, so the story still needs a review.
+    writeSessionPrd(f, sessionId, [story({
+      architectVerified: true,
+      architectVerificationCriteriaRevision: 'sha256:stale',
+    })]);
+
+    const result = invokeStop(f, sessionId);
+
+    expect(String(result.reason)).toContain('BRIDGE-DELEGATED');
+  });
+
+  it('accepts an amendment ledger written in a different key order', () => {
+    const f = makeFixture(kind, REAL_SHAPE_BRIDGE);
+    const sessionId = 'ralph-amendment-order';
+    writeRalphState(f, sessionId);
+    const acceptanceCriteria = ['done'];
+    const amendment = {
+      timestamp: '2026-04-13T12:00:00.000Z',
+      authority: 'architect',
+      evidence: 'measured',
+      reason: 'refuted',
+      original: 'done',
+      kind: 'superseded',
+    };
+    writeSessionPrd(f, sessionId, [{
+      id: 'US-001',
+      title: 'Story',
+      description: 'Story',
+      acceptanceCriteria,
+      criterionAmendments: [amendment],
+      priority: 1,
+      passes: true,
+      completionCriteriaRevision: governingRevision(acceptanceCriteria, [{
+        kind: 'superseded',
+        original: 'done',
+        reason: 'refuted',
+        evidence: 'measured',
+        authority: 'architect',
+        timestamp: '2026-04-13T12:00:00.000Z',
+      }]),
+      architectVerified: false,
+    }]);
+
+    const result = invokeStop(f, sessionId);
+
+    expect(String(result.reason)).toContain('BRIDGE-DELEGATED');
+  });
+
+  it('does not treat an unscoped legacy request as pending for a session', () => {
+    const f = makeFixture(kind, MARKER_BRIDGE);
+    const sessionId = 'ralph-unscoped-request';
+    writeRalphState(f, sessionId);
+    writeSessionPrd(f, sessionId, [story({ passes: false, completionCriteriaRevision: undefined })]);
+    // readVerificationState(directory, sessionId) never reads this file, so
+    // delegating for it would start work the bridge cannot see.
+    mkdirSync(join(f.project, '.omc'), { recursive: true });
+    writeFileSync(join(f.project, '.omc', 'ralph-verification.json'), JSON.stringify({
+      pending: true,
+      completion_claim: 'legacy',
+      verification_attempts: 0,
+      max_verification_attempts: 3,
+      requested_at: new Date().toISOString(),
+      original_task: 'legacy',
+    }));
+    const marker = join(f.dir, 'bridge-calls.txt');
+
+    const result = invokeStop(f, sessionId, { env: { BRIDGE_MARKER: marker } });
+
+    expect(existsSync(marker)).toBe(false);
+    expect(String(result.reason)).toContain('RALPH LOOP');
   });
 
   it('converts the bridge { continue, message } answer into a Stop block', () => {

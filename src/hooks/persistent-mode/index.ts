@@ -52,6 +52,7 @@ import {
   getArchitectRejectionContinuationPrompt,
   detectArchitectApproval,
   detectArchitectRejection,
+  hasRejectionSignal,
   clearVerificationState,
   consumeVerificationRequest,
   restoreVerificationRequestIfAbsent,
@@ -1224,7 +1225,9 @@ function checkArchitectRejectionInTranscript(
         candidate,
         verificationState,
         TRANSCRIPT_APPROVAL_SCAN_BYTES,
-        (content) => /reject|not complete|incomplete|issue|bug|error|missing/i.test(content),
+        // Same pattern set the detector uses, so the prefilter cannot reject
+        // wording that detectArchitectRejection() would have accepted.
+        (content) => hasRejectionSignal(content),
       );
       for (const output of outputs) {
         // An output with no timestamp cannot be placed relative to the request,
