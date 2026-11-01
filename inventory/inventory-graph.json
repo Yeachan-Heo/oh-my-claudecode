@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c4a4abe8871aa287c49e7e4e4be77733191bfc0c",
-    "sourceSha256": "e22ce6e3faf622476abbd9d555be6370ff99ad70b7ced8bf2cfbf591ec5fef08",
+    "head": "f390a0975fb5223b056a21edbebb216985b7c73b",
+    "sourceSha256": "7ded809feb8ebb0b3628a0eda0f219b2ce042ce6ce029aebcc4e934010d4fb57",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c4a4abe8871aa287c49e7e4e4be77733191bfc0c",
-  "sourceSha256": "e22ce6e3faf622476abbd9d555be6370ff99ad70b7ced8bf2cfbf591ec5fef08",
+  "head": "f390a0975fb5223b056a21edbebb216985b7c73b",
+  "sourceSha256": "7ded809feb8ebb0b3628a0eda0f219b2ce042ce6ce029aebcc4e934010d4fb57",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 24,
-      "srcFiles": 1485,
-      "total": 1509
+      "srcFiles": 1483,
+      "total": 1507
     },
     "generated": {
       "distFiles": 5709,
@@ -851,8 +851,6 @@
       "scripts/lib/stdin.mjs",
       "scripts/lib/utf8-bom.d.mts",
       "scripts/lib/utf8-bom.mjs",
-      "scripts/lib/windows-search.cjs",
-      "scripts/lib/windows-search.mjs",
       "scripts/lib/workflow-profile-runtime.mjs",
       "scripts/lib/workflow-stage-prompts.mjs",
       "scripts/measure-prompt-ssot.ts",
@@ -37838,16 +37836,6 @@
         "path": "scripts/lib/utf8-bom.mjs"
       },
       {
-        "id": "scripts/lib/windows-search.cjs",
-        "kind": "script",
-        "path": "scripts/lib/windows-search.cjs"
-      },
-      {
-        "id": "scripts/lib/windows-search.mjs",
-        "kind": "script",
-        "path": "scripts/lib/windows-search.mjs"
-      },
-      {
         "id": "scripts/lib/workflow-profile-runtime.mjs",
         "kind": "script",
         "path": "scripts/lib/workflow-profile-runtime.mjs"
@@ -45928,11 +45916,6 @@
         "path": "src/utils/__tests__/string-width.test.ts"
       },
       {
-        "id": "src/utils/__tests__/windows-search.test.ts",
-        "kind": "src",
-        "path": "src/utils/__tests__/windows-search.test.ts"
-      },
-      {
         "id": "src/utils/cache-occupancy.ts",
         "kind": "src",
         "path": "src/utils/cache-occupancy.ts"
@@ -46031,11 +46014,6 @@
         "id": "src/utils/user-skill-compat.ts",
         "kind": "src",
         "path": "src/utils/user-skill-compat.ts"
-      },
-      {
-        "id": "src/utils/windows-search.ts",
-        "kind": "src",
-        "path": "src/utils/windows-search.ts"
       },
       {
         "id": "src/workflow/__tests__/alias-resolver.test.ts",
@@ -46326,6 +46304,11 @@
         "id": "tests/integration/issue-4363-ralph-skill-start.test.ts",
         "kind": "other",
         "path": "tests/integration/issue-4363-ralph-skill-start.test.ts"
+      },
+      {
+        "id": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts"
       },
       {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
@@ -47222,11 +47205,6 @@
       {
         "from": "scripts/cleanup-orphans.mjs",
         "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/cleanup-orphans.mjs",
-        "to": "scripts/lib/windows-search.mjs",
         "kind": "imports"
       },
       {
@@ -48630,11 +48608,6 @@
         "kind": "imports"
       },
       {
-        "from": "scripts/repair-plugin-cache.mjs",
-        "to": "scripts/lib/windows-search.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "scripts/review-gate.mjs",
         "to": "external:node:path",
         "kind": "imports"
@@ -48700,11 +48673,6 @@
         "kind": "imports"
       },
       {
-        "from": "scripts/run-provider-advisor.js",
-        "to": "scripts/lib/windows-search.mjs",
-        "kind": "imports"
-      },
-      {
         "from": "scripts/run.cjs",
         "to": "external:child_process",
         "kind": "imports"
@@ -48732,11 +48700,6 @@
       {
         "from": "scripts/run.cjs",
         "to": "external:worker_threads",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/run.cjs",
-        "to": "scripts/lib/windows-search.cjs",
         "kind": "imports"
       },
       {
@@ -48897,11 +48860,6 @@
       {
         "from": "scripts/shipyard-audit.mjs",
         "to": "scripts/lib/utf8-bom.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/shipyard-audit.mjs",
-        "to": "scripts/lib/windows-search.mjs",
         "kind": "imports"
       },
       {
@@ -49477,11 +49435,6 @@
       {
         "from": "skills/self-improve/scripts/resolve-paths.mjs",
         "to": "scripts/lib/state-root.mjs",
-        "kind": "imports"
-      },
-      {
-        "from": "skills/self-improve/scripts/resolve-paths.mjs",
-        "to": "scripts/lib/windows-search.mjs",
         "kind": "imports"
       },
       {
@@ -58680,11 +58633,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/cli/claude-md-coordinator.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/cli/commands/__tests__/capabilities.test.ts",
         "to": "external:fs/promises",
         "kind": "imports"
@@ -59785,11 +59733,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/cli/index.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/cli/interop.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -59982,11 +59925,6 @@
       {
         "from": "src/cli/team.ts",
         "to": "src/utils/paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/cli/team.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -61960,11 +61898,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/features/rate-limit-wait/daemon.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/features/rate-limit-wait/index.ts",
         "to": "src/features/rate-limit-wait/daemon.ts",
         "kind": "exports"
@@ -63120,11 +63053,6 @@
         "kind": "type-imports"
       },
       {
-        "from": "src/graph/runtime/executors/agent.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/graph/runtime/executors/authority.ts",
         "to": "src/graph/runtime/types.ts",
         "kind": "type-imports"
@@ -63153,11 +63081,6 @@
         "from": "src/graph/runtime/executors/command.ts",
         "to": "src/graph/types.ts",
         "kind": "type-imports"
-      },
-      {
-        "from": "src/graph/runtime/executors/command.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
       },
       {
         "from": "src/graph/runtime/fence.ts",
@@ -70465,11 +70388,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/hooks/session-end/action-runner.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/hooks/session-end/action-watchdog.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -70887,11 +70805,6 @@
       {
         "from": "src/hooks/session-end/worker.ts",
         "to": "src/platform/process-utils.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hooks/session-end/worker.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -72992,11 +72905,6 @@
       {
         "from": "src/hud/index.ts",
         "to": "src/utils/config-dir.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/hud/index.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -75905,11 +75813,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/mcp/standalone-server.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/mcp/team-job-convergence.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -76062,11 +75965,6 @@
       {
         "from": "src/mcp/team-server.ts",
         "to": "src/utils/paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/mcp/team-server.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -76987,11 +76885,6 @@
       {
         "from": "src/notifications/reply-listener.ts",
         "to": "src/utils/paths.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/notifications/reply-listener.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -82730,11 +82623,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/team/bridge-entry.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/team/capabilities.ts",
         "to": "src/team/types.ts",
         "kind": "type-imports"
@@ -84102,11 +83990,6 @@
       {
         "from": "src/team/runtime-cli.ts",
         "to": "src/team/worker-launch-ack.ts",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/runtime-cli.ts",
-        "to": "src/utils/windows-search.ts",
         "kind": "imports"
       },
       {
@@ -87695,41 +87578,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/utils/__tests__/windows-search.test.ts",
-        "to": "src/utils/windows-search.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/utils/cache-occupancy.ts",
         "to": "external:crypto",
         "kind": "imports"
@@ -88960,6 +88808,41 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:better-sqlite3",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts",
+        "to": "scripts/lib/state-lock.mjs",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -89816,12 +89699,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7865,
-      "edgeCount": 8657,
-      "importEdgeCount": 7227,
+      "nodeCount": 7862,
+      "edgeCount": 8637,
+      "importEdgeCount": 7207,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "bb4231f34bebc508f0d73addb6606a4f0abc1a05c6e75985b828c1154caf3aad",
-  "manifestSha256": "323e08ba000b87fb13b66ace94023213cdbd529693c92f28989d9136c105e538"
+  "inventorySha256": "0ee4eb1bbba064a1f6419f11342b23d135685f5d423b8a8f6c2ff3ade6815010",
+  "manifestSha256": "0b1cd39f5d9efbf7f216ea5992c451997cdac0c51735349e481867bd9d6b99f6"
 }

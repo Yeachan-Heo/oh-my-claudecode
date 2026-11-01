@@ -410,6 +410,19 @@ function boundedBusyTimeoutMs(timeoutMs, operationDeadline) {
   return Math.min(configuredTimeoutMs, Math.floor(remainingOperationTimeoutMs(operationDeadline)));
 }
 
+/**
+ * Reacquire the write transaction after an out-of-transaction owner probe. The
+ * probe consumed part of the operation budget, so the busy timeout is rebounded
+ * to what remains. False means the deadline has already passed; a busy timeout
+ * throws SQLITE_BUSY to the caller's retry handling.
+ */
+function beginWithinDeadline(db, busyTimeoutMs, operationDeadline) {
+  if (remainingOperationTimeoutMs(operationDeadline) <= 0) return false;
+  db.pragma(`busy_timeout = ${boundedBusyTimeoutMs(busyTimeoutMs, operationDeadline)}`);
+  db.exec('BEGIN IMMEDIATE');
+  return true;
+}
+
 function remainingProcessProbeMs(deadline, operationDeadline = null, testHooks) {
   return Math.max(0, Math.min(deadline - wallClockNowMs(testHooks), remainingOperationTimeoutMs(operationDeadline)));
 }
@@ -617,21 +630,69 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure('unverifiable');
         return null;
       }
+      // Issue #4727: Probe the owner outside BEGIN IMMEDIATE to avoid serializing
+      // multiple waiters on each other's PowerShell calls (Windows). Release the
+      // write lock before probing, then re-acquire it to verify the owner hasn't changed.
+      const ownerInfo = { pid: row.pid, processStart: row.process_start, nonce: row.nonce };
+      db.exec('ROLLBACK');
       const live = ownerLive(
-        { pid: row.pid, processStart: row.process_start },
+        { pid: ownerInfo.pid, processStart: ownerInfo.processStart },
         remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks),
         testHooks,
       );
-      if (live === null || live) {
+      if (live === null) {
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('unverifiable');
+          return null;
+        }
+        return retryAcquisition();
+      }
+      if (live) {
+        db.close();
+        recordFailure('contention');
+        if (attempts <= 1) {
+          return null;
+        }
+        return retryAcquisition();
+      }
+      // Owner is dead; reacquire the lock and delete it
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
+      const recheck = db.prepare('SELECT version, pid, process_start, created_at, nonce FROM state_mutation_locks WHERE lock_key = ?').get(key);
+      if (!recheck || recheck.nonce !== ownerInfo.nonce) {
+        // Owner changed or was deleted while we were probing; retry
         db.exec('ROLLBACK');
         db.close();
-        if (live === null || attempts <= 1) {
-          recordFailure(live === null ? 'unverifiable' : 'contention');
+        if (attempts <= 1) {
+          recordFailure('contention');
           return null;
         }
         return retryAcquisition();
       }
       db.prepare('DELETE FROM state_mutation_locks WHERE lock_key = ?').run(key);
+      // Commit the stale-row removal on its own: the artifact branch below may
+      // ROLLBACK to probe outside the write lock, which must not resurrect it.
+      db.exec('COMMIT');
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
+      // Another waiter may have claimed the key between COMMIT and BEGIN, and may
+      // even have left a stale row of its own; resolve that row on a fresh attempt.
+      if (db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key)) {
+        db.exec('ROLLBACK');
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('contention');
+          return null;
+        }
+        return retryAcquisition();
+      }
     }
 
     const artifact = readOwner(lockPath);
@@ -643,12 +704,41 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         console.error(`[omc-lock] state_mutation_lock_unverifiable: ${lockPath}`);
         return null;
       }
-      const live = ownerLive(artifact, remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks), testHooks);
-      if (live === null || live) {
+      // Issue #4727: Same fix as for SQLite row - probe outside BEGIN IMMEDIATE
+      const artifactCopy = artifact;
+      db.exec('ROLLBACK');
+      const live = ownerLive(artifactCopy, remainingProcessProbeMs(processProbeDeadline, operationDeadline, testHooks), testHooks);
+      if (live === null) {
+        db.close();
+        if (attempts <= 1) {
+          recordFailure('unverifiable');
+          return null;
+        }
+        return retryAcquisition();
+      }
+      if (live) {
+        db.close();
+        recordFailure('contention');
+        if (attempts <= 1) {
+          return null;
+        }
+        return retryAcquisition();
+      }
+      // Owner is dead. Reclaim under the write lock, and only the exact owner
+      // file that was probed: another waiter may have reclaimed it and published
+      // a live owner while the probe ran without the lock.
+      if (!beginWithinDeadline(db, busyTimeoutMs, operationDeadline)) {
+        db.close();
+        recordFailure('contention');
+        return null;
+      }
+      const claimed = db.prepare('SELECT 1 FROM state_mutation_locks WHERE lock_key = ?').get(key);
+      const current = readOwner(lockPath);
+      if (claimed || current === 'absent' || JSON.stringify(current) !== JSON.stringify(artifactCopy)) {
         db.exec('ROLLBACK');
         db.close();
-        if (live === null || attempts <= 1) {
-          recordFailure(live === null ? 'unverifiable' : 'contention');
+        if (attempts <= 1) {
+          recordFailure('contention');
           return null;
         }
         return retryAcquisition();
@@ -660,7 +750,7 @@ function acquireStateFileLockAtPathWithDeadline(lockPath, attempts, requireExclu
         recordFailure('unverifiable');
         return null;
       }
-      const reclaimed = reclaimDeadOwner(lockPath, artifact, identity);
+      const reclaimed = reclaimDeadOwner(lockPath, artifactCopy, identity);
       if (reclaimed !== 'removed') {
         db.exec('ROLLBACK');
         db.close();
