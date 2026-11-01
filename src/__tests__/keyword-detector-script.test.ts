@@ -217,6 +217,11 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
     '/oh-my-claudecode:uw build me an app',
     '/oh-my-claudecode:ccg deep interview this task',
     '/oh-my-claudecode:claude-codex-gemini deep interview this task',
+    '/ultraqa build me an app',
+    '/omc:ultraqa ask codex to review',
+    '/oh-my-claudecode:ultraqa deep interview this task',
+    '/omc-teams 1:cursor build me an app',
+    '/oh-my-claudecode:omc-teams 1:cursor deep interview this task',
   ])('passes through retired slash route before dispatching arguments: %s', (prompt) => {
     for (const detectorPath of [SCRIPT_PATH, TEMPLATE_PATH]) {
       const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-retired-slash-'));

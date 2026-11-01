@@ -186,7 +186,7 @@ function formatHotPathsTier(
 
   const lines = ["[Hot Paths]"];
   for (const hotPath of topPaths) {
-    lines.push(`- ${hotPath.path} (${hotPath.accessCount}x)`);
+    lines.push(`- ${hotPath.path} (${Math.round(hotPath.accessCount)}x)`);
   }
   return lines;
 }

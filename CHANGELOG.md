@@ -1,20 +1,33 @@
-# oh-my-claudecode v5.7.23: Preserve project memory during session start
+# oh-my-claudecode v5.7.25: Protect sensitive repository paths and credential files
 
 ## Release Notes
 
-This release prevents session-start from rescanning project memory through a competing writer, preserving stored user fields, and brings the Spanish README in line with the current English README. Thanks to @iyoda for #4681 and @DeadY2J for #4673.
+This release closes case-insensitive bypasses in sensitive repository path protection and prevents safe-read inspection from auto-approving private-key and credential files. Thanks to @LukeTheoJohnson for #4693.
 
-### Bug Fixes
+### Security Fixes
 
-- **fix(session-start): stop rescanning project memory in a second writer so stored user fields are not lost** (#4681; @iyoda)
-
-### Documentation
-
-- **docs(i18n): sync the Spanish README with the current English README** (#4673; @DeadY2J)
+- **fix(permission-handler): match sensitive repo paths case-insensitively** (#4693; @LukeTheoJohnson)
+- **fix(permission-handler): treat private-key and credential files as sensitive** (#4694)
 
 ### Stats
 
-- **2 PRs merged** | **0 new features** | **1 bug fix** | **1 documentation update**
+- **2 PRs merged** | **0 new features** | **2 security fixes**
+
+---
+
+# oh-my-claudecode v5.7.24: Route factory CI failures to the shipped debug skill
+
+## Release Notes
+
+This release routes factory CI failures to the shipped `debug` skill and migrates legacy full-template diagnose routes when they are read. Thanks to @RobinNorberg for #4677.
+
+### Bug Fixes
+
+- **fix(factory): route CI failures to the shipped debug skill and migrate legacy full-template diagnose routes on read** (#4677; fixes #4676; @RobinNorberg)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix**
 
 ---
 

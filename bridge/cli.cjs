@@ -54126,9 +54126,13 @@ function tokenizeShellCommand(command) {
   return tokens.length > 0 ? tokens : null;
 }
 function isSensitiveRepoRelativePath(repoRelativePath) {
-  const normalized = repoRelativePath.replace(/\\/g, "/").replace(/^\.\//, "");
+  const normalized = repoRelativePath.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
   if (!normalized || normalized === ".") {
     return false;
+  }
+  const basename44 = normalized.slice(normalized.lastIndexOf("/") + 1);
+  if (SENSITIVE_REPO_BASENAMES.has(basename44) || SENSITIVE_REPO_EXTENSIONS.some((extension) => basename44.endsWith(extension))) {
+    return true;
   }
   return normalized === ".git" || normalized.startsWith(".git/") || normalized.includes("/.git/") || normalized === ".ssh" || normalized.startsWith(".ssh/") || normalized.includes("/.ssh/") || normalized === "secrets" || normalized.startsWith("secrets/") || normalized.includes("/secrets/") || normalized === ".env" || normalized.startsWith(".env.") || normalized.includes("/.env") || normalized.includes("/.env.") || normalized === "node_modules/.cache" || normalized.startsWith("node_modules/.cache/") || normalized.includes("/node_modules/.cache/");
 }
@@ -54305,7 +54309,7 @@ function processPermissionRequest(input) {
 async function handlePermissionRequest(input) {
   return processPermissionRequest(input);
 }
-var fs10, path15, SAFE_PATTERNS, DANGEROUS_SHELL_CHARS, SAFE_RIPGREP_FLAGS, BACKGROUND_MUTATION_SUBAGENTS;
+var fs10, path15, SAFE_PATTERNS, DANGEROUS_SHELL_CHARS, SAFE_RIPGREP_FLAGS, BACKGROUND_MUTATION_SUBAGENTS, SENSITIVE_REPO_BASENAMES, SENSITIVE_REPO_EXTENSIONS;
 var init_permission_handler = __esm({
   "src/hooks/permission-handler/index.ts"() {
     "use strict";
@@ -54341,6 +54345,16 @@ var init_permission_handler = __esm({
       "qa-tester",
       "document-specialist"
     ]);
+    SENSITIVE_REPO_BASENAMES = /* @__PURE__ */ new Set([
+      "id_rsa",
+      "id_dsa",
+      "id_ecdsa",
+      "id_ed25519",
+      ".npmrc",
+      ".netrc",
+      ".pgpass"
+    ]);
+    SENSITIVE_REPO_EXTENSIONS = [".pem", ".key", ".p12", ".pfx"];
   }
 });
 
@@ -64245,10 +64259,17 @@ function readChainLedger(directory, sessionId) {
     return null;
   }
 }
+function migrateLegacyRoutes(directory, table) {
+  const launch = table["success:launch"];
+  if (!launch || launch.stage !== "diagnose" || launch.skill !== "diagnose" || launch.verify) return table;
+  if (fs17.existsSync((0, import_path90.join)(directory, ".claude", "skills", "diagnose", "SKILL.md"))) return table;
+  return { ...table, "success:launch": { stage: "diagnose", skill: "debug" } };
+}
 function readProjectRoutes(directory) {
   try {
     const parsed = JSON.parse(fs17.readFileSync((0, import_path90.join)(getOmcRoot(directory), "factory-routes.json"), "utf8"));
-    return normalizeRouteTable(parsed);
+    const table = normalizeRouteTable(parsed);
+    return table ? migrateLegacyRoutes(directory, table) : null;
   } catch {
     return null;
   }
@@ -132547,7 +132568,7 @@ function flagStall(stall, deps) {
 init_worktree_paths();
 var INTAKE_LABEL = "intake";
 var INTAKE_ROUTE_TABLE = { "success:intake": { stage: "intent", skill: "intent" } };
-var CI_ROUTE_TABLE = { "failed:ci": { stage: "diagnose", skill: "diagnose" } };
+var CI_ROUTE_TABLE = { "failed:ci": { stage: "diagnose", skill: "debug" } };
 function verifySignature(secret, rawBody, signatureHeader) {
   if (!signatureHeader?.startsWith("sha256=")) return false;
   const provided = signatureHeader.slice("sha256=".length);
@@ -132938,7 +132959,7 @@ function buildRouteTableFull() {
   return {
     "success:intake": { stage: "intent", skill: "intent" },
     "success:intent": { stage: "launch", skill: "launch" },
-    "success:launch": { stage: "diagnose", skill: "diagnose" }
+    "success:launch": { stage: "diagnose", skill: "debug" }
   };
 }
 function validateFactoryPrerequisites(cwd2) {
