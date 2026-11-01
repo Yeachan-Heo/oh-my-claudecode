@@ -211,6 +211,12 @@ With that config, the execution stage must launch executor-style work through:
 omc team 1:cursor "<implementation task>"
 ```
 
+or the Claude Code slash compatibility surface:
+
+```text
+/omc-teams 1:cursor "<implementation task>"
+```
+
 Limitations:
 - Cursor workers support implementation and reviewer-style team roles. `critic`, `code-reviewer`, `security-reviewer`, and `test-engineer` workers must emit the structured verdict file consumed by the team leader; final approval remains a lead-session responsibility.
 - Cursor requires the `cursor-agent` CLI to be installed and authenticated. If `cursor-agent` is unavailable, report that setup requirement instead of silently falling back to Claude-only execution.
