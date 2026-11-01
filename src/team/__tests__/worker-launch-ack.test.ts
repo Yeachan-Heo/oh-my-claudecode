@@ -30,6 +30,7 @@ import {
   withWorkerLaunchAttemptFence,
   buildProviderEnvironment,
   buildProviderSpawnInvocation,
+  buildProviderSpawnEnvironment,
   materializeProviderSpawnInvocation,
   quoteWindowsCreateProcessArgument,
 } from '../worker-launch-ack.js';
@@ -3115,6 +3116,26 @@ describe('worker launch acknowledgement', () => {
       } finally {
         await invocation.cleanup();
       }
+    });
+
+    it('keeps exactly one NoDefaultCurrentDirectoryInExePath=1 when the provider env holds a case alias', async () => {
+      cwd = await createFixture('worker-launch-native-nodefault-alias-');
+      const invocation = buildProviderSpawnInvocation(
+        [process.execPath, '-e', "console.log(JSON.stringify(Object.entries(process.env).filter(([k])=>k.toUpperCase()==='NODEFAULTCURRENTDIRECTORYINEXEPATH')))"],
+        'win32', { SystemRoot: process.env.SystemRoot },
+      );
+      // Windows keeps one entry per case-insensitive name, and NODEFAULT... sorts first.
+      const env = buildProviderSpawnEnvironment({ SystemRoot: process.env.SystemRoot, NODEFAULTCURRENTDIRECTORYINEXEPATH: '' }, invocation);
+      expect(Object.entries(env).filter(([key]) => key.toUpperCase() === 'NODEFAULTCURRENTDIRECTORYINEXEPATH'))
+        .toEqual([['NoDefaultCurrentDirectoryInExePath', '1']]);
+      const output = await new Promise<string>((resolve, reject) => {
+        const child = spawn(invocation.command, invocation.args, { cwd, stdio: ['ignore', 'pipe', 'ignore'], env });
+        let stdout = '';
+        child.stdout.on('data', chunk => { stdout += chunk; });
+        child.once('error', reject);
+        child.once('exit', () => resolve(stdout));
+      });
+      expect(JSON.parse(output)).toEqual([['NoDefaultCurrentDirectoryInExePath', '1']]);
     });
 
     it('refuses to run the wrapper when the spawn env lacks its line variable', async () => {

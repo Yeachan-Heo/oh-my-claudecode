@@ -300,7 +300,7 @@ export interface ProviderSpawnInvocation {
   command: string;
   args: string[];
   batchScript?: string;
-  /** Variables the spawn environment must carry on top of the provider environment. */
+  /** Variables the spawn environment must carry on top of the provider environment; merge with buildProviderSpawnEnvironment. */
   env?: Record<string, string>;
   /** A direct win32 launch (no batch wrapper), which only a plain spawn can run. */
   windowsDirect?: true;
@@ -315,7 +315,7 @@ export interface MaterializedProviderSpawnInvocation {
   stdinPayload?: string;
   /** Pass through to spawn(): the args are already quoted for cmd.exe. */
   windowsVerbatimArguments?: boolean;
-  /** Variables the spawn environment must carry on top of the provider environment. */
+  /** Variables the spawn environment must carry on top of the provider environment; merge with buildProviderSpawnEnvironment. */
   env?: Record<string, string>;
   /** Extra POSIX descriptor used to hold provider execution until ownership is proven. */
   providerGateFd?: number;
@@ -2117,6 +2117,20 @@ export function buildProviderSpawnInvocation(
   return { command, args };
 }
 
+
+/**
+ * The spawn environment for an invocation: the provider environment with its
+ * overlay on top. Windows keeps one entry per case-insensitive name, so every
+ * case alias of an overlay key is dropped rather than left to win the sort.
+ */
+export function buildProviderSpawnEnvironment(
+  providerEnv: NodeJS.ProcessEnv,
+  invocation: { env?: Record<string, string> },
+): NodeJS.ProcessEnv {
+  const overlaid = new Set(Object.keys(invocation.env ?? {}).map(key => key.toUpperCase()));
+  const env = Object.fromEntries(Object.entries(providerEnv).filter(([key]) => !overlaid.has(key.toUpperCase())));
+  return { ...env, ...invocation.env };
+}
 
 async function awaitExternalTerminationCompletion(
   spec: WorkerLaunchBootstrapSpec,

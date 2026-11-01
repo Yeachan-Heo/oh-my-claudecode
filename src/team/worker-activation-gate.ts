@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 import {
+  buildProviderSpawnEnvironment,
   buildProviderSpawnInvocation,
   buildWorkerLaunchBootstrapSpec,
   materializeProviderSpawnInvocation,
@@ -115,7 +116,7 @@ export async function runWorkerActivationGate(gate: RecoveryActivationGate): Pro
     });
     const child = spawn(invocation.command, invocation.args, {
       cwd: gate.cwd,
-      env: { ...providerEnv, ...invocation.env },
+      env: buildProviderSpawnEnvironment(providerEnv, invocation),
       stdio: 'inherit',
       windowsVerbatimArguments: invocation.windowsVerbatimArguments,
       // A recovery gate already runs inside the durable worker-launch
