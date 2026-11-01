@@ -150,13 +150,16 @@ export function isManifestTerminal(job: SessionEndJobV1): boolean { return ['sea
 export function readSessionEndJob(directory: string, sessionId: string): SessionEndJobV1 | null { try { return readPath(sessionEndJobPath(directory, sessionId)); } catch { return null; } }
 
 /** Locked expected-revision CAS with an exact post-write reread. */
-export function mutateSessionEndJob(directory: string, sessionId: string, expectedRevision: number, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null {
+export function mutateSessionEndJob(directory: string, sessionId: string, expectedRevision: number, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null { const result = casSessionEndJob(directory, sessionId, expectedRevision, mutate); return result === 'revision-mismatch' ? null : result; }
+/** Like mutateSessionEndJob, but tells revision drift apart from every final failure (lock timeout, rejected mutation). */
+function casSessionEndJob(directory: string, sessionId: string, expectedRevision: number, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | 'revision-mismatch' | null {
   let terminal = false;
   try {
     const jobPath = sessionEndJobPath(directory, sessionId);
-    const result = withLock(jobPath, () => {
+    const result = withLock(jobPath, (): SessionEndJobV1 | 'revision-mismatch' | null => {
       const current = readPath(jobPath);
-      if (!current || current.revision !== expectedRevision) return null;
+      if (!current) return null;
+      if (current.revision !== expectedRevision) return 'revision-mismatch';
       mutate(current);
       const next: SessionEndJobV1 = { ...current, revision: current.revision + 1, updatedAt: nowIso() };
       if (isManifestTerminal(next) && next.phase !== 'complete') { next.phase = 'complete'; next.completion = { completedAt: next.updatedAt, terminalDigest: digest({ producers: next.producers, actions: next.actions }), terminalRevision: next.revision }; }
@@ -187,7 +190,7 @@ export function updateSessionEndActionPayload(directory: string, sessionId: stri
   });
 }
 /** Retries the CAS only on revision drift; a conflict thrown by `mutate` is final. */
-function mutateLatest(directory: string, sessionId: string, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null { for (let i = 0; i < 8; i++) { const current = readSessionEndJob(directory, sessionId); if (!current) return null; let rejected = false; const result = mutateSessionEndJob(directory, sessionId, current.revision, (job) => { try { mutate(job); } catch (error) { rejected = true; throw error; } }); if (result || rejected) return result; } return null; }
+function mutateLatest(directory: string, sessionId: string, mutate: (job: SessionEndJobV1) => void): SessionEndJobV1 | null { for (let i = 0; i < 8; i++) { const current = readSessionEndJob(directory, sessionId); if (!current) return null; const result = casSessionEndJob(directory, sessionId, current.revision, mutate); if (result !== 'revision-mismatch') return result; } return null; }
 
 export function prepareCoreManifest(directory: string, sessionId: string, payload: Record<string, unknown>): SessionEndJobV1 | null {
   const durablePayload = withOpenClawRouting(payload);

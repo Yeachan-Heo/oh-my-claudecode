@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -103,4 +103,17 @@ describe('owner-fenced SessionEnd writes under revision drift', () => {
     expect(manifestReads.count).toBe(4);
     expect(manifest.readSessionEndJob(directory, sessionId)).toMatchObject({ revision: claimed.revision, owner: { nonce: 'owner', leaseGeneration: 1 } });
   });
+
+  it('does not retry when the manifest lock times out', () => {
+    const sessionId = 'lock-timeout';
+    const { directory } = claimedJob(sessionId);
+    // A live holder (this process) keeps the lock unreclaimable for the whole call.
+    writeFileSync(`${manifest.sessionEndJobPath(directory, sessionId)}.lock`, JSON.stringify({ pid: process.pid, processStartIdentity: null, nonce: 'holder', createdAt: new Date().toISOString() }));
+    manifestReads.count = 0;
+
+    expect(manifest.renewSessionEndLease(directory, sessionId, 'owner', 1, Date.now() + 5_000)).toBeNull();
+
+    // One unlocked read, then a lock timeout: the timeout is final, not drift.
+    expect(manifestReads.count).toBe(1);
+  }, 20_000);
 });
