@@ -7,6 +7,8 @@ import path from "path";
 import { HotPath, ProjectMemoryContext } from "./types.js";
 
 const MAX_HOT_PATHS = 50;
+// Counts halve per idle day, so a file hammered weeks ago cannot outrank today's work forever.
+const ACCESS_HALF_LIFE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Track file or directory access
@@ -26,6 +28,7 @@ export function trackAccess(
   ).replace(/\\/g, "/");
 
   const normalizedHotPaths = ensureHotPathList(hotPaths);
+  const now = Date.now();
 
   if (relativePath.startsWith("..") || shouldIgnorePath(relativePath)) {
     return normalizedHotPaths;
@@ -34,23 +37,27 @@ export function trackAccess(
   const existing = normalizedHotPaths.find((hp) => hp.path === relativePath);
 
   if (existing) {
-    existing.accessCount++;
-    existing.lastAccessed = Date.now();
-  } else {
-    normalizedHotPaths.push({
-      path: relativePath,
-      accessCount: 1,
-      lastAccessed: Date.now(),
-      type,
-    });
+    // Fold idle decay into the stored count, so one touch cannot revive a count built weeks ago.
+    existing.accessCount = weightedAccessCount(existing, now) + 1;
+    existing.lastAccessed = now;
+    return normalizedHotPaths;
   }
 
-  normalizedHotPaths.sort((a, b) => b.accessCount - a.accessCount);
-
-  if (normalizedHotPaths.length > MAX_HOT_PATHS) {
-    normalizedHotPaths.splice(MAX_HOT_PATHS);
+  // Evict the least recently touched before adding, so files of the current work can build up counts.
+  // On a tie the earliest added goes, so a new file never evicts the one added just before it.
+  while (normalizedHotPaths.length >= MAX_HOT_PATHS) {
+    const oldest = normalizedHotPaths.reduce(
+      (min, hp, i) => (hp.lastAccessed < normalizedHotPaths[min].lastAccessed ? i : min),
+      0,
+    );
+    normalizedHotPaths.splice(oldest, 1);
   }
-
+  normalizedHotPaths.push({
+    path: relativePath,
+    accessCount: 1,
+    lastAccessed: now,
+    type,
+  });
   return normalizedHotPaths;
 }
 
@@ -93,7 +100,8 @@ export function getTopHotPaths(
       (a, b) =>
         scoreHotPath(b, scopePath, now) - scoreHotPath(a, scopePath, now),
     )
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((hp) => ({ ...hp, accessCount: weightedAccessCount(hp, now) }));
 }
 
 /**
@@ -117,6 +125,11 @@ export function decayHotPaths(hotPaths: HotPath[] | null | undefined): HotPath[]
     .filter((hp) => hp.accessCount > 0);
 }
 
+function weightedAccessCount(hotPath: HotPath, now: number): number {
+  const idleMs = Math.max(0, now - hotPath.lastAccessed);
+  return hotPath.accessCount * 0.5 ** (idleMs / ACCESS_HALF_LIFE_MS);
+}
+
 function scoreHotPath(
   hotPath: HotPath,
   scopePath: string | null,
@@ -124,7 +137,7 @@ function scoreHotPath(
 ): number {
   const ageMs = Math.max(0, now - hotPath.lastAccessed);
   const recencyScore = Math.max(0, 120 - Math.floor(ageMs / (60 * 60 * 1000)));
-  const accessScore = hotPath.accessCount * 10;
+  const accessScore = weightedAccessCount(hotPath, now) * 10;
   const typeBonus = hotPath.type === "file" ? 6 : 3;
   const scopeBonus = getScopeAffinityScore(hotPath.path, scopePath);
 
