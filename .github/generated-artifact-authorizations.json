@@ -7,12 +7,12 @@
       "pullNumber": 4775,
       "targetRef": "main",
       "mergeBaseSha": "083ae63607512f1051c6a4d1d5cd26c2d77dc5a2",
-      "headSha": "33b41ad6d204e0f2cac18bfd58798b84d41c65e9",
+      "headSha": "367965aa410313ffed42d3d86a14fe2ebefae116",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-12-02T00:00:00.000Z",
       "generatedDelta": {
-        "count": 62,
-        "sha256": "b327f5d21ba5e7c4be3a1bb62995d9b79c8cf93ce80f4d50d9ebd9dfd1d265c1"
+        "count": 64,
+        "sha256": "f1f2fadb7a757253a08c6ead1774fe013c9e3237ac3f18408d99d43939761d7e"
       },
       "generatedFiles": [
         {
@@ -385,6 +385,18 @@
           "status": "modified",
           "filename": "dist/team/tmux-session.js.map",
           "sha": "f6e67687f6bfb9fa3b62b49af401a8bd42522261",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/windows-search.d.ts",
+          "sha": "b1c86ee1a31ef1fffe04bb88616700ae04a240ea",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/utils/windows-search.js",
+          "sha": "4b337bb0067d622db513a792ed53ab3c658ed446",
           "previousFilename": null
         }
       ]
