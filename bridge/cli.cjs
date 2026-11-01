@@ -68755,6 +68755,11 @@ var init_delegation_enforcer = __esm({
 });
 
 // src/team/model-contract.ts
+function windowsPathExtensions() {
+  return new Set(
+    (process.env.PATHEXT ?? DEFAULT_PATHEXT).split(";").map((extension) => extension.trim().toLowerCase()).filter(Boolean)
+  );
+}
 function getTrustedPrefixes() {
   const trusted = [
     "/usr/local/bin",
@@ -68791,7 +68796,8 @@ function resolveCliBinaryPath(binary) {
   const cached2 = resolvedPathCache.get(binary);
   if (cached2) return cached2;
   const finder = process.platform === "win32" ? "where" : "which";
-  const result = (0, import_child_process25.spawnSync)(finder, [binary], {
+  const searchTarget = process.platform === "win32" ? `$PATH:${binary}` : binary;
+  const result = (0, import_child_process25.spawnSync)(finder, [searchTarget], {
     timeout: 5e3,
     env: process.env
   });
@@ -68799,12 +68805,14 @@ function resolveCliBinaryPath(binary) {
     throw new Error(`CLI binary '${binary}' not found in PATH`);
   }
   const stdout = result.stdout?.toString().trim() ?? "";
-  const firstLine = stdout.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-  if (!firstLine) {
+  const candidates = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (candidates.length === 0) {
     throw new Error(`CLI binary '${binary}' not found in PATH`);
   }
-  const resolvedPath = (0, import_path99.normalize)(firstLine);
-  if (!(0, import_path99.isAbsolute)(resolvedPath)) {
+  const windows = process.platform === "win32";
+  const selected = windows ? candidates.find((candidate) => windowsPathExtensions().has(import_path99.win32.extname(candidate).toLowerCase())) ?? candidates[0] : candidates[0];
+  const resolvedPath = windows ? import_path99.win32.normalize(selected) : (0, import_path99.normalize)(selected);
+  if (!(windows ? import_path99.win32.isAbsolute(resolvedPath) : (0, import_path99.isAbsolute)(resolvedPath))) {
     throw new Error(`Resolved CLI binary '${binary}' to relative path`);
   }
   if (UNTRUSTED_PATH_PATTERNS.some((pattern) => pattern.test(resolvedPath))) {
@@ -68844,7 +68852,8 @@ function resolveBinaryPath(binary) {
   if ((0, import_path99.isAbsolute)(binary)) return binary;
   try {
     const resolver = process.platform === "win32" ? "where" : "which";
-    const result = (0, import_child_process25.spawnSync)(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
+    const searchTarget = process.platform === "win32" ? `$PATH:${binary}` : binary;
+    const result = (0, import_child_process25.spawnSync)(resolver, [searchTarget], { timeout: 5e3, encoding: "utf8" });
     if (result.status !== 0) return binary;
     const lines = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
     const firstPath = lines[0];
@@ -69040,7 +69049,7 @@ function getPromptModeArgs(agentType, instruction) {
   }
   return [instruction];
 }
-var import_child_process25, import_path99, resolvedPathCache, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST, CLAUDE_WORKER_ENV_ALLOWLIST;
+var import_child_process25, import_path99, resolvedPathCache, DEFAULT_PATHEXT, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST, CLAUDE_WORKER_ENV_ALLOWLIST;
 var init_model_contract = __esm({
   "src/team/model-contract.ts"() {
     "use strict";
@@ -69051,6 +69060,7 @@ var init_model_contract = __esm({
     init_models();
     init_security_config();
     resolvedPathCache = /* @__PURE__ */ new Map();
+    DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
     UNTRUSTED_PATH_PATTERNS = [
       /^\/tmp(\/|$)/,
       /^\/var\/tmp(\/|$)/,
@@ -121108,7 +121118,7 @@ var import_path141 = __toESM(require("path"), 1);
 var import_child_process35 = require("child_process");
 var RESOLVE_TIMEOUT_MS = 5e3;
 var VERSION_TIMEOUT_MS = 3e3;
-var DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
+var DEFAULT_PATHEXT2 = ".COM;.EXE;.BAT;.CMD";
 var SAFE_BINARY_NAME = /^[A-Za-z0-9._-]+$/;
 var SAFE_BATCH_PATH = /^[A-Za-z]:\\(?:[A-Za-z0-9 ._-]+\\)*[A-Za-z0-9 ._-]+\.(?:cmd|bat)$/i;
 var VALID_BATCH_EXTENSIONS = /* @__PURE__ */ new Set([".cmd", ".bat"]);
@@ -121169,7 +121179,7 @@ function resolveCliPath(binary, model) {
   if (candidates.length === 0) return void 0;
   if (model.isWindows) {
     const pathExtensions = new Set(
-      (process.env.PATHEXT ?? DEFAULT_PATHEXT).split(";").map((extension) => extension.trim().toLowerCase()).filter(Boolean)
+      (process.env.PATHEXT ?? DEFAULT_PATHEXT2).split(";").map((extension) => extension.trim().toLowerCase()).filter(Boolean)
     );
     const preferredCandidate = candidates.find(
       (candidate) => pathExtensions.has(model.pathFlavor.extname(candidate).toLowerCase())
