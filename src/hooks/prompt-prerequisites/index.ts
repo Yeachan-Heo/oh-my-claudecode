@@ -57,7 +57,7 @@ const DEFAULT_SECTION_NAMES: Record<PromptPrerequisiteSectionKind, string[]> = {
 };
 
 const DEFAULT_BLOCKING_TOOLS = ["Edit", "MultiEdit", "Write", "Agent", "Task"];
-const DEFAULT_EXECUTION_KEYWORDS = ["ralph", "ultrawork", "autopilot"];
+const DEFAULT_EXECUTION_KEYWORDS = ["ralph", "autopilot"];
 
 const HEADING_PATTERN = /^#{1,6}\s+(.+?)\s*$/gm;
 const FILE_PATH_PATTERN =
