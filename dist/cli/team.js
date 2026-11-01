@@ -1,3 +1,4 @@
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, } from 'fs';
@@ -13,6 +14,7 @@ import { getGlobalOmcStatePath } from '../utils/paths.js';
 import { readApprovedExecutionLaunchHintOutcome } from '../planning/artifacts.js';
 import { isValidTeamInstanceId } from '../team/types.js';
 import { withProcessIdentityFileLockSync } from '../team/process-identity-lock.js';
+hardenWindowsExeSearch();
 const JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 const VALID_CLI_AGENT_TYPES = new Set(['claude', 'codex', 'gemini', 'cursor', 'grok', 'antigravity']);
 const SUBCOMMANDS = new Set(['start', 'status', 'wait', 'cleanup', 'resume', 'shutdown', 'api', 'help', '--help', '-h']);

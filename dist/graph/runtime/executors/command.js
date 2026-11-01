@@ -12,6 +12,7 @@
  * inherits only an allowlisted environment (see CHILD_ENV_ALLOWLIST), not
  * the host's full environment.
  */
+import { childEnv } from "../../../utils/windows-search.js";
 import { spawn } from "node:child_process";
 import { buildCommandEnv, idempotencyKeyFor } from "./authority.js";
 /** Per-stream captured output cap; the TAIL is kept. */
@@ -89,7 +90,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
                 shell: true,
                 windowsHide: true,
                 cwd: process.cwd(),
-                env: buildCommandEnv(idempotencyKey),
+                env: childEnv(buildCommandEnv(idempotencyKey)),
                 stdio: ["ignore", "pipe", "pipe"],
                 // Detached => own process group => the NEGATIVE-pid group kill in
                 // terminateProcessTree can reach grandchildren, not just the shell.

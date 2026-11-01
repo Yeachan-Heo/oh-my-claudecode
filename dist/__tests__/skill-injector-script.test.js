@@ -122,7 +122,7 @@ Write concise release notes.`);
         mkdirSync(libDir, { recursive: true });
         mkdirSync(join(pluginRoot, 'hooks'), { recursive: true });
         provisionStandaloneStateLockBridge(PACKAGE_ROOT, join(libDir, 'state-lock.mjs'));
-        for (const file of ['config-dir.mjs', 'stdin.mjs', 'atomic-write.mjs', 'utf8-bom.mjs']) {
+        for (const file of ['config-dir.mjs', 'stdin.mjs', 'atomic-write.mjs', 'utf8-bom.mjs', 'windows-search.mjs', 'windows-search.cjs']) {
             writeFileSync(join(libDir, file), readFileSync(join(process.cwd(), 'scripts', 'lib', file)));
         }
         writeFileSync(join(scriptsDir, 'run.cjs'), readFileSync(join(process.cwd(), 'scripts', 'run.cjs')));

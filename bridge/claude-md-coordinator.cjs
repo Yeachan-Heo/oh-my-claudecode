@@ -35,6 +35,21 @@ __export(claude_md_coordinator_exports, {
   runClaudeMdCoordinatorHandshake: () => runClaudeMdCoordinatorHandshake
 });
 module.exports = __toCommonJS(claude_md_coordinator_exports);
+
+// src/utils/windows-search.ts
+var VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+
+// src/cli/claude-md-coordinator.ts
 var import_node_crypto2 = require("node:crypto");
 var import_node_fs = require("node:fs");
 var import_node_path2 = require("node:path");
@@ -890,9 +905,10 @@ function executeClaudeMdTransaction(request) {
 }
 
 // src/cli/claude-md-coordinator.ts
+hardenWindowsExeSearch();
 var CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
-var COMPILED_ENGINE_VERSION = true ? "5.7.29" : "";
-var COMPILED_SOURCE_SHA256 = true ? "bd707aed31f48c1fb600a5cb04155e774ae6706a495dd7e36570c6c1ec511f3e" : "";
+var COMPILED_ENGINE_VERSION = true ? "5.7.30" : "";
+var COMPILED_SOURCE_SHA256 = true ? "ce84a47faadeef06575382631a6fad331ab4d98137e6042d29da99ac9545bd4b" : "";
 function runClaudeMdCoordinatorHandshake() {
   if (!COMPILED_ENGINE_VERSION || !COMPILED_SOURCE_SHA256) {
     return { exitCode: 2, response: coordinatorError(2, "Coordinator build handshake is unavailable") };
