@@ -72,6 +72,10 @@ export interface ProviderSpawnInvocation {
     command: string;
     args: string[];
     batchScript?: string;
+    /** Variables the spawn environment must carry on top of the provider environment; merge with buildProviderSpawnEnvironment. */
+    env?: Record<string, string>;
+    /** A direct win32 launch (no batch wrapper), which only a plain spawn can run. */
+    windowsDirect?: true;
 }
 export interface MaterializedProviderSpawnInvocation {
     command: string;
@@ -80,6 +84,10 @@ export interface MaterializedProviderSpawnInvocation {
     completionPath?: string;
     completionBinding?: WorkerLaunchCompletionBinding;
     stdinPayload?: string;
+    /** Pass through to spawn(): the args are already quoted for cmd.exe. */
+    windowsVerbatimArguments?: boolean;
+    /** Variables the spawn environment must carry on top of the provider environment; merge with buildProviderSpawnEnvironment. */
+    env?: Record<string, string>;
     /** Extra POSIX descriptor used to hold provider execution until ownership is proven. */
     providerGateFd?: number;
 }
@@ -175,8 +183,24 @@ export declare function awaitWorkerLaunchProviderStarted(attempt: WorkerLaunchAt
 }): Promise<boolean>;
 export declare function isWorkerLaunchProviderStarted(attempt: WorkerLaunchAttempt): Promise<boolean>;
 export declare function buildWindowsSupervisorInvocation(spec: WorkerLaunchBootstrapSpec, sourceEnv?: NodeJS.ProcessEnv): MaterializedProviderSpawnInvocation;
+/** Whether Windows runs this provider through cmd.exe (a trailing `.` or space is ignored). */
+export declare function isWindowsBatchProvider(command: string): boolean;
+/** The quoted line for a cmd-hosted provider; throws when cmd could not carry it intact. */
+export declare function buildWindowsBatchProviderLine(providerArgv: readonly string[]): string;
 export declare function quoteWindowsCreateProcessArgument(value: string): string;
+/**
+ * On a win32 host SystemRoot is read from the host process and `env` is
+ * ignored; other hosts (tests of the pure builder) take it from `env`.
+ */
 export declare function buildProviderSpawnInvocation(providerArgv: readonly string[], platform?: NodeJS.Platform, env?: NodeJS.ProcessEnv): ProviderSpawnInvocation;
+/**
+ * The spawn environment for an invocation: the provider environment with its
+ * overlay on top. Windows keeps one entry per case-insensitive name, so every
+ * case alias of an overlay key is dropped rather than left to win the sort.
+ */
+export declare function buildProviderSpawnEnvironment(providerEnv: NodeJS.ProcessEnv, invocation: {
+    env?: Record<string, string>;
+}): NodeJS.ProcessEnv;
 export declare function materializeProviderSpawnInvocation(invocation: ProviderSpawnInvocation, options?: {
     superviseWindowsTree?: boolean;
     superviseProcessTree?: boolean;

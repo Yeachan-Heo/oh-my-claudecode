@@ -3337,12 +3337,12 @@ function isOmcPluginCacheIdentity(pluginName, marketplace) {
   return OMC_PLUGIN_CACHE_IDENTITIES.has(`${pluginName}@${marketplace}`.toLowerCase());
 }
 function sameFileSystemIdentity(left, right) {
-  return typeof left.dev === "number" && typeof left.ino === "number" && left.ino !== 0 && typeof right.dev === "number" && typeof right.ino === "number" && right.ino !== 0 && left.dev === right.dev && left.ino === right.ino;
+  return typeof left.dev === "bigint" && typeof left.ino === "bigint" && left.ino !== 0n && typeof right.dev === "bigint" && typeof right.ino === "bigint" && right.ino !== 0n && left.dev === right.dev && left.ino === right.ino;
 }
 function hasAncestorWithIdentity(path30, identity) {
   let currentPath = path30;
   while (true) {
-    if (sameFileSystemIdentity((0, import_fs2.statSync)(currentPath), identity)) return true;
+    if (sameFileSystemIdentity((0, import_fs2.statSync)(currentPath, { bigint: true }), identity)) return true;
     const parentPath = (0, import_path3.dirname)(currentPath);
     if (parentPath === currentPath) return false;
     currentPath = parentPath;
@@ -3355,7 +3355,7 @@ function firstChildBelowDirectoryIdentity(path30, directoryIdentity) {
     const parentPath = (0, import_path3.dirname)(currentPath);
     if (parentPath === currentPath) return void 0;
     try {
-      if (sameFileSystemIdentity((0, import_fs2.statSync)(parentPath), directoryIdentity)) return (0, import_path3.basename)(currentPath);
+      if (sameFileSystemIdentity((0, import_fs2.statSync)(parentPath, { bigint: true }), directoryIdentity)) return (0, import_path3.basename)(currentPath);
     } catch {
     }
     currentPath = parentPath;
@@ -3395,7 +3395,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
   for (let index = components.length - 1; index >= 0; index--) steps.push(components[index]);
   const activeLinks = /* @__PURE__ */ new Set();
   try {
-    if (sameFileSystemIdentity((0, import_fs2.lstatSync)(currentPath), identity)) return true;
+    if (sameFileSystemIdentity((0, import_fs2.lstatSync)(currentPath, { bigint: true }), identity)) return true;
   } catch {
     return false;
   }
@@ -3413,7 +3413,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
     const nextPath = (0, import_path3.join)(currentPath, step);
     let nextStats;
     try {
-      nextStats = (0, import_fs2.lstatSync)(nextPath);
+      nextStats = (0, import_fs2.lstatSync)(nextPath, { bigint: true });
     } catch {
       return false;
     }
@@ -3422,7 +3422,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
       currentPath = nextPath;
       continue;
     }
-    const linkKey = typeof nextStats.dev === "number" && typeof nextStats.ino === "number" && nextStats.ino !== 0 ? `inode:${nextStats.dev}:${nextStats.ino}` : `path:${process.platform === "win32" ? nextPath.toLowerCase() : nextPath}`;
+    const linkKey = typeof nextStats.dev === "bigint" && typeof nextStats.ino === "bigint" && nextStats.ino !== 0n ? `inode:${nextStats.dev}:${nextStats.ino}` : `path:${process.platform === "win32" ? nextPath.toLowerCase() : nextPath}`;
     if (activeLinks.has(linkKey)) return false;
     let linkTarget;
     try {
@@ -3450,6 +3450,7 @@ function pathTraversesFileSystemIdentity(path30, identity) {
   return false;
 }
 function isUsableVersionPath(path30, staleVersionIdentity) {
+  if (staleVersionIdentity !== void 0 && typeof staleVersionIdentity.ino !== "bigint") return false;
   let stats;
   try {
     stats = (0, import_fs2.lstatSync)(path30);
@@ -3506,19 +3507,19 @@ function hasUsableOmcHookTargets(path30, staleVersionIdentity) {
   return true;
 }
 function hasResolvablePluginSymlinks(directory, staleVersionIdentity, ancestors = [], payload) {
-  const directoryStats = (0, import_fs2.statSync)(directory);
+  const directoryStats = (0, import_fs2.statSync)(directory, { bigint: true });
   if (ancestors.some((identity) => sameFileSystemIdentity(directoryStats, identity))) return false;
   const branch = [...ancestors, directoryStats];
   const entries = (0, import_fs2.readdirSync)(directory, { withFileTypes: true });
   for (const entry2 of entries) {
     const entryPath = (0, import_path3.join)(directory, entry2.name);
     if (entry2.isSymbolicLink()) {
-      const entryStats = (0, import_fs2.statSync)(entryPath);
+      const entryStats = (0, import_fs2.statSync)(entryPath, { bigint: true });
       if (pathTraversesFileSystemIdentity(entryPath, staleVersionIdentity)) return false;
       if (entryStats.isDirectory()) {
         if (branch.some((identity) => sameFileSystemIdentity(entryStats, identity))) continue;
         if (!hasResolvablePluginSymlinks(entryPath, staleVersionIdentity, branch, payload)) return false;
-      } else if (payload && entryStats.isFile() && entryStats.size > 0 && !FILESYSTEM_JUNK_NAMES.has(entry2.name.toLowerCase())) {
+      } else if (payload && entryStats.isFile() && entryStats.size > 0n && !FILESYSTEM_JUNK_NAMES.has(entry2.name.toLowerCase())) {
         payload.found = true;
       }
     } else if (entry2.isDirectory()) {
@@ -3530,6 +3531,7 @@ function hasResolvablePluginSymlinks(directory, staleVersionIdentity, ancestors 
   return true;
 }
 function isUsableGenericPluginTarget(target, staleVersionIdentity) {
+  if (staleVersionIdentity !== void 0 && typeof staleVersionIdentity.ino !== "bigint") return false;
   const payload = { found: false };
   return hasResolvablePluginSymlinks(target, staleVersionIdentity, [], payload) && payload.found;
 }
@@ -3812,7 +3814,7 @@ function purgeStalePluginCacheVersions(options) {
       const lexicalActiveVersionDirsHere = activePathIdentities.filter((ap) => ap.startsWith(pluginDirNorm + "/")).map((ap) => (0, import_path4.join)(pluginDir, ap.slice(pluginDirNorm.length + 1).split("/")[0]));
       const filesystemActiveVersionDirsHere = [];
       try {
-        const pluginDirStats = (0, import_fs3.statSync)(pluginDir);
+        const pluginDirStats = (0, import_fs3.statSync)(pluginDir, { bigint: true });
         for (const activePath of activePathsArray) {
           const versionName = firstChildBelowDirectoryIdentity(activePath, pluginDirStats);
           if (versionName) filesystemActiveVersionDirsHere.push((0, import_path4.join)(pluginDir, versionName));
@@ -3877,11 +3879,11 @@ function purgeStalePluginCacheVersions(options) {
             (a, b) => compareSemverDesc(versionLeaf(a), versionLeaf(b))
           )[0];
           try {
-            const targetStats = (0, import_fs3.statSync)(target);
+            const targetStats = (0, import_fs3.statSync)(target, { bigint: true });
             if (!targetStats.isDirectory()) {
               throw new Error("Registered active plugin target is not a directory");
             }
-            const staleVersionStats = (0, import_fs3.statSync)(versionDir);
+            const staleVersionStats = (0, import_fs3.statSync)(versionDir, { bigint: true });
             const resolvedTarget = (0, import_fs3.realpathSync)(target);
             const resolvedStaleVersion = (0, import_fs3.realpathSync)(versionDir);
             const targetPath = comparisonPath(resolvedTarget);
@@ -58173,12 +58175,17 @@ function readSessionEndJob(directory, sessionId) {
   }
 }
 function mutateSessionEndJob(directory, sessionId, expectedRevision, mutate) {
+  const result = casSessionEndJob(directory, sessionId, expectedRevision, mutate);
+  return result === "revision-mismatch" ? null : result;
+}
+function casSessionEndJob(directory, sessionId, expectedRevision, mutate) {
   let terminal = false;
   try {
     const jobPath = sessionEndJobPath(directory, sessionId);
     const result = withLock(jobPath, () => {
       const current = readPath(jobPath);
-      if (!current || current.revision !== expectedRevision) return null;
+      if (!current) return null;
+      if (current.revision !== expectedRevision) return "revision-mismatch";
       mutate(current);
       const next = { ...current, revision: current.revision + 1, updatedAt: nowIso() };
       if (isManifestTerminal(next) && next.phase !== "complete") {
@@ -58209,8 +58216,8 @@ function mutateLatest(directory, sessionId, mutate) {
   for (let i = 0; i < 8; i++) {
     const current = readSessionEndJob(directory, sessionId);
     if (!current) return null;
-    const result = mutateSessionEndJob(directory, sessionId, current.revision, mutate);
-    if (result) return result;
+    const result = casSessionEndJob(directory, sessionId, current.revision, mutate);
+    if (result !== "revision-mismatch") return result;
   }
   return null;
 }
@@ -58338,9 +58345,7 @@ function claimSessionEndJob(directory, sessionId, nonce, identity, deadlineAt) {
   });
 }
 function renewSessionEndLease(directory, sessionId, nonce, generation, deadlineAt) {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     const owner = job.owner;
     if (!owner || owner.nonce !== nonce || owner.leaseGeneration !== generation) throw new Error("lease-conflict");
     owner.leaseGeneration++;
@@ -58368,10 +58373,17 @@ function reapStaleSessionEndOwner(directory, sessionId, expectedNonce, expectedG
   });
 }
 function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = "worker-released") {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     if (!job.owner || job.owner.nonce !== nonce || job.owner.leaseGeneration !== generation) throw new Error("release-conflict");
+    for (const action of Object.values(job.actions)) {
+      if (action.status === "claimed" && action.claimantNonce === nonce && action.runner?.phase === "reserved") {
+        action.attempts--;
+        action.status = action.attempts > 0 ? "retryable" : "pending";
+        action.claimantNonce = void 0;
+        action.claimedAt = void 0;
+        action.runner = void 0;
+      }
+    }
     job.owner = null;
     if (job.phase !== "complete") {
       job.phase = "recoverable-failure";
@@ -58380,9 +58392,7 @@ function releaseSessionEndJob(directory, sessionId, nonce, generation, reason = 
   });
 }
 function updateSessionEndJob(directory, sessionId, expectedOwner, mutate) {
-  const current = readSessionEndJob(directory, sessionId);
-  if (!current) return null;
-  return mutateSessionEndJob(directory, sessionId, current.revision, (job) => {
+  return mutateLatest(directory, sessionId, (job) => {
     if (job.owner?.nonce !== expectedOwner || job.phase === "complete") throw new Error("owner-conflict");
     mutate(job);
   });
@@ -69245,7 +69255,7 @@ function buildWindowsSupervisorSource() {
     'if ($hash -ne $payload.authority_digest) { throw "worker_launch_authority_digest_mismatch" }',
     'Add-Type @"',
     "using System; using System.Text; using System.Runtime.InteropServices;",
-    String.raw`public static partial class O { [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct STARTUPINFO { public int cb; public IntPtr lpReserved; public IntPtr lpDesktop; public IntPtr lpTitle; public int dwX; public int dwY; public int dwXSize; public int dwYSize; public int dwXCountChars; public int dwYCountChars; public int dwFillAttribute; public int dwFlags; public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError; } [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; } [StructLayout(LayoutKind.Sequential)] public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; } [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateJobObjectW(IntPtr a, string n); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr j, int c, IntPtr i, uint l); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr j, IntPtr p); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint ResumeThread(IntPtr h); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateJobObject(IntPtr j, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr p, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint ms); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(IntPtr h, out uint code); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); public static System.Threading.Tasks.Task<string> ReadLineAsync() { return System.Threading.Tasks.Task.Run(() => Console.In.ReadLine()); } public static string Quote(string value) { var b = new StringBuilder(); b.Append('\"'); int slashes = 0; foreach (var c in value) { if (c == '\\') { slashes++; continue; } if (c == '\"') { b.Append('\\', slashes * 2 + 1); b.Append('\"'); slashes = 0; continue; } b.Append('\\', slashes); slashes = 0; b.Append(c); } b.Append('\\', slashes * 2); b.Append('\"'); return b.ToString(); } public static string BuildCommandLine(string[] argv) { var b = new StringBuilder(); for (var i = 0; i < argv.Length; i++) { if (i != 0) b.Append(' '); b.Append(Quote(argv[i])); } return b.ToString(); } }`.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("//")).join(" "),
+    String.raw`public static partial class O { [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct STARTUPINFO { public int cb; public IntPtr lpReserved; public IntPtr lpDesktop; public IntPtr lpTitle; public int dwX; public int dwY; public int dwXSize; public int dwYSize; public int dwXCountChars; public int dwYCountChars; public int dwFillAttribute; public int dwFlags; public short wShowWindow; public short cbReserved2; public IntPtr lpReserved2; public IntPtr hStdInput; public IntPtr hStdOutput; public IntPtr hStdError; } [StructLayout(LayoutKind.Sequential)] public struct PROCESS_INFORMATION { public IntPtr hProcess; public IntPtr hThread; public uint dwProcessId; public uint dwThreadId; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_BASIC_LIMIT_INFORMATION { public long PerProcessUserTimeLimit; public long PerJobUserTimeLimit; public uint LimitFlags; public UIntPtr MinimumWorkingSetSize; public UIntPtr MaximumWorkingSetSize; public uint ActiveProcessLimit; public UIntPtr Affinity; public uint PriorityClass; public uint SchedulingClass; } [StructLayout(LayoutKind.Sequential)] public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; } [StructLayout(LayoutKind.Sequential)] public struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION { public JOBOBJECT_BASIC_LIMIT_INFORMATION BasicLimitInformation; public IO_COUNTERS IoInfo; public UIntPtr ProcessMemoryLimit; public UIntPtr JobMemoryLimit; public UIntPtr PeakProcessMemoryUsed; public UIntPtr PeakJobMemoryUsed; } [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr CreateJobObjectW(IntPtr a, string n); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool SetInformationJobObject(IntPtr j, int c, IntPtr i, uint l); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr j, IntPtr p); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint ResumeThread(IntPtr h); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateJobObject(IntPtr j, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool TerminateProcess(IntPtr p, uint c); [DllImport("kernel32.dll", SetLastError=true)] public static extern uint WaitForSingleObject(IntPtr h, uint ms); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool GetExitCodeProcess(IntPtr h, out uint code); [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr h); public static System.Threading.Tasks.Task<string> ReadLineAsync() { return System.Threading.Tasks.Task.Run(() => Console.In.ReadLine()); } public static string Quote(string value) { var b = new StringBuilder(); b.Append('\"'); int slashes = 0; foreach (var c in value) { if (c == '\\') { slashes++; continue; } if (c == '\"') { b.Append('\\', slashes * 2 + 1); b.Append('\"'); slashes = 0; continue; } b.Append('\\', slashes); slashes = 0; b.Append(c); } b.Append('\\', slashes * 2); b.Append('\"'); return b.ToString(); } public static string BuildCommandLine(string[] argv) { var b = new StringBuilder(); for (var i = 0; i < argv.Length; i++) { if (i != 0) b.Append(' '); b.Append(Quote(argv[i])); } return b.ToString(); } public static string CmdQuote(string value) { var b = new StringBuilder(); b.Append('\"'); int slashes = 0; foreach (var c in value) { if (c < ' ') throw new ArgumentException("worker_launch_provider_argv_invalid"); if (c == '\\') { slashes++; continue; } if (c == '\"') { b.Append('\\', slashes * 2); b.Append('\"'); b.Append('\"'); slashes = 0; continue; } b.Append('\\', slashes); slashes = 0; b.Append(c); } b.Append('\\', slashes * 2); b.Append('\"'); return b.ToString(); } public static string BuildCmdLine(string[] argv) { var b = new StringBuilder(); for (var i = 0; i < argv.Length; i++) { if (i != 0) b.Append(' '); b.Append(CmdQuote(argv[i])); } if (b.Length > ${WINDOWS_PROVIDER_LINE_MAX}) throw new ArgumentException("worker_launch_provider_argv_too_long"); return b.ToString(); } }`.split("\n").map((line) => line.trim()).filter((line) => line.length > 0 && !line.startsWith("//")).join(" "),
     String.raw`public static partial class O {
   [StructLayout(LayoutKind.Sequential)]
   private struct SECURITY_ATTRIBUTES {
@@ -69271,6 +69281,15 @@ function buildWindowsSupervisorSource() {
   private static System.ComponentModel.Win32Exception LaunchError(string operation) {
     int error = Marshal.GetLastWin32Error();
     return new System.ComponentModel.Win32Exception(error, operation + ": Win32=" + error);
+  }
+  public static void RequireBatchProvider(string app) {
+    // cmd.exe runs a batch argv[0] as part of its command line and would
+    // search the cwd and PATH for a relative one; hold it to the same rule.
+    if (String.IsNullOrWhiteSpace(app)
+        || !System.Text.RegularExpressions.Regex.IsMatch(app, @"^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+[\\/])")
+        || !System.IO.File.Exists(app)) {
+      throw new ArgumentException("worker_launch_provider_executable_invalid");
+    }
   }
   public static void CreateConsoleProcess(string app, string commandLine, IntPtr environment, string cwd, out PROCESS_INFORMATION pi) {
     pi = new PROCESS_INFORMATION();
@@ -69328,9 +69347,18 @@ function buildWindowsSupervisorSource() {
     '"@',
     "$pi = New-Object O+PROCESS_INFORMATION; $job = [IntPtr]::Zero; $jobAssigned = $false; $envPtr = [IntPtr]::Zero; $cmd = $null",
     "try {",
-    "  $cmd = [O]::BuildCommandLine([string[]]$payload.provider_argv)",
-    '  $envPairs = @($payload.provider_env.psobject.Properties | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)',
-    "  [O]::CreateConsoleProcess([string]$payload.provider_argv[0], $cmd, $envPtr, $payload.cwd, [ref]$pi)",
+    // A .cmd/.bat argv[0] is never handed to CreateProcessW, which would run
+    // it through cmd.exe with the MSVC-quoted line. cmd.exe from the system
+    // directory is started instead with a fixed command line; it expands the
+    // cmd-quoted provider line once from its environment block and clears
+    // the variable before the provider runs. Every launch sets
+    // NoDefaultCurrentDirectoryInExePath so neither that cmd (and a shim's
+    // bare `node`) nor a provider's bare-name child runs a command planted in
+    // the worker cwd.
+    "  $argv = [string[]]$payload.provider_argv; $app = [string]$argv[0]; $providerLine = $null",
+    `  if ($app -match '\\.(cmd|bat)[. ]*$') { [O]::RequireBatchProvider($app); $providerLine = [O]::BuildCmdLine($argv); $app = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $cmd = '"' + $app + '" /d /v:off /s /c "set "${WINDOWS_PROVIDER_LINE_VAR}=" & %${WINDOWS_PROVIDER_LINE_VAR}%"' } else { $cmd = [O]::BuildCommandLine($argv) }`,
+    `  $envPairs = @($payload.provider_env.psobject.Properties | Where-Object { $_.Name -ne '${WINDOWS_PROVIDER_LINE_VAR}' -and $_.Name -ne '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}' } | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Value = $_.Value } }); $envPairs += [pscustomobject]@{ Name = '${WINDOWS_NO_CWD_EXE_SEARCH_VAR}'; Value = '1' }; if ($null -ne $providerLine) { $envPairs += [pscustomobject]@{ Name = '${WINDOWS_PROVIDER_LINE_VAR}'; Value = $providerLine } }; $envPairs = @($envPairs | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }); $envText = (($envPairs -join [char]0) + [char]0 + [char]0); $envBytes = [Text.Encoding]::Unicode.GetBytes($envText); $envPtr = [Runtime.InteropServices.Marshal]::AllocHGlobal($envBytes.Length); [Runtime.InteropServices.Marshal]::Copy($envBytes, 0, $envPtr, $envBytes.Length)`,
+    "  [O]::CreateConsoleProcess($app, $cmd, $envPtr, $payload.cwd, [ref]$pi)",
     '  $job = [O]::CreateJobObjectW([IntPtr]::Zero, $null); if ($job -eq [IntPtr]::Zero) { throw "worker_launch_create_job_failed" }; $info = New-Object O+JOBOBJECT_EXTENDED_LIMIT_INFORMATION; $info.BasicLimitInformation.LimitFlags = 0x2000; $ptr = [Runtime.InteropServices.Marshal]::AllocHGlobal([Runtime.InteropServices.Marshal]::SizeOf($info)); try { [Runtime.InteropServices.Marshal]::StructureToPtr($info, $ptr, $false); if (-not [O]::SetInformationJobObject($job, 9, $ptr, [Runtime.InteropServices.Marshal]::SizeOf($info))) { throw "worker_launch_job_config_failed" } } finally { [Runtime.InteropServices.Marshal]::FreeHGlobal($ptr) }; if (-not [O]::AssignProcessToJobObject($job, $pi.hProcess)) { throw "worker_launch_assign_job_failed" }; $jobAssigned = $true; if ([O]::ResumeThread($pi.hThread) -eq [uint32]::MaxValue) { throw "worker_launch_resume_failed" }',
     '  $ticks = ([DateTime]((Get-Process -Id $pi.dwProcessId).StartTime)).ToUniversalTime().Ticks; $ready = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="ready"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; process_start_identity=("ticks:" + $ticks) } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($ready); [Console]::Out.Flush()',
     '  $readTask = [O]::ReadLineAsync(); while ($true) { if ([O]::WaitForSingleObject($pi.hProcess, 50) -eq 0) { $exitCode = [uint32]0; if (-not [O]::GetExitCodeProcess($pi.hProcess, [ref]$exitCode)) { throw "worker_launch_exit_code_failed" }; if (-not [O]::TerminateJobObject($job, $exitCode)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="exit"; cleanup_verified=$true; exit_code=$exitCode } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }; if (-not $readTask.IsCompleted) { continue }; $line = $readTask.Result; if ($null -eq $line) { throw "worker_launch_authority_lost" }; $readTask = [O]::ReadLineAsync(); if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -gt 4096) { continue }; try { $msg = $line | ConvertFrom-Json } catch { continue }; if ($msg.protocol -ne "' + WINDOWS_SUPERVISOR_PROTOCOL + '" -or $msg.attempt_id -ne $payload.identity.attempt_id -or $msg.instance_id -ne $payload.identity.instance_id -or $msg.authority_digest -ne $payload.authority_digest -or $msg.containment_nonce -ne $payload.containment_nonce -or $msg.kind -ne "terminate") { continue }; if (-not [O]::TerminateJobObject($job, 1)) { throw "worker_launch_job_terminate_failed" }; if ([O]::WaitForSingleObject($job, 5000) -ne 0) { throw "worker_launch_job_cleanup_timeout" }; $terminal = @{ protocol="' + WINDOWS_SUPERVISOR_PROTOCOL + '"; kind="terminal"; attempt_id=$payload.identity.attempt_id; instance_id=$payload.identity.instance_id; authority_digest=$payload.authority_digest; containment_nonce=$payload.containment_nonce; pid=$pi.dwProcessId; outcome="terminated"; cleanup_verified=$true; exit_code=1 } | ConvertTo-Json -Compress; [Console]::Out.WriteLine($terminal); [Console]::Out.Flush(); break }',
@@ -69396,6 +69424,11 @@ function buildProviderEnvironment(providerEnv, sourceEnv = process.env, platform
       const baselineKey = Object.keys(baseline).find((candidate) => candidate.toUpperCase() === key.toUpperCase());
       if (baselineKey) delete baseline[baselineKey];
     }
+    const env2 = { ...baseline, ...normalized };
+    for (const key of Object.keys(env2)) {
+      if (key.toUpperCase() === WINDOWS_NO_CWD_EXE_SEARCH_VAR.toUpperCase()) delete env2[key];
+    }
+    return { ...env2, [WINDOWS_NO_CWD_EXE_SEARCH_VAR]: "1" };
   }
   return { ...baseline, ...normalized };
 }
@@ -69632,6 +69665,9 @@ async function loadCurrentWorkerLaunchAttempt(input) {
 }
 function buildWorkerLaunchBootstrapSpec(attempt, providerArgv, cwd2, options = {}) {
   if (!isValidIdentity(attempt)) throw new Error("worker_launch_attempt_identity_invalid");
+  if ((options.platform ?? process.platform) === "win32" && providerArgv[0] && isWindowsBatchProvider(providerArgv[0])) {
+    buildWindowsBatchProviderLine(providerArgv);
+  }
   const providerEnv = normalizeProviderEnvironment(options.providerEnv, options.platform ?? process.platform);
   const absoluteCwd = (0, import_node_path16.resolve)(cwd2);
   const containmentNonce = (0, import_node_crypto8.randomUUID)();
@@ -69677,8 +69713,8 @@ function windowsWrapperRelativePath(cwd2, wrapperPath) {
 }
 function buildWorkerLaunchWrapper(attempt, platform = process.platform) {
   if (platform === "win32") {
-    const runtimeCli2 = quoteWindowsCmdArgument(attempt.runtimeCliPath);
-    const nodeExecutable2 = quoteWindowsCmdArgument(process.execPath);
+    const runtimeCli2 = quoteWindowsBatchFileArgument(attempt.runtimeCliPath);
+    const nodeExecutable2 = quoteWindowsBatchFileArgument(process.execPath);
     return [
       "@echo off",
       "setlocal DisableDelayedExpansion",
@@ -70360,10 +70396,22 @@ function isDeterministicTransportPath(expectedPath, candidate, fileName) {
   return isExactText(candidate) && (0, import_node_path16.resolve)(candidate) === (0, import_node_path16.resolve)((0, import_node_path16.join)((0, import_node_path16.dirname)(expectedPath), fileName));
 }
 function quoteWindowsCmdArgument(value) {
-  if (/[\r\n]/.test(value)) throw new Error("worker_launch_provider_argv_invalid");
-  return `"${value.replace(/%/g, "%%").replace(/"/g, '""')}"`;
+  if (/[\x00-\x1f]/.test(value)) throw new Error("worker_launch_provider_argv_invalid");
+  const escaped = value.replace(/(\\*)"/g, '$1$1""').replace(/(\\+)$/, "$1$1");
+  return `"${escaped}"`;
 }
-var import_node_crypto8, import_node_fs11, import_promises16, import_node_path16, import_node_os2, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, WORKER_LAUNCH_INTERNAL_ENV_KEYS, WORKER_LAUNCH_AUTHORITY_PROTOCOL, WINDOWS_SUPERVISOR_PROTOCOL, WINDOWS_RESERVED_ENV_KEYS, SAFE_BASELINE_ENV_KEYS, DECIMAL_INTEGER_TEXT2;
+function quoteWindowsBatchFileArgument(value) {
+  return quoteWindowsCmdArgument(value).replace(/%/g, "%%");
+}
+function isWindowsBatchProvider(command) {
+  return /\.(cmd|bat)[. ]*$/i.test(command);
+}
+function buildWindowsBatchProviderLine(providerArgv) {
+  const line = providerArgv.map(quoteWindowsCmdArgument).join(" ");
+  if (line.length > WINDOWS_PROVIDER_LINE_MAX) throw new Error("worker_launch_provider_argv_too_long");
+  return line;
+}
+var import_node_crypto8, import_node_fs11, import_promises16, import_node_path16, import_node_os2, WORKER_LAUNCH_SCHEMA_VERSION, DEFAULT_ACK_TIMEOUT_MS, DEFAULT_POLL_INTERVAL_MS, DEFAULT_DECISION_TIMEOUT_MS, WORKER_LAUNCH_TRANSPORT_OWNER_KIND, WORKER_LAUNCH_TRANSPORT_CLEANUP_KIND, WORKER_LAUNCH_BOOTSTRAP_DESCRIPTOR_FILE, WORKER_LAUNCH_RECOVERY_GATE_CONTAINED_ENV, WORKER_LAUNCH_INTERNAL_ENV_KEYS, WORKER_LAUNCH_AUTHORITY_PROTOCOL, WINDOWS_SUPERVISOR_PROTOCOL, WINDOWS_PROVIDER_LINE_MAX, WINDOWS_PROVIDER_LINE_VAR, WINDOWS_NO_CWD_EXE_SEARCH_VAR, WINDOWS_RESERVED_ENV_KEYS, SAFE_BASELINE_ENV_KEYS, DECIMAL_INTEGER_TEXT2;
 var init_worker_launch_ack = __esm({
   "src/team/worker-launch-ack.ts"() {
     "use strict";
@@ -70394,6 +70442,9 @@ var init_worker_launch_ack = __esm({
     ]);
     WORKER_LAUNCH_AUTHORITY_PROTOCOL = "worker-launch-authority-v1";
     WINDOWS_SUPERVISOR_PROTOCOL = "worker-launch-windows-supervisor-v1";
+    WINDOWS_PROVIDER_LINE_MAX = 8e3;
+    WINDOWS_PROVIDER_LINE_VAR = "_OMC_PROVIDER_LINE";
+    WINDOWS_NO_CWD_EXE_SEARCH_VAR = "NoDefaultCurrentDirectoryInExePath";
     WINDOWS_RESERVED_ENV_KEYS = new Set([...WORKER_LAUNCH_INTERNAL_ENV_KEYS, "SystemRoot"].map((key) => key.toUpperCase()));
     SAFE_BASELINE_ENV_KEYS = ["PATH", "TEMP", "TMP", "TERM", "COLORTERM"];
     DECIMAL_INTEGER_TEXT2 = /^(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/;
@@ -112821,9 +112872,10 @@ function scanDirectories(projectRoot) {
       return;
     }
     try {
-      const stat2 = (0, import_node_fs4.statSync)(absDir);
-      if (visitedInodes.has(stat2.ino)) return;
-      visitedInodes.add(stat2.ino);
+      const stat2 = (0, import_node_fs4.statSync)(absDir, { bigint: true });
+      const identity = `${stat2.dev}:${stat2.ino}`;
+      if (visitedInodes.has(identity)) return;
+      visitedInodes.add(identity);
     } catch {
       return;
     }
