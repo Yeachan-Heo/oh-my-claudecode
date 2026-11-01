@@ -15195,6 +15195,11 @@ var init_security_config = __esm({
 // src/team/model-contract.ts
 import { spawnSync as spawnSync4 } from "child_process";
 import { isAbsolute as isAbsolute9, normalize as normalize3, sep as sep5, win32 as win32Path2 } from "path";
+function windowsPathExtensions() {
+  return new Set(
+    (process.env.PATHEXT ?? DEFAULT_PATHEXT).split(";").map((extension) => extension.trim().toLowerCase()).filter(Boolean)
+  );
+}
 function getTrustedPrefixes() {
   const trusted = [
     "/usr/local/bin",
@@ -15231,7 +15236,8 @@ function resolveCliBinaryPath(binary) {
   const cached = resolvedPathCache.get(binary);
   if (cached) return cached;
   const finder = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync4(finder, [binary], {
+  const searchTarget = process.platform === "win32" ? `$PATH:${binary}` : binary;
+  const result = spawnSync4(finder, [searchTarget], {
     timeout: 5e3,
     env: process.env
   });
@@ -15239,12 +15245,14 @@ function resolveCliBinaryPath(binary) {
     throw new Error(`CLI binary '${binary}' not found in PATH`);
   }
   const stdout = result.stdout?.toString().trim() ?? "";
-  const firstLine = stdout.split("\n").map((line) => line.trim()).find(Boolean) ?? "";
-  if (!firstLine) {
+  const candidates = stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+  if (candidates.length === 0) {
     throw new Error(`CLI binary '${binary}' not found in PATH`);
   }
-  const resolvedPath = normalize3(firstLine);
-  if (!isAbsolute9(resolvedPath)) {
+  const windows = process.platform === "win32";
+  const selected = windows ? candidates.find((candidate) => windowsPathExtensions().has(win32Path2.extname(candidate).toLowerCase())) ?? candidates[0] : candidates[0];
+  const resolvedPath = windows ? win32Path2.normalize(selected) : normalize3(selected);
+  if (!(windows ? win32Path2.isAbsolute(resolvedPath) : isAbsolute9(resolvedPath))) {
     throw new Error(`Resolved CLI binary '${binary}' to relative path`);
   }
   if (UNTRUSTED_PATH_PATTERNS.some((pattern) => pattern.test(resolvedPath))) {
@@ -15284,7 +15292,8 @@ function resolveBinaryPath(binary) {
   if (isAbsolute9(binary)) return binary;
   try {
     const resolver = process.platform === "win32" ? "where" : "which";
-    const result = spawnSync4(resolver, [binary], { timeout: 5e3, encoding: "utf8" });
+    const searchTarget = process.platform === "win32" ? `$PATH:${binary}` : binary;
+    const result = spawnSync4(resolver, [searchTarget], { timeout: 5e3, encoding: "utf8" });
     if (result.status !== 0) return binary;
     const lines = result.stdout?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) ?? [];
     const firstPath = lines[0];
@@ -15462,7 +15471,7 @@ function getPromptModeArgs(agentType, instruction) {
   }
   return [instruction];
 }
-var resolvedPathCache, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST, CLAUDE_WORKER_ENV_ALLOWLIST;
+var resolvedPathCache, DEFAULT_PATHEXT, UNTRUSTED_PATH_PATTERNS, CONTRACTS, WORKER_MODEL_ENV_ALLOWLIST, CLAUDE_WORKER_ENV_ALLOWLIST;
 var init_model_contract = __esm({
   "src/team/model-contract.ts"() {
     "use strict";
@@ -15471,6 +15480,7 @@ var init_model_contract = __esm({
     init_models();
     init_security_config();
     resolvedPathCache = /* @__PURE__ */ new Map();
+    DEFAULT_PATHEXT = ".COM;.EXE;.BAT;.CMD";
     UNTRUSTED_PATH_PATTERNS = [
       /^\/tmp(\/|$)/,
       /^\/var\/tmp(\/|$)/,
