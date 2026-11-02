@@ -5900,6 +5900,9 @@ var init_keyword_detector = __esm({
       "deepsearch",
       "analyze",
       "deep-interview",
+      "ultragoal",
+      "ai-slop-cleaner",
+      "wiki",
       "codex",
       "gemini",
       "cursor",
@@ -5930,7 +5933,7 @@ function skillTriggerCriteria() {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
   return {
     ...Object.fromEntries(
-      priority.filter((type) => type !== "team").slice(0, 12).map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
+      priority.filter((type) => type !== "team").map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])
     ),
     none: "No trigger fires; handle the prompt without a mode or skill."
   };

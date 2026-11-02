@@ -114,7 +114,7 @@ describe('jev-model-routing shadow wiring', () => {
         const entry = JSON.parse(log.trim().split('\n')[0]);
         expect(entry.point).toBe('model-routing');
         expect(entry.mode).toBe('shadow');
-        expect(entry.heuristic.model).toBe('sonnet');
+        expect(entry.heuristic).toBe('sonnet');
         expect(entry.jev?.choice).toBe('opus');
     });
     it('bounds the task excerpt sent to Jev to OMC_JEV_EXCERPT_CHARS', async () => {

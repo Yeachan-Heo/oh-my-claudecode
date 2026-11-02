@@ -189,4 +189,50 @@ describe('applyLoopContinuationShadow', () => {
     const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
     expect(noulEntry.heuristic).toBeNull();
   });
+
+  it('makes task-complete non-comparable when ralplan circuit breaker trips (shouldBlock=false but not task complete)', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn, calls } = stubFetch();
+    
+    // Ralplan circuit breaker: shouldBlock=false (allow stopping) but task is NOT complete
+    const ralplanTripped: PersistentModeResult = {
+      shouldBlock: false,
+      message: '[RALPLAN] Circuit breaker tripped; allowing stop for recovery',
+      mode: 'ralplan',
+      metadata: { iteration: 5, maxIterations: 10, phase: 'execution' },
+    };
+    const result = await applyLoopContinuationShadow({ result: ralplanTripped, sessionId: 'sess-1', fetchFn });
+
+    expect(result).toEqual(ralplanTripped);
+
+    const lines = await readLogLines();
+    const parsed = lines.map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    // Ralplan safety release should be non-comparable, not "task complete"
+    expect(noulEntry.heuristic).toBeNull();
+  });
+
+  it('makes task-complete non-comparable when autoresearch fails/cancels (shouldBlock=false but not task complete)', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn, calls } = stubFetch();
+    
+    // Autoresearch failure: shouldBlock=false (allow stopping) but task is NOT complete
+    const autoresearchFailed: PersistentModeResult = {
+      shouldBlock: false,
+      message: '[AUTORESEARCH] Mission failed; allowing stop',
+      mode: 'autoresearch',
+      metadata: { iteration: 2, maxIterations: 5, phase: 'research' },
+    };
+    const result = await applyLoopContinuationShadow({ result: autoresearchFailed, sessionId: 'sess-1', fetchFn });
+
+    expect(result).toEqual(autoresearchFailed);
+
+    const lines = await readLogLines();
+    const parsed = lines.map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    const noulEntry = parsed.find((e) => e.jev?.type === 'noul')!;
+    // Autoresearch safety release should be non-comparable, not "task complete"
+    expect(noulEntry.heuristic).toBeNull();
+  });
 });

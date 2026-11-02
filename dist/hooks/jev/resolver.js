@@ -62,6 +62,10 @@ function recordFailure(point) {
         console.error('[jev] ' + point + ': circuit open after ' + count + ' consecutive failures');
     }
 }
+/** Extract the loggable heuristic value, applying mapHeuristic if provided. */
+function extractHeuristicForLogging(twinResult, mapHeuristic, questionSet) {
+    return mapHeuristic ? mapHeuristic(twinResult, questionSet) : twinResult;
+}
 export async function resolveJudgment(resolveJudgmentArgs) {
     const args = resolveJudgmentArgs;
     const config = parseJevConfig();
@@ -112,14 +116,15 @@ export async function resolveJudgment(resolveJudgmentArgs) {
     // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
     if (mode === 'shadow' && args.blocking === false) {
         const heuristic = twinAnswer();
+        const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
         void attempt.then((outcome) => {
             if (outcome.ok) {
                 recordSuccess(args.point);
-                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', heuristic, firstAnswer(outcome.response), outcome.response.usage), config.logDir);
+                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, firstAnswer(outcome.response), outcome.response.usage), config.logDir);
             }
             else {
                 recordFailure(args.point);
-                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', heuristic, null), config.logDir);
+                void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
             }
             // Belt-and-braces: a future throw in this callback must never become an
             // unhandled rejection that kills a one-shot hook process.
@@ -130,15 +135,16 @@ export async function resolveJudgment(resolveJudgmentArgs) {
     // to enable active mode to work with non-blocking points.
     if (mode === 'active' && args.blocking === false) {
         const heuristic = twinAnswer();
+        const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
         const outcome = await attempt;
         if (!outcome.ok) {
             recordFailure(args.point);
-            await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', heuristic, null), config.logDir);
+            await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
             return { answer: heuristic, source: 'twin', mode: 'degraded' };
         }
         recordSuccess(args.point);
         const jevAnswer = firstAnswer(outcome.response);
-        await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', heuristic, jevAnswer, outcome.response.usage), config.logDir);
+        await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, jevAnswer, outcome.response.usage), config.logDir);
         const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
         return { answer, source: 'jev', mode: 'active' };
     }
@@ -147,13 +153,15 @@ export async function resolveJudgment(resolveJudgmentArgs) {
         recordFailure(args.point);
         console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
         const heuristic = twinAnswer();
-        await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', heuristic, null), config.logDir);
+        const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
+        await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
         return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
     const heuristic = twinAnswer();
+    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
     const jevAnswer = firstAnswer(outcome.response);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', heuristic, jevAnswer, outcome.response.usage), config.logDir);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, jevAnswer, outcome.response.usage), config.logDir);
     if (mode === 'active') {
         const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : jevAnswer;
         return { answer, source: 'jev', mode: 'active' };
