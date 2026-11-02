@@ -325,7 +325,8 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
         // jev/confidence come from the first question asked, not the first answer sent.
         expect(entry.jev.choice).toBe("opus");
         expect(entry.confidence).toBe(0.9);
-        expect(entry.heuristic.originalInput.effort).toBe("max");
+        // The heuristic is the twin's tier, the comparable answer to the first question.
+        expect(entry.heuristic).toBe("haiku");
       },
       { timeout: 5000, interval: 25 },
     );

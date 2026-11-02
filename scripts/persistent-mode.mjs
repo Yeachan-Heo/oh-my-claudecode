@@ -53,11 +53,14 @@ const LEARNER_EXTRACTION_QUESTIONS = {
 };
 
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
+  // Noul question ("Is the task complete?"): blocking the stop is an explicit
+  // "not complete"; a release carries no completion signal, so it is non-comparable.
+  const mappedHeuristic = heuristic.shouldBlock ? false : null;
   recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
-    heuristic,
+    heuristic: mappedHeuristic,
     permissionMode,
   });
 }
@@ -72,7 +75,8 @@ async function recordLearnerExtractionShadow(data) {
     const detectorPath = join(__dirname, "..", "dist", "hooks", "learner", "detector.js");
     if (!existsSync(detectorPath)) return;
     const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
-    const heuristic = detectExtractableMoment(assistantMessage);
+    const detectionResult = detectExtractableMoment(assistantMessage);
+    const heuristic = detectionResult.detected;
     recordJevShadow({
       point: "learner-extraction",
       state: { assistant_message: assistantMessage, user_message: null },

@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4ea309e1f1709df110b298dad439ca931b62f8a3",
-    "sourceSha256": "336c8947b25cb0af02c85a173e167171c3d0f278488c25ea5baa3f9d6c8b2fca",
+    "head": "fb9323a378b7ebe81a80917bcffda8f0d831f16a",
+    "sourceSha256": "6a4b533d6101a19f5ed9ccc8b7367c659b89dd4c737149c4a375592e8cf09af4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4ea309e1f1709df110b298dad439ca931b62f8a3",
-  "sourceSha256": "336c8947b25cb0af02c85a173e167171c3d0f278488c25ea5baa3f9d6c8b2fca",
+  "head": "fb9323a378b7ebe81a80917bcffda8f0d831f16a",
+  "sourceSha256": "6a4b533d6101a19f5ed9ccc8b7367c659b89dd4c737149c4a375592e8cf09af4",
   "counts": {
     "public": {
       "skills": 48,
@@ -44602,6 +44602,11 @@
         "path": "tests/integration/issue-4804-jev-context-pruning.test.ts"
       },
       {
+        "id": "tests/integration/issue-4806.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4806.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
@@ -85414,6 +85419,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -86325,12 +86370,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7570,
-      "edgeCount": 8302,
-      "importEdgeCount": 6942,
+      "nodeCount": 7571,
+      "edgeCount": 8310,
+      "importEdgeCount": 6950,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "e7a7652eb44218a49b27b7cf9eb7d14fa6ab0faee3716cd3f0e597060818eec1",
-  "manifestSha256": "98c18647bdbdb84948d0c1840b455cacb7ca04631f0d4e76f7bcfb1e473a5b1e"
+  "inventorySha256": "5f0c66d052f03b65a68c92be754c682f1fa97b78058594e5cf11cbe8611c99b0",
+  "manifestSha256": "c396e309e41ce7bf7a67e242ad95476b47e10841b1b1a96c9b3108c15e0324f2"
 }

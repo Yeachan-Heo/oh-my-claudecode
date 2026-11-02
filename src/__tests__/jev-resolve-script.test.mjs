@@ -282,6 +282,18 @@ describe('resolveRequest', () => {
       expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
     },
   );
+
+  it.each([
+    ['a choice outside the declared criteria', QUESTIONS, 'us.anthropic.claude-sonnet-4-6-v1:0'],
+    ['a non-primitive choice', QUESTIONS, ['sonnet']],
+    ['a non-boolean noul answer', { done: { type: 'noul', criteria: { yes: 'done', no: 'not done' } } }, 'true'],
+    ['a non-numeric score', { size: { type: 'score', criteria: { low: 'l', high: 'h' } } }, '2'],
+  ])('logs %s as a non-comparable null heuristic', async (_label, questions, heuristic) => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    await resolveRequest({ point: 'model-routing', state: {}, questions, heuristic }, baseEnv(), fetchFn);
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.heuristic).toBeNull();
+  });
 });
 
 describe('end-to-end child process', () => {

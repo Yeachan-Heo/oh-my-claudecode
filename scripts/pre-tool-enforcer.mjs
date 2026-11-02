@@ -647,12 +647,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
   if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
   
-  const heuristic = {
-    originalInput,
-    modifiedInput,
-    injected: Boolean(updatedToolInput),
-    model,
-  };
+  const heuristic = model;
   
   const jevResult = recordJevShadow({
     point: 'model-routing',
