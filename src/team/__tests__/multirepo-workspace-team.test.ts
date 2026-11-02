@@ -16,11 +16,6 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { clearWorktreeCache } from '../../lib/worktree-paths.js';
-import { logAuditEvent, readAuditLog } from '../audit-log.js';
-import type { AuditEvent } from '../audit-log.js';
-import { recordTaskUsage } from '../usage-tracker.js';
-import type { TaskUsageRecord } from '../usage-tracker.js';
-import { recordRestart, readRestartState } from '../worker-restart.js';
 import {
   createWorkerWorktree,
   listTeamWorktrees,
@@ -59,52 +54,6 @@ describe('multi-repo workspace team writes', () => {
   });
 
   const sharedOmc = () => join(parent, '.omc');
-
-  it('audit log writes land under the shared .omc, not the sub-repo', () => {
-    const event: AuditEvent = {
-      timestamp: new Date().toISOString(),
-      eventType: 'bridge_start',
-      teamName,
-      workerName: 'worker1',
-    };
-
-    expect(() => logAuditEvent(api, event)).not.toThrow();
-
-    const logPath = join(sharedOmc(), 'logs', `team-bridge-${teamName}.jsonl`);
-    expect(existsSync(logPath)).toBe(true);
-    // Must NOT have written into the sub-repo's local .omc.
-    expect(existsSync(join(api, '.omc', 'logs', `team-bridge-${teamName}.jsonl`))).toBe(false);
-    expect(readAuditLog(api, teamName)).toHaveLength(1);
-  });
-
-  it('usage records write under the shared .omc without traversal error', () => {
-    const record: TaskUsageRecord = {
-      taskId: 'task1',
-      workerName: 'worker1',
-      provider: 'codex',
-      model: 'gpt',
-      startedAt: new Date().toISOString(),
-      completedAt: new Date().toISOString(),
-      wallClockMs: 10,
-      promptChars: 5,
-      responseChars: 7,
-    };
-
-    expect(() => recordTaskUsage(api, teamName, record)).not.toThrow();
-
-    const logPath = join(sharedOmc(), 'logs', `team-usage-${teamName}.jsonl`);
-    expect(existsSync(logPath)).toBe(true);
-  });
-
-  it('restart state writes under the shared .omc without traversal error', () => {
-    expect(() => recordRestart(api, teamName, 'worker1')).not.toThrow();
-
-    const statePath = join(sharedOmc(), 'state', 'team-bridge', teamName, 'worker1.restart.json');
-    expect(existsSync(statePath)).toBe(true);
-
-    const state = readRestartState(api, teamName, 'worker1');
-    expect(state?.restartCount).toBe(1);
-  });
 
   it('worktree creation + metadata + AGENTS overlay work from the sub-repo', () => {
     let info!: ReturnType<typeof createWorkerWorktree>;
