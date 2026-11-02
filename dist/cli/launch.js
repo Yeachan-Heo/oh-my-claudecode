@@ -1092,7 +1092,8 @@ function canonicalTmuxEnvironmentName(name) {
     }
     if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName))
         return normalizedName;
-    if (normalizedName === 'NODE_EXTRA_CA_CERTS'
+    if (normalizedName === 'NODEFAULTCURRENTDIRECTORYINEXEPATH'
+        || normalizedName === 'NODE_EXTRA_CA_CERTS'
         || normalizedName === 'NODE_TLS_REJECT_UNAUTHORIZED'
         || normalizedName.startsWith('SSL_CERT_')
         || normalizedName.endsWith('_CA_BUNDLE'))
@@ -1134,10 +1135,15 @@ function buildTmuxClaudeLaunch(args, options) {
             : nativeWindows
                 ? transport.prefix
                 : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
+        // On Windows, set NoDefaultCurrentDirectoryInExePath=1 BEFORE the 'where claude' check
+        // to prevent execution of planted executables in the current directory.
+        const windowsSecurityPrefix = nativeWindows
+            ? 'set "NoDefaultCurrentDirectoryInExePath=1" && '
+            : '';
         const missingBinaryGuard = nativeWindows
             ? '(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && '
             : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
-        const command = wrapWithLoginShell(`${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? 'exec ' : ''}${rawClaudeCmd}`);
+        const command = wrapWithLoginShell(`${envPrefix}${options.preflight}${windowsSecurityPrefix}${missingBinaryGuard}${options.useExec ? 'exec ' : ''}${rawClaudeCmd}`);
         return { command, cleanup: transport.cleanup };
     }
     catch (error) {
