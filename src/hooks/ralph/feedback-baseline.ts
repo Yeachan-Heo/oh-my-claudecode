@@ -24,6 +24,10 @@ export const MAX_SIGNATURES_PER_COMMAND = 200;
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS: RegExp[] = [
+  // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
+  // Anchored to the "in <duration>" suffix so clock-shaped assertion values
+  // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
+  /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
   /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
   /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
@@ -56,6 +60,10 @@ export function signatureLines(output: string): string[] {
     if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
     // Drop all-pass pytest progress lines (dots plus skipped/xfail/xpass markers with an optional "[ NN%]" suffix); their width and percentages shift with the test count. A line containing F/E is a failure marker and must survive, because quiet runs can emit only that line.
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
+    // Exclude pytest all-pass summaries ("N passed in <v>", optionally with warnings/skipped/...
+    // and a trailing duration already normalized to one or more "<v>" tokens); a summary that
+    // reports failures/errors does not match and is kept below.
+    if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
     // Exclude pass/test/fail/skipped/cancelled/todo summary counters when 0 or for non-failure types.
     // These vary as tests are added; only keep failure counter when fail > 0.
     if (/^#\s*(?:pass|tests?|skipped|cancelled|todo)\s+\d+\s*$/.test(line)) continue;
