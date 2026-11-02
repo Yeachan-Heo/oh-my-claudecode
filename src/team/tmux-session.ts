@@ -698,7 +698,14 @@ function isCmuxContext(): boolean {
 }
 
 function isCmuxSurfaceTarget(value: string | undefined): value is string {
-  return typeof value === 'string' && value.trim().length > 0 && !value.trim().startsWith('%');
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  const trimmed = value.trim();
+  // Exclude tmux format (%N)
+  if (/^%\d+$/.test(trimmed)) return false;
+  // Exclude herdr format (w<N>:p<N>) - issue #4816
+  if (/^w\d+:p\d+$/.test(trimmed)) return false;
+  // Positive match: only if we're in a cmux context
+  return isCmuxContext();
 }
 
 async function cmuxExecAsync(args: string[]): Promise<{ stdout: string; stderr: string }> {
