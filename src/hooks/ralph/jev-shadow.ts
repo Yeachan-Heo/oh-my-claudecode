@@ -47,6 +47,7 @@ export async function applyRalphVerdictShadow(args: RalphVerdictShadowArgs): Pro
       critic_mode: args.criticMode ?? null,
     },
     twin: () => verdict,
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
       // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
       return answer.noul === true;

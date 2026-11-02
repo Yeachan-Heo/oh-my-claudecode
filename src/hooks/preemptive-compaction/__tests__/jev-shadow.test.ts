@@ -83,7 +83,7 @@ async function readLogLine(): Promise<string> {
 }
 
 describe('recordContextPruningShadow', () => {
-  it('with key set, records a shadow comparison: heuristic action + Jev Score', async () => {
+  it('with key set, records a shadow comparison: non-comparable action heuristic + Jev Score', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key-123';
     process.env.OMC_JEV = 'context-pruning';
     const { fetchFn, calls } = captureFetch(3);
@@ -115,7 +115,7 @@ describe('recordContextPruningShadow', () => {
     expect(line).toMatchObject({
       point: 'context-pruning',
       mode: 'shadow',
-      heuristic: 'warn',
+      heuristic: null, // the twin's action is not a valid answer to the staleness score question
       jev: { type: 'score', score: 3 },
       confidence: 0.8,
     });
@@ -201,7 +201,7 @@ describe('hook wiring: createPreemptiveCompactionHook + context-pruning shadow',
     expect(line).toMatchObject({
       point: 'context-pruning',
       mode: 'shadow',
-      heuristic: 'warn',
+      heuristic: null,
     });
     const state = line.state as { candidates: Array<{ tool: string; excerpt: string }>; candidateCount: number };
     expect(state.candidateCount).toBe(1);

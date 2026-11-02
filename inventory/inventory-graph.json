@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "4aec2f656418f3985fe0edebdb254978ae2a15e0",
-    "sourceSha256": "8ee3455046142a72e1070cf409152eee86fcc21b6dfa9a64f85673d64df72b1d",
+    "head": "fb9323a378b7ebe81a80917bcffda8f0d831f16a",
+    "sourceSha256": "6a4b533d6101a19f5ed9ccc8b7367c659b89dd4c737149c4a375592e8cf09af4",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "4aec2f656418f3985fe0edebdb254978ae2a15e0",
-  "sourceSha256": "8ee3455046142a72e1070cf409152eee86fcc21b6dfa9a64f85673d64df72b1d",
+  "head": "fb9323a378b7ebe81a80917bcffda8f0d831f16a",
+  "sourceSha256": "6a4b533d6101a19f5ed9ccc8b7367c659b89dd4c737149c4a375592e8cf09af4",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1427,
-      "total": 1452
+      "srcFiles": 1426,
+      "total": 1451
     },
     "generated": {
       "distFiles": 5471,
@@ -43112,11 +43112,6 @@
         "path": "src/team/__tests__/issue-4412-cmux-startup.test.ts"
       },
       {
-        "id": "src/team/__tests__/issue-4816-isCmuxSurfaceTarget.test.ts",
-        "kind": "src",
-        "path": "src/team/__tests__/issue-4816-isCmuxSurfaceTarget.test.ts"
-      },
-      {
         "id": "src/team/__tests__/leader-inbox.test.ts",
         "kind": "src",
         "path": "src/team/__tests__/leader-inbox.test.ts"
@@ -44602,9 +44597,24 @@
         "path": "tests/integration/issue-4727-windows-state-lock-probe-budget.test.ts"
       },
       {
+        "id": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4804-jev-context-pruning.test.ts"
+      },
+      {
+        "id": "tests/integration/issue-4806.test.ts",
+        "kind": "other",
+        "path": "tests/integration/issue-4806.test.ts"
+      },
+      {
         "id": "tests/integration/jev-active-mode-repro.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-active-mode-repro.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-model-routing-effort.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-model-routing-effort.test.ts"
       },
       {
         "id": "tests/integration/multirepo-workspace.test.ts",
@@ -76894,16 +76904,6 @@
         "kind": "imports"
       },
       {
-        "from": "src/team/__tests__/issue-4816-isCmuxSurfaceTarget.test.ts",
-        "to": "external:vitest",
-        "kind": "imports"
-      },
-      {
-        "from": "src/team/__tests__/issue-4816-isCmuxSurfaceTarget.test.ts",
-        "to": "src/team/tmux-session.ts",
-        "kind": "imports"
-      },
-      {
         "from": "src/team/__tests__/leader-inbox.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -85379,6 +85379,86 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4804-jev-context-pruning.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/issue-4806.test.ts",
+        "to": "src/hooks/keyword-detector/index.ts",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -85415,6 +85495,46 @@
       },
       {
         "from": "tests/integration/jev-active-mode-repro.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
         "to": "external:vitest",
         "kind": "imports"
       },
@@ -86250,12 +86370,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7569,
-      "edgeCount": 8288,
-      "importEdgeCount": 6930,
+      "nodeCount": 7571,
+      "edgeCount": 8310,
+      "importEdgeCount": 6950,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "ad9262d979797768ee9d2f2263c3e046354245c7720b1cf223066739bc1693d2",
-  "manifestSha256": "6cbf169cc2041695fc3d17b2468441bae279aec8933c0adb2f45b6753af08542"
+  "inventorySha256": "5f0c66d052f03b65a68c92be754c682f1fa97b78058594e5cf11cbe8611c99b0",
+  "manifestSha256": "c396e309e41ce7bf7a67e242ad95476b47e10841b1b1a96c9b3108c15e0324f2"
 }

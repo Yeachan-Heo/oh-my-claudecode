@@ -20,15 +20,18 @@ import type { JevAnswer, JevQuestions, JudgmentPointName, ResolveResult } from '
 /**
  * Top emit-able keyword types, derived from the detector's own priority
  * constants (team is excluded: its regex never matches, detection is
- * explicit-only via /team).
+ * explicit-only via /team). Note: script-emitted triggers like 'ultragoal',
+ * 'ai-slop-cleaner', and 'wiki' are not TypeScript KeywordType members and
+ * will be logged as non-comparable by the mapHeuristic function.
  */
 function skillTriggerCriteria(): Record<string, string> {
   const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
+  // Include all keywords except 'team' (explicit-only). Do not slice:
+  // all keywords that can be detected and emitted should be in the criteria.
   return {
     ...Object.fromEntries(
       priority
         .filter((type) => type !== 'team')
-        .slice(0, 12)
         .map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`]),
     ),
     none: 'No trigger fires; handle the prompt without a mode or skill.',
@@ -87,7 +90,9 @@ const SCORE_QUESTIONS: JevQuestions = {
 /**
  * Point "model-routing" (ticket 04): tier guidance from CLAUDE.md
  * <model_routing> and docs/DELEGATION-ENFORCER.md - haiku for quick lookups,
- * sonnet for standard work, opus for architecture.
+ * sonnet for standard work, opus for architecture. The "effort" score (0-3)
+ * picks the subagent reasoning effort; scripts/pre-tool-enforcer.mjs maps it
+ * to none/low/medium/high in active mode.
  */
 const MODEL_ROUTING_QUESTIONS: JevQuestions = {
   'model-tier': {
@@ -97,6 +102,16 @@ const MODEL_ROUTING_QUESTIONS: JevQuestions = {
       haiku: 'Quick lookups and lightweight, mechanical work',
       sonnet: 'Standard coding and orchestration work',
       opus: 'Complex architecture and deep analysis',
+    },
+  },
+  effort: {
+    type: 'score',
+    instructions: 'How much reasoning effort does this delegated task need?',
+    criteria: {
+      trivial: 'Trivial: the answer or action is obvious, no thinking needed',
+      some: 'Some thought: a few straightforward steps',
+      careful: 'Careful multi-step reasoning: several dependent steps or things to check',
+      deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
     },
   },
 };
@@ -252,7 +267,13 @@ export interface RecordJudgmentCall<T> {
   twin: () => T;
   /** Maps Jev's answer onto the result type. Only used in active mode. */
   mapAnswer?: (answer: JevAnswer) => T;
-  /** Index into the point's question sets (loop-continuation's Score call uses 1). */
+  /** Extracts the comparison-relevant heuristic value from the twin result for shadow logging.
+   * When not provided, the full twin result is logged as the heuristic.
+   * For judgment points with non-primitive twins, this should return the comparable primitive
+   * (boolean for noul, string for choice, number for score). */
+  mapHeuristic?: (twinResult: T, questionSet?: number) => unknown;
+  /** Index into the point's question sets (loop-continuation's Score call uses 1).
+   * Provided to mapHeuristic to allow conditional extraction of the right field. */
   questionSet?: number;
   /** Test hook: injected transport. */
   fetchFn?: typeof fetch;
@@ -276,6 +297,8 @@ export function recordJudgment<T>(pointName: string, call: RecordJudgmentCall<T>
     questions: typeof questions === 'function' ? questions() : questions,
     twin: call.twin,
     mapAnswer: call.mapAnswer,
+    mapHeuristic: call.mapHeuristic,
+    questionSet,
     blocking: point.blocking,
     fetchFn: call.fetchFn,
   });

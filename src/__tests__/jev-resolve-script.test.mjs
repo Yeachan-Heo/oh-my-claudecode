@@ -221,6 +221,35 @@ describe('resolveRequest', () => {
     const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
     expect(line.mode).toBe('degraded');
     expect(line.jev).toBeNull();
+    expect(result.answers).toBeNull();
+    expect(line.answers).toBeNull();
+  });
+
+  it('returns and logs every answer by question name, whatever their order', async () => {
+    const answers = {
+      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'trivial', 1: 'some', 2: 'careful', 3: 'deep' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.1 } },
+      'model-tier': { type: 'choice', choice: 'sonnet', confidence: 0.9, probabilities: { haiku: 0.05, sonnet: 0.9, opus: 0.05 } },
+    };
+    const questions = {
+      'model-tier': QUESTIONS.route,
+      effort: { type: 'score', criteria: { trivial: 'trivial', some: 'some', careful: 'careful', deep: 'deep' } },
+    };
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers }) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+    expect(result.mode).toBe('active');
+    // `answer` is the answer to the first question asked, not the first one the server sent.
+    expect(result.answer).toEqual(answers['model-tier']);
+    expect(result.answers).toEqual(answers);
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.jev).toEqual(answers['model-tier']);
+    expect(line.confidence).toBe(0.9);
+    expect(line.answers).toEqual(answers);
+  });
+
+  it('falls back to the first answer in server order when the first question has no answer', async () => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { other: { type: 'choice', choice: 'opus' } } }) });
+    const result = await resolveRequest({ point: 'model-routing', state: {}, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
+    expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
   });
 
   it('bounds excerpts before send and log', async () => {
@@ -253,6 +282,18 @@ describe('resolveRequest', () => {
       expect(result.answer).toEqual({ type: 'choice', choice: 'opus' });
     },
   );
+
+  it.each([
+    ['a choice outside the declared criteria', QUESTIONS, 'us.anthropic.claude-sonnet-4-6-v1:0'],
+    ['a non-primitive choice', QUESTIONS, ['sonnet']],
+    ['a non-boolean noul answer', { done: { type: 'noul', criteria: { yes: 'done', no: 'not done' } } }, 'true'],
+    ['a non-numeric score', { size: { type: 'score', criteria: { low: 'l', high: 'h' } } }, '2'],
+  ])('logs %s as a non-comparable null heuristic', async (_label, questions, heuristic) => {
+    const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'opus' } } }) });
+    await resolveRequest({ point: 'model-routing', state: {}, questions, heuristic }, baseEnv(), fetchFn);
+    const line = JSON.parse(readFileSync(join(tmp, 'shadow.jsonl'), 'utf8').trim().split('\n').pop());
+    expect(line.heuristic).toBeNull();
+  });
 });
 
 describe('end-to-end child process', () => {
