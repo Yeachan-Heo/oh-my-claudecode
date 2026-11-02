@@ -7,6 +7,7 @@
  * `@anthropic-ai/claude-agent-sdk`.
  */
 
+import { childEnv } from "../../../utils/windows-search.js";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type {
   NodeExecutionContext,
@@ -157,7 +158,7 @@ export class AgentNodeExecutor implements NodeExecutor {
           options: {
             abortController,
             cwd: process.cwd(),
-            env: buildAgentEnv(idempotencyKey),
+            env: childEnv(buildAgentEnv(idempotencyKey)),
             tools: [...READ_ONLY_AGENT_TOOLS],
             permissionMode: "dontAsk",
             canUseTool,

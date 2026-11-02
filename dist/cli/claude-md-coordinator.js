@@ -1,8 +1,10 @@
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { isStrictChildPath } from '../installer/claude-md-transaction.js';
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig } from '../installer/claude-md-transaction.js';
+hardenWindowsExeSearch();
 export const CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
 const COMPILED_ENGINE_VERSION = typeof __OMC_COORDINATOR_ENGINE_VERSION__ === 'string' ? __OMC_COORDINATOR_ENGINE_VERSION__ : '';
 const COMPILED_SOURCE_SHA256 = typeof __OMC_COORDINATOR_SOURCE_SHA256__ === 'string' ? __OMC_COORDINATOR_SOURCE_SHA256__ : '';

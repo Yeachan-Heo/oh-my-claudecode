@@ -35,6 +35,33 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
+// src/utils/windows-search.ts
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+function childEnv(env2) {
+  const out = {};
+  for (const [key, value] of Object.entries(env2)) {
+    if (process.platform !== "win32" || !isVariable(key)) out[key] = value;
+  }
+  if (process.platform === "win32") out[VARIABLE] = "1";
+  return out;
+}
+var VARIABLE;
+var init_windows_search = __esm({
+  "src/utils/windows-search.ts"() {
+    "use strict";
+    VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+  }
+});
+
 // node_modules/commander/lib/error.js
 var require_error = __commonJS({
   "node_modules/commander/lib/error.js"(exports2) {
@@ -58619,7 +58646,7 @@ async function runSessionEndAction(context, _execute) {
     fs13.mkdirSync(runPath, { recursive: true });
     if (Date.now() >= context.deadlineAt) return { code: "deadline-before-arm", completed: false };
     const childInput = { directory: context.directory, sessionId: context.sessionId, jobId: context.job.jobId, actionName: context.actionName, attempt: context.action.attempts, ownerNonce: context.ownerNonce, runnerNonce: context.runnerNonce, runPath, deadlineAt: context.deadlineAt };
-    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url13.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: runnerEnvironment(context) });
+    const child = (0, import_child_process21.spawn)(process.execPath, [(0, import_url13.fileURLToPath)(importMetaUrl), RUNNER_ARG, JSON.stringify(childInput)], { detached: true, stdio: "ignore", windowsHide: true, env: childEnv(runnerEnvironment(context)) });
     const identity = child.pid ? getProcessStartIdentitySync(child.pid) : null;
     child.unref();
     let settled = false;
@@ -58733,6 +58760,7 @@ var fs13, path18, import_child_process21, import_url13, RUNNER_ARG, POST_KILL_SE
 var init_action_runner = __esm({
   "src/hooks/session-end/action-runner.ts"() {
     "use strict";
+    init_windows_search();
     fs13 = __toESM(require("fs"), 1);
     path18 = __toESM(require("path"), 1);
     import_child_process21 = require("child_process");
@@ -72687,11 +72715,11 @@ function buildWorkerStartCommand(config2) {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars).filter(([key]) => key.toUpperCase() !== "NODEFAULTCURRENTDIRECTORYINEXEPATH").map(([key, value]) => {
       assertSafeEnvKey(key);
       assertSafeCmdValue2(value);
       return `set "${key}=${escapeForCmdSet2(value)}"`;
-    }).join(" && ");
+    })].join(" && ");
     const launch = launchWords.map((part) => {
       assertSafeCmdValue2(part);
       return `"${escapeForCmdSet2(part)}"`;
@@ -84979,7 +85007,7 @@ function startReplyListener(_config) {
       detached: true,
       stdio: "ignore",
       cwd: process.cwd(),
-      env: createMinimalDaemonEnv()
+      env: childEnv(createMinimalDaemonEnv())
     });
     child.unref();
     const pid = child.pid;
@@ -85161,6 +85189,7 @@ var import_fs91, import_path114, import_url15, import_child_process28, import_cr
 var init_reply_listener = __esm({
   "src/notifications/reply-listener.ts"() {
     "use strict";
+    init_windows_search();
     import_fs91 = require("fs");
     import_path114 = require("path");
     import_url15 = require("url");
@@ -85984,7 +86013,7 @@ function workerEnvironment() {
 }
 function spawnSessionEndWorker(payload) {
   try {
-    const child = (0, import_child_process29.spawn)(process.execPath, [(0, import_url16.fileURLToPath)(importMetaUrl), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: "ignore", env: workerEnvironment(), windowsHide: true });
+    const child = (0, import_child_process29.spawn)(process.execPath, [(0, import_url16.fileURLToPath)(importMetaUrl), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: "ignore", env: childEnv(workerEnvironment()), windowsHide: true });
     child.unref();
     return true;
   } catch {
@@ -86161,6 +86190,7 @@ var import_child_process29, import_crypto34, import_url16, WORKER_ARG, MAX_WORKE
 var init_worker = __esm({
   "src/hooks/session-end/worker.ts"() {
     "use strict";
+    init_windows_search();
     import_child_process29 = require("child_process");
     import_crypto34 = require("crypto");
     import_url16 = require("url");
@@ -102619,6 +102649,7 @@ var import_fs146, import_promises33, import_path174, import_child_process50, imp
 var init_hud = __esm({
   "src/hud/index.ts"() {
     "use strict";
+    init_windows_search();
     init_stdin();
     init_transcript();
     init_state3();
@@ -102640,6 +102671,7 @@ var init_hud = __esm({
     import_url23 = require("url");
     init_worktree_paths();
     init_config_dir();
+    hardenWindowsExeSearch();
     SAME_WINDOW_TOLERANCE_MS = 60 * 1e3;
     lastSummarySpawnTimestamp = 0;
     summaryProcessPid = null;
@@ -102654,6 +102686,7 @@ __export(index_exports, {
   buildProgram: () => buildProgram
 });
 module.exports = __toCommonJS(index_exports);
+init_windows_search();
 
 // node_modules/commander/esm.mjs
 var import_index = __toESM(require_commander(), 1);
@@ -123129,6 +123162,7 @@ function shouldMonitorBlockedPanes(status) {
 init_tmux_detector();
 
 // src/features/rate-limit-wait/daemon.ts
+init_windows_search();
 var import_fs125 = require("fs");
 var import_path150 = require("path");
 var import_url20 = require("url");
@@ -123556,7 +123590,7 @@ function startDaemon(config2) {
   `;
   try {
     const daemonEnv = {
-      ...createMinimalDaemonEnv2(),
+      ...childEnv(createMinimalDaemonEnv2()),
       OMC_DAEMON_CONFIG_FILE: configPath
     };
     const child = (0, import_child_process39.spawn)("node", ["-e", daemonScript], {
@@ -130862,7 +130896,7 @@ function canonicalTmuxEnvironmentName(name) {
     return normalizedName;
   }
   if (/^(?:HTTP|HTTPS|ALL|NO)_PROXY$/.test(normalizedName)) return normalizedName;
-  if (normalizedName === "NODE_EXTRA_CA_CERTS" || normalizedName === "NODE_TLS_REJECT_UNAUTHORIZED" || normalizedName.startsWith("SSL_CERT_") || normalizedName.endsWith("_CA_BUNDLE")) return normalizedName;
+  if (normalizedName === "NODEFAULTCURRENTDIRECTORYINEXEPATH" || normalizedName === "NODE_EXTRA_CA_CERTS" || normalizedName === "NODE_TLS_REJECT_UNAUTHORIZED" || normalizedName.startsWith("SSL_CERT_") || normalizedName.endsWith("_CA_BUNDLE")) return normalizedName;
   return null;
 }
 function getEffectiveTmuxEnvironment() {
@@ -130887,9 +130921,10 @@ function buildTmuxClaudeLaunch(args, options) {
   try {
     const rawClaudeCmd = nativeWindows ? buildTmuxShellCommandWithEnv("claude", args, withoutSensitiveEnv(forwardedEnv)) : buildTmuxShellCommand("claude", args);
     const envPrefix = forwardedEnvNames.length === 0 ? "" : nativeWindows ? transport.prefix : `${buildEnvExportPrefix(forwardedEnvNames)}${transport.prefix}`;
+    const windowsSecurityPrefix = nativeWindows ? 'set "NoDefaultCurrentDirectoryInExePath=1" && ' : "";
     const missingBinaryGuard = nativeWindows ? "(where claude >nul 2>nul || (echo [omc] Error: claude CLI not found in PATH. 1>&2 & exit /b 1)) && " : "command -v claude >/dev/null 2>&1 || { echo '[omc] Error: claude CLI not found in PATH.' >&2; exit 127; }; ";
     const command = wrapWithLoginShell(
-      `${envPrefix}${options.preflight}${missingBinaryGuard}${options.useExec ? "exec " : ""}${rawClaudeCmd}`
+      `${envPrefix}${options.preflight}${windowsSecurityPrefix}${missingBinaryGuard}${options.useExec ? "exec " : ""}${rawClaudeCmd}`
     );
     return { command, cleanup: transport.cleanup };
   } catch (error2) {
@@ -131388,6 +131423,9 @@ var import_node_path34 = require("node:path");
 init_descriptor();
 init_types10();
 
+// src/graph/runtime/executors/agent.ts
+init_windows_search();
+
 // src/graph/runtime/executors/authority.ts
 var BASE_ENV_ALLOWLIST = [
   "PATH",
@@ -131567,7 +131605,7 @@ Goal: ${context.descriptor.goal}`;
           options: {
             abortController,
             cwd: process.cwd(),
-            env: buildAgentEnv(idempotencyKey),
+            env: childEnv(buildAgentEnv(idempotencyKey)),
             tools: [...READ_ONLY_AGENT_TOOLS],
             permissionMode: "dontAsk",
             canUseTool,
@@ -131645,6 +131683,7 @@ function failed(context, summary) {
 }
 
 // src/graph/runtime/executors/command.ts
+init_windows_search();
 var import_node_child_process14 = require("node:child_process");
 var STREAM_TAIL_CHARS = 2e3;
 var KILL_ESCALATION_MS = 5e3;
@@ -131692,7 +131731,7 @@ function runShellCommand(command, timeoutMs, stdoutTail, stderrTail, idempotency
         shell: true,
         windowsHide: true,
         cwd: process.cwd(),
-        env: buildCommandEnv(idempotencyKey),
+        env: childEnv(buildCommandEnv(idempotencyKey)),
         stdio: ["ignore", "pipe", "pipe"],
         // Detached => own process group => the NEGATIVE-pid group kill in
         // terminateProcessTree can reach grandchildren, not just the shell.
@@ -133206,6 +133245,7 @@ async function runHudWatchLoop(options) {
 }
 
 // src/cli/index.ts
+hardenWindowsExeSearch();
 var version2 = getRuntimePackageVersion();
 function applyPluginDirOption(rawPath) {
   if (!rawPath) return;

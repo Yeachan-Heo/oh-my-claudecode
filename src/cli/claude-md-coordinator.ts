@@ -1,8 +1,11 @@
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { isStrictChildPath } from '../installer/claude-md-transaction.js';
 import { executeClaudeMdTransaction, isClaudeMdEnabledInConfig, type ClaudeMdTransactionResult } from '../installer/claude-md-transaction.js';
+
+hardenWindowsExeSearch();
 
 export const CLAUDE_MD_COORDINATOR_SCHEMA_VERSION = 1;
 /** These literals are replaced in the packed coordinator. Defaults keep the ordinary TS module importable. */

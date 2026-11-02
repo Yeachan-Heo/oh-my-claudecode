@@ -11,6 +11,7 @@
  *
  * Reference: https://github.com/EvanOman/cc-wait
  */
+import { childEnv } from '../../utils/windows-search.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -456,7 +457,7 @@ export function startDaemon(config) {
         // Use node to run the daemon in background
         // Note: Using minimal env to prevent leaking sensitive credentials
         const daemonEnv = {
-            ...createMinimalDaemonEnv(),
+            ...childEnv(createMinimalDaemonEnv()),
             OMC_DAEMON_CONFIG_FILE: configPath,
         };
         const child = spawn('node', ['-e', daemonScript], {

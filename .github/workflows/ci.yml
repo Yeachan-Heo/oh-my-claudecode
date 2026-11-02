@@ -124,6 +124,7 @@ jobs:
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
+          src/utils/__tests__/windows-search.test.ts
 
       - name: Run Windows legacy state-lock tests
         run: >-

@@ -988,6 +988,7 @@ describe('pre-tool-use packaged artifacts', () => {
         const sourceStateRootHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'state-root.mjs');
         const sourceSkillEntitlementsPath = join(packageRoot, 'templates', 'hooks', 'lib', 'skill-entitlements.mjs');
         const sourceUtf8BomHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'utf8-bom.mjs');
+        const sourceWindowsSearchHelperPath = join(packageRoot, 'templates', 'hooks', 'lib', 'windows-search.mjs');
         const configDir = mkdtempSync(join(tmpdir(), 'pre-tool-installed-layout-'));
         const fakeHome = mkdtempSync(join(tmpdir(), 'pre-tool-installed-home-'));
         const installedHookDir = join(configDir, 'hooks');
@@ -1002,6 +1003,7 @@ describe('pre-tool-use packaged artifacts', () => {
         copyFileSync(sourceStateRootHelperPath, join(installedHookDir, 'lib', 'state-root.mjs'));
         copyFileSync(sourceSkillEntitlementsPath, join(installedHookDir, 'lib', 'skill-entitlements.mjs'));
         copyFileSync(sourceUtf8BomHelperPath, join(installedHookDir, 'lib', 'utf8-bom.mjs'));
+        copyFileSync(sourceWindowsSearchHelperPath, join(installedHookDir, 'lib', 'windows-search.mjs'));
         mkdirSync(installedSkillsDir, { recursive: true });
         writeFileSync(join(installedSkillsDir, 'SKILL.md'), '---\nname: ai-slop-cleaner\n---\nBundled skill.\n');
         mkdirSync(installedAgentsDir, { recursive: true });

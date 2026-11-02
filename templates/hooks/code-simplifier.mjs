@@ -12,6 +12,7 @@
  * Default: disabled (must explicitly opt in)
  */
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import {
   existsSync,
   readFileSync,
@@ -23,6 +24,8 @@ import { join, dirname } from 'path';
 import { homedir } from 'os';
 import { execFileSync } from 'child_process';
 import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

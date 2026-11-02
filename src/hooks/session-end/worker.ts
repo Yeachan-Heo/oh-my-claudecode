@@ -1,3 +1,4 @@
+import { childEnv } from '../../utils/windows-search.js';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -23,7 +24,7 @@ export function workerEnvironment(): NodeJS.ProcessEnv {
 }
 export function spawnSessionEndWorker(payload: SessionEndWorkerPayload): boolean {
   try {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: workerEnvironment(), windowsHide: true });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: childEnv(workerEnvironment()), windowsHide: true });
     child.unref();
     return true;
   } catch { return false; }
