@@ -5,14 +5,14 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "bfbdba915b421134c45a01a85160597089c850d0",
+    "head": "d90a0fabc64de888058987a96f1140db1e48149b",
     "sourceSha256": "83f0fff661b96dae256edf6cff43170331786cb7f7310a341a65f840521d14b9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "bfbdba915b421134c45a01a85160597089c850d0",
+  "head": "d90a0fabc64de888058987a96f1140db1e48149b",
   "sourceSha256": "83f0fff661b96dae256edf6cff43170331786cb7f7310a341a65f840521d14b9",
   "counts": {
     "public": {
@@ -32,9 +32,9 @@
       "total": 1452
     },
     "generated": {
-      "distFiles": 5466,
-      "bridgeFiles": 7,
-      "total": 5473
+      "distFiles": 5471,
+      "bridgeFiles": 8,
+      "total": 5479
     },
     "prompt": {
       "promptLikeFiles": 58
@@ -3909,11 +3909,16 @@
       "dist/hooks/prompt-prerequisites/index.js.map",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts",
       "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts.map",
+      "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+      "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
       "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.d.ts",
       "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.d.ts.map",
       "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.js",
       "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.js.map",
       "dist/hooks/ralph/feedback-baseline.d.ts",
+      "dist/hooks/ralph/feedback-baseline.d.ts.map",
+      "dist/hooks/ralph/feedback-baseline.js",
+      "dist/hooks/ralph/feedback-baseline.js.map",
       "dist/hooks/ralph/index.d.ts",
       "dist/hooks/ralph/index.d.ts.map",
       "dist/hooks/ralph/index.js",
@@ -6383,6 +6388,7 @@
     ],
     "bridgeFiles": [
       "bridge/claude-md-coordinator.cjs",
+      "bridge/cli.cjs",
       "bridge/gyoshu_bridge.py",
       "bridge/mcp-server.cjs",
       "bridge/run-mcp-server.sh",
@@ -7720,6 +7726,11 @@
         "id": "bridge/claude-md-coordinator.cjs",
         "kind": "generated-bridge",
         "path": "bridge/claude-md-coordinator.cjs"
+      },
+      {
+        "id": "bridge/cli.cjs",
+        "kind": "generated-bridge",
+        "path": "bridge/cli.cjs"
       },
       {
         "id": "bridge/gyoshu_bridge.py",
@@ -22847,6 +22858,16 @@
         "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.d.ts.map"
       },
       {
+        "id": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.js"
+      },
+      {
+        "id": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map"
+      },
+      {
         "id": "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/__tests__/jev-verdict-shadow.test.d.ts"
@@ -22870,6 +22891,21 @@
         "id": "dist/hooks/ralph/feedback-baseline.d.ts",
         "kind": "generated-dist",
         "path": "dist/hooks/ralph/feedback-baseline.d.ts"
+      },
+      {
+        "id": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/feedback-baseline.d.ts.map"
+      },
+      {
+        "id": "dist/hooks/ralph/feedback-baseline.js",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/feedback-baseline.js"
+      },
+      {
+        "id": "dist/hooks/ralph/feedback-baseline.js.map",
+        "kind": "generated-dist",
+        "path": "dist/hooks/ralph/feedback-baseline.js.map"
       },
       {
         "id": "dist/hooks/ralph/index.d.ts",
@@ -44767,11 +44803,6 @@
         "path": "unresolved:benchmarks/harsh-critic/fixtures/code/code-payment-handler.ts#87318efcf4e7d00d"
       },
       {
-        "id": "unresolved:bin/oh-my-claudecode.js#2c44a271a799d5fa",
-        "kind": "unresolved",
-        "path": "unresolved:bin/oh-my-claudecode.js#2c44a271a799d5fa"
-      },
-      {
         "id": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f",
         "kind": "unresolved",
         "path": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f"
@@ -45070,8 +45101,8 @@
       },
       {
         "from": "bin/oh-my-claudecode.js",
-        "to": "unresolved:bin/oh-my-claudecode.js#2c44a271a799d5fa",
-        "kind": "imports-unresolved"
+        "to": "bridge/cli.cjs",
+        "kind": "imports"
       },
       {
         "from": "commands/ask.md",
@@ -86255,12 +86286,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7565,
+      "nodeCount": 7570,
       "edgeCount": 8294,
-      "importEdgeCount": 6932,
+      "importEdgeCount": 6933,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "01b9a5529fcb9fc8ff7cd6f5e09ba0851a988d98d8af4f02d1fe843bb9a87229",
-  "manifestSha256": "42fa1041d2d2ebb39ac026920e3e8254ea076a09ea9bbb40bf9adccbf0be90a2"
+  "manifestSha256": "f47bb2679623e459922707270f6d3e7a273afe556a337805b23fefbdb98f5271"
 }
