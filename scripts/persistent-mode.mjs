@@ -53,11 +53,15 @@ const LEARNER_EXTRACTION_QUESTIONS = {
 };
 
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
+  // Map heuristic: !shouldBlock for the Noul question (questionSet 0)
+  // shouldBlock=true means prevent stopping (task NOT complete)
+  // shouldBlock=false means allow stopping (task IS complete)
+  const mappedHeuristic = !heuristic.shouldBlock;
   recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
-    heuristic,
+    heuristic: mappedHeuristic,
     permissionMode,
   });
 }
@@ -72,7 +76,8 @@ async function recordLearnerExtractionShadow(data) {
     const detectorPath = join(__dirname, "..", "dist", "hooks", "learner", "detector.js");
     if (!existsSync(detectorPath)) return;
     const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
-    const heuristic = detectExtractableMoment(assistantMessage);
+    const detectionResult = detectExtractableMoment(assistantMessage);
+    const heuristic = detectionResult.detected;
     recordJevShadow({
       point: "learner-extraction",
       state: { assistant_message: assistantMessage, user_message: null },

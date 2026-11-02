@@ -87,12 +87,16 @@ describe('applyLoopContinuationShadow', () => {
         const lines = await readLogLines();
         expect(lines).toHaveLength(2);
         const parsed = lines.map((line) => JSON.parse(line));
-        for (const entry of parsed) {
-            expect(entry.point).toBe('loop-continuation');
-            expect(entry.mode).toBe('shadow');
-            expect(entry.heuristic).toEqual(TWIN);
-        }
-        expect(parsed.map((entry) => entry.jev?.type).sort()).toEqual(['noul', 'score']);
+        // heuristics are extracted by mapHeuristic: noul=!shouldBlock, score=shouldBlock?1:0
+        // logs may be written in any order since both are async (non-blocking points)
+        const noulEntry = parsed.find((e) => e.jev?.type === 'noul');
+        const scoreEntry = parsed.find((e) => e.jev?.type === 'score');
+        expect(noulEntry.point).toBe('loop-continuation');
+        expect(noulEntry.mode).toBe('shadow');
+        expect(noulEntry.heuristic).toBe(false); // !shouldBlock
+        expect(scoreEntry.point).toBe('loop-continuation');
+        expect(scoreEntry.mode).toBe('shadow');
+        expect(scoreEntry.heuristic).toBe(1); // shouldBlock ? 1 : 0
     });
     it('without a key, zero fetch calls and the twin result is returned unchanged', async () => {
         const { fetchFn, calls } = stubFetch();
@@ -110,10 +114,15 @@ describe('applyLoopContinuationShadow', () => {
         expect(result).toEqual(TWIN);
         const lines = await readLogLines();
         expect(lines).toHaveLength(2);
-        for (const line of lines) {
-            const entry = JSON.parse(line);
+        const parsed = lines.map((line) => JSON.parse(line));
+        // heuristics are extracted by mapHeuristic: [!shouldBlock, shouldBlock ? 0 : 1]
+        // logs may be written in any order since both are async (non-blocking points)
+        // but degraded logs will have jev:null, so we can't use jev.type to distinguish
+        // Instead, check that we have the right heuristics regardless of order
+        expect(parsed).toHaveLength(2);
+        expect(new Set(parsed.map((e) => e.heuristic))).toEqual(new Set([false, 1]));
+        for (const entry of parsed) {
             expect(entry.mode).toBe('degraded');
-            expect(entry.heuristic).toEqual(TWIN);
             expect(entry.jev).toBeNull();
         }
     });

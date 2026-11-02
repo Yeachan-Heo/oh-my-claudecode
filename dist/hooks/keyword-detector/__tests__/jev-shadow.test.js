@@ -79,7 +79,7 @@ describe('keyword-detector shadow judgment points', () => {
         expect(byPoint.get('skill-trigger')).toMatchObject({
             mode: 'shadow',
             state: { prompt: PROMPT, source: 'user-prompt-submit' },
-            heuristic: ['ralph'],
+            heuristic: 'ralph',
             jev: { type: 'choice', choice: 'autopilot', confidence: 0.8 },
         });
         expect(byPoint.get('intent')).toMatchObject({

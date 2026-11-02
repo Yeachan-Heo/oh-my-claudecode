@@ -224,6 +224,8 @@ export function recordJudgment(pointName, call) {
         questions: typeof questions === 'function' ? questions() : questions,
         twin: call.twin,
         mapAnswer: call.mapAnswer,
+        mapHeuristic: call.mapHeuristic,
+        questionSet,
         blocking: point.blocking,
         fetchFn: call.fetchFn,
     });

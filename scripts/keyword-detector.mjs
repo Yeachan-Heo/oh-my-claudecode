@@ -2033,11 +2033,12 @@ async function main() {
 
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
+      const keywords = resolved.map((match) => match.name);
       const jevResult = recordJevShadow({
         point: 'skill-trigger',
         state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
         questions: SKILL_TRIGGER_QUESTIONS,
-        heuristic: resolved.map((match) => match.name),
+        heuristic: keywords.length > 0 ? keywords[0] : null,
         permissionMode,
       });
       
@@ -2068,11 +2069,12 @@ async function main() {
     if (isJevShadowOptedIn('task-size', process.env, permissionMode)) {
       try {
         const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
+        const classifyResult = classifyTaskSize(cleanPrompt);
         const jevResult = recordJevShadow({
           point: 'task-size',
           state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
           questions: TASK_SIZE_QUESTIONS,
-          heuristic: classifyTaskSize(cleanPrompt),
+          heuristic: classifyResult.size,
           permissionMode,
         });
         // In active mode, task-size Jev answer could be used here if needed
