@@ -65,6 +65,7 @@ export function recordIntentShadow(
   return recordJudgment<boolean>('intent', {
     state: { prompt, mode_name: 'intent' },
     twin: () => INTENT_SLASH_PATTERN.test(prompt),
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
       // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
       return answer.noul === true;

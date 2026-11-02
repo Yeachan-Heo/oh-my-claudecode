@@ -57,6 +57,7 @@ export function recordContextPruningShadow(args: {
       })),
     },
     twin: () => args.action,
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
       // Jev Score answer has { type: 'score', choice: 'fresh' | 'recent' | 'aging' | 'stale' }
       const choice = (answer.choice as string | undefined)?.toLowerCase();

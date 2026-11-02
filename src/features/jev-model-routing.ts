@@ -39,12 +39,10 @@ export function recordModelRoutingShadow(
     },
     twin: () => pinned,
     mapHeuristic: (result, questionSet) => {
-      // When forceInherit is enabled, the model is 'inherit' (a sentinel value).
-      // Logging this as a comparable string causes false disagreements with every
-      // Jev choice, even though the inherited model could match. Return null
-      // to make inherited model selections non-comparable.
-      if (result.model === 'inherit') return null;
-      return result.model;
+      // Only haiku, sonnet, opus are valid choices in MODEL_ROUTING_QUESTIONS.
+      // Return null for anything else (inherit, fable, provider-specific IDs).
+      const validChoices = ['haiku', 'sonnet', 'opus'];
+      return validChoices.includes(result.model) ? result.model : null;
     },
     fetchFn,
   });
