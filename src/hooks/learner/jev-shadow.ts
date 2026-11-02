@@ -34,6 +34,7 @@ export function recordLearnerExtractionShadow(
       source: 'learner-detection',
     },
     twin: () => detectExtractableMoment(assistantMessage, userMessage),
+    mapHeuristic: (result, questionSet) => result.detected,
     mapAnswer: (answer: JevAnswer) => {
       // Jev Noul answer has { type: 'noul', noul: boolean | undefined }
       return {
