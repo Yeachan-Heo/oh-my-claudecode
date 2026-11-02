@@ -272,6 +272,34 @@ process.exit(1);
     expect(ralphVerify({ session: 'sess-verify' }, dir)).toBe(1);
   });
 
+  it('reports a re-record delta and preserves the previous baseline', () => {
+    writeFailer('FAIL old');
+    writePackage('node failer.js');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-rerecord', json: true, writeBaseline: true }, dir)).toBe(0);
+      const first = JSON.parse(String(logSpy.mock.calls[0][0])) as { previousPath: string | null; added: number; removed: number };
+      expect(first.previousPath).toBeNull();
+      expect(first.added).toBe(0);
+      expect(first.removed).toBe(0);
+
+      writeFailer('FAIL new');
+      logSpy.mockClear();
+      expect(ralphVerify({ session: 'sess-rerecord', writeBaseline: true }, dir)).toBe(0);
+      expect(String(logSpy.mock.calls[0][0])).toContain('baseline replaced: +1 signature, -1 signature (previous saved at ');
+      expect(String(logSpy.mock.calls[0][0])).toContain('feedback-baseline.history');
+
+      logSpy.mockClear();
+      expect(ralphVerify({ session: 'sess-rerecord', json: true, writeBaseline: true }, dir)).toBe(0);
+      const second = JSON.parse(String(logSpy.mock.calls[0][0])) as { previousPath: string; added: number; removed: number };
+      expect(second.previousPath).toContain('feedback-baseline.history');
+      expect(second.added).toBe(0);
+      expect(second.removed).toBe(0);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('reports new test failures even when suite output includes ENOENT', () => {
     writePackage('node failer.js');
     writeFailer('Error: ENOENT: no such file or directory: missing.json\nFAIL a.test.js > existing failure');

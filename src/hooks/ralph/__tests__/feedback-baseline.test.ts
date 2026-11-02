@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   baselinePath,
   diffAgainstBaseline,
+  FEEDBACK_BASELINE_HISTORY_DIRNAME,
+  MAX_FEEDBACK_BASELINE_HISTORY,
   readBaseline,
+  recordBaseline,
   signatureLines,
   writeBaseline,
   type CommandBaseline,
@@ -98,6 +101,71 @@ describe('baseline IO', () => {
       expect(writeBaseline(path, { test: { signatures: ['FAIL a'] } })).toBe(true);
       expect(readBaseline(path)?.commands.test?.signatures).toEqual(['FAIL a']);
       expect(readBaseline(join(dir, 'nope.json'))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a replaced baseline in history and the newest document at the live path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      const first = recordBaseline(path, { test: { signatures: ['FAIL old'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      expect(first.previousPath).toBeUndefined();
+      expect(first.added).toBe(0);
+      expect(first.removed).toBe(0);
+
+      const second = recordBaseline(path, { test: { signatures: ['FAIL old'] } }, new Date('2026-10-01T00:00:00.000Z'));
+      expect(second.written).toBe(true);
+      expect(second.previousPath).toBeDefined();
+      expect(existsSync(second.previousPath as string)).toBe(true);
+      const history = readdirSync(join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME));
+      expect(history).toHaveLength(1);
+      expect(history[0]).toContain('2026-09-30T00-00-00.000Z-1.json');
+
+      // The archived document is the first one; the live path holds the second.
+      expect(readBaseline(second.previousPath as string)).toEqual({
+        version: 1,
+        recordedAt: '2026-09-30T00:00:00.000Z',
+        commands: { test: { signatures: ['FAIL old'] } },
+      });
+      expect(readBaseline(path)?.recordedAt).toBe('2026-10-01T00:00:00.000Z');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports signatures added and removed by a re-record', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      recordBaseline(path, { test: { signatures: ['FAIL a', 'FAIL b'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const result = recordBaseline(path, { test: { signatures: ['FAIL b', 'FAIL c', 'FAIL d'] } }, new Date('2026-10-01T00:00:00.000Z'));
+      expect(result.added).toBe(2);
+      expect(result.removed).toBe(1);
+      expect(result.previousPath).toBeDefined();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('caps the history at the configured maximum, pruning the oldest entries', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      const total = MAX_FEEDBACK_BASELINE_HISTORY + 5;
+      for (let index = 0; index < total; index += 1) {
+        recordBaseline(
+          path,
+          { test: { signatures: [`FAIL ${index}`] } },
+          new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
+        );
+      }
+      const history = readdirSync(join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME)).sort();
+      expect(history).toHaveLength(MAX_FEEDBACK_BASELINE_HISTORY);
+      // The first four records were pruned; the oldest survivor is record 4.
+      expect(history[0]).toContain('2026-01-01T00-00-04.000Z');
+      expect(readBaseline(path)?.commands.test?.signatures).toEqual([`FAIL ${total - 1}`]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -14,9 +14,13 @@
  */
 
 import * as fs from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 export const FEEDBACK_BASELINE_FILENAME = 'feedback-baseline.json';
+/** Sibling directory that keeps replaced baselines recoverable. */
+export const FEEDBACK_BASELINE_HISTORY_DIRNAME = 'feedback-baseline.history';
+/** Bounded history: older re-records are pruned so the state directory cannot grow without limit. */
+export const MAX_FEEDBACK_BASELINE_HISTORY = 20;
 /** Per-command signature cap: a pathological runaway output must not become a giant baseline. */
 export const MAX_SIGNATURES_PER_COMMAND = 200;
 
@@ -143,12 +147,76 @@ export function readBaseline(path: string): FeedbackBaseline | null {
   }
 }
 
-export function writeBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): boolean {
+/**
+ * Copy the live baseline into its sibling history directory before it is
+ * replaced, returning the history path (or null when there is nothing to
+ * archive or the copy failed). The file name uses the replaced document's own
+ * `recordedAt` (sanitized for cross-platform paths) plus a counter, so history
+ * sorts chronologically.
+ */
+export function archiveBaseline(path: string, now: Date = new Date()): string | null {
+  try {
+    if (!fs.existsSync(path)) return null;
+    const dir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = (readBaseline(path)?.recordedAt || now.toISOString()).replace(/[^0-9A-Za-z.-]+/g, '-');
+    let counter = 1;
+    let target = join(dir, `${stamp}-${counter}.json`);
+    while (fs.existsSync(target)) target = join(dir, `${stamp}-${++counter}.json`);
+    fs.copyFileSync(path, target);
+    pruneBaselineHistory(dir);
+    return target;
+  } catch {
+    return null;
+  }
+}
+
+function pruneBaselineHistory(dir: string): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
+  } catch {
+    return;
+  }
+  for (const name of entries.slice(0, Math.max(0, entries.length - MAX_FEEDBACK_BASELINE_HISTORY))) {
+    try {
+      fs.rmSync(join(dir, name), { force: true });
+    } catch {
+      // A file we cannot prune must not block the re-record.
+    }
+  }
+}
+
+export interface BaselineWriteResult {
+  written: boolean;
+  /** History path preserving the replaced baseline, when one existed. */
+  previousPath?: string;
+  /** Signatures present now but absent from the replaced baseline. */
+  added: number;
+  /** Signatures in the replaced baseline that are gone now. */
+  removed: number;
+}
+
+/**
+ * Write a baseline, archiving any existing document first. The archive must
+ * succeed before the live file is replaced: losing history silently is the bug
+ * this guards against, so an unarchivable previous baseline fails the write.
+ */
+export function recordBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): BaselineWriteResult {
+  const previous = readBaseline(path);
+  const previousPath = archiveBaseline(path, now);
+  if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
   try {
     fs.mkdirSync(join(path, '..'), { recursive: true });
     fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
-    return true;
   } catch {
-    return false;
+    return { written: false, added: 0, removed: 0 };
   }
+  const diff = previousPath && previous ? diffAgainstBaseline(previous, commands) : { newSignatures: [], resolvedSignatures: [] };
+  return { written: true, ...(previousPath ? { previousPath } : {}), added: diff.newSignatures.length, removed: diff.resolvedSignatures.length };
+}
+
+/** Backward-compatible wrapper: the boolean says only whether the write succeeded. */
+export function writeBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): boolean {
+  return recordBaseline(path, commands, now).written;
 }
