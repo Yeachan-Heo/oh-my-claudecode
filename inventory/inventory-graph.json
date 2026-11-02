@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "327a7ec9f141638cc03374a0ebde0f1be67f59e3",
-    "sourceSha256": "e9791d781019db8725be14e32874d912883038a85af615506c2c7d3617945f27",
+    "head": "c6b1951d61356a85c73a4784a856f830a6181f64",
+    "sourceSha256": "d8f55fbc100853390633f11808fd8b7a43f5d6fff109b1064e81ce7ee5139821",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "327a7ec9f141638cc03374a0ebde0f1be67f59e3",
-  "sourceSha256": "e9791d781019db8725be14e32874d912883038a85af615506c2c7d3617945f27",
+  "head": "c6b1951d61356a85c73a4784a856f830a6181f64",
+  "sourceSha256": "d8f55fbc100853390633f11808fd8b7a43f5d6fff109b1064e81ce7ee5139821",
   "counts": {
     "public": {
       "skills": 48,
@@ -32,9 +32,9 @@
       "total": 1451
     },
     "generated": {
-      "distFiles": 5469,
+      "distFiles": 5471,
       "bridgeFiles": 8,
-      "total": 5477
+      "total": 5479
     },
     "prompt": {
       "promptLikeFiles": 58
@@ -6354,6 +6354,8 @@
       "dist/utils/user-skill-compat.d.ts.map",
       "dist/utils/user-skill-compat.js",
       "dist/utils/user-skill-compat.js.map",
+      "dist/utils/windows-search.d.ts",
+      "dist/utils/windows-search.js",
       "dist/workflow/__tests__/alias-resolver.test.d.ts",
       "dist/workflow/__tests__/alias-resolver.test.d.ts.map",
       "dist/workflow/__tests__/alias-resolver.test.js",
@@ -35083,6 +35085,16 @@
         "id": "dist/utils/user-skill-compat.js.map",
         "kind": "generated-dist",
         "path": "dist/utils/user-skill-compat.js.map"
+      },
+      {
+        "id": "dist/utils/windows-search.d.ts",
+        "kind": "generated-dist",
+        "path": "dist/utils/windows-search.d.ts"
+      },
+      {
+        "id": "dist/utils/windows-search.js",
+        "kind": "generated-dist",
+        "path": "dist/utils/windows-search.js"
       },
       {
         "id": "dist/workflow/__tests__/alias-resolver.test.d.ts",
@@ -86223,12 +86235,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7566,
+      "nodeCount": 7568,
       "edgeCount": 8286,
       "importEdgeCount": 6928,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "be27aeeb4f377c9511bee33941088d74f24fa7bd49be66e8323754ae3da4349c",
-  "manifestSha256": "6b985beb2f0016d9d9f74e7d37dfb93fe290dbba1d6daf370ef3cd44d6ce17a1"
+  "manifestSha256": "37ff8274eb848ed35c1f404bca5a76552c8dee604930b4d0300a034558878e59"
 }
