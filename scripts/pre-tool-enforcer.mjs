@@ -578,7 +578,40 @@ const MODEL_ROUTING_QUESTIONS = {
       opus: 'Complex architecture and deep analysis',
     },
   },
+  effort: {
+    type: 'score',
+    instructions: 'How much reasoning effort does this delegated task need?',
+    criteria: {
+      trivial: 'Trivial: the answer or action is obvious, no thinking needed',
+      some: 'Some thought: a few straightforward steps',
+      careful: 'Careful multi-step reasoning: several dependent steps or things to check',
+      deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
+    },
+  },
 };
+
+// Subagent reasoning effort chosen by the model-routing "effort" score (0-3):
+// < 0.75 low, < 1.5 medium, otherwise high. The mapping never goes above
+// high; OMC_JEV_MAX_EFFORT can only lower it. When the point is active and
+// Jev returns no usable effort score, an explicit effort above the cap is
+// lowered to the cap. The default cap is high: xhigh and max spend several
+// times the tokens of high, so a router must not raise a subagent there
+// unless the user opts in.
+const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const DEFAULT_MAX_EFFORT = 'high';
+
+function resolveMaxEffort(env = process.env) {
+  const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
+  return EFFORT_LEVELS.includes(raw) ? raw : DEFAULT_MAX_EFFORT;
+}
+
+function capEffort(effort, maxEffort) {
+  return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
+}
+
+function effortFromScore(score, maxEffort) {
+  return capEffort(score < 0.75 ? 'low' : score < 1.5 ? 'medium' : 'high', maxEffort);
+}
 
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
   recordJevShadow({
@@ -594,7 +627,7 @@ const MODEL_ROUTING_METADATA_MAX_CHARS = 500;
 
 function boundModelRoutingInput(toolInput) {
   const bounded = {};
-  for (const key of ['description', 'prompt', 'subagent_type', 'model', 'resume']) {
+  for (const key of ['description', 'prompt', 'subagent_type', 'model', 'effort', 'resume']) {
     if (typeof toolInput[key] === 'string') {
       bounded[key] = toolInput[key].slice(0, MODEL_ROUTING_METADATA_MAX_CHARS);
     }
@@ -633,13 +666,29 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     permissionMode,
   });
   
-  // In active mode with valid answer, update the toolInput model to Jev's choice
-  if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
-    const jevChoice = jevResult.answer.choice?.toLowerCase();
-    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice)) {
-      // Jev says use this tier; update the tool input
+  // In active mode, Jev's answers replace the model and effort in the call,
+  // explicit values included. Answers are read by question name: the API
+  // does not guarantee their order. A missing or malformed answer leaves that
+  // field as it was.
+  const answers = jevResult && jevResult.mode === 'active' ? jevResult.answers : undefined;
+  if (answers && typeof answers === 'object') {
+    const ensureUpdated = () => {
       if (!updatedToolInput) updatedToolInput = { ...toolInput };
-      updatedToolInput.model = jevChoice;
+      return updatedToolInput;
+    };
+    const tierChoice = answers['model-tier']?.choice;
+    const jevChoice = typeof tierChoice === 'string' ? tierChoice.toLowerCase() : undefined;
+    if (jevChoice && ['haiku', 'sonnet', 'opus'].includes(jevChoice)) {
+      ensureUpdated().model = jevChoice;
+    }
+
+    const maxEffort = resolveMaxEffort();
+    const effortScore = answers.effort?.score;
+    const currentEffort = (updatedToolInput || toolInput).effort;
+    if (typeof effortScore === 'number' && Number.isFinite(effortScore)) {
+      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
+    } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
+      ensureUpdated().effort = capEffort(currentEffort, maxEffort);
     }
   }
   
