@@ -124485,10 +124485,6 @@ var FEEDBACK_BASELINE_FILENAME = "feedback-baseline.json";
 var MAX_SIGNATURES_PER_COMMAND = 200;
 var ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 var VOLATILE_PATTERNS = [
-  // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
-  // Anchored to the "in <duration>" suffix so clock-shaped assertion values
-  // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
-  /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
   /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
   /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,
@@ -124506,8 +124502,6 @@ function signatureLines(output) {
     line = line.replace(/\s+/g, " ").trim();
     if (!line || line.length > 500) continue;
     if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
-    if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
-    if (/^\d+ passed(?:, \d+ (?:warnings?|skipped|xfailed|xpassed|deselected))* in <v>(?: <v>)*(?: \([^)]*\))?$/.test(line)) continue;
     if (/^#\s*(?:pass|tests?|skipped|cancelled|todo)\s+\d+\s*$/.test(line)) continue;
     if (/^#\s*fail\s+0\s*$/.test(line)) continue;
     if (/^#\s*<v>\s*(<v>\s*)*$/.test(line)) continue;

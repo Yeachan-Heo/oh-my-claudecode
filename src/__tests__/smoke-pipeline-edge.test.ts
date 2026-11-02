@@ -62,12 +62,10 @@ import { truncateLineToMaxWidth } from '../hud/render.js';
 
 describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
   let testDir: string;
-  const originalOmcStateDir = process.env.OMC_STATE_DIR;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `edge-pipe-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(testDir, { recursive: true });
-    process.env.OMC_STATE_DIR = testDir;
     // Pipeline state uses getOmcRoot(worktreeRoot) — mock returns <dir>/.omc for any arg
     mockGetOmcRoot.mockImplementation((dir?: string) => {
       const base = dir || testDir;
@@ -78,11 +76,6 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
   });
 
   afterEach(() => {
-    if (originalOmcStateDir !== undefined) {
-      process.env.OMC_STATE_DIR = originalOmcStateDir;
-    } else {
-      delete process.env.OMC_STATE_DIR;
-    }
     mockGetOmcRoot.mockReset();
     if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
   });
@@ -259,22 +252,15 @@ describe('EDGE: Pipeline Orchestrator (issue #1132)', () => {
 
 describe('EDGE: Shared Memory (issue #1137)', () => {
   let testDir: string;
-  const originalOmcStateDir = process.env.OMC_STATE_DIR;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `edge-shmem-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     const omcDir = join(testDir, '.omc');
     mkdirSync(omcDir, { recursive: true });
-    process.env.OMC_STATE_DIR = testDir;
     mockGetOmcRoot.mockReturnValue(omcDir);
   });
 
   afterEach(() => {
-    if (originalOmcStateDir !== undefined) {
-      process.env.OMC_STATE_DIR = originalOmcStateDir;
-    } else {
-      delete process.env.OMC_STATE_DIR;
-    }
     mockGetOmcRoot.mockReset();
     if (existsSync(testDir)) rmSync(testDir, { recursive: true, force: true });
   });

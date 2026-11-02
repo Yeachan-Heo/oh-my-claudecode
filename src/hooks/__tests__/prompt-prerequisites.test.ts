@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   buildPromptPrerequisiteDenyReason,
   buildPromptPrerequisiteReminder,
@@ -91,27 +91,10 @@ describe('prompt prerequisite parser', () => {
 });
 
 describe('prompt prerequisite progress tracking', () => {
-  const originalOmcStateDir = process.env.OMC_STATE_DIR;
-  let tempDir: string;
-
-  beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'prompt-prereq-'));
-    process.env.OMC_STATE_DIR = tempDir;
-  });
-
-  afterEach(() => {
-    if (originalOmcStateDir !== undefined) {
-      process.env.OMC_STATE_DIR = originalOmcStateDir;
-    } else {
-      delete process.env.OMC_STATE_DIR;
-    }
-    if (tempDir) {
-      rmSync(tempDir, { recursive: true, force: true });
-    }
-  });
-
   it('tracks prerequisite tool calls and file reads until complete', () => {
-    writeModeState('prompt-prerequisites', {
+    const tempDir = mkdtempSync(join(tmpdir(), 'prompt-prereq-'));
+    try {
+      writeModeState('prompt-prerequisites', {
         active: true,
         session_id: 'sess',
         execution_keywords: ['ralph'],
@@ -123,16 +106,19 @@ describe('prompt prerequisite progress tracking', () => {
         updated_at: new Date().toISOString(),
       }, tempDir, 'sess');
 
-    const afterNotepad = recordPromptPrerequisiteProgress(tempDir, 'sess', 'mcp__omx_notepad__notepad_read', {});
-    expect(afterNotepad?.toolSatisfied).toBe('notepad_read');
-    expect(afterNotepad?.isComplete).toBe(false);
+      const afterNotepad = recordPromptPrerequisiteProgress(tempDir, 'sess', 'mcp__omx_notepad__notepad_read', {});
+      expect(afterNotepad?.toolSatisfied).toBe('notepad_read');
+      expect(afterNotepad?.isComplete).toBe(false);
 
-    const afterRead = recordPromptPrerequisiteProgress(tempDir, 'sess', 'Read', { file_path: 'src/hooks/bridge.ts' });
-    expect(afterRead?.fileSatisfied).toBe('src/hooks/bridge.ts');
-    expect(afterRead?.isComplete).toBe(false);
+      const afterRead = recordPromptPrerequisiteProgress(tempDir, 'sess', 'Read', { file_path: 'src/hooks/bridge.ts' });
+      expect(afterRead?.fileSatisfied).toBe('src/hooks/bridge.ts');
+      expect(afterRead?.isComplete).toBe(false);
 
-    const afterMemory = recordPromptPrerequisiteProgress(tempDir, 'sess', 'project_memory_read', {});
-    expect(afterMemory?.toolSatisfied).toBe('project_memory_read');
-    expect(afterMemory?.isComplete).toBe(true);
+      const afterMemory = recordPromptPrerequisiteProgress(tempDir, 'sess', 'project_memory_read', {});
+      expect(afterMemory?.toolSatisfied).toBe('project_memory_read');
+      expect(afterMemory?.isComplete).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 });

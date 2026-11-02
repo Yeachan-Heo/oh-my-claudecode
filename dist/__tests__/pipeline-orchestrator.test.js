@@ -15,19 +15,11 @@ import { resolvePipelineConfig, getDeprecationWarning, buildPipelineTracking, ge
 import { DEFAULT_PIPELINE_CONFIG, STAGE_ORDER, DEPRECATED_MODE_ALIASES, } from '../hooks/autopilot/pipeline-types.js';
 describe('Pipeline Orchestrator', () => {
     let testDir;
-    const originalOmcStateDir = process.env.OMC_STATE_DIR;
     beforeEach(() => {
         testDir = join(tmpdir(), `pipeline-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
         mkdirSync(testDir, { recursive: true });
-        process.env.OMC_STATE_DIR = testDir;
     });
     afterEach(() => {
-        if (originalOmcStateDir !== undefined) {
-            process.env.OMC_STATE_DIR = originalOmcStateDir;
-        }
-        else {
-            delete process.env.OMC_STATE_DIR;
-        }
         if (existsSync(testDir)) {
             rmSync(testDir, { recursive: true, force: true });
         }
