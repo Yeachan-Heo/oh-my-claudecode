@@ -8,7 +8,12 @@
  * request to stdin and reads one JSON result from stdout.
  *
  * Request:  { point, state, questions, heuristic, permissionMode? }
- * Result:   { mode, answer, confidence, durationMs }
+ * Result:   { mode, answer, answers, confidence, durationMs }
+ *
+ * `answer` is the answer to the request's first question (the first answer
+ * in server order when that name is missing). `answers` maps every question
+ * name to its answer; multi-question points must read it by name, because the
+ * API does not guarantee the order of the answers object.
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
@@ -199,7 +204,7 @@ export async function resolveRequest(
   const startedAt = Date.now();
   const mode = parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
-    return { mode, answer: null, confidence: undefined, durationMs: 0 };
+    return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
   const bound = boundExcerpts(
     { state: request.state, questions: request.questions },
@@ -215,6 +220,7 @@ export async function resolveRequest(
     }, timeoutMs);
   });
   let jevAnswer = null;
+  let jevAnswers = null;
   let confidence;
   let entryMode = mode;
   try {
@@ -237,7 +243,12 @@ export async function resolveRequest(
     if (!response.ok)
       throw new Error("jev request failed: HTTP " + response.status);
     const body = validateJevResponse(await response.json());
-    jevAnswer = Object.values(body.answers)[0];
+    const firstQuestion = Object.keys(request.questions ?? {})[0];
+    jevAnswer =
+      firstQuestion !== undefined && Object.hasOwn(body.answers, firstQuestion)
+        ? body.answers[firstQuestion]
+        : Object.values(body.answers)[0];
+    jevAnswers = body.answers;
     confidence = jevAnswer.confidence;
   } catch (error) {
     entryMode = "degraded";
@@ -259,6 +270,7 @@ export async function resolveRequest(
       state: bound.state,
       heuristic: request.heuristic ?? null,
       jev: entryMode === "degraded" ? null : jevAnswer,
+      answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
       durationMs,
     },
@@ -267,6 +279,7 @@ export async function resolveRequest(
   return {
     mode: entryMode,
     answer: entryMode === "degraded" ? null : jevAnswer,
+    answers: entryMode === "degraded" ? null : jevAnswers,
     confidence,
     durationMs,
   };
