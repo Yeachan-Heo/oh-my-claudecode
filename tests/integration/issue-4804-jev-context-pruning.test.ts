@@ -251,6 +251,36 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     expect(output.hookSpecificOutput).toBeUndefined();
   });
 
+  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with aging answer (95%) should emit warning", async () => {
+    stalenesAnswer = "aging";
+    const input = postToolInput("read", 95);
+    const result = await runScript(
+      "post-tool-verifier.mjs",
+      input,
+      { ...env, OMC_JEV: "context-pruning:active" },
+      cwd,
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(requests.length).toBeGreaterThanOrEqual(1);
+
+    const request = requests.find(
+      (entry) => "staleness" in entry.body.questions,
+    );
+    expect(request).toBeDefined();
+    assertWireContract(request!, "staleness", "score");
+
+    // Verify the request includes the context percentage
+    expect(request!.body.state).toHaveProperty("context_percent", 95);
+
+    // Aging answer at 95% should trigger warning action
+    // Maps to 'warn' which produces a warning message (not critical)
+    const output = JSON.parse(result.stdout);
+    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
+    // With 'aging' answer, warning should be suggested (not critical)
+    expect(output.hookSpecificOutput.additionalContext).toContain("WARNING");
+    expect(output.hookSpecificOutput.additionalContext).not.toContain("CRITICAL");
+  });
+
   it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with stale answer (80%) should trigger compaction", async () => {
     stalenesAnswer = "stale";
     const input = postToolInput("read", 80);

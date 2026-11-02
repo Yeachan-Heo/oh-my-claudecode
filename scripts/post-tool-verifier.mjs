@@ -576,7 +576,8 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   
   // In active mode, use Jev's action instead of heuristic
   if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
-    const choice = (jevResult.answer.choice || '').toLowerCase();
+    const rawChoice = jevResult.answer.choice;
+    const choice = typeof rawChoice === 'string' ? rawChoice.toLowerCase() : '';
     // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
     if (choice === 'fresh' || choice === 'recent') {
       action = 'none';
