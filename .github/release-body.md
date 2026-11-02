@@ -1,8 +1,8 @@
-# oh-my-claudecode v5.7.30: Fix Windows executable search in project folder
+# oh-my-claudecode v5.7.31: Windows executable search fix and security improvements
 
 ## Release Notes
 
-This release fixes a security issue where omc processes on Windows could inadvertently run executables planted in the project folder.
+This release includes a critical security fix for Windows executable search behavior and incorporates improvements from the unpublished v5.7.30 release. See v5.7.30 release notes below for additional context.
 
 ### Bug Fixes
 
@@ -19,7 +19,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.30
+npm install -g oh-my-claude-sisyphus@5.7.31
 ```
 
 **Claude Code plugin:**
@@ -28,7 +28,7 @@ npm install -g oh-my-claude-sisyphus@5.7.30
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.29...v5.7.30
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.29...v5.7.31
 
 ## Contributors
 

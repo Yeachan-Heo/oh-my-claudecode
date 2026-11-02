@@ -1,3 +1,35 @@
+# oh-my-claudecode v5.7.31: Windows executable search fix and security improvements
+
+## Release Notes
+
+This release includes a critical security fix for Windows executable search behavior and incorporates improvements from the unpublished v5.7.30 release. The v5.7.30 tag was created but not published to npm or GitHub releases due to a CHANGELOG validation issue. All v5.7.30 fixes are included in this release.
+
+### Bug Fixes
+
+- **fix: stop omc processes on Windows from running executables planted in the project folder** (#4768)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 test improvements** | **0 chore**
+
+---
+
+# oh-my-claudecode v5.7.30: Fix Windows executable search in project folder (unpublished)
+
+## Release Notes
+
+This release fixes a security issue where omc processes on Windows could inadvertently run executables planted in the project folder. **Note:** v5.7.30 was not published to npm or GitHub releases; all fixes are included in v5.7.31.
+
+### Bug Fixes
+
+- **fix: stop omc processes on Windows from running executables planted in the project folder** (#4768)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 test improvements** | **0 chore**
+
+---
+
 # oh-my-claudecode v5.7.29: Windows provider resolution and state-lock contention fixes
 
 ## Release Notes
