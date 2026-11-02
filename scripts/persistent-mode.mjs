@@ -53,10 +53,9 @@ const LEARNER_EXTRACTION_QUESTIONS = {
 };
 
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
-  // Map heuristic: !shouldBlock for the Noul question (questionSet 0)
-  // shouldBlock=true means prevent stopping (task NOT complete)
-  // shouldBlock=false means allow stopping (task IS complete)
-  const mappedHeuristic = !heuristic.shouldBlock;
+  // Noul question ("Is the task complete?"): blocking the stop is an explicit
+  // "not complete"; a release carries no completion signal, so it is non-comparable.
+  const mappedHeuristic = heuristic.shouldBlock ? false : null;
   recordJevShadow({
     point: "loop-continuation",
     state,

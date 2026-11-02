@@ -235,4 +235,41 @@ describe('applyLoopContinuationShadow', () => {
     // Autoresearch safety release should be non-comparable, not "task complete"
     expect(noulEntry.heuristic).toBeNull();
   });
+
+  it.each(['ralph', 'todo-continuation', 'autopilot', 'skill-active'] as const)(
+    'never infers task completion from a %s release',
+    async (mode) => {
+      process.env.TYPESAFE_API_KEY = 'test-key-123';
+      process.env.OMC_JEV = 'loop-continuation';
+      const { fetchFn } = stubFetch();
+      const released: PersistentModeResult = {
+        shouldBlock: false,
+        message: `[${mode}] diagnostic release`,
+        mode,
+        metadata: { iteration: 1 },
+      };
+
+      await applyLoopContinuationShadow({ result: released, sessionId: 'sess-1', fetchFn });
+
+      const parsed = (await readLogLines()).map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+      expect(parsed.find((e) => e.jev?.type === 'noul')!.heuristic).toBeNull();
+    },
+  );
+
+  it('logs a blocked stop as an explicit not-complete judgment', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'loop-continuation';
+    const { fetchFn } = stubFetch();
+    const blocked: PersistentModeResult = {
+      shouldBlock: true,
+      message: '[AUTOPILOT] keep going',
+      mode: 'autopilot',
+      metadata: { iteration: 2 },
+    };
+
+    await applyLoopContinuationShadow({ result: blocked, sessionId: 'sess-1', fetchFn });
+
+    const parsed = (await readLogLines()).map((line) => JSON.parse(line) as { jev: { type: string } | null; heuristic: boolean | null });
+    expect(parsed.find((e) => e.jev?.type === 'noul')!.heuristic).toBe(false);
+  });
 });

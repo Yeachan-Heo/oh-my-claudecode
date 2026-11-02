@@ -82,18 +82,12 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
       // actual progress metrics, return null to make this comparison non-comparable.
       return null;
     }
-    // Question set 0 (Noul, default): Is task complete?
-    // shouldBlock=true means prevent stopping (task NOT complete)
-    // shouldBlock=false USUALLY means allow stopping (task IS complete),
-    // BUT when a persistent mode allows stopping due to pipeline failure/cancellation
-    // (safety release), it may return shouldBlock=false without task completion.
-    // This applies to: team (failure/cancellation), ralplan (circuit breaker/agent still
-    // running), autoresearch (failure/cancellation/runtime exhausted). In these cases,
-    // return null to make the comparison non-comparable (not actual task completion).
-    if (!r.shouldBlock && ['team', 'ralplan', 'autoresearch'].includes(r.mode)) {
-      return null; // Safety release or permission to stop, not task completion
-    }
-    return !r.shouldBlock;
+    // Question set 0 (Noul): "Is the task complete?"
+    // Blocking the stop is an explicit "not complete" judgment. Releasing the stop
+    // is not evidence of completion in any mode: failures, cancellations, circuit
+    // breakers, diagnostics and exhausted runtimes all release without finishing.
+    // The result carries no explicit completion signal, so a release is non-comparable.
+    return r.shouldBlock ? false : null;
   };
 
   const results = await Promise.all([
