@@ -588,9 +588,14 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
     // Otherwise keep the heuristic action
   }
 
-  const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
+  // Build message based on the computed action
+  if (action === 'none') {
+    return '';
+  }
+
   const now = Date.now();
   const sessionId = data.session_id || data.sessionId || 'unknown';
+  const severity = action === 'compact' ? 'critical' : 'warning';
 
   if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
     return '';
