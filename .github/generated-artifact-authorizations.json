@@ -4,6 +4,26 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4780,
+      "targetRef": "main",
+      "mergeBaseSha": "b3c485e1052beb69c12591a43dbeb9b1ff81513b",
+      "headSha": "61486d20a4df9a7046bf631cf97ecb8396809ff3",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-02T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 1,
+        "sha256": "95c2ec1cffb755f85762984e974c3f2614c1b81efc93fa4998fdeb4fd311fbf1"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "4621a80e89edabbfc975edbf704c3cc79d87e83d",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4775,
       "targetRef": "main",
       "mergeBaseSha": "f3b363df4199d057547c8bd0f3ec3b4e2ff95e66",
