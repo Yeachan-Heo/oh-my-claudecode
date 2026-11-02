@@ -1,4 +1,9 @@
-/** Real post-tool-verifier.mjs active Jev coverage for issue #4804. */
+/**
+ * Real post-tool-verifier.mjs active Jev coverage for issue #4804.
+ *
+ * The mock returns the API's real score shape: `score`, `confidence`,
+ * `legend`, `probabilities`, and no `choice`.
+ */
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -9,6 +14,18 @@ import { fileURLToPath } from "node:url";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_KEY = "test-key-123";
+
+/** A staleness answer as the API sends it: 0 = fresh ... 3 = stale, no `choice`. */
+function scoreAnswer(score: unknown, extra: Record<string, unknown> = {}) {
+  return {
+    type: "score",
+    score,
+    confidence: 0.7,
+    legend: { "0": "Fresh — keep", "1": "Recent", "2": "Aging", "3": "Stale — prune candidate" },
+    probabilities: { "0": 0.2, "1": 0.4, "2": 0.3, "3": 0.1 },
+    ...extra,
+  };
+}
 
 type WireRequest = {
   method: string | undefined;
@@ -76,17 +93,15 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
   let server: Server;
   let requests: WireRequest[];
   let status: number;
-  let stalenesAnswer: string;
+  let answer: Record<string, unknown>;
   let responseDelayMs: number;
-  let malformedChoice: unknown = null;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-context-pruning-"));
     requests = [];
     status = 200;
-    stalenesAnswer = "fresh";
+    answer = scoreAnswer(0);
     responseDelayMs = 0;
-    malformedChoice = null;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -105,18 +120,6 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
         console.log("[jev context-pruning request]", entry);
 
         const question = Object.keys(body.questions)[0];
-        const questionDef = body.questions[question] as Record<string, unknown>;
-        const isScoreQuestion = questionDef.type === "score";
-
-        // Build the appropriate answer based on question type
-        let answer;
-        const choiceValue = malformedChoice !== null ? malformedChoice : stalenesAnswer;
-        if (isScoreQuestion) {
-          // For score questions, return the selected staleness level
-          answer = { type: "score", choice: choiceValue, confidence: 0.95 };
-        } else {
-          answer = { type: "choice", choice: choiceValue, confidence: 0.95 };
-        }
 
         const sendResponse = () => {
           if (response.destroyed) return;
@@ -225,120 +228,89 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     expect(output.hookSpecificOutput.additionalContext).toContain("WARNING");
   });
 
-  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with fresh answer (95%) should NOT compact", async () => {
-    stalenesAnswer = "fresh";
-    const input = postToolInput("read", 95);
+  /** Run the hook in active mode and return its additionalContext ("" when none). */
+  async function activeContext(contextPercent: number, sessionSuffix = "") {
     const result = await runScript(
       "post-tool-verifier.mjs",
-      input,
+      postToolInput("read", contextPercent, sessionSuffix),
       { ...env, OMC_JEV: "context-pruning:active" },
       cwd,
     );
     expect(result.exitCode, result.stderr).toBe(0);
-    expect(requests.length).toBeGreaterThanOrEqual(1);
-
-    const request = requests.find(
-      (entry) => "staleness" in entry.body.questions,
-    );
-    expect(request).toBeDefined();
-    assertWireContract(request!, "staleness", "score");
-
-    // Verify the request state includes context percentage and tool info
-    expect(request!.body.state).toHaveProperty("context_percent", 95);
-    expect(request!.body.state).toHaveProperty("action");
-
-    // Fresh answer at 95% should suppress the message
-    // because Jev decides the answer is 'fresh' (keep context)
     const output = JSON.parse(result.stdout);
-    // With 'fresh' answer, no compaction message should be generated
-    expect(output.hookSpecificOutput).toBeUndefined();
-  });
+    return (output.hookSpecificOutput?.additionalContext ?? "") as string;
+  }
 
-  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with aging answer (95%) should emit warning", async () => {
-    stalenesAnswer = "aging";
-    const input = postToolInput("read", 95);
-    const result = await runScript(
-      "post-tool-verifier.mjs",
-      input,
-      { ...env, OMC_JEV: "context-pruning:active" },
-      cwd,
-    );
-    expect(result.exitCode, result.stderr).toBe(0);
-    expect(requests.length).toBeGreaterThanOrEqual(1);
-
+  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active sends the staleness score question", async () => {
+    answer = scoreAnswer(1.53);
+    await activeContext(80);
     const request = requests.find(
       (entry) => "staleness" in entry.body.questions,
     );
     expect(request).toBeDefined();
     assertWireContract(request!, "staleness", "score");
-
-    // Verify the request includes the context percentage
-    expect(request!.body.state).toHaveProperty("context_percent", 95);
-
-    // Aging answer at 95% should trigger warning action
-    // Maps to 'warn' which produces a warning message (not critical)
-    const output = JSON.parse(result.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
-    // With 'aging' answer, warning should be suggested (not critical)
-    expect(output.hookSpecificOutput.additionalContext).toContain("WARNING");
-    expect(output.hookSpecificOutput.additionalContext).not.toContain("CRITICAL");
-  });
-
-  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with stale answer (80%) should trigger compaction", async () => {
-    stalenesAnswer = "stale";
-    const input = postToolInput("read", 80);
-    const result = await runScript(
-      "post-tool-verifier.mjs",
-      input,
-      { ...env, OMC_JEV: "context-pruning:active" },
-      cwd,
-    );
-    expect(result.exitCode, result.stderr).toBe(0);
-    expect(requests.length).toBeGreaterThanOrEqual(1);
-
-    const request = requests.find(
-      (entry) => "staleness" in entry.body.questions,
-    );
-    expect(request).toBeDefined();
-    assertWireContract(request!, "staleness", "score");
-
-    // Verify the request includes the context percentage
     expect(request!.body.state).toHaveProperty("context_percent", 80);
-
-    // Stale answer at 80% should trigger compaction action
-    // Heuristic would give 'warn', but Jev says 'stale' which becomes 'compact'
-    const output = JSON.parse(result.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
-    // With 'stale' answer, compaction should be suggested
-    expect(output.hookSpecificOutput.additionalContext).toContain("CRITICAL");
+    expect(request!.body.state).toHaveProperty("action", "warn");
   });
 
-  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with malformed choice (non-string) should emit CRITICAL", async () => {
-    malformedChoice = 42; // Non-string choice
-    const input = postToolInput("read", 95);
-    const result = await runScript(
-      "post-tool-verifier.mjs",
-      input,
-      { ...env, OMC_JEV: "context-pruning:active" },
-      cwd,
-    );
-    expect(result.exitCode, result.stderr).toBe(0);
-    expect(requests.length).toBeGreaterThanOrEqual(1);
+  // Below the critical threshold (80%, heuristic: warn) the rounded score decides.
+  it.each([
+    { score: 0, expected: "no message" },
+    { score: 0.49, expected: "no message" },
+    { score: 0.5, expected: "no message" },
+    { score: 1.49, expected: "no message" },
+    { score: 1.5, expected: "WARNING" },
+    { score: 1.53, expected: "WARNING" },
+    { score: 2.49, expected: "WARNING" },
+    { score: 2.5, expected: "CRITICAL" },
+    { score: 3, expected: "CRITICAL" },
+  ])("post-tool-verifier.mjs: active score $score at 80 percent gives $expected", async ({ score, expected }) => {
+    answer = scoreAnswer(score);
+    const context = await activeContext(80);
+    if (expected === "no message") {
+      expect(context).toBe("");
+    } else {
+      expect(context).toContain(expected);
+      if (expected === "WARNING") expect(context).not.toContain("CRITICAL");
+    }
+  });
 
-    const request = requests.find(
-      (entry) => "staleness" in entry.body.questions,
-    );
-    expect(request).toBeDefined();
-    assertWireContract(request!, "staleness", "score");
+  // At or above the critical threshold Jev never lowers the level. This
+  // replaces the earlier expectation that "aging" at 95% drops CRITICAL.
+  it.each([
+    { percent: 92, score: 1, label: "recent" },
+    { percent: 92, score: 2, label: "aging" },
+    { percent: 95, score: 0, label: "fresh" },
+    { percent: 95, score: 1, label: "recent" },
+    { percent: 95, score: 2, label: "aging" },
+  ])("post-tool-verifier.mjs: active at $percent percent keeps CRITICAL when Jev scores $score ($label)", async ({ percent, score }) => {
+    answer = scoreAnswer(score);
+    expect(await activeContext(percent)).toContain("[OMC CRITICAL]");
+  });
 
-    // Verify the request includes the context percentage
-    expect(request!.body.state).toHaveProperty("context_percent", 95);
+  it.each([
+    ["score -1", scoreAnswer(-1)],
+    ["score 3.4", scoreAnswer(3.4)],
+    ["score 99", scoreAnswer(99)],
+    ["score NaN as text", scoreAnswer("NaN")],
+    ["a choice-type answer carrying a score", { type: "choice", score: 0, confidence: 0.9 }],
+    ["a non-string choice", { type: "score", choice: 42, confidence: 0.9 }],
+  ])("post-tool-verifier.mjs: active ignores %s and keeps the heuristic", async (_label, malformed) => {
+    answer = malformed;
+    // Heuristic at 80% is warn: WARNING, not suppressed and not raised.
+    const context = await activeContext(80);
+    expect(context).toContain("WARNING");
+    expect(context).not.toContain("CRITICAL");
+  });
 
-    // Malformed choice (non-string) should be treated as invalid,
-    // falling back to heuristic action. At 95%, heuristic is 'compact' (CRITICAL).
-    const output = JSON.parse(result.stdout);
-    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
-    expect(output.hookSpecificOutput.additionalContext).toContain("CRITICAL");
+  it("post-tool-verifier.mjs: a string choice label, when present, still maps", async () => {
+    answer = { type: "score", choice: "STALE", confidence: 0.9 };
+    expect(await activeContext(80)).toContain("CRITICAL");
+  });
+
+  it("post-tool-verifier.mjs: an unknown choice string does not hide a valid score", async () => {
+    answer = scoreAnswer(3, { choice: "x" });
+    expect(await activeContext(80)).toContain("CRITICAL");
   });
 
   it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active gracefully degrades when Jev unavailable", async () => {
@@ -393,7 +365,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
   });
 
   it("post-tool-verifier.mjs: OMC_JEV=all:active includes context-pruning point", async () => {
-    stalenesAnswer = "stale";
+    answer = scoreAnswer(3);
     const input = postToolInput("read", 75);
     const result = await runScript(
       "post-tool-verifier.mjs",
@@ -411,8 +383,8 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     expect(request).toBeDefined();
     assertWireContract(request!, "staleness", "score");
 
+    // Score 3 (stale) at 75% raises the heuristic warn to CRITICAL.
     const output = JSON.parse(result.stdout);
-    expect(output.hookSpecificOutput).toBeDefined();
-    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
+    expect(output.hookSpecificOutput.additionalContext).toContain("[OMC CRITICAL]");
   });
 });

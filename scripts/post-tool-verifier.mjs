@@ -44,6 +44,24 @@ const CONTEXT_PRUNING_QUESTIONS = {
   },
 };
 
+const STALENESS_LABELS = Object.keys(CONTEXT_PRUNING_QUESTIONS.staleness.criteria);
+
+/**
+ * Staleness label from a Jev answer. A score answer carries only `score`
+ * (0 = fresh ... 3 = stale), so it is rounded to the nearest label; a score
+ * outside 0..3, a non-number, or another answer type yields no label. A
+ * string `choice` that names one of the labels (case-insensitively) wins.
+ */
+function stalenessLabelOf(answer) {
+  const choice = typeof answer?.choice === 'string' ? answer.choice.toLowerCase() : undefined;
+  if (choice !== undefined && STALENESS_LABELS.includes(choice)) return choice;
+  if (answer?.type !== 'score') return undefined;
+  const { score } = answer;
+  if (typeof score !== 'number' || !Number.isFinite(score)) return undefined;
+  if (score < 0 || score > STALENESS_LABELS.length - 1) return undefined;
+  return STALENESS_LABELS[Math.round(score)];
+}
+
 function readPositiveIntegerEnv(name, fallback) {
   const raw = process.env[name];
   if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return fallback;
@@ -574,16 +592,18 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
     permissionMode: data.permission_mode,
   });
   
-  // In active mode, use Jev's action instead of heuristic
-  if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
-    const rawChoice = jevResult.answer.choice;
-    const choice = typeof rawChoice === 'string' ? rawChoice.toLowerCase() : '';
+  // In active mode, use Jev's action instead of heuristic, but only below the
+  // critical threshold: at or above it the hook always asks for /compact.
+  // The Jev call above still runs there so the shadow log keeps the
+  // comparison; it is the rare case and is bounded by OMC_JEV_TIMEOUT_MS.
+  if (jevResult && jevResult.mode === 'active' && jevResult.answer && percentUsed < criticalThreshold) {
+    const label = stalenessLabelOf(jevResult.answer);
     // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
-    if (choice === 'fresh' || choice === 'recent') {
+    if (label === 'fresh' || label === 'recent') {
       action = 'none';
-    } else if (choice === 'aging') {
+    } else if (label === 'aging') {
       action = 'warn';
-    } else if (choice === 'stale') {
+    } else if (label === 'stale') {
       action = 'compact';
     }
     // Otherwise keep the heuristic action
