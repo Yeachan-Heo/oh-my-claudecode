@@ -1,27 +1,16 @@
-# oh-my-claudecode v5.7.29: Windows provider resolution and state-lock contention fixes
+# oh-my-claudecode v5.7.30: Fix Windows executable search in project folder
 
 ## Release Notes
 
-This release resolves Windows-specific provider resolution issues for both npm-installed and planted-cwd binaries, fixes state-lock contention from early probe attempts, and improves SessionEnd action claim and manifest handling. Note: v5.7.28 was cut from the wrong branch (main instead of dev) and contained only a version bump with no functionality changes; it was not published to npm or GitHub releases. This release incorporates all intended fixes from the 5.7.27→5.7.28→5.7.29 sequence.
+This release fixes a security issue where omc processes on Windows could inadvertently run executables planted in the project folder.
 
 ### Bug Fixes
 
-- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4726 follow-up, #4741)
-- **fix: prevent Windows where command from searching cwd** (#4728) (#4734)
-- **fix: state-lock owner probe outside BEGIN IMMEDIATE to avoid contention** (#4727) (#4736)
-- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
-- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
-- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
-- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
-- **chore: remove src modules no runtime entry point reaches**
-
-### Test Improvements
-
-- **test(team): fix the #4726 Windows planted-git test and expose the libuv cwd-search gap** (#4746) (#4739)
+- **fix: stop omc processes on Windows from running executables planted in the project folder** (#4768)
 
 ### Stats
 
-- **10 PRs merged** | **0 new features** | **8 bug fixes** | **1 test improvement** | **1 chore**
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 test improvements** | **0 chore**
 
 ### Install / Update
 
@@ -30,7 +19,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.29
+npm install -g oh-my-claude-sisyphus@5.7.30
 ```
 
 **Claude Code plugin:**
@@ -39,10 +28,10 @@ npm install -g oh-my-claude-sisyphus@5.7.29
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.27...v5.7.29
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.29...v5.7.30
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @Yeachan-Heo
+@RobinNorberg @Yeachan-Heo

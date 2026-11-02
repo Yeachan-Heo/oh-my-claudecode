@@ -11404,11 +11404,11 @@ function buildWorkerStartCommand(config) {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars).filter(([key]) => key.toUpperCase() !== "NODEFAULTCURRENTDIRECTORYINEXEPATH").map(([key, value]) => {
       assertSafeEnvKey(key);
       assertSafeCmdValue2(value);
       return `set "${key}=${escapeForCmdSet(value)}"`;
-    }).join(" && ");
+    })].join(" && ");
     const launch = launchWords.map((part) => {
       assertSafeCmdValue2(part);
       return `"${escapeForCmdSet(part)}"`;
@@ -22519,6 +22519,21 @@ __export(runtime_cli_exports, {
   writeResultArtifact: () => writeResultArtifact
 });
 module.exports = __toCommonJS(runtime_cli_exports);
+
+// src/utils/windows-search.ts
+var VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+
+// src/team/runtime-cli.ts
 var import_node_crypto10 = require("node:crypto");
 var import_fs29 = require("fs");
 var import_promises19 = require("fs/promises");
@@ -23102,6 +23117,7 @@ init_team_owner_epoch();
 init_team_instance();
 init_tmux_session();
 init_tmux_session();
+hardenWindowsExeSearch();
 function normalizeRuntimeInstanceId(value) {
   return isValidTeamInstanceId(value) ? value.toLowerCase() : null;
 }
