@@ -331,8 +331,8 @@ describe('baseline IO', () => {
 
   it('covers archive-failure path: fails when history directory is unwritable (issue #4798)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    const path = baselinePath(dir, 'sess-1');
     try {
-      const path = baselinePath(dir, 'sess-1');
       recordBaseline(path, { test: { signatures: ['FAIL original'] } }, new Date('2026-09-30T00:00:00.000Z'));
       const before = readFileSync(path);
       const historyDir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
@@ -361,8 +361,8 @@ describe('baseline IO', () => {
 
   it('cleans up the archived file if the live write fails, so retries do not retain stale references (issue #4798)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    const path = baselinePath(dir, 'sess-1');
     try {
-      const path = baselinePath(dir, 'sess-1');
       recordBaseline(path, { test: { signatures: ['FAIL first'] } }, new Date('2026-09-30T00:00:00.000Z'));
       const historyDir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
       // Get the count of archived files before the failed write.
