@@ -4,6 +4,44 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
+      "pullNumber": 4780,
+      "targetRef": "main",
+      "mergeBaseSha": "b3c485e1052beb69c12591a43dbeb9b1ff81513b",
+      "headSha": "63140b23278bc30625a81e163178741ef2502fc4",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2026-12-02T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 4,
+        "sha256": "0801fc56b11ce34608d93e1382f92650671ab2a209a94d118254d32f8399c048"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": ".github/CLAUDE.md",
+          "sha": "4aa34b4d0362187e4f6dd387cf807a367b07a9fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "CLAUDE.md",
+          "sha": "4aa34b4d0362187e4f6dd387cf807a367b07a9fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "docs/CLAUDE.md",
+          "sha": "4aa34b4d0362187e4f6dd387cf807a367b07a9fd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "4621a80e89edabbfc975edbf704c3cc79d87e83d",
+          "previousFilename": null
+        }
+      ]
+    },
+    {
       "pullNumber": 4775,
       "targetRef": "main",
       "mergeBaseSha": "f3b363df4199d057547c8bd0f3ec3b4e2ff95e66",
