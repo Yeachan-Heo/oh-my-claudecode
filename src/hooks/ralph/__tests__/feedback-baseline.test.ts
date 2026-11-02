@@ -24,6 +24,53 @@ describe('signatureLines', () => {
     expect(first.some((line) => line.includes('123ms'))).toBe(false);
   });
 
+  it('normalizes parenthesized pytest clock durations so identical runs fingerprint identically', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes pytest clock durations with hours and fractional seconds', () => {
+    expect(signatureLines('1 failed, 200 passed in 194.32s (1:02:45)')).toEqual(['1 failed, 200 passed in <v> <v>']);
+    expect(signatureLines('1 failed, 200 passed in 194.32s (0:03:14.123)')).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes two-component m:ss clock durations (third component is optional)', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes clock durations behind integer-second prefixes (no decimal part)', () => {
+    const first = signatureLines('1 failed, 200 passed in 194s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('keeps the pytest summary clock normalized only in its duration context', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 194.32s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('does not erase clock-like assertion values: a changed failure reason stays distinct', () => {
+    const first = signatureLines("AssertionError: assert '(12:15)' == '(12:16)'");
+    const second = signatureLines("AssertionError: assert '(12:17)' == '(12:18)'");
+    expect(first).toEqual(["AssertionError: assert '(12:15)' == '(12:16)'"]);
+    expect(second).toEqual(["AssertionError: assert '(12:17)' == '(12:18)'"]);
+    expect(first).not.toEqual(second);
+  });
+
+  it('keeps failure text on a line that also carries a duration', () => {
+    const lines = signatureLines('FAIL tests/test_x.py::test_foo - AssertionError in 194.32s (0:03:14)');
+    expect(lines).toEqual(['FAIL tests/test_x.py::test_foo - AssertionError in <v> <v>']);
+    expect(lines[0]).toContain('AssertionError');
+  });
+
   it('keeps failure and summary lines but drops pure progress chatter', () => {
     const lines = signatureLines('Running tests...\n✓ ok\nFAIL a > b\nTest Files  1 failed | 2 passed\n');
     expect(lines).toContain('FAIL a > b');
