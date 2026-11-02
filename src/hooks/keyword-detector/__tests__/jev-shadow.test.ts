@@ -145,4 +145,19 @@ describe('keyword-detector shadow judgment points', () => {
     expect(intentResult.answer).toBe(true);
     expect(intentResult.source).toBe('twin');
   });
+
+  it('empty keyword list maps to none choice instead of null', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'skill-trigger';
+    const promptWithoutKeywords = 'just some random text without keywords';
+    const trigger = stubFetch({ choice: 'autopilot' });
+
+    const result = await recordSkillTriggerShadow(promptWithoutKeywords, trigger.fetchFn);
+    expect(result.source).toBe('twin');
+    expect(result.answer).toEqual([]);
+
+    const lines = await waitForLogLines(1);
+    const entry = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(entry.heuristic).toBe('none');
+  });
 });

@@ -74,16 +74,23 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
     }
   };
   
-  const mapHeuristicForLoopContinuation = (r: PersistentModeResult, questionSet?: number) => {
+  const mapHeuristicForLoopContinuation = (r: PersistentModeResult, questionSet?: number): boolean | number | null => {
     if (questionSet === 1) {
-      // Score question (iteration progress): 0-1 range
-      // shouldBlock=true means prevent stopping (continuing, making progress)
-      // shouldBlock=false means allow stopping (done, no progress)
-      return r.shouldBlock ? 1 : 0;
+      // Score question (iteration progress): shouldBlock does not reliably indicate
+      // actual progress made. Continuing (shouldBlock=true) does not mean we made
+      // progress; stopping (shouldBlock=false) does not mean zero progress. Without
+      // actual progress metrics, return null to make this comparison non-comparable.
+      return null;
     }
     // Question set 0 (Noul, default): Is task complete?
     // shouldBlock=true means prevent stopping (task NOT complete)
-    // shouldBlock=false means allow stopping (task IS complete)
+    // shouldBlock=false USUALLY means allow stopping (task IS complete),
+    // BUT when mode='team' and shouldBlock=false, it may indicate pipeline
+    // failure/cancellation (safety release), not task completion. In that case,
+    // return null to make the comparison non-comparable.
+    if (r.mode === 'team' && !r.shouldBlock) {
+      return null; // Safety release, not task completion
+    }
     return !r.shouldBlock;
   };
 

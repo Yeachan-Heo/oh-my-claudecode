@@ -2038,7 +2038,7 @@ async function main() {
         point: 'skill-trigger',
         state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
         questions: SKILL_TRIGGER_QUESTIONS,
-        heuristic: keywords.length > 0 ? keywords[0] : null,
+        heuristic: keywords.length > 0 ? keywords[0] : 'none',
         permissionMode,
       });
       
