@@ -256,8 +256,9 @@ export interface RecordJudgmentCall<T> {
    * When not provided, the full twin result is logged as the heuristic.
    * For judgment points with non-primitive twins, this should return the comparable primitive
    * (boolean for noul, string for choice, number for score). */
-  mapHeuristic?: (twinResult: T) => unknown;
-  /** Index into the point's question sets (loop-continuation's Score call uses 1). */
+  mapHeuristic?: (twinResult: T, questionSet?: number) => unknown;
+  /** Index into the point's question sets (loop-continuation's Score call uses 1).
+   * Provided to mapHeuristic to allow conditional extraction of the right field. */
   questionSet?: number;
   /** Test hook: injected transport. */
   fetchFn?: typeof fetch;
