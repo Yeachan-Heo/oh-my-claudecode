@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "0b863a19eb8e595200fa1f153dc8f516f3881037",
-    "sourceSha256": "dd4126184050a6cdc48872497719d650b06a55352eafb58abfebf2afd0aca2f8",
+    "head": "804a7238c031aa8bc794ad0caf389fa26c354390",
+    "sourceSha256": "4a0436870fdc8c6b3fcc643e383435ed0047b3574eecf00bfdf1d54310892e1b",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "0b863a19eb8e595200fa1f153dc8f516f3881037",
-  "sourceSha256": "dd4126184050a6cdc48872497719d650b06a55352eafb58abfebf2afd0aca2f8",
+  "head": "804a7238c031aa8bc794ad0caf389fa26c354390",
+  "sourceSha256": "4a0436870fdc8c6b3fcc643e383435ed0047b3574eecf00bfdf1d54310892e1b",
   "counts": {
     "public": {
       "skills": 48,
@@ -27,9 +27,9 @@
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
-      "templateHooks": 26,
+      "templateHooks": 25,
       "srcFiles": 1427,
-      "total": 1453
+      "total": 1452
     },
     "generated": {
       "distFiles": 5471,
@@ -703,7 +703,6 @@
       "templates/hooks/lib/bounded-git-timeout.mjs",
       "templates/hooks/lib/cache-occupancy.mjs",
       "templates/hooks/lib/config-dir.mjs",
-      "templates/hooks/lib/jev-shadow.mjs",
       "templates/hooks/lib/model-routing-override-message.mjs",
       "templates/hooks/lib/precompact-publisher.mjs",
       "templates/hooks/lib/precompact-restore.mjs",
@@ -44373,11 +44372,6 @@
         "path": "templates/hooks/lib/config-dir.mjs"
       },
       {
-        "id": "templates/hooks/lib/jev-shadow.mjs",
-        "kind": "template-hook",
-        "path": "templates/hooks/lib/jev-shadow.mjs"
-      },
-      {
         "id": "templates/hooks/lib/model-routing-override-message.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/model-routing-override-message.mjs"
@@ -44821,11 +44815,6 @@
         "id": "unresolved:benchmarks/harsh-critic/fixtures/code/code-payment-handler.ts#87318efcf4e7d00d",
         "kind": "unresolved",
         "path": "unresolved:benchmarks/harsh-critic/fixtures/code/code-payment-handler.ts#87318efcf4e7d00d"
-      },
-      {
-        "id": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f",
-        "kind": "unresolved",
-        "path": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f"
       },
       {
         "id": "vitest.config.ts",
@@ -84560,46 +84549,6 @@
         "kind": "projects"
       },
       {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "hooks/hooks.json",
-        "kind": "projects"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "src/hooks/bridge.ts",
-        "kind": "projects"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f",
-        "kind": "imports-unresolved"
-      },
-      {
         "from": "templates/hooks/lib/model-routing-override-message.mjs",
         "to": "hooks/hooks.json",
         "kind": "projects"
@@ -86436,12 +86385,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7574,
-      "edgeCount": 8320,
-      "importEdgeCount": 6957,
+      "nodeCount": 7572,
+      "edgeCount": 8312,
+      "importEdgeCount": 6952,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "f9a8da353aecccd52cd57762a3ef0deaa6b7649435cfbb94b7fd1f5022b14589",
-  "manifestSha256": "35b7f1de3cf2d7a2139d9016b5719e521eb094e6c8603d1441c022169cfdd9ce"
+  "inventorySha256": "4846a89f3370b3a9e00cbe559c3801f2c0d2ee56aa9bcbc5694328d0aa810f65",
+  "manifestSha256": "38aa959e348bd9f580c09f788bce129053ff0063c092570d4de2660e3c6a40a8"
 }
