@@ -575,8 +575,17 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   });
   
   // In active mode, use Jev's action instead of heuristic
-  if (jevResult && jevResult.mode === 'active' && jevResult.source === 'jev') {
-    action = jevResult.answer || action;
+  if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
+    const choice = (jevResult.answer.choice || '').toLowerCase();
+    // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
+    if (choice === 'fresh' || choice === 'recent') {
+      action = 'none';
+    } else if (choice === 'aging') {
+      action = 'warn';
+    } else if (choice === 'stale') {
+      action = 'compact';
+    }
+    // Otherwise keep the heuristic action
   }
 
   const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
