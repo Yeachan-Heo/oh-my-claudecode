@@ -412,3 +412,55 @@ describe('pytest progress lines (issue #4794)', () => {
     expect(lines).toContain(`${'.'.repeat(200)}F [ 36%]`);
   });
 });
+
+describe('vitest summary clock', () => {
+  const assertion = "AssertionError: expected 'a' to be 'b' // Object.is equality";
+  // vitest's run output (colors off). "Start at" is the wall-clock time the run started, so it differs on every run.
+  function vitestRun(startAt: string, failure: string | null = assertion): string {
+    const lines = failure ? [' FAIL  src/math.test.js > fails', failure, ''] : [];
+    lines.push(
+      failure ? ' Test Files  1 failed | 1 passed (2)' : ' Test Files  1 passed (1)',
+      failure ? '      Tests  1 failed | 2 passed (3)' : '      Tests  2 passed (2)',
+      `   Start at  ${startAt}`,
+      '   Duration  3.18s (transform 90ms, setup 0ms, import 119ms, tests 5ms, environment 0ms)',
+    );
+    return lines.join('\n');
+  }
+
+  it('fingerprints an unchanged green rerun identically', () => {
+    const first = signatureLines(vitestRun('00:09:56', null));
+    expect(first).toEqual(signatureLines(vitestRun('00:55:29', null)));
+    expect(first.some((line) => line.includes('Start at'))).toBe(false);
+  });
+
+  it('reports no new failure for an unchanged red rerun and keeps its failure lines', () => {
+    const first = signatureLines(vitestRun('00:09:56'));
+    const second = signatureLines(vitestRun('00:55:29'));
+    expect(first).toEqual(second);
+    expect(first.some((line) => line.includes('Start at'))).toBe(false);
+    expect(first).toContain('FAIL src/math.test.js > fails');
+    expect(first).toContain(assertion);
+    const diff = diffAgainstBaseline(baseline({ 'npm run test': { signatures: first } }), { 'npm run test': { signatures: second } });
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('keeps a Start at clock that is part of an assertion message', () => {
+    const line = "AssertionError: expected 'Start at 10:00:00' to be 'Start at 10:00:01' // Object.is equality";
+    expect(signatureLines(line)).toEqual([line]);
+  });
+
+  it('keeps a Start at line that is not exactly the summary clock', () => {
+    // vitest's diff lines for a multi-line string mismatch, a clock followed by more text, and a non-clock value.
+    const lines = ['- Start at 10:00:01', '+ Start at 10:00:00', 'Start at 10:00:00 UTC', 'Start at noon'];
+    expect(signatureLines(lines.join('\n'))).toEqual([...lines].sort());
+  });
+
+  it('still reports a changed assertion as new', () => {
+    const changed = "AssertionError: expected 'a' to be 'c' // Object.is equality";
+    const diff = diffAgainstBaseline(
+      baseline({ 'npm run test': { signatures: signatureLines(vitestRun('00:09:56')) } }),
+      { 'npm run test': { signatures: signatureLines(vitestRun('00:55:29', changed)) } },
+    );
+    expect(diff.newSignatures).toEqual([`npm run test: ${changed}`]);
+  });
+});
