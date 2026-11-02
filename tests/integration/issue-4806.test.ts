@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { KEYWORD_PRIORITY } from '../../src/hooks/keyword-detector/index.js';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -168,6 +169,12 @@ describe('issue #4806: plugin hook heuristic format', () => {
     // After the fix, skill-trigger heuristics for ultragoal, ai-slop-cleaner, and wiki
     // should be valid choices in SKILL_TRIGGER_QUESTIONS.criteria, making them comparable.
     // Before the fix, these would have comparable=0 and nonComparable=3.
+    
+    // Assert the production criteria actually contains these keywords (regression test for issue #4806)
+    expect(KEYWORD_PRIORITY).toContain('ultragoal');
+    expect(KEYWORD_PRIORITY).toContain('ai-slop-cleaner');
+    expect(KEYWORD_PRIORITY).toContain('wiki');
+    
     const shadowLog = [
       {
         ts: '2026-11-02T11:00:00.000Z',
