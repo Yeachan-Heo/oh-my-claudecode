@@ -319,6 +319,9 @@ describe('stale-run reporter hook', () => {
     expect(awaitingBlock).toContain('team');
     expect(awaitingBlock).not.toContain('ralph');
     expect(awaitingBlock).toContain(waitingSetAt);
+    // A parked run must not inherit the crashed group's death or reclaim wording.
+    expect(awaitingBlock).not.toContain('died');
+    expect(awaitingBlock).not.toContain('To reclaim');
   });
 
   it('still reports a stale active state without the confirmation flag', async () => {
