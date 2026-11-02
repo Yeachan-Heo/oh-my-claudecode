@@ -352,7 +352,9 @@ describe('baseline IO', () => {
       // Reset permissions before cleanup.
       try {
         chmodSync(join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME), 0o755);
-      } catch {}
+      } catch (_err) {
+        // Ignore cleanup errors when resetting permissions.
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -378,7 +380,9 @@ describe('baseline IO', () => {
     } finally {
       try {
         chmodSync(path, 0o644);
-      } catch {}
+      } catch (_err) {
+        // Ignore cleanup errors when resetting permissions.
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -414,7 +418,6 @@ describe('baseline IO', () => {
       const path = baselinePath(dir, 'sess-1');
       const now = new Date('2026-09-30T00:00:00.000Z');
       recordBaseline(path, { test: { signatures: ['FAIL first'] } }, now);
-      const historyDir = join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME);
 
       // Simulate a collision: pre-create the archive that would be created next.
       const secondDoc = readFileSync(path);
