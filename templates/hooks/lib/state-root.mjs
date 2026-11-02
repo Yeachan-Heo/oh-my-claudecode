@@ -123,9 +123,8 @@ export async function resolveOmcStateRoot(directory) {
     }
   }
 
-  // Inline fallback: preserve the canonical non-git namespace when the
-  // generated distribution is unavailable, while retaining a stable
-  // project-specific identity for valid Git repositories.
+  // Inline fallback: preserve the canonical non-git identity used by the
+  // TypeScript resolver when the generated distribution is unavailable.
   const customDir = process.env.OMC_STATE_DIR;
   if (customDir) {
     const workspaceRoot = findWorkspaceRoot(directory);
@@ -134,12 +133,9 @@ export async function resolveOmcStateRoot(directory) {
     if (!gitRoot) return join(customDir, 'non-git');
     const primaryRoot = primaryGitRoot(gitRoot);
     let source = primaryRoot;
-    try {
-      source = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || primaryRoot;
-    } catch {}
+    try { source = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: gitRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000, env: gitEnv() }).trim() || primaryRoot; } catch {}
     const hash = createHash('sha256').update(source).digest('hex').slice(0, 16);
-    const dirName = basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, '_');
-    return join(customDir, `${dirName}-${hash}`);
+    return join(customDir, `${basename(primaryRoot).replace(/[^a-zA-Z0-9_-]/g, '_')}-${hash}`);
   }
   const workspaceRoot = findWorkspaceRoot(directory);
   if (workspaceRoot && isSafeWorkspaceRoot(workspaceRoot)) return join(workspaceRoot, '.omc');
