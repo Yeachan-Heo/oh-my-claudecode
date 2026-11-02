@@ -1489,6 +1489,7 @@ async function main() {
               // Transition ralph to completed state when Jev signals task completion
               ralph.state.active = false;
               ralph.state.current_phase = 'complete';
+              ralph.state.phase = 'complete';
               ralph.state.completed_at = new Date().toISOString();
               if (shouldWriteStateBack(ralph.path)) {
                 writeJsonFile(ralph.path, ralph.state);
@@ -1721,6 +1722,7 @@ async function main() {
                 // Transition autopilot to completed state when Jev signals task completion
                 autopilot.state.active = false;
                 autopilot.state.current_phase = 'complete';
+                autopilot.state.phase = 'complete';
                 autopilot.state.completed_at = new Date().toISOString();
                 if (shouldWriteStateBack(autopilot.path)) {
                   writeJsonFile(autopilot.path, autopilot.state);
