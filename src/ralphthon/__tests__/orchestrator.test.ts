@@ -30,13 +30,20 @@ import type {
 
 describe('Ralphthon Orchestrator', () => {
   let testDir: string;
+  const originalOmcStateDir = process.env.OMC_STATE_DIR;
 
   beforeEach(() => {
     testDir = mkdtempSync(join(tmpdir(), 'ralphthon-orch-test-'));
     mkdirSync(join(testDir, '.omc', 'state'), { recursive: true });
+    process.env.OMC_STATE_DIR = testDir;
   });
 
   afterEach(() => {
+    if (originalOmcStateDir !== undefined) {
+      process.env.OMC_STATE_DIR = originalOmcStateDir;
+    } else {
+      delete process.env.OMC_STATE_DIR;
+    }
     rmSync(testDir, { recursive: true, force: true });
   });
 
