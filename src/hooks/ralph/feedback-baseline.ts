@@ -24,7 +24,10 @@ export const MAX_SIGNATURES_PER_COMMAND = 200;
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS: RegExp[] = [
-  /\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
+  // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
+  // Anchored to the "in <duration>" suffix so clock-shaped assertion values
+  // (e.g. assert '(12:15)' == '(12:16)') keep their failure signal.
+  /(?<=\bin \d+(?:\.\d+)?s\s)\(\d+:\d{2}(?::\d{2})?(?:\.\d+)?\)/g,
   /\b\d+(?:\.\d+)?\s*(?:ms|s|sec|secs|seconds)\b/gi,
   /\bduration_ms\s*:?\s*\d+(?:\.\d+)?\b/gi,
   /\bduration\s*:?\s*\d+(?:\.\d+)?\b/gi,

@@ -36,6 +36,28 @@ describe('signatureLines', () => {
     expect(signatureLines('1 passed in 194.32s (0:03:14.123)')).toEqual(['1 passed in <v> <v>']);
   });
 
+  it('normalizes two-component m:ss clock durations (third component is optional)', () => {
+    const first = signatureLines('1 passed in 194.32s (3:14)');
+    const second = signatureLines('1 passed in 201.07s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 passed in <v> <v>']);
+  });
+
+  it('keeps the pytest summary clock normalized only in its duration context', () => {
+    const first = signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)');
+    const second = signatureLines('459 passed, 14 warnings in 194.32s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['459 passed, 14 warnings in <v> <v>']);
+  });
+
+  it('does not erase clock-like assertion values: a changed failure reason stays distinct', () => {
+    const first = signatureLines("AssertionError: assert '(12:15)' == '(12:16)'");
+    const second = signatureLines("AssertionError: assert '(12:17)' == '(12:18)'");
+    expect(first).toEqual(["AssertionError: assert '(12:15)' == '(12:16)'"]);
+    expect(second).toEqual(["AssertionError: assert '(12:17)' == '(12:18)'"]);
+    expect(first).not.toEqual(second);
+  });
+
   it('keeps failure text on a line that also carries a duration', () => {
     const lines = signatureLines('FAIL tests/test_x.py::test_foo - AssertionError in 194.32s (0:03:14)');
     expect(lines).toEqual(['FAIL tests/test_x.py::test_foo - AssertionError in <v> <v>']);
