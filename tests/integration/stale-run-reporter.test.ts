@@ -36,6 +36,7 @@ async function writeModeState(
   state: Record<string, unknown>,
   sessionId?: string,
   ageHours?: number,
+  mtimeAt?: Date,
 ): Promise<string> {
   const omcRoot = await resolveOmcStateRoot(dir);
   const statePath = sessionId
@@ -44,7 +45,7 @@ async function writeModeState(
   mkdirSync(join(statePath, '..'), { recursive: true });
   writeFileSync(statePath, JSON.stringify(state, null, 2));
   if (ageHours !== undefined) {
-    const past = new Date(Date.now() - ageHours * 3600_000);
+    const past = mtimeAt ?? new Date(Date.now() - ageHours * 3600_000);
     utimesSync(statePath, past, past);
   }
   return statePath;
@@ -53,16 +54,20 @@ async function writeModeState(
 interface RunResult {
   stdout: string;
   parsed: {
+    continue?: boolean;
     suppressOutput?: boolean;
     hookSpecificOutput?: { additionalContext?: string };
   };
 }
 
-function runReporter(payload: Record<string, unknown>): Promise<RunResult> {
+function runReporter(
+  payload: Record<string, unknown>,
+  extraEnv?: Record<string, string>,
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
     const child = spawn('node', [script], {
       cwd: (payload.cwd as string) ?? root,
-      env: process.env,
+      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -98,7 +103,10 @@ describe('stale-run reporter hook', () => {
 
   it('reports a stale state waiting for confirmation without claiming it died', async () => {
     const dir = fixture();
-    const setAt = new Date(Date.now() - 60_000).toISOString();
+    // A parked run's marker shares the mtime of the write that set it, even
+    // when that write is nine hours old.
+    const staleAt = new Date(Date.now() - 9 * 3600_000);
+    const setAt = staleAt.toISOString();
     await writeModeState(
       dir,
       'ralph',
@@ -109,6 +117,7 @@ describe('stale-run reporter hook', () => {
       },
       undefined,
       9,
+      staleAt,
     );
     const result = await runReporter({ cwd: dir });
     const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
@@ -123,13 +132,15 @@ describe('stale-run reporter hook', () => {
 
   it('reports a session-scoped run waiting for confirmation with its session id', async () => {
     const dir = fixture();
-    const setAt = new Date(Date.now() - 30_000).toISOString();
+    const staleAt = new Date(Date.now() - 9 * 3600_000);
+    const setAt = staleAt.toISOString();
     await writeModeState(
       dir,
       'ralph',
       { active: true, awaiting_confirmation: true, awaiting_confirmation_set_at: setAt },
       'sess-waiting-1',
       9,
+      staleAt,
     );
     const result = await runReporter({ cwd: dir });
     const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
@@ -140,9 +151,12 @@ describe('stale-run reporter hook', () => {
     expect(ctx).not.toContain('[STALE RUN]');
   });
 
-  it('treats an expired confirmation marker as a crashed run', async () => {
+  it('treats a marker superseded by a later write as a crashed run', async () => {
     const dir = fixture();
-    const setAt = new Date(Date.now() - 9 * 3600_000).toISOString();
+    // The marker is an hour older than the file's last mtime: the run wrote
+    // again after the prompt, so the stale flag is a leftover, not proof of a
+    // parked prompt.
+    const setAt = new Date(Date.now() - 10 * 3600_000).toISOString();
     await writeModeState(
       dir,
       'ralph',
@@ -159,6 +173,90 @@ describe('stale-run reporter hook', () => {
     expect(ctx).toContain('[STALE RUN]');
     expect(ctx).toContain('died');
     expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('treats a malformed confirmation timestamp as a crashed run', async () => {
+    const dir = fixture();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: 'not-a-date',
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('treats a future confirmation timestamp as a crashed run', async () => {
+    const dir = fixture();
+    const setAt = new Date(Date.now() + 9 * 3600_000).toISOString();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: setAt,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('reports crashed and waiting runs side by side without mixing groups', async () => {
+    const dir = fixture();
+    const waitingAt = new Date(Date.now() - 3 * 3600_000);
+    const waitingSetAt = waitingAt.toISOString();
+    await writeModeState(
+      dir,
+      'team',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: waitingSetAt,
+      },
+      undefined,
+      3,
+      waitingAt,
+    );
+    await writeModeState(dir, 'ralph', { active: true }, undefined, 5);
+
+    const result = await runReporter(
+      { cwd: dir },
+      { OMC_STALE_RUN_HOURS: '1' },
+    );
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN] 1 ');
+    expect(ctx).toContain('[AWAITING CONFIRMATION] 1 ');
+
+    // Each entry belongs to exactly one group: ralph crashed, team waiting.
+    const staleStart = ctx.indexOf('[STALE RUN]');
+    const awaitingStart = ctx.indexOf('[AWAITING CONFIRMATION]');
+    expect(staleStart).toBeGreaterThanOrEqual(0);
+    expect(awaitingStart).toBeGreaterThan(staleStart);
+    const staleBlock = ctx.slice(staleStart, awaitingStart);
+    const awaitingBlock = ctx.slice(awaitingStart);
+    expect(staleBlock).toContain('ralph');
+    expect(staleBlock).not.toContain('team');
+    expect(awaitingBlock).toContain('team');
+    expect(awaitingBlock).not.toContain('ralph');
+    expect(awaitingBlock).toContain(waitingSetAt);
   });
 
   it('still reports a stale active state without the confirmation flag', async () => {

@@ -17,20 +17,25 @@ export const WATCHED_MODES = ['ralph', 'autopilot', 'team', 'ultragoal'];
 
 const DEFAULT_THRESHOLD_HOURS = 2; // matches the persistent-mode freshness window
 
-// Mirrors AWAITING_CONFIRMATION_TTL_MS in scripts/persistent-mode.mjs: a
-// confirmation flag is only live for two minutes. After that the run either
-// resumed or was abandoned, so the raw boolean is not proof of life.
-const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+// scripts/keyword-detector.mjs writes `awaiting_confirmation_set_at` in the
+// same atomic write that updates the state file's mtime, so a genuinely parked
+// run keeps set_at ≈ mtime no matter how many hours pass. A leftover marker
+// from a run that resumed or was abandoned is followed by later state writes,
+// which advance mtime past set_at. "The marker is the last write" is therefore
+// what proves a stale file is parked on a prompt rather than dead. The
+// tolerance only absorbs clock and write jitter.
+const CONFIRMATION_MTIME_TOLERANCE_MS = 5_000;
 
 export function staleThresholdHours() {
   const raw = Number(process.env.OMC_STALE_RUN_HOURS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_THRESHOLD_HOURS;
 }
 
-function isRecentConfirmation(setAt, now) {
-  const timestampMs = new Date(setAt).getTime();
-  const ageMs = now - timestampMs;
-  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < AWAITING_CONFIRMATION_TTL_MS;
+function isLastWriteMarker(setAt, mtimeMs, now) {
+  const setAtMs = new Date(setAt).getTime();
+  if (!Number.isFinite(setAtMs)) return false; // malformed timestamp
+  if (setAtMs > now) return false; // future timestamps are not evidence
+  return Math.abs(mtimeMs - setAtMs) <= CONFIRMATION_MTIME_TOLERANCE_MS;
 }
 
 function inspectStateFile(path, now, thresholdMs) {
@@ -47,8 +52,9 @@ function inspectStateFile(path, now, thresholdMs) {
   if (now - mtimeMs <= thresholdMs) return null;
   const sessionId = state.session_id ?? state.sessionId;
   // A run parked on a confirmation prompt emits no mtime updates, so it can
-  // cross the threshold while the process is still alive. Report it, but with
-  // waiting wording only while the marker is still live (see TTL above).
+  // cross the threshold while the process is still alive. Report it with
+  // waiting wording only when the marker is still the file's last write (see
+  // CONFIRMATION_MTIME_TOLERANCE_MS above); otherwise it has been superseded.
   const awaitingConfirmationSetAt =
     typeof state.awaiting_confirmation_set_at === 'string'
       ? state.awaiting_confirmation_set_at
@@ -56,7 +62,7 @@ function inspectStateFile(path, now, thresholdMs) {
   const awaitingConfirmation =
     state.awaiting_confirmation === true &&
     awaitingConfirmationSetAt !== null &&
-    isRecentConfirmation(awaitingConfirmationSetAt, now);
+    isLastWriteMarker(awaitingConfirmationSetAt, mtimeMs, now);
   return {
     ageHours: Math.round(ageHours * 10) / 10,
     ownerSessionId: typeof sessionId === 'string' ? sessionId : null,
