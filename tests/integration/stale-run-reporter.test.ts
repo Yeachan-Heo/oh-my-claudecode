@@ -96,6 +96,86 @@ describe('stale-run reporter hook', () => {
     expect(readFileSync(statePath, 'utf8')).toBe(before);
   });
 
+  it('reports a stale state waiting for confirmation without claiming it died', async () => {
+    const dir = fixture();
+    const setAt = new Date(Date.now() - 60_000).toISOString();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: setAt,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('[AWAITING CONFIRMATION]');
+    expect(ctx).toContain(
+      `waiting for your confirmation since ${setAt}, no activity for ~9h`,
+    );
+    expect(ctx).not.toContain('died');
+    expect(ctx).not.toContain('[STALE RUN]');
+    expect(ctx).not.toContain('To reclaim');
+  });
+
+  it('reports a session-scoped run waiting for confirmation with its session id', async () => {
+    const dir = fixture();
+    const setAt = new Date(Date.now() - 30_000).toISOString();
+    await writeModeState(
+      dir,
+      'ralph',
+      { active: true, awaiting_confirmation: true, awaiting_confirmation_set_at: setAt },
+      'sess-waiting-1',
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('[AWAITING CONFIRMATION]');
+    expect(ctx).toContain('ralph (session sess-waiting-1)');
+    expect(ctx).toContain(`since ${setAt}`);
+    expect(ctx).not.toContain('died');
+    expect(ctx).not.toContain('[STALE RUN]');
+  });
+
+  it('treats an expired confirmation marker as a crashed run', async () => {
+    const dir = fixture();
+    const setAt = new Date(Date.now() - 9 * 3600_000).toISOString();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: setAt,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('died');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('still reports a stale active state without the confirmation flag', async () => {
+    const dir = fixture();
+    await writeModeState(
+      dir,
+      'ralph',
+      { active: true, awaiting_confirmation: false },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+  });
+
   it('reports a stale session-scoped state with its session id', async () => {
     const dir = fixture();
     await writeModeState(dir, 'autopilot', { active: true }, 'sess-dead-1', 5);

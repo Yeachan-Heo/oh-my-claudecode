@@ -17,9 +17,20 @@ export const WATCHED_MODES = ['ralph', 'autopilot', 'team', 'ultragoal'];
 
 const DEFAULT_THRESHOLD_HOURS = 2; // matches the persistent-mode freshness window
 
+// Mirrors AWAITING_CONFIRMATION_TTL_MS in scripts/persistent-mode.mjs: a
+// confirmation flag is only live for two minutes. After that the run either
+// resumed or was abandoned, so the raw boolean is not proof of life.
+const AWAITING_CONFIRMATION_TTL_MS = 2 * 60 * 1000;
+
 export function staleThresholdHours() {
   const raw = Number(process.env.OMC_STALE_RUN_HOURS);
   return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_THRESHOLD_HOURS;
+}
+
+function isRecentConfirmation(setAt, now) {
+  const timestampMs = new Date(setAt).getTime();
+  const ageMs = now - timestampMs;
+  return Number.isFinite(ageMs) && ageMs >= 0 && ageMs < AWAITING_CONFIRMATION_TTL_MS;
 }
 
 function inspectStateFile(path, now, thresholdMs) {
@@ -35,9 +46,24 @@ function inspectStateFile(path, now, thresholdMs) {
   const ageHours = Math.max(0, (now - mtimeMs) / 3600_000);
   if (now - mtimeMs <= thresholdMs) return null;
   const sessionId = state.session_id ?? state.sessionId;
+  // A run parked on a confirmation prompt emits no mtime updates, so it can
+  // cross the threshold while the process is still alive. Report it, but with
+  // waiting wording only while the marker is still live (see TTL above).
+  const awaitingConfirmationSetAt =
+    typeof state.awaiting_confirmation_set_at === 'string'
+      ? state.awaiting_confirmation_set_at
+      : null;
+  const awaitingConfirmation =
+    state.awaiting_confirmation === true &&
+    awaitingConfirmationSetAt !== null &&
+    isRecentConfirmation(awaitingConfirmationSetAt, now);
   return {
     ageHours: Math.round(ageHours * 10) / 10,
     ownerSessionId: typeof sessionId === 'string' ? sessionId : null,
+    awaitingConfirmation,
+    awaitingConfirmationSetAt: awaitingConfirmation
+      ? awaitingConfirmationSetAt
+      : null,
   };
 }
 
@@ -52,7 +78,7 @@ function inspectStateFile(path, now, thresholdMs) {
  * @param {number} [options.now] - Epoch ms (defaults to Date.now())
  * @param {number} [options.thresholdHours] - Overrides the env-derived threshold
  * @param {string} [options.excludeSessionId] - Skip state under this session id
- * @returns {Promise<Array<{mode: string, path: string, sessionId: string|null, ageHours: number}>>}
+ * @returns {Promise<Array<{mode: string, path: string, sessionId: string|null, ageHours: number, awaitingConfirmation: boolean, awaitingConfirmationSetAt: string|null}>>}
  *   Stale entries, most stale first.
  */
 export async function findStaleRuns({
@@ -86,6 +112,8 @@ export async function findStaleRuns({
         path: join(stateDir, `${mode}-state.json`),
         sessionId: legacy.ownerSessionId,
         ageHours: legacy.ageHours,
+        awaitingConfirmation: legacy.awaitingConfirmation,
+        awaitingConfirmationSetAt: legacy.awaitingConfirmationSetAt,
       });
     }
 
@@ -105,6 +133,8 @@ export async function findStaleRuns({
           path: join(sessionsDir, sessionId, `${mode}-state.json`),
           sessionId,
           ageHours: scoped.ageHours,
+          awaitingConfirmation: scoped.awaitingConfirmation,
+          awaitingConfirmationSetAt: scoped.awaitingConfirmationSetAt,
         });
       }
     }

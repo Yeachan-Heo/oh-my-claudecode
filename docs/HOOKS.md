@@ -346,9 +346,12 @@ A PreToolUse hook (matcher: `Bash`) that checks shell command positions and bloc
 
 #### Stale Run Reporter (`stale-run-reporter.mjs`)
 
-A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime (the signature of a run whose process died mid-flight), and surfaces them as advisory `[STALE RUN]` context naming the mode, approximate age, and state path.
+A SessionStart hook: the unattended-run **watchdog**. It scans the resolved `.omc` state root for persistent unattended-mode state files — ralph, autopilot, team, ultragoal — left `active: true` with a stale mtime and surfaces them as advisory context, split into two categories.
 
+- **`[STALE RUN]`**: the signature of a run whose process died mid-flight. The message names the mode, approximate age, and state path, and points at reclaiming the state via `/oh-my-claudecode:cancel` or re-entering the mode.
+- **`[AWAITING CONFIRMATION]`**: the run is parked on a confirmation prompt and has emitted no activity since `awaiting_confirmation_set_at`. It is reported separately so a live-but-paused run is not called dead; the message names the mode, session, `since` timestamp, and state path, and points at answering the prompt or cancelling if the run is gone.
 - **Threshold**: 2 hours of mtime silence (matching the persistent-mode freshness window); tunable via `OMC_STALE_RUN_HOURS`.
+- **Confirmation expiry**: the waiting category only applies while the marker is live — the same 2-minute `AWAITING_CONFIRMATION_TTL_MS` window `isAwaitingConfirmation()` uses in `persistent-mode.mjs`. An older `awaiting_confirmation` flag is not proof of life, so the run falls back to `[STALE RUN]`.
 - **Coverage**: both layouts — legacy `.omc/state/<mode>-state.json` and session-scoped `.omc/state/sessions/<sessionId>/<mode>-state.json`. The starting session's own state is excluded; malformed state files are ignored, never findings.
 - **Doctrine**: the watchdog observes and reports only. It never mutates state, never resumes a run, and never infers approval — reclaiming a dead run (`/oh-my-claudecode:cancel` to clean up, or re-entering the mode to resume from artifacts) is always a human decision.
 
