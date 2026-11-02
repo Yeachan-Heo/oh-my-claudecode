@@ -52,6 +52,13 @@ const LEARNER_EXTRACTION_QUESTIONS = {
   },
 };
 
+function boundLastAssistantMessage(text, maxChars = 2000) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxChars ? trimmed.substring(0, maxChars) : trimmed;
+}
+
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
   return recordJevShadow({
     point: "loop-continuation",
@@ -1476,11 +1483,12 @@ async function main() {
             phase: null,
             should_block: true,
             continuation_excerpt: reason,
+            last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          // In active mode, check if Jev says task is complete (noul: true means exit loop)
-          const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul === true;
+          // In active mode, check if Jev says task is complete (noul >= 0.5 means exit loop; noul is a probability)
+          const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul >= 0.5;
           
           if (jevSaysTaskComplete) {
             // Guard the completion write against concurrent state changes:
@@ -1533,6 +1541,7 @@ async function main() {
           phase: null,
           should_block: true,
           continuation_excerpt: ralphExtendedReason,
+          last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
         }, {
           mode: "ralph",
           shouldBlock: true,
@@ -1540,8 +1549,8 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        // In active mode, check if Jev says task is complete (issue #4805)
-        const jevSaysTaskCompleteAtExtend = jevExtendResult && jevExtendResult.mode === 'active' && jevExtendResult.answer && jevExtendResult.answer.noul === true;
+        // In active mode, check if Jev says task is complete (issue #4805); noul is a probability
+        const jevSaysTaskCompleteAtExtend = jevExtendResult && jevExtendResult.mode === 'active' && jevExtendResult.answer && jevExtendResult.answer.noul >= 0.5;
         const shouldBlockExtend = true; // Always block after extending (original behavior)
         
         console.log(
@@ -1705,6 +1714,7 @@ async function main() {
               phase,
               should_block: true,
               continuation_excerpt: reason,
+              last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
             }, {
               mode: "autopilot",
               shouldBlock: true,
@@ -1712,8 +1722,8 @@ async function main() {
               phase,
             }, data.permission_mode);
 
-            // In active mode, check if Jev says task is complete (issue #4805)
-            const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul === true;
+            // In active mode, check if Jev says task is complete (issue #4805); noul is a probability
+            const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul >= 0.5;
             
             if (jevSaysTaskCompleteAP) {
               // Guard the completion write against concurrent state changes:

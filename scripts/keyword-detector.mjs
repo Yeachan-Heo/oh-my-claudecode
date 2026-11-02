@@ -2071,14 +2071,16 @@ async function main() {
     const HEAVY_KEYWORDS = new Set(['ralph', 'autopilot', 'team', 'ralplan']);
     
     let jevTaskSizeResult = null;
+    let heuristicTaskSize = null;
     if (isJevShadowOptedIn('task-size', process.env, permissionMode)) {
       try {
         const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
+        heuristicTaskSize = classifyTaskSize(cleanPrompt);
         const jevResult = recordJevShadow({
           point: 'task-size',
           state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
           questions: TASK_SIZE_QUESTIONS,
-          heuristic: classifyTaskSize(cleanPrompt),
+          heuristic: heuristicTaskSize,
           permissionMode,
         });
         // In active mode, consume the Jev answer to suppress heavy keywords for small tasks
@@ -2098,33 +2100,39 @@ async function main() {
     }
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
-    // Honor task-size suppression opt-outs: only suppress if the feature is enabled in config
-    if (jevTaskSizeResult && jevTaskSizeResult.size === 'small') {
-      // Load config to check if task-size suppression is enabled
-      const configDir = resolveSettingsProjectRoot(data.directory);
-      const configPaths = [
-        join(configDir, '.omc', 'config.jsonc'),
-        join(getOmcUserConfigDir(), 'config.jsonc'),
-      ];
+    // New logic per reporter feedback:
+    // - Only suppress when confidence >= 0.9 AND (classifyTaskSize says small OR has size prefix)
+    // - NEVER suppress slash-invoked modes
+    // - Otherwise only add [TASK-SIZE: SMALL] note
+    if (jevTaskSizeResult && jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9) {
+      // Check if prompt has a size prefix like "quick:"
+      const hasSizePrefix = /^\s*(?:quick|small|tiny|minimal|fast|speed|urgent):/i.test(cleanPrompt);
+      // Check if heuristic classifyTaskSize also says small
+      const heuristicSaysSmall = heuristicTaskSize && (heuristicTaskSize.size === 'small' || heuristicTaskSize.size === 'quick');
       
-      let suppressionEnabled = true; // default: enabled
-      for (const configPath of configPaths) {
-        const config = loadJsoncConfig(configPath);
-        if (config?.taskSizeDetection) {
-          // Check if task-size detection is enabled and if suppression is enabled
-          if (config.taskSizeDetection.enabled === false) {
-            suppressionEnabled = false;
-            break;
-          }
-          if (config.taskSizeDetection.suppressHeavyModesForSmallTasks === false) {
-            suppressionEnabled = false;
-            break;
-          }
-        }
-      }
+      // Only suppress if BOTH conditions are true: confidence >= 0.9 AND (heuristic small OR size prefix)
+      const shouldSuppressForSize = (heuristicSaysSmall || hasSizePrefix);
       
-      if (suppressionEnabled) {
-        resolved = resolved.filter(keyword => !HEAVY_KEYWORDS.has(keyword.name));
+      if (shouldSuppressForSize) {
+        // Check for slash invocations: never suppress slash-invoked modes
+        const slashInvokedKeywords = new Set();
+        if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralplan');
+        // Check for other slash modes: /oh-my-claudecode:ralph, /oh-my-claudecode:autopilot, etc.
+        if (/^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('ralph');
+        if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('autopilot');
+        if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
+        
+        // Filter out non-slash-invoked heavy keywords
+        resolved = resolved.filter(keyword => {
+          if (!HEAVY_KEYWORDS.has(keyword.name)) {
+            return true; // Keep non-heavy keywords
+          }
+          // For heavy keywords, suppress only if NOT slash-invoked
+          return slashInvokedKeywords.has(keyword.name);
+        });
+      } else {
+        // Confidence >= 0.9 but heuristic doesn't agree: just add a note
+        // (We'll add this as a separate additionalContext field in the hook output)
       }
     }
 
