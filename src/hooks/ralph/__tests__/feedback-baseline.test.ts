@@ -27,6 +27,53 @@ describe('signatureLines', () => {
     expect(first.some((line) => line.includes('123ms'))).toBe(false);
   });
 
+  it('normalizes parenthesized pytest clock durations so identical runs fingerprint identically', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes pytest clock durations with hours and fractional seconds', () => {
+    expect(signatureLines('1 failed, 200 passed in 194.32s (1:02:45)')).toEqual(['1 failed, 200 passed in <v> <v>']);
+    expect(signatureLines('1 failed, 200 passed in 194.32s (0:03:14.123)')).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes two-component m:ss clock durations (third component is optional)', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes clock durations behind integer-second prefixes (no decimal part)', () => {
+    const first = signatureLines('1 failed, 200 passed in 194s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('keeps the pytest summary clock normalized only in its duration context', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 194.32s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('does not erase clock-like assertion values: a changed failure reason stays distinct', () => {
+    const first = signatureLines("AssertionError: assert '(12:15)' == '(12:16)'");
+    const second = signatureLines("AssertionError: assert '(12:17)' == '(12:18)'");
+    expect(first).toEqual(["AssertionError: assert '(12:15)' == '(12:16)'"]);
+    expect(second).toEqual(["AssertionError: assert '(12:17)' == '(12:18)'"]);
+    expect(first).not.toEqual(second);
+  });
+
+  it('keeps failure text on a line that also carries a duration', () => {
+    const lines = signatureLines('FAIL tests/test_x.py::test_foo - AssertionError in 194.32s (0:03:14)');
+    expect(lines).toEqual(['FAIL tests/test_x.py::test_foo - AssertionError in <v> <v>']);
+    expect(lines[0]).toContain('AssertionError');
+  });
+
   it('keeps failure and summary lines but drops pure progress chatter', () => {
     const lines = signatureLines('Running tests...\n✓ ok\nFAIL a > b\nTest Files  1 failed | 2 passed\n');
     expect(lines).toContain('FAIL a > b');
@@ -283,6 +330,40 @@ describe('baseline IO', () => {
   });
 });
 
+describe('pytest summary normalization (issue #4795)', () => {
+  it('adding a passing test does not register as a new failure', () => {
+    const baseline1 = baseline({
+      'python3 -m pytest -q': { signatures: signatureLines('200 passed in 0.31s') },
+    });
+    const current = {
+      'python3 -m pytest -q': { signatures: signatureLines('201 passed in 0.32s') },
+    };
+    const diff = diffAgainstBaseline(baseline1, current);
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('keeps pytest summaries that report failures and flags them as new against a green baseline', () => {
+    const green = baseline({
+      'python3 -m pytest -q': { signatures: signatureLines('200 passed in 0.31s') },
+    });
+    const current = {
+      'python3 -m pytest -q': { signatures: signatureLines('1 failed, 200 passed in 0.32s') },
+    };
+    expect(current['python3 -m pytest -q'].signatures).toContain('1 failed, 200 passed in <v>');
+    const diff = diffAgainstBaseline(green, current);
+    expect(diff.newSignatures).toEqual(['python3 -m pytest -q: 1 failed, 200 passed in <v>']);
+  });
+
+  it('excludes all-pass summaries regardless of whether the duration is normalized to <v> tokens', () => {
+    // This PR alone: the parenthesized wall-clock duration is still literal.
+    expect(signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)')).toEqual([]);
+    // Composed with the duration PR: every duration fragment is already "<v>".
+    expect(signatureLines('459 passed, 14 warnings in <v> <v>')).toEqual([]);
+    // Failures are still signal in either normalized shape.
+    expect(signatureLines('1 failed, 200 passed in <v> <v>')).toContain('1 failed, 200 passed in <v> <v>');
+  });
+});
+
 describe('node:test TAP output normalization (issue #4215)', () => {
   it('normalizes node:test prefix-style duration_ms values so reruns do not report new failures', () => {
     const run1 = signatureLines(
@@ -483,5 +564,30 @@ not ok 2 - test b new failure
     const withSpace = signatureLines('duration_ms 123.45');
     expect(withColon).toEqual(withSpace);
     expect(withColon.some((line) => line.includes('duration'))).toBe(false);
+  });
+});
+
+describe('pytest progress lines (issue #4794)', () => {
+  it('does not fingerprint progress dots, so 200 vs 201 passing tests yields no new signatures', () => {
+    const run1 = signatureLines(`${'.'.repeat(200)} [ 36%]\n${'.'.repeat(200)} [100%]`);
+    const run2 = signatureLines(`${'.'.repeat(201)} [ 35%]\n${'.'.repeat(201)} [100%]`);
+    expect(run1).toEqual([]);
+    expect(run2).toEqual([]);
+    const diff = diffAgainstBaseline(baseline({ test: { signatures: run1 } }), { test: { signatures: run2 } });
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('drops an all-pass progress line but keeps a line carrying a failure marker', () => {
+    // pytest -qq emits only the progress line for a quiet run; a red run's F is the sole failure signal.
+    expect(signatureLines('.                                              [100%]')).toEqual([]);
+    const lines = signatureLines('.F                                              [100%]');
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('F');
+  });
+
+  it('still keeps real pytest failure lines and a failing progress line', () => {
+    const lines = signatureLines(`${'.'.repeat(200)}F [ 36%]\nFAILED tests/test_x.py::test_y - assert 1 == 2`);
+    expect(lines).toContain('FAILED tests/test_x.py::test_y - assert 1 == 2');
+    expect(lines).toContain(`${'.'.repeat(200)}F [ 36%]`);
   });
 });
