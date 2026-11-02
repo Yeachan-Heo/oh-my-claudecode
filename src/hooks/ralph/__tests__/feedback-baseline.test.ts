@@ -24,6 +24,24 @@ describe('signatureLines', () => {
     expect(first.some((line) => line.includes('123ms'))).toBe(false);
   });
 
+  it('normalizes parenthesized pytest clock durations so identical green runs fingerprint identically', () => {
+    const first = signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)');
+    const second = signatureLines('459 passed, 14 warnings in 201.07s (0:03:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['459 passed, 14 warnings in <v> <v>']);
+  });
+
+  it('normalizes pytest clock durations with hours and fractional seconds', () => {
+    expect(signatureLines('1 passed in 194.32s (1:02:45)')).toEqual(['1 passed in <v> <v>']);
+    expect(signatureLines('1 passed in 194.32s (0:03:14.123)')).toEqual(['1 passed in <v> <v>']);
+  });
+
+  it('keeps failure text on a line that also carries a duration', () => {
+    const lines = signatureLines('FAIL tests/test_x.py::test_foo - AssertionError in 194.32s (0:03:14)');
+    expect(lines).toEqual(['FAIL tests/test_x.py::test_foo - AssertionError in <v> <v>']);
+    expect(lines[0]).toContain('AssertionError');
+  });
+
   it('keeps failure and summary lines but drops pure progress chatter', () => {
     const lines = signatureLines('Running tests...\n✓ ok\nFAIL a > b\nTest Files  1 failed | 2 passed\n');
     expect(lines).toContain('FAIL a > b');
