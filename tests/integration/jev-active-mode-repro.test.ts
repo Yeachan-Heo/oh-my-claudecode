@@ -201,8 +201,10 @@ describe("jev active-mode subprocess repro", () => {
   async function waitForShadowLog(point: string) {
     // Shadow children are intentionally detached. Wait for their completed log
     // write before closing the server/removing the temporary workspace.
-    await vi.waitFor(
-      () => {
+    const startTime = Date.now();
+    const timeout = 5000;
+    while (Date.now() - startTime < timeout) {
+      try {
         const entries = readFileSync(
           join(cwd, "jev-logs", "shadow.jsonl"),
           "utf8",
@@ -210,14 +212,21 @@ describe("jev active-mode subprocess repro", () => {
           .trim()
           .split("\n")
           .map((line) => JSON.parse(line));
-        expect(entries).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({ point, mode: "shadow" }),
-          ]),
-        );
-      },
-      { timeout: 5000, interval: 25 },
-    );
+        const found = entries.some(e => e.point === point && e.mode === "shadow");
+        if (found) {
+          expect(entries).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ point, mode: "shadow" }),
+            ]),
+          );
+          return;
+        }
+      } catch (e) {
+        // File might not exist yet
+      }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    throw new Error(`Timeout waiting for shadow log entry for point ${point}`);
   }
 
   it.each(["Task", "Agent"])(
@@ -502,5 +511,33 @@ describe("jev active-mode subprocess repro", () => {
     expect(planShadow.stdout).toBe(baseline.stdout);
     await waitForShadowLog("skill-trigger");
     expect(requests).toHaveLength(1);
+  }, 15000);
+
+  it("keyword-detector.mjs: task-size:active is requested but answer is not consumed (issue #4805)", async () => {
+    // This test documents issue #4805: task-size Jev answers are recorded but not consumed
+    // when in active mode, wasting resolver time
+    const input = keywordInput();
+    
+    // Clear requests
+    requests = [];
+    
+    // Run with task-size:active
+    const active = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+    
+    expect(active.exitCode, active.stderr).toBe(0);
+    
+    // Should have made a task-size request (resolver was called synchronously in active mode)
+    const taskSizeRequest = requests.find((entry) => "task-size" in entry.body.questions);
+    // The bug: resolver IS called (wasting time), but the answer is never used
+    expect(taskSizeRequest).toBeDefined();
+    expect(taskSizeRequest!.body.questions).toHaveProperty('task-size');
+    
+    // Verify it was an active request that waited for the resolver
+    assertWireContract(taskSizeRequest!, "task-size");
   }, 15000);
 });

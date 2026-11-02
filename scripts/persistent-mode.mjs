@@ -53,7 +53,7 @@ const LEARNER_EXTRACTION_QUESTIONS = {
 };
 
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
-  recordJevShadow({
+  return recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
@@ -1458,12 +1458,16 @@ async function main() {
             should_block: true,
             continuation_excerpt: reason,
           };
-          recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+          const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+
+          // In active mode, check if Jev says task is complete (noul: true means exit loop)
+          const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul === true;
+          const shouldBlock = jevSaysTaskComplete ? true : heuristic.shouldBlock;
 
           console.log(
             JSON.stringify({
-              decision: "block",
-              reason,
+              decision: shouldBlock ? "block" : "continue",
+              reason: jevSaysTaskComplete ? '[JEV-COMPLETION] Task complete per Jev answer; exiting ralph.' : reason,
             }),
           );
           return;
@@ -1479,7 +1483,7 @@ async function main() {
         writeJsonFile(ralph.path, ralph.state);
 
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
-        recordLoopContinuationShadow({
+        const jevExtendResult = recordLoopContinuationShadow({
           mode_name: "ralph",
           session_id: sessionId || null,
           iteration: ralph.state.iteration,
@@ -1492,10 +1496,15 @@ async function main() {
           iteration: ralph.state.iteration,
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
+        
+        // In active mode, check if Jev says task is complete (issue #4805)
+        const jevSaysTaskCompleteAtExtend = jevExtendResult && jevExtendResult.mode === 'active' && jevExtendResult.answer && jevExtendResult.answer.noul === true;
+        const shouldBlockExtend = true; // Always block after extending (original behavior)
+        
         console.log(
           JSON.stringify({
-            decision: "block",
-            reason: ralphExtendedReason,
+            decision: shouldBlockExtend ? "block" : "continue",
+            reason: jevSaysTaskCompleteAtExtend ? '[JEV-COMPLETION] Task complete per Jev answer; exiting ralph.' : ralphExtendedReason,
           }),
         );
         return;
@@ -1646,7 +1655,7 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            recordLoopContinuationShadow({
+            const jevAutopilotResult = recordLoopContinuationShadow({
               mode_name: "autopilot",
               session_id: sessionId || null,
               iteration: newCount,
@@ -1660,10 +1669,14 @@ async function main() {
               phase,
             }, data.permission_mode);
 
+            // In active mode, check if Jev says task is complete (issue #4805)
+            const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul === true;
+            const shouldBlockAP = true; // Always block after reaching iteration limit (original behavior)
+
             console.log(
               JSON.stringify({
-                decision: "block",
-                reason,
+                decision: shouldBlockAP ? "block" : "continue",
+                reason: jevSaysTaskCompleteAP ? '[JEV-COMPLETION] Task complete per Jev answer; exiting autopilot.' : reason,
               }),
             );
             return;

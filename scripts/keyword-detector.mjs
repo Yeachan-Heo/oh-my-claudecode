@@ -2065,6 +2065,12 @@ async function main() {
       // In active mode, intent Jev answer could be used here if needed
       // Currently logging-only: resolved keywords come from skill-trigger
     }
+
+    // Apply task-size filtering: suppress heavy keywords for small tasks (issue #4805)
+    // Heavy keywords are: ralph, autopilot, team, ralplan
+    const HEAVY_KEYWORDS = new Set(['ralph', 'autopilot', 'team', 'ralplan']);
+    
+    let jevTaskSizeResult = null;
     if (isJevShadowOptedIn('task-size', process.env, permissionMode)) {
       try {
         const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
@@ -2075,11 +2081,25 @@ async function main() {
           heuristic: classifyTaskSize(cleanPrompt),
           permissionMode,
         });
-        // In active mode, task-size Jev answer could be used here if needed
-        // Currently logging-only: task sizing is handled on TypeScript side
+        // In active mode, consume the Jev answer to suppress heavy keywords for small tasks
+        if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
+          const choice = (jevResult.answer.choice || '').toLowerCase();
+          jevTaskSizeResult = {
+            size: choice === 'small' ? 'small' : choice === 'large' ? 'large' : 'medium',
+            reason: `Jev active-mode classification: ${choice}`,
+            wordCount: 0,
+            hasEscapeHatch: false,
+            confidence: jevResult.answer.confidence,
+          };
+        }
       } catch {
         // The compiled twin is optional for script-only installs; never affect prompt handling.
       }
+    }
+
+    // Filter heavy keywords if task-size is 'small' (issue #4805)
+    if (jevTaskSizeResult && jevTaskSizeResult.size === 'small') {
+      resolved = resolved.filter(keyword => !HEAVY_KEYWORDS.has(keyword.name));
     }
 
     // Import flow tracer once (best-effort)
