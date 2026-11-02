@@ -184,7 +184,7 @@ function readJsonFile(path) {
  * (session_id, iteration, updated_at) haven't changed.
  * Returns true if the state is safe to write (unchanged), false otherwise.
  */
-function isStateUnchangedSinceCJevRequest(originalState, statePath) {
+function isStateUnchangedSinceJevRequest(originalState, statePath) {
   if (!originalState || !statePath) return false;
   const currentState = readJsonFile(statePath);
   if (!currentState) return false;
@@ -194,6 +194,25 @@ function isStateUnchangedSinceCJevRequest(originalState, statePath) {
   if (originalState.iteration !== currentState.iteration) return false;
   if (originalState.updated_at !== currentState.updated_at) return false;
   
+  return true;
+}
+
+function jevSaysTaskComplete(result) {
+  const noul = result?.answer?.noul;
+  return result?.mode === "active" &&
+    (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
+}
+
+function completeModeFromJev(state, statePath) {
+  if (!isStateUnchangedSinceJevRequest(state, statePath)) return false;
+
+  state.active = false;
+  state.current_phase = "complete";
+  state.phase = "complete";
+  state.completed_at = new Date().toISOString();
+  if (shouldWriteStateBack(statePath)) {
+    writeJsonFile(statePath, state);
+  }
   return true;
 }
 
@@ -1423,7 +1442,7 @@ async function main() {
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
-    if (
+    ralphPriority: if (
       isAuthoritativeModeActive(stateDir, "ralph", ralph, sessionId) && !isAwaitingConfirmation(ralph.state) &&
       !isStaleState(ralph.state) &&
       isStateForCurrentProject(ralph.state, directory, ralph.isGlobal)
@@ -1434,7 +1453,15 @@ async function main() {
       if (sessionMatches) {
         const iteration = ralph.state.iteration || 1;
         const maxIter = ralph.state.max_iterations || 100;
-
+        const autopilotSessionMatches = hasValidSessionId
+          ? autopilot.state?.session_id === sessionId
+          : !autopilot.state?.session_id || autopilot.state.session_id === sessionId;
+        const hasActiveAutopilotForSession = Boolean(
+          autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
+          (!isStaleState(autopilot.state) || autopilot.state.workflow) &&
+          isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal) &&
+          autopilotSessionMatches
+        );
         // Hard max: check the iteration count directly against the security
         // limit before continuing or extending, so a high max_iterations value
         // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
@@ -1491,30 +1518,24 @@ async function main() {
           };
           const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
 
-          // In active mode, check if Jev says task is complete (noul >= 0.5 means exit loop; noul is a probability)
-          const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul >= 0.5;
-          
-          if (jevSaysTaskComplete) {
-            // Guard the completion write against concurrent state changes:
-            // Re-read the state file and verify it hasn't been modified before writing terminal state.
-            if (isStateUnchangedSinceCJevRequest(ralph.state, ralph.path)) {
-              // Transition ralph to completed state when Jev signals task completion
-              ralph.state.active = false;
-              ralph.state.current_phase = 'complete';
-              ralph.state.phase = 'complete';
-              ralph.state.completed_at = new Date().toISOString();
-              if (shouldWriteStateBack(ralph.path)) {
-                writeJsonFile(ralph.path, ralph.state);
-              }
+          const jevCompletionAccepted =
+            jevSaysTaskComplete(jevResult) &&
+            completeModeFromJev(ralph.state, ralph.path);
+
+          if (jevCompletionAccepted) {
+            if (!hasActiveAutopilotForSession) {
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+                }),
+              );
+              return;
             }
-            
-            console.log(
-              JSON.stringify({
-                decision: "continue",
-                reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
-              }),
-            );
-            return;
+
+            // Ralph is a child workflow here; let the active autopilot handler
+            // below enforce Stop instead of releasing the turn.
+            break ralphPriority;
           }
 
           const shouldBlock = heuristic.shouldBlock;
@@ -1553,17 +1574,32 @@ async function main() {
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
         
-        // In active mode, check if Jev says task is complete (issue #4805); noul is a probability
-        const jevSaysTaskCompleteAtExtend = jevExtendResult && jevExtendResult.mode === 'active' && jevExtendResult.answer && jevExtendResult.answer.noul >= 0.5;
-        const shouldBlockExtend = true; // Always block after extending (original behavior)
-        
-        console.log(
-          JSON.stringify({
-            decision: shouldBlockExtend ? "block" : "continue",
-            reason: jevSaysTaskCompleteAtExtend ? '[JEV-COMPLETION] Task complete per Jev answer; exiting ralph.' : ralphExtendedReason,
-          }),
-        );
-        return;
+        const jevCompletionAcceptedAtExtend =
+          jevSaysTaskComplete(jevExtendResult) &&
+          completeModeFromJev(ralph.state, ralph.path);
+
+        if (!jevCompletionAcceptedAtExtend) {
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: ralphExtendedReason,
+            }),
+          );
+          return;
+        }
+
+        if (!hasActiveAutopilotForSession) {
+          console.log(
+            JSON.stringify({
+              decision: "continue",
+              reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+            }),
+          );
+          return;
+        }
+
+        // Continue into the active autopilot handler below.
+        break ralphPriority;
       }
     }
 
@@ -1726,23 +1762,10 @@ async function main() {
               phase,
             }, data.permission_mode);
 
-            // In active mode, check if Jev says task is complete (issue #4805); noul is a probability
-            const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul >= 0.5;
-            
-            if (jevSaysTaskCompleteAP) {
-              // Guard the completion write against concurrent state changes:
-              // Re-read the state file and verify it hasn't been modified before writing terminal state.
-              if (isStateUnchangedSinceCJevRequest(autopilot.state, autopilot.path)) {
-                // Transition autopilot to completed state when Jev signals task completion
-                autopilot.state.active = false;
-                autopilot.state.current_phase = 'complete';
-                autopilot.state.phase = 'complete';
-                autopilot.state.completed_at = new Date().toISOString();
-                if (shouldWriteStateBack(autopilot.path)) {
-                  writeJsonFile(autopilot.path, autopilot.state);
-                }
-              }
-              
+            if (
+              jevSaysTaskComplete(jevAutopilotResult) &&
+              completeModeFromJev(autopilot.state, autopilot.path)
+            ) {
               console.log(
                 JSON.stringify({
                   decision: "continue",

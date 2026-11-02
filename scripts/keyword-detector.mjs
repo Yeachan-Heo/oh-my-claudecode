@@ -1658,6 +1658,38 @@ function loadDisabledKeywords(directory) {
 }
 
 /**
+ * Read task-size suppression opt-outs from the same project and user JSONC
+ * config files used by the TypeScript bridge. User config is merged first so
+ * explicitly set project values take precedence, matching loadConfig().
+ */
+function loadTaskSizeDetectionConfig(directory) {
+  const configPaths = [
+    join(getOmcUserConfigDir(), 'claude-omc', 'config.jsonc'),
+    join(directory || process.cwd(), '.claude', 'omc.jsonc'),
+  ];
+  const result = {
+    enabled: true,
+    suppressHeavyModesForSmallTasks: true,
+  };
+
+  for (const configPath of configPaths) {
+    const taskSizeDetection = loadJsoncConfig(configPath)?.taskSizeDetection;
+    if (!taskSizeDetection || typeof taskSizeDetection !== 'object' || Array.isArray(taskSizeDetection)) {
+      continue;
+    }
+    if (taskSizeDetection.enabled !== undefined) {
+      result.enabled = taskSizeDetection.enabled !== false;
+    }
+    if (taskSizeDetection.suppressHeavyModesForSmallTasks !== undefined) {
+      result.suppressHeavyModesForSmallTasks =
+        taskSizeDetection.suppressHeavyModesForSmallTasks !== false;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
@@ -2104,11 +2136,17 @@ async function main() {
     }
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
-    // New logic per reporter feedback:
-    // - Only suppress when confidence >= 0.9 AND (classifyTaskSize says small OR has size prefix)
+    // Only suppress when enabled, confidence >= 0.9, and the heuristic says
+    // small or the prompt has an explicit size prefix.
     // - NEVER suppress slash-invoked modes
-    // - Otherwise only add [TASK-SIZE: SMALL] note
-    if (jevTaskSizeResult && jevTaskSizeResult.size === 'small' && jevTaskSizeResult.confidence >= 0.9) {
+    const taskSizeDetectionConfig = loadTaskSizeDetectionConfig(directory);
+    if (
+      taskSizeDetectionConfig.enabled &&
+      taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
+      jevTaskSizeResult &&
+      jevTaskSizeResult.size === 'small' &&
+      jevTaskSizeResult.confidence >= 0.9
+    ) {
       // Check if prompt has a size prefix like "quick:"
       const hasSizePrefix = /^\s*(?:quick|small|tiny|minimal|fast|speed|urgent):/i.test(cleanPrompt);
       // Check if heuristic classifyTaskSize also says small
@@ -2134,9 +2172,6 @@ async function main() {
           // For heavy keywords, suppress only if NOT slash-invoked
           return slashInvokedKeywords.has(keyword.name);
         });
-      } else {
-        // Confidence >= 0.9 but heuristic doesn't agree: just add a note
-        // (We'll add this as a separate additionalContext field in the hook output)
       }
     }
 

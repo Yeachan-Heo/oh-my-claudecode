@@ -1,7 +1,7 @@
 /** Real script subprocess regressions for issue #4208. */
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,6 +82,9 @@ describe("jev active-mode subprocess repro", () => {
   let choice: string;
   let responseDelayMs: number;
   let noulAnswer: boolean | number;  // Can be boolean for old tests or probability (0-1) for realistic tests
+  let noulAnswerByMode: Record<string, boolean | number>;
+  let confidenceAnswer: number;
+  let onTaskCompleteRequest: (() => void) | undefined;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-active-repro-"));
@@ -90,6 +93,9 @@ describe("jev active-mode subprocess repro", () => {
     choice = "opus";
     responseDelayMs = 0;
     noulAnswer = false;
+    noulAnswerByMode = {};
+    confidenceAnswer = 0.99;
+    onTaskCompleteRequest = undefined;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -107,10 +113,15 @@ describe("jev active-mode subprocess repro", () => {
         requests.push(entry);
         console.log("[jev repro request]", entry);
         const question = Object.keys(body.questions)[0];
+        if (question === "task_complete") onTaskCompleteRequest?.();
+        const modeName = body.state.mode_name;
+        const modeNoulAnswer = typeof modeName === "string"
+          ? noulAnswerByMode[modeName]
+          : undefined;
         const answer =
           body.questions[question].type === "noul"
-            ? { type: "noul", noul: noulAnswer, confidence: 0.99 }
-            : { type: "choice", choice, confidence: 0.99 };
+            ? { type: "noul", noul: modeNoulAnswer ?? noulAnswer, confidence: confidenceAnswer }
+            : { type: "choice", choice, confidence: confidenceAnswer };
         const sendResponse = () => {
           if (response.destroyed) return;
           response.writeHead(status, {
@@ -172,6 +183,69 @@ describe("jev active-mode subprocess repro", () => {
       sessionId: "test-sess-model",
       prompt: "",
     };
+  }
+
+  function persistentModeInput(sessionId: string) {
+    return {
+      cwd,
+      sessionId,
+      directory: cwd,
+      last_assistant_message: "The implementation is complete.",
+    };
+  }
+
+  function createRalphState(
+    sessionId: string,
+    overrides: Record<string, unknown> = {},
+  ) {
+    const now = new Date().toISOString();
+    return {
+      active: true,
+      mode: "ralph",
+      iteration: 1,
+      max_iterations: 5,
+      session_id: sessionId,
+      project_path: cwd,
+      started_at: now,
+      last_checked_at: now,
+      updated_at: now,
+      ...overrides,
+    };
+  }
+
+  function createAutopilotState(sessionId: string) {
+    const now = new Date().toISOString();
+    return {
+      active: true,
+      mode: "autopilot",
+      phase: "qa",
+      current_phase: "qa",
+      session_id: sessionId,
+      project_path: cwd,
+      started_at: now,
+      last_checked_at: now,
+      updated_at: now,
+      reinforcement_count: 0,
+    };
+  }
+
+  function writeSessionState(
+    sessionId: string,
+    fileName: string,
+    state: Record<string, unknown>,
+  ) {
+    const sessionStateDir = join(
+      cwd,
+      ".omc",
+      "non-git",
+      "state",
+      "sessions",
+      sessionId,
+    );
+    mkdirSync(sessionStateDir, { recursive: true });
+    const statePath = join(sessionStateDir, fileName);
+    writeFileSync(statePath, JSON.stringify(state, null, 2));
+    return statePath;
   }
 
   function keywordInput() {
@@ -557,24 +631,110 @@ describe("jev active-mode subprocess repro", () => {
       cwd,
     );
     expect(withSmall.exitCode, withSmall.stderr).toBe(0);
-    // When task-size returns 'small', the output should suppressOutput: true
-    // because the heavy keywords were filtered out
     const smallParsed = JSON.parse(withSmall.stdout);
-    // If no keywords remain after filtering, suppressOutput will be true
-    if (smallParsed.suppressOutput) {
-      // This means all keywords were filtered (which would happen with 'small')
-      expect(smallParsed.suppressOutput).toBe(true);
-    } else {
-      // If some keywords remain, they should not be heavy keywords
-      const smallOutput = smallParsed.hookSpecificOutput?.additionalContext || "";
-      expect(smallOutput).not.toContain("ralph");
-      expect(smallOutput).not.toContain("autopilot");
-    }
+    expect(smallParsed.suppressOutput).toBe(true);
+    expect(withSmall.stdout).not.toContain("ralph");
+    expect(withSmall.stdout).not.toContain("autopilot");
     
     // Verify task-size request was made
     const taskSizeRequest = requests.find((entry) => "task-size" in entry.body.questions);
     expect(taskSizeRequest).toBeDefined();
     assertWireContract(taskSizeRequest!, "task-size");
+  }, 15000);
+
+  it("keyword-detector.mjs: low-confidence small task-size keeps ralph", async () => {
+    const input = {
+      prompt: "Please use ralph to fix this.",
+      cwd,
+      session_id: "test-sess-keyword",
+    };
+    choice = "small";
+    confidenceAnswer = 0.5;
+
+    const result = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain("ralph");
+    expect(requests.some((entry) => "task-size" in entry.body.questions)).toBe(true);
+  }, 15000);
+
+  it("keyword-detector.mjs: slash-invoked ralph survives small task-size classification", async () => {
+    const input = {
+      prompt: "/oh-my-claudecode:ralph fix typo",
+      cwd,
+      session_id: "test-sess-keyword",
+    };
+    choice = "small";
+
+    const result = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain("ralph");
+    expect(requests.some((entry) => "task-size" in entry.body.questions)).toBe(true);
+  }, 15000);
+
+  it("keyword-detector.mjs: task-size suppression opt-out keeps ralph", async () => {
+    const input = {
+      prompt: "Please use ralph and autopilot to fix this.",
+      cwd,
+      session_id: "test-sess-keyword",
+    };
+    const configDir = join(cwd, ".claude");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "omc.jsonc"),
+      JSON.stringify({
+        taskSizeDetection: { suppressHeavyModesForSmallTasks: false },
+      }),
+    );
+    choice = "small";
+
+    const result = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain("ralph");
+    expect(requests.some((entry) => "task-size" in entry.body.questions)).toBe(true);
+  }, 15000);
+
+  it("keyword-detector.mjs: disabled task-size detection never suppresses ralph", async () => {
+    const input = {
+      prompt: "Please use ralph and autopilot to fix this.",
+      cwd,
+      session_id: "test-sess-keyword",
+    };
+    const configDir = join(cwd, ".claude");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(
+      join(configDir, "omc.jsonc"),
+      JSON.stringify({ taskSizeDetection: { enabled: false } }),
+    );
+    choice = "small";
+
+    const result = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).hookSpecificOutput.additionalContext).toContain("ralph");
+    expect(requests.some((entry) => "task-size" in entry.body.questions)).toBe(true);
   }, 15000);
 
   it("keyword-detector.mjs: task-size:active with non-small answer preserves heavy keywords (issue #4805)", async () => {
@@ -606,108 +766,203 @@ describe("jev active-mode subprocess repro", () => {
     assertWireContract(taskSizeRequest!, "task-size");
   }, 15000);
 
-  it("persistent-mode.mjs: guards completion write against concurrent state mutations (issue #4805)", async () => {
-    // Test the isStateUnchangedSinceCJevRequest guard function that protects against
-    // race conditions where another process modifies the state file while Jev is called.
-    // When Jev returns noul:true (task complete), persistent-mode.mjs re-reads the state
-    // file to verify it hasn't changed. If it detects a concurrent mutation (different
-    // iteration, session_id, or updated_at), the completion write is skipped.
-    
-    const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
-    
-    // Guard function extracted from persistent-mode.mjs (issue #4805)
-    function isStateUnchangedSinceCJevRequest(originalState: Record<string, unknown>, filePath: string) {
-      if (!originalState || !filePath) return false;
-      let currentState: Record<string, unknown> | null = null;
-      try {
-        currentState = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>;
-      } catch {
-        return false;
-      }
-      if (!currentState) return false;
-      // Verify key identifiers haven't changed by another process
-      if (originalState.session_id !== currentState.session_id) return false;
-      if (originalState.iteration !== currentState.iteration) return false;
-      if (originalState.updated_at !== currentState.updated_at) return false;
-      return true;
-    }
-    
-    const stateDir = join(cwd, ".omc", "state");
-    mkdirSync(stateDir, { recursive: true });
-    const statePath = join(stateDir, "test-state.json");
-    const now = new Date().toISOString();
-    
-    const inMemoryState = {
-      active: true,
-      session_id: "test-session",
-      iteration: 2, // persistent-mode incremented from 1 → 2
-      updated_at: now,
-      current_phase: "work",
-    };
-    
-    // Test 1: File matches in-memory state → guard returns true (no concurrent change)
-    writeFileSync(statePath, JSON.stringify(inMemoryState));
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(true);
-    
-    // Test 2: Concurrent process changed iteration → guard returns false
-    writeFileSync(statePath, JSON.stringify({ ...inMemoryState, iteration: 3 }));
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(false);
-    
-    // Test 3: Concurrent process changed updated_at → guard returns false
-    writeFileSync(statePath, JSON.stringify({ ...inMemoryState, updated_at: "2026-11-02T14:30:00.000Z" }));
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(false);
-    
-    // Test 4: Concurrent process changed session_id → guard returns false
-    writeFileSync(statePath, JSON.stringify({ ...inMemoryState, session_id: "different-session" }));
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(false);
-    
-    // Test 5: File is deleted → guard returns false (safe fallback)
-    rmSync(statePath, { force: true });
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(false);
+
+  it("persistent-mode.mjs: active Ralph completion sets both terminal phase fields", async () => {
+    const sessionId = "test-sess-ralph-complete";
+    const statePath = writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId),
+    );
+    requests = [];
+    noulAnswer = 0.95;
+
+    const result = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).decision).toBe("continue");
+    const taskCompleteRequest = requests.find(
+      (entry) => "task_complete" in entry.body.questions,
+    );
+    expect(taskCompleteRequest).toBeDefined();
+    expect(taskCompleteRequest!.body.state.last_assistant_message).toBe(
+      "The implementation is complete.",
+    );
+    expect(taskCompleteRequest!.body.questions.task_complete.type).toBe("noul");
+
+    const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(resultingState.active).toBe(false);
+    expect(resultingState.phase).toBe("complete");
+    expect(resultingState.current_phase).toBe("complete");
+    expect(resultingState.completed_at).toEqual(expect.any(String));
   }, 15000);
 
-  it("persistent-mode.mjs: completion handler sets both phase and current_phase when Jev signals noul:true (issue #4805)", async () => {
-    // Issue #4805: Verify that the production completion handler sets BOTH phase fields
-    // when Jev signals task completion (noul: true), not just current_phase.
+  it("persistent-mode.mjs: incomplete active Ralph remains blocking and active", async () => {
+    const sessionId = "test-sess-ralph-incomplete";
+    const statePath = writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId),
+    );
+    noulAnswer = 0.2;
+
+    const result = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).decision).toBe("block");
+    const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(resultingState.active).toBe(true);
+    expect(resultingState.phase).not.toBe("complete");
+    expect(resultingState.current_phase).not.toBe("complete");
+  }, 15000);
+
+  it("persistent-mode.mjs: stale Ralph completion guard blocks without overwriting concurrent state", async () => {
+    const sessionId = "test-sess-ralph-stale";
+    const statePath = writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId),
+    );
+    let concurrentIteration = 0;
+    onTaskCompleteRequest = () => {
+      const currentState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+      concurrentIteration = Number(currentState.iteration) + 1;
+      writeFileSync(
+        statePath,
+        JSON.stringify({
+          ...currentState,
+          iteration: concurrentIteration,
+          updated_at: new Date(Date.now() + 1000).toISOString(),
+        }, null, 2),
+      );
+    };
+    noulAnswer = 0.95;
+
+    const result = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).decision).toBe("block");
+    const resultingState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(resultingState.iteration).toBe(concurrentIteration);
+    expect(resultingState.active).toBe(true);
+    expect(resultingState.phase).not.toBe("complete");
+    expect(resultingState.current_phase).not.toBe("complete");
+  }, 15000);
+
+  it("persistent-mode.mjs: Ralph extends at max iterations and still honors Jev completion", async () => {
+    const sessionId = "test-sess-ralph-extend";
+    const statePath = writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId, { iteration: 3, max_iterations: 3 }),
+    );
+    noulAnswer = 0.95;
+
+    const completed = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
+    );
+
+    expect(completed.exitCode, completed.stderr).toBe(0);
+    expect(JSON.parse(completed.stdout).decision).toBe("continue");
+    const completedState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(completedState.active).toBe(false);
+    expect(completedState.max_iterations).toBe(13);
+    expect(completedState.phase).toBe("complete");
+    expect(completedState.current_phase).toBe("complete");
+
+    writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId, { iteration: 3, max_iterations: 3 }),
+    );
+    requests = [];
+    const extended = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      env,
+      cwd,
+    );
+
+    expect(extended.exitCode, extended.stderr).toBe(0);
+    expect(JSON.parse(extended.stdout)).toMatchObject({ decision: "block" });
+    expect(JSON.parse(extended.stdout).reason).toContain("[RALPH LOOP - EXTENDED]");
+    expect(requests).toHaveLength(0);
+    const extendedState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
+    expect(extendedState.active).toBe(true);
+    expect(extendedState.max_iterations).toBe(13);
+  }, 15000);
+
+  it("persistent-mode.mjs: completing child Ralph leaves active autopilot enforcement in control", async () => {
+    const sessionId = "test-sess-ralph-parent";
+    const ralphPath = writeSessionState(
+      sessionId,
+      "ralph-state.json",
+      createRalphState(sessionId),
+    );
+    const autopilotPath = writeSessionState(
+      sessionId,
+      "autopilot-state.json",
+      createAutopilotState(sessionId),
+    );
+    noulAnswerByMode = { ralph: 0.95, autopilot: 0.2 };
+
+    const result = await runScript(
+      "persistent-mode.mjs",
+      persistentModeInput(sessionId),
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
+    );
+
+    expect(result.exitCode, result.stderr).toBe(0);
+    const output = JSON.parse(result.stdout);
+    expect(output.decision).toBe("block");
+    expect(output.reason).toContain("[AUTOPILOT - Phase: qa]");
+    expect(requests.map((entry) => entry.body.state.mode_name)).toEqual([
+      "ralph",
+      "autopilot",
+    ]);
+    const ralphState = JSON.parse(readFileSync(ralphPath, "utf8")) as Record<string, unknown>;
+    const autopilotState = JSON.parse(readFileSync(autopilotPath, "utf8")) as Record<string, unknown>;
+    expect(ralphState.active).toBe(false);
+    expect(ralphState.current_phase).toBe("complete");
+    expect(autopilotState.active).toBe(true);
+    expect(autopilotState.reinforcement_count).toBe(1);
+  }, 15000);
+
+  it("persistent-mode.mjs: autopilot completion sets both phase and current_phase", async () => {
+    // Verify that the production completion handler sets BOTH phase fields
+    // when Jev signals task completion (noul >= 0.5), not just current_phase.
     // This prevents the completed-run resumption bug in canResumeAutopilot().
     // Exercise the production code by running persistent-mode.mjs with a state that
     // triggers the completion handler.
-    const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
-    
-    // resolveOmcStateRoot returns OMC_STATE_DIR/non-git for non-git directories
-    const stateDir = join(cwd, ".omc", "non-git", "state");
     const sessionId = "test-sess-handler";
-    const sessionStateDir = join(stateDir, "sessions", sessionId);
-    mkdirSync(sessionStateDir, { recursive: true });
-    const autopilotStatePath = join(sessionStateDir, "autopilot-state.json");
-    const now = new Date().toISOString();
-    
-    // Create initial autopilot state in a non-terminal phase (qa)
-    const initialState = {
-      active: true,
-      mode: "autopilot",
-      phase: "qa",  // Non-terminal phase
-      current_phase: "qa",
-      session_id: sessionId,
-      iteration: 3,
-      max_iterations: 5,
-      updated_at: now,
-    };
-    
-    writeFileSync(autopilotStatePath, JSON.stringify(initialState));
-    
-    // Run persistent-mode.mjs with the session ID and initial state
-    // When Jev returns noul >= 0.5 (probability) for task_complete, the handler should set both phase fields
-    const input = {
-      cwd,
+    const autopilotStatePath = writeSessionState(
       sessionId,
-      directory: cwd,
-    };
+      "autopilot-state.json",
+      createAutopilotState(sessionId),
+    );
+    const input = persistentModeInput(sessionId);
     
-    // Set up the mock Jev endpoint to return noul: 0.95 (probability) for task_complete
-    // (Real Jev answers are probabilities, not booleans; >= 0.5 means task complete)
     requests = [];
-    noulAnswer = 0.95;  // Make the mock return noul: 0.95 for the task_complete question
+    noulAnswer = 0.95;
     const result = await runScript(
       "persistent-mode.mjs",
       input,
@@ -716,6 +971,7 @@ describe("jev active-mode subprocess repro", () => {
     );
     
     expect(result.exitCode, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout).decision).toBe("continue");
     
     // Verify that Jev was called with the task_complete question
     const taskCompleteRequest = requests.find(
@@ -731,6 +987,9 @@ describe("jev active-mode subprocess repro", () => {
     expect(req.body.questions["task_complete"].type).toBe("noul");
     expect(req.body.questions["task_complete"].instructions).toEqual(
       expect.any(String),
+    );
+    expect(req.body.state.last_assistant_message).toBe(
+      "The implementation is complete.",
     );
     
     // Read the resulting state file and verify BOTH phase fields are set to 'complete'
