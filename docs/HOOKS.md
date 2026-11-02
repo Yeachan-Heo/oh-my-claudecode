@@ -723,6 +723,20 @@ This needs a Claude Code version whose Agent/Task tool schema has an `effort` fi
 
 Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`.
 
+### Context pruning: staleness score
+
+`post-tool-verifier.mjs` asks the `context-pruning` point only for large-output tools (read, grep, glob, bash, webfetch, and the task tools) and only once context usage reaches the warning threshold (default 70%). The `staleness` question is a Score 0-3, and a score answer carries no `choice`, so in active mode the score is rounded to the nearest label and mapped to an action:
+
+| Score | Label | Action |
+|-------|-------|--------|
+| < 0.5 | `fresh` | no message |
+| 0.5 to < 1.5 | `recent` | no message |
+| 1.5 to < 2.5 | `aging` | `[OMC WARNING]` |
+| 2.5 to 3 | `stale` | `[OMC CRITICAL]` |
+
+- Jev changes the level only below the critical threshold (default 90%). At or above it the hook always emits `[OMC CRITICAL]` and asks for `/compact`, whatever Jev answers, subject to the usual warning cooldown.
+- A score outside 0-3, a non-numeric score, or an answer of another type is ignored and the heuristic action stays, even when that answer carries a `choice`. In a score answer, a string `choice` that names one of the four labels, matched case-insensitively, takes precedence over the score.
+
 ### Request Budget and Latency
 
 Set limits to control cost and latency:

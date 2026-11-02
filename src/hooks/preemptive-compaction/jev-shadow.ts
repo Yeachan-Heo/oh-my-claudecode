@@ -1,19 +1,46 @@
 /**
  * Jev shadow judgment: "context-pruning" (judgment point 5).
  *
- * Shadow-only. The existing heuristic (analyzeContextUsage -> action) still
- * decides everything; Jev's staleness Score is requested asynchronously
- * (blocking: false) and recorded in the shadow log for later comparison.
- * With no key configured this is a no-op: zero HTTP calls, no log.
+ * In shadow/off mode the heuristic (analyzeContextUsage -> action) decides;
+ * Jev's staleness Score is requested asynchronously (blocking: false) and
+ * recorded in the shadow log for later comparison. In active mode the score
+ * is mapped to an action (see mapAnswer below). With no key configured this
+ * is a no-op: zero HTTP calls, no log.
  *
  * The point declaration (questions, blocking flag) lives in the jev registry
  * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
 
-import { recordJudgment } from '../jev/index.js';
+import { getJudgmentPoint, recordJudgment } from '../jev/index.js';
 import type { JevAnswer, ResolveResult } from '../jev/index.js';
 
 export const CONTEXT_PRUNING_POINT = 'context-pruning';
+
+/** Staleness labels in the order of the point's score criteria (low to high). */
+function readStalenessLabels(): string[] {
+  const questions = getJudgmentPoint(CONTEXT_PRUNING_POINT).questions[0];
+  const resolved = typeof questions === 'function' ? questions() : questions;
+  return Object.keys(resolved.staleness?.criteria ?? {});
+}
+
+const STALENESS_LABELS = readStalenessLabels();
+
+/**
+ * Staleness label from a Jev answer. Only a score answer counts; another
+ * answer type yields no label, even when it carries a `choice`. A score answer
+ * carries only `score` (0 = fresh ... 3 = stale), so it is rounded to the
+ * nearest label; a score outside 0..3 or a non-number yields no label. A
+ * string `choice` that names one of the labels (case-insensitively) wins.
+ */
+export function stalenessLabelOf(answer: JevAnswer): string | undefined {
+  if (answer.type !== 'score') return undefined;
+  const choice = typeof answer.choice === 'string' ? answer.choice.toLowerCase() : undefined;
+  if (choice !== undefined && STALENESS_LABELS.includes(choice)) return choice;
+  const { score } = answer;
+  if (typeof score !== 'number' || !Number.isFinite(score)) return undefined;
+  if (score < 0 || score > STALENESS_LABELS.length - 1) return undefined;
+  return STALENESS_LABELS[Math.round(score)];
+}
 
 /** Metadata-only summary of one pruning candidate (a tool result). */
 export interface PruningCandidate {
@@ -59,13 +86,12 @@ export function recordContextPruningShadow(args: {
     twin: () => args.action,
     mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
-      // Jev Score answer has { type: 'score', choice: 'fresh' | 'recent' | 'aging' | 'stale' }
-      const choice = (answer.choice as string | undefined)?.toLowerCase();
+      const label = stalenessLabelOf(answer);
       // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
-      if (choice === 'fresh' || choice === 'recent') return 'none';
-      if (choice === 'aging') return 'warn';
-      if (choice === 'stale') return 'compact';
-      return 'none'; // Default fallback
+      if (label === 'fresh' || label === 'recent') return 'none';
+      if (label === 'aging') return 'warn';
+      if (label === 'stale') return 'compact';
+      return args.action; // No usable answer: keep the heuristic action
     },
     fetchFn: args.fetchFn,
   });
