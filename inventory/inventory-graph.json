@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "f547124753d7e62d670202639cd1482fc67ef585",
-    "sourceSha256": "d7c2dfbc583fc7d45dc20c9178330d22da7d4e56c3dd81b68707a7ca02fc37da",
+    "head": "4ea309e1f1709df110b298dad439ca931b62f8a3",
+    "sourceSha256": "336c8947b25cb0af02c85a173e167171c3d0f278488c25ea5baa3f9d6c8b2fca",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "f547124753d7e62d670202639cd1482fc67ef585",
-  "sourceSha256": "d7c2dfbc583fc7d45dc20c9178330d22da7d4e56c3dd81b68707a7ca02fc37da",
+  "head": "4ea309e1f1709df110b298dad439ca931b62f8a3",
+  "sourceSha256": "336c8947b25cb0af02c85a173e167171c3d0f278488c25ea5baa3f9d6c8b2fca",
   "counts": {
     "public": {
       "skills": 48,
@@ -27,9 +27,9 @@
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
-      "templateHooks": 26,
+      "templateHooks": 25,
       "srcFiles": 1426,
-      "total": 1452
+      "total": 1451
     },
     "generated": {
       "distFiles": 5471,
@@ -703,7 +703,6 @@
       "templates/hooks/lib/bounded-git-timeout.mjs",
       "templates/hooks/lib/cache-occupancy.mjs",
       "templates/hooks/lib/config-dir.mjs",
-      "templates/hooks/lib/jev-shadow.mjs",
       "templates/hooks/lib/model-routing-override-message.mjs",
       "templates/hooks/lib/precompact-publisher.mjs",
       "templates/hooks/lib/precompact-restore.mjs",
@@ -44368,11 +44367,6 @@
         "path": "templates/hooks/lib/config-dir.mjs"
       },
       {
-        "id": "templates/hooks/lib/jev-shadow.mjs",
-        "kind": "template-hook",
-        "path": "templates/hooks/lib/jev-shadow.mjs"
-      },
-      {
         "id": "templates/hooks/lib/model-routing-override-message.mjs",
         "kind": "template-hook",
         "path": "templates/hooks/lib/model-routing-override-message.mjs"
@@ -44613,6 +44607,11 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
+        "id": "tests/integration/jev-model-routing-effort.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-model-routing-effort.test.ts"
+      },
+      {
         "id": "tests/integration/multirepo-workspace.test.ts",
         "kind": "other",
         "path": "tests/integration/multirepo-workspace.test.ts"
@@ -44806,11 +44805,6 @@
         "id": "unresolved:benchmarks/harsh-critic/fixtures/code/code-payment-handler.ts#87318efcf4e7d00d",
         "kind": "unresolved",
         "path": "unresolved:benchmarks/harsh-critic/fixtures/code/code-payment-handler.ts#87318efcf4e7d00d"
-      },
-      {
-        "id": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f",
-        "kind": "unresolved",
-        "path": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f"
       },
       {
         "id": "vitest.config.ts",
@@ -84535,46 +84529,6 @@
         "kind": "projects"
       },
       {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:child_process",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:fs",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:os",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:path",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "hooks/hooks.json",
-        "kind": "projects"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "src/hooks/bridge.ts",
-        "kind": "projects"
-      },
-      {
-        "from": "templates/hooks/lib/jev-shadow.mjs",
-        "to": "unresolved:templates/hooks/lib/jev-shadow.mjs#f46150328330040f",
-        "kind": "imports-unresolved"
-      },
-      {
         "from": "templates/hooks/lib/model-routing-override-message.mjs",
         "to": "hooks/hooks.json",
         "kind": "projects"
@@ -85500,6 +85454,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/multirepo-workspace.test.ts",
         "to": "external:node:fs",
         "kind": "imports"
@@ -86331,12 +86325,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7571,
+      "nodeCount": 7570,
       "edgeCount": 8302,
-      "importEdgeCount": 6940,
+      "importEdgeCount": 6942,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "7be0764e3b805ce7354333dba215381185cd259e111611a27e17729db077b127",
-  "manifestSha256": "cadce68eab264a244bd4c862117051899b6bb2b558525119d5b48d09feb540cd"
+  "inventorySha256": "e7a7652eb44218a49b27b7cf9eb7d14fa6ab0faee3716cd3f0e597060818eec1",
+  "manifestSha256": "98c18647bdbdb84948d0c1840b455cacb7ca04631f0d4e76f7bcfb1e473a5b1e"
 }
