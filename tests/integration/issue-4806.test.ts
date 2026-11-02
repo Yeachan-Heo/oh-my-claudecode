@@ -163,4 +163,62 @@ describe('issue #4806: plugin hook heuristic format', () => {
       expect(point.nonComparable).toBeGreaterThan(0);
     }
   });
+
+  it('skill-trigger points with ultragoal, ai-slop-cleaner, wiki heuristics are comparable (issue P2)', () => {
+    // After the fix, skill-trigger heuristics for ultragoal, ai-slop-cleaner, and wiki
+    // should be valid choices in SKILL_TRIGGER_QUESTIONS.criteria, making them comparable.
+    // Before the fix, these would have comparable=0 and nonComparable=3.
+    const shadowLog = [
+      {
+        ts: '2026-11-02T11:00:00.000Z',
+        point: 'skill-trigger',
+        mode: 'shadow',
+        state: { prompt: 'test', source: 'user-prompt-submit' },
+        heuristic: 'ultragoal',
+        jev: { type: 'choice', choice: 'ralph', confidence: 0.8 },
+        durationMs: 100,
+      },
+      {
+        ts: '2026-11-02T11:00:01.000Z',
+        point: 'skill-trigger',
+        mode: 'shadow',
+        state: { prompt: 'test', source: 'user-prompt-submit' },
+        heuristic: 'ai-slop-cleaner',
+        jev: { type: 'choice', choice: 'ralph', confidence: 0.75 },
+        durationMs: 100,
+      },
+      {
+        ts: '2026-11-02T11:00:02.000Z',
+        point: 'skill-trigger',
+        mode: 'shadow',
+        state: { prompt: 'test', source: 'user-prompt-submit' },
+        heuristic: 'wiki',
+        jev: { type: 'choice', choice: 'cancel', confidence: 0.7 },
+        durationMs: 100,
+      },
+    ].map(e => JSON.stringify(e)).join('\n') + '\n';
+
+    const logPath = join(tmp, 'issue-4806-skill-triggers.jsonl');
+    writeFileSync(logPath, shadowLog);
+
+    // Run jev-eval
+    const output = execFileSync(NODE, [JEV_EVAL_SCRIPT, logPath, '--json'], {
+      encoding: 'utf8',
+    });
+
+    const report = JSON.parse(output);
+
+    // With the fix, these heuristics should be comparable (in the criteria)
+    expect(report.points).toBeDefined();
+    expect(report.points.length).toBeGreaterThan(0);
+    
+    // Find the skill-trigger point (entries are aggregated by point name)
+    const skillTriggerPoint = report.points.find((p: any) => p.point === 'skill-trigger');
+    expect(skillTriggerPoint).toBeDefined();
+    
+    // With the fix: all 3 entries should be comparable (not nonComparable)
+    // comparable=3, nonComparable=0
+    expect(skillTriggerPoint.comparable).toBe(3);
+    expect(skillTriggerPoint.nonComparable).toBe(0);
+  });
 });
