@@ -209,6 +209,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     ["max", 2.49, 1, "high"],
     ["max", 0.4, 1, "low"],
     ["MAX", 3, 1, "max"],
+    [" max ", 3, 1, "max"],
   ])("with OMC_JEV_MAX_EFFORT=%s maps score %s at confidence %s to %s", async (cap, score, confidence, expected) => {
     answersFor = () => ({ effort: scoreAnswer(score, confidence), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: cap })).effort).toBe(expected);
@@ -217,6 +218,15 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
   it("does not pick max when the effort answer has no confidence", async () => {
     const { confidence: _confidence, ...withoutConfidence } = scoreAnswer(3);
     answersFor = () => ({ effort: withoutConfidence, "model-tier": choiceAnswer("opus") });
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("xhigh");
+  }, 15000);
+
+  it.each([
+    ["a string", "0.99"],
+    ["null", null],
+    ["above 1", 1.5],
+  ])("does not pick max when the effort confidence is %s", async (_label, confidence) => {
+    answersFor = () => ({ effort: { ...scoreAnswer(3), confidence }, "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("xhigh");
   }, 15000);
 

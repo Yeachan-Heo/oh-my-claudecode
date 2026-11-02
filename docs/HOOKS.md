@@ -587,7 +587,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
-| `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels for deep-reasoning tasks. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels for deep-reasoning tasks. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -714,7 +714,7 @@ In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds 
 | 1.5 to < 2.5 | careful multi-step reasoning | `high` |
 | 2.5 to 3 | deep reasoning | top bucket: `max` when `OMC_JEV_MAX_EFFORT=max` and the effort answer's `confidence` is at least 0.95, otherwise `xhigh` when the cap is `xhigh` or `max`, otherwise the cap |
 
-Every result is capped by `OMC_JEV_MAX_EFFORT`.
+Every result is capped by `OMC_JEV_MAX_EFFORT`. A missing `confidence`, or one that is not a number from 0 to 1, counts as below 0.95, so it never selects `max`.
 
 This needs a Claude Code version whose Agent/Task tool schema has an `effort` field (checked on Claude Code 2.1.316).
 

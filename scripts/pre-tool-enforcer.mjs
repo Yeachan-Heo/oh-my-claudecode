@@ -594,8 +594,8 @@ const MODEL_ROUTING_QUESTIONS = {
 // The score is rounded onto its legend: < 0.5 low (trivial), < 1.5 medium
 // (some thought), < 2.5 high (careful multi-step), otherwise the top bucket
 // (deep reasoning). The top bucket is max when the cap is max and the effort
-// answer's confidence is at least MAX_EFFORT_MIN_CONFIDENCE, else xhigh when
-// the cap allows xhigh, else the cap. Every result is capped by
+// answer's confidence (0-1) is at least MAX_EFFORT_MIN_CONFIDENCE, else
+// xhigh when the cap allows xhigh, else the cap. Every result is capped by
 // OMC_JEV_MAX_EFFORT (low, medium, high, xhigh, or max). The default cap is
 // high: xhigh and max spend several times the tokens of high, so a router
 // raises a subagent there only when the user opts in with a higher cap.
@@ -616,7 +616,7 @@ function capEffort(effort, maxEffort) {
 
 function effortFromScore(score, confidence, maxEffort) {
   if (score < 2.5) return capEffort(score < 0.5 ? 'low' : score < 1.5 ? 'medium' : 'high', maxEffort);
-  if (maxEffort === 'max' && typeof confidence === 'number' && confidence >= MAX_EFFORT_MIN_CONFIDENCE) return 'max';
+  if (maxEffort === 'max' && typeof confidence === 'number' && confidence >= MAX_EFFORT_MIN_CONFIDENCE && confidence <= 1) return 'max';
   return capEffort('xhigh', maxEffort);
 }
 
