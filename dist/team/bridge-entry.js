@@ -8,6 +8,7 @@
 //   node dist/team/bridge-entry.js --config /path/to/config.json
 //
 // Config via temp file, not inline JSON argument.
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { readFileSync, statSync, realpathSync } from 'fs';
 import { resolve } from 'path';
 import { homedir } from 'os';
@@ -17,6 +18,7 @@ import { unregisterMcpWorker } from './team-registration.js';
 import { probeGitTopLevel } from '../lib/worktree-paths.js';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { sanitizeName } from './tmux-session.js';
+hardenWindowsExeSearch();
 /**
  * Validate that a config path is under the user's home directory
  * and contains a trusted subpath (Claude config dir or ~/.omc/).

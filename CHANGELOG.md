@@ -1,3 +1,19 @@
+# oh-my-claudecode v5.7.31: Keep plugin and standalone helper copies synchronized
+
+## Release Notes
+
+This release synchronizes the plugin and standalone helper copies of thirteen shared modules and fixes a stdin timeout mismatch that caused hook reads to time out mid-operation under external hook budgets.
+
+### Bug Fixes
+
+- **fix(hooks): keep the plugin and standalone helper copies identical** (#4784; @Jack11111eee)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix**
+
+---
+
 # oh-my-claudecode v5.7.29: Windows provider resolution and state-lock contention fixes
 
 ## Release Notes
