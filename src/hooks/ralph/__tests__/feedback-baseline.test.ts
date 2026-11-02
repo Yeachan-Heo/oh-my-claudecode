@@ -306,3 +306,19 @@ not ok 2 - test b new failure
     expect(withColon.some((line) => line.includes('duration'))).toBe(false);
   });
 });
+
+describe('pytest progress lines (issue #4794)', () => {
+  it('does not fingerprint progress dots, so 200 vs 201 passing tests yields no new signatures', () => {
+    const run1 = signatureLines(`${'.'.repeat(200)} [ 36%]\n${'.'.repeat(200)} [100%]`);
+    const run2 = signatureLines(`${'.'.repeat(201)} [ 35%]\n${'.'.repeat(201)} [100%]`);
+    expect(run1).toEqual([]);
+    expect(run2).toEqual([]);
+    const diff = diffAgainstBaseline(baseline({ test: { signatures: run1 } }), { test: { signatures: run2 } });
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('still keeps real pytest failure lines', () => {
+    const lines = signatureLines(`${'.'.repeat(200)}F [ 36%]\nFAILED tests/test_x.py::test_y - assert 1 == 2`);
+    expect(lines).toEqual(['FAILED tests/test_x.py::test_y - assert 1 == 2']);
+  });
+});
