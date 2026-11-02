@@ -81,6 +81,7 @@ describe("jev active-mode subprocess repro", () => {
   let status: number;
   let choice: string;
   let responseDelayMs: number;
+  let noulAnswer: boolean;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-active-repro-"));
@@ -88,6 +89,7 @@ describe("jev active-mode subprocess repro", () => {
     status = 200;
     choice = "opus";
     responseDelayMs = 0;
+    noulAnswer = false;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -107,7 +109,7 @@ describe("jev active-mode subprocess repro", () => {
         const question = Object.keys(body.questions)[0];
         const answer =
           body.questions[question].type === "noul"
-            ? { type: "noul", noul: false, confidence: 0.99 }
+            ? { type: "noul", noul: noulAnswer, confidence: 0.99 }
             : { type: "choice", choice, confidence: 0.99 };
         const sendResponse = () => {
           if (response.destroyed) return;
@@ -660,10 +662,12 @@ describe("jev active-mode subprocess repro", () => {
     // Issue #4805: Verify that the production completion handler sets BOTH phase fields
     // when Jev signals task completion (noul: true), not just current_phase.
     // This prevents the completed-run resumption bug in canResumeAutopilot().
-    // We verify this by checking that the production code sets both fields.
+    // Exercise the production code by running persistent-mode.mjs with a state that
+    // triggers the completion handler.
     const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
     
-    const stateDir = join(cwd, ".omc", "state");
+    // resolveOmcStateRoot returns OMC_STATE_DIR/non-git for non-git directories
+    const stateDir = join(cwd, ".omc", "non-git", "state");
     const sessionId = "test-sess-handler";
     const sessionStateDir = join(stateDir, "sessions", sessionId);
     mkdirSync(sessionStateDir, { recursive: true });
@@ -671,7 +675,6 @@ describe("jev active-mode subprocess repro", () => {
     const now = new Date().toISOString();
     
     // Create initial autopilot state in a non-terminal phase (qa)
-    // Then simulate what the production handler does when Jev returns noul: true
     const initialState = {
       active: true,
       mode: "autopilot",
@@ -685,24 +688,49 @@ describe("jev active-mode subprocess repro", () => {
     
     writeFileSync(autopilotStatePath, JSON.stringify(initialState));
     
-    // The production handler in persistent-mode.mjs (lines 1722-1728) does this:
-    // When Jev returns noul: true and state hasn't changed, it sets:
-    // - autopilot.state.active = false
-    // - autopilot.state.current_phase = 'complete'  
-    // - autopilot.state.phase = 'complete'  <- This is the fix for issue #4805
-    // - autopilot.state.completed_at = new Date().toISOString()
-    // Verify the source code contains both assignments (already checked via grep)
+    // Run persistent-mode.mjs with the session ID and initial state
+    // When Jev returns noul:true for task_complete, the handler should set both phase fields
+    const input = {
+      cwd,
+      sessionId,
+      directory: cwd,
+    };
     
-    // Read the source code to verify both phase fields are set
-    const sourceCode = readFileSync(join(PROJECT_ROOT, "scripts", "persistent-mode.mjs"), "utf8");
-    // Look for the pattern where both fields are set to 'complete' in the autopilot handler
-    expect(sourceCode).toContain("autopilot.state.current_phase = 'complete'");
-    expect(sourceCode).toContain("autopilot.state.phase = 'complete'");
-    // Verify they appear in sequence (within reasonable distance) in the handler
-    const completeMatch = sourceCode.match(
-      /autopilot\.state\.current_phase = 'complete'[\s\S]{0,200}autopilot\.state\.phase = 'complete'/
+    // Set up the mock Jev endpoint to return noul:true for task_complete
+    requests = [];
+    noulAnswer = true;  // Make the mock return noul: true for the task_complete question
+    const result = await runScript(
+      "persistent-mode.mjs",
+      input,
+      { ...env, OMC_JEV: "loop-continuation:active" },
+      cwd,
     );
-    expect(completeMatch).toBeTruthy();
+    
+    expect(result.exitCode, result.stderr).toBe(0);
+    
+    // Verify that Jev was called with the task_complete question
+    const taskCompleteRequest = requests.find(
+      (entry) => "task_complete" in entry.body.questions
+    );
+    expect(taskCompleteRequest).toBeDefined();
+    // Verify the wire contract (adapted for noul questions)
+    const req = taskCompleteRequest!;
+    expect(req.method).toBe("POST");
+    expect(req.url).toBe("/v1/systemone");
+    expect(req.headers.authorization).toBe(`Bearer ${API_KEY}`);
+    expect(req.headers["content-type"]).toBe("application/json");
+    expect(req.body.questions["task_complete"].type).toBe("noul");
+    expect(req.body.questions["task_complete"].instructions).toEqual(
+      expect.any(String),
+    );
+    
+    // Read the resulting state file and verify BOTH phase fields are set to 'complete'
+    const resultingState = JSON.parse(readFileSync(autopilotStatePath, "utf8")) as Record<string, unknown>;
+    expect(resultingState.active).toBe(false);
+    expect(resultingState.phase).toBe("complete");
+    expect(resultingState.current_phase).toBe("complete");
+    expect(resultingState.completed_at).toBeDefined();
+    expect(typeof resultingState.completed_at).toBe("string");
   }, 15000);
 });
 
