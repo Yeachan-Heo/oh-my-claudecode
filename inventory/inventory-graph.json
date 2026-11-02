@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "af2fcadc2649efd06e6a64e0af401353449d7a27",
-    "sourceSha256": "0dd631cb965fda3958835c7bde5ac012979b9f04d3d71825d67d267967886978",
+    "head": "435712201b728564135c2e8f725873085ea6bc4e",
+    "sourceSha256": "621e29b2cd636a4f0e02b46cd09a9a541a78a7d920771e183f6c565e80ac5614",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "af2fcadc2649efd06e6a64e0af401353449d7a27",
-  "sourceSha256": "0dd631cb965fda3958835c7bde5ac012979b9f04d3d71825d67d267967886978",
+  "head": "435712201b728564135c2e8f725873085ea6bc4e",
+  "sourceSha256": "621e29b2cd636a4f0e02b46cd09a9a541a78a7d920771e183f6c565e80ac5614",
   "counts": {
     "public": {
       "skills": 48,
@@ -66950,6 +66950,16 @@
       },
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -66961,6 +66971,11 @@
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:url",
         "kind": "imports"
       },
       {
@@ -86236,11 +86251,11 @@
     ],
     "stats": {
       "nodeCount": 7568,
-      "edgeCount": 8286,
-      "importEdgeCount": 6928,
+      "edgeCount": 8289,
+      "importEdgeCount": 6930,
       "registerEdgeCount": 69
     }
   },
   "inventorySha256": "be27aeeb4f377c9511bee33941088d74f24fa7bd49be66e8323754ae3da4349c",
-  "manifestSha256": "f035817e4c128bf85fc38391fcf716e0d2fd059e2e275c83490809f8ee7ccc4d"
+  "manifestSha256": "78b5cd6ca869c806540e1cd0e6937c90fe3e3fb87a19cf4a879a03221bcbc181"
 }

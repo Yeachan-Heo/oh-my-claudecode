@@ -23,6 +23,12 @@ export const FEEDBACK_BASELINE_HISTORY_DIRNAME = 'feedback-baseline.history';
 export const MAX_FEEDBACK_BASELINE_HISTORY = 20;
 /** Per-command signature cap: a pathological runaway output must not become a giant baseline. */
 export const MAX_SIGNATURES_PER_COMMAND = 200;
+/** Cross-process baseline write lock: how long to wait between acquisition attempts. */
+const BASELINE_LOCK_RETRY_MS = 10;
+/** A lock file older than this is treated as abandoned by a crashed writer. */
+const BASELINE_LOCK_STALE_MS = 30_000;
+/** Upper bound on waiting for the write lock; past it the write fails closed. */
+const BASELINE_LOCK_TIMEOUT_MS = 10_000;
 
 /** ANSI escape sequences, stripped before fingerprinting. */
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
@@ -208,9 +214,10 @@ export function archiveBaseline(path: string, now: Date = new Date()): string | 
         throw err;
       }
     }
-    // The archive created by this call must survive pruning even when older
-    // timestamps (a restored baseline) sort before existing history entries.
-    pruneBaselineHistory(dir, target);
+    // No pruning here: the archive must not be evicted until the replacement
+    // that depends on it has actually landed. recordBaseline prunes after a
+    // successful live write; pruning first would evict history when that write
+    // fails and the caller retries.
     return target;
   } catch {
     return null;
@@ -260,58 +267,123 @@ export interface BaselineWriteResult {
   becameUnrunnable?: string[];
 }
 
+/** Synchronous sleep: this module is synchronous, so a blocking wait is the only option. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Take the sibling `.lock` for a baseline transaction, returning the open fd
+ * (kept open until release) or null on timeout/failure. `openSync(..., 'wx')`
+ * is an atomic exclusive create, so exactly one writer wins each round.
+ * A lock older than BASELINE_LOCK_STALE_MS is assumed abandoned by a crashed
+ * writer and removed, otherwise one crash would wedge the baseline forever.
+ */
+function acquireBaselineLock(lockPath: string): number | null {
+  const deadline = Date.now() + BASELINE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      return fs.openSync(lockPath, 'wx');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') return null;
+    }
+    try {
+      const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+      if (age > BASELINE_LOCK_STALE_MS) {
+        fs.rmSync(lockPath, { force: true });
+        continue;
+      }
+    } catch {
+      // The lock vanished between open and stat; retry the atomic create.
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
+    sleepSync(BASELINE_LOCK_RETRY_MS);
+  }
+}
+
+/** Release the lock on every path, so a failed transaction cannot leak the file. */
+function releaseBaselineLock(fd: number, lockPath: string): void {
+  try {
+    fs.closeSync(fd);
+  } catch {
+    // Already closed; the path removal below is what actually releases the lock.
+  }
+  try {
+    fs.rmSync(lockPath, { force: true });
+  } catch {
+    // A stale lock is broken by age on the next acquisition.
+  }
+}
+
 /**
  * Write a baseline, archiving any existing document first. The archive must
  * succeed before the live file is replaced: losing history silently is the bug
  * this guards against, so an unarchivable previous baseline fails the write.
+ *
+ * The whole read/archive/write transaction runs under a sibling `.lock` file.
+ * `COPYFILE_EXCL` only makes archive NAMES unique; without serialization two
+ * writers could archive the same original and the second could overwrite the
+ * first replacement without archiving it. A writer that cannot take the lock
+ * fails closed rather than proceeding unlocked.
+ *
+ * A failed live write leaves the archive in place: when `writeFileSync` fails
+ * partway (ENOSPC/EFBIG) that archive is the only intact recovery copy.
  */
 export function recordBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): BaselineWriteResult {
-  const previous = readBaseline(path);
-  const previousPath = archiveBaseline(path, now);
-  if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
-  // Delete the staged archive if the live write fails, so a retry does not retain
-  // an outdated reference. The archive must survive a successful write.
+  // The lock lives beside the baseline, so its parent must exist first.
   try {
-    fs.mkdirSync(join(path, '..'), { recursive: true });
-    fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
+    fs.mkdirSync(dirname(path), { recursive: true });
   } catch {
-    if (previousPath) {
-      try {
-        fs.rmSync(previousPath, { force: true });
-      } catch {
-        // If we cannot clean up the failed archive, let it stay; a retry will
-        // create a new one with a higher counter, not overwrite this one.
-      }
-    }
     return { written: false, added: 0, removed: 0 };
   }
-  // Audit the document replacement from the raw signature sets, independent of
-  // the gate judgment in diffAgainstBaseline: that function collapses a newly
-  // unrunnable command into one synthetic marker, which would misreport the
-  // stored signatures the replacement actually removed.
-  let added = 0;
-  let removed = 0;
-  const becameUnrunnable: string[] = [];
-  if (previous && previousPath) {
-    for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
-      const before = previous.commands[command];
-      const after = commands[command];
-      const beforeSet = new Set(before?.signatures ?? []);
-      const afterSet = new Set(after?.signatures ?? []);
-      for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
-      for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
-      // Only mark as becameUnrunnable if the command existed in the previous baseline.
-      // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
-      if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+  const lockPath = `${path}.lock`;
+  const lockFd = acquireBaselineLock(lockPath);
+  if (lockFd === null) return { written: false, added: 0, removed: 0 };
+  try {
+    const previous = readBaseline(path);
+    const previousPath = archiveBaseline(path, now);
+    if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
+    try {
+      fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
+    } catch {
+      // Deliberately keep the archive: a partial live write makes it the only
+      // intact copy of the document the caller was replacing.
+      return { written: false, added: 0, removed: 0 };
     }
+    // Prune only now that the live replacement succeeded, so a failed write and
+    // its retry never evict history for a replacement that never landed.
+    if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
+    // Audit the document replacement from the raw signature sets, independent of
+    // the gate judgment in diffAgainstBaseline: that function collapses a newly
+    // unrunnable command into one synthetic marker, which would misreport the
+    // stored signatures the replacement actually removed.
+    let added = 0;
+    let removed = 0;
+    const becameUnrunnable: string[] = [];
+    if (previous && previousPath) {
+      for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+        const before = previous.commands[command];
+        const after = commands[command];
+        const beforeSet = new Set(before?.signatures ?? []);
+        const afterSet = new Set(after?.signatures ?? []);
+        for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+        for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+        // Only mark as becameUnrunnable if the command existed in the previous baseline.
+        // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
+        if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+      }
+    }
+    return {
+      written: true,
+      ...(previousPath ? { previousPath } : {}),
+      added,
+      removed,
+      ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
+    };
+  } finally {
+    releaseBaselineLock(lockFd, lockPath);
   }
-  return {
-    written: true,
-    ...(previousPath ? { previousPath } : {}),
-    added,
-    removed,
-    ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
-  };
 }
 
 /** Backward-compatible wrapper: the boolean says only whether the write succeeded. */

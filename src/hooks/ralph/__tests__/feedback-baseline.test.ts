@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { spawn, type ChildProcess } from 'child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { dirname, join } from 'path';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath, pathToFileURL } from 'url';
 import {
   baselinePath,
   diffAgainstBaseline,
@@ -14,6 +16,12 @@ import {
   type CommandBaseline,
   type FeedbackBaseline,
 } from '../feedback-baseline.js';
+
+// chmod-based failure injection does not restrict UID 0, so those tests would
+// assert failure against a write that actually succeeds under root.
+const isRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 function baseline(commands: Record<string, CommandBaseline>): FeedbackBaseline {
   return { version: 1, recordedAt: '2026-09-30T00:00:00.000Z', commands };
@@ -329,7 +337,7 @@ describe('baseline IO', () => {
     }
   });
 
-  it('covers archive-failure path: fails when history directory is unwritable (issue #4798)', () => {
+  it.skipIf(isRoot)('covers archive-failure path: fails when history directory is unwritable (issue #4798)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
     const path = baselinePath(dir, 'sess-1');
     try {
@@ -359,24 +367,26 @@ describe('baseline IO', () => {
     }
   });
 
-  it('cleans up the archived file if the live write fails, so retries do not retain stale references (issue #4798)', () => {
+  it.skipIf(isRoot)('retains the archived file when the live write fails, so a partial write keeps its intact recovery copy (issue #4798)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
     const path = baselinePath(dir, 'sess-1');
     try {
       recordBaseline(path, { test: { signatures: ['FAIL first'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const before = readFileSync(path);
       const historyDir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
-      // Get the count of archived files before the failed write.
-      const beforeCount = existsSync(historyDir) ? readdirSync(historyDir).filter((n) => n.endsWith('.json')).length : 0;
 
-      // Make the baseline file read-only so writeFileSync fails.
+      // Make the baseline file read-only so writeFileSync fails after the archive.
       chmodSync(path, 0o444);
       const result = recordBaseline(path, { test: { signatures: ['FAIL second'] } }, new Date('2026-10-01T00:00:00.000Z'));
       expect(result.written).toBe(false);
 
-      // Reset permissions and verify the staged archive was cleaned up.
+      // The archive must survive: a partially written live file leaves it as the
+      // only intact copy of the document that was being replaced.
       chmodSync(path, 0o644);
-      const afterCount = existsSync(historyDir) ? readdirSync(historyDir).filter((n) => n.endsWith('.json')).length : 0;
-      expect(afterCount).toBe(beforeCount); // No new archive left behind.
+      const history = readdirSync(historyDir).filter((name) => name.endsWith('.json'));
+      expect(history).toHaveLength(1);
+      expect(readFileSync(join(historyDir, history[0]))).toEqual(before);
+      expect(readBaseline(join(historyDir, history[0]))?.commands.test?.signatures).toEqual(['FAIL first']);
     } finally {
       try {
         chmodSync(path, 0o644);
@@ -500,13 +510,129 @@ describe('baseline IO', () => {
       // The audit must count signatures from the removed lint command.
       expect(result.removed).toBe(1);
       expect(result.added).toBe(0);
+      // The replacement is auditable in history: the archive keeps the dropped
+      // command and its signature, while the live document no longer has it.
+      const archived = readBaseline(result.previousPath as string);
+      expect(archived?.commands.lint).toEqual({ signatures: ['FAIL lint-a'] });
+      expect(readBaseline(path)?.commands ?? {}).not.toHaveProperty('lint');
       // The audit must report the union of old and new command keys.
-      const diff = diffAgainstBaseline(readBaseline(result.previousPath as string), readBaseline(path)?.commands ?? {});
+      const diff = diffAgainstBaseline(archived, readBaseline(path)?.commands ?? {});
       expect(diff.resolvedSignatures).toEqual(['lint: FAIL lint-a']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+const WORKER_SOURCE = (moduleUrl: string): string => `
+import { existsSync, writeFileSync } from 'node:fs';
+import { recordBaseline } from ${JSON.stringify(moduleUrl)};
+
+const [baselinePath, signature, readySelf, readyOther] = process.argv.slice(2);
+writeFileSync(readySelf, '');
+const deadline = Date.now() + 10000;
+while (!existsSync(readyOther)) {
+  if (Date.now() > deadline) break;
+  await new Promise((done) => setTimeout(done, 5));
+}
+const result = recordBaseline(
+  baselinePath,
+  { test: { signatures: ['FAIL ' + signature] } },
+  new Date('2026-10-01T00:00:00.000Z'),
+);
+process.stdout.write(JSON.stringify({ written: result.written, previousPath: result.previousPath ?? null }));
+`;
+
+function runWorker(
+  children: ChildProcess[],
+  workerPath: string,
+  args: string[],
+): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((settle, fail) => {
+    const child = spawn(process.execPath, ['--import', 'tsx', workerPath, ...args], {
+      cwd: repoRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    children.push(child);
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      fail(new Error(`worker timed out\nstderr: ${stderr}`));
+    }, 20_000);
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      fail(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      settle({ code, stdout, stderr });
+    });
+  });
+}
+
+describe('cross-process baseline serialization', () => {
+  it('serializes overlapping writers so each replacement archives the document that preceded it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-xproc-'));
+    const children: ChildProcess[] = [];
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      expect(
+        recordBaseline(path, { test: { signatures: ['FAIL original'] } }, new Date('2026-09-30T00:00:00.000Z')).written,
+      ).toBe(true);
+
+      const workerPath = join(dir, 'worker.mjs');
+      writeFileSync(
+        workerPath,
+        WORKER_SOURCE(pathToFileURL(join(repoRoot, 'src/hooks/ralph/feedback-baseline.ts')).href),
+        'utf8',
+      );
+
+      const readyA = join(dir, 'ready-a');
+      const readyB = join(dir, 'ready-b');
+      // Each worker waits for the OTHER's ready file, so the two recordBaseline
+      // transactions genuinely overlap instead of running back to back.
+      const [a, b] = await Promise.all([
+        runWorker(children, workerPath, [path, 'writer-a', readyA, readyB]),
+        runWorker(children, workerPath, [path, 'writer-b', readyB, readyA]),
+      ]);
+
+      expect(a.code, a.stderr).toBe(0);
+      expect(b.code, b.stderr).toBe(0);
+      const resultA = JSON.parse(a.stdout.trim()) as { written: boolean; previousPath: string | null };
+      const resultB = JSON.parse(b.stdout.trim()) as { written: boolean; previousPath: string | null };
+      expect(resultA.written).toBe(true);
+      expect(resultB.written).toBe(true);
+      expect(resultA.previousPath).not.toBeNull();
+      expect(resultB.previousPath).not.toBeNull();
+      // Distinct archives are the whole point: the second writer must archive
+      // the first replacement instead of overwriting it unarchived.
+      expect(resultA.previousPath).not.toBe(resultB.previousPath);
+
+      const archived = [readBaseline(resultA.previousPath as string), readBaseline(resultB.previousPath as string)];
+      const archivedSignals = archived.map((doc) => doc?.commands.test?.signatures?.[0]);
+      const liveSignal = readBaseline(path)?.commands.test?.signatures?.[0];
+
+      expect(['FAIL writer-a', 'FAIL writer-b']).toContain(liveSignal);
+      const firstWriterSignal = liveSignal === 'FAIL writer-a' ? 'FAIL writer-b' : 'FAIL writer-a';
+      // Together the archives preserve the original and the first replacement.
+      expect(archivedSignals).toContain('FAIL original');
+      expect(archivedSignals).toContain(firstWriterSignal);
+      // The lock must not leak after either transaction.
+      expect(existsSync(`${path}.lock`)).toBe(false);
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null) child.kill('SIGKILL');
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
 
 describe('pytest summary normalization (issue #4795)', () => {
