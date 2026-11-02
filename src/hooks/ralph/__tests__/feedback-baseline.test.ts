@@ -24,30 +24,37 @@ describe('signatureLines', () => {
     expect(first.some((line) => line.includes('123ms'))).toBe(false);
   });
 
-  it('normalizes parenthesized pytest clock durations so identical green runs fingerprint identically', () => {
-    const first = signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)');
-    const second = signatureLines('459 passed, 14 warnings in 201.07s (0:03:21)');
+  it('normalizes parenthesized pytest clock durations so identical runs fingerprint identically', () => {
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (0:03:21)');
     expect(first).toEqual(second);
-    expect(first).toEqual(['459 passed, 14 warnings in <v> <v>']);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
   });
 
   it('normalizes pytest clock durations with hours and fractional seconds', () => {
-    expect(signatureLines('1 passed in 194.32s (1:02:45)')).toEqual(['1 passed in <v> <v>']);
-    expect(signatureLines('1 passed in 194.32s (0:03:14.123)')).toEqual(['1 passed in <v> <v>']);
+    expect(signatureLines('1 failed, 200 passed in 194.32s (1:02:45)')).toEqual(['1 failed, 200 passed in <v> <v>']);
+    expect(signatureLines('1 failed, 200 passed in 194.32s (0:03:14.123)')).toEqual(['1 failed, 200 passed in <v> <v>']);
   });
 
   it('normalizes two-component m:ss clock durations (third component is optional)', () => {
-    const first = signatureLines('1 passed in 194.32s (3:14)');
-    const second = signatureLines('1 passed in 201.07s (3:21)');
+    const first = signatureLines('1 failed, 200 passed in 194.32s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201.07s (3:21)');
     expect(first).toEqual(second);
-    expect(first).toEqual(['1 passed in <v> <v>']);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
+  });
+
+  it('normalizes clock durations behind integer-second prefixes (no decimal part)', () => {
+    const first = signatureLines('1 failed, 200 passed in 194s (3:14)');
+    const second = signatureLines('1 failed, 200 passed in 201s (3:21)');
+    expect(first).toEqual(second);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
   });
 
   it('keeps the pytest summary clock normalized only in its duration context', () => {
-    const first = signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)');
-    const second = signatureLines('459 passed, 14 warnings in 194.32s (0:03:21)');
+    const first = signatureLines('1 failed, 200 passed in 194.32s (0:03:14)');
+    const second = signatureLines('1 failed, 200 passed in 194.32s (0:03:21)');
     expect(first).toEqual(second);
-    expect(first).toEqual(['459 passed, 14 warnings in <v> <v>']);
+    expect(first).toEqual(['1 failed, 200 passed in <v> <v>']);
   });
 
   it('does not erase clock-like assertion values: a changed failure reason stays distinct', () => {
