@@ -17,6 +17,7 @@ vi.mock('../../factory/map-ingest.js', async (importOriginal) => {
 
 import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
 import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, runFeedbackCommand, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
+import { acquireFileLockSync, lockPathFor, releaseFileLockSync } from '../../lib/file-lock.js';
 import { Command } from 'commander';
 
 const tempRoots: string[] = [];
@@ -173,6 +174,13 @@ describe('omc ralph verify', () => {
     writeFileSync(join(dir, 'failer.js'), `console.log(${JSON.stringify(body)});
 process.exit(1);
 `, 'utf8');
+  }
+
+  function writePrinter(body: string, exitCode = 0): void {
+    writeFileSync(join(dir, 'printer.js'), `console.log(${JSON.stringify(body)});
+process.exit(${exitCode});
+`, 'utf8');
+    writePackage('node printer.js');
   }
 
   beforeEach(() => {
@@ -360,6 +368,71 @@ operable program or batch file.`);
   it('reports no feedback commands as a clean no-op', () => {
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'no-scripts' }), 'utf8');
     expect(ralphVerify({ session: 'sess-none' }, dir)).toBe(0);
+  });
+
+  it('does not fingerprint success output when the command exits 0', () => {
+    writePrinter('phase 6: 20/20 checks passed');
+    expect(ralphVerify({ session: 'sess-success-output', writeBaseline: true }, dir)).toBe(0);
+    const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-success-output', 'feedback-baseline.json');
+    const recorded = JSON.parse(readFileSync(baselineFile, 'utf8')) as { commands: Record<string, { signatures: string[] }> };
+    expect(recorded.commands['npm run test'].signatures).toEqual([]);
+
+    writePrinter('all checks passed');
+    expect(ralphVerify({ session: 'sess-success-output' }, dir)).toBe(0);
+  });
+
+  it('treats a designed-to-fail baseline as resolved once the check exits 0', () => {
+    writePrinter('Phase 6 acceptance checks are not implemented yet', 1);
+    expect(ralphVerify({ session: 'sess-designed-fail', writeBaseline: true }, dir)).toBe(0);
+
+    writePrinter('phase 6: 20/20 checks passed');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-designed-fail' }, dir)).toBe(0);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toMatch(/\(\d+ baseline failure\(s\) resolved\)/);
+      expect(output).not.toContain('NEW failure');
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it('reports a timeout as a timeout, not as a new failure', () => {
+    writePrinter('fast');
+    expect(ralphVerify({ session: 'sess-timeout', writeBaseline: true }, dir)).toBe(0);
+
+    writePackage('node -e "setTimeout(() => {}, 3000)"');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-timeout', timeoutMs: 500 }, dir)).toBe(1);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('timed out');
+      expect(output).toContain('--timeout <seconds>');
+      expect(output).not.toContain('NEW failure');
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 20000);
+
+  it('treats a timeout recorded in the baseline as environment noise', () => {
+    writePackage('node -e "setTimeout(() => {}, 3000)"');
+    expect(ralphVerify({ session: 'sess-timeout-baseline', writeBaseline: true, timeoutMs: 500 }, dir)).toBe(0);
+    expect(ralphVerify({ session: 'sess-timeout-baseline', timeoutMs: 500 }, dir)).toBe(0);
+  }, 30000);
+
+  it('serializes concurrent verify runs for the same session', () => {
+    writePrinter('ok');
+    const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-lock', 'feedback-baseline.json');
+    const lock = acquireFileLockSync(lockPathFor(baselineFile));
+    expect(lock).not.toBeNull();
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-lock' }, dir)).toBe(1);
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain('another verify is running');
+    } finally {
+      errorSpy.mockRestore();
+      if (lock) releaseFileLockSync(lock);
+    }
   });
 });
 
