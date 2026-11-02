@@ -81,7 +81,7 @@ describe("jev active-mode subprocess repro", () => {
   let status: number;
   let choice: string;
   let responseDelayMs: number;
-  let noulAnswer: boolean;
+  let noulAnswer: boolean | number;  // Can be boolean for old tests or probability (0-1) for realistic tests
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-active-repro-"));
@@ -689,16 +689,17 @@ describe("jev active-mode subprocess repro", () => {
     writeFileSync(autopilotStatePath, JSON.stringify(initialState));
     
     // Run persistent-mode.mjs with the session ID and initial state
-    // When Jev returns noul:true for task_complete, the handler should set both phase fields
+    // When Jev returns noul >= 0.5 (probability) for task_complete, the handler should set both phase fields
     const input = {
       cwd,
       sessionId,
       directory: cwd,
     };
     
-    // Set up the mock Jev endpoint to return noul:true for task_complete
+    // Set up the mock Jev endpoint to return noul: 0.95 (probability) for task_complete
+    // (Real Jev answers are probabilities, not booleans; >= 0.5 means task complete)
     requests = [];
-    noulAnswer = true;  // Make the mock return noul: true for the task_complete question
+    noulAnswer = 0.95;  // Make the mock return noul: 0.95 for the task_complete question
     const result = await runScript(
       "persistent-mode.mjs",
       input,
