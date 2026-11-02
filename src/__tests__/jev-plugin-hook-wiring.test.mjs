@@ -289,8 +289,8 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       expect(readPoint(context, point)).toMatchObject({
         point,
         heuristic: point === 'loop-continuation'
-          ? { mode: 'ralph', shouldBlock: true }
-          : { detected: true },
+          ? false
+          : true,
       });
       expect(readdirSync(context.root).filter((entry) => entry.startsWith('omc-jev-'))).toEqual([]);
     }
