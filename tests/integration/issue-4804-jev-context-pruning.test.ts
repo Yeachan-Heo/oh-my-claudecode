@@ -78,6 +78,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
   let status: number;
   let stalenesAnswer: string;
   let responseDelayMs: number;
+  let malformedChoice: unknown = null;
 
   beforeEach(async () => {
     cwd = mkdtempSync(join(tmpdir(), "jev-context-pruning-"));
@@ -85,6 +86,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     status = 200;
     stalenesAnswer = "fresh";
     responseDelayMs = 0;
+    malformedChoice = null;
     server = createServer((request, response) => {
       let raw = "";
       request.setEncoding("utf8");
@@ -108,11 +110,12 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
 
         // Build the appropriate answer based on question type
         let answer;
+        const choiceValue = malformedChoice !== null ? malformedChoice : stalenesAnswer;
         if (isScoreQuestion) {
           // For score questions, return the selected staleness level
-          answer = { type: "score", choice: stalenesAnswer, confidence: 0.95 };
+          answer = { type: "score", choice: choiceValue, confidence: 0.95 };
         } else {
-          answer = { type: "choice", choice: stalenesAnswer, confidence: 0.95 };
+          answer = { type: "choice", choice: choiceValue, confidence: 0.95 };
         }
 
         const sendResponse = () => {
@@ -307,6 +310,34 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     const output = JSON.parse(result.stdout);
     expect(output.hookSpecificOutput.additionalContext).toBeDefined();
     // With 'stale' answer, compaction should be suggested
+    expect(output.hookSpecificOutput.additionalContext).toContain("CRITICAL");
+  });
+
+  it("post-tool-verifier.mjs: OMC_JEV=context-pruning:active with malformed choice (non-string) should emit CRITICAL", async () => {
+    malformedChoice = 42; // Non-string choice
+    const input = postToolInput("read", 95);
+    const result = await runScript(
+      "post-tool-verifier.mjs",
+      input,
+      { ...env, OMC_JEV: "context-pruning:active" },
+      cwd,
+    );
+    expect(result.exitCode, result.stderr).toBe(0);
+    expect(requests.length).toBeGreaterThanOrEqual(1);
+
+    const request = requests.find(
+      (entry) => "staleness" in entry.body.questions,
+    );
+    expect(request).toBeDefined();
+    assertWireContract(request!, "staleness", "score");
+
+    // Verify the request includes the context percentage
+    expect(request!.body.state).toHaveProperty("context_percent", 95);
+
+    // Malformed choice (non-string) should be treated as invalid,
+    // falling back to heuristic action. At 95%, heuristic is 'compact' (CRITICAL).
+    const output = JSON.parse(result.stdout);
+    expect(output.hookSpecificOutput.additionalContext).toBeDefined();
     expect(output.hookSpecificOutput.additionalContext).toContain("CRITICAL");
   });
 
