@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 const spawnMock = vi.hoisted(() => ({ defaultSpawnFn: vi.fn(() => ({ pid: 4242, unref: vi.fn() })) }));
 vi.mock('../../hooks/session-end/spawn-next.js', async (importOriginal) => {
@@ -298,6 +298,26 @@ process.exit(1);
     } finally {
       logSpy.mockRestore();
     }
+  });
+
+  it('exits nonzero and leaves the live baseline untouched when history cannot be archived', () => {
+    writeFailer('FAIL old');
+    writePackage('node failer.js');
+    expect(ralphVerify({ session: 'sess-unarchivable', writeBaseline: true }, dir)).toBe(0);
+    const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-unarchivable', 'feedback-baseline.json');
+    const before = readFileSync(baselineFile);
+    // A regular file where the history directory must go makes archiving fail.
+    writeFileSync(join(dirname(baselineFile), 'feedback-baseline.history'), 'not a directory', 'utf8');
+    writeFailer('FAIL new');
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-unarchivable', writeBaseline: true }, dir)).toBe(1);
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('could not write a baseline');
+    } finally {
+      logSpy.mockRestore();
+    }
+    expect(readFileSync(baselineFile)).toEqual(before);
   });
 
   it('reports new test failures even when suite output includes ENOENT', () => {

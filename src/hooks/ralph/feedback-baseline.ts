@@ -113,8 +113,15 @@ export function diffAgainstBaseline(
   }
   const newSignatures: string[] = [];
   const resolvedSignatures: string[] = [];
-  for (const [command, entry] of Object.entries(current)) {
+  // Iterate the union so a command dropped from the current set still reports
+  // its baseline signatures as resolved/removed instead of vanishing silently.
+  for (const command of new Set([...Object.keys(baseline.commands), ...Object.keys(current)])) {
+    const entry = current[command];
     const before = baseline.commands[command];
+    if (!entry) {
+      if (before) resolvedSignatures.push(...before.signatures.map((signature) => `${command}: ${signature}`));
+      continue;
+    }
     if (!before) {
       newSignatures.push(...entry.signatures.map((signature) => `${command}: ${signature}`));
       continue;
@@ -164,21 +171,25 @@ export function archiveBaseline(path: string, now: Date = new Date()): string | 
     let target = join(dir, `${stamp}-${counter}.json`);
     while (fs.existsSync(target)) target = join(dir, `${stamp}-${++counter}.json`);
     fs.copyFileSync(path, target);
-    pruneBaselineHistory(dir);
+    // The archive created by this call must survive pruning even when older
+    // timestamps (a restored baseline) sort before existing history entries.
+    pruneBaselineHistory(dir, target);
     return target;
   } catch {
     return null;
   }
 }
 
-function pruneBaselineHistory(dir: string): void {
+function pruneBaselineHistory(dir: string, keepPath: string): void {
   let entries: string[];
   try {
-    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json')).sort();
+    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json') && join(dir, name) !== keepPath).sort();
   } catch {
     return;
   }
-  for (const name of entries.slice(0, Math.max(0, entries.length - MAX_FEEDBACK_BASELINE_HISTORY))) {
+  // Reserve one slot for `keepPath`, so the total never exceeds the cap.
+  const budget = Math.max(0, MAX_FEEDBACK_BASELINE_HISTORY - 1);
+  for (const name of entries.slice(0, Math.max(0, entries.length - budget))) {
     try {
       fs.rmSync(join(dir, name), { force: true });
     } catch {
