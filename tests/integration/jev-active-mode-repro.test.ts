@@ -180,7 +180,11 @@ describe("jev active-mode subprocess repro", () => {
     };
   }
 
-  function assertWireContract(request: WireRequest, question: string) {
+  function assertWireContract(
+    request: WireRequest,
+    question: string,
+    extraQuestions: string[] = [],
+  ) {
     expect(request.method).toBe("POST");
     expect(request.url).toBe("/v1/systemone");
     expect(request.headers.authorization).toBe(`Bearer ${API_KEY}`);
@@ -191,7 +195,10 @@ describe("jev active-mode subprocess repro", () => {
       "state",
     ]);
     expect(request.body.model).toBe("jev-latest");
-    expect(Object.keys(request.body.questions)).toEqual([question]);
+    expect(Object.keys(request.body.questions)).toEqual([
+      question,
+      ...extraQuestions,
+    ]);
     expect(request.body.questions[question].type).toBe("choice");
     expect(request.body.questions[question].instructions).toEqual(
       expect.any(String),
@@ -236,7 +243,8 @@ describe("jev active-mode subprocess repro", () => {
         (entry) => "model-tier" in entry.body.questions,
       );
       expect(request).toBeDefined();
-      assertWireContract(request!, "model-tier");
+      assertWireContract(request!, "model-tier", ["effort"]);
+      expect(request!.body.questions.effort.type).toBe("score");
       expect(request!.body.state).toEqual({
         tool_name: toolName,
         subagent_type: "",

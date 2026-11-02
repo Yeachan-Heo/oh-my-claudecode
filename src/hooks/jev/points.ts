@@ -90,7 +90,9 @@ const SCORE_QUESTIONS: JevQuestions = {
 /**
  * Point "model-routing" (ticket 04): tier guidance from CLAUDE.md
  * <model_routing> and docs/DELEGATION-ENFORCER.md - haiku for quick lookups,
- * sonnet for standard work, opus for architecture.
+ * sonnet for standard work, opus for architecture. The "effort" score (0-3)
+ * picks the subagent reasoning effort; scripts/pre-tool-enforcer.mjs maps it
+ * to none/low/medium/high in active mode.
  */
 const MODEL_ROUTING_QUESTIONS: JevQuestions = {
   'model-tier': {
@@ -100,6 +102,16 @@ const MODEL_ROUTING_QUESTIONS: JevQuestions = {
       haiku: 'Quick lookups and lightweight, mechanical work',
       sonnet: 'Standard coding and orchestration work',
       opus: 'Complex architecture and deep analysis',
+    },
+  },
+  effort: {
+    type: 'score',
+    instructions: 'How much reasoning effort does this delegated task need?',
+    criteria: {
+      trivial: 'Trivial: the answer or action is obvious, no thinking needed',
+      some: 'Some thought: a few straightforward steps',
+      careful: 'Careful multi-step reasoning: several dependent steps or things to check',
+      deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
     },
   },
 };

@@ -275,7 +275,9 @@ export function sweepStaleTempDirs(maxAgeMs = 24 * 60 * 60 * 1000) {
 /**
  * Fire-and-record one script-side judgment.
  * - Shadow mode: fire-and-forget, returns undefined immediately
- * - Active mode: waits (sync) for Jev answer, returns { mode, answer, source, ... }
+ * - Active mode: waits (sync) for Jev answer, returns { mode, answer, answers, ... }
+ *   (`answers` maps every question name to its answer; read multi-question
+ *   points by name, never by position)
  * - Off mode: returns undefined
  * Falls back to undefined (caller uses heuristic) on timeout/error/parse-failure.
  * permissionMode is the hook input's permission_mode; it travels in the

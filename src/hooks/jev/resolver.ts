@@ -93,6 +93,8 @@ interface ShadowLogEntry {
   state: unknown;
   heuristic: unknown;
   jev: unknown;
+  /** Every Jev answer by question name; null on degraded lines. */
+  answers: Record<string, JevAnswer> | null;
   confidence?: number;
   durationMs: number;
   /** Jev-reported token usage; absent on degraded lines. */
@@ -108,7 +110,16 @@ function sanitizeUsage(usage: unknown): JevUsage | undefined {
   return isCount(input_tokens) && isCount(output_tokens) ? { input_tokens, output_tokens } : undefined;
 }
 
-function firstAnswer(response: JevResponse): JevAnswer {
+/**
+ * The answer to the first question asked. The API does not guarantee the
+ * order of its answers object, so look it up by name; fall back to the first
+ * answer in server order when that name is missing.
+ */
+function firstAnswer(response: JevResponse, questions: JevQuestions): JevAnswer {
+  const firstQuestion = Object.keys(questions)[0];
+  if (firstQuestion !== undefined && Object.hasOwn(response.answers, firstQuestion)) {
+    return response.answers[firstQuestion];
+  }
   return Object.values(response.answers)[0] as JevAnswer;
 }
 
@@ -220,7 +231,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     void attempt.then((outcome) => {
       if (outcome.ok) {
         recordSuccess(args.point);
-        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, firstAnswer(outcome.response), outcome.response.usage), config.logDir);
+        void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
       } else {
         recordFailure(args.point);
         void writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
@@ -243,8 +254,8 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
       return { answer: heuristic, source: 'twin', mode: 'degraded' };
     }
     recordSuccess(args.point);
-    const jevAnswer = firstAnswer(outcome.response);
-    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, jevAnswer, outcome.response.usage), config.logDir);
+    const jevAnswer = firstAnswer(outcome.response, args.questions);
+    await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'active', loggableHeuristic, outcome.response, args.questions), config.logDir);
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
   }
@@ -262,8 +273,8 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   recordSuccess(args.point);
   const heuristic = twinAnswer();
   const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
-  const jevAnswer = firstAnswer(outcome.response);
-  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, jevAnswer, outcome.response.usage), config.logDir);
+  const jevAnswer = firstAnswer(outcome.response, args.questions);
+  await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, outcome.response, args.questions), config.logDir);
   if (mode === 'active') {
     const answer = args.mapAnswer ? args.mapAnswer(jevAnswer) : (jevAnswer as unknown as T);
     return { answer, source: 'jev', mode: 'active' };
@@ -278,10 +289,11 @@ function buildLogEntry(
   startedAt: number,
   entryMode: ShadowLogEntry['mode'],
   heuristic: unknown,
-  jev: JevAnswer | null,
-  usage?: unknown,
+  response: JevResponse | null,
+  questions?: JevQuestions,
 ): ShadowLogEntry {
-  const safeUsage = sanitizeUsage(usage);
+  const jev = response ? firstAnswer(response, questions ?? {}) : null;
+  const safeUsage = sanitizeUsage(response?.usage);
   return {
     ts: new Date().toISOString(),
     point,
@@ -289,6 +301,7 @@ function buildLogEntry(
     state: boundedState,
     heuristic,
     jev,
+    answers: response ? response.answers : null,
     confidence: jev?.confidence,
     durationMs: Date.now() - startedAt,
     ...(safeUsage ? { usage: safeUsage } : {}),
