@@ -715,7 +715,7 @@ In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` maps th
 
 This needs a Claude Code version whose Agent/Task tool schema has an `effort` field (checked on Claude Code 2.1.316).
 
-- Answers are read by question name. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
+- Answers are read by question name. An effort answer counts only when its `type` is `score` and its `score` is a number from 0 to 3. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
 - As with the model, Jev's effort replaces an explicit `effort` in the call.
 - The mapping ends at `high`. `OMC_JEV_MAX_EFFORT` (default `high`) can only lower it, for example to `medium`. The default stops at `high` because `xhigh` and `max` can spend several times the tokens of `high` across every delegated call.
 - When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap, for example `max` becomes `high`. Raise the cap to let explicit `xhigh` or `max` through.

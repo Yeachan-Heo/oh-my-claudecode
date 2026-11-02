@@ -683,9 +683,12 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     }
 
     const maxEffort = resolveMaxEffort();
-    const effortScore = answers.effort?.score;
+    // Only a score answer inside the declared 0-3 range counts; anything else
+    // is treated as a missing effort answer.
+    const effortAnswer = answers.effort;
+    const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
     const currentEffort = (updatedToolInput || toolInput).effort;
-    if (typeof effortScore === 'number' && Number.isFinite(effortScore)) {
+    if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 3) {
       ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
       ensureUpdated().effort = capEffort(currentEffort, maxEffort);

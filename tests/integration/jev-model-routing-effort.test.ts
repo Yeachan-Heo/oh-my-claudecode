@@ -246,6 +246,25 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect((await routedInput(agentInput({ effort: "low" }))).effort).toBe("low");
   }, 15000);
 
+  it.each([
+    ["score -1", { ...scoreAnswer(0), score: -1 }],
+    ["score 99", { ...scoreAnswer(0), score: 99 }],
+    ["a choice answer carrying a score", { ...choiceAnswer("high"), score: 2 }],
+    ["score NaN as text", { ...scoreAnswer(0), score: "NaN" }],
+  ])("treats %s as a missing effort answer", async (_label, effortAnswer) => {
+    answersFor = () => ({ effort: effortAnswer, "model-tier": choiceAnswer("opus") });
+    // Explicit effort within the cap stays as it was.
+    expect(await routedInput(agentInput({ effort: "medium" }))).toEqual({
+      ...agentInput().tool_input,
+      model: "opus",
+      effort: "medium",
+    });
+    // No explicit effort: none is added.
+    expect(await routedInput(agentInput())).not.toHaveProperty("effort");
+    // Explicit effort above the cap is lowered to the cap, as with no effort answer.
+    expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("high");
+  }, 15000);
+
   it("applies the effort answer when model-tier is missing", async () => {
     answersFor = () => ({ effort: scoreAnswer(0.9) });
     expect(await routedInput(agentInput())).toEqual({ ...agentInput().tool_input, effort: "medium" });
