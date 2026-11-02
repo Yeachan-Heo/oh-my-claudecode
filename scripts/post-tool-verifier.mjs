@@ -575,13 +575,28 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
   });
   
   // In active mode, use Jev's action instead of heuristic
-  if (jevResult && jevResult.mode === 'active' && jevResult.source === 'jev') {
-    action = jevResult.answer || action;
+  if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
+    const rawChoice = jevResult.answer.choice;
+    const choice = typeof rawChoice === 'string' ? rawChoice.toLowerCase() : '';
+    // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
+    if (choice === 'fresh' || choice === 'recent') {
+      action = 'none';
+    } else if (choice === 'aging') {
+      action = 'warn';
+    } else if (choice === 'stale') {
+      action = 'compact';
+    }
+    // Otherwise keep the heuristic action
   }
 
-  const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
+  // Build message based on the computed action
+  if (action === 'none') {
+    return '';
+  }
+
   const now = Date.now();
   const sessionId = data.session_id || data.sessionId || 'unknown';
+  const severity = action === 'compact' ? 'critical' : 'warning';
 
   if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
     return '';
