@@ -50,14 +50,32 @@ async function main() {
     return;
   }
 
-  const lines = [
-    `[STALE RUN] ${stale.length} unattended-run state file(s) look stale — likely a run whose process died mid-flight:`,
-    ...stale.map(
-      (entry) =>
-        `- ${entry.mode}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: active for ~${entry.ageHours}h — ${entry.path}`,
-    ),
-    'Nothing was changed automatically. To reclaim: run /oh-my-claudecode:cancel to clean up the state, or re-enter the mode to resume from its artifacts. Re-kicking is a human decision.',
-  ];
+  const crashed = stale.filter((entry) => !entry.awaitingConfirmation);
+  const waiting = stale.filter((entry) => entry.awaitingConfirmation);
+
+  const lines = [];
+  if (crashed.length > 0) {
+    lines.push(
+      `[STALE RUN] ${crashed.length} unattended-run state file(s) look stale — likely a run whose process died mid-flight:`,
+      ...crashed.map(
+        (entry) =>
+          `- ${entry.mode}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: active for ~${entry.ageHours}h — ${entry.path}`,
+      ),
+      'Nothing was changed automatically. To reclaim: run /oh-my-claudecode:cancel to clean up the state, or re-enter the mode to resume from its artifacts. Re-kicking is a human decision.',
+    );
+  }
+  if (waiting.length > 0) {
+    lines.push(
+      `[AWAITING CONFIRMATION] ${waiting.length} unattended-run state file(s) are waiting for your confirmation and show no recent activity:`,
+      ...waiting.map((entry) => {
+        const since = entry.awaitingConfirmationSetAt
+          ? ` since ${entry.awaitingConfirmationSetAt}`
+          : '';
+        return `- ${entry.mode}${entry.sessionId ? ` (session ${entry.sessionId})` : ''}: waiting for your confirmation${since}, no activity for ~${entry.ageHours}h — ${entry.path}`;
+      }),
+      'Nothing was changed automatically. A parked prompt is not proof the run is still alive; answer it in its session, or run /oh-my-claudecode:cancel if it is gone. Re-kicking is a human decision.',
+    );
+  }
 
   console.log(
     JSON.stringify({
