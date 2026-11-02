@@ -23,7 +23,6 @@ export function recordSkillTriggerShadow(prompt, fetchFn) {
     return recordJudgment('skill-trigger', {
         state: { prompt, source: 'user-prompt-submit' },
         twin: () => getAllKeywords(prompt),
-        mapHeuristic: (keywords, questionSet) => keywords.length > 0 ? keywords[0] : 'none',
         mapAnswer: (answer) => {
             // Jev Choice answer has { type: 'choice', choice: <keyword> | 'none' }
             const choice = answer.choice?.toLowerCase();

@@ -87,18 +87,12 @@ describe('applyLoopContinuationShadow', () => {
         const lines = await readLogLines();
         expect(lines).toHaveLength(2);
         const parsed = lines.map((line) => JSON.parse(line));
-        // heuristics are extracted by mapHeuristic: 
-        // - noul=!shouldBlock (task complete question)
-        // - score=null (no reliable progress data, make non-comparable)
-        // logs may be written in any order since both are async (non-blocking points)
-        const noulEntry = parsed.find((e) => e.jev?.type === 'noul');
-        const scoreEntry = parsed.find((e) => e.jev?.type === 'score');
-        expect(noulEntry.point).toBe('loop-continuation');
-        expect(noulEntry.mode).toBe('shadow');
-        expect(noulEntry.heuristic).toBe(false); // !shouldBlock
-        expect(scoreEntry.point).toBe('loop-continuation');
-        expect(scoreEntry.mode).toBe('shadow');
-        expect(scoreEntry.heuristic).toBeNull(); // No reliable progress data
+        for (const entry of parsed) {
+            expect(entry.point).toBe('loop-continuation');
+            expect(entry.mode).toBe('shadow');
+            expect(entry.heuristic).toEqual(TWIN);
+        }
+        expect(parsed.map((entry) => entry.jev?.type).sort()).toEqual(['noul', 'score']);
     });
     it('without a key, zero fetch calls and the twin result is returned unchanged', async () => {
         const { fetchFn, calls } = stubFetch();
@@ -116,15 +110,10 @@ describe('applyLoopContinuationShadow', () => {
         expect(result).toEqual(TWIN);
         const lines = await readLogLines();
         expect(lines).toHaveLength(2);
-        const parsed = lines.map((line) => JSON.parse(line));
-        // heuristics are extracted by mapHeuristic: [!shouldBlock (noul), null (score)]
-        // logs may be written in any order since both are async (non-blocking points)
-        // but degraded logs will have jev:null, so we can't use jev.type to distinguish
-        // Instead, check that we have the right heuristics regardless of order
-        expect(parsed).toHaveLength(2);
-        expect(new Set(parsed.map((e) => e.heuristic))).toEqual(new Set([false, null]));
-        for (const entry of parsed) {
+        for (const line of lines) {
+            const entry = JSON.parse(line);
             expect(entry.mode).toBe('degraded');
+            expect(entry.heuristic).toEqual(TWIN);
             expect(entry.jev).toBeNull();
         }
     });
@@ -137,29 +126,6 @@ describe('applyLoopContinuationShadow', () => {
         expect(result).toBe(none);
         expect(calls).toHaveLength(0);
         await expect(readLogLines()).rejects.toThrow();
-    });
-    it('makes task-complete non-comparable when team pipeline fails/cancels (shouldBlock=false but not task complete)', async () => {
-        process.env.TYPESAFE_API_KEY = 'test-key-123';
-        process.env.OMC_JEV = 'loop-continuation';
-        const { fetchFn, calls } = stubFetch();
-        // Team pipeline failure: shouldBlock=false (allow stopping) but task is NOT complete
-        const teamFailed = {
-            shouldBlock: false,
-            message: '[TEAM] Pipeline failed; allowing stop for recovery',
-            mode: 'team',
-            metadata: { iteration: 3, maxIterations: 10 },
-        };
-        const result = await applyLoopContinuationShadow({ result: teamFailed, sessionId: 'sess-1', fetchFn });
-        expect(result).toEqual(teamFailed);
-        expect(calls).toHaveLength(2);
-        const lines = await readLogLines();
-        expect(lines).toHaveLength(2);
-        const parsed = lines.map((line) => JSON.parse(line));
-        // When team mode fails/cancels, the noul (task complete) heuristic should be null
-        // not !shouldBlock (which would be true), because shouldBlock=false here means
-        // "stop for safety" not "task is complete"
-        const noulEntry = parsed.find((e) => e.jev?.type === 'noul');
-        expect(noulEntry.heuristic).toBeNull();
     });
 });
 //# sourceMappingURL=jev-loop-continuation-shadow.test.js.map
