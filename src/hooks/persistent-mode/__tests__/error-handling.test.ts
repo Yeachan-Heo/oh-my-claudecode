@@ -64,9 +64,12 @@ describe('persistent-mode hook error handling (issue #319)', () => {
     }));
 
     for (const result of await Promise.all(runs)) {
-      // Falls back to the default safety timeout, which outlives the harness.
+      // A truncated value (1ms, 30ms) would fire the safety timeout almost
+      // immediately and report it on stderr. The hook outliving a second of
+      // open stdin is what proves the value was not truncated; it used to
+      // outlive the harness instead only because readStdin waited 5s for EOF.
       expect(result.stderr).not.toContain('Safety timeout reached');
-      expect(result.timedOut).toBe(true);
+      expect(result.duration).toBeGreaterThan(1000);
     }
   }, 10_000);
 

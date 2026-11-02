@@ -31,6 +31,7 @@ function writeEmergencyJournal(path, journal, requireOwnership = true) {
 }
 
 
+
 /**
  * Ensure directory exists
  */
