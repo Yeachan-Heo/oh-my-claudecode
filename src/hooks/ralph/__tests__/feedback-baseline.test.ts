@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
@@ -324,6 +324,182 @@ describe('baseline IO', () => {
 
       expect(result.written).toBe(false);
       expect(readFileSync(path)).toEqual(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('covers archive-failure path: fails when history directory is unwritable (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      recordBaseline(path, { test: { signatures: ['FAIL original'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const before = readFileSync(path);
+      const historyDir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
+      mkdirSync(historyDir, { recursive: true });
+      // Make the history directory read-only so copyFileSync fails.
+      chmodSync(historyDir, 0o555);
+
+      const result = recordBaseline(path, { test: { signatures: ['FAIL changed'] } }, new Date('2026-10-01T00:00:00.000Z'));
+
+      expect(result.written).toBe(false);
+      expect(readFileSync(path)).toEqual(before);
+      // Verify no stale archive was created in the failed attempt.
+      chmodSync(historyDir, 0o755);
+      const history = readdirSync(historyDir).filter((name) => name.endsWith('.json'));
+      expect(history).toHaveLength(0); // archiveBaseline failed, so no archive was created
+    } finally {
+      // Reset permissions before cleanup.
+      try {
+        chmodSync(join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME), 0o755);
+      } catch {}
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('cleans up the archived file if the live write fails, so retries do not retain stale references (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      recordBaseline(path, { test: { signatures: ['FAIL first'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const historyDir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
+      // Get the count of archived files before the failed write.
+      const beforeCount = existsSync(historyDir) ? readdirSync(historyDir).filter((n) => n.endsWith('.json')).length : 0;
+
+      // Make the baseline file read-only so writeFileSync fails.
+      chmodSync(path, 0o444);
+      const result = recordBaseline(path, { test: { signatures: ['FAIL second'] } }, new Date('2026-10-01T00:00:00.000Z'));
+      expect(result.written).toBe(false);
+
+      // Reset permissions and verify the staged archive was cleaned up.
+      chmodSync(path, 0o644);
+      const afterCount = existsSync(historyDir) ? readdirSync(historyDir).filter((n) => n.endsWith('.json')).length : 0;
+      expect(afterCount).toBe(beforeCount); // No new archive left behind.
+    } finally {
+      try {
+        chmodSync(path, 0o644);
+      } catch {}
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('never prunes the archive created by the current call, even when its timestamp sorts before newer entries (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      recordBaseline(path, { test: { signatures: ['FAIL v1'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const historyDir = join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME);
+      mkdirSync(historyDir, { recursive: true });
+      // Fill the history with entries that sort after the old baseline's timestamp.
+      for (let index = 0; index < MAX_FEEDBACK_BASELINE_HISTORY; index += 1) {
+        writeFileSync(join(historyDir, `2099-12-31T23-59-${String(index).padStart(2, '0')}.000Z-1.json`), '{"version":1}\n', 'utf8');
+      }
+
+      const result = recordBaseline(path, { test: { signatures: ['FAIL v2'] } }, new Date('2026-10-01T00:00:00.000Z'));
+
+      expect(result.written).toBe(true);
+      expect(result.previousPath).toBeDefined();
+      expect(existsSync(result.previousPath as string)).toBe(true);
+      expect(readBaseline(result.previousPath as string)?.commands.test?.signatures).toEqual(['FAIL v1']);
+      const history = readdirSync(historyDir).filter((n) => n.endsWith('.json'));
+      expect(history).toHaveLength(MAX_FEEDBACK_BASELINE_HISTORY);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('handles concurrent archive creation: retries collision detection until a unique filename is found (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      const now = new Date('2026-09-30T00:00:00.000Z');
+      recordBaseline(path, { test: { signatures: ['FAIL first'] } }, now);
+      const historyDir = join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME);
+
+      // Simulate a collision: pre-create the archive that would be created next.
+      const secondDoc = readFileSync(path);
+      const secondPath = recordBaseline(path, { test: { signatures: ['FAIL second'] } }, now).previousPath;
+      expect(secondPath).toBeDefined();
+      expect(existsSync(secondPath as string)).toBe(true);
+
+      // Re-record with the same timestamp; archiveBaseline should find the collision and use the next counter.
+      const thirdDoc = readFileSync(path);
+      const third = recordBaseline(path, { test: { signatures: ['FAIL third'] } }, now);
+      expect(third.previousPath).toBeDefined();
+      expect(third.previousPath).not.toBe(secondPath);
+      expect(existsSync(third.previousPath as string)).toBe(true);
+      expect(readFileSync(third.previousPath as string)).toEqual(thirdDoc);
+
+      // Verify all archives are byte-identical to what they replaced.
+      expect(readFileSync(secondPath as string)).toEqual(secondDoc);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not mark a newly added unrunnable command as "became unrunnable" (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      // First record has no lint command.
+      recordBaseline(path, { test: { signatures: ['FAIL a'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      // Second record adds a lint command that is unavailable (unrunnable).
+      const result = recordBaseline(
+        path,
+        { test: { signatures: ['FAIL a'] }, lint: { signatures: [], unrunnable: true } },
+        new Date('2026-10-01T00:00:00.000Z'),
+      );
+
+      // The newly added lint command should NOT appear in becameUnrunnable,
+      // because it was never runnable in the replaced baseline.
+      expect(result.becameUnrunnable).toBeUndefined();
+      expect(result.added).toBe(0);
+      expect(result.removed).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks an existing runnable command as "became unrunnable" in the audit (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      // First record has lint as runnable.
+      recordBaseline(path, { test: { signatures: ['FAIL a'] }, lint: { signatures: ['FAIL lint'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      // Second record marks lint as unrunnable.
+      const result = recordBaseline(
+        path,
+        { test: { signatures: ['FAIL a'] }, lint: { signatures: [], unrunnable: true } },
+        new Date('2026-10-01T00:00:00.000Z'),
+      );
+
+      // The lint command transitions from runnable to unrunnable, so it should be reported.
+      expect(result.becameUnrunnable).toEqual(['lint']);
+      expect(result.removed).toBe(1); // One signature from lint was removed.
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('counts removed commands when a feedback command is dropped entirely (issue #4798)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      // First record has both test and lint.
+      recordBaseline(
+        path,
+        { test: { signatures: ['FAIL test-a', 'FAIL test-b'] }, lint: { signatures: ['FAIL lint-a'] } },
+        new Date('2026-09-30T00:00:00.000Z'),
+      );
+      // Second record drops lint entirely (removed command).
+      const result = recordBaseline(path, { test: { signatures: ['FAIL test-a', 'FAIL test-b'] } }, new Date('2026-10-01T00:00:00.000Z'));
+
+      // The audit must count signatures from the removed lint command.
+      expect(result.removed).toBe(1);
+      expect(result.added).toBe(0);
+      // The audit must report the union of old and new command keys.
+      const diff = diffAgainstBaseline(readBaseline(result.previousPath as string), readBaseline(path)?.commands ?? {});
+      expect(diff.resolvedSignatures).toEqual(['lint: FAIL lint-a']);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

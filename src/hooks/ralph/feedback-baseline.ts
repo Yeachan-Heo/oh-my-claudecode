@@ -191,8 +191,23 @@ export function archiveBaseline(path: string, now: Date = new Date()): string | 
       // The directory was just created; start from the first slot.
     }
     let target = join(dir, `${stamp}-${counter}.json`);
-    while (fs.existsSync(target)) target = join(dir, `${stamp}-${++counter}.json`);
-    fs.copyFileSync(path, target);
+    // Reserve the target atomically: COPYFILE_EXCL prevents overwriting an
+    // existing file (critical when concurrent writers create the same timestamp).
+    // Retry with an incremented counter on collision.
+    while (true) {
+      try {
+        fs.copyFileSync(path, target, fs.constants.COPYFILE_EXCL);
+        break;
+      } catch (err) {
+        const isEEXIST = (err as NodeJS.ErrnoException)?.code === 'EEXIST';
+        if (isEEXIST) {
+          counter += 1;
+          target = join(dir, `${stamp}-${counter}.json`);
+          continue;
+        }
+        throw err;
+      }
+    }
     // The archive created by this call must survive pruning even when older
     // timestamps (a restored baseline) sort before existing history entries.
     pruneBaselineHistory(dir, target);
@@ -254,10 +269,20 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
   const previous = readBaseline(path);
   const previousPath = archiveBaseline(path, now);
   if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
+  // Delete the staged archive if the live write fails, so a retry does not retain
+  // an outdated reference. The archive must survive a successful write.
   try {
     fs.mkdirSync(join(path, '..'), { recursive: true });
     fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
   } catch {
+    if (previousPath) {
+      try {
+        fs.rmSync(previousPath, { force: true });
+      } catch {
+        // If we cannot clean up the failed archive, let it stay; a retry will
+        // create a new one with a higher counter, not overwrite this one.
+      }
+    }
     return { written: false, added: 0, removed: 0 };
   }
   // Audit the document replacement from the raw signature sets, independent of
@@ -275,7 +300,9 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
       const afterSet = new Set(after?.signatures ?? []);
       for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
       for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
-      if (after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+      // Only mark as becameUnrunnable if the command existed in the previous baseline.
+      // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
+      if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
     }
   }
   return {
