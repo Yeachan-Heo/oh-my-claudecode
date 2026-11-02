@@ -300,6 +300,36 @@ process.exit(1);
     }
   });
 
+  it('reports removed stored signatures when a re-record turns the command unrunnable', () => {
+    writePrd(JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      userStories: [],
+      feedbackCommands: ['node runner.js'],
+    }));
+    writeFileSync(join(dir, 'runner.js'), `const fs = require('fs');
+if (fs.existsSync('unrunnable')) process.exit(127);
+console.log('FAIL a');
+console.log('FAIL b');
+process.exit(1);
+`, 'utf8');
+    expect(ralphVerify({ session: 'sess-rerecord-unrunnable', writeBaseline: true }, dir)).toBe(0);
+    // Exit 127 marks the previously runnable command unrunnable.
+    writeFileSync(join(dir, 'unrunnable'), '', 'utf8');
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-rerecord-unrunnable', json: true, writeBaseline: true }, dir)).toBe(0);
+      const result = JSON.parse(String(logSpy.mock.calls[0][0])) as { added: number; removed: number; becameUnrunnable: string[] };
+      expect(result.added).toBe(0);
+      expect(result.removed).toBe(2);
+      expect(result.becameUnrunnable).toEqual(['node runner.js']);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
   it('exits nonzero and leaves the live baseline untouched when history cannot be archived', () => {
     writeFailer('FAIL old');
     writePackage('node failer.js');

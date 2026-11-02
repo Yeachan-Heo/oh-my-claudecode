@@ -167,7 +167,19 @@ export function archiveBaseline(path: string, now: Date = new Date()): string | 
     const dir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
     fs.mkdirSync(dir, { recursive: true });
     const stamp = (readBaseline(path)?.recordedAt || now.toISOString()).replace(/[^0-9A-Za-z.-]+/g, '-');
+    // Continue past the highest counter for this stamp. Reusing a hole left by
+    // pruning would let a newer archive land on an older-looking name, breaking
+    // both chronological sorting and newest-first retention.
     let counter = 1;
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.startsWith(`${stamp}-`)) continue;
+        const match = /-(\d+)\.json$/.exec(name);
+        if (match) counter = Math.max(counter, Number(match[1]) + 1);
+      }
+    } catch {
+      // The directory was just created; start from the first slot.
+    }
     let target = join(dir, `${stamp}-${counter}.json`);
     while (fs.existsSync(target)) target = join(dir, `${stamp}-${++counter}.json`);
     fs.copyFileSync(path, target);
@@ -183,7 +195,7 @@ export function archiveBaseline(path: string, now: Date = new Date()): string | 
 function pruneBaselineHistory(dir: string, keepPath: string): void {
   let entries: string[];
   try {
-    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json') && join(dir, name) !== keepPath).sort();
+    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json') && join(dir, name) !== keepPath).sort(compareHistoryNames);
   } catch {
     return;
   }
@@ -198,6 +210,19 @@ function pruneBaselineHistory(dir: string, keepPath: string): void {
   }
 }
 
+/**
+ * Chronological history order: the recordedAt stem first, then numeric suffix.
+ * A plain string sort would place `...-10.json` before `...-2.json`, so pruning
+ * a run of same-timestamp collisions would delete the wrong (newer) archives.
+ */
+function compareHistoryNames(left: string, right: string): number {
+  const leftMatch = /^(.*)-(\d+)\.json$/.exec(left);
+  const rightMatch = /^(.*)-(\d+)\.json$/.exec(right);
+  if (!leftMatch || !rightMatch) return left < right ? -1 : left > right ? 1 : 0;
+  if (leftMatch[1] !== rightMatch[1]) return leftMatch[1] < rightMatch[1] ? -1 : 1;
+  return Number(leftMatch[2]) - Number(rightMatch[2]);
+}
+
 export interface BaselineWriteResult {
   written: boolean;
   /** History path preserving the replaced baseline, when one existed. */
@@ -206,6 +231,8 @@ export interface BaselineWriteResult {
   added: number;
   /** Signatures in the replaced baseline that are gone now. */
   removed: number;
+  /** Commands that ran in the replaced baseline but could not execute now. */
+  becameUnrunnable?: string[];
 }
 
 /**
@@ -223,8 +250,31 @@ export function recordBaseline(path: string, commands: Record<string, CommandBas
   } catch {
     return { written: false, added: 0, removed: 0 };
   }
-  const diff = previousPath && previous ? diffAgainstBaseline(previous, commands) : { newSignatures: [], resolvedSignatures: [] };
-  return { written: true, ...(previousPath ? { previousPath } : {}), added: diff.newSignatures.length, removed: diff.resolvedSignatures.length };
+  // Audit the document replacement from the raw signature sets, independent of
+  // the gate judgment in diffAgainstBaseline: that function collapses a newly
+  // unrunnable command into one synthetic marker, which would misreport the
+  // stored signatures the replacement actually removed.
+  let added = 0;
+  let removed = 0;
+  const becameUnrunnable: string[] = [];
+  if (previous && previousPath) {
+    for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+      const before = previous.commands[command];
+      const after = commands[command];
+      const beforeSet = new Set(before?.signatures ?? []);
+      const afterSet = new Set(after?.signatures ?? []);
+      for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+      for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+      if (after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+    }
+  }
+  return {
+    written: true,
+    ...(previousPath ? { previousPath } : {}),
+    added,
+    removed,
+    ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
+  };
 }
 
 /** Backward-compatible wrapper: the boolean says only whether the write succeeded. */

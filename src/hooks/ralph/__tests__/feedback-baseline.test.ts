@@ -158,6 +158,66 @@ describe('baseline IO', () => {
     }
   });
 
+  it('counts the stored signatures a replacement removed when a command becomes unrunnable', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      recordBaseline(path, { test: { signatures: ['FAIL a', 'FAIL b'] } }, new Date('2026-09-30T00:00:00.000Z'));
+      const result = recordBaseline(path, { test: { signatures: [], unrunnable: true } }, new Date('2026-10-01T00:00:00.000Z'));
+
+      // The audit describes the document replacement, not the gate marker.
+      expect(result.added).toBe(0);
+      expect(result.removed).toBe(2);
+      expect(result.becameUnrunnable).toEqual(['test']);
+      // Gate semantics remain untouched: the command is still newly unrunnable.
+      const diff = diffAgainstBaseline(readBaseline(result.previousPath as string), readBaseline(path)?.commands ?? {});
+      expect(diff.newSignatures).toEqual(['test: <command became unrunnable>']);
+      expect(diff.resolvedSignatures).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps colliding same-timestamp archives distinct and retains the newest below the cap', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
+    try {
+      const path = baselinePath(dir, 'sess-1');
+      const now = new Date('2026-09-30T00:00:00.000Z');
+      recordBaseline(path, { test: { signatures: ['FAIL 0'] } }, now);
+      const secondDoc = readFileSync(path);
+      const second = recordBaseline(path, { test: { signatures: ['FAIL 1'] } }, now);
+      expect(second.previousPath).toBeDefined();
+      expect(readFileSync(second.previousPath as string)).toEqual(secondDoc);
+
+      const thirdDoc = readFileSync(path);
+      const third = recordBaseline(path, { test: { signatures: ['FAIL 2'] } }, now);
+      expect(third.previousPath).not.toBe(second.previousPath);
+      expect(readFileSync(third.previousPath as string)).toEqual(thirdDoc);
+
+      // Continue with the same `recordedAt` so every archive shares one stamp.
+      const total = MAX_FEEDBACK_BASELINE_HISTORY + 5;
+      let last = third;
+      for (let index = 3; index <= total; index += 1) {
+        last = recordBaseline(path, { test: { signatures: [`FAIL ${index}`] } }, now);
+      }
+
+      const historyDir = join(dir, 'state', 'sessions', 'sess-1', FEEDBACK_BASELINE_HISTORY_DIRNAME);
+      const history = readdirSync(historyDir).filter((name) => name.endsWith('.json'));
+      expect(history).toHaveLength(MAX_FEEDBACK_BASELINE_HISTORY);
+      // The newest archive is the document the final write replaced.
+      expect(readBaseline(last.previousPath as string)?.commands.test?.signatures).toEqual([`FAIL ${total - 1}`]);
+
+      // Retention keeps the newest MAX documents, not whichever names sort first.
+      const archived = history
+        .map((name) => readBaseline(join(historyDir, name))?.commands.test?.signatures?.[0])
+        .sort();
+      const expected = Array.from({ length: MAX_FEEDBACK_BASELINE_HISTORY }, (_, offset) => `FAIL ${total - MAX_FEEDBACK_BASELINE_HISTORY + offset}`);
+      expect(archived).toEqual(expected.sort());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('caps the history at the configured maximum, pruning the oldest entries', () => {
     const dir = mkdtempSync(join(tmpdir(), 'omc-fb-'));
     try {

@@ -460,14 +460,17 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   if (options.writeBaseline) {
     const result = path ? recordBaseline(path, current, now) : { written: false, added: 0, removed: 0 };
     const { written, previousPath } = result;
+    const transitionNote = result.becameUnrunnable?.length
+      ? `, ${result.becameUnrunnable.length} command${result.becameUnrunnable.length === 1 ? '' : 's'} became unrunnable (${result.becameUnrunnable.join(', ')})`
+      : '';
     const note = written
       ? previousPath
-        ? `baseline replaced: +${result.added} signature${result.added === 1 ? '' : 's'}, -${result.removed} signature${result.removed === 1 ? '' : 's'} (previous saved at ${previousPath})`
+        ? `baseline replaced: +${result.added} signature${result.added === 1 ? '' : 's'}, -${result.removed} signature${result.removed === 1 ? '' : 's'}${transitionNote} (previous saved at ${previousPath})`
         : `baseline recorded at ${path}`
       : path
         ? 'could not write a baseline'
         : 'could not write a baseline (no session id; pass --session)';
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, previousPath: previousPath ?? null, added: result.added, removed: result.removed, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
+    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, previousPath: previousPath ?? null, added: result.added, removed: result.removed, becameUnrunnable: result.becameUnrunnable ?? [], commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
     else console.log(`ralph verify: ${note}`);
     return written ? 0 : 1;
   }
