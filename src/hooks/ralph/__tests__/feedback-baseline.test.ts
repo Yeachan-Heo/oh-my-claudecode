@@ -144,6 +144,40 @@ describe('baseline IO', () => {
   });
 });
 
+describe('pytest summary normalization (issue #4795)', () => {
+  it('adding a passing test does not register as a new failure', () => {
+    const baseline1 = baseline({
+      'python3 -m pytest -q': { signatures: signatureLines('200 passed in 0.31s') },
+    });
+    const current = {
+      'python3 -m pytest -q': { signatures: signatureLines('201 passed in 0.32s') },
+    };
+    const diff = diffAgainstBaseline(baseline1, current);
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('keeps pytest summaries that report failures and flags them as new against a green baseline', () => {
+    const green = baseline({
+      'python3 -m pytest -q': { signatures: signatureLines('200 passed in 0.31s') },
+    });
+    const current = {
+      'python3 -m pytest -q': { signatures: signatureLines('1 failed, 200 passed in 0.32s') },
+    };
+    expect(current['python3 -m pytest -q'].signatures).toContain('1 failed, 200 passed in <v>');
+    const diff = diffAgainstBaseline(green, current);
+    expect(diff.newSignatures).toEqual(['python3 -m pytest -q: 1 failed, 200 passed in <v>']);
+  });
+
+  it('excludes all-pass summaries regardless of whether the duration is normalized to <v> tokens', () => {
+    // This PR alone: the parenthesized wall-clock duration is still literal.
+    expect(signatureLines('459 passed, 14 warnings in 194.32s (0:03:14)')).toEqual([]);
+    // Composed with the duration PR: every duration fragment is already "<v>".
+    expect(signatureLines('459 passed, 14 warnings in <v> <v>')).toEqual([]);
+    // Failures are still signal in either normalized shape.
+    expect(signatureLines('1 failed, 200 passed in <v> <v>')).toContain('1 failed, 200 passed in <v> <v>');
+  });
+});
+
 describe('node:test TAP output normalization (issue #4215)', () => {
   it('normalizes node:test prefix-style duration_ms values so reruns do not report new failures', () => {
     const run1 = signatureLines(
