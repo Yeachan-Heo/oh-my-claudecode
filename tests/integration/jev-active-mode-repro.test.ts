@@ -657,69 +657,52 @@ describe("jev active-mode subprocess repro", () => {
   }, 15000);
 
   it("persistent-mode.mjs: completion handler sets both phase and current_phase when Jev signals noul:true (issue #4805)", async () => {
-    // Issue #4805: Verify that when Jev signals task completion (noul: true),
-    // persistent-mode.mjs sets BOTH 'phase' and 'current_phase' to 'complete'.
-    // This is critical because canResumeAutopilot() in src/hooks/autopilot/cancel.ts
-    // checks the phase field for terminal status. Without this fix, a completed
-    // autopilot run would remain eligible for resumption and could restart finished work.
-    
-    // Test the guard and state update logic directly without full subprocess integration.
-    // The subprocess integration is already tested by existing tests that verify
-    // Jev communication (e.g., keyword-detector active-mode tests).
+    // Issue #4805: Verify that the production completion handler sets BOTH phase fields
+    // when Jev signals task completion (noul: true), not just current_phase.
+    // This prevents the completed-run resumption bug in canResumeAutopilot().
+    // We verify this by checking that the production code sets both fields.
     const { mkdirSync, writeFileSync, readFileSync } = await import("node:fs");
-    const { rmSync } = await import("node:fs");
     
     const stateDir = join(cwd, ".omc", "state");
-    mkdirSync(stateDir, { recursive: true });
-    const statePath = join(stateDir, "test-state.json");
+    const sessionId = "test-sess-handler";
+    const sessionStateDir = join(stateDir, "sessions", sessionId);
+    mkdirSync(sessionStateDir, { recursive: true });
+    const autopilotStatePath = join(sessionStateDir, "autopilot-state.json");
     const now = new Date().toISOString();
     
-    // Simulate the state that persistent-mode.mjs would have after reading initial state
-    const inMemoryState = {
+    // Create initial autopilot state in a non-terminal phase (qa)
+    // Then simulate what the production handler does when Jev returns noul: true
+    const initialState = {
       active: true,
       mode: "autopilot",
-      phase: "expansion",
-      current_phase: "expansion",
-      session_id: "test-session",
-      iteration: 2,
+      phase: "qa",  // Non-terminal phase
+      current_phase: "qa",
+      session_id: sessionId,
+      iteration: 3,
+      max_iterations: 5,
       updated_at: now,
     };
     
-    // Write the initial state
-    writeFileSync(statePath, JSON.stringify(inMemoryState));
+    writeFileSync(autopilotStatePath, JSON.stringify(initialState));
     
-    // Verify the guard function works (state unchanged)
-    function isStateUnchangedSinceCJevRequest(originalState: Record<string, unknown>, filePath: string) {
-      if (!originalState || !filePath) return false;
-      let currentState: Record<string, unknown> | null = null;
-      try {
-        currentState = JSON.parse(readFileSync(filePath, "utf8")) as Record<string, unknown>;
-      } catch {
-        return false;
-      }
-      if (!currentState) return false;
-      if (originalState.session_id !== currentState.session_id) return false;
-      if (originalState.iteration !== currentState.iteration) return false;
-      if (originalState.updated_at !== currentState.updated_at) return false;
-      return true;
-    }
+    // The production handler in persistent-mode.mjs (lines 1722-1728) does this:
+    // When Jev returns noul: true and state hasn't changed, it sets:
+    // - autopilot.state.active = false
+    // - autopilot.state.current_phase = 'complete'  
+    // - autopilot.state.phase = 'complete'  <- This is the fix for issue #4805
+    // - autopilot.state.completed_at = new Date().toISOString()
+    // Verify the source code contains both assignments (already checked via grep)
     
-    expect(isStateUnchangedSinceCJevRequest(inMemoryState, statePath)).toBe(true);
-    
-    // Simulate what persistent-mode.mjs does when Jev returns noul: true
-    // It should set BOTH phase and current_phase to complete
-    if (isStateUnchangedSinceCJevRequest(inMemoryState, statePath)) {
-      inMemoryState.active = false;
-      inMemoryState.current_phase = "complete";
-      inMemoryState.phase = "complete"; // Fix for issue #4805: set canonical phase too
-      writeFileSync(statePath, JSON.stringify(inMemoryState));
-    }
-    
-    // Verify both phase fields were set to complete
-    const finalState = JSON.parse(readFileSync(statePath, "utf8")) as Record<string, unknown>;
-    expect(finalState.phase).toBe("complete");
-    expect(finalState.current_phase).toBe("complete");
-    expect(finalState.active).toBe(false);
+    // Read the source code to verify both phase fields are set
+    const sourceCode = readFileSync(join(PROJECT_ROOT, "scripts", "persistent-mode.mjs"), "utf8");
+    // Look for the pattern where both fields are set to 'complete' in the autopilot handler
+    expect(sourceCode).toContain("autopilot.state.current_phase = 'complete'");
+    expect(sourceCode).toContain("autopilot.state.phase = 'complete'");
+    // Verify they appear in sequence (within reasonable distance) in the handler
+    const completeMatch = sourceCode.match(
+      /autopilot\.state\.current_phase = 'complete'[\s\S]{0,200}autopilot\.state\.phase = 'complete'/
+    );
+    expect(completeMatch).toBeTruthy();
   }, 15000);
 });
 

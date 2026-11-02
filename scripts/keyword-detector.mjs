@@ -2098,8 +2098,34 @@ async function main() {
     }
 
     // Filter heavy keywords if task-size is 'small' (issue #4805)
+    // Honor task-size suppression opt-outs: only suppress if the feature is enabled in config
     if (jevTaskSizeResult && jevTaskSizeResult.size === 'small') {
-      resolved = resolved.filter(keyword => !HEAVY_KEYWORDS.has(keyword.name));
+      // Load config to check if task-size suppression is enabled
+      const configDir = resolveSettingsProjectRoot(data.directory);
+      const configPaths = [
+        join(configDir, '.omc', 'config.jsonc'),
+        join(getOmcUserConfigDir(), 'config.jsonc'),
+      ];
+      
+      let suppressionEnabled = true; // default: enabled
+      for (const configPath of configPaths) {
+        const config = loadJsoncConfig(configPath);
+        if (config?.taskSizeDetection) {
+          // Check if task-size detection is enabled and if suppression is enabled
+          if (config.taskSizeDetection.enabled === false) {
+            suppressionEnabled = false;
+            break;
+          }
+          if (config.taskSizeDetection.suppressHeavyModesForSmallTasks === false) {
+            suppressionEnabled = false;
+            break;
+          }
+        }
+      }
+      
+      if (suppressionEnabled) {
+        resolved = resolved.filter(keyword => !HEAVY_KEYWORDS.has(keyword.name));
+      }
     }
 
     // Import flow tracer once (best-effort)
