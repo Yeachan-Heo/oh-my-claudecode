@@ -590,15 +590,20 @@ const MODEL_ROUTING_QUESTIONS = {
   },
 };
 
-// Subagent reasoning effort chosen by the model-routing "effort" score (0-3):
-// < 0.75 low, < 1.5 medium, otherwise high. The mapping never goes above
-// high; OMC_JEV_MAX_EFFORT can only lower it. When the point is active and
-// Jev returns no usable effort score, an explicit effort above the cap is
-// lowered to the cap. The default cap is high: xhigh and max spend several
-// times the tokens of high, so a router must not raise a subagent there
-// unless the user opts in.
+// Subagent reasoning effort chosen by the model-routing "effort" score (0-3).
+// The score is rounded onto its legend: < 0.5 low (trivial), < 1.5 medium
+// (some thought), < 2.5 high (careful multi-step), otherwise the top bucket
+// (deep reasoning). The top bucket is max when the cap is max and the effort
+// answer's confidence is at least MAX_EFFORT_MIN_CONFIDENCE, else xhigh when
+// the cap allows xhigh, else the cap. Every result is capped by
+// OMC_JEV_MAX_EFFORT (low, medium, high, xhigh, or max). The default cap is
+// high: xhigh and max spend several times the tokens of high, so a router
+// raises a subagent there only when the user opts in with a higher cap.
+// When the point is active and Jev returns no usable effort score, an
+// explicit effort above the cap is lowered to the cap.
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const DEFAULT_MAX_EFFORT = 'high';
+const MAX_EFFORT_MIN_CONFIDENCE = 0.95;
 
 function resolveMaxEffort(env = process.env) {
   const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
@@ -609,8 +614,10 @@ function capEffort(effort, maxEffort) {
   return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
 }
 
-function effortFromScore(score, maxEffort) {
-  return capEffort(score < 0.75 ? 'low' : score < 1.5 ? 'medium' : 'high', maxEffort);
+function effortFromScore(score, confidence, maxEffort) {
+  if (score < 2.5) return capEffort(score < 0.5 ? 'low' : score < 1.5 ? 'medium' : 'high', maxEffort);
+  if (maxEffort === 'max' && typeof confidence === 'number' && confidence >= MAX_EFFORT_MIN_CONFIDENCE) return 'max';
+  return capEffort('xhigh', maxEffort);
 }
 
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
@@ -684,7 +691,7 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
     const currentEffort = (updatedToolInput || toolInput).effort;
     if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 3) {
-      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
+      ensureUpdated().effort = effortFromScore(effortScore, effortAnswer.confidence, maxEffort);
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
       ensureUpdated().effort = capEffort(currentEffort, maxEffort);
     }

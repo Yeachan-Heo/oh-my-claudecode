@@ -587,7 +587,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
-| `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`. Other values use the default. The mapping never goes above `high`, so the cap can only lower it. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels for deep-reasoning tasks. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -705,23 +705,26 @@ The `model-routing` point asks two questions in one request, so choosing the eff
 | `model-tier` | Choice | `haiku`, `sonnet`, or `opus` |
 | `effort` | Score 0-3 | 0 trivial, 1 some thought, 2 careful multi-step reasoning, 3 deep reasoning |
 
-In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` maps the effort score onto the `effort` field of the Task/Agent call:
+In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds the effort score onto its legend and maps it onto the `effort` field of the Task/Agent call:
 
-| Score | Effort |
-|-------|--------|
-| < 0.75 | `low` |
-| 0.75 to < 1.5 | `medium` |
-| 1.5 and above | `high` |
+| Score | Legend | Effort |
+|-------|--------|--------|
+| < 0.5 | trivial | `low` |
+| 0.5 to < 1.5 | some thought | `medium` |
+| 1.5 to < 2.5 | careful multi-step reasoning | `high` |
+| 2.5 to 3 | deep reasoning | top bucket: `max` when `OMC_JEV_MAX_EFFORT=max` and the effort answer's `confidence` is at least 0.95, otherwise `xhigh` when the cap is `xhigh` or `max`, otherwise the cap |
+
+Every result is capped by `OMC_JEV_MAX_EFFORT`.
 
 This needs a Claude Code version whose Agent/Task tool schema has an `effort` field (checked on Claude Code 2.1.316).
 
 - Answers are read by question name. An effort answer counts only when its `type` is `score` and its `score` is a number from 0 to 3. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
 - As with the model, Jev's effort replaces an explicit `effort` in the call.
-- The mapping ends at `high`. `OMC_JEV_MAX_EFFORT` (default `high`) can only lower it, for example to `medium`. The default stops at `high` because `xhigh` and `max` can spend several times the tokens of `high` across every delegated call.
+- `OMC_JEV_MAX_EFFORT` defaults to `high`, so by default the top bucket runs at `high`: `xhigh` and `max` can spend several times the tokens of `high` across every delegated call. Set the cap to `xhigh` to let deep-reasoning tasks run at `xhigh`, or to `max` to also allow `max` when Jev is at least 95% confident; a lower cap such as `medium` lowers every bucket above it.
 - When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap, for example `max` becomes `high`. Raise the cap to let explicit `xhigh` or `max` through.
 - Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included.
 
-Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`.
+Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With `OMC_JEV_MAX_EFFORT=max` and the effort answer `{ "type": "score", "score": 2.9, "confidence": 0.9, ... }` the same call runs with `"effort": "xhigh"`; at `"confidence": 0.97` it runs with `"effort": "max"`.
 
 ### Context pruning: staleness score
 
