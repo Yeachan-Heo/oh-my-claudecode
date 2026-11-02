@@ -168,6 +168,25 @@ function readJsonFile(path) {
 }
 
 /**
+ * Check if the state file has been modified since it was last read.
+ * Re-reads the state from disk and verifies that key identifiers
+ * (session_id, iteration, updated_at) haven't changed.
+ * Returns true if the state is safe to write (unchanged), false otherwise.
+ */
+function isStateUnchangedSinceCJevRequest(originalState, statePath) {
+  if (!originalState || !statePath) return false;
+  const currentState = readJsonFile(statePath);
+  if (!currentState) return false;
+  
+  // Verify key identifiers haven't changed
+  if (originalState.session_id !== currentState.session_id) return false;
+  if (originalState.iteration !== currentState.iteration) return false;
+  if (originalState.updated_at !== currentState.updated_at) return false;
+  
+  return true;
+}
+
+/**
  * Get hard max iterations for persistent modes.
  * Mirrors src/lib/security-config.ts getSecurityConfig(): default 500;
  * OMC_SECURITY=strict caps at 200 and a config value may only tighten it.
@@ -1464,12 +1483,16 @@ async function main() {
           const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul === true;
           
           if (jevSaysTaskComplete) {
-            // Transition ralph to completed state when Jev signals task completion
-            ralph.state.active = false;
-            ralph.state.current_phase = 'complete';
-            ralph.state.completed_at = new Date().toISOString();
-            if (shouldWriteStateBack(ralph.path)) {
-              writeJsonFile(ralph.path, ralph.state);
+            // Guard the completion write against concurrent state changes:
+            // Re-read the state file and verify it hasn't been modified before writing terminal state.
+            if (isStateUnchangedSinceCJevRequest(ralph.state, ralph.path)) {
+              // Transition ralph to completed state when Jev signals task completion
+              ralph.state.active = false;
+              ralph.state.current_phase = 'complete';
+              ralph.state.completed_at = new Date().toISOString();
+              if (shouldWriteStateBack(ralph.path)) {
+                writeJsonFile(ralph.path, ralph.state);
+              }
             }
             
             console.log(
@@ -1692,12 +1715,16 @@ async function main() {
             const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul === true;
             
             if (jevSaysTaskCompleteAP) {
-              // Transition autopilot to completed state when Jev signals task completion
-              autopilot.state.active = false;
-              autopilot.state.current_phase = 'complete';
-              autopilot.state.completed_at = new Date().toISOString();
-              if (shouldWriteStateBack(autopilot.path)) {
-                writeJsonFile(autopilot.path, autopilot.state);
+              // Guard the completion write against concurrent state changes:
+              // Re-read the state file and verify it hasn't been modified before writing terminal state.
+              if (isStateUnchangedSinceCJevRequest(autopilot.state, autopilot.path)) {
+                // Transition autopilot to completed state when Jev signals task completion
+                autopilot.state.active = false;
+                autopilot.state.current_phase = 'complete';
+                autopilot.state.completed_at = new Date().toISOString();
+                if (shouldWriteStateBack(autopilot.path)) {
+                  writeJsonFile(autopilot.path, autopilot.state);
+                }
               }
               
               console.log(
