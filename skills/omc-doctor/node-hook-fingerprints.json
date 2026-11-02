@@ -920,14 +920,6 @@
       ]
     },
     {
-      "path": "templates/hooks/lib/jev-shadow.mjs",
-      "fingerprints": [],
-      "workingTree": {
-        "sha256": "3ab92eb62fbe6be0f4d60254d0d6e807cb2bbdcb5a34ce7c4a0c5f66d0200ec3",
-        "state": "working-tree"
-      }
-    },
-    {
       "path": "templates/hooks/lib/model-routing-override-message.mjs",
       "fingerprints": [
         {
