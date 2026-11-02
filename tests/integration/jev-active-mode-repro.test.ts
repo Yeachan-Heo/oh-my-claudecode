@@ -513,31 +513,86 @@ describe("jev active-mode subprocess repro", () => {
     expect(requests).toHaveLength(1);
   }, 15000);
 
-  it("keyword-detector.mjs: task-size:active is requested but answer is not consumed (issue #4805)", async () => {
-    // This test documents issue #4805: task-size Jev answers are recorded but not consumed
-    // when in active mode, wasting resolver time
-    const input = keywordInput();
+  it("keyword-detector.mjs: task-size:active with small answer filters heavy keywords (issue #4805)", async () => {
+    // This test verifies the fix for issue #4805: when task-size returns 'small',
+    // heavy keywords (ralph, autopilot, team, ralplan) are filtered out
+    const input = {
+      prompt: "Please use ralph and autopilot to fix this.",  // Contains 2 heavy keywords
+      cwd,
+      session_id: "test-sess-keyword",
+    };
     
-    // Clear requests
+    // Baseline: Run without Jev to see default behavior
     requests = [];
+    const baseline = await runScript(
+      "keyword-detector.mjs",
+      input,
+      env,
+      cwd,
+    );
+    expect(baseline.exitCode, baseline.stderr).toBe(0);
+    const baselineOutput = JSON.parse(baseline.stdout).hookSpecificOutput.additionalContext;
+    // Default should include both 'ralph' and 'autopilot' since they're in the prompt
+    expect(baselineOutput).toContain("ralph");
+    expect(baselineOutput).toContain("autopilot");
     
-    // Run with task-size:active
-    const active = await runScript(
+    // Run with task-size:active returning 'small'
+    // Heavy keywords should be filtered out
+    requests = [];
+    choice = "small";
+    const withSmall = await runScript(
       "keyword-detector.mjs",
       input,
       { ...env, OMC_JEV: "task-size:active" },
       cwd,
     );
+    expect(withSmall.exitCode, withSmall.stderr).toBe(0);
+    // When task-size returns 'small', the output should suppressOutput: true
+    // because the heavy keywords were filtered out
+    const smallParsed = JSON.parse(withSmall.stdout);
+    // If no keywords remain after filtering, suppressOutput will be true
+    if (smallParsed.suppressOutput) {
+      // This means all keywords were filtered (which would happen with 'small')
+      expect(smallParsed.suppressOutput).toBe(true);
+    } else {
+      // If some keywords remain, they should not be heavy keywords
+      const smallOutput = smallParsed.hookSpecificOutput?.additionalContext || "";
+      expect(smallOutput).not.toContain("ralph");
+      expect(smallOutput).not.toContain("autopilot");
+    }
     
-    expect(active.exitCode, active.stderr).toBe(0);
-    
-    // Should have made a task-size request (resolver was called synchronously in active mode)
+    // Verify task-size request was made
     const taskSizeRequest = requests.find((entry) => "task-size" in entry.body.questions);
-    // The bug: resolver IS called (wasting time), but the answer is never used
     expect(taskSizeRequest).toBeDefined();
-    expect(taskSizeRequest!.body.questions).toHaveProperty('task-size');
+    assertWireContract(taskSizeRequest!, "task-size");
+  }, 15000);
+
+  it("keyword-detector.mjs: task-size:active with non-small answer preserves heavy keywords (issue #4805)", async () => {
+    // This test verifies that when task-size returns something other than 'small',
+    // heavy keywords are NOT filtered (preserving original behavior)
+    const input = {
+      prompt: "Please use ralph to fix this.",
+      cwd,
+      session_id: "test-sess-keyword",
+    };
     
-    // Verify it was an active request that waited for the resolver
+    // Run with task-size:active returning 'opus' (not 'small')
+    requests = [];
+    choice = "opus";
+    const withOpus = await runScript(
+      "keyword-detector.mjs",
+      input,
+      { ...env, OMC_JEV: "task-size:active" },
+      cwd,
+    );
+    expect(withOpus.exitCode, withOpus.stderr).toBe(0);
+    const opusOutput = JSON.parse(withOpus.stdout).hookSpecificOutput.additionalContext;
+    // When task-size returns 'opus' (not 'small'), 'ralph' should still be there
+    expect(opusOutput).toContain("ralph");
+    
+    // Verify task-size request was made
+    const taskSizeRequest = requests.find((entry) => "task-size" in entry.body.questions);
+    expect(taskSizeRequest).toBeDefined();
     assertWireContract(taskSizeRequest!, "task-size");
   }, 15000);
 });

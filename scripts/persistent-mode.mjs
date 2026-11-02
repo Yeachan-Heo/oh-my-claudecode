@@ -1462,12 +1462,31 @@ async function main() {
 
           // In active mode, check if Jev says task is complete (noul: true means exit loop)
           const jevSaysTaskComplete = jevResult && jevResult.mode === 'active' && jevResult.answer && jevResult.answer.noul === true;
-          const shouldBlock = jevSaysTaskComplete ? true : heuristic.shouldBlock;
+          
+          if (jevSaysTaskComplete) {
+            // Transition ralph to completed state when Jev signals task completion
+            ralph.state.active = false;
+            ralph.state.current_phase = 'complete';
+            ralph.state.completed_at = new Date().toISOString();
+            if (shouldWriteStateBack(ralph.path)) {
+              writeJsonFile(ralph.path, ralph.state);
+            }
+            
+            console.log(
+              JSON.stringify({
+                decision: "continue",
+                reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+              }),
+            );
+            return;
+          }
+
+          const shouldBlock = heuristic.shouldBlock;
 
           console.log(
             JSON.stringify({
               decision: shouldBlock ? "block" : "continue",
-              reason: jevSaysTaskComplete ? '[JEV-COMPLETION] Task complete per Jev answer; exiting ralph.' : reason,
+              reason: reason,
             }),
           );
           return;
@@ -1671,12 +1690,31 @@ async function main() {
 
             // In active mode, check if Jev says task is complete (issue #4805)
             const jevSaysTaskCompleteAP = jevAutopilotResult && jevAutopilotResult.mode === 'active' && jevAutopilotResult.answer && jevAutopilotResult.answer.noul === true;
+            
+            if (jevSaysTaskCompleteAP) {
+              // Transition autopilot to completed state when Jev signals task completion
+              autopilot.state.active = false;
+              autopilot.state.current_phase = 'complete';
+              autopilot.state.completed_at = new Date().toISOString();
+              if (shouldWriteStateBack(autopilot.path)) {
+                writeJsonFile(autopilot.path, autopilot.state);
+              }
+              
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; autopilot mode exited and transitioned to completion.',
+                }),
+              );
+              return;
+            }
+
             const shouldBlockAP = true; // Always block after reaching iteration limit (original behavior)
 
             console.log(
               JSON.stringify({
                 decision: shouldBlockAP ? "block" : "continue",
-                reason: jevSaysTaskCompleteAP ? '[JEV-COMPLETION] Task complete per Jev answer; exiting autopilot.' : reason,
+                reason: reason,
               }),
             );
             return;
