@@ -735,7 +735,7 @@ Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call
 | 2.5 to 3 | `stale` | `[OMC CRITICAL]` |
 
 - Jev changes the level only below the critical threshold (default 90%). At or above it the hook always emits `[OMC CRITICAL]` and asks for `/compact`, whatever Jev answers, subject to the usual warning cooldown.
-- A score outside 0-3, a non-numeric score, or an answer of another type is ignored and the heuristic action stays. A string `choice` that names one of the four labels, matched case-insensitively, takes precedence over the score.
+- A score outside 0-3, a non-numeric score, or an answer of another type is ignored and the heuristic action stays, even when that answer carries a `choice`. In a score answer, a string `choice` that names one of the four labels, matched case-insensitively, takes precedence over the score.
 
 ### Request Budget and Latency
 

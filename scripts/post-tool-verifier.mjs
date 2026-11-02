@@ -47,15 +47,16 @@ const CONTEXT_PRUNING_QUESTIONS = {
 const STALENESS_LABELS = Object.keys(CONTEXT_PRUNING_QUESTIONS.staleness.criteria);
 
 /**
- * Staleness label from a Jev answer. A score answer carries only `score`
- * (0 = fresh ... 3 = stale), so it is rounded to the nearest label; a score
- * outside 0..3, a non-number, or another answer type yields no label. A
+ * Staleness label from a Jev answer. Only a score answer counts; another
+ * answer type yields no label, even when it carries a `choice`. A score answer
+ * carries only `score` (0 = fresh ... 3 = stale), so it is rounded to the
+ * nearest label; a score outside 0..3 or a non-number yields no label. A
  * string `choice` that names one of the labels (case-insensitively) wins.
  */
 function stalenessLabelOf(answer) {
-  const choice = typeof answer?.choice === 'string' ? answer.choice.toLowerCase() : undefined;
-  if (choice !== undefined && STALENESS_LABELS.includes(choice)) return choice;
   if (answer?.type !== 'score') return undefined;
+  const choice = typeof answer.choice === 'string' ? answer.choice.toLowerCase() : undefined;
+  if (choice !== undefined && STALENESS_LABELS.includes(choice)) return choice;
   const { score } = answer;
   if (typeof score !== 'number' || !Number.isFinite(score)) return undefined;
   if (score < 0 || score > STALENESS_LABELS.length - 1) return undefined;

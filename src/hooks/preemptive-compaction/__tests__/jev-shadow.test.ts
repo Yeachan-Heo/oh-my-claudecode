@@ -229,6 +229,7 @@ describe('context-pruning active mapping of the staleness score', () => {
     ['score 3.4', { type: 'score', score: 3.4 }],
     ['score NaN', { type: 'score', score: Number.NaN }],
     ['a choice-type answer with a score', { type: 'choice', score: 1 }],
+    ['a choice-type answer with a label choice', { type: 'choice', choice: 'fresh' }],
   ])('yields no label for %s', (_label, answer) => {
     expect(stalenessLabelOf(answer)).toBeUndefined();
   });

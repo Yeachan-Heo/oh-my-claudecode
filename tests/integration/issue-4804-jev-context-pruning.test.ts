@@ -294,6 +294,7 @@ describe("jev active-mode context-pruning coverage (issue #4804)", () => {
     ["score 99", scoreAnswer(99)],
     ["score NaN as text", scoreAnswer("NaN")],
     ["a choice-type answer carrying a score", { type: "choice", score: 0, confidence: 0.9 }],
+    ["a choice-type answer carrying a label choice", { type: "choice", choice: "fresh", confidence: 0.9 }],
     ["a non-string choice", { type: "score", choice: 42, confidence: 0.9 }],
   ])("post-tool-verifier.mjs: active ignores %s and keeps the heuristic", async (_label, malformed) => {
     answer = malformed;
