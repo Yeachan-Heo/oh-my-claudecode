@@ -387,3 +387,28 @@ not ok 2 - test b new failure
     expect(withColon.some((line) => line.includes('duration'))).toBe(false);
   });
 });
+
+describe('pytest progress lines (issue #4794)', () => {
+  it('does not fingerprint progress dots, so 200 vs 201 passing tests yields no new signatures', () => {
+    const run1 = signatureLines(`${'.'.repeat(200)} [ 36%]\n${'.'.repeat(200)} [100%]`);
+    const run2 = signatureLines(`${'.'.repeat(201)} [ 35%]\n${'.'.repeat(201)} [100%]`);
+    expect(run1).toEqual([]);
+    expect(run2).toEqual([]);
+    const diff = diffAgainstBaseline(baseline({ test: { signatures: run1 } }), { test: { signatures: run2 } });
+    expect(diff.newSignatures).toEqual([]);
+  });
+
+  it('drops an all-pass progress line but keeps a line carrying a failure marker', () => {
+    // pytest -qq emits only the progress line for a quiet run; a red run's F is the sole failure signal.
+    expect(signatureLines('.                                              [100%]')).toEqual([]);
+    const lines = signatureLines('.F                                              [100%]');
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).toContain('F');
+  });
+
+  it('still keeps real pytest failure lines and a failing progress line', () => {
+    const lines = signatureLines(`${'.'.repeat(200)}F [ 36%]\nFAILED tests/test_x.py::test_y - assert 1 == 2`);
+    expect(lines).toContain('FAILED tests/test_x.py::test_y - assert 1 == 2');
+    expect(lines).toContain(`${'.'.repeat(200)}F [ 36%]`);
+  });
+});

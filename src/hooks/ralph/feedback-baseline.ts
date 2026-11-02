@@ -58,6 +58,8 @@ export function signatureLines(output: string): string[] {
     if (!line || line.length > 500) continue;
     // Pure progress chatter and test format headers carry no failure signal.
     if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    // Drop all-pass pytest progress lines (dots plus skipped/xfail/xpass markers with an optional "[ NN%]" suffix); their width and percentages shift with the test count. A line containing F/E is a failure marker and must survive, because quiet runs can emit only that line.
+    if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     // Exclude pytest all-pass summaries ("N passed in <v>", optionally with warnings/skipped/...
     // and a trailing duration already normalized to one or more "<v>" tokens); a summary that
     // reports failures/errors does not match and is kept below.
