@@ -74,17 +74,32 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
     }
   };
   
+  const mapHeuristicForLoopContinuation = (r: PersistentModeResult, questionSet?: number) => {
+    if (questionSet === 1) {
+      // Score question (iteration progress): 0-1 range
+      // shouldBlock=true means prevent stopping (continuing, making progress)
+      // shouldBlock=false means allow stopping (done, no progress)
+      return r.shouldBlock ? 1 : 0;
+    }
+    // Question set 0 (Noul, default): Is task complete?
+    // shouldBlock=true means prevent stopping (task NOT complete)
+    // shouldBlock=false means allow stopping (task IS complete)
+    return !r.shouldBlock;
+  };
+
   const results = await Promise.all([
     recordJudgment<PersistentModeResult>('loop-continuation', {
       state,
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn,
     }),
     recordJudgment<PersistentModeResult>('loop-continuation', {
       state,
       twin: () => result,
       questionSet: 1,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn,
     }),
   ]);

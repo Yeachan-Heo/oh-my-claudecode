@@ -252,6 +252,11 @@ export interface RecordJudgmentCall<T> {
   twin: () => T;
   /** Maps Jev's answer onto the result type. Only used in active mode. */
   mapAnswer?: (answer: JevAnswer) => T;
+  /** Extracts the comparison-relevant heuristic value from the twin result for shadow logging.
+   * When not provided, the full twin result is logged as the heuristic.
+   * For judgment points with non-primitive twins, this should return the comparable primitive
+   * (boolean for noul, string for choice, number for score). */
+  mapHeuristic?: (twinResult: T) => unknown;
   /** Index into the point's question sets (loop-continuation's Score call uses 1). */
   questionSet?: number;
   /** Test hook: injected transport. */
@@ -276,6 +281,8 @@ export function recordJudgment<T>(pointName: string, call: RecordJudgmentCall<T>
     questions: typeof questions === 'function' ? questions() : questions,
     twin: call.twin,
     mapAnswer: call.mapAnswer,
+    mapHeuristic: call.mapHeuristic,
+    questionSet,
     blocking: point.blocking,
     fetchFn: call.fetchFn,
   });

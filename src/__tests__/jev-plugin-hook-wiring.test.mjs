@@ -165,7 +165,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'skill-trigger')).toMatchObject({
       point: 'skill-trigger',
       state: { source: 'user-prompt-submit' },
-      heuristic: ['ralph'],
+      heuristic: 'ralph',
     });
   });
 
@@ -179,7 +179,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'task-size')).toMatchObject({
       point: 'task-size',
       state: { source: 'user-prompt-submit' },
-      heuristic: { size: 'large' },
+      heuristic: 'large',
     });
   });
 
@@ -203,7 +203,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
         subagent_type: 'oh-my-claudecode:executor',
         task: 'Fix the regression and add a test.',
       },
-      heuristic: { model: 'sonnet' },
+      heuristic: 'sonnet',
     });
   });
 
@@ -235,7 +235,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(entry).toMatchObject({
       point: 'loop-continuation',
       state: { mode_name: 'ralph', should_block: true },
-      heuristic: { mode: 'ralph', shouldBlock: true },
+      heuristic: false,
     });
     const logEntries = readFileSync(join(context.logDir, 'shadow.jsonl'), 'utf8')
       .trim()
@@ -268,7 +268,7 @@ describe('plugin hook script Jev wiring (#4120)', () => {
     expect(readPoint(context, 'learner-extraction')).toMatchObject({
       point: 'learner-extraction',
       state: { assistant_message: expect.stringContaining('race condition') },
-      heuristic: { detected: true },
+      heuristic: true,
     });
   });
 

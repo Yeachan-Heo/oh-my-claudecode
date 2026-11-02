@@ -38,6 +38,7 @@ export function recordModelRoutingShadow(
       task: pinned.originalInput.prompt,
     },
     twin: () => pinned,
+    mapHeuristic: (result, questionSet) => result.model,
     fetchFn,
   });
 }
