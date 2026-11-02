@@ -38929,6 +38929,290 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4809,
+      "targetRef": "dev",
+      "mergeBaseSha": "87df48f9f2655d1e19dfea1a49338a29b6c87e42",
+      "headSha": "07631fcf4a781c5ad9ddda12cba383b8c6055832",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-05-01T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 45,
+        "sha256": "c8557aea78a219feb0ae325e911576733f4b777aae915e377ea29379193630b8"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "0026f5270abf0d94fe30a7064184a2db92cc255d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js",
+          "sha": "2922986b316405709974fcf2787fd0c4356c2db3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js.map",
+          "sha": "7e397598f1cf604e493af12403d950cfb6777053",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.d.ts.map",
+          "sha": "f7a5e76de149838d9963fdd4d7870afb0c39a304",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.js",
+          "sha": "724c725bf8718e5dd7ceeeeb54f5171a2584e69f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.js.map",
+          "sha": "ba0bc2432f3827821cbb8058b797cb83e3cb9228",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js",
+          "sha": "9caaaeb49fce931bf9b5ad8c1fc5ef91c713e8e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js.map",
+          "sha": "f50b6d4b2fdbaafb6251ec667d9b53b69c248a95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts",
+          "sha": "e9e13731a33ea82b498c304a8994eb9676a9d3e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts.map",
+          "sha": "8779250b9c775bc3d540db6ab9fe6370a350be08",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js",
+          "sha": "448bc71b13cce9cc0c53f972a824e76bdce3b4ac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js.map",
+          "sha": "688fe12fdb55f18cacdae7dfb049731961acd449",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.d.ts",
+          "sha": "ea86f30f71c5bd2ebec1a196faf8e55d39666f6e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.d.ts.map",
+          "sha": "9642aea2f3dbdc2ad035d2a7d3f92298b09eef13",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js",
+          "sha": "66709feea5469a8f03690d6fb546b2e3f448e141",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js.map",
+          "sha": "1abd29abe7eb4bdec7d3707cd273e21f26986b99",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js",
+          "sha": "d047068ac12157f0d9d41168816adeafbdd08527",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "ba0888a997ab7e7e78b269b27924366500665414",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts",
+          "sha": "7e70ed271470469ab487aa944cd945f07b2e952f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "d0cd2a5793c3d6f33c22f64cd6b4c899a87c4287",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "72806a0f6ae6e9aba0d4150a123682180361ede7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "080f9aa6f551c6e6182924d28790a98b57a9dbd4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.d.ts.map",
+          "sha": "7ba1d02b24b8e01b85523e23b4cb97c69777fc9e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.js",
+          "sha": "a74f4c81cbb4017350d52ab6967eff4ab0ea28f6",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.js.map",
+          "sha": "69f8285c664a6c13783efe27650a879195c083e4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js",
+          "sha": "e85a37194cd87c063cda369c8ff7537ee096f642",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js.map",
+          "sha": "d272e1912e737a9e501949c27f9ae67542a76829",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.d.ts.map",
+          "sha": "b1c5bf318d1c1f4ec28821e55435ab4efcb69820",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.js",
+          "sha": "96c2b333e1c30dfce0f7490a84cd4fc4a654687f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.js.map",
+          "sha": "86881d1989401d1c46eba584093353bb4f44e33e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js",
+          "sha": "a6d721a219cad3e2f9b9e41a3a7b8522ab8e8a2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js.map",
+          "sha": "2427565ab4602dd28210e58715cd3beb6f75ee37",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.d.ts.map",
+          "sha": "fcde875ee59d427ae3468edaf36e2fb5171dc0f5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.js",
+          "sha": "2e2e7fa4db06480d8b88e1e6ae5c9ab9395b8e8c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.js.map",
+          "sha": "32925348f998355ddd07027565249ef4058e6635",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+          "sha": "56ea36f1372c6a6182711394e18079e4e94bc68d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+          "sha": "17bd56a186bad1d3559cc61bec6e739284f26c41",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+          "sha": "da329068c893bdfcd45a4261ede59b57f8847037",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js",
+          "sha": "beb98bc551e3b8427fdfb6efd0abf3e9b9ef44d4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js.map",
+          "sha": "079b4ff829966b0d47150ceb7fef232d55d59f95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js",
+          "sha": "320227a0b5aa123154cb5d79b77cd4b6788242a8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "1e8cce86ec9df46313bcb624f547e456e89eb1c9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.d.ts.map",
+          "sha": "8e3d56dc7e7c4777ab067f6f29bb119f4bf45db5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.js",
+          "sha": "1c1c476bc7e5b8e0d713f747edc8ad03a44bec1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.js.map",
+          "sha": "58eeac075e026f1552ee31725532435034f97aee",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
