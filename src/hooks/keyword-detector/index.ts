@@ -27,6 +27,9 @@ export type KeywordType =
   | 'deepsearch'  // Priority 12
   | 'deep-interview' // Priority 13.5
   | 'analyze'     // Priority 13
+  | 'ultragoal'   // Script-detected workflow trigger
+  | 'ai-slop-cleaner' // Script-detected workflow trigger
+  | 'wiki'        // Script-detected workflow trigger
   | 'codex'       // Priority 15
   | 'gemini'      // Priority 16
   | 'cursor'      // Priority 17
@@ -56,6 +59,10 @@ const KEYWORD_PATTERNS: Record<KeywordType, RegExp> = {
   deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
   analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
   'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
+  // Script-only triggers: never-match placeholders (script detects them, TypeScript doesn't)
+  ultragoal: /(?!x)x/,  // Script-only detection
+  'ai-slop-cleaner': /(?!x)x/,  // Script-only detection
+  wiki: /(?!x)x/,  // Script-only detection
   codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
   gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
   cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -92,7 +99,9 @@ const KEYWORD_SKIP_PREDICATES: Partial<Record<KeywordType, (text: string) => boo
 export const KEYWORD_PRIORITY: KeywordType[] = [
   'cancel', 'ralph', 'autopilot', 'team',
   'ralplan', 'tdd', 'code-review', 'security-review',
-  'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
+  'ultrathink', 'deepsearch', 'analyze', 'deep-interview',
+  'ultragoal', 'ai-slop-cleaner', 'wiki',
+  'codex', 'gemini', 'cursor', 'antigravity'
 ];
 
 const RETIRED_WORKFLOW_SLASH_PATTERN =

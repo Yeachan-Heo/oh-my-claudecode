@@ -85,11 +85,13 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
     // Question set 0 (Noul, default): Is task complete?
     // shouldBlock=true means prevent stopping (task NOT complete)
     // shouldBlock=false USUALLY means allow stopping (task IS complete),
-    // BUT when mode='team' and shouldBlock=false, it may indicate pipeline
-    // failure/cancellation (safety release), not task completion. In that case,
-    // return null to make the comparison non-comparable.
-    if (r.mode === 'team' && !r.shouldBlock) {
-      return null; // Safety release, not task completion
+    // BUT when a persistent mode allows stopping due to pipeline failure/cancellation
+    // (safety release), it may return shouldBlock=false without task completion.
+    // This applies to: team (failure/cancellation), ralplan (circuit breaker/agent still
+    // running), autoresearch (failure/cancellation/runtime exhausted). In these cases,
+    // return null to make the comparison non-comparable (not actual task completion).
+    if (!r.shouldBlock && ['team', 'ralplan', 'autoresearch'].includes(r.mode)) {
+      return null; // Safety release or permission to stop, not task completion
     }
     return !r.shouldBlock;
   };

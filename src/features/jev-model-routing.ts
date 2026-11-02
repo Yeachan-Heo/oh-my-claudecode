@@ -38,7 +38,14 @@ export function recordModelRoutingShadow(
       task: pinned.originalInput.prompt,
     },
     twin: () => pinned,
-    mapHeuristic: (result, questionSet) => result.model,
+    mapHeuristic: (result, questionSet) => {
+      // When forceInherit is enabled, the model is 'inherit' (a sentinel value).
+      // Logging this as a comparable string causes false disagreements with every
+      // Jev choice, even though the inherited model could match. Return null
+      // to make inherited model selections non-comparable.
+      if (result.model === 'inherit') return null;
+      return result.model;
+    },
     fetchFn,
   });
 }
