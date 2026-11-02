@@ -218,6 +218,68 @@ describe('stale-run reporter hook', () => {
     expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
   });
 
+  it('treats a null confirmation timestamp as a crashed run', async () => {
+    const dir = fixture();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: null,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('treats a numeric confirmation timestamp as a crashed run', async () => {
+    const dir = fixture();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+        awaiting_confirmation_set_at: 12345,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
+  it('treats an absent confirmation timestamp as a crashed run', async () => {
+    const dir = fixture();
+    await writeModeState(
+      dir,
+      'ralph',
+      {
+        active: true,
+        awaiting_confirmation: true,
+      },
+      undefined,
+      9,
+    );
+    const result = await runReporter({ cwd: dir });
+    const ctx = result.parsed.hookSpecificOutput?.additionalContext ?? '';
+    expect(result.parsed.continue).toBe(true);
+    expect(ctx).toContain('[STALE RUN]');
+    expect(ctx).toContain('ralph');
+    expect(ctx).not.toContain('[AWAITING CONFIRMATION]');
+  });
+
   it('reports crashed and waiting runs side by side without mixing groups', async () => {
     const dir = fixture();
     const waitingAt = new Date(Date.now() - 3 * 3600_000);
