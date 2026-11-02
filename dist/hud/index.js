@@ -5,6 +5,7 @@
  * Statusline command that visualizes oh-my-claudecode state.
  * Receives stdin JSON from Claude Code and outputs formatted statusline.
  */
+import { hardenWindowsExeSearch } from "../utils/windows-search.js";
 import { readStdin, writeStdinCache, readStdinCache, getContextPercent, getModelId, getEffortLevel, getModelName, getRateLimitsFromStdin, stabilizeContextPercent, } from "./stdin.js";
 import { parseTranscript } from "./transcript.js";
 import { readHudState, readHudConfig, getRunningTasks, writeHudState, initializeHUDState, } from "./state.js";
@@ -26,6 +27,7 @@ import { spawn } from "child_process";
 import { fileURLToPath } from "url";
 import { getOmcRoot } from "../lib/worktree-paths.js";
 import { getClaudeConfigDir, getUpdateCheckCachePath } from "../utils/config-dir.js";
+hardenWindowsExeSearch();
 /**
  * Extract session ID (UUID) from a transcript path.
  */

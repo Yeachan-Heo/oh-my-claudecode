@@ -5,6 +5,7 @@
  *
  * Bundled as CJS via esbuild (scripts/build-runtime-cli.mjs).
  */
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync, statSync } from 'fs';
 import { rename, unlink, writeFile } from 'fs/promises';
@@ -25,6 +26,7 @@ import { checkOwnerFence, currentProcessStartIdentity, requireOwnerProcessIdenti
 import { assertTeamInstanceUnderLock, createTeamInstanceBinding, withTeamInstanceLifecycleLock } from './team-instance.js';
 import { runTmuxServerIdentityGuard } from './tmux-session.js';
 export { runTmuxServerIdentityGuard } from './tmux-session.js';
+hardenWindowsExeSearch();
 function normalizeRuntimeInstanceId(value) {
     return isValidTeamInstanceId(value) ? value.toLowerCase() : null;
 }

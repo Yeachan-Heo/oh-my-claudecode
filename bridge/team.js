@@ -9947,11 +9947,11 @@ function buildWorkerStartCommand(config) {
       windowsEnvVars.OMC_RECOVERY_GATE_SPEC_B64 = Buffer.from(windowsEnvVars.OMC_RECOVERY_GATE_SPEC, "utf8").toString("base64");
       delete windowsEnvVars.OMC_RECOVERY_GATE_SPEC;
     }
-    const envPrefix = Object.entries(windowsEnvVars).map(([key, value]) => {
+    const envPrefix = ['set "NoDefaultCurrentDirectoryInExePath=1"', ...Object.entries(windowsEnvVars).filter(([key]) => key.toUpperCase() !== "NODEFAULTCURRENTDIRECTORYINEXEPATH").map(([key, value]) => {
       assertSafeEnvKey(key);
       assertSafeCmdValue2(value);
       return `set "${key}=${escapeForCmdSet(value)}"`;
-    }).join(" && ");
+    })].join(" && ");
     const launch = launchWords.map((part) => {
       assertSafeCmdValue2(part);
       return `"${escapeForCmdSet(part)}"`;
@@ -23594,6 +23594,19 @@ var init_runtime_v2 = __esm({
   }
 });
 
+// src/utils/windows-search.ts
+var VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+
 // src/cli/team.ts
 import { randomUUID as randomUUID16 } from "crypto";
 import { spawn as spawn2 } from "child_process";
@@ -25114,6 +25127,7 @@ function readApprovedExecutionLaunchHintOutcome(cwd, mode, options = {}) {
 // src/cli/team.ts
 init_types();
 init_process_identity_lock();
+hardenWindowsExeSearch();
 var JOB_ID_PATTERN = /^omc-[a-z0-9]{1,16}$/;
 var VALID_CLI_AGENT_TYPES = /* @__PURE__ */ new Set(["claude", "codex", "gemini", "cursor", "grok", "antigravity"]);
 var SUBCOMMANDS = /* @__PURE__ */ new Set(["start", "status", "wait", "cleanup", "resume", "shutdown", "api", "help", "--help", "-h"]);

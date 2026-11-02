@@ -6,6 +6,7 @@
  * network access; the injectable queryImpl mirrors `query` from
  * `@anthropic-ai/claude-agent-sdk`.
  */
+import { childEnv } from "../../../utils/windows-search.js";
 import { buildAgentEnv, idempotencyKeyFor, READ_ONLY_AGENT_TOOLS, } from "./authority.js";
 const SUMMARY_LIMIT = 2000;
 class AgentTimeoutError extends Error {
@@ -120,7 +121,7 @@ export class AgentNodeExecutor {
                     options: {
                         abortController,
                         cwd: process.cwd(),
-                        env: buildAgentEnv(idempotencyKey),
+                        env: childEnv(buildAgentEnv(idempotencyKey)),
                         tools: [...READ_ONLY_AGENT_TOOLS],
                         permissionMode: "dontAsk",
                         canUseTool,
