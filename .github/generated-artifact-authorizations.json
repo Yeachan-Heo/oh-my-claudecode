@@ -4,7 +4,7 @@
   "owner": "Yeachan-Heo",
   "authorizations": [
     {
-      "pullNumber": 4758,
+      "pullNumber": 4788,
       "targetRef": "dev",
       "mergeBaseSha": "3c890d74776d47b5795ce9f362459ba0620c2612",
       "headSha": "d13e38a1a628ec8775f636462ec42170b8474e16",
