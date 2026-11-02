@@ -136,8 +136,28 @@ function recordFailure(point: string): void {
 }
 
 /** Extract the loggable heuristic value, applying mapHeuristic if provided. */
-function extractHeuristicForLogging<T>(twinResult: T, mapHeuristic: ((result: T, questionSet?: number) => unknown) | undefined, questionSet?: number): unknown {
-  return mapHeuristic ? mapHeuristic(twinResult, questionSet) : twinResult;
+/**
+ * A logged heuristic is comparable with the logged Jev answer only when it is
+ * a valid answer to the same question: the first declared question, whose
+ * answer is the one logged. Anything else is logged as null (non-comparable).
+ */
+export function comparableHeuristic(value: unknown, questions: JevQuestions): string | number | boolean | null {
+  const question = Object.values(questions)[0];
+  if (!question) return null;
+  switch (question.type) {
+    case 'choice':
+      return typeof value === 'string' && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case 'noul':
+      return typeof value === 'boolean' ? value : null;
+    case 'score':
+      return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+
+function extractHeuristicForLogging<T>(twinResult: T, questions: JevQuestions, mapHeuristic: ((result: T, questionSet?: number) => unknown) | undefined, questionSet?: number): string | number | boolean | null {
+  return comparableHeuristic(mapHeuristic ? mapHeuristic(twinResult, questionSet) : twinResult, questions);
 }
 
 export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>> {
@@ -196,7 +216,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   // Non-blocking (detector-type) in shadow mode: return the twin now; log when Jev settles.
   if (mode === 'shadow' && args.blocking === false) {
     const heuristic = twinAnswer();
-    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
+    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
     void attempt.then((outcome) => {
       if (outcome.ok) {
         recordSuccess(args.point);
@@ -215,7 +235,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   // to enable active mode to work with non-blocking points.
   if (mode === 'active' && args.blocking === false) {
     const heuristic = twinAnswer();
-    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
+    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
     const outcome = await attempt;
     if (!outcome.ok) {
       recordFailure(args.point);
@@ -234,14 +254,14 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     recordFailure(args.point);
     console.error('[jev] ' + args.point + ': degraded - ' + outcome.error);
     const heuristic = twinAnswer();
-    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
+    const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
     await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, 'degraded', loggableHeuristic, null), config.logDir);
     return { answer: heuristic, source: 'twin', mode: 'degraded' };
   }
 
   recordSuccess(args.point);
   const heuristic = twinAnswer();
-  const loggableHeuristic = extractHeuristicForLogging(heuristic, args.mapHeuristic, args.questionSet);
+  const loggableHeuristic = extractHeuristicForLogging(heuristic, args.questions, args.mapHeuristic, args.questionSet);
   const jevAnswer = firstAnswer(outcome.response);
   await writeShadowLog(buildLogEntry(args.point, boundedState, startedAt, mode === 'active' ? 'active' : 'shadow', loggableHeuristic, jevAnswer, outcome.response.usage), config.logDir);
   if (mode === 'active') {

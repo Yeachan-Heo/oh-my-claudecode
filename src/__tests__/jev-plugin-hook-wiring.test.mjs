@@ -306,9 +306,10 @@ describe('plugin hook script Jev wiring (#4120)', () => {
       context_window: { used_percentage: 90 },
     }, 'context-pruning');
 
+    // The twin's action is not a valid answer to the staleness score question.
     expect(readPoint(context, 'context-pruning')).toMatchObject({
       point: 'context-pruning',
-      heuristic: 'compact',
+      heuristic: null,
       state: {
         action: 'compact',
         context_percent: 90,

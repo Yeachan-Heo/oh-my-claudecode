@@ -111,13 +111,8 @@ describe('issue #4806: plugin hook heuristic format', () => {
     const entry = JSON.parse(logLines[logLines.length - 1]!);
     expect(entry.point).toBe('task-size');
     expect(entry.mode).toBe('shadow');
-    // The heuristic should be an object (this is the current behavior)
-    expect(entry.heuristic).toEqual({
-      size: 'small',
-      reason: 'heuristic',
-      wordCount: 10,
-      hasEscapeHatch: false,
-    });
+    // An object is not a valid choice answer, so it is logged as non-comparable.
+    expect(entry.heuristic).toBeNull();
     // The jev answer should be the choice object
     expect(entry.jev).toEqual({ type: 'choice', choice: 'medium', confidence: 0.85 });
   });

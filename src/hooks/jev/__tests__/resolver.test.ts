@@ -19,7 +19,7 @@ const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
 
-const TWIN = { tier: 'sonnet' };
+const TWIN = 'sonnet';
 
 let logDir = '';
 const savedEnv: Record<string, string | undefined> = {};

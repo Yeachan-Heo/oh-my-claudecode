@@ -161,5 +161,16 @@ describe('keyword-detector shadow judgment points', () => {
     expect(entry.heuristic).toBe('none');
   });
 
+  it('logs a detected keyword outside the declared trigger choices as non-comparable', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key-123';
+    process.env.OMC_JEV = 'skill-trigger';
+    const trigger = stubFetch({ choice: 'none' });
 
+    const result = await recordSkillTriggerShadow('/team fix the regression', trigger.fetchFn);
+    expect(result.answer[0]).toBe('team');
+
+    const lines = await waitForLogLines(1);
+    const entry = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(entry.heuristic).toBeNull();
+  });
 });
