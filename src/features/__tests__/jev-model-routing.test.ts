@@ -133,12 +133,12 @@ describe('jev-model-routing shadow wiring', () => {
     const entry = JSON.parse(log!.trim().split('\n')[0]) as {
       point: string;
       mode: string;
-      heuristic: EnforcementResult;
+      heuristic: string;
       jev: { choice?: string } | null;
     };
     expect(entry.point).toBe('model-routing');
     expect(entry.mode).toBe('shadow');
-    expect(entry.heuristic.model).toBe('sonnet');
+    expect(entry.heuristic).toBe('sonnet');
     expect(entry.jev?.choice).toBe('opus');
   });
 
@@ -204,5 +204,31 @@ describe('jev-model-routing shadow wiring', () => {
 
     expect(withJev).toEqual(withoutJev);
     expect((withJev.modifiedInput as AgentInput).model).toBe('haiku');
+  });
+
+  it('logs null for inherited model selections (non-comparable)', async () => {
+    process.env.TYPESAFE_API_KEY = TEST_KEY;
+    process.env.OMC_JEV = 'model-routing';
+    const fetchFn = makeJevFetchStub('sonnet');
+    // Create a result with model='inherit' (sentinel value when forceInherit is enabled)
+    const inherited = makePinned();
+    inherited.model = 'inherit' as unknown as string;
+
+    const result = await recordModelRoutingShadow('Task', inherited, fetchFn as unknown as typeof fetch);
+
+    // Result should be unchanged
+    expect(result.mode).toBe('shadow');
+    expect(result.answer).toBe(inherited);
+
+    // Shadow log should have null for heuristic (non-comparable)
+    const log = await waitForShadowLog(logDir);
+    expect(log).not.toBeNull();
+    const entry = JSON.parse(log!.trim().split('\n')[0]) as {
+      point: string;
+      heuristic: string | null;
+    };
+    expect(entry.point).toBe('model-routing');
+    // Inherited model should be logged as null, not as the string 'inherit'
+    expect(entry.heuristic).toBeNull();
   });
 });

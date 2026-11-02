@@ -83,6 +83,7 @@ export function recordContextPruningShadow(args: {
       })),
     },
     twin: () => args.action,
+    mapHeuristic: (result, questionSet) => result,
     mapAnswer: (answer: JevAnswer) => {
       const label = stalenessLabelOf(answer);
       // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact

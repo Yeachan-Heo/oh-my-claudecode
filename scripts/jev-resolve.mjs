@@ -140,6 +140,26 @@ export function boundExcerpts(value, max) {
 }
 
 /** Mirror of validateJevResponse in client.ts. Throws on any invalid shape. */
+/**
+ * A logged heuristic is comparable with the logged Jev answer only when it is
+ * a valid answer to the same question: the first declared question, whose
+ * answer is the one logged. Anything else is logged as null (non-comparable).
+ */
+export function comparableHeuristic(value, questions) {
+  const question = Object.values(questions ?? {})[0];
+  if (!question || typeof question !== "object") return null;
+  switch (question.type) {
+    case "choice":
+      return typeof value === "string" && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case "noul":
+      return typeof value === "boolean" ? value : null;
+    case "score":
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+
 export function validateJevResponse(body) {
   if (body === null || typeof body !== "object")
     throw new Error("invalid response: expected object");
@@ -268,7 +288,7 @@ export async function resolveRequest(
       point: request.point,
       mode: entryMode,
       state: bound.state,
-      heuristic: request.heuristic ?? null,
+      heuristic: comparableHeuristic(request.heuristic, request.questions),
       jev: entryMode === "degraded" ? null : jevAnswer,
       answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
