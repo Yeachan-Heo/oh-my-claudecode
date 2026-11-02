@@ -697,14 +697,15 @@ function isCmuxContext(): boolean {
   return detectTeamMultiplexerContext() === 'cmux';
 }
 
-function isCmuxSurfaceTarget(value: string | undefined): value is string {
-  if (typeof value !== 'string' || value.trim().length === 0) return false;
+/**
+ * A pane id names a cmux surface only inside a cmux session (issue #4816).
+ * tmux ids (`%N`) and herdr ids (`w<id>:p<id>`, e.g. `w2FQ:p16`) never do.
+ */
+export function isCmuxSurfaceTarget(value: string | undefined): value is string {
+  if (typeof value !== 'string') return false;
   const trimmed = value.trim();
-  // Exclude tmux format (%N)
-  if (/^%\d+$/.test(trimmed)) return false;
-  // Exclude herdr format (w<N>:p<N>) - issue #4816
-  if (/^w\d+:p\d+$/.test(trimmed)) return false;
-  // Positive match: only if we're in a cmux context
+  if (trimmed.length === 0 || trimmed.startsWith('%')) return false;
+  if (/^w[0-9A-Za-z]+:p[0-9A-Za-z]+$/.test(trimmed)) return false;
   return isCmuxContext();
 }
 
