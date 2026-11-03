@@ -963,7 +963,7 @@ function hasValidWorkflowDescriptor(state, sessionId) {
 // Create state file for a mode
 const SESSION_ID_ALLOWLIST = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/;
 
-async function activateState(directory, prompt, stateName, sessionId) {
+async function activateState(directory, prompt, stateName, sessionId, options = {}) {
   const now = new Date().toISOString();
   // Sanitize prompt BEFORE writing to state: prevents pasted system echoes
   // and oversized blobs from being persisted and re-emitted by Stop hook.
@@ -981,10 +981,18 @@ async function activateState(directory, prompt, stateName, sessionId) {
       session_id: sessionId || undefined,
       project_path: directory,
       reinforcement_count: 0,
-      awaiting_confirmation: true,
-      awaiting_confirmation_set_at: now,
       last_checked_at: now
     };
+    // A typed `/oh-my-claudecode:ralph` IS the confirmation. Arming the
+    // awaiting_confirmation flag would suppress the Stop hook for the
+    // confirmation TTL, and the only clearer (a Skill tool call) never runs on
+    // the slash path. Prose activation keeps the flag.
+    if (options.confirmedBySlash === true) {
+      state.invocation_source = 'slash';
+    } else {
+      state.awaiting_confirmation = true;
+      state.awaiting_confirmation_set_at = now;
+    }
   } else {
     state = {
       active: true,
@@ -1786,7 +1794,9 @@ async function main() {
     const sessionId = data.sessionId || data.session_id || data.sessionid || '';
     const stateModes = resolved.filter(m => ['ralph', 'autopilot'].includes(m.name));
     for (const mode of stateModes) {
-      const activationError = await activateState(directory, prompt, mode.name, sessionId);
+      const activationError = await activateState(directory, prompt, mode.name, sessionId, {
+        confirmedBySlash: mode.name === 'ralph' && /^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(prompt),
+      });
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
         return;
