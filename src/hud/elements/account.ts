@@ -260,10 +260,20 @@ function getCachedAccountEmail(): string | null {
   // Snapshot every candidate before reading, so a change to any of them
   // (account switch, sign-out, or a new login appearing in either location)
   // invalidates the cache on the next render.
-  const sources: CachedAccountSource[] = candidatePaths.map((path) => ({ path, metadata: getFileMetadata(path) }));
+  // A candidate that cannot be inspected (e.g. EACCES on its directory) makes
+  // the cache unverifiable, so bypass it rather than trusting or writing it.
+  let cacheable = true;
+  const sources: CachedAccountSource[] = candidatePaths.map((path) => {
+    try {
+      return { path, metadata: getFileMetadata(path) };
+    } catch {
+      cacheable = false;
+      return { path, metadata: null };
+    }
+  });
 
   try {
-    const cache = JSON.parse(readFileSync(cacheFile, 'utf-8')) as Record<string, unknown>;
+    const cache = cacheable ? JSON.parse(readFileSync(cacheFile, 'utf-8')) as Record<string, unknown> : {};
     const cached = cache.account;
     if (
       isCachedAccountData(cached) &&
@@ -282,6 +292,8 @@ function getCachedAccountEmail(): string | null {
     email = readEmailFromClaudeJson(path).email;
     if (email) break;
   }
+
+  if (!cacheable) return email;
 
   try {
     mkdirSync(cacheDir, { recursive: true });
@@ -310,7 +322,13 @@ export function renderAccount(): string | null {
     return null;
   }
 
-  const email = getCachedAccountEmail();
+  let email: string | null;
+  try {
+    email = getCachedAccountEmail();
+  } catch {
+    // An unreadable account source must never take down the whole HUD.
+    return null;
+  }
   if (!email) {
     return null;
   }

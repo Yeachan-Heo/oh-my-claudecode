@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -167,6 +168,20 @@ describe('renderAccount', () => {
 
     expect(renderedText()).toBe('acct:second.account.with.more@example.test');
   });
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'renders the active account when the fallback location cannot be inspected',
+    () => {
+      writeAccount(configFile(), 'active@example.com');
+      chmodSync(homeDir, 0o000);
+      try {
+        expect(renderedText()).toBe('acct:active@example.com');
+        expect(renderedText()).toBe('acct:active@example.com');
+      } finally {
+        chmodSync(homeDir, 0o700);
+      }
+    },
+  );
 
   it('prefers a newly created active-config account over a cached fallback account', () => {
     writeAccount(fallbackFile(), 'fallback@example.com');
