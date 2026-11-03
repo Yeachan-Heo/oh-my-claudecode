@@ -17,6 +17,7 @@ vi.mock('../../factory/map-ingest.js', async (importOriginal) => {
 
 import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
 import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, resolveFeedbackTimeoutMs, runFeedbackCommand, DEFAULT_FEEDBACK_TIMEOUT_MS, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
+import * as fileLock from '../../lib/file-lock.js';
 import { acquireFileLockSync, lockPathFor, releaseFileLockSync } from '../../lib/file-lock.js';
 import { Command } from 'commander';
 
@@ -181,6 +182,14 @@ process.exit(1);
 process.exit(${exitCode});
 `, 'utf8');
     writePackage('node printer.js');
+  }
+
+  /** A feedback command that leaves a file behind when (and only when) it runs. */
+  function writeMarkerScript(): string {
+    const marker = join(dir, 'feedback-ran.txt');
+    writeFileSync(join(dir, 'marker.js'), `require('fs').writeFileSync(${JSON.stringify(marker)}, 'ran');\n`, 'utf8');
+    writePackage('node marker.js');
+    return marker;
   }
 
   beforeEach(() => {
@@ -420,6 +429,66 @@ operable program or batch file.`);
     expect(ralphVerify({ session: 'sess-timeout-baseline', timeoutMs: 500 }, dir)).toBe(0);
   }, 30000);
 
+  it('serializes timedOutCommands in JSON when the baseline has no entry for the command', () => {
+    writeFileSync(join(dir, 'printer.js'), 'console.log("fast");\nprocess.exit(0);\n', 'utf8');
+    writeFileSync(join(dir, 'slow.js'), 'setTimeout(() => {}, 3000);\n', 'utf8');
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({
+      name: 'fb-fixture',
+      scripts: { fast: 'node printer.js', slow: 'node slow.js' },
+    }), 'utf8');
+    const prd = (feedbackCommands: string[]) => JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      userStories: [],
+      feedbackCommands,
+    });
+
+    // Baseline covers `npm run fast` only; the next gate runs `npm run slow`,
+    // which has no baseline entry, so the timeout is new.
+    writePrd(prd(['npm run fast']));
+    expect(ralphVerify({ session: 'sess-timeout-json-new', writeBaseline: true }, dir)).toBe(0);
+    writePrd(prd(['npm run slow']));
+
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-timeout-json-new', json: true, timeoutMs: 500 }, dir)).toBe(1);
+      const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as {
+        baselinePresent: boolean;
+        newFailures: string[];
+        timedOutCommands: string[];
+      };
+      expect(result.baselinePresent).toBe(true);
+      // A killed process has no failure output, so timedOutCommands — not
+      // newFailures — is the JSON consumer's signal here.
+      expect(result.timedOutCommands).toEqual(['npm run slow']);
+      expect(result.newFailures).toEqual([]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 20000);
+
+  it('serializes a baseline-only timeout in JSON but exits 0', () => {
+    writePackage('node -e "setTimeout(() => {}, 3000)"');
+    expect(ralphVerify({ session: 'sess-timeout-json-baseline', writeBaseline: true, timeoutMs: 500 }, dir)).toBe(0);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      // Same timedOutCommands as a new timeout; the exit code is what tells the
+      // consumer this one was already present in the baseline.
+      expect(ralphVerify({ session: 'sess-timeout-json-baseline', json: true, timeoutMs: 500 }, dir)).toBe(0);
+      const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as {
+        baselinePresent: boolean;
+        newFailures: string[];
+        timedOutCommands: string[];
+      };
+      expect(result.baselinePresent).toBe(true);
+      expect(result.timedOutCommands).toEqual(['npm run test']);
+      expect(result.newFailures).toEqual([]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 30000);
+
   it('serializes concurrent verify runs for the same session', () => {
     writePrinter('ok');
     const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-lock', 'feedback-baseline.json');
@@ -458,6 +527,55 @@ operable program or batch file.`);
       logSpy.mockRestore();
       errorSpy.mockRestore();
       if (lock) releaseFileLockSync(lock);
+    }
+  });
+
+  it('reports a throwing lock acquisition and runs no feedback command', () => {
+    const marker = writeMarkerScript();
+    const lockSpy = vi.spyOn(fileLock, 'acquireFileLockSync').mockImplementation(() => {
+      throw new Error('EACCES: permission denied, open /nope/feedback-baseline.json.lock');
+    });
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-lock-throw' }, dir)).toBe(1);
+      const output = errorSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('could not acquire the session lock');
+      expect(output).toContain('EACCES');
+      // The gate stopped before running anything: a feedback command here would
+      // have created the marker file.
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      lockSpy.mockRestore();
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('emits a parseable result when lock acquisition throws in JSON mode', () => {
+    const marker = writeMarkerScript();
+    const lockSpy = vi.spyOn(fileLock, 'acquireFileLockSync').mockImplementation(() => {
+      throw new Error('ENOTDIR: not a directory, open /nope/feedback-baseline.json.lock');
+    });
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-lock-throw-json', json: true }, dir)).toBe(1);
+      const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as {
+        sessionId: string;
+        commands: string[];
+        newFailures: string[];
+        error: string;
+      };
+      expect(result.sessionId).toBe('sess-lock-throw-json');
+      expect(result.commands).toEqual([]);
+      expect(result.newFailures).toEqual([]);
+      expect(result.error).toContain('could not acquire the session lock');
+      expect(result.error).toContain('ENOTDIR');
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain('could not acquire the session lock');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      lockSpy.mockRestore();
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
     }
   });
 });
