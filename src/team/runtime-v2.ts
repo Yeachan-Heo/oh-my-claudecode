@@ -102,6 +102,8 @@ import {
   type WorkerPaneSplitEvidence,
   type TeamSessionMode,
   TeamSessionCreationError,
+  isHerdrSessionTarget,
+  providerForTeamTarget,
 } from './tmux-session.js';
 import {
   composeInitialInbox,
@@ -765,7 +767,7 @@ function tmuxServerIdentityForTarget(
   providerTarget: string,
   identity: TmuxServerIdentity | undefined,
 ): TmuxServerIdentity | undefined {
-  if (providerTarget.startsWith('cmux:')) return undefined;
+  if (providerTarget.startsWith('cmux:') || isHerdrSessionTarget(providerTarget)) return undefined;
   if (!isValidTmuxServerIdentity(identity)) return undefined;
   return identity;
 }
@@ -774,7 +776,7 @@ function requireTmuxServerIdentity(
   providerTarget: string,
   identity: TmuxServerIdentity | undefined,
 ): TmuxServerIdentity | undefined {
-  if (providerTarget.startsWith('cmux:')) return undefined;
+  if (providerTarget.startsWith('cmux:') || isHerdrSessionTarget(providerTarget)) return undefined;
   if (!isValidTmuxServerIdentity(identity)) throw new Error('tmux_server_identity_missing');
   return identity;
 }
@@ -1507,9 +1509,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   // Use the same logic as verifyTeamTargetOwnership:
   // - Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format (not %...).
   // - Otherwise use 'tmux' provider (including cmux with tmux-compat where paneId is %...).
-  const isTmuxFormatPaneId = TMUX_MAILBOX_PANE_ID.test(opts.leaderPaneId);
-  const isNativeCmuxProvider = opts.sessionName.startsWith('cmux:') && !isTmuxFormatPaneId;
-  const launchProvider = isNativeCmuxProvider ? 'cmux' as const : 'tmux' as const;
+  const launchProvider = providerForTeamTarget(opts.sessionName, opts.leaderPaneId);
   const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
   if (!await workerPaneBelongsToOwnedProviderTarget({
     provider: launchProvider,
@@ -2803,9 +2803,9 @@ export async function executeRecoverDeadWorkerV2Owner(
       return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_descriptor_unresolvable'));
     }
     if (!owner.config.tmux_session) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
-    if (owner.config.tmux_session.startsWith('cmux:')) {
+    if (owner.config.tmux_session.startsWith('cmux:') || isHerdrSessionTarget(owner.config.tmux_session)) {
       if (!owner.config.leader_pane_id || !await workerPaneBelongsToOwnedProviderTarget({
-        provider: 'cmux',
+        provider: providerForTeamTarget(owner.config.tmux_session),
         providerTarget: owner.config.tmux_session,
         paneId: owner.config.leader_pane_id,
       })) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
@@ -6187,6 +6187,7 @@ export async function shutdownTeamV2(
     await assertTeamInstanceUnderLock(boundInstance);
     if (!current.config.tmux_session
       || (!current.config.tmux_session.startsWith('cmux:')
+        && !isHerdrSessionTarget(current.config.tmux_session)
         && !isValidTmuxServerIdentity(current.config.tmux_server_identity))) {
       throw new Error('tmux_server_identity_missing');
     }
@@ -6532,7 +6533,7 @@ export async function shutdownTeamV2(
         if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
         return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
       }
-      const serverState = config.tmux_session.startsWith('cmux:')
+      const serverState = (config.tmux_session.startsWith('cmux:') || isHerdrSessionTarget(config.tmux_session))
         ? 'matching' as const
         : isValidTmuxServerIdentity(config.tmux_server_identity)
           ? await observeTmuxServerIdentity(config.tmux_server_identity)
@@ -6687,7 +6688,7 @@ export async function resumeTeamV2(
 
   // Verify tmux session is alive
   const sessionName = config.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName.startsWith('cmux:')) {
+  if (sessionName.startsWith('cmux:') || isHerdrSessionTarget(sessionName)) {
     return {
       teamName: sanitized,
       sanitizedName: sanitized,

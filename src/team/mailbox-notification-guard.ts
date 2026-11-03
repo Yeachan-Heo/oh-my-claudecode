@@ -26,7 +26,7 @@ export interface MailboxNotificationGuardInput {
   triggerMessage: string;
 }
 
-export type MailboxNotificationProvider = 'tmux' | 'cmux';
+export type MailboxNotificationProvider = 'tmux' | 'cmux' | 'herdr';
 
 export interface MailboxNotificationTarget {
   provider: MailboxNotificationProvider;
@@ -50,6 +50,12 @@ export type MailboxTargetOwnership =
   | {
       kind: 'owned';
       provider: 'cmux';
+      providerTarget: string;
+      paneId: string;
+    }
+  | {
+      kind: 'owned';
+      provider: 'herdr';
       providerTarget: string;
       paneId: string;
     }

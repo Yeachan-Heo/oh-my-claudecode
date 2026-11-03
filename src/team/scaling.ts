@@ -57,6 +57,8 @@ import {
   waitForPaneReady,
   type StartupPaneContext,
   type WorkerPaneOwnership,
+  isHerdrSessionTarget,
+  providerForTeamTarget,
 } from './tmux-session.js';
 import {
   TeamPaths,
@@ -132,7 +134,7 @@ async function validateSplitTargetPaneInConfiguredSession(
   if (!expectedTarget) {
     return `Refusing to split tmux pane ${splitTarget}: missing configured tmux_session.`;
   }
-  const provider = expectedTarget.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+  const provider = providerForTeamTarget(expectedTarget);
   if (provider === 'tmux' && !isValidTmuxServerIdentity(tmuxServerIdentity)) {
     return `Refusing to split tmux pane ${splitTarget}: tmux server identity is unavailable.`;
   }
@@ -190,6 +192,7 @@ async function assertScalingInstanceUnderLock(
   if (!configuredInstanceId) throw new Error('team_instance_authority_missing');
   if (config.tmux_session
     && !config.tmux_session.startsWith('cmux:')
+    && !isHerdrSessionTarget(config.tmux_session)
     && !isValidTmuxServerIdentity(config.tmux_server_identity)) {
     throw new Error('tmux_server_identity_missing');
   }
@@ -883,7 +886,7 @@ export async function scaleUpOwned(
         splitTarget,
         splitDirection === '-h' ? 'right' : 'down',
         workerCwd,
-        config.tmux_session.startsWith('cmux:') ? 'cmux' : 'tmux',
+        providerForTeamTarget(config.tmux_session),
         config.tmux_server_identity,
       );
       if (!splitEvidence.commandSucceeded) {
