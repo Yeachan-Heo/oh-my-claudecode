@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "511e465cf1e9ac934e12f329e543e45669fd2076",
-    "sourceSha256": "495096314364fb861ede037f244085fe4750b4ffeedf08d1c397de1e5a4d8b13",
+    "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
+    "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "511e465cf1e9ac934e12f329e543e45669fd2076",
-  "sourceSha256": "495096314364fb861ede037f244085fe4750b4ffeedf08d1c397de1e5a4d8b13",
+  "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
+  "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1427,
-      "total": 1452
+      "srcFiles": 1428,
+      "total": 1453
     },
     "generated": {
       "distFiles": 5471,
@@ -39037,6 +39037,11 @@
         "path": "src/cli/__tests__/team-help.test.ts"
       },
       {
+        "id": "src/cli/__tests__/team-resume-v2.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/team-resume-v2.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/team-runtime-boundary.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/team-runtime-boundary.test.ts"
@@ -56487,6 +56492,51 @@
         "from": "src/cli/__tests__/team-help.test.ts",
         "to": "external:vitest",
         "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "external:node:util",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "src/cli/team.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "src/team/mailbox-notification-guard.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "src/team/state-paths.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/team-resume-v2.test.ts",
+        "to": "src/team/types.ts",
+        "kind": "type-imports"
       },
       {
         "from": "src/cli/__tests__/team-runtime-boundary.test.ts",
@@ -86385,12 +86435,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7572,
-      "edgeCount": 8312,
-      "importEdgeCount": 6952,
+      "nodeCount": 7573,
+      "edgeCount": 8321,
+      "importEdgeCount": 6959,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "4846a89f3370b3a9e00cbe559c3801f2c0d2ee56aa9bcbc5694328d0aa810f65",
-  "manifestSha256": "7f78cb157542cce5448ad5797fa3013cf7e80f83c76aae97bef212e90cd49c13"
+  "inventorySha256": "bc1fd835f1dd1b32ce54d6636192bb0b818960f64df9829aaeb9ba4afb0593b2",
+  "manifestSha256": "7b2d88ff5feab40500b32539977635f969ee401c8957bd302e8b4252f51bd757"
 }
