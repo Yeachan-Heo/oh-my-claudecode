@@ -24,18 +24,7 @@ export interface WatchCheckRun {
 export type WatchReviewDecision = 'approved' | 'changes_requested' | 'none';
 
 export type WatchMergeability = 'mergeable' | 'unknown' | 'conflicting';
-// GitHub's MergeStateStatus enum in full. BEHIND, DIRTY, DRAFT, and HAS_HOOKS
-// join the four the classifier originally handled so no raw enum value can
-// fall through to a ready verdict.
-export type WatchMergeStateStatus =
-  | 'clean'
-  | 'unstable'
-  | 'blocked'
-  | 'unknown'
-  | 'behind'
-  | 'dirty'
-  | 'draft'
-  | 'has_hooks';
+export type WatchMergeStateStatus = 'clean' | 'unstable' | 'blocked' | 'unknown';
 
 /** Facts snapshot for one pull request at one poll. */
 export interface WatchPrFacts {
@@ -101,30 +90,14 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
   }
 
   const blocked: string[] = [];
-  const waiting: string[] = [];
   if (facts.mergeable === 'conflicting') {
     blocked.push('merge conflicts — branch owner decides the resolution');
   }
   if (facts.mergeStateStatus === 'blocked') {
     blocked.push('aggregate merge gate is blocked');
   }
-  const pending = facts.checks.filter((c) => c.state === 'pending');
   if (facts.mergeStateStatus === 'unstable') {
-    // UNSTABLE is "mergeable with non-passing commit status" — that includes
-    // statuses that have not finished yet. While a visible check is still
-    // pending the PR is running CI (waiting); only an unstable aggregate with
-    // nothing pending proves a failure and blocks.
-    if (pending.length > 0) {
-      waiting.push('aggregate merge state is unstable while checks run — re-poll');
-    } else {
-      blocked.push('aggregate merge state is unstable — failing or missing required checks; re-poll');
-    }
-  }
-  if (facts.mergeStateStatus === 'dirty') {
-    blocked.push('aggregate merge state is dirty — merge conflicts; branch owner decides the resolution');
-  }
-  if (facts.mergeStateStatus === 'behind') {
-    blocked.push('head is behind the base branch — the branch owner updates it; babysit never rebases or force-pushes');
+    blocked.push('aggregate merge state is unstable — failing or missing required checks; re-poll');
   }
   const failed = facts.checks.filter((c) => c.state === 'fail');
   if (failed.length > 0) {
@@ -144,6 +117,7 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
     return { kind: 'blocked', reasons: blocked };
   }
 
+  const waiting: string[] = [];
   if (facts.isDraft) {
     waiting.push('draft');
   }
@@ -153,13 +127,7 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
   if (facts.mergeStateStatus === 'unknown') {
     waiting.push('aggregate merge state not yet computed — re-poll');
   }
-  if (facts.mergeStateStatus === 'draft' && !facts.isDraft) {
-    waiting.push('merge state reports a draft — re-poll');
-  }
-  // has_hooks is not a wait: GitHub defines it as "mergeable with passing
-  // commit status and pre-receive hooks" — the hooks belong to the server's
-  // merge attempt, not to a check that will later report. Re-polling here
-  // would hold an otherwise green PR in waiting forever.
+  const pending = facts.checks.filter((c) => c.state === 'pending');
   if (pending.length > 0) {
     waiting.push(`pending checks: ${pending.map((c) => c.name).join(', ')}`);
   }

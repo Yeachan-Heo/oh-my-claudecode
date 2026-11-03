@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   appendLedgerEntry,
-  defaultLedgerPath,
   isVerificationVerdict,
   LEDGER_HEADER,
-  LEDGER_STATE_RELATIVE_PATH,
   readLedger,
   renderLedgerCell,
 } from '../ledger.js';
@@ -88,31 +86,6 @@ describe('verification ledger', () => {
     rmSync(dirname(path), { recursive: true, force: true });
   });
 
-  it('skips rows whose required cells are whitespace-only', async () => {
-    const path = tempLedger();
-    writeFileSync(
-      path,
-      `${LEDGER_HEADER}\n  \tverify\tref\tsha\tunit-test-verified\tevidence\t\n`,
-      'utf8',
-    );
-    expect(await readLedger(path)).toEqual([]);
-    rmSync(dirname(path), { recursive: true, force: true });
-  });
-
-  it('parses CRLF rows without retaining carriage returns', async () => {
-    const path = tempLedger();
-    writeFileSync(
-      path,
-      `${LEDGER_HEADER}\r\n2026-10-25T00:00:00Z\tverify\tref\tsha\tunit-test-verified\tevidence\tbabysit\r\n`,
-      'utf8',
-    );
-    const entries = await readLedger(path);
-    expect(entries).toHaveLength(1);
-    expect(entries[0].verifier).toBe('babysit');
-    expect(entries[0].verdict).toBe('unit-test-verified');
-    rmSync(dirname(path), { recursive: true, force: true });
-  });
-
   it('neutralizes formula-leading and multiline cells', () => {
     expect(renderLedgerCell('=SUM(A1)')).toBe("'=SUM(A1)");
     expect(renderLedgerCell('+cmd')).toBe("'+cmd");
@@ -174,6 +147,7 @@ describe('verification ledger', () => {
       expect(true).toBe(true);
       return;
     }
+    mkdirSync(dirname(path), { recursive: true });
     await appendLedgerEntry(path, {
       ts: '2026-11-01T00:00:00Z', kind: 'verify', verdict: 'unit-test-verified', evidence: 'perm check',
     });
@@ -184,20 +158,5 @@ describe('verification ledger', () => {
 
   it('reads an empty ledger as no entries', async () => {
     expect(await readLedger(join(tmpdir(), 'omc-ledger-missing.tsv'))).toEqual([]);
-  });
-
-  it('resolves the default ledger path under OMC_STATE_DIR when set', () => {
-    const stateDir = mkdtempSync(join(tmpdir(), 'omc-state-'));
-    const prev = process.env.OMC_STATE_DIR;
-    process.env.OMC_STATE_DIR = stateDir;
-    try {
-      const resolved = defaultLedgerPath();
-      expect(resolved.startsWith(stateDir + sep)).toBe(true);
-      expect(resolved.endsWith(LEDGER_STATE_RELATIVE_PATH.split('/').join(sep))).toBe(true);
-    } finally {
-      if (prev === undefined) delete process.env.OMC_STATE_DIR;
-      else process.env.OMC_STATE_DIR = prev;
-      rmSync(stateDir, { recursive: true, force: true });
-    }
   });
 });
