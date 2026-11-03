@@ -1,351 +1,202 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { tmpdir, homedir } from 'os';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { execFileSync } from 'child_process';
+import { tmpdir } from 'os';
 import { join } from 'path';
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from 'fs';
+import { renderAccount } from '../elements/account.js';
 
-describe('account element - behavioral tests', () => {
+const envKeys = ['CLAUDE_CONFIG_DIR', 'HOME', 'USERPROFILE', 'ANTHROPIC_API_KEY'] as const;
+
+describe('renderAccount', () => {
   let tempDir: string;
+  let configDir: string;
+  let homeDir: string;
+  let originalEnv: Partial<Record<(typeof envKeys)[number], string>>;
+
+  const configFile = () => join(configDir, '.claude.json');
+  const fallbackFile = () => join(homeDir, '.claude.json');
 
   beforeEach(() => {
+    originalEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
     tempDir = mkdtempSync(join(tmpdir(), 'omc-account-test-'));
+    configDir = join(tempDir, 'config');
+    homeDir = join(tempDir, 'home');
+    mkdirSync(configDir, { recursive: true });
+    mkdirSync(homeDir, { recursive: true });
+
+    process.env.CLAUDE_CONFIG_DIR = configDir;
+    process.env.HOME = homeDir;
+    process.env.USERPROFILE = homeDir;
+    delete process.env.ANTHROPIC_API_KEY;
+    // getOmcConfigDir() places hud-account-cache.json under CLAUDE_CONFIG_DIR/.omc,
+    // so each fixture gets an isolated cache without a separate HUD cache override.
   });
 
   afterEach(() => {
+    for (const key of envKeys) {
+      const value = originalEnv[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  describe('email validation', () => {
-    it('accepts valid plain email addresses', () => {
-      const testCases = [
-        'alice@example.com',
-        'bob.smith@domain.co.uk',
-        'user+tag@example.org',
-        'test123@test-domain.com',
-      ];
+  function writeAccount(filePath: string, email: string): void {
+    writeFileSync(filePath, JSON.stringify({ oauthAccount: { emailAddress: email } }));
+  }
 
-      for (const email of testCases) {
-        const json = JSON.stringify({ oauthAccount: { emailAddress: email } });
-        // Basic validation: should contain @ and domain with dot, no control chars
-        expect(email).toContain('@');
-        expect(email.split('@')[1]).toContain('.');
-        // Should not contain any C0/C1 controls or bidi marks
-        expect(/[\x00-\x1f\x7f-\x9f\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(email)).toBe(false);
-      }
-    });
+  function renderedText(): string | null {
+    const rendered = renderAccount();
+    return rendered?.replace(/\x1b\[[0-9;]*m/g, '') ?? null;
+  }
 
-    it('rejects emails with whitespace', () => {
-      const invalidEmails = [
-        'alice @example.com',
-        'alice@ example.com',
-        'alice\t@example.com',
-        'alice\n@example.com',
-      ];
+  it('renders a valid email from the active Claude config directory', () => {
+    writeAccount(configFile(), 'alice@example.com');
 
-      for (const email of invalidEmails) {
-        expect(/\s/.test(email)).toBe(true); // Has whitespace
-      }
-    });
-
-    it('rejects emails with control characters (C0, C1, ESC)', () => {
-      const invalidEmails = [
-        'alice\x00@example.com', // NULL
-        'alice\x1b@example.com', // ESC
-        'alice\x80@example.com', // C1 control
-        'alice\x9f@example.com', // C1 control
-      ];
-
-      for (const email of invalidEmails) {
-        expect(/[\x00-\x1f\x7f-\x9f]/.test(email)).toBe(true); // Has control char
-      }
-    });
-
-    it('rejects emails with bidi controls', () => {
-      const invalidEmails = [
-        'alice\u200e@example.com', // LRM
-        'alice\u200f@example.com', // RLM
-        'alice\u202a@example.com', // LRE
-        'alice\u202b@example.com', // RLE
-        'alice\u202c@example.com', // PDF
-        'alice\u202d@example.com', // LRO
-        'alice\u202e@example.com', // RLO
-        'alice\u2066@example.com', // LRI
-        'alice\u2067@example.com', // RLI
-        'alice\u2068@example.com', // FSI
-        'alice\u2069@example.com', // PDI
-      ];
-
-      for (const email of invalidEmails) {
-        expect(/[\u200e-\u200f\u202a-\u202e\u2066-\u2069]/.test(email)).toBe(true); // Has bidi control
-      }
-    });
-
-    it('rejects emails without @ symbol', () => {
-      const invalidEmails = [
-        'aliceexample.com',
-        'alice-example-com',
-      ];
-
-      for (const email of invalidEmails) {
-        expect(email).not.toContain('@');
-      }
-    });
-
-    it('rejects emails without proper domain (no dot after @)', () => {
-      const invalidEmails = [
-        'alice@localhost',
-        'alice@example',
-        'alice@sub',
-      ];
-
-      for (const email of invalidEmails) {
-        const domain = email.split('@')[1] ?? '';
-        expect(domain).not.toContain('.');
-      }
-    });
-
-    it('rejects emails with invalid domain characters', () => {
-      const invalidEmails = [
-        'alice@exam ple.com', // space
-        'alice@exam[ple.com', // bracket
-        'alice@exam"ple.com', // quote
-      ];
-
-      for (const email of invalidEmails) {
-        expect(/[^a-z0-9.@+-]/i.test(email)).toBe(true); // Has invalid char
-      }
-    });
+    expect(renderedText()).toBe('acct:alice@example.com');
   });
 
-  describe('file reading and security', () => {
-    it('should read email from .claude.json file', () => {
-      const testDir = mkdtempSync(join(tmpdir(), 'test-'));
-      try {
-        const claudePath = join(testDir, '.claude.json');
-        const content = { oauthAccount: { emailAddress: 'test@example.com' } };
-        writeFileSync(claudePath, JSON.stringify(content));
-
-        const readContent = JSON.parse(require('fs').readFileSync(claudePath, 'utf-8'));
-        expect(readContent.oauthAccount.emailAddress).toBe('test@example.com');
-      } finally {
-        rmSync(testDir, { recursive: true, force: true });
-      }
-    });
-
-    it('should verify file is regular file (not directory or FIFO)', () => {
-      const testDir = mkdtempSync(join(tmpdir(), 'test-'));
-      try {
-        const stats = require('fs').statSync(testDir);
-        expect(stats.isDirectory()).toBe(true);
-        expect(stats.isFile()).toBe(false);
-
-        // A file should be different
-        const filePath = join(testDir, 'test.json');
-        writeFileSync(filePath, '{}');
-        const fileStats = require('fs').statSync(filePath);
-        expect(fileStats.isFile()).toBe(true);
-        expect(fileStats.isDirectory()).toBe(false);
-      } finally {
-        rmSync(testDir, { recursive: true, force: true });
-      }
-    });
-
-    it('should reject .claude.json files larger than 5MB', () => {
-      // This test verifies the size check logic
-      const largeSize = 5 * 1024 * 1024 + 1; // 5MB + 1 byte
-      const normalSize = 5 * 1024 * 1024 - 1; // 5MB - 1 byte
-
-      expect(largeSize > 5 * 1024 * 1024).toBe(true);
-      expect(normalSize <= 5 * 1024 * 1024).toBe(true);
-    });
-
-    it('should handle malformed JSON gracefully', () => {
-      const testDir = mkdtempSync(join(tmpdir(), 'test-'));
-      try {
-        const filePath = join(testDir, 'broken.json');
-        writeFileSync(filePath, '{invalid json}');
-
-        // Reading should throw
-        expect(() => {
-          JSON.parse(require('fs').readFileSync(filePath, 'utf-8'));
-        }).toThrow();
-      } finally {
-        rmSync(testDir, { recursive: true, force: true });
-      }
-    });
-
-    it('should handle non-object JSON gracefully', () => {
-      const testDir = mkdtempSync(join(tmpdir(), 'test-'));
-      try {
-        const filePath = join(testDir, 'array.json');
-        writeFileSync(filePath, '["array", "at", "root"]');
-
-        const content = JSON.parse(require('fs').readFileSync(filePath, 'utf-8'));
-        expect(Array.isArray(content)).toBe(true);
-        // Arrays are objects in JavaScript, but we use isArray() to distinguish them
-        expect(typeof content).toBe('object'); // Arrays are objects
-        expect(Array.isArray(content)).toBe(true); // But we can detect arrays
-      } finally {
-        rmSync(testDir, { recursive: true, force: true });
-      }
-    });
+  it('renders nothing when account configuration is absent', () => {
+    expect(renderAccount()).toBeNull();
   });
 
-  describe('oauthAccount structure validation', () => {
-    it('should reject when oauthAccount is null', () => {
-      const content = { oauthAccount: null };
-      expect(content.oauthAccount).toBeNull();
-      // In JavaScript, typeof null === 'object' is true (a quirk)
-      // But we need to check that it's null or not a valid object
-      const isValidObject = typeof content.oauthAccount === 'object' && content.oauthAccount !== null;
-      expect(isValidObject).toBe(false);
-    });
+  it('falls back to ~/.claude.json when the active config has no account file', () => {
+    writeAccount(fallbackFile(), 'fallback@example.com');
 
-    it('should reject when oauthAccount is not an object', () => {
-      const testCases = [
-        { oauthAccount: 'string', valid: false },
-        { oauthAccount: 123, valid: false },
-        { oauthAccount: true, valid: false },
-        { oauthAccount: [], valid: false }, // Arrays are objects but isArray is true
-      ];
-
-      for (const { oauthAccount, valid } of testCases) {
-        const isValidObject = typeof oauthAccount === 'object' && oauthAccount !== null && !Array.isArray(oauthAccount);
-        expect(isValidObject).toBe(valid);
-      }
-    });
-
-    it('should reject when emailAddress is missing', () => {
-      const content = { oauthAccount: { accountUuid: 'uuid-123' } };
-      expect((content.oauthAccount as any).emailAddress).toBeUndefined();
-    });
-
-    it('should only extract emailAddress, not other sensitive fields', () => {
-      const content = {
-        oauthAccount: {
-          emailAddress: 'alice@example.com',
-          accountUuid: 'secret-uuid',
-          organizationUuid: 'secret-org',
-          refreshToken: 'secret-token',
-        },
-      };
-
-      const account = content.oauthAccount as any;
-      expect(account.emailAddress).toBe('alice@example.com');
-      // Other fields should be present but we should NOT use them
-      expect(account.accountUuid).toBeDefined();
-      expect(account.organizationUuid).toBeDefined();
-      expect(account.refreshToken).toBeDefined();
-    });
+    expect(renderedText()).toBe('acct:fallback@example.com');
   });
 
-  describe('ellipsis truncation', () => {
-    it('should apply middle-ellipsis for long emails', () => {
-      const longEmail = 'very.long.email.address.with.many.parts+tag@very.long.domain.example.subdomain.com';
-      expect(longEmail.length).toBeGreaterThan(64);
+  it('renders nothing when ANTHROPIC_API_KEY is set', () => {
+    writeAccount(configFile(), 'alice@example.com');
+    process.env.ANTHROPIC_API_KEY = 'sk-test-account-key';
 
-      // When truncated to 64 chars with ..., should have format like: start...end
-      const maxChars = 64;
-      const ellipsis = '...';
-      const availableChars = maxChars - ellipsis.length;
-      const startChars = Math.floor(availableChars / 2);
-      const endChars = availableChars - startChars;
-
-      const truncated = longEmail.slice(0, startChars) + ellipsis + longEmail.slice(-endChars);
-      expect(truncated.length).toBeLessThanOrEqual(maxChars);
-      expect(truncated).toContain('...');
-      expect(truncated).toContain('very.long.email');
-    });
-
-    it('should not truncate short emails', () => {
-      const shortEmail = 'alice@example.com';
-      expect(shortEmail.length).toBeLessThanOrEqual(64);
-      // Should remain unchanged
-      expect(shortEmail).not.toContain('...');
-    });
-
-    it('should handle emails at exactly the boundary', () => {
-      // Create an email exactly 64 chars
-      const email = 'a'.repeat(30) + '@' + 'b'.repeat(32) + '.com';
-      // 30 + 1 + 32 + 4 = 67
-      expect(email.length).toBe(67);
-
-      // This should be truncated
-      expect(email.length).toBeGreaterThan(64);
-    });
+    expect(renderAccount()).toBeNull();
   });
 
-  describe('format and output', () => {
-    it('should use acct: prefix format', () => {
-      const email = 'alice@example.com';
-      const prefix = 'acct:';
-      const formatted = prefix + email;
-      expect(formatted).toContain('acct:');
-    });
+  it('renders nothing when oauthAccount is absent', () => {
+    writeFileSync(configFile(), JSON.stringify({ userID: 'not-an-account-email' }));
 
-    it('should apply ANSI color codes (cyan)', () => {
-      // ANSI escape for cyan: \x1b[36m (or variations)
-      const colorCode = '\x1b[';
-      const ansiText = colorCode + '36m' + 'text' + '\x1b[0m';
-      expect(ansiText).toMatch(/\x1b\[[0-9;]*m/);
-    });
-
-    it('should not leak sensitive fields in output', () => {
-      const sensitiveFields = [
-        'secret-uuid-12345',
-        'secret-org-67890',
-        'secret-token',
-        'refresh-token',
-      ];
-
-      const output = 'acct:alice@example.com';
-
-      for (const field of sensitiveFields) {
-        expect(output).not.toContain(field);
-      }
-    });
+    expect(renderAccount()).toBeNull();
   });
 
-  describe('API key mode handling', () => {
-    it('should return null when ANTHROPIC_API_KEY is set', () => {
-      const hasApiKey = process.env.ANTHROPIC_API_KEY !== undefined;
-      // Test setup should ensure no key is set initially
-      if (hasApiKey) {
-        // In API key mode, no email should be shown
-        expect(process.env.ANTHROPIC_API_KEY).toBeDefined();
-      }
-    });
+  it('rejects whitespace, ESC, C0/C1 controls, and bidi characters in account emails', () => {
+    const invalidEmails = [
+      'alice @example.com',
+      ' alice@example.com ',
+      'alice\t@example.com',
+      'alice\x1b@example.com',
+      'alice\x00@example.com',
+      'alice\x80@example.com',
+      'alice\x9f@example.com',
+      'alice\u202e@example.com',
+      'alice\u2066@example.com',
+    ];
 
-    it('should show email when using OAuth (no API key)', () => {
-      const hasApiKey = process.env.ANTHROPIC_API_KEY !== undefined;
-      if (!hasApiKey) {
-        // In OAuth mode, email can be shown
-        expect(process.env.ANTHROPIC_API_KEY).toBeUndefined();
-      }
-    });
+    for (const [index, email] of invalidEmails.entries()) {
+      writeAccount(configFile(), email);
+      const timestamp = Date.now() / 1000 + index + 1;
+      utimesSync(configFile(), timestamp, timestamp);
+      expect(renderAccount(), `email case ${index}`).toBeNull();
+    }
   });
 
-  describe('caching behavior', () => {
-    it('should cache email data with mtimeMs and size', () => {
-      const cacheData = {
-        mtimeMs: Date.now(),
-        size: 178,
-        email: 'alice@example.com',
-      };
+  it('middle-truncates emails longer than 64 characters', () => {
+    const email = `${'long.name.'.repeat(8)}@example.com`;
+    expect(email.length).toBeGreaterThan(64);
+    writeAccount(configFile(), email);
 
-      expect(cacheData.mtimeMs).toBeGreaterThan(0);
-      expect(cacheData.size).toBeGreaterThan(0);
-      expect(cacheData.email).toBe('alice@example.com');
-    });
+    const rendered = renderedText();
+    expect(rendered).toMatch(/^acct:/);
+    expect(rendered).toContain('...');
+    expect(rendered!.slice('acct:'.length).length).toBeLessThanOrEqual(64);
+  });
 
-    it('should reparse when mtime or size changes', () => {
-      const cache1 = { mtimeMs: 1000, size: 100, email: 'old@example.com' };
-      const cache2 = { mtimeMs: 2000, size: 100, email: 'old@example.com' }; // mtime changed
-      const cache3 = { mtimeMs: 1000, size: 200, email: 'old@example.com' }; // size changed
+  it.skipIf(process.platform === 'win32')('rejects a symlinked .claude.json without following it', () => {
+    const target = join(tempDir, 'account-target.json');
+    writeAccount(target, 'symlink@example.com');
+    symlinkSync(target, configFile());
 
-      // Cache is invalid when mtime or size differs
-      expect(cache1.mtimeMs === cache2.mtimeMs).toBe(false); // mtime differs
-      expect(cache1.size === cache3.size).toBe(false); // size differs
-      expect(cache1.mtimeMs === cache1.mtimeMs && cache1.size === cache1.size).toBe(true); // same cache is valid
-    });
+    expect(renderAccount()).toBeNull();
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects a FIFO at .claude.json without hanging', () => {
+    writeAccount(configFile(), 'before-fifo@example.com');
+    expect(renderedText()).toBe('acct:before-fifo@example.com');
+
+    rmSync(configFile());
+    execFileSync('mkfifo', [configFile()]);
+
+    expect(renderAccount()).toBeNull();
+  });
+
+  it('renders nothing for a .claude.json larger than 5 MiB', () => {
+    const validAccount = JSON.stringify({ oauthAccount: { emailAddress: 'large@example.com' } });
+    writeFileSync(configFile(), `${validAccount}${' '.repeat(5 * 1024 * 1024 + 1)}`);
+
+    expect(renderAccount()).toBeNull();
+  });
+
+  it('renders nothing for malformed JSON', () => {
+    writeFileSync(configFile(), '{malformed json');
+
+    expect(renderAccount()).toBeNull();
+  });
+
+  it('refreshes the cached email when the account file changes', () => {
+    writeAccount(configFile(), 'first.account@sample.test');
+    expect(renderedText()).toBe('acct:first.account@sample.test');
+    const before = statSync(configFile());
+
+    writeAccount(configFile(), 'second.account.with.more@example.test');
+    const changedMtimeSeconds = before.mtimeMs / 1000 + 5;
+    utimesSync(configFile(), changedMtimeSeconds, changedMtimeSeconds);
+    const after = statSync(configFile());
+    expect(after.mtimeMs).not.toBe(before.mtimeMs);
+    expect(after.size).not.toBe(before.size);
+
+    expect(renderedText()).toBe('acct:second.account.with.more@example.test');
+  });
+
+  it('prefers a newly created active-config account over a cached fallback account', () => {
+    writeAccount(fallbackFile(), 'fallback@example.com');
+    expect(renderedText()).toBe('acct:fallback@example.com');
+
+    writeAccount(configFile(), 'active@example.com');
+    expect(renderedText()).toBe('acct:active@example.com');
+  });
+
+  it('shows a fallback account created after the active config was cached as signed out', () => {
+    writeFileSync(configFile(), JSON.stringify({ numStartups: 1 }));
+    expect(renderedText()).toBeNull();
+
+    writeAccount(fallbackFile(), 'fallback@example.com');
+    expect(renderedText()).toBe('acct:fallback@example.com');
+  });
+
+  it('shows an account created after a signed-out render', () => {
+    expect(renderAccount()).toBeNull();
+    writeAccount(configFile(), 'logged-in@example.com');
+
+    expect(renderedText()).toBe('acct:logged-in@example.com');
+  });
+
+  it('stops showing an account after its source file is deleted', () => {
+    writeAccount(configFile(), 'signed-in@example.com');
+    expect(renderedText()).toBe('acct:signed-in@example.com');
+
+    rmSync(configFile());
+
+    expect(renderAccount()).toBeNull();
   });
 });

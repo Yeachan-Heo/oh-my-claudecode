@@ -9,22 +9,32 @@
  * - ~64-char middle-ellipsis cap
  * - O_NOFOLLOW | O_NONBLOCK open (no symlink/TOCTOU attacks)
  * - fstat verify: regular file only, size check
- * - Cache in OMC HUD cache: {mtimeMs, size, email} to avoid re-parsing
+ * - Cache source path and metadata (mtimeMs, size, inode) to avoid stale emails
  * - Renders nothing when signed out or when auth comes from ANTHROPIC_API_KEY
  */
 
-import { existsSync, openSync, fstatSync, readFileSync, closeSync, mkdirSync, writeFileSync } from 'fs';
-import { constants } from 'fs';
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, writeFileSync, type Stats } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 import { cyan } from '../colors.js';
 import { getClaudeConfigDir } from '../../utils/config-dir.js';
 import { getOmcConfigDir } from '../../utils/config-dir.js';
 
-interface CachedAccountData {
+interface AccountFileMetadata {
   mtimeMs: number;
   size: number;
-  email: string;
+  ino: number;
+  isFile: boolean;
+}
+
+interface CachedAccountSource {
+  path: string;
+  metadata: AccountFileMetadata | null;
+}
+
+interface CachedAccountData {
+  sources: CachedAccountSource[];
+  email: string | null;
 }
 
 interface EmailValidationResult {
@@ -49,19 +59,14 @@ function validateEmail(value: unknown): EmailValidationResult {
     return { valid: false };
   }
 
-  // Quick length check first (cap at about 64 chars)
+  // Quick length check first (cap at about 64 chars after truncation).
   if (value.length === 0 || value.length > 320) {
     return { valid: false };
   }
 
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return { valid: false };
-  }
-
   // Check for control characters and bidi controls
-  for (let i = 0; i < trimmed.length; i += 1) {
-    const code = trimmed.charCodeAt(i);
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
     
     // C0 controls (U+0000–U+001F), including TAB (0x09), LF (0x0A), CR (0x0D), ESC (0x1B)
     if (code <= 0x1f) {
@@ -85,14 +90,19 @@ function validateEmail(value: unknown): EmailValidationResult {
     if (code === 0x20 || code === 0x09 || code === 0x0a || code === 0x0d || code === 0x0b || code === 0x0c) {
       return { valid: false };
     }
+
+    // Keep the rendered value to plain ASCII.
+    if (code < 0x21 || code > 0x7e) {
+      return { valid: false };
+    }
   }
 
   // Basic sanity check: must contain @ and at least one dot after @
-  if (!trimmed.includes('@')) {
+  if (!value.includes('@') || value.indexOf('@') !== value.lastIndexOf('@')) {
     return { valid: false };
   }
 
-  const [local, domain] = trimmed.split('@', 2);
+  const [local, domain] = value.split('@', 2);
   if (!local || !domain || !domain.includes('.')) {
     return { valid: false };
   }
@@ -103,7 +113,7 @@ function validateEmail(value: unknown): EmailValidationResult {
     return { valid: false };
   }
 
-  return { valid: true, email: trimmed };
+  return { valid: true, email: value };
 }
 
 /**
@@ -129,65 +139,111 @@ function truncateEmailMiddle(email: string, maxChars: number = 64): string {
  * Read and validate an email from a .claude.json file with security hardening:
  * - O_NOFOLLOW to prevent symlink attacks
  * - fstat to verify regular file and size limit
- * - No TOCTOU sequence (open → stat → read is atomic from open fd)
+ * - No path-based TOCTOU sequence (open → fstat → read uses the same fd)
  */
-function readEmailFromClaudeJson(filePath: string): string | null {
+interface AccountReadResult {
+  email: string | null;
+  metadata: AccountFileMetadata | null;
+}
+
+function metadataFromStats(stats: Stats): AccountFileMetadata {
+  return {
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+    ino: stats.ino,
+    isFile: stats.isFile(),
+  };
+}
+
+function getFileMetadata(filePath: string): AccountFileMetadata | null {
   try {
-    // Check file exists first (avoid O_NOFOLLOW errors on missing files)
-    if (!existsSync(filePath)) {
+    return metadataFromStats(lstatSync(filePath));
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
       return null;
     }
+    throw error;
+  }
+}
 
-    // Open with O_NOFOLLOW | O_NONBLOCK to prevent symlink/FIFO attacks
-    // Platform-specific: O_NOFOLLOW may not exist on all systems, but we use it where available
-    const flags = constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0);
-    let fd: number;
-    try {
-      fd = openSync(filePath, flags);
-    } catch (err) {
-      // If O_NOFOLLOW/O_NONBLOCK cause issues, fall back to normal open
-      // This is a defensive fallback; modern systems support these flags
-      fd = openSync(filePath, constants.O_RDONLY);
+function bestEffortFileMetadata(filePath: string): AccountFileMetadata | null {
+  try {
+    return getFileMetadata(filePath);
+  } catch {
+    return null;
+  }
+}
+
+function readEmailFromClaudeJson(filePath: string): AccountReadResult {
+  const flags = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+  let fd: number;
+  try {
+    // Never retry without the protection flags if this open is rejected.
+    fd = openSync(filePath, flags);
+  } catch {
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  }
+
+  try {
+    // Verify the opened file descriptor before reading it; O_NONBLOCK also
+    // ensures that opening a FIFO cannot hold the HUD render indefinitely.
+    const metadata = metadataFromStats(fstatSync(fd));
+    if (!metadata.isFile || metadata.size > 5 * 1024 * 1024) {
+      return { email: null, metadata };
     }
 
     try {
-      // Verify via fstat: must be a regular file, size must be under 5 MB
-      const stats = fstatSync(fd);
-      if (!stats.isFile()) {
-        return null;
-      }
-      if (stats.size > 5 * 1024 * 1024) {
-        // File is too large; skip to avoid parsing expensive files
-        return null;
-      }
-
-      // Read from the same fd (no TOCTOU gap)
       const content = readFileSync(fd, 'utf-8');
-      const parsed = JSON.parse(content);
-
+      const parsed: unknown = JSON.parse(content);
       if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return null;
+        return { email: null, metadata };
       }
 
       const account = (parsed as Record<string, unknown>).oauthAccount;
       if (typeof account !== 'object' || account === null || Array.isArray(account)) {
-        return null;
+        return { email: null, metadata };
       }
 
       const email = (account as Record<string, unknown>).emailAddress;
       const validation = validateEmail(email);
-      return validation.valid && validation.email ? validation.email : null;
-    } finally {
-      // Always close the fd
-      try {
-        closeSync(fd);
-      } catch {
-        // Ignore close errors in cleanup
-      }
+      return { email: validation.valid ? validation.email ?? null : null, metadata };
+    } catch {
+      return { email: null, metadata };
     }
   } catch {
-    return null;
+    return { email: null, metadata: bestEffortFileMetadata(filePath) };
+  } finally {
+    try {
+      closeSync(fd);
+    } catch {
+      // Ignore close errors in cleanup.
+    }
   }
+}
+
+function metadataEquals(a: AccountFileMetadata | null, b: AccountFileMetadata | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.mtimeMs === b.mtimeMs && a.size === b.size && a.ino === b.ino && a.isFile === b.isFile;
+}
+
+function isAccountFileMetadata(value: unknown): value is AccountFileMetadata {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const m = value as Partial<AccountFileMetadata>;
+  return [m.mtimeMs, m.size, m.ino].every((item) => typeof item === 'number' && Number.isFinite(item)) &&
+    typeof m.isFile === 'boolean';
+}
+
+function isCachedAccountData(value: unknown): value is CachedAccountData {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const cached = value as Partial<CachedAccountData>;
+  return (cached.email === null || typeof cached.email === 'string') &&
+    Array.isArray(cached.sources) &&
+    cached.sources.every((source: unknown) => {
+      if (typeof source !== 'object' || source === null) return false;
+      const { path, metadata } = source as Partial<CachedAccountSource>;
+      return typeof path === 'string' && (metadata === null || isAccountFileMetadata(metadata));
+    });
 }
 
 /**
@@ -197,48 +253,44 @@ function readEmailFromClaudeJson(filePath: string): string | null {
 function getCachedAccountEmail(): string | null {
   const cacheDir = getOmcConfigDir();
   const cacheFile = join(cacheDir, 'hud-account-cache.json');
-
-  try {
-    // Try to read cache
-    if (existsSync(cacheFile)) {
-      const cacheContent = readFileSync(cacheFile, 'utf-8');
-      const cache = JSON.parse(cacheContent) as Record<string, unknown>;
-      const cached = cache.account as CachedAccountData | undefined;
-      if (cached && typeof cached === 'object') {
-        return cached.email ?? null;
-      }
-    }
-  } catch {
-    // Ignore cache read errors; will recompute
-  }
-
-  // No valid cache; read from .claude.json
-  const claudeConfigDir = getClaudeConfigDir();
-  const configJsonPath = join(claudeConfigDir, '.claude.json');
+  const configJsonPath = join(getClaudeConfigDir(), '.claude.json');
   const fallbackPath = join(homedir(), '.claude.json');
 
-  let email = readEmailFromClaudeJson(configJsonPath);
-  if (!email) {
-    email = readEmailFromClaudeJson(fallbackPath);
+  const candidatePaths = fallbackPath === configJsonPath ? [configJsonPath] : [configJsonPath, fallbackPath];
+  // Snapshot every candidate before reading, so a change to any of them
+  // (account switch, sign-out, or a new login appearing in either location)
+  // invalidates the cache on the next render.
+  const sources: CachedAccountSource[] = candidatePaths.map((path) => ({ path, metadata: getFileMetadata(path) }));
+
+  try {
+    const cache = JSON.parse(readFileSync(cacheFile, 'utf-8')) as Record<string, unknown>;
+    const cached = cache.account;
+    if (
+      isCachedAccountData(cached) &&
+      cached.sources.length === sources.length &&
+      cached.sources.every((entry, i) => entry.path === sources[i].path && metadataEquals(entry.metadata, sources[i].metadata)) &&
+      (cached.email === null || validateEmail(cached.email).valid)
+    ) {
+      return cached.email;
+    }
+  } catch {
+    // Ignore missing, stale, or malformed cache data and recompute.
   }
 
-  // Update cache with the result (best effort; errors are ignored)
+  let email: string | null = null;
+  for (const path of candidatePaths) {
+    email = readEmailFromClaudeJson(path).email;
+    if (email) break;
+  }
+
   try {
-    const cacheDir = getOmcConfigDir();
-    if (!existsSync(cacheDir)) {
-      mkdirSync(cacheDir, { recursive: true });
-    }
-    
-    const cacheFile = join(cacheDir, 'hud-account-cache.json');
-    const cacheData: Record<string, unknown> = {
-      account: email ? { mtimeMs: Date.now(), size: 0, email } : {},
-    };
-    writeFileSync(cacheFile, JSON.stringify(cacheData));
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(cacheFile, JSON.stringify({ account: { sources, email } satisfies CachedAccountData }));
   } catch {
     // Ignore cache update errors; the feature still works without cache
   }
 
-  return email ?? null;
+  return email;
 }
 
 /**
