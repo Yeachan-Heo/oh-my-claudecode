@@ -92,7 +92,6 @@ import {
   paneLooksReady,
   applyMainVerticalLayout,
   splitTeamWorkerPaneWithEvidence,
-  TMUX_MAILBOX_PANE_ID,
   type StartupPaneContext,
   type StartupPaneActivity,
   type StartupInboxResubmitOutcome,
