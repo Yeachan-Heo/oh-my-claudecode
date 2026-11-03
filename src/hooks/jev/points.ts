@@ -92,7 +92,7 @@ const SCORE_QUESTIONS: JevQuestions = {
  * <model_routing> and docs/DELEGATION-ENFORCER.md - haiku for quick lookups,
  * sonnet for standard work, opus for architecture. The "effort" score (0-3)
  * picks the subagent reasoning effort; scripts/pre-tool-enforcer.mjs maps it
- * to none/low/medium/high in active mode.
+ * to low/medium/high/xhigh/max in active mode, capped by OMC_JEV_MAX_EFFORT.
  */
 const MODEL_ROUTING_QUESTIONS: JevQuestions = {
   'model-tier': {
