@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveOmcCliPrefix } from '../../src/utils/omc-cli-rendering.js';
+import { ralphAfkArgv, RALPH_AFK_SESSION_COMMANDS } from '../../src/cli/commands/ralph.js';
 
 // A plugin-only install has no `omc` on PATH. The ralph feedback gate is
 // mandatory, so the skill's documented fallback must actually run: resolve the
@@ -99,5 +100,23 @@ describe('ralph verify in a plugin-only install (issue #4814)', () => {
     const regressionRun = runVerify(project, ['--session', session], env);
     expect(regressionRun.status).toBe(1);
     expect(regressionRun.stdout).toContain('NEW failure');
+  });
+});
+
+describe('ralph AFK preflight uses the granted CLI form (issue #4814 follow-up)', () => {
+  it('tells AFK sessions to use the one form the launcher grants, without a probe', () => {
+    // The launcher grants only the bare form; a discovery probe is not on the
+    // list and is denied in headless mode, which would block the gate before
+    // its first permitted call.
+    const argv = ralphAfkArgv('task', [], 'afk-session');
+    const allowedTools = argv[argv.indexOf('--allowedTools') + 1];
+    for (const grant of RALPH_AFK_SESSION_COMMANDS) expect(allowedTools).toContain(grant);
+
+    const skill = readFileSync(join(REPO_ROOT, 'skills', 'ralph', 'SKILL.md'), 'utf8');
+    expect(skill).toContain('OMC_RALPH_AFK_FEEDBACK');
+    expect(skill).toContain('Bash(omc ralph verify:*)');
+    expect(skill).not.toContain('command -v');
+    // The non-AFK plugin-only fallback stays documented.
+    expect(skill).toContain('node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs');
   });
 });
