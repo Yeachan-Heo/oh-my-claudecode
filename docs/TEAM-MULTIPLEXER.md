@@ -69,6 +69,13 @@ unchanged.
 
 ## Surfaces beyond the team layer
 
+- **Interop side-by-side** (`src/cli/interop.ts`): running inside a Herdr
+  pane (HERDR_PANE_ID) or with herdr elected, `omc interop` spawns the Codex
+  CLI as a tab of the SAME workspace as the invoking pane (workspace id from
+  the pane id prefix) instead of a tmux split-window. No attach is attempted
+  (the user is already in the Herdr TUI); tmux prerequisites are waived on
+  that path. Electing herdr without being inside a Herdr pane surfaces a
+  clear error instead of silently falling back to tmux.
 - **Notifications & replies** (`src/notifications`): when OMC runs inside a
   Herdr pane (`HERDR_PANE_ID`, grammar-validated), pane/session detection
   returns the Herdr pane id and the `herdr:<workspace_id>` marker, so
