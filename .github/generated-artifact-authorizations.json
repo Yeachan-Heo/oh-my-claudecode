@@ -9,28 +9,28 @@
       "mergeBaseSha": "14cd0fe92fbe376fab6c89b333b7896811986d2d",
       "headSha": "6f2e160f3f8a2d98a3929d637fb33c02e894da49",
       "owner": "Yeachan-Heo",
-      "expiresAt": "2026-12-03T04:17:50.463Z",
+      "expiresAt": "2026-12-03T04:27:52.564Z",
       "generatedDelta": {
         "count": 280,
-        "sha256": "d86806fa53c0fe99c3bac252bd4581b597b347a73de507f67dfd074f40480e2b"
+        "sha256": "eb4b760ce9334b4137a77a60885cddde32d8ea4469c78a828bf1bb330807f225"
       },
       "generatedFiles": [
         {
           "status": "modified",
           "filename": "bridge/claude-md-coordinator.cjs",
-          "sha": "4621a80e8",
+          "sha": "4621a80e89edabbfc975edbf704c3cc79d87e83d",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "a3f66bbb8",
+          "sha": "a3f66bbb8c5dbfe751a2086437547493877e78fa",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/runtime-cli.cjs",
-          "sha": "ef3300594",
+          "sha": "ef3300594761a1353e20b08c13d7d7609e27685d",
           "previousFilename": null
         },
         {
@@ -42,37 +42,37 @@
         {
           "status": "modified",
           "filename": "bridge/team-mcp.cjs",
-          "sha": "c1ac1ce02",
+          "sha": "c1ac1ce02fe24ed561abe7b7b116aead056031d9",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "bridge/team.js",
-          "sha": "87e397131",
+          "sha": "87e397131ac90d46eda7dfa756809a57a85c9d7d",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/hud/windows-platform.test.js",
-          "sha": "a509668e4",
+          "sha": "a509668e47ba7c336559d7466c8cc5b94432219b",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/hud/windows-platform.test.js.map",
-          "sha": "0941c5911",
+          "sha": "0941c5911225866ac35f039a68b6eee670342d14",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/npm-package-bin-surface.test.js",
-          "sha": "51ea4cc64",
+          "sha": "51ea4cc64a1ba9196a60c56aff196d0ffec6fdc1",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/__tests__/npm-package-bin-surface.test.js.map",
-          "sha": "4673ec387",
+          "sha": "4673ec387abdbfc861eb0501f6f8ab766720de71",
           "previousFilename": null
         },
         {
@@ -198,115 +198,115 @@
         {
           "status": "modified",
           "filename": "dist/features/jev-model-routing.js",
-          "sha": "8582c7889",
+          "sha": "8582c78899443340131da1fb2fb65717a2f4154a",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/features/jev-slop-warning.js",
-          "sha": "e76358969",
+          "sha": "e763589694ce339810c78e28872e49aba4ca53d2",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/code-simplifier/jev-shadow.js",
-          "sha": "e1619deca",
+          "sha": "e1619deca3ace57cc7534790523639669fcf5dff",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/jev/points.d.ts",
-          "sha": "e9e13731a",
+          "sha": "e9e13731a33ea82b498c304a8994eb9676a9d3e7",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/jev/points.js",
-          "sha": "3bd3d3561",
+          "sha": "3bd3d35615446d079682e32fbfbda07112f409e7",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/jev/resolver.d.ts",
-          "sha": "fd9d8e1d0",
+          "sha": "fd9d8e1d069f4712451d4fa6d968d5237e7e87e3",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/jev/resolver.js",
-          "sha": "6160f19f2",
+          "sha": "6160f19f2ed1a36f45c930b9a50af17d59a7bc1b",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/keyword-detector/index.d.ts",
-          "sha": "7e70ed271",
+          "sha": "7e70ed271470469ab487aa944cd945f07b2e952f",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/keyword-detector/index.js",
-          "sha": "72806a0f6",
+          "sha": "72806a0f6ae6e9aba0d4150a123682180361ede7",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/keyword-detector/jev-shadow.js",
-          "sha": "10e428f8d",
+          "sha": "10e428f8df20d0fe41ff5db1a1a2c016c6228541",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/learner/jev-shadow.js",
-          "sha": "96c2b333e",
+          "sha": "96c2b333e1c30dfce0f7490a84cd4fc4a654687f",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js",
-          "sha": "e47f37d4a",
+          "sha": "e47f37d4a5da2b70db391e65e4b077cc0950b8dd",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/__tests__/error-handling.test.js.map",
-          "sha": "f4854dc1f",
+          "sha": "f4854dc1f3d8f24b50510bb07f912f8567bbd90e",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/persistent-mode/jev-shadow.js",
-          "sha": "1c7c8ae5b",
+          "sha": "1c7c8ae5b146371a5e6cf45b7e7a6c8be0f794f1",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/preemptive-compaction/jev-shadow.d.ts",
-          "sha": "d86f9668d",
+          "sha": "d86f9668d35ab19a4809ec14e75d00a342e9a8c4",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/preemptive-compaction/jev-shadow.js",
-          "sha": "a08c0c6ec",
+          "sha": "a08c0c6ecff2480b532517b47297708755d1944c",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/ralph/feedback-baseline.js",
-          "sha": "8a1b4d9fd",
+          "sha": "8a1b4d9fd435dba2eaf2515b33b5cdaeab38be43",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/ralph/jev-shadow.js",
-          "sha": "18415626c",
+          "sha": "18415626c2fa1d3ef8fcdfa7b68385c67af9cd28",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/task-size-detector/jev-shadow.js",
-          "sha": "1c1c476bc",
+          "sha": "1c1c476bc7e5b8e0d713f747edc8ad03a44bec1d",
           "previousFilename": null
         },
         {
@@ -672,13 +672,13 @@
         {
           "status": "modified",
           "filename": "dist/team/__tests__/multirepo-workspace-team.test.js",
-          "sha": "f677a0cef",
+          "sha": "f677a0cef2bd7e2efce7aa367ebf8e8c6140bafb",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/__tests__/multirepo-workspace-team.test.js.map",
-          "sha": "d440bba6d",
+          "sha": "d440bba6d24cda7b553be6d1a1f207b61037a6cc",
           "previousFilename": null
         },
         {
@@ -1260,25 +1260,25 @@
         {
           "status": "modified",
           "filename": "dist/team/index.d.ts",
-          "sha": "a0ea1b881",
+          "sha": "a0ea1b881751313d97610e67f090244e705f8da3",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/index.d.ts.map",
-          "sha": "9eec8c7d9",
+          "sha": "9eec8c7d9bbf375a59ca09ae7ae30223f0a33f4f",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/index.js",
-          "sha": "e9dfa2219",
+          "sha": "e9dfa22197c255ea0dc57b5c86b3f851adb8d9f5",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/index.js.map",
-          "sha": "aea6a3766",
+          "sha": "aea6a37661efdd4032d479799695b7ce3ef05fe1",
           "previousFilename": null
         },
         {
@@ -1572,31 +1572,31 @@
         {
           "status": "modified",
           "filename": "dist/team/tmux-session.d.ts",
-          "sha": "8e6c17bea",
+          "sha": "8e6c17bead89f226ec6837a43e97cb4df646bcaa",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/tmux-session.js",
-          "sha": "f98511fa5",
+          "sha": "f98511fa566865817f1667336c0d59905c733929",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/types.d.ts",
-          "sha": "5406a7795",
+          "sha": "5406a77958ba19f7fc9a466cfe2951a71db27352",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/types.d.ts.map",
-          "sha": "ed6142d9a",
+          "sha": "ed6142d9ae97d1d0fd9510abc5dfd4c9c1814131",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/team/types.js.map",
-          "sha": "2ae8e8c81",
+          "sha": "2ae8e8c81b458fc0e55c65978ab534a891079a1a",
           "previousFilename": null
         },
         {
