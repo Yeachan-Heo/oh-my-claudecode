@@ -208,6 +208,10 @@ function isExplicitRalplanSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ralplan(?:\s|$)/i.test(prompt);
 }
 
+function isExplicitRalphSlashInvocation(prompt) {
+  return /^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(prompt);
+}
+
 function isExplicitAskSlashInvocation(prompt) {
   return /^\s*\/(?:oh-my-claudecode:)?ask\s+(?:claude|codex|gemini|antigravity|agy|grok|cursor|muse)\b/i.test(prompt);
 }
@@ -1081,7 +1085,7 @@ function hasValidWorkflowDescriptor(state, sessionId) {
 
 
 // Create state file for a mode
-async function activateState(directory, prompt, stateName, sessionId) {
+async function activateState(directory, prompt, stateName, sessionId, options = {}) {
   const now = new Date().toISOString();
   // Sanitize prompt BEFORE writing to state: prevents pasted system echoes
   // and oversized blobs from being persisted and re-emitted by Stop hook.
@@ -1098,11 +1102,23 @@ async function activateState(directory, prompt, stateName, sessionId) {
       prompt: safePrompt,
       session_id: sessionId || undefined,
       project_path: directory,
-      awaiting_confirmation: true,
-      awaiting_confirmation_set_at: now,
       last_checked_at: now,
       prd_mode: true, // CRITICAL: Enable PRD mode for ralph (issue #4363)
     };
+    // A typed `/oh-my-claudecode:ralph` IS the confirmation. Arming the
+    // awaiting_confirmation flag here would suppress the Stop hook for
+    // AWAITING_CONFIRMATION_TTL_MS, and the only clearer
+    // (confirmSkillModeStates on a Skill tool call) never runs on the slash
+    // path — [CC] expands the skill body without a Skill tool use. A short
+    // first turn therefore ended the loop silently. Prose activation
+    // ("use ralph for this") keeps the flag so an accidental mention cannot
+    // hijack the session.
+    if (options.confirmedBySlash === true) {
+      state.invocation_source = 'slash';
+    } else {
+      state.awaiting_confirmation = true;
+      state.awaiting_confirmation_set_at = now;
+    }
   } else if (stateName === 'ralplan') {
     // Ralplan needs active + session_id for stop-hook enforcement
     state = {
@@ -2160,7 +2176,7 @@ async function main() {
         const slashInvokedKeywords = new Set();
         if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralplan');
         // Check for other slash modes: /oh-my-claudecode:ralph, /oh-my-claudecode:autopilot, etc.
-        if (/^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('ralph');
+        if (isExplicitRalphSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralph');
         if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('autopilot');
         if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
         
@@ -2274,7 +2290,11 @@ async function main() {
       ? []
       : resolved.filter(m => ['ralph', 'ultragoal', 'autopilot', 'ralplan'].includes(m.name));
     for (const mode of stateModes) {
-      const activationError = await activateState(directory, prompt, mode.name, sessionId);
+      const activationError = await activateState(directory, prompt, mode.name, sessionId, {
+        // Only a leading slash command counts as the user's confirmation.
+        // A mention inside prose keeps the awaiting-confirmation window.
+        confirmedBySlash: mode.name === 'ralph' && isExplicitRalphSlashInvocation(prompt),
+      });
       if (activationError === 'workflow_descriptor_integrity_failed') {
         console.log(JSON.stringify(createHookOutput('workflow_descriptor_integrity_failed')));
         return;
