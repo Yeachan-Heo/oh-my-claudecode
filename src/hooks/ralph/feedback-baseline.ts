@@ -34,6 +34,9 @@ const VOLATILE_PATTERNS: RegExp[] = [
   /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?/g,
   /[A-Za-z]:\\[^\s:]*\\[^\s]*(?:omc|omc-)[^\s\\\/]+/g,
   /\/tmp\/[\w.-]+/g,
+  // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
+  // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
+  /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
   /\b[0-9a-f]{8,}\b/gi,
 ];
 
