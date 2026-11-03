@@ -147,7 +147,6 @@ describe('verification ledger', () => {
       expect(true).toBe(true);
       return;
     }
-    mkdirSync(dirname(path), { recursive: true });
     await appendLedgerEntry(path, {
       ts: '2026-11-01T00:00:00Z', kind: 'verify', verdict: 'unit-test-verified', evidence: 'perm check',
     });
