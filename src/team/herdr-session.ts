@@ -431,6 +431,22 @@ export async function herdrSendKey(
   await runHerdr(['agent', 'send-keys', paneId, key], { env: options.env, execFn: options.execFn });
 }
 
+/**
+ * Live agent inventory (the `agent list` result). Detectors and liveness
+ * surfaces iterate this instead of shelling out per pane; names are cleared
+ * when agents exit, so presence here is the liveness proof.
+ */
+export async function listHerdrAgents(
+  options: { env?: NodeJS.ProcessEnv; execFn?: HerdrExecOptions['execFn'] } = {},
+): Promise<HerdrAgentLikeInfo[]> {
+  const result = await runHerdrResult<{ agents?: HerdrAgentLikeInfo[] }>(
+    ['agent', 'list'],
+    { env: options.env, execFn: options.execFn },
+  );
+  const agents = Array.isArray(result?.agents) ? result.agents : [];
+  return agents.filter((agent) => typeof agent.pane_id === 'string' && agent.pane_id.length > 0);
+}
+
 /** Readiness probe: the recognized agent occupying the pane, or null. */
 export async function herdrAgentInfo(
   paneId: string,

@@ -21,6 +21,7 @@ import {
   herdrRunPaneCommand,
   isHerdrBinaryCallable,
   isHerdrWorkerAlive,
+  listHerdrAgents,
   listHerdrTeams,
   resolveHerdrBinary,
   teardownHerdrWorker,
@@ -75,6 +76,32 @@ describe("herdr team session (real herdr)", () => {
       if (serverState === "started") {
         // We spawned the headless server for this test; stop it again. The
         // `server stop` command prints no JSON, so bypass the envelope parser.
+        const bin = resolveHerdrBinary();
+        if (bin) {
+          try {
+            await execFileAsync(bin, ["server", "stop"]);
+          } catch {
+            /* best-effort */
+          }
+        }
+      }
+    }
+  });
+  it("exposes the live agent inventory for detector surfaces", async () => {
+    if (!(await isHerdrBinaryCallable())) return; // skip: herdr not installed
+
+    const serverState = await ensureHerdrServer();
+    try {
+      const agents = await listHerdrAgents();
+      expect(Array.isArray(agents)).toBe(true);
+      // Every inventory entry addresses a pane (the liveness grammar the
+      // rate-limit detector keys on).
+      for (const agent of agents) {
+        expect(typeof agent.pane_id).toBe("string");
+        expect(agent.pane_id).toMatch(/^w[0-9a-z]+:p[0-9a-z]+$/i);
+      }
+    } finally {
+      if (serverState === "started") {
         const bin = resolveHerdrBinary();
         if (bin) {
           try {

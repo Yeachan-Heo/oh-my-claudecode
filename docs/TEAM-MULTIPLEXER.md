@@ -69,6 +69,13 @@ unchanged.
 
 ## Surfaces beyond the team layer
 
+- **Rate-limit wait daemon** (`src/features/rate-limit-wait`): when herdr is
+  elected, the daemon also scans live Herdr agent panes (`agent list` +
+  `pane read`) with the same content classifiers, revalidates them against
+  the live-agent inventory before resuming, and confirms the preselected
+  "continue" option through `agent send-keys enter`. Tmux scanning is
+  unchanged and remains pane-grammar-gated (`%N` only); herdr panes never
+  reach tmux helpers.
 - **`omc` launch** (`src/cli/launch.ts`): with the herdr backend selected,
   `omc` launches Claude as a tab in a fresh Herdr workspace labelled with the
   tmux session identity (`omc-<dir>-<branch>-<ts>`), reusing the same env

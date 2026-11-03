@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { execFileSync, spawnSync } from "child_process";
+import { execFileSync } from "child_process";
 
 vi.mock("child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("child_process")>();
