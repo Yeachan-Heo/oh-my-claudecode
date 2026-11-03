@@ -6683,7 +6683,7 @@ export async function resumeTeamV2(
 ): Promise<TeamRuntimeV2 | null> {
   const sanitized = sanitizeTeamName(teamName);
   const config = await readTeamConfig(sanitized, cwd);
-  if (!config?.instance_id) return null;
+  if (!config?.instance_id || (config.lifecycle_state ?? 'active') !== 'active') return null;
 
   const sessionName = config.tmux_session || `omc-team-${sanitized}`;
   if (!config.leader_pane_id) return null;
