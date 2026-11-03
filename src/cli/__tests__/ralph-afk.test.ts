@@ -192,6 +192,28 @@ process.exit(${exitCode});
     return marker;
   }
 
+  /**
+   * Two feedback commands: `node slow.js` hangs past any budget, `node
+   * failerout.js` exits 1 printing whatever `failure.txt` holds. The PRD is
+   * rewritten per run so a test can change which commands the gate sees.
+   */
+  function writeTwoCommandFixture(failure: string, commands: string[]): void {
+    writeFileSync(join(dir, 'slow.js'), 'setTimeout(() => {}, 3000);\n', 'utf8');
+    writeFileSync(
+      join(dir, 'failerout.js'),
+      "console.log(require('fs').readFileSync('failure.txt', 'utf8').trim());\nprocess.exit(1);\n",
+      'utf8',
+    );
+    writeFileSync(join(dir, 'failure.txt'), `${failure}\n`, 'utf8');
+    writePrd(JSON.stringify({
+      project: 'fb-fixture',
+      branchName: 'main',
+      description: 'fixture',
+      userStories: [],
+      feedbackCommands: commands,
+    }));
+  }
+
   beforeEach(() => {
     dir = tempDir();
     process.env.HOME = dir;
@@ -488,6 +510,87 @@ operable program or batch file.`);
       logSpy.mockRestore();
     }
   }, 30000);
+
+  it('reports a timeout and a real regression in the same gate', () => {
+    writeTwoCommandFixture('known baseline failure', ['node failerout.js']);
+    expect(ralphVerify({ session: 'sess-mixed', writeBaseline: true }, dir)).toBe(0);
+
+    // The suite now also exceeds its budget, and the known failure changes.
+    writeTwoCommandFixture('brand new regression', ['node slow.js', 'node failerout.js']);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-mixed', timeoutMs: 500 }, dir)).toBe(1);
+      const output = logSpy.mock.calls.flat().join('\n');
+      // The infrastructure cause and the actionable regression are distinct lines:
+      // the first says retry/raise the budget, the second names what to fix.
+      expect(output).toContain('timed out');
+      expect(output).toContain('timed out: node slow.js');
+      expect(output).toContain('NEW failure(s) since baseline');
+      expect(output).toContain('new: node failerout.js: brand new regression');
+      expect(output).not.toContain('candidate:');
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 30000);
+
+  it('labels non-timeout failures as candidates when a timeout has no baseline', () => {
+    // No baseline was recorded: `diffAgainstBaseline(null, …)` only ever yields
+    // candidates. The timeout still fails the gate, but the other command's
+    // output must not be presented as a regression.
+    writeTwoCommandFixture('environment failure', ['node slow.js', 'node failerout.js']);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-timeout-no-baseline', timeoutMs: 500 }, dir)).toBe(1);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('timed out');
+      expect(output).toContain('candidate: node failerout.js: environment failure');
+      expect(output).not.toContain('NEW failure');
+    } finally {
+      logSpy.mockRestore();
+    }
+  }, 30000);
+
+  it('runs a sessionless gate without a lock and reports baseline candidates', () => {
+    writeFailer('sessionless failure');
+    writePackage('node failer.js');
+    const lockSpy = vi.spyOn(fileLock, 'acquireFileLockSync');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      // No --session, no OMC_SESSION_ID, no baseline to infer: the gate still
+      // runs (there is nothing to serialize on) and exits 0 with candidates.
+      expect(ralphVerify({}, dir)).toBe(0);
+      const output = logSpy.mock.calls.flat().join('\n');
+      expect(output).toContain('no baseline for session (unknown)');
+      expect(output).toContain('candidate: npm run test: sessionless failure');
+      expect(lockSpy).not.toHaveBeenCalled();
+    } finally {
+      lockSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  }, 20000);
+
+  it('refuses a sessionless --write-baseline and reports it in plain and JSON output', () => {
+    writePrinter('ok');
+    const lockSpy = vi.spyOn(fileLock, 'acquireFileLockSync');
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ writeBaseline: true }, dir)).toBe(1);
+      expect(logSpy.mock.calls.flat().join('\n')).toContain('could not write a baseline (no session id; pass --session)');
+
+      logSpy.mockClear();
+      expect(ralphVerify({ writeBaseline: true, json: true }, dir)).toBe(1);
+      const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as {
+        sessionId: string | null;
+        baselineWritten: boolean;
+      };
+      expect(result.sessionId).toBeNull();
+      expect(result.baselineWritten).toBe(false);
+      expect(lockSpy).not.toHaveBeenCalled();
+    } finally {
+      lockSpy.mockRestore();
+      logSpy.mockRestore();
+    }
+  }, 20000);
 
   it('serializes concurrent verify runs for the same session', () => {
     writePrinter('ok');
