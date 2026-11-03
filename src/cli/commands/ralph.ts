@@ -535,9 +535,15 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
       for (const command of newlyTimedOut) console.log(`  timed out: ${command}`);
       console.log('  raise the budget with --timeout <seconds> or OMC_RALPH_VERIFY_TIMEOUT_SECONDS');
       const otherNew = diff.newSignatures.filter((signature) => !signature.endsWith(': <command timed out>'));
-      if (otherNew.length > 0) {
+      if (otherNew.length > 0 && gateBaseline) {
         console.log(`ralph verify: ${otherNew.length} NEW failure(s) since baseline`);
         for (const signature of otherNew) console.log(`  new: ${signature}`);
+      } else if (otherNew.length > 0) {
+        // Without a baseline there is nothing to diff against, so these are
+        // candidates, not regressions — the same classification the
+        // missing-baseline branch below uses. The timeout alone fails the gate.
+        console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — ${otherNew.length} failure signature(s) reported as candidates, not regressions`);
+        for (const signature of otherNew) console.log(`  candidate: ${signature}`);
       }
       return 1;
     }
