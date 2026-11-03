@@ -35,15 +35,17 @@ describe("herdr team session (real herdr)", () => {
 
     const dir = mkdtempSync(join(tmpdir(), "omc-herdr-itest-"));
     const serverState = await ensureHerdrServer();
+    let teamWorkspaceId: string | null = null;
     try {
       const workspaceId = await herdrCreateTeamWorkspace(
         dir,
-        `${HERDR_TEAM_WORKSPACE_LABEL_PREFIX}itest`,
+        `${HERDR_TEAM_WORKSPACE_LABEL_PREFIX}itest${Date.now().toString(36)}`,
       );
-      expect(workspaceId).toMatch(/^w\d+$/);
+      expect(workspaceId).toMatch(/^w[0-9a-z]+$/i);
+      teamWorkspaceId = workspaceId;
 
       const tab = await herdrCreateWorkerTab(workspaceId, dir, "worker-1");
-      expect(tab.paneId).toMatch(/^w\d+:p\d+$/);
+      expect(tab.paneId).toMatch(/^w[0-9a-z]+:p[0-9a-z]+$/i);
 
       // Deliver a plain shell command through the pane surface (the team start
       // command rides this path; agents then replace the shell occupant).
@@ -66,6 +68,9 @@ describe("herdr team session (real herdr)", () => {
         false,
       );
     } finally {
+      if (teamWorkspaceId) {
+        try { await destroyHerdrTeam(teamWorkspaceId); } catch { /* best-effort */ }
+      }
       rmSync(dir, { recursive: true, force: true });
       if (serverState === "started") {
         // We spawned the headless server for this test; stop it again. The

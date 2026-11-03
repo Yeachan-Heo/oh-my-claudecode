@@ -343,7 +343,7 @@ export function herdrWorkspaceIdFromSessionTarget(sessionTarget: string): string
     throw new HerdrError('invalid_session_target', `not a herdr session target: ${sessionTarget}`);
   }
   const workspaceId = sessionTarget.slice(prefix.length).split(':')[0];
-  if (!/^w\d+$/.test(workspaceId)) {
+  if (!/^w[0-9a-z]+$/i.test(workspaceId)) {
     throw new HerdrError('invalid_session_target', `not a herdr session target: ${sessionTarget}`);
   }
   return workspaceId;
