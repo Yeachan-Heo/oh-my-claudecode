@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
-    "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
+    "head": "62ee5f42c89ad7951463ba98c29bd7537e69dd75",
+    "sourceSha256": "724ce4976c4f0fd5f1ff5f9c30fb1a80fafa18b58a188964417f1e2893474b64",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
-  "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
+  "head": "62ee5f42c89ad7951463ba98c29bd7537e69dd75",
+  "sourceSha256": "724ce4976c4f0fd5f1ff5f9c30fb1a80fafa18b58a188964417f1e2893474b64",
   "counts": {
     "public": {
       "skills": 48,
@@ -28,8 +28,8 @@
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1428,
-      "total": 1453
+      "srcFiles": 1430,
+      "total": 1455
     },
     "generated": {
       "distFiles": 5471,
@@ -41767,6 +41767,11 @@
         "path": "src/hooks/wiki/types.ts"
       },
       {
+        "id": "src/hud/__tests__/account.test.ts",
+        "kind": "src",
+        "path": "src/hud/__tests__/account.test.ts"
+      },
+      {
         "id": "src/hud/__tests__/autopilot-profile.test.ts",
         "kind": "src",
         "path": "src/hud/__tests__/autopilot-profile.test.ts"
@@ -41825,6 +41830,11 @@
         "id": "src/hud/custom-rate-provider.ts",
         "kind": "src",
         "path": "src/hud/custom-rate-provider.ts"
+      },
+      {
+        "id": "src/hud/elements/account.ts",
+        "kind": "src",
+        "path": "src/hud/elements/account.ts"
       },
       {
         "id": "src/hud/elements/agents.ts",
@@ -70459,6 +70469,26 @@
         "kind": "imports"
       },
       {
+        "from": "src/hud/__tests__/account.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/__tests__/account.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/__tests__/account.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/__tests__/account.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/hud/__tests__/autopilot-profile.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -70664,6 +70694,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/hud/elements/account.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/elements/account.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/elements/account.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/elements/account.ts",
+        "to": "src/hud/colors.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/elements/account.ts",
+        "to": "src/utils/config-dir.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hud/elements/agents.ts",
         "to": "src/features/agent-addressability/index.ts",
         "kind": "imports"
@@ -70857,6 +70912,11 @@
         "from": "src/hud/elements/hostname.ts",
         "to": "src/hud/colors.ts",
         "kind": "imports"
+      },
+      {
+        "from": "src/hud/elements/index.ts",
+        "to": "src/hud/elements/account.ts",
+        "kind": "exports"
       },
       {
         "from": "src/hud/elements/index.ts",
@@ -71361,6 +71421,11 @@
       {
         "from": "src/hud/render.ts",
         "to": "src/hud/colors.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hud/render.ts",
+        "to": "src/hud/elements/account.ts",
         "kind": "imports"
       },
       {
@@ -86435,12 +86500,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7573,
-      "edgeCount": 8321,
-      "importEdgeCount": 6959,
+      "nodeCount": 7575,
+      "edgeCount": 8332,
+      "importEdgeCount": 6969,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "bc1fd835f1dd1b32ce54d6636192bb0b818960f64df9829aaeb9ba4afb0593b2",
-  "manifestSha256": "7b2d88ff5feab40500b32539977635f969ee401c8957bd302e8b4252f51bd757"
+  "inventorySha256": "b3f0d0c6522ce1ad3f6cc47082fc1d52ca895c624d9befe8a5f2de83a0f299e8",
+  "manifestSha256": "d32811e2201b305ad2c1e33a7509cb23e1813881a682c565fe9a4336f315ad29"
 }
