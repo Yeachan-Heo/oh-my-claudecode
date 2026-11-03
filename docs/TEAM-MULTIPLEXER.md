@@ -69,6 +69,15 @@ unchanged.
 
 ## Surfaces beyond the team layer
 
+- **Notifications & replies** (`src/notifications`): when OMC runs inside a
+  Herdr pane (`HERDR_PANE_ID`, grammar-validated), pane/session detection
+  returns the Herdr pane id and the `herdr:<workspace_id>` marker, so
+  notification payloads and reply mappings address Herdr panes. Reply
+  injection routes by pane grammar: tmux panes keep send-keys; Herdr panes
+  deliver the sanitized reply through `agent prompt` (submission-verified —
+  one step replaces the tmux literal+Enter pair and the ask-user-question
+  Down/Enter walk). The reply listener starts on herdr-only machines when
+  herdr is elected; default tmux detection is unchanged.
 - **Rate-limit wait daemon** (`src/features/rate-limit-wait`): when herdr is
   elected, the daemon also scans live Herdr agent panes (`agent list` +
   `pane read`) with the same content classifiers, revalidates them against

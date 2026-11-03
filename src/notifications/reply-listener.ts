@@ -32,6 +32,11 @@ import {
   isTmuxAvailable,
 } from '../features/rate-limit-wait/tmux-detector.js';
 import {
+  captureHerdrWorkerPane,
+  herdrSendPrompt,
+} from '../team/herdr-session.js';
+import { isHerdrPaneId, resolveTeamMultiplexer } from '../team/tmux-session.js';
+import {
   lookupByMessageId,
   lockRegistryIfEmpty,
   removeMessagesByPane,
@@ -77,7 +82,7 @@ const DAEMON_ENV_ALLOWLIST = [
   'PATH', 'HOME', 'USERPROFILE',
   'USER', 'USERNAME', 'LOGNAME',
   'LANG', 'LC_ALL', 'LC_CTYPE',
-  'TERM', 'TMUX', 'TMUX_PANE',
+  'TERM', 'TMUX', 'TMUX_PANE', 'HERDR_PANE_ID',
   'TMPDIR', 'TMP', 'TEMP',
   'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
   'SHELL',
@@ -493,13 +498,60 @@ function sendReplyInjectionSteps(paneId: string, steps: ReplyInjectionStep[]): b
   }
 }
 
-function injectReply(
+/**
+ * Inject a reply into a Herdr agent pane through the semantic agent surface.
+ *
+ * herdrSendPrompt types the sanitized text and submits it in one
+ * submission-verified step (the literal + Enter pair the tmux path sends).
+ * The ask-user-question Down/Enter menu walk is a tmux-keyboard artifact;
+ * Herdr delivers the typed reply itself, which Claude's question UI accepts.
+ */
+export async function injectReplyIntoHerdrPane(
   paneId: string,
   text: string,
   platform: string,
   config: ReplyListenerDaemonConfig,
   mapping?: SessionMapping,
-): boolean {
+): Promise<boolean> {
+  let content = '';
+  try {
+    content = await captureHerdrWorkerPane(paneId, 15);
+  } catch (error) {
+    log(`WARN: Failed to capture herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
+  if (!content.trim()) {
+    log(`WARN: Herdr pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
+    removeMessagesByPane(paneId);
+    return false;
+  }
+
+  const steps = buildReplyInjectionSteps(text, platform, config, mapping);
+  const preview = steps.find((step) => step.kind === 'literal')?.value ?? '';
+
+  try {
+    await herdrSendPrompt(paneId, preview);
+    log(`Injected reply from ${platform} into herdr pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? '...' : ''}"`);
+    return true;
+  } catch (error) {
+    log(`ERROR: Failed to inject reply into herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function injectReply(
+  paneId: string,
+  text: string,
+  platform: string,
+  config: ReplyListenerDaemonConfig,
+  mapping?: SessionMapping,
+): Promise<boolean> {
+  // Herdr pane ids (wN:pM) route to the Herdr agent surface; tmux panes
+  // keep the send-keys path below.
+  if (isHerdrPaneId(paneId)) {
+    return injectReplyIntoHerdrPane(paneId, text, platform, config, mapping);
+  }
+
   // 1. Verify pane has content (non-empty pane = active session per registry)
   const content = capturePaneContent(paneId, 15);
 
@@ -657,7 +709,7 @@ async function pollDiscord(
       writeDaemonState(state);
 
       // Inject reply
-      const success = injectReply(mapping.tmuxPaneId, msg.content, 'discord', config, mapping);
+      const success = await injectReply(mapping.tmuxPaneId, msg.content, 'discord', config, mapping);
       if (success) {
         state.messagesInjected++;
 
@@ -870,7 +922,7 @@ async function pollTelegram(
       writeDaemonState(state);
 
       // Inject reply
-      const success = injectReply(mapping.tmuxPaneId, text, 'telegram', config, mapping);
+      const success = await injectReply(mapping.tmuxPaneId, text, 'telegram', config, mapping);
       if (success) {
         state.messagesInjected++;
 
@@ -1032,7 +1084,7 @@ async function pollLoop(): Promise<void> {
             }
 
             // Inject reply
-            const success = injectReply(targetPaneId, event.text, 'slack', config, targetMapping);
+            const success = await injectReply(targetPaneId, event.text, 'slack', config, targetMapping);
             if (success) {
               state.messagesInjected++;
               writeDaemonState(state);
@@ -1147,8 +1199,9 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
     };
   }
 
-  // Check for tmux
-  if (!isTmuxAvailable()) {
+  // Check for tmux. Herdr-backed panes inject through the Herdr agent
+  // surface, so the multiplexer being elected to herdr also unlocks startup.
+  if (!isTmuxAvailable() && resolveTeamMultiplexer() !== 'herdr') {
     return {
       success: false,
       message: 'tmux not available - reply injection requires tmux',
@@ -1349,7 +1402,7 @@ export function getReplyListenerStatus(): DaemonResponse {
  * @param timestamp - Slack request timestamp header (x-slack-request-timestamp)
  * @returns Object with injection result and validation details
  */
-export function processSlackSocketMessage(
+export async function processSlackSocketMessage(
   rawMessage: string,
   connectionState: SlackConnectionStateTracker,
   paneId: string | null,
@@ -1358,7 +1411,7 @@ export function processSlackSocketMessage(
   rateLimiter: RateLimiter,
   signature?: string,
   timestamp?: string,
-): { injected: boolean; validation: SlackValidationResult } {
+): Promise<{ injected: boolean; validation: SlackValidationResult }> {
   // 1. Validate the Slack message
   const validation = validateSlackMessage(
     rawMessage,
@@ -1418,7 +1471,7 @@ export function processSlackSocketMessage(
   }
 
   // 5. Inject reply (applies sanitization + pane verification)
-  const success = injectReply(paneId, text, 'slack', config);
+  const success = await injectReply(paneId, text, 'slack', config);
   if (success) {
     state.messagesInjected++;
   } else {

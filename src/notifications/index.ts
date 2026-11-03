@@ -55,7 +55,9 @@ export {
 export {
   getCurrentTmuxSession,
   getCurrentTmuxPaneId,
+  getCurrentHerdrPaneId,
   getTeamTmuxSessions,
+  getTeamHerdrWorkspaces,
   formatTmuxInfo,
 } from "./tmux.js";
 export {
