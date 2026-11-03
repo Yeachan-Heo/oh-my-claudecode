@@ -381,14 +381,17 @@ export const DEFAULT_FEEDBACK_TIMEOUT_MS = 600_000;
 /**
  * Resolve the per-command budget: `--timeout <seconds>`, then
  * OMC_RALPH_VERIFY_TIMEOUT_SECONDS, then the 10-minute default.
- * Returns null for a value that is not a positive number.
+ * Returns null for a value that is not a positive number of milliseconds:
+ * `spawnSync` treats a 0 timeout as "no deadline", so a budget that rounds to
+ * zero (for example `--timeout 0.0001`) must be rejected, not passed through.
  */
 export function resolveFeedbackTimeoutMs(raw?: string): number | null {
   const value = raw ?? process.env.OMC_RALPH_VERIFY_TIMEOUT_SECONDS;
   if (value === undefined || value.trim() === '') return DEFAULT_FEEDBACK_TIMEOUT_MS;
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  return Math.round(seconds * 1000);
+  const timeoutMs = Math.round(seconds * 1000);
+  return timeoutMs >= 1 ? timeoutMs : null;
 }
 
 /** Run one feedback command on the current tree and fingerprint its failures. */
@@ -562,9 +565,22 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   if (!path) return runGate();
   // Two concurrent gates compete for the same machine and can interleave their
   // reads and re-records. Serialize on the baseline itself.
-  const lock = acquireFileLockSync(lockPathFor(path));
+  let lock: ReturnType<typeof acquireFileLockSync> = null;
+  let lockError: string | null = null;
+  try {
+    lock = acquireFileLockSync(lockPathFor(path));
+  } catch (error) {
+    lockError = error instanceof Error ? error.message : String(error);
+  }
   if (!lock) {
-    console.error(`omc ralph verify: another verify is running for session ${sessionId} (${lockPathFor(path)})`);
+    const message = lockError
+      ? `could not acquire the session lock (${lockPathFor(path)}): ${lockError}`
+      : `another verify is running for session ${sessionId} (${lockPathFor(path)})`;
+    console.error(`omc ralph verify: ${message}`);
+    if (options.json) {
+      // A JSON consumer needs a parseable result for this outcome too.
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(readCurrentBaseline()), commands: [], newFailures: [], resolvedFailures: [], unrunnableCommands: [], error: message }));
+    }
     return 1;
   }
   try {

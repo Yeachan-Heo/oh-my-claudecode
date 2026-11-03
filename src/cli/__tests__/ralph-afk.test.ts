@@ -16,7 +16,7 @@ vi.mock('../../factory/map-ingest.js', async (importOriginal) => {
 });
 
 import { AFK_ALLOWED_TOOLS, AFK_INCLUDE_USER_SETTINGS_ENV, AFK_SPAWN_FLAGS } from '../../hooks/session-end/spawn-next.js';
-import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, runFeedbackCommand, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
+import { materializeRalphSkill, ralphAfkArgv, ralphCommand, ralphVerify, resolveFeedbackCommands, resolveFeedbackTimeoutMs, runFeedbackCommand, DEFAULT_FEEDBACK_TIMEOUT_MS, RALPH_AFK_FEEDBACK_ENV, RALPH_AFK_SESSION_COMMANDS } from '../commands/ralph.js';
 import { acquireFileLockSync, lockPathFor, releaseFileLockSync } from '../../lib/file-lock.js';
 import { Command } from 'commander';
 
@@ -432,6 +432,66 @@ operable program or batch file.`);
     } finally {
       errorSpy.mockRestore();
       if (lock) releaseFileLockSync(lock);
+    }
+  });
+
+  it('emits a parseable result when a JSON run loses the session lock', () => {
+    writePrinter('ok');
+    const baselineFile = join(dir, '.omc', 'state', 'sessions', 'sess-lock-json', 'feedback-baseline.json');
+    const lock = acquireFileLockSync(lockPathFor(baselineFile));
+    expect(lock).not.toBeNull();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(ralphVerify({ session: 'sess-lock-json', json: true }, dir)).toBe(1);
+      const result = JSON.parse(String(logSpy.mock.calls.at(-1)?.[0])) as {
+        sessionId: string;
+        commands: string[];
+        newFailures: string[];
+        error: string;
+      };
+      expect(result.sessionId).toBe('sess-lock-json');
+      expect(result.commands).toEqual([]);
+      expect(result.newFailures).toEqual([]);
+      expect(result.error).toContain('another verify is running');
+    } finally {
+      logSpy.mockRestore();
+      errorSpy.mockRestore();
+      if (lock) releaseFileLockSync(lock);
+    }
+  });
+});
+
+describe('ralph verify timeout resolution', () => {
+  afterEach(() => {
+    delete process.env.OMC_RALPH_VERIFY_TIMEOUT_SECONDS;
+  });
+
+  it('defaults to ten minutes and reads the environment override', () => {
+    expect(resolveFeedbackTimeoutMs()).toBe(DEFAULT_FEEDBACK_TIMEOUT_MS);
+    process.env.OMC_RALPH_VERIFY_TIMEOUT_SECONDS = '1800';
+    expect(resolveFeedbackTimeoutMs()).toBe(1_800_000);
+    expect(resolveFeedbackTimeoutMs('90')).toBe(90_000);
+  });
+
+  it.each(['0', '-5', 'abc', '0.0001', 'NaN'])('rejects %s instead of passing it to spawnSync', (value) => {
+    // spawnSync treats 0 as "no deadline"; a budget that rounds to zero would
+    // let a hung suite hold the session lock forever.
+    expect(resolveFeedbackTimeoutMs(value)).toBeNull();
+  });
+
+  it('rejects a CLI --timeout that rounds to zero', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const program = new Command();
+      program.exitOverride();
+      ralphCommand(program);
+      await program.parseAsync(['ralph', 'verify', '--timeout', '0.0001'], { from: 'user' });
+      expect(process.exitCode).toBe(1);
+      expect(errorSpy.mock.calls.flat().join('\n')).toContain('--timeout must be a positive number of seconds');
+    } finally {
+      process.exitCode = undefined;
+      errorSpy.mockRestore();
     }
   });
 });

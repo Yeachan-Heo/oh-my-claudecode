@@ -17,12 +17,12 @@ NON-NEGOTIABLE, runs before any story work and at every verification gate:
 
 0. Resolve the CLI once per run. Use `omc` when `command -v omc` succeeds. On a
    plugin-only install there is no `omc` on PATH; use the plugin-shaped form
-   `node "${CLAUDE_PLUGIN_ROOT}/bin/oh-my-claudecode.js"` instead — the same
-   fallback `ultragoal` and `cancel` already document. Every `omc ralph verify`
-   below means the resolved command. An `omc ralph afk` session grants only the
-   bare `Bash(omc ralph verify:*)` form, so it needs `omc` on PATH; if neither
-   form is available, STOP and report the failure — do not fall back to
-   hand-rolled judgment.
+   `node "$CLAUDE_PLUGIN_ROOT"/bridge/cli.cjs` instead — the same prefix OMC's
+   own skill renderer emits, and the same fallback `ultragoal` and `cancel`
+   already document. Every `omc ralph verify` below means the resolved command.
+   An `omc ralph afk` session grants only the bare `Bash(omc ralph verify:*)`
+   form, so it needs `omc` on PATH; if neither form is available, STOP and
+   report the failure — do not fall back to hand-rolled judgment.
 
 1. FIRST ITERATION, before picking a story: run `omc ralph verify --write-baseline --session <sessionId>` (session id: read OMC_SESSION_ID if set — `omc ralph afk` exports it — else the one in the Ralph continuation context / active PRD path; use the SAME id for every call in this run). This records the feedback baseline. If the command is unavailable or denied, STOP and report the failure — do not fall back to hand-rolled judgment.
 2. EVERY verification gate (story verification, post-deslop re-verification): run `omc ralph verify --session <sessionId>` and obey the exit code — 0 = pass (baseline-only failures are recorded warnings, never a story failure), 1 = new failures to fix. Two infrastructure causes also exit 1 and are printed on their own lines: `timed out` (the command exceeded its per-command budget; partial output is discarded) and `another verify is running` (runs for one session are serialized). Neither is a story failure: retry after the other run finishes, or raise the budget with `--timeout <seconds>` (or `OMC_RALPH_VERIFY_TIMEOUT_SECONDS`) when the suite legitimately needs more than 600 s.
