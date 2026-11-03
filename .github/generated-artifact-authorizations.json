@@ -7,9 +7,9 @@
       "pullNumber": 4822,
       "targetRef": "main",
       "mergeBaseSha": "ea2230bf6e3c4337588a14439b095b19b1f1f0ca",
-      "headSha": "e210b466b",
+      "headSha": "e210b466b0f61875aedcd3e3b7af17d9fea1e2f4",
       "owner": "Yeachan-Heo",
-      "expiresAt": "2026-12-03T04:46:38.210Z",
+      "expiresAt": "2026-12-03T04:50:17.856Z",
       "generatedDelta": {
         "count": 5720,
         "sha256": "82c3801eb5b014ae00bf7c02905d35ca9bddb236fc31db1952545a28a14c3ef7"
