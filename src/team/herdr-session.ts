@@ -349,8 +349,12 @@ export function herdrWorkspaceIdFromSessionTarget(sessionTarget: string): string
   return workspaceId;
 }
 
-/** Create the team workspace; workers become tabs inside it. */
-export async function herdrCreateTeamWorkspace(
+/**
+ * Create a workspace for any Herdr-backed surface. Team code uses
+ * herdrCreateTeamWorkspace for the `omc-team-` label contract; launch and
+ * interop surfaces call this directly with their own labels.
+ */
+export async function herdrCreateWorkspace(
   cwd: string,
   label: string,
   options: { env?: NodeJS.ProcessEnv; execFn?: HerdrExecOptions['execFn'] } = {},
@@ -364,6 +368,15 @@ export async function herdrCreateTeamWorkspace(
     throw new HerdrError('missing_workspace_id', 'workspace create did not return workspace_id');
   }
   return workspaceId;
+}
+
+/** Create the team workspace; workers become tabs inside it. */
+export async function herdrCreateTeamWorkspace(
+  cwd: string,
+  label: string,
+  options: { env?: NodeJS.ProcessEnv; execFn?: HerdrExecOptions['execFn'] } = {},
+): Promise<string> {
+  return herdrCreateWorkspace(cwd, label, options);
 }
 
 /** Split-equivalent: one tab per worker, returning the new root pane id. */

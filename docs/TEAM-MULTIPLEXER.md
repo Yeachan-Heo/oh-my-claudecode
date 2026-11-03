@@ -67,6 +67,15 @@ unchanged.
   teardown against a real binary, leaving the machine as found. Verified
   against Herdr v0.9.5.
 
+## Surfaces beyond the team layer
+
+- **`omc` launch** (`src/cli/launch.ts`): with the herdr backend selected,
+  `omc` launches Claude as a tab in a fresh Herdr workspace labelled with the
+  tmux session identity (`omc-<dir>-<branch>-<ts>`), reusing the same env
+  forwarding and 0600 credential transport as the tmux paths. OMX prints
+  attach guidance for the Herdr TUI instead of attaching (the Herdr server
+  owns the pane). A Herdr failure falls back to the default tmux/direct flow.
+
 ## Limitations
 
 - HUD watch panes, tmux layout options, and clipboard configuration are
