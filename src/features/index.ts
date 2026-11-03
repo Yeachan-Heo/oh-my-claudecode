@@ -358,7 +358,6 @@ export {
   type WatchCheckRun,
   type WatchCheckState,
   type WatchMergeability,
-  type WatchMergeStateStatus,
   type WatchOptions,
   type WatchPrFacts,
   type WatchReviewDecision,
@@ -368,10 +367,8 @@ export {
 // verification-ledger - durable append-only verification verdict TSV
 export {
   appendLedgerEntry,
-  defaultLedgerPath,
   isVerificationVerdict,
   LEDGER_HEADER,
-  LEDGER_STATE_RELATIVE_PATH,
   readLedger,
   renderLedgerCell,
   renderLedgerRow,

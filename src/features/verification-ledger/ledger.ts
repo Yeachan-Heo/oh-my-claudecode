@@ -11,9 +11,8 @@
 
 import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, appendFileSync, statSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { withFileLock, lockPathFor } from '../../lib/file-lock.js';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
 
 export const VERIFICATION_VERDICTS = [
   'live-ui-verified',
@@ -49,19 +48,6 @@ export interface LedgerEntry {
 
 export const LEDGER_HEADER =
   'ts\tkind\tref\tsha\tverdict\tevidence\tverifier';
-
-/** Ledger location under the OMC state root. */
-export const LEDGER_STATE_RELATIVE_PATH = 'state/verification-ledger.tsv';
-
-/**
- * The canonical ledger path under OMC's state root, so callers never
- * hard-code `.omc/state/`: with `OMC_STATE_DIR` (or a workspace marker)
- * mapping project state elsewhere, a hard-coded working-tree path would
- * split the ledger from the rest of OMC state.
- */
-export function defaultLedgerPath(): string {
-  return join(getOmcRoot(), LEDGER_STATE_RELATIVE_PATH);
-}
 
 /**
  * Render one cell: tabs and newlines become spaces, and a cell that starts
@@ -136,28 +122,19 @@ export async function readLedger(ledgerPath: string): Promise<LedgerEntry[]> {
   }
   const text = await readFile(ledgerPath, 'utf8');
   const entries: LedgerEntry[] = [];
-  for (const raw of text.split('\n')) {
-    // A CRLF-written ledger leaves a carriage return on the last cell;
-    // strip it so the row parses exactly as an LF row would.
-    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+  for (const line of text.split('\n')) {
     if (!line || line === LEDGER_HEADER) continue;
     const cells = line.split('\t');
     if (cells.length !== 7) continue;
     const [ts, kind, ref, sha, verdict, evidence, verifier] = cells;
-    // Trim the required cells so a hand-edited row of spaces fails the same
-    // writer/reader invariant appendLedgerEntry enforces; whitespace-only
-    // cells must not read back as a semantically valid entry.
-    const tsCell = ts.trim();
-    const kindCell = kind.trim();
-    const verdictCell = verdict.trim();
-    if (!tsCell || !kindCell || !verdictCell || !isVerificationVerdict(verdictCell)) continue;
+    if (!ts || !kind || !verdict || !isVerificationVerdict(verdict)) continue;
     if (!evidence || !evidence.trim()) continue;
     entries.push({
-      ts: tsCell,
-      kind: kindCell,
+      ts,
+      kind,
       ref: ref || undefined,
       sha: sha || undefined,
-      verdict: verdictCell,
+      verdict,
       evidence: evidence ?? '',
       verifier: verifier || undefined,
     });

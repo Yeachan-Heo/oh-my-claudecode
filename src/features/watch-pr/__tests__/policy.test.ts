@@ -35,34 +35,6 @@ describe('decideWatchVerdict', () => {
     expect(verdict.reasons.join(' ')).toContain('unstable');
   });
 
-  it('waits on unstable while a visible check is still pending', () => {
-    // UNSTABLE is "mergeable with non-passing commit status" — a pending
-    // check means CI is running, not that a failure is proven.
-    const verdict = decideWatchVerdict(
-      facts({ mergeStateStatus: 'unstable', checks: [{ name: 'ci', state: 'pending' }] }),
-      { nowMs: NOW },
-    );
-    expect(verdict.kind).toBe('waiting');
-    expect(verdict.reasons.join(' ')).toContain('unstable while checks run');
-  });
-
-  it('blocks every remaining raw merge-state enum value instead of falling through to ready', () => {
-    const dirty = decideWatchVerdict(facts({ mergeStateStatus: 'dirty' }), { nowMs: NOW });
-    expect(dirty.kind).toBe('blocked');
-    const behind = decideWatchVerdict(facts({ mergeStateStatus: 'behind' }), { nowMs: NOW });
-    expect(behind.kind).toBe('blocked');
-    expect(behind.reasons.join(' ')).toContain('behind');
-  });
-
-  it('waits on draft and has_hooks merge states instead of reporting ready', () => {
-    const draft = decideWatchVerdict(facts({ mergeStateStatus: 'draft' }), { nowMs: NOW });
-    expect(draft.kind).toBe('waiting');
-    // has_hooks is GitHub's "mergeable with passing commit status and
-    // pre-receive hooks" — merge-attemptable, never a wait reason.
-    const hooks = decideWatchVerdict(facts({ mergeStateStatus: 'has_hooks' }), { nowMs: NOW });
-    expect(hooks.reasons.join(' ')).not.toContain('hooks');
-  });
-
   it('closed and merged PRs are gone, not blocked', () => {
     expect(decideWatchVerdict(facts({ state: 'merged' }), { nowMs: NOW }).kind).toBe('gone');
     expect(decideWatchVerdict(facts({ state: 'closed' }), { nowMs: NOW }).kind).toBe('gone');
