@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
-    "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
+    "head": "a9ba550df0f15c067d2e96e6177df63d19f2af30",
+    "sourceSha256": "37a3aef1b5fc3c4d269e4dbb60f0012655aa20350c7270d4f8f6cbd9999a7c3a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "e17f9b9a18b773aa7cd02df329b010f4c5489bc7",
-  "sourceSha256": "dcc4119947d9791fd81ef8956692daf856f1de752ac893a68366e3171440ebe9",
+  "head": "a9ba550df0f15c067d2e96e6177df63d19f2af30",
+  "sourceSha256": "37a3aef1b5fc3c4d269e4dbb60f0012655aa20350c7270d4f8f6cbd9999a7c3a",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 331,
+      "hookFiles": 333,
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1428,
-      "total": 1453
+      "srcFiles": 1431,
+      "total": 1456
     },
     "generated": {
       "distFiles": 5471,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 331,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 58
@@ -350,9 +350,11 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/closeout.test.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/__tests__/prd-read.test.ts",
+      "src/hooks/ralph/closeout.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -6593,9 +6595,11 @@
       "src/hooks/project-memory/storage.ts",
       "src/hooks/project-memory/types.ts",
       "src/hooks/prompt-prerequisites/index.ts",
+      "src/hooks/ralph/__tests__/closeout.test.ts",
       "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
       "src/hooks/ralph/__tests__/jev-verdict-shadow.test.ts",
       "src/hooks/ralph/__tests__/prd-read.test.ts",
+      "src/hooks/ralph/closeout.ts",
       "src/hooks/ralph/feedback-baseline.ts",
       "src/hooks/ralph/index.ts",
       "src/hooks/ralph/jev-shadow.ts",
@@ -39002,6 +39006,11 @@
         "path": "src/cli/__tests__/ralph-afk.test.ts"
       },
       {
+        "id": "src/cli/__tests__/ralph-closeout.test.ts",
+        "kind": "src",
+        "path": "src/cli/__tests__/ralph-closeout.test.ts"
+      },
+      {
         "id": "src/cli/__tests__/self-improve-paths.test.ts",
         "kind": "src",
         "path": "src/cli/__tests__/self-improve-paths.test.ts"
@@ -41087,6 +41096,11 @@
         "path": "src/hooks/prompt-prerequisites/index.ts"
       },
       {
+        "id": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/__tests__/closeout.test.ts"
+      },
+      {
         "id": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/__tests__/feedback-baseline.test.ts"
@@ -41100,6 +41114,11 @@
         "id": "src/hooks/ralph/__tests__/prd-read.test.ts",
         "kind": "hook",
         "path": "src/hooks/ralph/__tests__/prd-read.test.ts"
+      },
+      {
+        "id": "src/hooks/ralph/closeout.ts",
+        "kind": "hook",
+        "path": "src/hooks/ralph/closeout.ts"
       },
       {
         "id": "src/hooks/ralph/feedback-baseline.ts",
@@ -49980,6 +49999,11 @@
       },
       {
         "from": "src/__tests__/hud/omc-state.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/hud/omc-state.test.ts",
         "to": "src/hud/omc-state.ts",
         "kind": "imports"
       },
@@ -56334,6 +56358,46 @@
         "kind": "imports"
       },
       {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/cli/commands/ralph.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/__tests__/ralph-closeout.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/cli/__tests__/self-improve-paths.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -57486,6 +57550,11 @@
       {
         "from": "src/cli/commands/ralph.ts",
         "to": "src/features/builtin-skills/skills.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/cli/commands/ralph.ts",
+        "to": "src/hooks/ralph/closeout.ts",
         "kind": "imports"
       },
       {
@@ -67019,6 +67088,36 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/closeout.test.ts",
+        "to": "src/hooks/ralph/closeout.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -67101,6 +67200,16 @@
       {
         "from": "src/hooks/ralph/__tests__/prd-read.test.ts",
         "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/closeout.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/closeout.ts",
+        "to": "external:path",
         "kind": "imports"
       },
       {
@@ -71332,6 +71441,11 @@
         "from": "src/hud/omc-state.ts",
         "to": "src/hooks/autopilot/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/hud/omc-state.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
       },
       {
         "from": "src/hud/omc-state.ts",
@@ -86435,12 +86549,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7573,
-      "edgeCount": 8321,
-      "importEdgeCount": 6959,
+      "nodeCount": 7576,
+      "edgeCount": 8340,
+      "importEdgeCount": 6978,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "bc1fd835f1dd1b32ce54d6636192bb0b818960f64df9829aaeb9ba4afb0593b2",
-  "manifestSha256": "7b2d88ff5feab40500b32539977635f969ee401c8957bd302e8b4252f51bd757"
+  "inventorySha256": "0a874a96adc629746f82b46c157bd85b3ba734ca77f362ab35e0011afd53d247",
+  "manifestSha256": "8c49e064990d194b1e20e1b085ddcf05710da44f403167ffbb055ffe9de5efb8"
 }
