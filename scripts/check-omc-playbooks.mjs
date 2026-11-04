@@ -218,7 +218,10 @@ async function main() {
     }
     if (allBasesFound) {
       ANCHOR_RE.lastIndex = 0;
-      const body = source.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
+      // The BOM is stripped before the frontmatter fence is removed, or a
+      // BOM-prefixed `---` leaves the frontmatter inside the anchor-scanned
+      // body.
+      const body = stripLeadingUtf8Bom(source).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
       let anchor;
       while ((anchor = ANCHOR_RE.exec(body)) !== null) {
         const quoted = unescapeAnchor(anchor[2]);

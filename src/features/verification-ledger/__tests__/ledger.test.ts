@@ -99,6 +99,20 @@ describe('verification ledger', () => {
     rmSync(dirname(path), { recursive: true, force: true });
   });
 
+  it('parses CRLF rows without retaining carriage returns', async () => {
+    const path = tempLedger();
+    writeFileSync(
+      path,
+      `${LEDGER_HEADER}\r\n2026-10-25T00:00:00Z\tverify\tref\tsha\tunit-test-verified\tevidence\tbabysit\r\n`,
+      'utf8',
+    );
+    const entries = await readLedger(path);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].verifier).toBe('babysit');
+    expect(entries[0].verdict).toBe('unit-test-verified');
+    rmSync(dirname(path), { recursive: true, force: true });
+  });
+
   it('neutralizes formula-leading and multiline cells', () => {
     expect(renderLedgerCell('=SUM(A1)')).toBe("'=SUM(A1)");
     expect(renderLedgerCell('+cmd')).toBe("'+cmd");

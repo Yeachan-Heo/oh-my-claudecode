@@ -11,6 +11,7 @@ export {
   type WatchCheckRun,
   type WatchCheckState,
   type WatchMergeability,
+  type WatchMergeStateStatus,
   type WatchOptions,
   type WatchPrFacts,
   type WatchReviewDecision,
