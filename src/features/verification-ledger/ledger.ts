@@ -136,7 +136,10 @@ export async function readLedger(ledgerPath: string): Promise<LedgerEntry[]> {
   }
   const text = await readFile(ledgerPath, 'utf8');
   const entries: LedgerEntry[] = [];
-  for (const line of text.split('\n')) {
+  for (const raw of text.split('\n')) {
+    // A CRLF-written ledger leaves a carriage return on the last cell;
+    // strip it so the row parses exactly as an LF row would.
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
     if (!line || line === LEDGER_HEADER) continue;
     const cells = line.split('\t');
     if (cells.length !== 7) continue;
