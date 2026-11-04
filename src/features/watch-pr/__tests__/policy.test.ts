@@ -35,6 +35,17 @@ describe('decideWatchVerdict', () => {
     expect(verdict.reasons.join(' ')).toContain('unstable');
   });
 
+  it('waits on unstable while a visible check is still pending', () => {
+    // UNSTABLE is "mergeable with non-passing commit status" — a pending
+    // check means CI is running, not that a failure is proven.
+    const verdict = decideWatchVerdict(
+      facts({ mergeStateStatus: 'unstable', checks: [{ name: 'ci', state: 'pending' }] }),
+      { nowMs: NOW },
+    );
+    expect(verdict.kind).toBe('waiting');
+    expect(verdict.reasons.join(' ')).toContain('unstable while checks run');
+  });
+
   it('blocks every remaining raw merge-state enum value instead of falling through to ready', () => {
     const dirty = decideWatchVerdict(facts({ mergeStateStatus: 'dirty' }), { nowMs: NOW });
     expect(dirty.kind).toBe('blocked');
