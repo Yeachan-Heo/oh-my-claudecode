@@ -177,6 +177,15 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('resolves a quoted extends scalar', () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(root, 'quoted.md', '---\nextends: "tdd"\nwhen: Quoted extends.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n');
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('no bundled skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('rejects a semantically empty when scalar', () => {
     const { root, skillsRoot } = buildProject();
     writePlaybook(root, 'quoted.md', '---\nextends: tdd\nwhen: ""\n---\n\nBody.\n');

@@ -101,14 +101,24 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
   }
 
   const blocked: string[] = [];
+  const waiting: string[] = [];
   if (facts.mergeable === 'conflicting') {
     blocked.push('merge conflicts — branch owner decides the resolution');
   }
   if (facts.mergeStateStatus === 'blocked') {
     blocked.push('aggregate merge gate is blocked');
   }
+  const pending = facts.checks.filter((c) => c.state === 'pending');
   if (facts.mergeStateStatus === 'unstable') {
-    blocked.push('aggregate merge state is unstable — failing or missing required checks; re-poll');
+    // UNSTABLE is "mergeable with non-passing commit status" — that includes
+    // statuses that have not finished yet. While a visible check is still
+    // pending the PR is running CI (waiting); only an unstable aggregate with
+    // nothing pending proves a failure and blocks.
+    if (pending.length > 0) {
+      waiting.push('aggregate merge state is unstable while checks run — re-poll');
+    } else {
+      blocked.push('aggregate merge state is unstable — failing or missing required checks; re-poll');
+    }
   }
   if (facts.mergeStateStatus === 'dirty') {
     blocked.push('aggregate merge state is dirty — merge conflicts; branch owner decides the resolution');
@@ -134,7 +144,6 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
     return { kind: 'blocked', reasons: blocked };
   }
 
-  const waiting: string[] = [];
   if (facts.isDraft) {
     waiting.push('draft');
   }
@@ -151,7 +160,6 @@ export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions
   // commit status and pre-receive hooks" — the hooks belong to the server's
   // merge attempt, not to a check that will later report. Re-polling here
   // would hold an otherwise green PR in waiting forever.
-  const pending = facts.checks.filter((c) => c.state === 'pending');
   if (pending.length > 0) {
     waiting.push(`pending checks: ${pending.map((c) => c.name).join(', ')}`);
   }
