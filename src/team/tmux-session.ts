@@ -22,12 +22,14 @@ import {
   herdrCloseWorkspace,
   herdrCreateTeamWorkspace,
   herdrCreateWorkerTab,
+  herdrPaneWorkspaceMembership,
   herdrRunPaneCommand,
   herdrSendKey,
   herdrSendPrompt,
   herdrWorkspaceIdFromPaneId,
   herdrWorkspaceIdFromSessionTarget,
   isHerdrWorkerAlive,
+  type HerdrExecOptions,
 } from "./herdr-session.js";
 import {
   tmuxExec,
@@ -912,7 +914,9 @@ export function resolveTeamMultiplexer(
 
 /** Herdr pane ids look like `wN:pM` (workspace-qualified, never `%N`). */
 export function isHerdrPaneId(value: string | undefined): boolean {
-  return typeof value === "string" && /^w[0-9a-z]+:p[0-9a-z]+$/i.test(value.trim());
+  return (
+    typeof value === "string" && /^w[0-9a-z]+:p[0-9a-z]+$/i.test(value.trim())
+  );
 }
 
 /** Herdr team sessions are persisted as `herdr:<workspace_id>`. */
@@ -1228,6 +1232,8 @@ type MailboxOwnershipCommand = (
 export interface MailboxTargetOwnershipDependencies {
   tmuxExec: MailboxOwnershipCommand;
   cmuxExec: MailboxOwnershipCommand;
+  /** Injectable Herdr exec (execFile shape) for the Herdr ownership proof. */
+  herdrExec?: HerdrExecOptions["execFn"];
   serverIdentityDependencies?: TmuxServerIdentityDependencies;
 }
 
@@ -1252,9 +1258,15 @@ export async function verifyTeamTargetOwnership(
   // If pane id is tmux-format (%...) then use tmux provider even if session is 'cmux:...'.
   const isNativeCmuxPaneFormat = !TMUX_MAILBOX_PANE_ID.test(target.paneId);
   let expectedProvider: "tmux" | "cmux" | "herdr";
-  if (isHerdrSessionTarget(target.providerTarget) && isHerdrPaneId(target.paneId)) {
+  if (
+    isHerdrSessionTarget(target.providerTarget) &&
+    isHerdrPaneId(target.paneId)
+  ) {
     expectedProvider = "herdr";
-  } else if (target.providerTarget.startsWith("cmux:") && isNativeCmuxPaneFormat) {
+  } else if (
+    target.providerTarget.startsWith("cmux:") &&
+    isNativeCmuxPaneFormat
+  ) {
     expectedProvider = "cmux";
   } else {
     expectedProvider = "tmux";
@@ -1264,16 +1276,28 @@ export async function verifyTeamTargetOwnership(
 
   if (target.provider === "herdr") {
     if (
-      typeof target.providerTarget !== "string"
-      || target.providerTarget.length === 0
-      || target.providerTarget !== target.providerTarget.trim()
-      || !isHerdrPaneId(target.paneId)
+      typeof target.providerTarget !== "string" ||
+      target.providerTarget.length === 0 ||
+      target.providerTarget !== target.providerTarget.trim() ||
+      !isHerdrPaneId(target.paneId)
     ) {
       return { kind: "unavailable" };
     }
     try {
-      // The live-agent inventory proves the pane still hosts a running worker.
-      if (!(await isHerdrWorkerAlive(target.paneId))) return { kind: "foreign" };
+      // Pre-launch ownership proves pane existence + membership in the
+      // configured workspace, not agent liveness: a freshly allocated worker
+      // tab hosts only a shell until spawnOwnedWorkerInPane delivers the
+      // start command, so requiring a live agent here would reject every new
+      // tab as foreign. Live-agent presence stays a post-launch liveness
+      // concern (getWorkerLiveness). A workspace query that cannot be
+      // answered yields 'unavailable', never proof the pane is foreign.
+      const membership = await herdrPaneWorkspaceMembership(
+        target.paneId,
+        herdrWorkspaceIdFromSessionTarget(target.providerTarget),
+        { execFn: dependencies.herdrExec },
+      );
+      if (membership === "unavailable") return { kind: "unavailable" };
+      if (membership === "foreign") return { kind: "foreign" };
       return {
         kind: "owned",
         provider: "herdr",
@@ -2807,8 +2831,10 @@ export async function splitTeamWorkerPaneWithEvidence(
   try {
     if (provider === "herdr") {
       const workspaceId =
-        herdrWorkspaceId
-        || (isHerdrPaneId(splitTarget) ? herdrWorkspaceIdFromPaneId(splitTarget) : null);
+        herdrWorkspaceId ||
+        (isHerdrPaneId(splitTarget)
+          ? herdrWorkspaceIdFromPaneId(splitTarget)
+          : null);
       if (!workspaceId) {
         return {
           commandSucceeded: false,
@@ -3047,7 +3073,10 @@ export async function createTeamSession(
       `${TMUX_SESSION_PREFIX}-${sanitizeName(teamName)}`,
     );
     sessionAndWindow = `herdr:${workspaceId}`;
-    leaderPaneId = (process.env.HERDR_PANE_ID ?? "").trim() || envPaneId;
+    // The Herdr leader pane must be a Herdr pane (where `omc` was invoked).
+    // Never fall back to the tmux-context TMUX_PANE id: a tmux pane id in a
+    // Herdr team target would misroute split targeting and ownership proofs.
+    leaderPaneId = (process.env.HERDR_PANE_ID ?? "").trim();
     sessionMode = "split-pane";
   } else if (inCmux) {
     const cmuxLeaderSurface = (process.env.CMUX_SURFACE_ID ?? "").trim();
@@ -3354,8 +3383,11 @@ export async function createTeamSession(
     }
   }
 
-  if (!sessionAndWindow || !leaderPaneId) {
-    // Fallback when TMUX_PANE is unavailable/invalid.
+  // Fallback when TMUX_PANE is unavailable/invalid. Herdr never enters: its
+  // session target is the workspace id and an untracked leader (empty pane
+  // id) is valid — dereferencing the absent tmux identity here crashed
+  // herdr-only creation after the workspace was already allocated.
+  if (!herdrBackend && (!sessionAndWindow || !leaderPaneId)) {
     const contextResult = await tmuxCmdAsync(
       tmuxArgsForIdentity(tmuxServerIdentity!, [
         "display-message",
@@ -3523,7 +3555,13 @@ export async function createTeamSession(
   };
 
   if (workerCount <= 0) {
-    if (!inCmux) {
+    // Herdr-only creation has no tmux server identity by design: the team
+    // workspace is the provider resource. The tmux-only initialization below
+    // (mouse option, leader select-pane) would throw
+    // tmux_server_identity_unavailable AFTER the workspace was allocated,
+    // leaking it. Herdr needs none of it — the workspace allocation is the
+    // whole zero-worker creation.
+    if (!inCmux && !herdrBackend) {
       if (!tmuxServerIdentity)
         throw new Error("tmux_server_identity_unavailable");
       try {
@@ -4334,6 +4372,15 @@ export async function killOwnedWorkerPane(
   } as MailboxNotificationTarget);
   if (membership.kind !== "owned")
     throw new Error("owned_pane_membership_unverified");
+  if (ownership.provider === "herdr") {
+    // Herdr panes close through the Herdr engine, not the guarded tmux
+    // kill-pane (which would dereference an undefined tmux server identity
+    // and fail owned_pane_tmux_server_guard_failed). This is the teardown
+    // used by spawnOwnedWorkerInPane's failure handler and v2 startup
+    // rollback, so herdrClosePane must run before any tmux-only fallback.
+    await herdrClosePane(ownership.paneId);
+    return;
+  }
   if (ownership.provider === "cmux") {
     await cmuxCloseSurface(ownership.paneId);
     return;
@@ -4624,10 +4671,19 @@ function paneTailContainsLiteralLine(captured: string, text: string): boolean {
   return normalizeTmuxCapture(captured).includes(normalizeTmuxCapture(text));
 }
 
-async function paneCopyModeObservation(
+/**
+ * @internal Exported for testing only.
+ */
+export async function paneCopyModeObservation(
   paneId: string,
   tmuxServerIdentity?: TmuxServerIdentity,
 ): Promise<boolean | null> {
+  // Herdr panes have no tmux copy mode, and pane read answers regardless of
+  // the pane's scroll state. Reporting a definitive false (not null) keeps
+  // Herdr startup contexts out of the tmux-only readiness checks; null would
+  // fail waitForStartupPaneReady with copy_mode_unknown before the pane is
+  // ever captured.
+  if (isHerdrPaneId(paneId)) return false;
   if (isCmuxSurfaceTarget(paneId)) return false;
   if (!tmuxServerIdentity) return null;
   if (
@@ -5038,7 +5094,12 @@ export async function sendToWorker(
     );
     return false;
   }
-  if (!isCmuxSurfaceTarget(paneId) && !isHerdrPaneId(paneId) && !tmuxServerIdentity) return false;
+  if (
+    !isCmuxSurfaceTarget(paneId) &&
+    !isHerdrPaneId(paneId) &&
+    !tmuxServerIdentity
+  )
+    return false;
   if (tmuxServerIdentity) {
     return guardedSendLiteralAndEnter(paneId, message, tmuxServerIdentity);
   }
@@ -5327,9 +5388,16 @@ export async function getWorkerLiveness(
   paneId: string,
 ): Promise<WorkerPaneLiveness> {
   if (isHerdrPaneId(paneId)) {
-    // Herdr's agent inventory lists live agents only, so absence is provable
-    // death (unlike cmux, which can never prove 'dead').
-    return (await isHerdrWorkerAlive(paneId)) ? "alive" : "dead";
+    // Herdr's agent inventory lists live agents only, so a successfully
+    // answered inventory that excludes the pane is provable death (unlike
+    // cmux, which can never prove 'dead'). A failed inventory query (server
+    // down, timeout, binary missing) is not evidence of exit: report
+    // 'unknown' rather than sending a live worker into post-exit handling.
+    try {
+      return (await isHerdrWorkerAlive(paneId)) ? "alive" : "dead";
+    } catch {
+      return "unknown";
+    }
   }
   if (isCmuxSurfaceTarget(paneId)) {
     try {
@@ -5463,7 +5531,14 @@ export async function getOwnedWorkerLiveness(
   ownership: WorkerPaneOwnership,
   dependencies: TmuxServerIdentityDependencies = {},
 ): Promise<WorkerPaneLiveness> {
+  // cmux/herdr ownership carries no tmux server identity; both dispatch by
+  // pane id. Without the herdr arm, herdr ownership produced by the split
+  // path fell through to the tmux identity guard below and always returned
+  // 'unknown', so probeStartupPaneActivity could never see an active worker
+  // and launch cleanup could never retire a proven-dead pane.
   if (ownership.provider === "cmux") return getWorkerLiveness(ownership.paneId);
+  if (ownership.provider === "herdr")
+    return getWorkerLiveness(ownership.paneId);
   if (!isValidTmuxServerIdentity(ownership.tmuxServerIdentity))
     return "unknown";
   const serverState = await observeTmuxServerIdentityWithBoundedRecheck(
@@ -5879,7 +5954,9 @@ export async function killTeamSession(
       // Panes are gone; close the team workspace itself so the Herdr sidebar
       // does not keep an empty omc-team entry.
       try {
-        await herdrCloseWorkspace(herdrWorkspaceIdFromSessionTarget(sessionName));
+        await herdrCloseWorkspace(
+          herdrWorkspaceIdFromSessionTarget(sessionName),
+        );
       } catch {
         return false;
       }
