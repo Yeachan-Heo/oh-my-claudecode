@@ -183,7 +183,15 @@ async function main() {
       problems.push(`${file}: frontmatter is missing a "when:" field`);
     }
     if (missingExtends) continue;
-    const baseNames = extendsValue.split(',').map((s) => s.trim()).filter(Boolean);
+    // Decode a quoted extends scalar the way the runtime frontmatter parser
+    // does, or `extends: "tdd"` splits to `"tdd"` and fails the name regex.
+    const extendsDecoded =
+      typeof extendsValue === 'string' && extendsValue.length > 1
+        && ((extendsValue.startsWith('"') && extendsValue.endsWith('"'))
+          || (extendsValue.startsWith("'") && extendsValue.endsWith("'")))
+        ? extendsValue.slice(1, -1)
+        : extendsValue;
+    const baseNames = extendsDecoded.split(',').map((s) => s.trim()).filter(Boolean);
     if (baseNames.length === 0) {
       problems.push(`${file}: "extends:" lists no skills (empty or separators only)`);
       continue;
