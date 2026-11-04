@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import {
   appendLedgerEntry,
+  defaultLedgerPath,
   isVerificationVerdict,
   LEDGER_HEADER,
+  LEDGER_STATE_RELATIVE_PATH,
   readLedger,
   renderLedgerCell,
 } from '../ledger.js';
@@ -158,5 +160,20 @@ describe('verification ledger', () => {
 
   it('reads an empty ledger as no entries', async () => {
     expect(await readLedger(join(tmpdir(), 'omc-ledger-missing.tsv'))).toEqual([]);
+  });
+
+  it('resolves the default ledger path under OMC_STATE_DIR when set', () => {
+    const stateDir = mkdtempSync(join(tmpdir(), 'omc-state-'));
+    const prev = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = stateDir;
+    try {
+      const resolved = defaultLedgerPath();
+      expect(resolved.startsWith(stateDir + sep)).toBe(true);
+      expect(resolved.endsWith(LEDGER_STATE_RELATIVE_PATH.split('/').join(sep))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = prev;
+      rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 });
