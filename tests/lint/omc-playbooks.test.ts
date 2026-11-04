@@ -224,6 +224,44 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('prints the validated playbooks directory, following OMC_STATE_DIR', () => {
+    const { root, skillsRoot } = buildProject();
+    // Assert behavior, not path text: whatever the flag prints, a playbook
+    // written there must be the one validation reads — on the default layout
+    // and under an OMC_STATE_DIR redirect (win32 8.3 short paths make text
+    // comparison unreliable).
+    const plain = spawnSync('node', [CHECKER, root, '--print-playbooks-dir'], { encoding: 'utf8' });
+    expect(plain.status).toBe(0);
+    expect(plain.stdout.trim().replace(/\\/g, '/').endsWith('playbooks')).toBe(true);
+    const plainDir = plain.stdout.trim();
+    writeFileSync(join(plainDir, 'flag-default.md'), '---\nextends: tdd\nwhen: Flag default.\n---\n\nBody.\n');
+    const validated = runChecker(root, skillsRoot);
+    expect(validated.status).toBe(0);
+
+    const stateDir = mkdtempSync(join(tmpdir(), 'omc-playbooks-state-'));
+    const prev = process.env.OMC_STATE_DIR;
+    process.env.OMC_STATE_DIR = stateDir;
+    try {
+      const redirected = spawnSync('node', [CHECKER, root, '--print-playbooks-dir'], { encoding: 'utf8' });
+      expect(redirected.status).toBe(0);
+      expect(redirected.stdout.trim().replace(/\\/g, '/').endsWith('playbooks')).toBe(true);
+      const redirectedDir = redirected.stdout.trim();
+      mkdirSync(redirectedDir, { recursive: true });
+      writeFileSync(
+        join(redirectedDir, 'flag-redirected.md'),
+        '---\n---\n\nBody.\n',
+      );
+      const invalid = runChecker(root, skillsRoot);
+      expect(invalid.status).toBe(1);
+      expect(invalid.stderr).toContain('flag-redirected.md');
+    } finally {
+      if (prev === undefined) delete process.env.OMC_STATE_DIR;
+      else process.env.OMC_STATE_DIR = prev;
+      rmSync(stateDir, { recursive: true, force: true });
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('reports a malformed anchor marker with an unterminated quote', () => {
     const { root, skillsRoot } = buildProject();
     writePlaybook(
