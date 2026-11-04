@@ -186,6 +186,23 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('indexes a quoted registered name the way the runtime parser does', () => {
+    const { root, skillsRoot } = buildProject();
+    mkdirSync(join(skillsRoot, 'plan'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, 'plan', 'SKILL.md'),
+      '---\nname: "omc-plan"\n---\n\n# Plan\n\nPlan body step.\n',
+    );
+    writePlaybook(
+      root,
+      'quoted-name.md',
+      '---\nextends: omc-plan\nwhen: Quoted-name target.\n---\n\n**After** "Plan body step." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.stderr).not.toContain('no bundled skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('validates a playbook saved with a UTF-8 BOM', () => {
     const { root, skillsRoot } = buildProject();
     writeFileSync(

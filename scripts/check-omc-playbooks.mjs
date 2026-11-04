@@ -99,8 +99,16 @@ function buildSkillIndex(skillsRoot) {
     if (!existsSync(bodyPath)) continue;
     index.set(entry.name, bodyPath);
     // A checked-out or copied SKILL.md may carry a UTF-8 BOM; strip it before
-    // parsing so the registered name still joins the index.
-    const registeredName = parseFrontmatter(stripLeadingUtf8Bom(readFileSync(bodyPath, 'utf8'))).name;
+    // parsing so the registered name still joins the index. Decode matching
+    // YAML quotes the way the runtime frontmatter parser does, or a quoted
+    // `name: "omc-plan"` indexes under the quoted scalar and rejects extends
+    // targets the runtime would accept.
+    const raw = parseFrontmatter(stripLeadingUtf8Bom(readFileSync(bodyPath, 'utf8'))).name;
+    const registeredName =
+      typeof raw === 'string' && raw.length > 1
+        && ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")))
+        ? raw.slice(1, -1)
+        : raw;
     if (registeredName) index.set(registeredName, bodyPath);
   }
   return index;
