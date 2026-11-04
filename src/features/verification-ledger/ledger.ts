@@ -141,14 +141,20 @@ export async function readLedger(ledgerPath: string): Promise<LedgerEntry[]> {
     const cells = line.split('\t');
     if (cells.length !== 7) continue;
     const [ts, kind, ref, sha, verdict, evidence, verifier] = cells;
-    if (!ts || !kind || !verdict || !isVerificationVerdict(verdict)) continue;
+    // Trim the required cells so a hand-edited row of spaces fails the same
+    // writer/reader invariant appendLedgerEntry enforces; whitespace-only
+    // cells must not read back as a semantically valid entry.
+    const tsCell = ts.trim();
+    const kindCell = kind.trim();
+    const verdictCell = verdict.trim();
+    if (!tsCell || !kindCell || !verdictCell || !isVerificationVerdict(verdictCell)) continue;
     if (!evidence || !evidence.trim()) continue;
     entries.push({
-      ts,
-      kind,
+      ts: tsCell,
+      kind: kindCell,
       ref: ref || undefined,
       sha: sha || undefined,
-      verdict,
+      verdict: verdictCell,
       evidence: evidence ?? '',
       verifier: verifier || undefined,
     });

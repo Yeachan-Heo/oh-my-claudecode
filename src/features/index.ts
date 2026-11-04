@@ -367,8 +367,10 @@ export {
 // verification-ledger - durable append-only verification verdict TSV
 export {
   appendLedgerEntry,
+  defaultLedgerPath,
   isVerificationVerdict,
   LEDGER_HEADER,
+  LEDGER_STATE_RELATIVE_PATH,
   readLedger,
   renderLedgerCell,
   renderLedgerRow,
