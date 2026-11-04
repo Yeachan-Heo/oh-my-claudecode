@@ -167,6 +167,32 @@ describe('check-omc-playbooks', () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it('reports both missing required fields before skipping anchor validation', () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(root, 'bare.md', '---\n---\n\nBody.\n');
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('missing an "extends:"');
+    expect(r.stderr).toContain('missing a "when:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('indexes a registered name from a BOM-prefixed bundled skill', () => {
+    const { root, skillsRoot } = buildProject();
+    writeFileSync(
+      join(skillsRoot, 'tdd', 'SKILL.md'),
+      '\uFEFF---\nname: test-driven-development\n---\n\n# TDD\n\nWrite the failing test first. Watch it fail for the intended reason.\n',
+    );
+    writePlaybook(
+      root,
+      'bom.md',
+      '---\nextends: test-driven-development\nwhen: Local checkout without a setup copy.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.stderr).not.toContain('no bundled skill');
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('reports a malformed anchor marker with an unterminated quote', () => {
     const { root, skillsRoot } = buildProject();
     writePlaybook(

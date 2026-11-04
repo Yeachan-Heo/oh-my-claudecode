@@ -27,6 +27,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
+import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 
 const args = process.argv.slice(2);
 const allowArchiveOnly = args.includes('--allow-archive-only');
@@ -97,7 +98,9 @@ function buildSkillIndex(skillsRoot) {
     const bodyPath = resolveSkillBodyPath(skillsRoot, entry.name);
     if (!existsSync(bodyPath)) continue;
     index.set(entry.name, bodyPath);
-    const registeredName = parseFrontmatter(readFileSync(bodyPath, 'utf8')).name;
+    // A checked-out or copied SKILL.md may carry a UTF-8 BOM; strip it before
+    // parsing so the registered name still joins the index.
+    const registeredName = parseFrontmatter(stripLeadingUtf8Bom(readFileSync(bodyPath, 'utf8'))).name;
     if (registeredName) index.set(registeredName, bodyPath);
   }
   return index;
@@ -146,13 +149,16 @@ async function main() {
     const source = readFileSync(join(playbooksDir, file), 'utf8');
     const fields = parseFrontmatter(source);
     const extendsValue = fields.extends;
-    if (!extendsValue) {
+    // One error per problem: record both missing required fields before
+    // deciding whether anchor validation can run at all.
+    const missingExtends = !extendsValue;
+    if (missingExtends) {
       problems.push(`${file}: frontmatter is missing an "extends:" field`);
-      continue;
     }
     if (!fields.when) {
       problems.push(`${file}: frontmatter is missing a "when:" field`);
     }
+    if (missingExtends) continue;
     const baseNames = extendsValue.split(',').map((s) => s.trim()).filter(Boolean);
     if (baseNames.length === 0) {
       problems.push(`${file}: "extends:" lists no skills (empty or separators only)`);
