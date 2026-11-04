@@ -16,49 +16,59 @@
  * Follows the daemon pattern from src/features/rate-limit-wait/daemon.ts
  */
 
-import { childEnv } from '../utils/windows-search.js';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
-import { join } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import { spawn } from 'child_process';
-import { randomUUID } from 'crypto';
-import { tmuxExec } from '../cli/tmux-utils.js';
-import { request as httpsRequest } from 'https';
-import { resolveDaemonModulePath } from '../utils/daemon-module-path.js';
-import { getGlobalOmcStateRoot } from '../utils/paths.js';
+import { childEnv } from "../utils/windows-search.js";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  unlinkSync,
+  chmodSync,
+  statSync,
+  appendFileSync,
+  renameSync,
+} from "fs";
+import { join } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
+import { spawn } from "child_process";
+import { randomUUID } from "crypto";
+import { tmuxExec } from "../cli/tmux-utils.js";
+import { request as httpsRequest } from "https";
+import { resolveDaemonModulePath } from "../utils/daemon-module-path.js";
+import { getGlobalOmcStateRoot } from "../utils/paths.js";
 import {
   capturePaneContent,
   sendToPane,
   isTmuxAvailable,
-} from '../features/rate-limit-wait/tmux-detector.js';
+} from "../features/rate-limit-wait/tmux-detector.js";
 import {
   captureHerdrWorkerPane,
   herdrSendPrompt,
-} from '../team/herdr-session.js';
-import { isHerdrPaneId, resolveTeamMultiplexer } from '../team/tmux-session.js';
+} from "../team/herdr-session.js";
+import { isHerdrPaneId, resolveTeamMultiplexer } from "../team/tmux-session.js";
 import {
   lookupByMessageId,
   lockRegistryIfEmpty,
   removeMessagesByPane,
   pruneStale,
   type SessionMapping,
-} from './session-registry.js';
-import { writeApprovalDecision } from '../graph/runtime/remote-approval.js';
+} from "./session-registry.js";
+import { writeApprovalDecision } from "../graph/runtime/remote-approval.js";
 
-import type { ReplyConfig } from './types.js';
-import { parseMentionAllowedMentions } from './config.js';
-import { redactTokens } from './redact.js';
+import type { ReplyConfig } from "./types.js";
+import { parseMentionAllowedMentions } from "./config.js";
+import { redactTokens } from "./redact.js";
 import {
   getProcessStartIdentity,
   isProcessAlive,
   isProcessIdentityLive,
   terminateOwnedProcessTree,
-} from '../platform/index.js';
+} from "../platform/index.js";
 import {
   validateSlackMessage,
   SlackConnectionStateTracker,
   type SlackValidationResult,
-} from './slack-socket.js';
+} from "./slack-socket.js";
 
 // ESM compatibility: __filename is not available in ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -79,23 +89,46 @@ const MAX_LOG_SIZE_BYTES = 1 * 1024 * 1024;
  * OMC_* notification env vars are forwarded so the daemon can call getNotificationConfig().
  */
 const DAEMON_ENV_ALLOWLIST = [
-  'PATH', 'HOME', 'USERPROFILE',
-  'USER', 'USERNAME', 'LOGNAME',
-  'LANG', 'LC_ALL', 'LC_CTYPE',
-  'TERM', 'TMUX', 'TMUX_PANE', 'HERDR_PANE_ID',
-  'TMPDIR', 'TMP', 'TEMP',
-  'XDG_RUNTIME_DIR', 'XDG_DATA_HOME', 'XDG_CONFIG_HOME',
-  'SHELL',
-  'NODE_ENV', 'NODE_EXTRA_CA_CERTS',
-  'HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'NO_PROXY', 'no_proxy',
-  'SystemRoot', 'SYSTEMROOT', 'windir', 'COMSPEC',
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "USER",
+  "USERNAME",
+  "LOGNAME",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TERM",
+  "TMUX",
+  "TMUX_PANE",
+  "HERDR_PANE_ID",
+  "HERDR_BIN_PATH",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "XDG_RUNTIME_DIR",
+  "XDG_DATA_HOME",
+  "XDG_CONFIG_HOME",
+  "SHELL",
+  "NODE_ENV",
+  "NODE_EXTRA_CA_CERTS",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "SystemRoot",
+  "SYSTEMROOT",
+  "windir",
+  "COMSPEC",
 ] as const;
 
 /** Default paths */
 const DEFAULT_STATE_DIR = getGlobalOmcStateRoot();
-const PID_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener.pid');
-const STATE_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener-state.json');
-const LOG_FILE_PATH = join(DEFAULT_STATE_DIR, 'reply-listener.log');
+const PID_FILE_PATH = join(DEFAULT_STATE_DIR, "reply-listener.pid");
+const STATE_FILE_PATH = join(DEFAULT_STATE_DIR, "reply-listener-state.json");
+const LOG_FILE_PATH = join(DEFAULT_STATE_DIR, "reply-listener.log");
 
 /** Reply listener daemon state */
 export interface ReplyListenerState {
@@ -150,8 +183,9 @@ export interface DaemonResponse {
 /**
  * Create a minimal environment for daemon child processes.
  * Only includes allowlisted variables to prevent credential leakage.
+ * @internal Exported for testing only.
  */
-function createMinimalDaemonEnv(): NodeJS.ProcessEnv {
+export function createMinimalDaemonEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   for (const key of DAEMON_ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) {
@@ -160,7 +194,7 @@ function createMinimalDaemonEnv(): NodeJS.ProcessEnv {
   }
   // Forward OMC_* env vars so the daemon can call getNotificationConfig()
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith('OMC_')) {
+    if (key.startsWith("OMC_")) {
       env[key] = process.env[key];
     }
   }
@@ -235,7 +269,7 @@ function readDaemonState(): ReplyListenerState | null {
       return null;
     }
 
-    const content = readFileSync(STATE_FILE_PATH, 'utf-8');
+    const content = readFileSync(STATE_FILE_PATH, "utf-8");
     const state = JSON.parse(content) as ReplyListenerState;
     return state;
   } catch {
@@ -256,7 +290,11 @@ function writeDaemonState(state: ReplyListenerState): void {
  */
 export async function buildDaemonConfig(): Promise<ReplyListenerDaemonConfig | null> {
   try {
-    const { getReplyConfig, getNotificationConfig, getReplyListenerPlatformConfig } = await import('./config.js');
+    const {
+      getReplyConfig,
+      getNotificationConfig,
+      getReplyListenerPlatformConfig,
+    } = await import("./config.js");
     const replyConfig = getReplyConfig();
     if (!replyConfig) return null;
     const notifConfig = getNotificationConfig();
@@ -277,14 +315,23 @@ interface ReplyListenerPidRecord {
 function readPidRecord(): ReplyListenerPidRecord | null {
   try {
     if (!existsSync(PID_FILE_PATH)) return null;
-    const content = readFileSync(PID_FILE_PATH, 'utf-8').trim();
+    const content = readFileSync(PID_FILE_PATH, "utf-8").trim();
     const parsed = JSON.parse(content) as Partial<ReplyListenerPidRecord>;
-    return typeof parsed.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0
-      ? { pid: parsed.pid, generation: parsed.generation, processStartIdentity: parsed.processStartIdentity }
+    return typeof parsed.pid === "number" &&
+      Number.isInteger(parsed.pid) &&
+      parsed.pid > 0
+      ? {
+          pid: parsed.pid,
+          generation: parsed.generation,
+          processStartIdentity: parsed.processStartIdentity,
+        }
       : null;
   } catch {
     try {
-      const pid = Number.parseInt(readFileSync(PID_FILE_PATH, 'utf-8').trim(), 10);
+      const pid = Number.parseInt(
+        readFileSync(PID_FILE_PATH, "utf-8").trim(),
+        10,
+      );
       return Number.isInteger(pid) && pid > 0 ? { pid } : null;
     } catch {
       return null;
@@ -345,13 +392,13 @@ export function isDaemonRunning(): boolean {
  */
 export function sanitizeReplyInput(text: string): string {
   return text
-    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '')  // Strip control chars (keep \n, \r, \t)
-    .replace(/[\u202a-\u202e\u2066-\u2069]/g, '')      // Strip bidi override characters
-    .replace(/\r\n|[\r\n]/g, ' ')                            // Newlines -> spaces
-    .replace(/\\/g, '\\\\')                            // Escape backslashes
-    .replace(/`/g, '\\`')                              // Escape backticks
-    .replace(/\$\(/g, '\\$(')                          // Escape $()
-    .replace(/\$\{/g, '\\${')                          // Escape ${}
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "") // Strip control chars (keep \n, \r, \t)
+    .replace(/[\u202a-\u202e\u2066-\u2069]/g, "") // Strip bidi override characters
+    .replace(/\r\n|[\r\n]/g, " ") // Newlines -> spaces
+    .replace(/\\/g, "\\\\") // Escape backslashes
+    .replace(/`/g, "\\`") // Escape backticks
+    .replace(/\$\(/g, "\\$(") // Escape $()
+    .replace(/\$\{/g, "\\${") // Escape ${}
     .trim();
 }
 
@@ -361,22 +408,32 @@ export function sanitizeReplyInput(text: string): string {
 
 /** Keywords that resolve an approval gate (first word of the reply, case-insensitive). */
 const APPROVAL_APPROVE_WORDS = new Set([
-  'approve', 'approved', 'yes', 'y',
-  '批准', '同意',
+  "approve",
+  "approved",
+  "yes",
+  "y",
+  "批准",
+  "同意",
 ]);
 const APPROVAL_DENY_WORDS = new Set([
-  'deny', 'denied', 'no', 'n', 'reject', 'rejected',
-  '拒绝', '驳回',
+  "deny",
+  "denied",
+  "no",
+  "n",
+  "reject",
+  "rejected",
+  "拒绝",
+  "驳回",
 ]);
 
 /**
  * Parse a reply as an approval decision. Returns null when the reply does
  * not look like a decision (the message is then left for normal handling).
  */
-export function parseApprovalReply(text: string): 'approved' | 'denied' | null {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || '';
-  if (APPROVAL_APPROVE_WORDS.has(firstWord)) return 'approved';
-  if (APPROVAL_DENY_WORDS.has(firstWord)) return 'denied';
+export function parseApprovalReply(text: string): "approved" | "denied" | null {
+  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || "";
+  if (APPROVAL_APPROVE_WORDS.has(firstWord)) return "approved";
+  if (APPROVAL_DENY_WORDS.has(firstWord)) return "denied";
   return null;
 }
 
@@ -387,10 +444,10 @@ export function parseApprovalReply(text: string): 'approved' | 'denied' | null {
  * (callers should fall back to normal reply handling or ignore).
  */
 export function handleApprovalReply(
-  approvalRef: NonNullable<SessionMapping['approvalRef']>,
+  approvalRef: NonNullable<SessionMapping["approvalRef"]>,
   text: string,
   platform: string,
-): 'approved' | 'denied' | null {
+): "approved" | "denied" | null {
   const decision = parseApprovalReply(text);
   if (decision === null) return null;
   try {
@@ -404,10 +461,14 @@ export function handleApprovalReply(
   } catch (error) {
     // A stale or cross-session approvalRef must never throw out of the
     // poll loop: stale entries are pruned by their 24h TTL; log and skip.
-    log(`Approval reply ignored for stale ref ${approvalRef.runId}/${approvalRef.activationId}: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `Approval reply ignored for stale ref ${approvalRef.runId}/${approvalRef.activationId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return null;
   }
-  log(`Approval ${decision} recorded for run ${approvalRef.runId} activation ${approvalRef.activationId} via ${platform} reply`);
+  log(
+    `Approval ${decision} recorded for run ${approvalRef.runId} activation ${approvalRef.activationId} via ${platform} reply`,
+  );
   return decision;
 }
 
@@ -424,7 +485,7 @@ class RateLimiter {
   canProceed(): boolean {
     const now = Date.now();
     // Remove timestamps outside the window
-    this.timestamps = this.timestamps.filter(t => now - t < this.windowMs);
+    this.timestamps = this.timestamps.filter((t) => now - t < this.windowMs);
 
     if (this.timestamps.length >= this.maxPerMinute) {
       return false;
@@ -449,51 +510,71 @@ class RateLimiter {
  * Returns true if injection succeeded, false otherwise.
  */
 export type ReplyInjectionStep =
-  | { kind: 'literal'; value: string }
-  | { kind: 'key'; value: string };
+  | { kind: "literal"; value: string }
+  | { kind: "key"; value: string };
 
 export function buildReplyInjectionSteps(
   text: string,
   platform: string,
-  config: Pick<ReplyListenerDaemonConfig, 'includePrefix' | 'maxMessageLength'>,
-  mapping?: Pick<SessionMapping, 'event' | 'askUserQuestionOptionCount' | 'askUserQuestionAllowOther'>,
+  config: Pick<ReplyListenerDaemonConfig, "includePrefix" | "maxMessageLength">,
+  mapping?: Pick<
+    SessionMapping,
+    "event" | "askUserQuestionOptionCount" | "askUserQuestionAllowOther"
+  >,
 ): ReplyInjectionStep[] {
-  const prefix = config.includePrefix ? `[reply:${platform}] ` : '';
+  const prefix = config.includePrefix ? `[reply:${platform}] ` : "";
   const sanitized = sanitizeReplyInput(prefix + text);
   const truncated = sanitized.slice(0, config.maxMessageLength);
 
   if (
-    mapping?.event === 'ask-user-question' &&
+    mapping?.event === "ask-user-question" &&
     mapping.askUserQuestionAllowOther !== false &&
     Number.isFinite(mapping.askUserQuestionOptionCount)
   ) {
-    const optionCount = Math.max(0, Math.floor(mapping.askUserQuestionOptionCount ?? 0));
+    const optionCount = Math.max(
+      0,
+      Math.floor(mapping.askUserQuestionOptionCount ?? 0),
+    );
     return [
-      ...Array.from({ length: optionCount }, () => ({ kind: 'key' as const, value: 'Down' })),
-      { kind: 'key', value: 'Enter' },
-      { kind: 'literal', value: truncated },
-      { kind: 'key', value: 'Enter' },
+      ...Array.from({ length: optionCount }, () => ({
+        kind: "key" as const,
+        value: "Down",
+      })),
+      { kind: "key", value: "Enter" },
+      { kind: "literal", value: truncated },
+      { kind: "key", value: "Enter" },
     ];
   }
 
   return [
-    { kind: 'literal', value: truncated },
-    { kind: 'key', value: 'Enter' },
+    { kind: "literal", value: truncated },
+    { kind: "key", value: "Enter" },
   ];
 }
 
-function sendReplyInjectionSteps(paneId: string, steps: ReplyInjectionStep[]): boolean {
+function sendReplyInjectionSteps(
+  paneId: string,
+  steps: ReplyInjectionStep[],
+): boolean {
   try {
     for (const step of steps) {
-      if (step.kind === 'literal') {
-        tmuxExec(['send-keys', '-t', paneId, '-l', step.value], { stripTmux: true, timeout: 2000 });
+      if (step.kind === "literal") {
+        tmuxExec(["send-keys", "-t", paneId, "-l", step.value], {
+          stripTmux: true,
+          timeout: 2000,
+        });
       } else {
-        tmuxExec(['send-keys', '-t', paneId, step.value], { stripTmux: true, timeout: 2000 });
+        tmuxExec(["send-keys", "-t", paneId, step.value], {
+          stripTmux: true,
+          timeout: 2000,
+        });
       }
     }
     return true;
   } catch (error) {
-    log(`ERROR: Failed to send reply injection steps to pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `ERROR: Failed to send reply injection steps to pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return false;
   }
 }
@@ -513,28 +594,36 @@ export async function injectReplyIntoHerdrPane(
   config: ReplyListenerDaemonConfig,
   mapping?: SessionMapping,
 ): Promise<boolean> {
-  let content = '';
+  let content = "";
   try {
     content = await captureHerdrWorkerPane(paneId, 15);
   } catch (error) {
-    log(`WARN: Failed to capture herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `WARN: Failed to capture herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
 
   if (!content.trim()) {
-    log(`WARN: Herdr pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
+    log(
+      `WARN: Herdr pane ${paneId} appears empty. Skipping injection, removing stale mapping.`,
+    );
     removeMessagesByPane(paneId);
     return false;
   }
 
   const steps = buildReplyInjectionSteps(text, platform, config, mapping);
-  const preview = steps.find((step) => step.kind === 'literal')?.value ?? '';
+  const preview = steps.find((step) => step.kind === "literal")?.value ?? "";
 
   try {
     await herdrSendPrompt(paneId, preview);
-    log(`Injected reply from ${platform} into herdr pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? '...' : ''}"`);
+    log(
+      `Injected reply from ${platform} into herdr pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+    );
     return true;
   } catch (error) {
-    log(`ERROR: Failed to inject reply into herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`);
+    log(
+      `ERROR: Failed to inject reply into herdr pane ${paneId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
     return false;
   }
 }
@@ -556,20 +645,25 @@ async function injectReply(
   const content = capturePaneContent(paneId, 15);
 
   if (!content.trim()) {
-    log(`WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`);
+    log(
+      `WARN: Pane ${paneId} appears empty. Skipping injection, removing stale mapping.`,
+    );
     removeMessagesByPane(paneId);
     return false;
   }
 
   const steps = buildReplyInjectionSteps(text, platform, config, mapping);
-  const preview = steps.find((step) => step.kind === 'literal')?.value ?? '';
+  const preview = steps.find((step) => step.kind === "literal")?.value ?? "";
 
-  const success = mapping?.event === 'ask-user-question'
-    ? sendReplyInjectionSteps(paneId, steps)
-    : sendToPane(paneId, preview, true);
+  const success =
+    mapping?.event === "ask-user-question"
+      ? sendReplyInjectionSteps(paneId, steps)
+      : sendToPane(paneId, preview, true);
 
   if (success) {
-    log(`Injected reply from ${platform} into pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? '...' : ''}"`);
+    log(
+      `Injected reply from ${platform} into pane ${paneId}: "${preview.slice(0, 50)}${preview.length > 50 ? "..." : ""}"`,
+    );
   } else {
     log(`ERROR: Failed to inject reply into pane ${paneId}`);
   }
@@ -607,24 +701,28 @@ async function pollDiscord(
   }
 
   try {
-    const after = state.discordLastMessageId ? `?after=${state.discordLastMessageId}&limit=10` : '?limit=10';
+    const after = state.discordLastMessageId
+      ? `?after=${state.discordLastMessageId}&limit=10`
+      : "?limit=10";
     const url = `https://discord.com/api/v10/channels/${config.discordChannelId}/messages${after}`;
 
     const response = await fetch(url, {
-      method: 'GET',
+      method: "GET",
       headers: {
-        'Authorization': `Bot ${config.discordBotToken}`,
+        Authorization: `Bot ${config.discordBotToken}`,
       },
       signal: AbortSignal.timeout(10000),
     });
 
     // Read rate limit headers and back off when remaining < 2
-    const remaining = response.headers.get('x-ratelimit-remaining');
-    const reset = response.headers.get('x-ratelimit-reset');
+    const remaining = response.headers.get("x-ratelimit-remaining");
+    const reset = response.headers.get("x-ratelimit-reset");
     if (remaining !== null && parseInt(remaining, 10) < 2) {
       const resetTime = reset ? parseFloat(reset) * 1000 : Date.now() + 10_000;
       discordBackoffUntil = resetTime;
-      log(`WARN: Discord rate limit low (remaining: ${remaining}), backing off until ${new Date(resetTime).toISOString()}`);
+      log(
+        `WARN: Discord rate limit low (remaining: ${remaining}), backing off until ${new Date(resetTime).toISOString()}`,
+      );
     }
 
     if (!response.ok) {
@@ -632,7 +730,7 @@ async function pollDiscord(
       return;
     }
 
-    const messages = await response.json() as Array<{
+    const messages = (await response.json()) as Array<{
       id: string;
       author: { id: string };
       content: string;
@@ -661,7 +759,10 @@ async function pollDiscord(
       }
 
       // Filter: referenced message exists in session registry
-      const mapping = lookupByMessageId('discord-bot', msg.message_reference.message_id);
+      const mapping = lookupByMessageId(
+        "discord-bot",
+        msg.message_reference.message_id,
+      );
       if (!mapping) {
         state.discordLastMessageId = msg.id;
         writeDaemonState(state);
@@ -673,24 +774,30 @@ async function pollDiscord(
         // AT-MOST-ONCE: persist offset BEFORE processing
         state.discordLastMessageId = msg.id;
         writeDaemonState(state);
-        const decision = handleApprovalReply(mapping.approvalRef, msg.content, 'discord');
+        const decision = handleApprovalReply(
+          mapping.approvalRef,
+          msg.content,
+          "discord",
+        );
         if (decision !== null) {
           // Confirmation reaction (non-critical)
-          const reaction = decision === 'approved' ? '%E2%9C%85' : '%E2%9D%8C';
+          const reaction = decision === "approved" ? "%E2%9C%85" : "%E2%9D%8C";
           try {
             await fetch(
               `https://discord.com/api/v10/channels/${config.discordChannelId}/messages/${msg.id}/reactions/${reaction}/@me`,
               {
-                method: 'PUT',
-                headers: { 'Authorization': `Bot ${config.discordBotToken}` },
+                method: "PUT",
+                headers: { Authorization: `Bot ${config.discordBotToken}` },
                 signal: AbortSignal.timeout(5000),
-              }
+              },
             );
           } catch (e) {
             log(`WARN: Failed to add approval confirmation reaction: ${e}`);
           }
         } else {
-          log(`Discord reply on approval message ${msg.id} was not a decision; ignored`);
+          log(
+            `Discord reply on approval message ${msg.id} was not a decision; ignored`,
+          );
         }
         continue;
       }
@@ -709,7 +816,13 @@ async function pollDiscord(
       writeDaemonState(state);
 
       // Inject reply
-      const success = await injectReply(mapping.tmuxPaneId, msg.content, 'discord', config, mapping);
+      const success = await injectReply(
+        mapping.tmuxPaneId,
+        msg.content,
+        "discord",
+        config,
+        mapping,
+      );
       if (success) {
         state.messagesInjected++;
 
@@ -718,10 +831,10 @@ async function pollDiscord(
           await fetch(
             `https://discord.com/api/v10/channels/${config.discordChannelId}/messages/${msg.id}/reactions/%E2%9C%85/@me`,
             {
-              method: 'PUT',
-              headers: { 'Authorization': `Bot ${config.discordBotToken}` },
+              method: "PUT",
+              headers: { Authorization: `Bot ${config.discordBotToken}` },
               signal: AbortSignal.timeout(5000),
-            }
+            },
           );
         } catch (e) {
           log(`WARN: Failed to add confirmation reaction: ${e}`);
@@ -729,17 +842,19 @@ async function pollDiscord(
 
         // Send injection notification to channel (non-critical)
         try {
-          const mentionPrefix = config.discordMention ? `${config.discordMention} ` : '';
+          const mentionPrefix = config.discordMention
+            ? `${config.discordMention} `
+            : "";
           const feedbackAllowedMentions = config.discordMention
             ? parseMentionAllowedMentions(config.discordMention)
             : { parse: [] as string[] };
           await fetch(
             `https://discord.com/api/v10/channels/${config.discordChannelId}/messages`,
             {
-              method: 'POST',
+              method: "POST",
               headers: {
-                'Authorization': `Bot ${config.discordBotToken}`,
-                'Content-Type': 'application/json',
+                Authorization: `Bot ${config.discordBotToken}`,
+                "Content-Type": "application/json",
               },
               body: JSON.stringify({
                 content: `${mentionPrefix}Injected into Claude Code session.`,
@@ -747,7 +862,7 @@ async function pollDiscord(
                 allowed_mentions: feedbackAllowedMentions,
               }),
               signal: AbortSignal.timeout(5000),
-            }
+            },
           );
         } catch (e) {
           log(`WARN: Failed to send injection channel notification: ${e}`);
@@ -756,10 +871,11 @@ async function pollDiscord(
         state.errors++;
       }
     }
-
   } catch (error) {
     state.errors++;
-    state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
+    state.lastError = redactTokens(
+      error instanceof Error ? error.message : String(error),
+    );
     log(`Discord polling error: ${state.lastError}`);
   }
 }
@@ -782,25 +898,31 @@ async function pollTelegram(
   }
 
   try {
-    const offset = state.telegramLastUpdateId ? state.telegramLastUpdateId + 1 : 0;
+    const offset = state.telegramLastUpdateId
+      ? state.telegramLastUpdateId + 1
+      : 0;
     const path = `/bot${config.telegramBotToken}/getUpdates?offset=${offset}&timeout=0`;
 
     const updates = await new Promise<any[]>((resolve, reject) => {
       const req = httpsRequest(
         {
-          hostname: 'api.telegram.org',
+          hostname: "api.telegram.org",
           path,
-          method: 'GET',
+          method: "GET",
           family: 4, // Force IPv4
           timeout: 10000,
         },
         (res) => {
           const chunks: Buffer[] = [];
-          res.on('data', (chunk: Buffer) => chunks.push(chunk));
-          res.on('end', () => {
+          res.on("data", (chunk: Buffer) => chunks.push(chunk));
+          res.on("end", () => {
             try {
-              const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
-              if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+              if (
+                res.statusCode &&
+                res.statusCode >= 200 &&
+                res.statusCode < 300
+              ) {
                 resolve(body.result || []);
               } else {
                 reject(new Error(`HTTP ${res.statusCode}`));
@@ -809,13 +931,13 @@ async function pollTelegram(
               reject(e);
             }
           });
-        }
+        },
       );
 
-      req.on('error', reject);
-      req.on('timeout', () => {
+      req.on("error", reject);
+      req.on("timeout", () => {
         req.destroy();
-        reject(new Error('Request timeout'));
+        reject(new Error("Request timeout"));
       });
 
       req.end();
@@ -845,7 +967,10 @@ async function pollTelegram(
       }
 
       // Filter: referenced message exists in session registry
-      const mapping = lookupByMessageId('telegram', String(msg.reply_to_message.message_id));
+      const mapping = lookupByMessageId(
+        "telegram",
+        String(msg.reply_to_message.message_id),
+      );
       if (!mapping) {
         state.telegramLastUpdateId = update.update_id;
         writeDaemonState(state);
@@ -857,7 +982,11 @@ async function pollTelegram(
         // AT-MOST-ONCE: persist offset BEFORE processing
         state.telegramLastUpdateId = update.update_id;
         writeDaemonState(state);
-        const decision = handleApprovalReply(mapping.approvalRef, msg.text || '', 'telegram');
+        const decision = handleApprovalReply(
+          mapping.approvalRef,
+          msg.text || "",
+          "telegram",
+        );
         if (decision !== null) {
           // Confirmation reply (non-critical)
           try {
@@ -869,23 +998,23 @@ async function pollTelegram(
             await new Promise<void>((resolve) => {
               const confirmReq = httpsRequest(
                 {
-                  hostname: 'api.telegram.org',
+                  hostname: "api.telegram.org",
                   path: `/bot${config.telegramBotToken}/sendMessage`,
-                  method: 'POST',
+                  method: "POST",
                   family: 4,
                   headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(confirmBody),
+                    "Content-Type": "application/json",
+                    "Content-Length": Buffer.byteLength(confirmBody),
                   },
                   timeout: 5000,
                 },
                 (res) => {
                   res.resume();
                   resolve();
-                }
+                },
               );
-              confirmReq.on('error', () => resolve());
-              confirmReq.on('timeout', () => {
+              confirmReq.on("error", () => resolve());
+              confirmReq.on("timeout", () => {
                 confirmReq.destroy();
                 resolve();
               });
@@ -896,12 +1025,14 @@ async function pollTelegram(
             log(`WARN: Failed to send approval confirmation: ${e}`);
           }
         } else {
-          log(`Telegram reply on approval message ${msg.message_id} was not a decision; ignored`);
+          log(
+            `Telegram reply on approval message ${msg.message_id} was not a decision; ignored`,
+          );
         }
         continue;
       }
 
-      const text = msg.text || '';
+      const text = msg.text || "";
       if (!text) {
         state.telegramLastUpdateId = update.update_id;
         writeDaemonState(state);
@@ -910,7 +1041,9 @@ async function pollTelegram(
 
       // Rate limiting
       if (!rateLimiter.canProceed()) {
-        log(`WARN: Rate limit exceeded, dropping Telegram message ${msg.message_id}`);
+        log(
+          `WARN: Rate limit exceeded, dropping Telegram message ${msg.message_id}`,
+        );
         state.telegramLastUpdateId = update.update_id;
         writeDaemonState(state);
         state.errors++;
@@ -922,7 +1055,13 @@ async function pollTelegram(
       writeDaemonState(state);
 
       // Inject reply
-      const success = await injectReply(mapping.tmuxPaneId, text, 'telegram', config, mapping);
+      const success = await injectReply(
+        mapping.tmuxPaneId,
+        text,
+        "telegram",
+        config,
+        mapping,
+      );
       if (success) {
         state.messagesInjected++;
 
@@ -930,31 +1069,31 @@ async function pollTelegram(
         try {
           const replyBody = JSON.stringify({
             chat_id: config.telegramChatId,
-            text: 'Injected into Claude Code session.',
+            text: "Injected into Claude Code session.",
             reply_to_message_id: msg.message_id,
           });
 
           await new Promise<void>((resolve) => {
             const replyReq = httpsRequest(
               {
-                hostname: 'api.telegram.org',
+                hostname: "api.telegram.org",
                 path: `/bot${config.telegramBotToken}/sendMessage`,
-                method: 'POST',
+                method: "POST",
                 family: 4,
                 headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(replyBody),
+                  "Content-Type": "application/json",
+                  "Content-Length": Buffer.byteLength(replyBody),
                 },
                 timeout: 5000,
               },
               (res) => {
                 res.resume(); // Drain response
                 resolve();
-              }
+              },
             );
 
-            replyReq.on('error', () => resolve());
-            replyReq.on('timeout', () => {
+            replyReq.on("error", () => resolve());
+            replyReq.on("timeout", () => {
               replyReq.destroy();
               resolve();
             });
@@ -969,10 +1108,11 @@ async function pollTelegram(
         state.errors++;
       }
     }
-
   } catch (error) {
     state.errors++;
-    state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
+    state.lastError = redactTokens(
+      error instanceof Error ? error.message : String(error),
+    );
     log(`Telegram polling error: ${state.lastError}`);
   }
 }
@@ -988,11 +1128,11 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
  * Main daemon polling loop
  */
 async function pollLoop(): Promise<void> {
-  log('Reply listener daemon starting poll loop');
+  log("Reply listener daemon starting poll loop");
 
   const config = await buildDaemonConfig();
   if (!config) {
-    log('ERROR: No notification config found for reply listener, exiting');
+    log("ERROR: No notification config found for reply listener, exiting");
     process.exit(1);
   }
 
@@ -1014,13 +1154,16 @@ async function pollLoop(): Promise<void> {
   let lastPruneAt = Date.now();
 
   // Start Slack Socket Mode listener if configured
-  let slackSocket: import('./slack-socket.js').SlackSocketClient | null = null;
+  let slackSocket: import("./slack-socket.js").SlackSocketClient | null = null;
   if (config.slackAppToken && config.slackBotToken && config.slackChannelId) {
-    if (typeof WebSocket === 'undefined') {
-      log('WARN: WebSocket not available (requires Node 20.10+), Slack Socket Mode disabled');
+    if (typeof WebSocket === "undefined") {
+      log(
+        "WARN: WebSocket not available (requires Node 20.10+), Slack Socket Mode disabled",
+      );
     } else {
       try {
-        const { SlackSocketClient, addSlackReaction } = await import('./slack-socket.js');
+        const { SlackSocketClient, addSlackReaction } =
+          await import("./slack-socket.js");
         const slackChannelId = config.slackChannelId;
         const slackBotToken = config.slackBotToken;
 
@@ -1032,18 +1175,27 @@ async function pollLoop(): Promise<void> {
           },
           async (event) => {
             // Authorization: fail-closed — reject when no authorized users configured
-            if (!config.authorizedSlackUserIds || config.authorizedSlackUserIds.length === 0) {
-              log('WARN: No authorized Slack user IDs configured, rejecting all messages (fail-closed)');
+            if (
+              !config.authorizedSlackUserIds ||
+              config.authorizedSlackUserIds.length === 0
+            ) {
+              log(
+                "WARN: No authorized Slack user IDs configured, rejecting all messages (fail-closed)",
+              );
               return;
             }
             if (!config.authorizedSlackUserIds.includes(event.user)) {
-              log(`REJECTED Slack message from unauthorized user ${event.user}`);
+              log(
+                `REJECTED Slack message from unauthorized user ${event.user}`,
+              );
               return;
             }
 
             // Rate limiting
             if (!rateLimiter.canProceed()) {
-              log(`WARN: Rate limit exceeded, dropping Slack message ${event.ts}`);
+              log(
+                `WARN: Rate limit exceeded, dropping Slack message ${event.ts}`,
+              );
               state.errors++;
               return;
             }
@@ -1054,19 +1206,29 @@ async function pollLoop(): Promise<void> {
 
             // Thread replies: look up parent message in session registry
             if (event.thread_ts && event.thread_ts !== event.ts) {
-              const mapping = lookupByMessageId('slack-bot', event.thread_ts);
+              const mapping = lookupByMessageId("slack-bot", event.thread_ts);
               if (mapping) {
                 // Approval-gate replies resolve the gate instead of injecting a pane
                 if (mapping.approvalRef) {
-                  const decision = handleApprovalReply(mapping.approvalRef, event.text, 'slack');
+                  const decision = handleApprovalReply(
+                    mapping.approvalRef,
+                    event.text,
+                    "slack",
+                  );
                   if (decision !== null) {
                     try {
-                      await addSlackReaction(slackBotToken, slackChannelId, event.ts);
+                      await addSlackReaction(
+                        slackBotToken,
+                        slackChannelId,
+                        event.ts,
+                      );
                     } catch (e) {
                       log(`WARN: Failed to add Slack approval reaction: ${e}`);
                     }
                   } else {
-                    log(`Slack reply on approval message ${event.thread_ts} was not a decision; ignored`);
+                    log(
+                      `Slack reply on approval message ${event.thread_ts} was not a decision; ignored`,
+                    );
                   }
                   return;
                 }
@@ -1079,12 +1241,18 @@ async function pollLoop(): Promise<void> {
             // Discord and Telegram already skip when no match is found.
 
             if (!targetPaneId) {
-              log('WARN: No target pane found for Slack message, skipping');
+              log("WARN: No target pane found for Slack message, skipping");
               return;
             }
 
             // Inject reply
-            const success = await injectReply(targetPaneId, event.text, 'slack', config, targetMapping);
+            const success = await injectReply(
+              targetPaneId,
+              event.text,
+              "slack",
+              config,
+              targetMapping,
+            );
             if (success) {
               state.messagesInjected++;
               writeDaemonState(state);
@@ -1104,9 +1272,11 @@ async function pollLoop(): Promise<void> {
         );
 
         await slackSocket.start();
-        log('Slack Socket Mode listener started');
+        log("Slack Socket Mode listener started");
       } catch (e) {
-        log(`ERROR: Failed to start Slack Socket Mode: ${e instanceof Error ? e.message : String(e)}`);
+        log(
+          `ERROR: Failed to start Slack Socket Mode: ${e instanceof Error ? e.message : String(e)}`,
+        );
         slackSocket = null;
       }
     }
@@ -1114,7 +1284,7 @@ async function pollLoop(): Promise<void> {
 
   // Graceful shutdown handlers
   const shutdown = () => {
-    log('Shutdown signal received');
+    log("Shutdown signal received");
     state.isRunning = false;
     if (slackSocket) {
       slackSocket.stop();
@@ -1125,13 +1295,13 @@ async function pollLoop(): Promise<void> {
     process.exit(0);
   };
 
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 
   // Prune stale registry entries on startup
   try {
     pruneStale();
-    log('Pruned stale registry entries');
+    log("Pruned stale registry entries");
   } catch (e) {
     log(`WARN: Failed to prune stale entries: ${e}`);
   }
@@ -1149,29 +1319,36 @@ async function pollLoop(): Promise<void> {
         try {
           pruneStale();
           lastPruneAt = Date.now();
-          log('Pruned stale registry entries');
+          log("Pruned stale registry entries");
         } catch (e) {
-          log(`WARN: Prune failed: ${e instanceof Error ? e.message : String(e)}`);
+          log(
+            `WARN: Prune failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       }
 
       writeDaemonState(state);
 
       // Wait for next poll
-      await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs));
-
+      await new Promise((resolve) =>
+        setTimeout(resolve, config.pollIntervalMs),
+      );
     } catch (error) {
       state.errors++;
-      state.lastError = redactTokens(error instanceof Error ? error.message : String(error));
+      state.lastError = redactTokens(
+        error instanceof Error ? error.message : String(error),
+      );
       log(`Poll error: ${state.lastError}`);
       writeDaemonState(state);
 
       // Back off on repeated errors
-      await new Promise((resolve) => setTimeout(resolve, config.pollIntervalMs * 2));
+      await new Promise((resolve) =>
+        setTimeout(resolve, config.pollIntervalMs * 2),
+      );
     }
   }
 
-  log('Poll loop ended');
+  log("Poll loop ended");
 }
 
 // ============================================================================
@@ -1188,30 +1365,35 @@ async function pollLoop(): Promise<void> {
  *
  * @param config - Daemon config (used only for validation, daemon reads config independently)
  */
-export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonResponse {
+export function startReplyListener(
+  _config: ReplyListenerDaemonConfig,
+): DaemonResponse {
   // Check if already running (idempotent)
   if (isDaemonRunning()) {
     const state = readDaemonState();
     return {
       success: true,
-      message: 'Reply listener daemon is already running',
+      message: "Reply listener daemon is already running",
       state: state ?? undefined,
     };
   }
 
   // Check for tmux. Herdr-backed panes inject through the Herdr agent
   // surface, so the multiplexer being elected to herdr also unlocks startup.
-  if (!isTmuxAvailable() && resolveTeamMultiplexer() !== 'herdr') {
+  if (!isTmuxAvailable() && resolveTeamMultiplexer() !== "herdr") {
     return {
       success: false,
-      message: 'tmux not available - reply injection requires tmux',
+      message: "tmux not available - reply injection requires tmux",
     };
   }
 
   ensureStateDir();
 
   // Fork a new process for the daemon
-  const modulePath = resolveDaemonModulePath(__filename, ['notifications', 'reply-listener.js']);
+  const modulePath = resolveDaemonModulePath(__filename, [
+    "notifications",
+    "reply-listener.js",
+  ]);
   const moduleUrl = pathToFileURL(modulePath).href;
   const daemonScript = `
     import(${JSON.stringify(moduleUrl)}).then(({ pollLoop }) => {
@@ -1220,9 +1402,9 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
   `;
 
   try {
-    const child = spawn('node', ['-e', daemonScript], {
+    const child = spawn("node", ["-e", daemonScript], {
       detached: true,
-      stdio: 'ignore',
+      stdio: "ignore",
       cwd: process.cwd(),
       env: childEnv(createMinimalDaemonEnv()),
     });
@@ -1247,15 +1429,22 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
       };
       writeDaemonState(state);
 
-      void getProcessStartIdentity(pid).then((processStartIdentity) => {
-        if (!processStartIdentity) return;
-        const current = readDaemonState();
-        const currentPid = readPidRecord();
-        if (current?.pid !== pid || current.generation !== generation || currentPid?.generation !== generation) return;
-        current.processStartIdentity = processStartIdentity;
-        writeDaemonState(current);
-        writePidFile({ pid, generation, processStartIdentity });
-      }).catch(() => {});
+      void getProcessStartIdentity(pid)
+        .then((processStartIdentity) => {
+          if (!processStartIdentity) return;
+          const current = readDaemonState();
+          const currentPid = readPidRecord();
+          if (
+            current?.pid !== pid ||
+            current.generation !== generation ||
+            currentPid?.generation !== generation
+          )
+            return;
+          current.processStartIdentity = processStartIdentity;
+          writeDaemonState(current);
+          writePidFile({ pid, generation, processStartIdentity });
+        })
+        .catch(() => {});
 
       log(`Reply listener daemon started with PID ${pid}`);
 
@@ -1268,12 +1457,12 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
 
     return {
       success: false,
-      message: 'Failed to start daemon process',
+      message: "Failed to start daemon process",
     };
   } catch (error) {
     return {
       success: false,
-      message: 'Failed to start daemon',
+      message: "Failed to start daemon",
       error: error instanceof Error ? error.message : String(error),
     };
   }
@@ -1282,11 +1471,16 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
 /** Stop only the exact live listener generation; never signal a reused PID. */
 export async function stopReplyListener(): Promise<DaemonResponse> {
   const record = readPidRecord();
-  if (!record) return { success: true, message: 'Reply listener daemon is not running' };
+  if (!record)
+    return { success: true, message: "Reply listener daemon is not running" };
 
   if (!isProcessAlive(record.pid)) {
     removePidFile();
-    return { success: true, message: 'Reply listener daemon was not running (cleaned up stale PID file)' };
+    return {
+      success: true,
+      message:
+        "Reply listener daemon was not running (cleaned up stale PID file)",
+    };
   }
 
   const state = readDaemonState();
@@ -1297,28 +1491,43 @@ export async function stopReplyListener(): Promise<DaemonResponse> {
     state.generation !== record.generation ||
     state.processStartIdentity !== record.processStartIdentity
   ) {
-    return { success: false, message: 'Refusing to stop listener without an exact live identity' };
+    return {
+      success: false,
+      message: "Refusing to stop listener without an exact live identity",
+    };
   }
 
   // Revalidate under the registry lock. It is held through termination so a
   // concurrent registration cannot be accepted for a listener we are stopping.
   const emptyRegistryLock = lockRegistryIfEmpty();
-  if (emptyRegistryLock === 'active') {
-    return { success: true, message: 'Reply listener retained for active sessions', state };
+  if (emptyRegistryLock === "active") {
+    return {
+      success: true,
+      message: "Reply listener retained for active sessions",
+      state,
+    };
   }
   if (emptyRegistryLock === null) {
-    return { success: false, message: 'Could not durably verify an empty reply registry' };
+    return {
+      success: false,
+      message: "Could not durably verify an empty reply registry",
+    };
   }
 
   try {
     const deadlineAt = Date.now() + 500;
-    const liveness = await isProcessIdentityLive(record.pid, record.processStartIdentity, deadlineAt);
-    if (liveness !== 'live') {
+    const liveness = await isProcessIdentityLive(
+      record.pid,
+      record.processStartIdentity,
+      deadlineAt,
+    );
+    if (liveness !== "live") {
       return {
-        success: liveness === 'dead',
-        message: liveness === 'dead'
-          ? 'Reply listener was not running'
-          : 'Refusing to stop listener after identity revalidation failed',
+        success: liveness === "dead",
+        message:
+          liveness === "dead"
+            ? "Reply listener was not running"
+            : "Refusing to stop listener after identity revalidation failed",
       };
     }
 
@@ -1327,19 +1536,27 @@ export async function stopReplyListener(): Promise<DaemonResponse> {
       expectedStartIdentity: record.processStartIdentity,
       deadlineAt: new Date(deadlineAt).toISOString(),
     });
-    if (termination !== 'terminated' && termination !== 'already-dead') {
-      return { success: false, message: 'Refusing to stop listener after termination identity revalidation failed' };
+    if (termination !== "terminated" && termination !== "already-dead") {
+      return {
+        success: false,
+        message:
+          "Refusing to stop listener after termination identity revalidation failed",
+      };
     }
     removePidFile();
     state.isRunning = false;
     state.pid = null;
     writeDaemonState(state);
     log(`Reply listener daemon stopped (PID ${record.pid})`);
-    return { success: true, message: `Reply listener daemon stopped (PID ${record.pid})`, state };
+    return {
+      success: true,
+      message: `Reply listener daemon stopped (PID ${record.pid})`,
+      state,
+    };
   } catch (error) {
     return {
       success: false,
-      message: 'Failed to stop daemon',
+      message: "Failed to stop daemon",
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
@@ -1357,21 +1574,21 @@ export function getReplyListenerStatus(): DaemonResponse {
   if (!running && !state) {
     return {
       success: true,
-      message: 'Reply listener daemon has never been started',
+      message: "Reply listener daemon has never been started",
     };
   }
 
   if (!running && state) {
     return {
       success: true,
-      message: 'Reply listener daemon is not running',
+      message: "Reply listener daemon is not running",
       state: { ...state, isRunning: false, pid: null },
     };
   }
 
   return {
     success: true,
-    message: 'Reply listener daemon is running',
+    message: "Reply listener daemon is running",
     state: state ?? undefined,
   };
 }
@@ -1429,21 +1646,21 @@ export async function processSlackSocketMessage(
 
   // 2. Must have a target pane
   if (!paneId) {
-    log('REJECTED Slack message: no target pane ID');
+    log("REJECTED Slack message: no target pane ID");
     state.errors++;
     return {
       injected: false,
-      validation: { valid: false, reason: 'No target pane ID' },
+      validation: { valid: false, reason: "No target pane ID" },
     };
   }
 
   // 3. Rate limiting
   if (!rateLimiter.canProceed()) {
-    log('WARN: Rate limit exceeded, dropping Slack message');
+    log("WARN: Rate limit exceeded, dropping Slack message");
     state.errors++;
     return {
       injected: false,
-      validation: { valid: false, reason: 'Rate limit exceeded' },
+      validation: { valid: false, reason: "Rate limit exceeded" },
     };
   }
 
@@ -1452,26 +1669,28 @@ export async function processSlackSocketMessage(
   try {
     const parsed = JSON.parse(rawMessage);
     const payload = parsed.payload;
-    text = payload?.event?.text || payload?.text || '';
+    text = payload?.event?.text || payload?.text || "";
   } catch {
-    log('REJECTED Slack message: failed to extract text from validated message');
+    log(
+      "REJECTED Slack message: failed to extract text from validated message",
+    );
     state.errors++;
     return {
       injected: false,
-      validation: { valid: false, reason: 'Failed to extract message text' },
+      validation: { valid: false, reason: "Failed to extract message text" },
     };
   }
 
   if (!text) {
-    log('REJECTED Slack message: empty message text');
+    log("REJECTED Slack message: empty message text");
     return {
       injected: false,
-      validation: { valid: false, reason: 'Empty message text' },
+      validation: { valid: false, reason: "Empty message text" },
     };
   }
 
   // 5. Inject reply (applies sanitization + pane verification)
-  const success = await injectReply(paneId, text, 'slack', config);
+  const success = await injectReply(paneId, text, "slack", config);
   if (success) {
     state.messagesInjected++;
   } else {
@@ -1482,8 +1701,8 @@ export async function processSlackSocketMessage(
 }
 
 // Re-export for Slack integration
-export { SlackConnectionStateTracker } from './slack-socket.js';
-export type { SlackValidationResult } from './slack-socket.js';
+export { SlackConnectionStateTracker } from "./slack-socket.js";
+export type { SlackValidationResult } from "./slack-socket.js";
 
 // Export RateLimiter for external use (e.g., Slack Socket Mode handler)
 export { RateLimiter };

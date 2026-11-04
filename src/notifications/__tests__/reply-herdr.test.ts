@@ -5,7 +5,7 @@
  * sanitization (buildReplyInjectionSteps) runs for real.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const herdrMocks = vi.hoisted(() => ({
   captureHerdrWorkerPane: vi.fn(),
@@ -35,7 +35,10 @@ vi.mock("../session-registry.js", async (importOriginal) => {
   };
 });
 
-import { injectReplyIntoHerdrPane } from "../reply-listener.js";
+import {
+  createMinimalDaemonEnv,
+  injectReplyIntoHerdrPane,
+} from "../reply-listener.js";
 
 const config = {
   includePrefix: true,
@@ -117,5 +120,41 @@ describe("injectReplyIntoHerdrPane", () => {
     await expect(
       injectReplyIntoHerdrPane("w9:p2", "hi", "slack", config),
     ).resolves.toBe(false);
+  });
+});
+
+describe("createMinimalDaemonEnv herdr pin forwarding", () => {
+  const originalEnv = process.env;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it("forwards the herdr binary pin alongside the pane id", () => {
+    // When herdr is available only via HERDR_BIN_PATH (not on PATH), the
+    // detached listener must keep the pin or resolveHerdrBinary falls back
+    // to the unavailable bare name and every capture reads as an empty pane.
+    process.env.HERDR_BIN_PATH = "/opt/herdr/herdr";
+    process.env.HERDR_PANE_ID = "w9:p2";
+    const env = createMinimalDaemonEnv();
+    expect(env.HERDR_BIN_PATH).toBe("/opt/herdr/herdr");
+    expect(env.HERDR_PANE_ID).toBe("w9:p2");
+    // Credentials outside the allowlist never leak into the daemon env.
+    process.env.ANTHROPIC_API_KEY = "sk-secret";
+    const guarded = createMinimalDaemonEnv();
+    expect(guarded.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(guarded.HERDR_BIN_PATH).toBe("/opt/herdr/herdr");
+  });
+
+  it("omits herdr variables when unset", () => {
+    delete process.env.HERDR_BIN_PATH;
+    delete process.env.HERDR_PANE_ID;
+    const env = createMinimalDaemonEnv();
+    expect("HERDR_BIN_PATH" in env).toBe(false);
+    expect("HERDR_PANE_ID" in env).toBe(false);
   });
 });
