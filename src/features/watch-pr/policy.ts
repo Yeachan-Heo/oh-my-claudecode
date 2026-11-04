@@ -24,7 +24,18 @@ export interface WatchCheckRun {
 export type WatchReviewDecision = 'approved' | 'changes_requested' | 'none';
 
 export type WatchMergeability = 'mergeable' | 'unknown' | 'conflicting';
-export type WatchMergeStateStatus = 'clean' | 'unstable' | 'blocked' | 'unknown';
+// GitHub's MergeStateStatus enum in full. BEHIND, DIRTY, DRAFT, and HAS_HOOKS
+// join the four the classifier originally handled so no raw enum value can
+// fall through to a ready verdict.
+export type WatchMergeStateStatus =
+  | 'clean'
+  | 'unstable'
+  | 'blocked'
+  | 'unknown'
+  | 'behind'
+  | 'dirty'
+  | 'draft'
+  | 'has_hooks';
 
 /** Facts snapshot for one pull request at one poll. */
 export interface WatchPrFacts {
@@ -88,6 +99,12 @@ export function decideWatchVerdict(facts: WatchPrFacts, options: WatchOptions): 
   if (facts.mergeStateStatus === 'unstable') {
     blocked.push('aggregate merge state is unstable — failing or missing required checks; re-poll');
   }
+  if (facts.mergeStateStatus === 'dirty') {
+    blocked.push('aggregate merge state is dirty — merge conflicts; branch owner decides the resolution');
+  }
+  if (facts.mergeStateStatus === 'behind') {
+    blocked.push('head is behind the base branch — the branch owner updates it; babysit never rebases or force-pushes');
+  }
   const failed = facts.checks.filter((c) => c.state === 'fail');
   if (failed.length > 0) {
     blocked.push(`failing checks: ${failed.map((c) => c.name).join(', ')}`);
@@ -115,6 +132,12 @@ export function decideWatchVerdict(facts: WatchPrFacts, options: WatchOptions): 
   }
   if (facts.mergeStateStatus === 'unknown') {
     waiting.push('aggregate merge state not yet computed — re-poll');
+  }
+  if (facts.mergeStateStatus === 'draft' && !facts.isDraft) {
+    waiting.push('merge state reports a draft — re-poll');
+  }
+  if (facts.mergeStateStatus === 'has_hooks') {
+    waiting.push('repository merge hooks have not reported — re-poll');
   }
   const pending = facts.checks.filter((c) => c.state === 'pending');
   if (pending.length > 0) {
