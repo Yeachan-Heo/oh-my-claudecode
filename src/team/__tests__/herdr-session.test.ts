@@ -278,6 +278,60 @@ describe("herdr team operations", () => {
     ).toBe(false);
   });
 
+  it("propagates inventory failures instead of proving death", async () => {
+    const fail = Object.assign(new Error("timed out"), {
+      stderr: JSON.stringify({
+        error: { code: "server_not_running", message: "down" },
+      }),
+    });
+    const fake = fakeExec(() => ({ fail }));
+    await expect(
+      isHerdrWorkerAlive("w9:p2", { env: {}, execFn: fake.fn }),
+    ).rejects.toThrow(HerdrError);
+  });
+
+  it("proves pane existence and workspace membership without a live agent", async () => {
+    const { buildWorkspacePaneListArgs, herdrPaneWorkspaceMembership } =
+      await import("../herdr-session.js");
+    expect(buildWorkspacePaneListArgs("w9")).toEqual([
+      "pane",
+      "list",
+      "--workspace",
+      "w9",
+    ]);
+    const fake = fakeExec(() => ({
+      stdout: envelope("cli:pane:list", {
+        panes: [{ pane_id: "w9:p2", workspace_id: "w9" }],
+      }),
+    }));
+    // No agent occupies w9:p2 in the inventory above; membership still holds.
+    expect(
+      await herdrPaneWorkspaceMembership("w9:p2", "w9", {
+        env: {},
+        execFn: fake.fn,
+      }),
+    ).toBe("member");
+    expect(
+      await herdrPaneWorkspaceMembership("w1:p1", "w9", {
+        env: {},
+        execFn: fake.fn,
+      }),
+    ).toBe("foreign");
+    const failing = fakeExec(() => ({
+      fail: Object.assign(new Error("boom"), {
+        stderr: JSON.stringify({
+          error: { code: "workspace_not_found", message: "gone" },
+        }),
+      }),
+    }));
+    expect(
+      await herdrPaneWorkspaceMembership("w9:p2", "w9", {
+        env: {},
+        execFn: failing.fn,
+      }),
+    ).toBe("unavailable");
+  });
+
   it("tears down panes directly and lists teams by label prefix", async () => {
     const fake = fakeExec((args) => {
       if (args[0] === "workspace" && args[1] === "list") {

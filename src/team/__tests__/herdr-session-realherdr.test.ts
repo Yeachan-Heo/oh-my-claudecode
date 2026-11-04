@@ -18,6 +18,7 @@ import {
   ensureHerdrServer,
   herdrCreateTeamWorkspace,
   herdrCreateWorkerTab,
+  herdrPaneWorkspaceMembership,
   herdrRunPaneCommand,
   isHerdrBinaryCallable,
   isHerdrWorkerAlive,
@@ -70,7 +71,11 @@ describe("herdr team session (real herdr)", () => {
       );
     } finally {
       if (teamWorkspaceId) {
-        try { await destroyHerdrTeam(teamWorkspaceId); } catch { /* best-effort */ }
+        try {
+          await destroyHerdrTeam(teamWorkspaceId);
+        } catch {
+          /* best-effort */
+        }
       }
       rmSync(dir, { recursive: true, force: true });
       if (serverState === "started") {
@@ -101,6 +106,54 @@ describe("herdr team session (real herdr)", () => {
         expect(agent.pane_id).toMatch(/^w[0-9a-z]+:p[0-9a-z]+$/i);
       }
     } finally {
+      if (serverState === "started") {
+        const bin = resolveHerdrBinary();
+        if (bin) {
+          try {
+            await execFileAsync(bin, ["server", "stop"]);
+          } catch {
+            /* best-effort */
+          }
+        }
+      }
+    }
+  });
+  it("proves workspace membership for agentless panes and foreign panes", async () => {
+    if (!(await isHerdrBinaryCallable())) return; // skip: herdr not installed
+
+    const dir = mkdtempSync(join(tmpdir(), "omc-herdr-itest-"));
+    const serverState = await ensureHerdrServer();
+    let teamWorkspaceId: string | null = null;
+    try {
+      const workspaceId = await herdrCreateTeamWorkspace(
+        dir,
+        `${HERDR_TEAM_WORKSPACE_LABEL_PREFIX}member${Date.now().toString(36)}`,
+      );
+      teamWorkspaceId = workspaceId;
+      const tab = await herdrCreateWorkerTab(workspaceId, dir, "worker-1");
+
+      // Fresh tab hosts only a shell; membership must not depend on an agent.
+      expect(await herdrPaneWorkspaceMembership(tab.paneId, workspaceId)).toBe(
+        "member",
+      );
+      // A pane id from another workspace is provably not owned by this one.
+      expect(
+        await herdrPaneWorkspaceMembership("w999999:p999", workspaceId),
+      ).toBe("foreign");
+      // A closed pane drops out of the workspace pane list.
+      await teardownHerdrWorker(tab.paneId);
+      expect(await herdrPaneWorkspaceMembership(tab.paneId, workspaceId)).toBe(
+        "foreign",
+      );
+    } finally {
+      if (teamWorkspaceId) {
+        try {
+          await destroyHerdrTeam(teamWorkspaceId);
+        } catch {
+          /* best-effort */
+        }
+      }
+      rmSync(dir, { recursive: true, force: true });
       if (serverState === "started") {
         const bin = resolveHerdrBinary();
         if (bin) {
