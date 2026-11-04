@@ -1658,6 +1658,38 @@ function loadDisabledKeywords(directory) {
 }
 
 /**
+ * Read task-size suppression opt-outs from the same project and user JSONC
+ * config files used by the TypeScript bridge. User config is merged first so
+ * explicitly set project values take precedence, matching loadConfig().
+ */
+function loadTaskSizeDetectionConfig(directory) {
+  const configPaths = [
+    join(getOmcUserConfigDir(), 'claude-omc', 'config.jsonc'),
+    join(directory || process.cwd(), '.claude', 'omc.jsonc'),
+  ];
+  const result = {
+    enabled: true,
+    suppressHeavyModesForSmallTasks: true,
+  };
+
+  for (const configPath of configPaths) {
+    const taskSizeDetection = loadJsoncConfig(configPath)?.taskSizeDetection;
+    if (!taskSizeDetection || typeof taskSizeDetection !== 'object' || Array.isArray(taskSizeDetection)) {
+      continue;
+    }
+    if (taskSizeDetection.enabled !== undefined) {
+      result.enabled = taskSizeDetection.enabled !== false;
+    }
+    if (taskSizeDetection.suppressHeavyModesForSmallTasks !== undefined) {
+      result.suppressHeavyModesForSmallTasks =
+        taskSizeDetection.suppressHeavyModesForSmallTasks !== false;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Create a compact skill invocation guide without inlining SKILL.md bodies.
  * Full skill text remains available by path, avoiding UserPromptSubmit token blowups.
  */
@@ -1777,6 +1809,9 @@ const SKILL_TRIGGER_QUESTIONS = {
       analyze: 'The prompt explicitly invokes the analyze trigger.',
       'deep-interview': 'The prompt explicitly invokes the deep-interview trigger.',
       codex: 'The prompt explicitly invokes the codex trigger.',
+      ultragoal: 'The prompt explicitly invokes the ultragoal trigger.',
+      'ai-slop-cleaner': 'The prompt explicitly invokes the ai-slop-cleaner trigger.',
+      wiki: 'The prompt explicitly invokes the wiki trigger.',
       none: 'No trigger fires; handle the prompt without a mode or skill.',
     },
   },
@@ -2033,11 +2068,12 @@ async function main() {
 
     const permissionMode = data.permission_mode;
     if (isJevShadowOptedIn('skill-trigger', process.env, permissionMode)) {
+      const keywords = resolved.map((match) => match.name);
       const jevResult = recordJevShadow({
         point: 'skill-trigger',
         state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
         questions: SKILL_TRIGGER_QUESTIONS,
-        heuristic: resolved.map((match) => match.name),
+        heuristic: keywords.length > 0 ? keywords[0] : 'none',
         permissionMode,
       });
       
@@ -2065,20 +2101,77 @@ async function main() {
       // In active mode, intent Jev answer could be used here if needed
       // Currently logging-only: resolved keywords come from skill-trigger
     }
+
+    // Apply task-size filtering: suppress heavy keywords for small tasks (issue #4805)
+    // Heavy keywords are: ralph, autopilot, team, ralplan
+    const HEAVY_KEYWORDS = new Set(['ralph', 'autopilot', 'team', 'ralplan']);
+    
+    let jevTaskSizeResult = null;
+    let heuristicTaskSize = null;
     if (isJevShadowOptedIn('task-size', process.env, permissionMode)) {
       try {
         const { classifyTaskSize } = await import('../dist/hooks/task-size-detector/index.js');
+        heuristicTaskSize = classifyTaskSize(cleanPrompt);
         const jevResult = recordJevShadow({
           point: 'task-size',
           state: { prompt: cleanPrompt, source: 'user-prompt-submit' },
           questions: TASK_SIZE_QUESTIONS,
-          heuristic: classifyTaskSize(cleanPrompt),
+          heuristic: heuristicTaskSize.size,
           permissionMode,
         });
-        // In active mode, task-size Jev answer could be used here if needed
-        // Currently logging-only: task sizing is handled on TypeScript side
+        // In active mode, consume the Jev answer to suppress heavy keywords for small tasks
+        if (jevResult && jevResult.mode === 'active' && jevResult.answer) {
+          const choice = (jevResult.answer.choice || '').toLowerCase();
+          jevTaskSizeResult = {
+            size: choice === 'small' ? 'small' : choice === 'large' ? 'large' : 'medium',
+            reason: `Jev active-mode classification: ${choice}`,
+            wordCount: 0,
+            hasEscapeHatch: false,
+            confidence: jevResult.answer.confidence,
+          };
+        }
       } catch {
         // The compiled twin is optional for script-only installs; never affect prompt handling.
+      }
+    }
+
+    // Filter heavy keywords if task-size is 'small' (issue #4805)
+    // Only suppress when enabled, confidence >= 0.9, and the heuristic says
+    // small or the prompt has an explicit size prefix.
+    // - NEVER suppress slash-invoked modes
+    const taskSizeDetectionConfig = loadTaskSizeDetectionConfig(directory);
+    if (
+      taskSizeDetectionConfig.enabled &&
+      taskSizeDetectionConfig.suppressHeavyModesForSmallTasks &&
+      jevTaskSizeResult &&
+      jevTaskSizeResult.size === 'small' &&
+      jevTaskSizeResult.confidence >= 0.9
+    ) {
+      // Check if prompt has a size prefix like "quick:"
+      const hasSizePrefix = /^\s*(?:quick|small|tiny|minimal|fast|speed|urgent):/i.test(cleanPrompt);
+      // Check if heuristic classifyTaskSize also says small
+      const heuristicSaysSmall = heuristicTaskSize && (heuristicTaskSize.size === 'small' || heuristicTaskSize.size === 'quick');
+      
+      // Only suppress if BOTH conditions are true: confidence >= 0.9 AND (heuristic small OR size prefix)
+      const shouldSuppressForSize = (heuristicSaysSmall || hasSizePrefix);
+      
+      if (shouldSuppressForSize) {
+        // Check for slash invocations: never suppress slash-invoked modes
+        const slashInvokedKeywords = new Set();
+        if (isExplicitRalplanSlashInvocation(cleanPrompt)) slashInvokedKeywords.add('ralplan');
+        // Check for other slash modes: /oh-my-claudecode:ralph, /oh-my-claudecode:autopilot, etc.
+        if (/^\s*\/(?:oh-my-claudecode:)?ralph(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('ralph');
+        if (/^\s*\/(?:oh-my-claudecode:)?autopilot(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('autopilot');
+        if (/^\s*\/(?:oh-my-claudecode:)?team(?:\s|$|:)/i.test(cleanPrompt)) slashInvokedKeywords.add('team');
+        
+        // Filter out non-slash-invoked heavy keywords
+        resolved = resolved.filter(keyword => {
+          if (!HEAVY_KEYWORDS.has(keyword.name)) {
+            return true; // Keep non-heavy keywords
+          }
+          // For heavy keywords, suppress only if NOT slash-invoked
+          return slashInvokedKeywords.has(keyword.name);
+        });
       }
     }
 

@@ -19,7 +19,7 @@ const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
 
-const TWIN = { tier: 'sonnet' };
+const TWIN = 'sonnet';
 
 let logDir = '';
 const savedEnv: Record<string, string | undefined> = {};
@@ -179,6 +179,40 @@ describe('resolveJudgment', () => {
     const line = JSON.parse(await readLog());
     expect(line.mode).toBe('degraded');
     expect(line.jev).toBeNull();
+  });
+
+  it('logs every answer by name and takes jev/confidence from the first question asked', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV = 'model-routing:active';
+    const answers = {
+      effort: { type: 'score', score: 2.1, confidence: 0.6 },
+      'model-tier': { type: 'choice', choice: 'opus', confidence: 0.9 },
+    };
+    const { fetchFn } = captureFetch(() => ({ ok: true, status: 200, json: async () => ({ answers }) }) as unknown as Response);
+    const result = await resolveJudgment({
+      point: 'model-routing',
+      state: { prompt: 'hi' },
+      questions: {
+        'model-tier': QUESTIONS.route,
+        effort: { type: 'score', criteria: { low: 'low', high: 'high' } },
+      },
+      twin: () => TWIN,
+      fetchFn,
+    });
+    expect(result.answer).toEqual(answers['model-tier']);
+    const line = JSON.parse(await readLog());
+    expect(line.jev).toEqual(answers['model-tier']);
+    expect(line.confidence).toBe(0.9);
+    expect(line.answers).toEqual(answers);
+  });
+
+  it('logs answers as null on a degraded comparison', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    const { fetchFn } = captureFetch(httpErrorResponse);
+    await call({ point: 'model-routing', fetchFn });
+    const line = JSON.parse(await readLog());
+    expect(line.mode).toBe('degraded');
+    expect(line.answers).toBeNull();
   });
 
   it('degrades to the twin on an invalid Jev response', async () => {

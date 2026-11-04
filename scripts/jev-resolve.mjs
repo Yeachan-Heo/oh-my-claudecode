@@ -8,7 +8,12 @@
  * request to stdin and reads one JSON result from stdout.
  *
  * Request:  { point, state, questions, heuristic, permissionMode? }
- * Result:   { mode, answer, confidence, durationMs }
+ * Result:   { mode, answer, answers, confidence, durationMs }
+ *
+ * `answer` is the answer to the request's first question (the first answer
+ * in server order when that name is missing). `answers` maps every question
+ * name to its answer; multi-question points must read it by name, because the
+ * API does not guarantee the order of the answers object.
  *
  * mode mirrors the resolver's ResolveMode contract: off (config gates),
  * shadow (twin decides, comparison recorded), active (Jev decides), degraded
@@ -135,6 +140,26 @@ export function boundExcerpts(value, max) {
 }
 
 /** Mirror of validateJevResponse in client.ts. Throws on any invalid shape. */
+/**
+ * A logged heuristic is comparable with the logged Jev answer only when it is
+ * a valid answer to the same question: the first declared question, whose
+ * answer is the one logged. Anything else is logged as null (non-comparable).
+ */
+export function comparableHeuristic(value, questions) {
+  const question = Object.values(questions ?? {})[0];
+  if (!question || typeof question !== "object") return null;
+  switch (question.type) {
+    case "choice":
+      return typeof value === "string" && Object.hasOwn(question.criteria ?? {}, value) ? value : null;
+    case "noul":
+      return typeof value === "boolean" ? value : null;
+    case "score":
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
+    default:
+      return null;
+  }
+}
+
 export function validateJevResponse(body) {
   if (body === null || typeof body !== "object")
     throw new Error("invalid response: expected object");
@@ -199,7 +224,7 @@ export async function resolveRequest(
   const startedAt = Date.now();
   const mode = parseJevEnv(request.point, env, request.permissionMode);
   if (mode === "off") {
-    return { mode, answer: null, confidence: undefined, durationMs: 0 };
+    return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
   const bound = boundExcerpts(
     { state: request.state, questions: request.questions },
@@ -215,6 +240,7 @@ export async function resolveRequest(
     }, timeoutMs);
   });
   let jevAnswer = null;
+  let jevAnswers = null;
   let confidence;
   let entryMode = mode;
   try {
@@ -237,7 +263,12 @@ export async function resolveRequest(
     if (!response.ok)
       throw new Error("jev request failed: HTTP " + response.status);
     const body = validateJevResponse(await response.json());
-    jevAnswer = Object.values(body.answers)[0];
+    const firstQuestion = Object.keys(request.questions ?? {})[0];
+    jevAnswer =
+      firstQuestion !== undefined && Object.hasOwn(body.answers, firstQuestion)
+        ? body.answers[firstQuestion]
+        : Object.values(body.answers)[0];
+    jevAnswers = body.answers;
     confidence = jevAnswer.confidence;
   } catch (error) {
     entryMode = "degraded";
@@ -257,8 +288,9 @@ export async function resolveRequest(
       point: request.point,
       mode: entryMode,
       state: bound.state,
-      heuristic: request.heuristic ?? null,
+      heuristic: comparableHeuristic(request.heuristic, request.questions),
       jev: entryMode === "degraded" ? null : jevAnswer,
+      answers: entryMode === "degraded" ? null : jevAnswers,
       confidence,
       durationMs,
     },
@@ -267,6 +299,7 @@ export async function resolveRequest(
   return {
     mode: entryMode,
     answer: entryMode === "degraded" ? null : jevAnswer,
+    answers: entryMode === "degraded" ? null : jevAnswers,
     confidence,
     durationMs,
   };

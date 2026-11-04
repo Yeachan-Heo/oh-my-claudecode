@@ -65,13 +65,12 @@ Note: The repo has two main branches:
 2. **Understand the build chain** (from `package.json`):
    ```bash
    npm run build
-   # Runs: tsc && build-skill-bridge && build-mcp-server && build-bridge-entry && compose-docs && build:runtime-cli && build:team-server && build:cli
+   # Runs: tsc && build-skill-bridge && build-mcp-server && compose-docs && build:runtime-cli && build:team-server && build:cli
    ```
 
    - `tsc` — TypeScript compilation to JavaScript
    - `build-skill-bridge.mjs` — Bundles skills for plugin system
    - `build-mcp-server.mjs` — Builds MCP server for Claude Code integration
-   - `build-bridge-entry.mjs` — Builds the plugin entry point
    - `compose-docs` — Assembles documentation from partials
    - `build:runtime-cli.mjs` — Bundles the CLI runtime
    - `build:team-server.mjs` — Builds the team server
