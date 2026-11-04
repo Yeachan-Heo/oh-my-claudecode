@@ -53,9 +53,14 @@ are in scope.
    semantics, embedded below). Do not eyeball; classify.
 3. **Act on the verdict**:
    - failing check → `fix-ci` (classify real/flaky/environmental, then fix; pass the target repo, PR number, head SHA, and base branch)
-   - requested changes → `get-pr-comments` to triage threads, then address
-     each through the review lane; reply to threads you resolve; dismiss
-     bot noise with a concrete reason instead of churning code
+   - requested changes or unresolved review threads → `get-pr-comments` to
+     triage threads, then address each through the review lane; reply to
+     threads you resolve; dismiss bot noise with a concrete reason instead
+     of churning code. Read the threads surface (`comments`/`reviews` via
+     the get-pr-comments fetch) even when `reviewDecision` is empty or
+     `approved` — a non-blocking review or a comment after approval leaves
+     the decision clean while real threads stand — and never report `ready`
+     while an in-scope thread is untriaged
    - conflicts → `fix-merge-conflicts` **in its no-rebase mode**: resolve
      with a merge commit only. Never rebase and never force-push here —
      this constraint overrides that skill's own-branch rebase option,

@@ -22,11 +22,14 @@ either intent is a bug with a clean git status.
 1. **Establish ownership**: you resolve conflicts on a branch you own, against
    a base others own. Conflicts on a shared branch get reported to the
    owner, not resolved unilaterally.
-2. **Start the approved integration first**: `git merge <base>` (or the
-   project's rebase convention, when the caller has not constrained it) so
-   conflict markers exist. A `mergeable: conflicting` answer from the
-   remote, or a clean local branch, has no `MERGE_HEAD` — `git log --merge`
-   before integrating exits 128.
+2. **Start the approved integration first**: fetch the remote base
+   (`git fetch origin <base>`) and merge the fetched SHA — `git merge
+   FETCH_HEAD` (or the project's rebase convention, when the caller has not
+   constrained it) — so the conflicts you inspect match what GitHub
+   reported; a local base ref can be absent or behind `origin/<base>`, and
+   `git merge` never refreshes it implicitly. A `mergeable: conflicting`
+   answer from the remote, or a clean local branch, has no `MERGE_HEAD` —
+   `git log --merge` before integrating exits 128.
 3. **Read both intents**: `git log --merge -p -- <file>` for each conflicted
    file once the merge is in progress — what did each side change and why
    (commit messages are evidence). Conflict markers show the what; the
