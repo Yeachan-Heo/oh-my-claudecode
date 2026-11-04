@@ -88,6 +88,17 @@ describe('verification ledger', () => {
     rmSync(dirname(path), { recursive: true, force: true });
   });
 
+  it('skips rows whose required cells are whitespace-only', async () => {
+    const path = tempLedger();
+    writeFileSync(
+      path,
+      `${LEDGER_HEADER}\n  \tverify\tref\tsha\tunit-test-verified\tevidence\t\n`,
+      'utf8',
+    );
+    expect(await readLedger(path)).toEqual([]);
+    rmSync(dirname(path), { recursive: true, force: true });
+  });
+
   it('neutralizes formula-leading and multiline cells', () => {
     expect(renderLedgerCell('=SUM(A1)')).toBe("'=SUM(A1)");
     expect(renderLedgerCell('+cmd')).toBe("'+cmd");

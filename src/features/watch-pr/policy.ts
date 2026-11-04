@@ -136,9 +136,10 @@ export function decideWatchVerdict(facts: WatchPrFacts, options: WatchOptions): 
   if (facts.mergeStateStatus === 'draft' && !facts.isDraft) {
     waiting.push('merge state reports a draft — re-poll');
   }
-  if (facts.mergeStateStatus === 'has_hooks') {
-    waiting.push('repository merge hooks have not reported — re-poll');
-  }
+  // has_hooks is not a wait: GitHub defines it as "mergeable with passing
+  // commit status and pre-receive hooks" — the hooks belong to the server's
+  // merge attempt, not to a check that will later report. Re-polling here
+  // would hold an otherwise green PR in waiting forever.
   const pending = facts.checks.filter((c) => c.state === 'pending');
   if (pending.length > 0) {
     waiting.push(`pending checks: ${pending.map((c) => c.name).join(', ')}`);

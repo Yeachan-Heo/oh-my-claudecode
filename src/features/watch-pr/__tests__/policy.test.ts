@@ -46,9 +46,10 @@ describe('decideWatchVerdict', () => {
   it('waits on draft and has_hooks merge states instead of reporting ready', () => {
     const draft = decideWatchVerdict(facts({ mergeStateStatus: 'draft' }), { nowMs: NOW });
     expect(draft.kind).toBe('waiting');
+    // has_hooks is GitHub's "mergeable with passing commit status and
+    // pre-receive hooks" — merge-attemptable, never a wait reason.
     const hooks = decideWatchVerdict(facts({ mergeStateStatus: 'has_hooks' }), { nowMs: NOW });
-    expect(hooks.kind).toBe('waiting');
-    expect(hooks.reasons.join(' ')).toContain('hooks');
+    expect(hooks.reasons.join(' ')).not.toContain('hooks');
   });
 
   it('closed and merged PRs are gone, not blocked', () => {

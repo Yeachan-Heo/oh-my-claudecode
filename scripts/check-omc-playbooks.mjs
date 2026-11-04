@@ -126,8 +126,14 @@ async function main() {
   const skillsRoot = resolveSkillsRoot();
   const problems = [];
   let files;
+  let symlinked = [];
   try {
-    files = readdirSync(playbooksDir, { withFileTypes: true })
+    const dirents = readdirSync(playbooksDir, { withFileTypes: true });
+    // A symlinked playbook would otherwise vanish from this filter and the
+    // checker could exit 0 with "nothing to check" while an invalid target
+    // sits behind the link — reject it instead of skipping silently.
+    symlinked = dirents.filter((e) => e.isSymbolicLink() && e.name.endsWith('.md')).map((e) => e.name);
+    files = dirents
       .filter((e) => e.isFile() && e.name.endsWith('.md'))
       .map((e) => e.name)
       .sort();
@@ -139,15 +145,20 @@ async function main() {
     throw error;
   }
   const skillIndex = buildSkillIndex(skillsRoot);
+  for (const name of symlinked) {
+    problems.push(`${name}: is a symlink; playbooks must be regular files`);
+  }
 
-  if (files.length === 0) {
+  if (files.length === 0 && symlinked.length === 0) {
     console.log('check-omc-playbooks: no project playbooks — nothing to check');
     return 0;
   }
 
   for (const file of files) {
+    // Project playbooks can carry a UTF-8 BOM just like bundled skills;
+    // strip it before parsing or the frontmatter block is invisible.
     const source = readFileSync(join(playbooksDir, file), 'utf8');
-    const fields = parseFrontmatter(source);
+    const fields = parseFrontmatter(stripLeadingUtf8Bom(source));
     const extendsValue = fields.extends;
     // One error per problem: record both missing required fields before
     // deciding whether anchor validation can run at all.
@@ -155,7 +166,12 @@ async function main() {
     if (missingExtends) {
       problems.push(`${file}: frontmatter is missing an "extends:" field`);
     }
-    if (!fields.when) {
+    // A YAML placeholder such as when: "" parses to the quote characters;
+    // decode and trim so a semantically empty trigger sentence counts as
+    // missing.
+    const whenValue =
+      typeof fields.when === 'string' ? fields.when.replace(/^['"]+|['"]+$/g, '').trim() : fields.when;
+    if (!whenValue) {
       problems.push(`${file}: frontmatter is missing a "when:" field`);
     }
     if (missingExtends) continue;

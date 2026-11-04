@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -174,6 +174,37 @@ describe('check-omc-playbooks', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('missing an "extends:"');
     expect(r.stderr).toContain('missing a "when:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects a semantically empty when scalar', () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(root, 'quoted.md', '---\nextends: tdd\nwhen: ""\n---\n\nBody.\n');
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('missing a "when:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('validates a playbook saved with a UTF-8 BOM', () => {
+    const { root, skillsRoot } = buildProject();
+    writeFileSync(
+      join(root, '.omc', 'playbooks', 'bom.md'),
+      '\uFEFF---\nextends: tdd\nwhen: Local checkout without a setup copy.\n---\n\n**After** "Write the failing test first." keep the output artifact path.\n',
+    );
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain('missing an "extends:"');
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('rejects a symlinked playbook instead of skipping it', { skip: process.platform === 'win32' }, () => {
+    const { root, skillsRoot } = buildProject();
+    writePlaybook(root, 'real.md', '---\nextends: tdd\nwhen: Real playbook.\n---\n\nBody.\n');
+    symlinkSync(join(root, '.omc', 'playbooks', 'real.md'), join(root, '.omc', 'playbooks', 'link.md'));
+    const r = runChecker(root, skillsRoot);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('link.md: is a symlink');
     rmSync(root, { recursive: true, force: true });
   });
 
