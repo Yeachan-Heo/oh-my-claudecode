@@ -95,7 +95,7 @@ Classification order, first match wins:
 - any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
-- mergeability or `mergeStateStatus=UNKNOWN`, `DRAFT`, or `HAS_HOOKS` → **waiting** (re-poll; not an error)
+- mergeability or `mergeStateStatus=UNKNOWN` or `DRAFT` → **waiting** (re-poll; not an error). `HAS_HOOKS` is not a wait: GitHub defines it as mergeable with passing commit status and pre-receive hooks — the hooks belong to the merge attempt, so an otherwise green PR with `HAS_HOOKS` classifies normally
 - pending checks → **waiting**
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
