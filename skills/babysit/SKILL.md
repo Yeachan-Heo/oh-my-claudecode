@@ -68,8 +68,9 @@ are in scope.
      threads with `get-pr-comments <N>` before reporting an unactionable block
 4. **Ledger discipline**: watch verdicts (`ready`/`waiting`/`blocked`/`gone`)
    are gate states, not verification — never write them into the
-   verification ledger, whose vocabulary is separate. Append a
-   `.omc/state/verification-ledger.tsv` row only when *you* executed a check
+   verification ledger, whose vocabulary is separate. Append a verification
+   ledger row (at the writer's canonical path under OMC's state root) only
+   when *you* executed a check
    yourself — e.g. a `fix-ci` rerun went green (`unit-test-verified`, with
    the command as evidence). One row per executed check, never per poll.
 5. **Report**: verdict, what changed since the last poll, what is still
@@ -84,12 +85,12 @@ says stop, and say which.
 
 Classification order, first match wins:
 
-- conflicts, `mergeStateStatus=BLOCKED`, or `BEHIND` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
+- conflicts, `mergeStateStatus=BLOCKED`, `BEHIND`, or `DIRTY` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
 - any failed check → **blocked** (fix lane)
 - any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
 - review required or missing approval → **blocked** (needs a human reviewer; never self-approve)
-- mergeability or `mergeStateStatus=UNKNOWN` → **waiting** (re-poll; not an error)
+- mergeability or `mergeStateStatus=UNKNOWN`, `DRAFT`, or `HAS_HOOKS` → **waiting** (re-poll; not an error)
 - pending checks → **waiting**
 - no checks configured → **waiting** until the same head SHA has shown no
   checks for a 60-second confirmation window; only then is the absence
