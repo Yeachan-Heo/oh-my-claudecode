@@ -16,14 +16,33 @@
  * assignTask, resumeTeam as discrete operations driven by the caller.
  */
 
-import { join, resolve } from 'path';
-import { existsSync } from 'fs';
-import { link, lstat, mkdir, open, readdir, readFile, rm, unlink, writeFile } from 'fs/promises';
-import { performance } from 'perf_hooks';
-import { TeamPaths, absPath, canonicalTeamStatePath, teamStateRoot, teamWorkspaceHash } from './state-paths.js';
-import { getOmcRoot, validateSessionId } from '../lib/worktree-paths.js';
-import { allocateTasksToWorkers } from './allocation-policy.js';
-import type { TaskAllocationInput, WorkerAllocationInput } from './allocation-policy.js';
+import { join, resolve } from "path";
+import { existsSync } from "fs";
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rm,
+  unlink,
+  writeFile,
+} from "fs/promises";
+import { performance } from "perf_hooks";
+import {
+  TeamPaths,
+  absPath,
+  canonicalTeamStatePath,
+  teamStateRoot,
+  teamWorkspaceHash,
+} from "./state-paths.js";
+import { getOmcRoot, validateSessionId } from "../lib/worktree-paths.js";
+import { allocateTasksToWorkers } from "./allocation-policy.js";
+import type {
+  TaskAllocationInput,
+  WorkerAllocationInput,
+} from "./allocation-policy.js";
 import {
   readTeamConfig,
   readWorkerStatus,
@@ -38,14 +57,14 @@ import {
   migrateTeamConfigRevision,
   withTeamConfigMutationLock,
   readTeamManifest,
-} from './monitor.js';
-import { appendTeamEvent, emitMonitorDerivedEvents } from './events.js';
+} from "./monitor.js";
+import { appendTeamEvent, emitMonitorDerivedEvents } from "./events.js";
 import {
   DEFAULT_TEAM_GOVERNANCE,
   DEFAULT_TEAM_TRANSPORT_POLICY,
   getConfigGovernance,
-} from './governance.js';
-import { inferPhase } from './phase-controller.js';
+} from "./governance.js";
+import { inferPhase } from "./phase-controller.js";
 import type {
   TeamConfig,
   TeamManifestV2,
@@ -60,17 +79,29 @@ import type {
   TaskRecoveryRequeueSidecar,
   WorkerStatus,
   WorkerHeartbeat,
-} from './types.js';
-import { ABSOLUTE_MAX_WORKERS, isValidTeamInstanceId, isValidTmuxServerIdentity, type TeamInstanceProcessIdentity } from './types.js';
-import type { TeamPhase } from './phase-controller.js';
-import { validateTeamName } from './team-name.js';
-import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from './contracts.js';
-import type { CliAgentType } from './model-contract.js';
+} from "./types.js";
 import {
-  buildValidatedWorkerLaunchDescriptor, clearResolvedPathCache, validateWorkerLaunchDescriptor, resolveValidatedBinaryPath,
-  getWorkerEnv as getModelWorkerEnv, isPromptModeAgent, getPromptModeArgs,
-  resolveDefaultWorkerModel, resolveExternalModelsDefaults, assertHeadlessSupported,
-} from './model-contract.js';
+  ABSOLUTE_MAX_WORKERS,
+  isValidTeamInstanceId,
+  isValidTmuxServerIdentity,
+  type TeamInstanceProcessIdentity,
+} from "./types.js";
+import type { TeamPhase } from "./phase-controller.js";
+import { validateTeamName } from "./team-name.js";
+import { TASK_ID_SAFE_PATTERN, WORKER_NAME_SAFE_PATTERN } from "./contracts.js";
+import type { CliAgentType } from "./model-contract.js";
+import {
+  buildValidatedWorkerLaunchDescriptor,
+  clearResolvedPathCache,
+  validateWorkerLaunchDescriptor,
+  resolveValidatedBinaryPath,
+  getWorkerEnv as getModelWorkerEnv,
+  isPromptModeAgent,
+  getPromptModeArgs,
+  resolveDefaultWorkerModel,
+  resolveExternalModelsDefaults,
+  assertHeadlessSupported,
+} from "./model-contract.js";
 import {
   createTeamSession,
   spawnOwnedWorkerInPane,
@@ -103,7 +134,8 @@ import {
   TeamSessionCreationError,
   isHerdrSessionTarget,
   providerForTeamTarget,
-} from './tmux-session.js';
+} from "./tmux-session.js";
+import { herdrWorkspaceIdFromSessionTarget } from "./herdr-session.js";
 import {
   composeInitialInbox,
   ensureWorkerStateDir,
@@ -113,8 +145,8 @@ import {
   renderRecoveryContinuationInstruction,
   renderCursorWorkerGuidance,
   renderWorkerExitContract,
-} from './worker-bootstrap.js';
-import { queueInboxInstruction } from './mcp-comm.js';
+} from "./worker-bootstrap.js";
+import { queueInboxInstruction } from "./mcp-comm.js";
 import {
   cleanupTeamWorktrees,
   inspectTeamWorktreeCleanupSafety,
@@ -122,15 +154,23 @@ import {
   installWorktreeRootAgents,
   normalizeTeamWorktreeMode,
   type TeamWorktreeMode,
-} from './git-worktree.js';
-import { formatOmcCliInvocation } from '../utils/omc-cli-rendering.js';
-import { createSwallowedErrorLogger } from '../lib/swallowed-error.js';
-import type { CanonicalTeamRole, PluginConfig, RoleAssignment, TeamRoleAssignmentSpec } from '../shared/types.js';
-import { CANONICAL_TEAM_ROLES } from '../shared/types.js';
-import { loadConfig } from '../config/loader.js';
-import { buildResolvedRoutingSnapshot, getRoleRoutingSpec } from './stage-router.js';
-import { routeTaskToRole } from './role-router.js';
-import { normalizeDelegationRole } from '../features/delegation-routing/types.js';
+} from "./git-worktree.js";
+import { formatOmcCliInvocation } from "../utils/omc-cli-rendering.js";
+import { createSwallowedErrorLogger } from "../lib/swallowed-error.js";
+import type {
+  CanonicalTeamRole,
+  PluginConfig,
+  RoleAssignment,
+  TeamRoleAssignmentSpec,
+} from "../shared/types.js";
+import { CANONICAL_TEAM_ROLES } from "../shared/types.js";
+import { loadConfig } from "../config/loader.js";
+import {
+  buildResolvedRoutingSnapshot,
+  getRoleRoutingSpec,
+} from "./stage-router.js";
+import { routeTaskToRole } from "./role-router.js";
+import { normalizeDelegationRole } from "../features/delegation-routing/types.js";
 import {
   CONTRACT_ROLES,
   cliWorkerOutputFilePath,
@@ -139,35 +179,55 @@ import {
   renderCliWorkerOutputContract,
   shouldInjectContract,
   type CliWorkerOutputPayload,
-} from './cli-worker-contract.js';
+} from "./cli-worker-contract.js";
 import {
   startMergeOrchestrator,
   recoverFromRestart,
   type OrchestratorHandle,
-} from './merge-orchestrator.js';
-import { ensureLeaderInbox, extendLeaderBootstrapPrompt, appendToLeaderInbox } from './leader-inbox.js';
-import { execFileSync } from 'node:child_process';
-import { isRuntimeV2Enabled } from './runtime-flags.js';
+} from "./merge-orchestrator.js";
+import {
+  ensureLeaderInbox,
+  extendLeaderBootstrapPrompt,
+  appendToLeaderInbox,
+} from "./leader-inbox.js";
+import { execFileSync } from "node:child_process";
+import { isRuntimeV2Enabled } from "./runtime-flags.js";
 import {
   installCommitCadence,
   startFallbackPoller,
   uninstallCommitCadence,
   type FallbackPollerHandle,
   type WorkerCadenceContext,
-} from './worker-commit-cadence.js';
-import { createHash, randomUUID } from 'node:crypto';
-import { isMatchingRecoveryFinal, isSafeRecoveryRequestId, readRecoveryFinalState, readRecoveryOutcome, readRecoveryRequestReservation, readRecoveryResult, writeRecoveryFinal, type RecoveryDurableOutcome } from './recovery-request-store.js';
+} from "./worker-commit-cadence.js";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  isMatchingRecoveryFinal,
+  isSafeRecoveryRequestId,
+  readRecoveryFinalState,
+  readRecoveryOutcome,
+  readRecoveryRequestReservation,
+  readRecoveryResult,
+  writeRecoveryFinal,
+  type RecoveryDurableOutcome,
+} from "./recovery-request-store.js";
 
 import {
   parseRecoveryIntent,
   resolveRuntimeCliPath,
   teamRecoveryState,
   type RecoverDeadWorkerOwnerInput,
-} from './runtime-owner-client.js';
-import { scaleUpFenceBlocks } from './scaling.js';
-import { runRecoverySaga, type RecoverySagaDependencies, type RecoverySagaInput } from './recovery-saga.js';
-import { readTaskRecoveryCheckpoint, selectTaskRecoveryCheckpoint } from './task-recovery-checkpoint.js';
-import { withProcessIdentityFileLock } from './process-identity-lock.js';
+} from "./runtime-owner-client.js";
+import { scaleUpFenceBlocks } from "./scaling.js";
+import {
+  runRecoverySaga,
+  type RecoverySagaDependencies,
+  type RecoverySagaInput,
+} from "./recovery-saga.js";
+import {
+  readTaskRecoveryCheckpoint,
+  selectTaskRecoveryCheckpoint,
+} from "./task-recovery-checkpoint.js";
+import { withProcessIdentityFileLock } from "./process-identity-lock.js";
 import {
   teamAdoptRecoveryReservations,
   teamListTasks,
@@ -180,11 +240,17 @@ import {
   normalizeTaskRecord,
   withTaskClaimLock,
   writeAtomic,
-} from './team-ops.js';
-import { createTaskRecord, validateTaskDependencies } from './state/tasks.js';
+} from "./team-ops.js";
+import { createTaskRecord, validateTaskDependencies } from "./state/tasks.js";
 
-function workerInstructionStateRoot(cwd: string, teamName: string, platform: NodeJS.Platform = process.platform): string {
-  return platform === 'win32' ? teamStateRoot(cwd, teamName) : '$OMC_TEAM_STATE_ROOT';
+function workerInstructionStateRoot(
+  cwd: string,
+  teamName: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return platform === "win32"
+    ? teamStateRoot(cwd, teamName)
+    : "$OMC_TEAM_STATE_ROOT";
 }
 
 export function buildStartupInboxTrigger(
@@ -195,15 +261,37 @@ export function buildStartupInboxTrigger(
   platform: NodeJS.Platform = process.platform,
 ): string {
   const suffix = ` [launch:${attemptId.slice(0, 12)}]`;
-  const message = generateTriggerMessage(teamName, workerName, workerInstructionStateRoot(cwd, teamName, platform)) + suffix;
-  if (platform !== 'win32' || message.length <= 200) return message;
+  const message =
+    generateTriggerMessage(
+      teamName,
+      workerName,
+      workerInstructionStateRoot(cwd, teamName, platform),
+    ) + suffix;
+  if (platform !== "win32" || message.length <= 200) return message;
   // Both initial and recovery launches explicitly supply this environment variable.
   // Name it in prose so the instruction works with PowerShell, cmd, and Bash.
   return `Read workers/${workerName}/inbox.md under the OMC_TEAM_STATE_ROOT environment variable; execute now, report concrete progress.${suffix}`;
 }
-import { currentProcessStartIdentity, isProcessIdentityDead, publishOwnerEpoch, readLatestOwnerEpoch, requireOwnerFence, requireOwnerProcessIdentity, type OwnerEpochRecord, type OwnerFence } from './team-owner-epoch.js';
-import type { RecoverDeadWorkerV2Error, RecoverDeadWorkerV2Failure, RecoverDeadWorkerV2Result, TaskRecoveryAdoptionResult } from './types.js';
-import { waitForRecoveryGateRecord, type RecoveryActivationGate } from './worker-activation-gate.js';
+import {
+  currentProcessStartIdentity,
+  isProcessIdentityDead,
+  publishOwnerEpoch,
+  readLatestOwnerEpoch,
+  requireOwnerFence,
+  requireOwnerProcessIdentity,
+  type OwnerEpochRecord,
+  type OwnerFence,
+} from "./team-owner-epoch.js";
+import type {
+  RecoverDeadWorkerV2Error,
+  RecoverDeadWorkerV2Failure,
+  RecoverDeadWorkerV2Result,
+  TaskRecoveryAdoptionResult,
+} from "./types.js";
+import {
+  waitForRecoveryGateRecord,
+  type RecoveryActivationGate,
+} from "./worker-activation-gate.js";
 import {
   isWorkerLaunchAttemptCurrent,
   isWorkerLaunchAttemptAccepted,
@@ -212,8 +300,8 @@ import {
   observeWorkerLaunchProvider,
   retireAndCleanupCurrentWorkerLaunchAttempt,
   withWorkerLaunchAttemptFence,
-} from './worker-launch-ack.js';
-import { isProcessIdentityLive } from '../platform/process-utils.js';
+} from "./worker-launch-ack.js";
+import { isProcessIdentityLive } from "../platform/process-utils.js";
 import {
   activateTeamInstanceUnderLock,
   assertTeamInstanceUnderLock,
@@ -225,7 +313,7 @@ import {
   retryTeamInstanceDisposal,
   TeamInstanceError,
   withTeamInstanceLifecycleLock,
-} from './team-instance.js';
+} from "./team-instance.js";
 
 export interface RecoverDeadWorkerV2Options {
   workerName: string;
@@ -249,46 +337,99 @@ export interface RuntimeOwnerRecoveryClient {
 let runtimeOwnerRecoveryClient: RuntimeOwnerRecoveryClient | undefined;
 
 /** Runtime integration point; production may bind its owner client after startup. */
-export function setRuntimeOwnerRecoveryClient(client: RuntimeOwnerRecoveryClient | undefined): void {
+export function setRuntimeOwnerRecoveryClient(
+  client: RuntimeOwnerRecoveryClient | undefined,
+): void {
   runtimeOwnerRecoveryClient = client;
 }
 
-
-function hasRequiredRecoveryPaneIdentities(result: RecoverDeadWorkerV2Result): boolean {
-  if (result.outcome !== 'recovered' && result.outcome !== 'already_running') return true;
-  return Boolean(result.newPaneId.trim())
-    && (result.outcome !== 'recovered' || Boolean(result.oldPaneId?.trim()));
+function hasRequiredRecoveryPaneIdentities(
+  result: RecoverDeadWorkerV2Result,
+): boolean {
+  if (result.outcome !== "recovered" && result.outcome !== "already_running")
+    return true;
+  return (
+    Boolean(result.newPaneId.trim()) &&
+    (result.outcome !== "recovered" || Boolean(result.oldPaneId?.trim()))
+  );
 }
 
 /** Queue recovery with the runtime owner; this process never runs the owner saga. */
 export async function recoverDeadWorkerV2(
   teamName: string,
   cwd: string,
-  { workerName, requestId = randomUUID(), instanceId: expectedInstanceId, timeoutMs = 180_000 }: RecoverDeadWorkerV2Options,
+  {
+    workerName,
+    requestId = randomUUID(),
+    instanceId: expectedInstanceId,
+    timeoutMs = 180_000,
+  }: RecoverDeadWorkerV2Options,
 ): Promise<RecoverDeadWorkerV2Result> {
-  try { validateTeamName(teamName); } catch {
-    return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
-      updatedAt: new Date().toISOString(), message: 'teamName is invalid.' };
+  try {
+    validateTeamName(teamName);
+  } catch {
+    return {
+      outcome: "failed",
+      committed: false,
+      error: "invalid_input",
+      requestId,
+      recoveryId: "",
+      teamName,
+      workerName,
+      updatedAt: new Date().toISOString(),
+      message: "teamName is invalid.",
+    };
   }
-  if (!cwd || !WORKER_NAME_SAFE_PATTERN.test(workerName) || !isSafeRecoveryRequestId(requestId) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 180_000 || timeoutMs > 300_000) {
-    return { outcome: 'failed', committed: false, error: 'invalid_input', requestId, recoveryId: '', teamName, workerName,
-      updatedAt: new Date().toISOString(), message: 'cwd, workerName, and requestId are required; timeoutMs must be an integer from 180000 through 300000.' };
+  if (
+    !cwd ||
+    !WORKER_NAME_SAFE_PATTERN.test(workerName) ||
+    !isSafeRecoveryRequestId(requestId) ||
+    !Number.isSafeInteger(timeoutMs) ||
+    timeoutMs < 180_000 ||
+    timeoutMs > 300_000
+  ) {
+    return {
+      outcome: "failed",
+      committed: false,
+      error: "invalid_input",
+      requestId,
+      recoveryId: "",
+      teamName,
+      workerName,
+      updatedAt: new Date().toISOString(),
+      message:
+        "cwd, workerName, and requestId are required; timeoutMs must be an integer from 180000 through 300000.",
+    };
   }
   let instanceId = expectedInstanceId;
   try {
-    const requestReservationPath = absPath(cwd, TeamPaths.recoveryRequestPending(requestId));
+    const requestReservationPath = absPath(
+      cwd,
+      TeamPaths.recoveryRequestPending(requestId),
+    );
     const existing = readRecoveryRequestReservation(cwd, requestId);
     if (!existing && existsSync(requestReservationPath)) {
       // A request ID that already has an unreadable reservation is not a fresh
       // by-name request. Never let the current config rebind that identity.
-      throw new Error('invalid_persisted_state');
+      throw new Error("invalid_persisted_state");
     }
     if (existing) {
       const existingInstanceId = existing.instance_id.toLowerCase();
-      if (instanceId !== undefined && instanceId.toLowerCase() !== existingInstanceId) {
-        return { outcome: 'failed', committed: false, error: 'recovery_attempt_conflict', requestId,
-          recoveryId: existing.recovery_id, teamName, workerName, updatedAt: new Date().toISOString(),
-          message: 'Request ID is already bound to a different team instance.' };
+      if (
+        instanceId !== undefined &&
+        instanceId.toLowerCase() !== existingInstanceId
+      ) {
+        return {
+          outcome: "failed",
+          committed: false,
+          error: "recovery_attempt_conflict",
+          requestId,
+          recoveryId: existing.recovery_id,
+          teamName,
+          workerName,
+          updatedAt: new Date().toISOString(),
+          message: "Request ID is already bound to a different team instance.",
+        };
       }
       // Existing request IDs retain their durable incarnation even after the
       // canonical team name has been replaced. Never resolve the current
@@ -297,43 +438,72 @@ export async function recoverDeadWorkerV2(
     } else if (instanceId === undefined) {
       // A fresh by-name request may intentionally target the current team, but
       // resolve that identity while holding the canonical lifecycle lock.
-      const resolved = await withTeamInstanceLifecycleLock(cwd, teamName, async () => {
-        const state = await teamRecoveryState(cwd, teamName);
-        if (state !== 'v2') throw new Error(state);
-        const current = await readRevisionedTeamConfig(teamName, cwd);
-        if (!current?.config.instance_id) throw new Error('team_instance_authority_missing');
-        return current.config.instance_id;
-      });
+      const resolved = await withTeamInstanceLifecycleLock(
+        cwd,
+        teamName,
+        async () => {
+          const state = await teamRecoveryState(cwd, teamName);
+          if (state !== "v2") throw new Error(state);
+          const current = await readRevisionedTeamConfig(teamName, cwd);
+          if (!current?.config.instance_id)
+            throw new Error("team_instance_authority_missing");
+          return current.config.instance_id;
+        },
+      );
       instanceId = resolved;
     }
-    if (instanceId === undefined) throw new Error('team_instance_authority_missing');
+    if (instanceId === undefined)
+      throw new Error("team_instance_authority_missing");
     // Validate the explicit/current binding before constructing the owner
     // input. Admission performs the authoritative under-lock assertion.
     createTeamInstanceBinding({ teamName, cwd, instanceId });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const errorCode: RecoverDeadWorkerV2Error = message === 'team_not_found'
-      ? 'team_not_found'
-      : message === 'runtime_v2_required'
-        ? 'runtime_v2_required'
-        : 'invalid_persisted_state';
-    return { outcome: 'failed', committed: false, error: errorCode, requestId,
-      recoveryId: '', teamName, workerName, updatedAt: new Date().toISOString(),
-      message };
+    const errorCode: RecoverDeadWorkerV2Error =
+      message === "team_not_found"
+        ? "team_not_found"
+        : message === "runtime_v2_required"
+          ? "runtime_v2_required"
+          : "invalid_persisted_state";
+    return {
+      outcome: "failed",
+      committed: false,
+      error: errorCode,
+      requestId,
+      recoveryId: "",
+      teamName,
+      workerName,
+      updatedAt: new Date().toISOString(),
+      message,
+    };
   }
-  const ownerInput = { requestId, cwd, teamName, workerName, instanceId, timeoutMs };
+  const ownerInput = {
+    requestId,
+    cwd,
+    teamName,
+    workerName,
+    instanceId,
+    timeoutMs,
+  };
   const client = runtimeOwnerRecoveryClient ?? {
     requestRuntimeOwnerRecovery: (input: typeof ownerInput) =>
-      import('./runtime-owner-client.js').then(module => module.requestRuntimeOwnerRecovery(input)),
+      import("./runtime-owner-client.js").then((module) =>
+        module.requestRuntimeOwnerRecovery(input),
+      ),
   };
   const result = await client.requestRuntimeOwnerRecovery(ownerInput);
   if (hasRequiredRecoveryPaneIdentities(result)) return result;
   return {
-    outcome: 'failed', committed: false, error: 'invalid_persisted_state',
-    requestId: result.requestId, recoveryId: result.recoveryId, teamName: result.teamName, workerName: result.workerName,
-    updatedAt: new Date().toISOString(), message: 'Recovery success result omitted a required actual pane identity.',
+    outcome: "failed",
+    committed: false,
+    error: "invalid_persisted_state",
+    requestId: result.requestId,
+    recoveryId: result.recoveryId,
+    teamName: result.teamName,
+    workerName: result.workerName,
+    updatedAt: new Date().toISOString(),
+    message: "Recovery success result omitted a required actual pane identity.",
   };
-
 }
 
 /** Reads only the canonical durable terminal result for a request. */
@@ -346,17 +516,27 @@ export async function readRecoverDeadWorkerV2Result(
 }
 
 /** Compatibility/internal reader that may return an in-progress durable outcome. */
-export function readRecoverDeadWorkerV2Outcome(cwd: string, requestId: string): RecoveryDurableOutcome | null {
+export function readRecoverDeadWorkerV2Outcome(
+  cwd: string,
+  requestId: string,
+): RecoveryDurableOutcome | null {
   return readRecoveryOutcome(cwd, requestId);
 }
-
 
 // ---------------------------------------------------------------------------
 // In-process orchestrator registry (per-team handle for the lifetime of the
 // runtime-cli process). Lives at module scope so shutdownTeamV2 can find it.
 // ---------------------------------------------------------------------------
 
-const orchestratorByTeam = new Map<string, { handle: OrchestratorHandle; serviceGeneration?: number; serviceAttemptId?: string; registeredWorkers: Set<string> }>();
+const orchestratorByTeam = new Map<
+  string,
+  {
+    handle: OrchestratorHandle;
+    serviceGeneration?: number;
+    serviceAttemptId?: string;
+    registeredWorkers: Set<string>;
+  }
+>();
 
 interface TeamCadenceEntry {
   workerName: string;
@@ -366,9 +546,16 @@ interface TeamCadenceEntry {
 
 const cadenceByTeam = new Map<string, { entries: TeamCadenceEntry[] }>();
 
-function registerTeamOrchestrator(teamName: string, handle: OrchestratorHandle,
-  service?: { serviceGeneration: number; serviceAttemptId: string }): void {
-  orchestratorByTeam.set(teamName, { handle, ...service, registeredWorkers: new Set() });
+function registerTeamOrchestrator(
+  teamName: string,
+  handle: OrchestratorHandle,
+  service?: { serviceGeneration: number; serviceAttemptId: string },
+): void {
+  orchestratorByTeam.set(teamName, {
+    handle,
+    ...service,
+    registeredWorkers: new Set(),
+  });
 }
 
 function getTeamOrchestrator(teamName: string): OrchestratorHandle | undefined {
@@ -379,13 +566,20 @@ function unregisterTeamOrchestrator(teamName: string): void {
   orchestratorByTeam.delete(teamName);
 }
 
-function registerTeamCadence(teamName: string, context: WorkerCadenceContext, poller?: FallbackPollerHandle): void {
+function registerTeamCadence(
+  teamName: string,
+  context: WorkerCadenceContext,
+  poller?: FallbackPollerHandle,
+): void {
   const entry = cadenceByTeam.get(teamName) ?? { entries: [] };
   entry.entries.push({ workerName: context.workerName, context, poller });
   cadenceByTeam.set(teamName, entry);
 }
 
-async function stopTeamCadence(teamName: string, strict = false): Promise<void> {
+async function stopTeamCadence(
+  teamName: string,
+  strict = false,
+): Promise<void> {
   const entry = cadenceByTeam.get(teamName);
   if (!entry) return;
   cadenceByTeam.delete(teamName);
@@ -394,34 +588,59 @@ async function stopTeamCadence(teamName: string, strict = false): Promise<void> 
     let poller = cadence.poller;
     let context = cadence.context;
     if (poller) {
-      try { poller.stop(); poller = undefined; } catch { /* retain for retry */ }
+      try {
+        poller.stop();
+        poller = undefined;
+      } catch {
+        /* retain for retry */
+      }
     }
     if (context) {
-      try { await uninstallCommitCadence(context); context = undefined; } catch { /* retain for retry */ }
+      try {
+        await uninstallCommitCadence(context);
+        context = undefined;
+      } catch {
+        /* retain for retry */
+      }
     }
-    if (poller || context) failedEntries.push({ workerName: cadence.workerName, poller, context });
+    if (poller || context)
+      failedEntries.push({ workerName: cadence.workerName, poller, context });
   }
   if (failedEntries.length > 0) {
     cadenceByTeam.set(teamName, { entries: failedEntries });
-    if (strict) throw new Error('service_teardown_incomplete');
+    if (strict) throw new Error("service_teardown_incomplete");
   }
 }
 
 function cadenceContextMatches(
   candidate: TeamCadenceEntry,
-  expected: WorkerCadenceContext & { serviceGeneration: number; attemptId: string },
+  expected: WorkerCadenceContext & {
+    serviceGeneration: number;
+    attemptId: string;
+  },
 ): boolean {
-  const known = candidate.context as (WorkerCadenceContext & { serviceGeneration?: number; attemptId?: string }) | undefined;
+  const known = candidate.context as
+    | (WorkerCadenceContext & {
+        serviceGeneration?: number;
+        attemptId?: string;
+      })
+    | undefined;
   if (!known) return false;
-  return candidate.workerName === expected.workerName
-    && known.teamName === expected.teamName && known.worktreePath === expected.worktreePath
-    && known.agentType === expected.agentType && known.serviceGeneration === expected.serviceGeneration
-    && known.attemptId === expected.attemptId;
+  return (
+    candidate.workerName === expected.workerName &&
+    known.teamName === expected.teamName &&
+    known.worktreePath === expected.worktreePath &&
+    known.agentType === expected.agentType &&
+    known.serviceGeneration === expected.serviceGeneration &&
+    known.attemptId === expected.attemptId
+  );
 }
 
 async function removeStaleTeamCadence(
   teamName: string,
-  expectedContexts: Array<WorkerCadenceContext & { serviceGeneration: number; attemptId: string }>,
+  expectedContexts: Array<
+    WorkerCadenceContext & { serviceGeneration: number; attemptId: string }
+  >,
 ): Promise<boolean> {
   const entry = cadenceByTeam.get(teamName);
   if (!entry) return true;
@@ -429,8 +648,13 @@ async function removeStaleTeamCadence(
   const matched = new Set<string>();
   let converged = true;
   for (const cadence of entry.entries) {
-    const expected = expectedContexts.find(context => context.workerName === cadence.workerName);
-    const isExpected = expected && !matched.has(expected.workerName) && cadenceContextMatches(cadence, expected);
+    const expected = expectedContexts.find(
+      (context) => context.workerName === cadence.workerName,
+    );
+    const isExpected =
+      expected &&
+      !matched.has(expected.workerName) &&
+      cadenceContextMatches(cadence, expected);
     if (isExpected) {
       matched.add(expected.workerName);
       retained.push(cadence);
@@ -439,56 +663,88 @@ async function removeStaleTeamCadence(
     let poller = cadence.poller;
     let context = cadence.context;
     if (poller) {
-      try { poller.stop(); poller = undefined; } catch { converged = false; }
+      try {
+        poller.stop();
+        poller = undefined;
+      } catch {
+        converged = false;
+      }
     }
     if (context) {
-      try { await uninstallCommitCadence(context); context = undefined; } catch { converged = false; }
+      try {
+        await uninstallCommitCadence(context);
+        context = undefined;
+      } catch {
+        converged = false;
+      }
     }
-    if (poller || context) retained.push({ workerName: cadence.workerName, poller, context });
+    if (poller || context)
+      retained.push({ workerName: cadence.workerName, poller, context });
   }
   if (retained.length > 0) cadenceByTeam.set(teamName, { entries: retained });
   else cadenceByTeam.delete(teamName);
   return converged;
 }
 
-export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: string): Promise<'synced' | 'repair_required'> {
+export async function reconcileCommittedTeamServices(
+  config: TeamConfig,
+  cwd: string,
+): Promise<"synced" | "repair_required"> {
   // Only truly active (non-committed) scale-up fences block service repair.
   // A lingering phase=committed fence is reconcilable and must not wedge recovery/services.
-  if (scaleUpFenceBlocks(config)) return 'repair_required';
+  if (scaleUpFenceBlocks(config)) return "repair_required";
 
   /** Re-read authoritative lifecycle; abort service side effects if shutdown owns the team. */
   const assertLifecycleStillActive = async (): Promise<boolean> => {
-    const latest = await readRevisionedTeamConfig(config.name, cwd).catch(() => null);
+    const latest = await readRevisionedTeamConfig(config.name, cwd).catch(
+      () => null,
+    );
     if (!latest) return false;
-    const life = latest.config.lifecycle_state ?? 'active';
-    return life === 'active';
+    const life = latest.config.lifecycle_state ?? "active";
+    return life === "active";
   };
-  if (!await assertLifecycleStillActive()) return 'repair_required';
+  if (!(await assertLifecycleStillActive())) return "repair_required";
 
   const descriptor = config.service_descriptor;
-  if (!descriptor || descriptor.schema_version !== 1 || !Number.isSafeInteger(descriptor.service_generation)
-    || descriptor.service_generation < 1 || !descriptor.service_attempt_id || !descriptor.workspace_root) return 'repair_required';
+  if (
+    !descriptor ||
+    descriptor.schema_version !== 1 ||
+    !Number.isSafeInteger(descriptor.service_generation) ||
+    descriptor.service_generation < 1 ||
+    !descriptor.service_attempt_id ||
+    !descriptor.workspace_root
+  )
+    return "repair_required";
   if (!descriptor.auto_merge_enabled) {
-    if (descriptor.cadence_policy !== 'disabled') return 'repair_required';
+    if (descriptor.cadence_policy !== "disabled") return "repair_required";
     const localService = orchestratorByTeam.get(config.name);
     try {
       if (localService) await localService.handle.drainAndStop();
       await stopTeamCadence(config.name, true);
       unregisterTeamOrchestrator(config.name);
-      return 'synced';
+      return "synced";
     } catch {
-      return 'repair_required';
+      return "repair_required";
     }
   }
-  if (descriptor.cadence_policy !== 'worker-auto-commit-v1' || !descriptor.leader_branch || config.worktree_mode !== 'named') return 'repair_required';
+  if (
+    descriptor.cadence_policy !== "worker-auto-commit-v1" ||
+    !descriptor.leader_branch ||
+    config.worktree_mode !== "named"
+  )
+    return "repair_required";
   try {
     for (const worker of config.workers) {
       const launch = validateWorkerLaunchDescriptor(worker.launch_descriptor);
-      if (worker.worker_cli !== launch.provider || !worker.worktree_path) return 'repair_required';
+      if (worker.worker_cli !== launch.provider || !worker.worktree_path)
+        return "repair_required";
     }
     const localService = orchestratorByTeam.get(config.name);
-    if (localService && (localService.serviceGeneration !== descriptor.service_generation
-      || localService.serviceAttemptId !== descriptor.service_attempt_id)) {
+    if (
+      localService &&
+      (localService.serviceGeneration !== descriptor.service_generation ||
+        localService.serviceAttemptId !== descriptor.service_attempt_id)
+    ) {
       await localService.handle.drainAndStop();
       await stopTeamCadence(config.name, true);
       unregisterTeamOrchestrator(config.name);
@@ -496,24 +752,40 @@ export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: st
     let orchestrator = getTeamOrchestrator(config.name);
     if (!orchestrator) {
       // Re-check lifecycle immediately before starting services (stale active snapshot race).
-      if (!await assertLifecycleStillActive()) return 'repair_required';
-      orchestrator = await startMergeOrchestrator({ teamName: config.name, repoRoot: descriptor.workspace_root,
-        leaderBranch: descriptor.leader_branch, cwd, serviceGeneration: descriptor.service_generation,
-        serviceAttemptId: descriptor.service_attempt_id });
-      registerTeamOrchestrator(config.name, orchestrator, { serviceGeneration: descriptor.service_generation,
-        serviceAttemptId: descriptor.service_attempt_id });
+      if (!(await assertLifecycleStillActive())) return "repair_required";
+      orchestrator = await startMergeOrchestrator({
+        teamName: config.name,
+        repoRoot: descriptor.workspace_root,
+        leaderBranch: descriptor.leader_branch,
+        cwd,
+        serviceGeneration: descriptor.service_generation,
+        serviceAttemptId: descriptor.service_attempt_id,
+      });
+      registerTeamOrchestrator(config.name, orchestrator, {
+        serviceGeneration: descriptor.service_generation,
+        serviceAttemptId: descriptor.service_attempt_id,
+      });
     }
     const local = orchestratorByTeam.get(config.name);
-    if (!local) return 'repair_required';
-    const expectedContexts = config.workers.map(worker => {
+    if (!local) return "repair_required";
+    const expectedContexts = config.workers.map((worker) => {
       const launch = validateWorkerLaunchDescriptor(worker.launch_descriptor);
       return {
-        teamName: config.name, workerName: worker.name, worktreePath: worker.worktree_path!,
-        agentType: launch.provider, enabled: true, serviceGeneration: descriptor.service_generation,
+        teamName: config.name,
+        workerName: worker.name,
+        worktreePath: worker.worktree_path!,
+        agentType: launch.provider,
+        enabled: true,
+        serviceGeneration: descriptor.service_generation,
         attemptId: descriptor.service_attempt_id,
-      } satisfies WorkerCadenceContext & { serviceGeneration: number; attemptId: string };
+      } satisfies WorkerCadenceContext & {
+        serviceGeneration: number;
+        attemptId: string;
+      };
     });
-    const expectedWorkers = new Set(config.workers.map(worker => worker.name));
+    const expectedWorkers = new Set(
+      config.workers.map((worker) => worker.name),
+    );
     let staleOrchestratorRemovalFailed = false;
     for (const workerName of [...local.registeredWorkers]) {
       if (expectedWorkers.has(workerName)) continue;
@@ -524,7 +796,10 @@ export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: st
         staleOrchestratorRemovalFailed = true;
       }
     }
-    const cadenceRemovalsConverged = await removeStaleTeamCadence(config.name, expectedContexts);
+    const cadenceRemovalsConverged = await removeStaleTeamCadence(
+      config.name,
+      expectedContexts,
+    );
     for (const worker of config.workers) {
       if (!local.registeredWorkers.has(worker.name)) {
         await orchestrator.registerWorker(worker.name);
@@ -533,20 +808,40 @@ export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: st
     }
     const cadence = cadenceByTeam.get(config.name);
     for (const context of expectedContexts) {
-      const installed = cadence?.entries.some(candidate => cadenceContextMatches(candidate, context));
+      const installed = cadence?.entries.some((candidate) =>
+        cadenceContextMatches(candidate, context),
+      );
       if (installed) continue;
-      if (!await assertLifecycleStillActive()) return 'repair_required';
+      if (!(await assertLifecycleStillActive())) return "repair_required";
       const installedCadence = await installCommitCadence(context);
-      registerTeamCadence(config.name, context,
-        installedCadence.method === 'fallback-poll' ? startFallbackPoller(context.worktreePath, context.workerName) : undefined);
+      registerTeamCadence(
+        config.name,
+        context,
+        installedCadence.method === "fallback-poll"
+          ? startFallbackPoller(context.worktreePath, context.workerName)
+          : undefined,
+      );
     }
     const finalCadence = cadenceByTeam.get(config.name);
-    const exactCadence = (finalCadence?.entries.length ?? 0) === expectedContexts.length
-      && expectedContexts.every(context => finalCadence?.entries.some(candidate => cadenceContextMatches(candidate, context)));
-    return cadenceRemovalsConverged && !staleOrchestratorRemovalFailed
-      && exactCadence && local.registeredWorkers.size === expectedWorkers.size
-      && [...expectedWorkers].every(workerName => local.registeredWorkers.has(workerName)) ? 'synced' : 'repair_required';
-  } catch { return 'repair_required'; }
+    const exactCadence =
+      (finalCadence?.entries.length ?? 0) === expectedContexts.length &&
+      expectedContexts.every((context) =>
+        finalCadence?.entries.some((candidate) =>
+          cadenceContextMatches(candidate, context),
+        ),
+      );
+    return cadenceRemovalsConverged &&
+      !staleOrchestratorRemovalFailed &&
+      exactCadence &&
+      local.registeredWorkers.size === expectedWorkers.size &&
+      [...expectedWorkers].every((workerName) =>
+        local.registeredWorkers.has(workerName),
+      )
+      ? "synced"
+      : "repair_required";
+  } catch {
+    return "repair_required";
+  }
 }
 
 /**
@@ -554,14 +849,16 @@ export async function reconcileCommittedTeamServices(config: TeamConfig, cwd: st
  * Throws if not a git repo or HEAD is detached.
  */
 function resolveLeaderBranch(cwd: string): string {
-  const out = execFileSync('git', ['branch', '--show-current'], {
+  const out = execFileSync("git", ["branch", "--show-current"], {
     cwd,
-    encoding: 'utf-8',
-    stdio: ['pipe', 'pipe', 'pipe'],
+    encoding: "utf-8",
+    stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   }).trim();
   if (!out) {
-    throw new Error('auto-merge requires a non-detached leader branch (git branch --show-current returned empty)');
+    throw new Error(
+      "auto-merge requires a non-detached leader branch (git branch --show-current returned empty)",
+    );
   }
   return out;
 }
@@ -570,7 +867,7 @@ function resolveLeaderBranch(cwd: string): string {
 // Feature flag
 // ---------------------------------------------------------------------------
 
-export { isRuntimeV2Enabled } from './runtime-flags.js';
+export { isRuntimeV2Enabled } from "./runtime-flags.js";
 
 // ---------------------------------------------------------------------------
 // Runtime state (returned by startTeam, consumed by monitorTeam/shutdownTeam)
@@ -608,7 +905,7 @@ export interface TeamSnapshotV2 {
     alive: boolean;
     liveness: WorkerPaneLiveness;
     /** Provider execution health is observed independently of pane transport. */
-    providerLiveness: 'alive' | 'dead' | 'unknown';
+    providerLiveness: "alive" | "dead" | "unknown";
     status: WorkerStatus;
     heartbeat: WorkerHeartbeat | null;
     assignedTasks: string[];
@@ -655,9 +952,26 @@ export interface ShutdownOptionsV2 {
 }
 
 export type ShutdownTeamV2Result =
-  | { outcome: 'cleaned' }
-  | { outcome: 'preserved'; reason: 'config_missing_cleanup_evidence' | 'provider_cleanup_unverified' | 'worker_panes_alive' | 'worker_pane_liveness_unknown' | 'worker_process_reaped_pane_unconfirmed' | 'worktrees_preserved'; workers: string[] }
-  | { outcome: 'failed'; reason: 'tmux_cleanup_failed' | 'worktree_cleanup_failed' | 'state_cleanup_failed'; detail: string };
+  | { outcome: "cleaned" }
+  | {
+      outcome: "preserved";
+      reason:
+        | "config_missing_cleanup_evidence"
+        | "provider_cleanup_unverified"
+        | "worker_panes_alive"
+        | "worker_pane_liveness_unknown"
+        | "worker_process_reaped_pane_unconfirmed"
+        | "worktrees_preserved";
+      workers: string[];
+    }
+  | {
+      outcome: "failed";
+      reason:
+        | "tmux_cleanup_failed"
+        | "worktree_cleanup_failed"
+        | "state_cleanup_failed";
+      detail: string;
+    };
 
 interface ShutdownGateCounts {
   total: number;
@@ -690,20 +1004,39 @@ const MONITOR_SIGNAL_STALE_MS = 30_000;
  */
 export function resolveTaskAssignment(
   task: { subject: string; description: string; role?: string },
-  resolvedRouting: Record<CanonicalTeamRole, { primary: RoleAssignment; fallback: RoleAssignment }>,
-  roleRoutingConfig: Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined,
+  resolvedRouting: Record<
+    CanonicalTeamRole,
+    { primary: RoleAssignment; fallback: RoleAssignment }
+  >,
+  roleRoutingConfig:
+    | Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>>
+    | undefined,
   fallbackAgent: CliAgentType,
-): { agentType: CliAgentType; model: string; reasoningEffort?: string; role: CanonicalTeamRole | null } {
-  const canonicalRoles = new Set<string>(CANONICAL_TEAM_ROLES as readonly string[]);
-  const hasExplicitRole = typeof task.role === 'string' && task.role.length > 0;
+): {
+  agentType: CliAgentType;
+  model: string;
+  reasoningEffort?: string;
+  role: CanonicalTeamRole | null;
+} {
+  const canonicalRoles = new Set<string>(
+    CANONICAL_TEAM_ROLES as readonly string[],
+  );
+  const hasExplicitRole = typeof task.role === "string" && task.role.length > 0;
   const rawRole = hasExplicitRole
     ? task.role!
-    : routeTaskToRole(task.subject, task.description, 'executor').role;
+    : routeTaskToRole(task.subject, task.description, "executor").role;
   const normalized = normalizeDelegationRole(rawRole);
-  const canonical = canonicalRoles.has(normalized) ? (normalized as CanonicalTeamRole) : null;
+  const canonical = canonicalRoles.has(normalized)
+    ? (normalized as CanonicalTeamRole)
+    : null;
 
   if (!canonical) {
-    return { agentType: fallbackAgent, model: '', reasoningEffort: undefined, role: null };
+    return {
+      agentType: fallbackAgent,
+      model: "",
+      reasoningEffort: undefined,
+      role: null,
+    };
   }
 
   // Snapshot routing only overrides the caller's CLI agentType when the user
@@ -712,11 +1045,18 @@ export function resolveTaskAssignment(
   // pre-patch contract: `/team N:codex ...` stays on codex when config has no
   // per-role routing, even if the task text incidentally mentions "reviewer".
   const hasConfigForRole = !!getRoleRoutingSpec(
-    roleRoutingConfig as Record<string, TeamRoleAssignmentSpec | undefined> | undefined,
+    roleRoutingConfig as
+      | Record<string, TeamRoleAssignmentSpec | undefined>
+      | undefined,
     canonical,
   );
   if (!hasExplicitRole && !hasConfigForRole) {
-    return { agentType: fallbackAgent, model: '', reasoningEffort: undefined, role: canonical };
+    return {
+      agentType: fallbackAgent,
+      model: "",
+      reasoningEffort: undefined,
+      role: canonical,
+    };
   }
 
   // Explicit provider + explicit role with NO per-role routing config: the user
@@ -726,13 +1066,23 @@ export function resolveTaskAssignment(
   // opt into resolved_routing, whose default executor primary is Claude — silently
   // launching Claude instead of the requested CLI provider. When `team.roleRouting`
   // *is* configured for the role, that deliberate config still wins (below).
-  if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== 'claude') {
-    return { agentType: fallbackAgent, model: '', reasoningEffort: undefined, role: canonical };
+  if (hasExplicitRole && !hasConfigForRole && fallbackAgent !== "claude") {
+    return {
+      agentType: fallbackAgent,
+      model: "",
+      reasoningEffort: undefined,
+      role: canonical,
+    };
   }
 
   const pair = resolvedRouting[canonical];
   if (!pair) {
-    return { agentType: fallbackAgent, model: '', reasoningEffort: undefined, role: canonical };
+    return {
+      agentType: fallbackAgent,
+      model: "",
+      reasoningEffort: undefined,
+      role: canonical,
+    };
   }
 
   // A routed provider is authoritative. Missing or untrusted binaries fail later
@@ -747,8 +1097,14 @@ export function resolveTaskAssignment(
 }
 
 function sanitizeTeamName(name: string): string {
-  const sanitized = name.toLowerCase().replace(/[^a-z0-9-]/g, '').slice(0, 30);
-  if (!sanitized) throw new Error(`Invalid team name: "${name}" produces empty slug after sanitization`);
+  const sanitized = name
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "")
+    .slice(0, 30);
+  if (!sanitized)
+    throw new Error(
+      `Invalid team name: "${name}" produces empty slug after sanitization`,
+    );
   return sanitized;
 }
 
@@ -766,7 +1122,11 @@ function tmuxServerIdentityForTarget(
   providerTarget: string,
   identity: TmuxServerIdentity | undefined,
 ): TmuxServerIdentity | undefined {
-  if (providerTarget.startsWith('cmux:') || isHerdrSessionTarget(providerTarget)) return undefined;
+  if (
+    providerTarget.startsWith("cmux:") ||
+    isHerdrSessionTarget(providerTarget)
+  )
+    return undefined;
   if (!isValidTmuxServerIdentity(identity)) return undefined;
   return identity;
 }
@@ -775,33 +1135,42 @@ function requireTmuxServerIdentity(
   providerTarget: string,
   identity: TmuxServerIdentity | undefined,
 ): TmuxServerIdentity | undefined {
-  if (providerTarget.startsWith('cmux:') || isHerdrSessionTarget(providerTarget)) return undefined;
-  if (!isValidTmuxServerIdentity(identity)) throw new Error('tmux_server_identity_missing');
+  if (
+    providerTarget.startsWith("cmux:") ||
+    isHerdrSessionTarget(providerTarget)
+  )
+    return undefined;
+  if (!isValidTmuxServerIdentity(identity))
+    throw new Error("tmux_server_identity_missing");
   return identity;
 }
 
 function configuredPaneOwnership(
   config: TeamConfig,
-  worker: Pick<WorkerInfo, 'pane_id'>,
+  worker: Pick<WorkerInfo, "pane_id">,
 ): WorkerPaneOwnership | null {
   const paneId = worker.pane_id;
   const providerTarget = config.tmux_session;
   if (!paneId || !providerTarget) return null;
-  const provider = paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const;
-  const identity = provider === 'tmux'
-    ? tmuxServerIdentityForTarget(providerTarget, config.tmux_server_identity)
-    : undefined;
-  if (provider === 'tmux' && !identity) return null;
+  // Classify through the provider-aware helper: herdr worker panes (wN:pM)
+  // must never be adopted as cmux surfaces, or owned liveness and teardown
+  // dispatch to the wrong backend.
+  const provider = providerForTeamTarget(providerTarget, paneId);
+  const identity =
+    provider === "tmux"
+      ? tmuxServerIdentityForTarget(providerTarget, config.tmux_server_identity)
+      : undefined;
+  if (provider === "tmux" && !identity) return null;
   return {
     provider,
     providerTarget,
     paneId,
-    splitTarget: '',
-    leaderPaneId: config.leader_pane_id ?? '',
+    splitTarget: "",
+    leaderPaneId: config.leader_pane_id ?? "",
     reservedPaneIds: config.workers
-      .filter(candidate => candidate.pane_id && candidate.pane_id !== paneId)
-      .map(candidate => candidate.pane_id as string),
-    source: 'adopted',
+      .filter((candidate) => candidate.pane_id && candidate.pane_id !== paneId)
+      .map((candidate) => candidate.pane_id as string),
+    source: "adopted",
     ...(identity ? { tmuxServerIdentity: identity } : {}),
   };
 }
@@ -815,13 +1184,17 @@ async function getWorkerProviderLiveness(
   teamName: string,
   cwd: string,
   instanceId: TeamInstanceId | undefined,
-  worker: Pick<WorkerInfo, 'name' | 'pane_id' | 'worker_cli' | 'launch_attempt_id'> & {
+  worker: Pick<
+    WorkerInfo,
+    "name" | "pane_id" | "worker_cli" | "launch_attempt_id"
+  > & {
     launch_descriptor?: WorkerLaunchDescriptor;
   },
-): Promise<'alive' | 'dead' | 'unknown'> {
-  if (!instanceId || !worker.pane_id || !worker.launch_attempt_id) return 'unknown';
+): Promise<"alive" | "dead" | "unknown"> {
+  if (!instanceId || !worker.pane_id || !worker.launch_attempt_id)
+    return "unknown";
   const provider = worker.launch_descriptor?.provider ?? worker.worker_cli;
-  if (!provider) return 'unknown';
+  if (!provider) return "unknown";
   const attempt = await loadWorkerLaunchAttempt({
     cwd,
     teamName,
@@ -832,7 +1205,7 @@ async function getWorkerProviderLiveness(
     attemptId: worker.launch_attempt_id,
     runtimeCliPath: resolveRuntimeCliPath(),
   }).catch(() => null);
-  if (!attempt) return 'unknown';
+  if (!attempt) return "unknown";
   return observeWorkerLaunchProvider(attempt);
 }
 
@@ -845,24 +1218,38 @@ async function getWorkerExecutionLiveness(
   teamName: string,
   cwd: string,
   instanceId: TeamInstanceId | undefined,
-  worker: Pick<WorkerInfo, 'name' | 'pane_id' | 'worker_cli' | 'launch_attempt_id'> & {
+  worker: Pick<
+    WorkerInfo,
+    "name" | "pane_id" | "worker_cli" | "launch_attempt_id"
+  > & {
     launch_descriptor?: WorkerLaunchDescriptor;
   },
 ): Promise<WorkerPaneLiveness> {
-  const providerLiveness = await getWorkerProviderLiveness(teamName, cwd, instanceId, worker);
+  const providerLiveness = await getWorkerProviderLiveness(
+    teamName,
+    cwd,
+    instanceId,
+    worker,
+  );
   return providerLiveness;
 }
 
 function isTeamInstanceBoundaryError(error: unknown): boolean {
-  const code = error && typeof error === 'object' && 'code' in error
-    ? (error as { code?: unknown }).code
-    : undefined;
+  const code =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
   const message = error instanceof Error ? error.message : String(error);
-  return (typeof code === 'string' && code.startsWith('team_instance_'))
-    || message.startsWith('team_instance_');
+  return (
+    (typeof code === "string" && code.startsWith("team_instance_")) ||
+    message.startsWith("team_instance_")
+  );
 }
 
-function isFreshTimestamp(value: string | undefined, maxAgeMs: number = MONITOR_SIGNAL_STALE_MS): boolean {
+function isFreshTimestamp(
+  value: string | undefined,
+  maxAgeMs: number = MONITOR_SIGNAL_STALE_MS,
+): boolean {
   if (!value) return false;
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) return false;
@@ -874,10 +1261,13 @@ function findOutstandingWorkerTask(
   taskById: Map<string, TeamTask>,
   inProgressByOwner: Map<string, TeamTask[]>,
 ): TeamTask | null {
-  if (typeof worker.assigned_tasks === 'object') {
+  if (typeof worker.assigned_tasks === "object") {
     for (const taskId of worker.assigned_tasks) {
       const task = taskById.get(taskId);
-      if (task && (task.status === 'pending' || task.status === 'in_progress')) {
+      if (
+        task &&
+        (task.status === "pending" || task.status === "in_progress")
+      ) {
         return task;
       }
     }
@@ -894,12 +1284,17 @@ function getMissingDependencyIds(
   task: TeamTask,
   taskById: Map<string, TeamTask>,
 ): string[] {
-  return getTaskDependencyIds(task).filter((dependencyId) => !taskById.has(dependencyId));
+  return getTaskDependencyIds(task).filter(
+    (dependencyId) => !taskById.has(dependencyId),
+  );
 }
 
-type StartTeamTaskInput = StartTeamV2Config['tasks'][number];
+type StartTeamTaskInput = StartTeamV2Config["tasks"][number];
 
-function taskInputDependencyIds(task: StartTeamTaskInput, taskIndex: number): string[] {
+function taskInputDependencyIds(
+  task: StartTeamTaskInput,
+  taskIndex: number,
+): string[] {
   return [...validateTaskDependencies({ ...task, id: String(taskIndex + 1) })];
 }
 
@@ -907,18 +1302,26 @@ function taskInputDependencyIds(task: StartTeamTaskInput, taskIndex: number): st
  * Validate the complete initial task graph before creating team state,
  * worktrees, panes, or provider launch attempts.
  */
-function validateStartTaskDependencies(tasks: readonly StartTeamTaskInput[]): Map<number, string[]> {
+function validateStartTaskDependencies(
+  tasks: readonly StartTeamTaskInput[],
+): Map<number, string[]> {
   const dependencyByIndex = new Map<number, string[]>();
   const taskCount = tasks.length;
   for (let index = 0; index < taskCount; index++) {
     const task = tasks[index];
-    if (!task || typeof task !== 'object') throw new Error('invalid_task_dependencies');
+    if (!task || typeof task !== "object")
+      throw new Error("invalid_task_dependencies");
     const dependencies = taskInputDependencyIds(task, index);
     for (const dependencyId of dependencies) {
       const dependencyIndex = Number(dependencyId) - 1;
-      if (!Number.isSafeInteger(dependencyIndex) || dependencyIndex < 0 || dependencyIndex >= taskCount
+      if (
+        !Number.isSafeInteger(dependencyIndex) ||
+        dependencyIndex < 0 ||
+        dependencyIndex >= taskCount
       ) {
-        throw new Error(`invalid_task_dependency:task-${index + 1}:${dependencyId}`);
+        throw new Error(
+          `invalid_task_dependency:task-${index + 1}:${dependencyId}`,
+        );
       }
     }
     dependencyByIndex.set(index, dependencies);
@@ -927,10 +1330,12 @@ function validateStartTaskDependencies(tasks: readonly StartTeamTaskInput[]): Ma
   const visiting = new Set<number>();
   const visited = new Set<number>();
   const visit = (index: number): void => {
-    if (visiting.has(index)) throw new Error(`cyclic_task_dependency:task-${index + 1}`);
+    if (visiting.has(index))
+      throw new Error(`cyclic_task_dependency:task-${index + 1}`);
     if (visited.has(index)) return;
     visiting.add(index);
-    for (const dependencyId of dependencyByIndex.get(index) ?? []) visit(Number(dependencyId) - 1);
+    for (const dependencyId of dependencyByIndex.get(index) ?? [])
+      visit(Number(dependencyId) - 1);
     visiting.delete(index);
     visited.add(index);
   };
@@ -1002,28 +1407,28 @@ function buildV2TaskInstruction(
     {},
   );
   const completeTaskCommand = formatOmcCliInvocation(
-    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'completed', claim_token: '<claim_token>', result: 'Summary: <what changed>\\nVerification: <tests/checks run>\\nSubagent skip reason: worker protocol forbids nested subagents; completed focused probe in-session' })}' --json`,
+    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: "in_progress", to: "completed", claim_token: "<claim_token>", result: "Summary: <what changed>\\nVerification: <tests/checks run>\\nSubagent skip reason: worker protocol forbids nested subagents; completed focused probe in-session" })}' --json`,
   );
   const failTaskCommand = formatOmcCliInvocation(
-    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: 'in_progress', to: 'failed', claim_token: '<claim_token>' })}' --json`,
+    `team api transition-task-status --input '${JSON.stringify({ team_name: teamName, task_id: taskId, from: "in_progress", to: "failed", claim_token: "<claim_token>" })}' --json`,
   );
-  const persistentCursor = agentType === 'cursor';
+  const persistentCursor = agentType === "cursor";
   const cursorReviewer = persistentCursor && Boolean(cliOutputContract);
   const lifecycleInstructions = cursorReviewer
     ? [
-      `4. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
-      `5. ${renderWorkerExitContract(agentType, true)}`,
-    ]
+        `4. Write the structured verdict from the trusted reviewer contract below when the review is complete.`,
+        `5. ${renderWorkerExitContract(agentType, true)}`,
+      ]
     : [
-      `4. On completion (use claim_token from step 1):`,
-      `   ${completeTaskCommand}`,
-      `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
-      `5. On failure (use claim_token from step 1):`,
-      `   ${failTaskCommand}`,
-      persistentCursor
-        ? `6. ${renderWorkerExitContract(agentType, false)}`
-        : `6. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
-    ];
+        `4. On completion (use claim_token from step 1):`,
+        `   ${completeTaskCommand}`,
+        `   The result field is required for completion evidence. For broad delegated tasks, include either "Subagent skip reason: <why no nested worker was needed/allowed>" or, only when explicitly allowed by the leader, "Subagent spawn evidence: <child task names/thread ids and integrated findings>".`,
+        `5. On failure (use claim_token from step 1):`,
+        `   ${failTaskCommand}`,
+        persistentCursor
+          ? `6. ${renderWorkerExitContract(agentType, false)}`
+          : `6. ACK/progress replies are not a stop signal. Keep executing your assigned or next feasible work until the task is actually complete or failed, then transition and exit.`,
+      ];
   return [
     `## REQUIRED: Task Lifecycle Commands`,
     `You MUST run these commands. Do NOT skip any step.`,
@@ -1046,16 +1451,16 @@ function buildV2TaskInstruction(
     cursorReviewer
       ? `REMINDER: ${renderWorkerExitContract(agentType, true)} Do NOT write done.json; the leader owns the terminal transition.`
       : `REMINDER: ${renderWorkerExitContract(agentType, false)} Do NOT write done.json or edit task files directly.`,
-    ...(agentType === 'cursor' ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))] : []),
+    ...(agentType === "cursor"
+      ? [renderCursorWorkerGuidance(Boolean(cliOutputContract))]
+      : []),
     ...(cliOutputContract ? [cliOutputContract] : []),
-  ].join('\n');
+  ].join("\n");
 }
 
 // ---------------------------------------------------------------------------
 // V2 worker spawning — direct tmux pane creation, no v1 delegation
 // ---------------------------------------------------------------------------
-
-
 
 interface SpawnV2WorkerOptions {
   sessionName: string;
@@ -1123,14 +1528,26 @@ function workerStatusStartupFingerprint(status: WorkerStatus): string {
   });
 }
 
-function hasWorkerStatusProgress(status: WorkerStatus, taskId: string): boolean {
+function hasWorkerStatusProgress(
+  status: WorkerStatus,
+  taskId: string,
+): boolean {
   if (status.current_task_id === taskId) return true;
-  return ['working', 'blocked', 'done', 'failed'].includes(status.state);
+  return ["working", "blocked", "done", "failed"].includes(status.state);
 }
 
-async function readWorkerStartupTask(teamName: string, taskId: string, cwd: string): Promise<TeamTask | null> {
+async function readWorkerStartupTask(
+  teamName: string,
+  taskId: string,
+  cwd: string,
+): Promise<TeamTask | null> {
   try {
-    return JSON.parse(await readFile(absPath(cwd, TeamPaths.taskFile(teamName, taskId)), 'utf-8')) as TeamTask;
+    return JSON.parse(
+      await readFile(
+        absPath(cwd, TeamPaths.taskFile(teamName, taskId)),
+        "utf-8",
+      ),
+    ) as TeamTask;
   } catch {
     return null;
   }
@@ -1164,15 +1581,18 @@ async function hasCurrentWorkerStartupEvidence(
     readWorkerStartupTask(teamName, taskId, cwd),
     readWorkerStatus(teamName, workerName, cwd),
   ]);
-  const currentClaim = Boolean(task
-    && task.owner === workerName
-    && ['in_progress', 'completed', 'failed'].includes(task.status)
-    && task.claim?.launch_attempt_id === launchAttemptId
-    && workerTaskStartupFingerprint(task) !== baseline.taskFingerprint);
-  const currentStatus = status.current_task_id === taskId
-    && ['working', 'blocked', 'done', 'failed'].includes(status.state)
-    && status.launch_attempt_id === launchAttemptId
-    && workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
+  const currentClaim = Boolean(
+    task &&
+    task.owner === workerName &&
+    ["in_progress", "completed", "failed"].includes(task.status) &&
+    task.claim?.launch_attempt_id === launchAttemptId &&
+    workerTaskStartupFingerprint(task) !== baseline.taskFingerprint,
+  );
+  const currentStatus =
+    status.current_task_id === taskId &&
+    ["working", "blocked", "done", "failed"].includes(status.state) &&
+    status.launch_attempt_id === launchAttemptId &&
+    workerStatusStartupFingerprint(status) !== baseline.statusFingerprint;
   return currentClaim || currentStatus;
 }
 export interface WorkerStartupEvidencePolicy {
@@ -1186,7 +1606,9 @@ export interface WorkerStartupEvidencePolicy {
 }
 
 const WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS = 250;
-const WORKER_STARTUP_EVIDENCE_POLICIES: Readonly<Record<CliAgentType, WorkerStartupEvidencePolicy>> = {
+const WORKER_STARTUP_EVIDENCE_POLICIES: Readonly<
+  Record<CliAgentType, WorkerStartupEvidencePolicy>
+> = {
   // Claude's interactive transport can lose a submit, so retain the existing
   // bounded resubmit behavior and its effective 6 + (4 * 12) poll windows.
   // An engaged pane (issue #3849: WSL2 cold starts publish first-turn claim
@@ -1203,17 +1625,47 @@ const WORKER_STARTUP_EVIDENCE_POLICIES: Readonly<Record<CliAgentType, WorkerStar
   // External providers can be visibly ready before they publish task/status
   // evidence. Give that distinct evidence gate enough time for a cold start,
   // then perform one bounded read-only recheck without duplicating the inbox.
-  gemini: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
+  gemini: {
+    initialBudgetMs: 30_000,
+    finalRecheckBudgetMs: 1_000,
+    resubmitAttempts: 0,
+    resubmitBudgetMs: 0,
+    engagedPaneRecheckBudgetMs: 0,
+  },
   // Interactive external panes can consume the trigger while their first file
   // read is still in flight. A read-only activity probe earns one bounded
   // engaged recheck; it never resends the trigger or proves startup itself.
-  codex: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
-  cursor: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 30_000 },
-  grok: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
-  antigravity: { initialBudgetMs: 30_000, finalRecheckBudgetMs: 1_000, resubmitAttempts: 0, resubmitBudgetMs: 0, engagedPaneRecheckBudgetMs: 0 },
+  codex: {
+    initialBudgetMs: 30_000,
+    finalRecheckBudgetMs: 1_000,
+    resubmitAttempts: 0,
+    resubmitBudgetMs: 0,
+    engagedPaneRecheckBudgetMs: 30_000,
+  },
+  cursor: {
+    initialBudgetMs: 30_000,
+    finalRecheckBudgetMs: 1_000,
+    resubmitAttempts: 0,
+    resubmitBudgetMs: 0,
+    engagedPaneRecheckBudgetMs: 30_000,
+  },
+  grok: {
+    initialBudgetMs: 30_000,
+    finalRecheckBudgetMs: 1_000,
+    resubmitAttempts: 0,
+    resubmitBudgetMs: 0,
+    engagedPaneRecheckBudgetMs: 0,
+  },
+  antigravity: {
+    initialBudgetMs: 30_000,
+    finalRecheckBudgetMs: 1_000,
+    resubmitAttempts: 0,
+    resubmitBudgetMs: 0,
+    engagedPaneRecheckBudgetMs: 0,
+  },
 };
 
-const ENGAGED_PANE_RECHECK_TIMEOUT_ENV = 'OMC_TEAM_ENGAGED_PANE_RECHECK_MS';
+const ENGAGED_PANE_RECHECK_TIMEOUT_ENV = "OMC_TEAM_ENGAGED_PANE_RECHECK_MS";
 // The engaged recheck runs while the launch-attempt fence lock is held, so the
 // operator override stays clamped: a runaway value would hold stop/retire
 // contention for the whole window even though containment itself stays terminal.
@@ -1223,12 +1675,22 @@ function resolveEngagedPaneRecheckBudgetMs(fallback: number): number {
   const raw = process.env[ENGAGED_PANE_RECHECK_TIMEOUT_ENV];
   const value = raw === undefined ? Number.NaN : Number(raw);
   if (!Number.isFinite(value) || value <= 0) return fallback;
-  return Math.max(1, Math.min(Math.floor(value), MAX_ENGAGED_PANE_RECHECK_BUDGET_MS));
+  return Math.max(
+    1,
+    Math.min(Math.floor(value), MAX_ENGAGED_PANE_RECHECK_BUDGET_MS),
+  );
 }
 
-export function getWorkerStartupEvidencePolicy(agentType: CliAgentType): WorkerStartupEvidencePolicy {
+export function getWorkerStartupEvidencePolicy(
+  agentType: CliAgentType,
+): WorkerStartupEvidencePolicy {
   const policy = WORKER_STARTUP_EVIDENCE_POLICIES[agentType];
-  return { ...policy, engagedPaneRecheckBudgetMs: resolveEngagedPaneRecheckBudgetMs(policy.engagedPaneRecheckBudgetMs) };
+  return {
+    ...policy,
+    engagedPaneRecheckBudgetMs: resolveEngagedPaneRecheckBudgetMs(
+      policy.engagedPaneRecheckBudgetMs,
+    ),
+  };
 }
 
 export async function waitForStartupEvidenceBudget(
@@ -1241,7 +1703,9 @@ export async function waitForStartupEvidenceBudget(
     if (await hasEvidence()) return true;
     const remainingMs = deadline - Date.now();
     if (remainingMs <= 0) return false;
-    await new Promise(resolve => setTimeout(resolve, Math.min(delayMs, remainingMs)));
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.min(delayMs, remainingMs)),
+    );
   }
 }
 
@@ -1256,7 +1720,15 @@ async function waitForWorkerStartupEvidence(
   delayMs = WORKER_STARTUP_EVIDENCE_POLL_INTERVAL_MS,
 ): Promise<boolean> {
   return waitForStartupEvidenceBudget(
-    () => hasCurrentWorkerStartupEvidence(teamName, workerName, taskId, cwd, baseline, launchAttemptId),
+    () =>
+      hasCurrentWorkerStartupEvidence(
+        teamName,
+        workerName,
+        taskId,
+        cwd,
+        baseline,
+        launchAttemptId,
+      ),
     budgetMs,
     delayMs,
   );
@@ -1271,11 +1743,18 @@ async function waitForWorkerStatusTransition(
   budgetMs: number,
   delayMs = 250,
 ): Promise<boolean> {
-  return waitForStartupEvidenceBudget(async () => {
-    const status = await readWorkerStatus(teamName, workerName, cwd);
-    return status.state !== 'unknown' && status.launch_attempt_id === launchAttemptId
-      && workerStatusStartupFingerprint(status) !== baselineFingerprint;
-  }, budgetMs, delayMs);
+  return waitForStartupEvidenceBudget(
+    async () => {
+      const status = await readWorkerStatus(teamName, workerName, cwd);
+      return (
+        status.state !== "unknown" &&
+        status.launch_attempt_id === launchAttemptId &&
+        workerStatusStartupFingerprint(status) !== baselineFingerprint
+      );
+    },
+    budgetMs,
+    delayMs,
+  );
 }
 /**
  * Settle worker startup evidence under a provider-aware policy.
@@ -1298,33 +1777,44 @@ export async function settleStartupEvidence(
 ): Promise<{ settled: boolean; paneBusy: boolean }> {
   let settled = await waitForCurrentEvidence(policy.initialBudgetMs);
   let engagedPane = false;
-  for (let attempt = 1; !settled && resubmit && attempt <= policy.resubmitAttempts; attempt++) {
+  for (
+    let attempt = 1;
+    !settled && resubmit && attempt <= policy.resubmitAttempts;
+    attempt++
+  ) {
     const outcome = await resubmit();
-    if (outcome === 'pane_busy') {
+    if (outcome === "pane_busy") {
       engagedPane = true;
       break;
     }
-    if (outcome !== 'resubmitted') break;
+    if (outcome !== "resubmitted") break;
     settled = await waitForCurrentEvidence(policy.resubmitBudgetMs);
   }
   if (!settled && !engagedPane && probeActivity) {
     try {
-      engagedPane = (await probeActivity()) === 'busy';
+      engagedPane = (await probeActivity()) === "busy";
     } catch {
       // A failed activity observation must not turn an unverified pane into
       // startup evidence or extend the fail-closed path.
     }
   }
   if (!settled) {
-    settled = await waitForCurrentEvidence(engagedPane
-      ? policy.engagedPaneRecheckBudgetMs
-      : policy.finalRecheckBudgetMs);
+    settled = await waitForCurrentEvidence(
+      engagedPane
+        ? policy.engagedPaneRecheckBudgetMs
+        : policy.finalRecheckBudgetMs,
+    );
   }
   return { settled, paneBusy: engagedPane };
 }
 
-function startupEvidenceMissingReason(paneBusy: boolean, agentType?: CliAgentType): string {
-  const base = agentType ? `${agentType}_startup_evidence_missing` : 'worker_startup_evidence_missing';
+function startupEvidenceMissingReason(
+  paneBusy: boolean,
+  agentType?: CliAgentType,
+): string {
+  const base = agentType
+    ? `${agentType}_startup_evidence_missing`
+    : "worker_startup_evidence_missing";
   return paneBusy ? `${base}_pane_busy` : base;
 }
 
@@ -1332,34 +1822,42 @@ const CLAIM_ERROR_CAPTURE_MAX = 16_384;
 const CLAIM_ERROR_JSON_LINES_MAX = 80;
 const CLAIM_ERROR_LINE_MAX = 240;
 const CLAIM_ERROR_CODES = new Set([
-  'already_terminal',
-  'blocked_dependency',
-  'claim_conflict',
-  'invalid_input',
-  'operation_failed',
-  'task_not_found',
-  'worker_not_found',
+  "already_terminal",
+  "blocked_dependency",
+  "claim_conflict",
+  "invalid_input",
+  "operation_failed",
+  "task_not_found",
+  "worker_not_found",
 ]);
 
 function normalizePaneLine(line: string): string {
-  return line.replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ').replace(/[ \t]+/g, ' ').trim();
+  return line
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .trim();
 }
 
 function claimFailureSummary(value: unknown): string | undefined {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const result = value as Record<string, unknown>;
   if (result.ok !== false) return undefined;
   const error = result.error;
-  const code = error && typeof error === 'object' && !Array.isArray(error)
-    ? (error as Record<string, unknown>).code
-    : error;
-  return typeof code === 'string' && CLAIM_ERROR_CODES.has(code)
+  const code =
+    error && typeof error === "object" && !Array.isArray(error)
+      ? (error as Record<string, unknown>).code
+      : error;
+  return typeof code === "string" && CLAIM_ERROR_CODES.has(code)
     ? JSON.stringify({ ok: false, error: code })
     : undefined;
 }
 
 function singleLineClaimFailure(line: string): string | undefined {
-  const textError = /^error operation=claim-task code=([a-z][a-z0-9_]{0,63})(?:: .*)?$/.exec(line);
+  const textError =
+    /^error operation=claim-task code=([a-z][a-z0-9_]{0,63})(?:: .*)?$/.exec(
+      line,
+    );
   if (textError) {
     const code = textError[1];
     return code && CLAIM_ERROR_CODES.has(code)
@@ -1368,29 +1866,40 @@ function singleLineClaimFailure(line: string): string | undefined {
   }
   try {
     const parsed: unknown = JSON.parse(line);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return undefined;
     const envelope = parsed as Record<string, unknown>;
-    if (envelope.operation !== 'claim-task' || envelope.command !== 'omc team api claim-task') return undefined;
+    if (
+      envelope.operation !== "claim-task" ||
+      envelope.command !== "omc team api claim-task"
+    )
+      return undefined;
     if (envelope.ok === false) return claimFailureSummary(envelope);
-    return envelope.ok === true ? claimFailureSummary(envelope.data) : undefined;
+    return envelope.ok === true
+      ? claimFailureSummary(envelope.data)
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
 /** Pretty-printed text mode is `ok operation=claim-task` plus the data object on following lines. */
-function textModeClaimFailure(lines: string[], index: number): string | undefined {
-  if (lines[index] !== 'ok operation=claim-task' || lines[index + 1] !== '{') return undefined;
+function textModeClaimFailure(
+  lines: string[],
+  index: number,
+): string | undefined {
+  if (lines[index] !== "ok operation=claim-task" || lines[index + 1] !== "{")
+    return undefined;
   const collected: string[] = [];
   let collectedLength = 0;
   const end = Math.min(lines.length, index + 1 + CLAIM_ERROR_JSON_LINES_MAX);
   for (let lineIndex = index + 1; lineIndex < end; lineIndex += 1) {
-    const line = lines[lineIndex] ?? '';
+    const line = lines[lineIndex] ?? "";
     collectedLength += line.length + 1;
     if (collectedLength > CLAIM_ERROR_CAPTURE_MAX) return undefined;
     collected.push(line);
     try {
-      return claimFailureSummary(JSON.parse(collected.join('\n')));
+      return claimFailureSummary(JSON.parse(collected.join("\n")));
     } catch {
       // Ignore malformed or incomplete JSON and continue within the fixed bounds.
     }
@@ -1400,12 +1909,15 @@ function textModeClaimFailure(lines: string[], index: number): string | undefine
 
 /** Last owned-pane line that reports a claim-task failure. Pane text is not startup evidence. */
 export function claimErrorLineFromPane(captured: string): string | undefined {
-  const boundedCapture = captured.length > CLAIM_ERROR_CAPTURE_MAX
-    ? captured.slice(-CLAIM_ERROR_CAPTURE_MAX)
-    : captured;
+  const boundedCapture =
+    captured.length > CLAIM_ERROR_CAPTURE_MAX
+      ? captured.slice(-CLAIM_ERROR_CAPTURE_MAX)
+      : captured;
   const lines = boundedCapture.split(/\r?\n/).map(normalizePaneLine);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const failure = textModeClaimFailure(lines, index) ?? singleLineClaimFailure(lines[index] ?? '');
+    const failure =
+      textModeClaimFailure(lines, index) ??
+      singleLineClaimFailure(lines[index] ?? "");
     if (failure) return failure.slice(0, CLAIM_ERROR_LINE_MAX);
   }
   return undefined;
@@ -1426,18 +1938,22 @@ async function applyRequiredLayoutBeforeOwnedLaunch(
   try {
     await applyMainVerticalLayout(sessionName, {
       required: true,
-      ...(ownership.tmuxServerIdentity ? { tmuxServerIdentity: ownership.tmuxServerIdentity } : {}),
+      ...(ownership.tmuxServerIdentity
+        ? { tmuxServerIdentity: ownership.tmuxServerIdentity }
+        : {}),
     });
   } catch (error) {
     let cleaned = false;
     try {
       await killOwnedWorkerPane(ownership);
-      cleaned = await getOwnedWorkerLiveness(ownership) === 'dead';
+      cleaned = (await getOwnedWorkerLiveness(ownership)) === "dead";
     } catch {
       // Preserve the layout failure unless pane cleanup cannot be verified.
     }
     if (!cleaned) {
-      const cleanupError = new Error(`worker_layout_cleanup_unverified:${workerName}:${ownership.paneId}`);
+      const cleanupError = new Error(
+        `worker_layout_cleanup_unverified:${workerName}:${ownership.paneId}`,
+      );
       (cleanupError as Error & { cause?: unknown }).cause = error;
       throw cleanupError;
     }
@@ -1452,7 +1968,9 @@ interface UnresolvedStartupLaunch {
   provider: CliAgentType;
 }
 
-type StartupLaunchError = Error & { unresolvedLaunch?: UnresolvedStartupLaunch };
+type StartupLaunchError = Error & {
+  unresolvedLaunch?: UnresolvedStartupLaunch;
+};
 
 /**
  * `spawnOwnedWorkerInPane` deliberately throws when its own cleanup cannot
@@ -1463,16 +1981,25 @@ async function readUnresolvedStartupLaunch(
   opts: SpawnV2WorkerOptions,
   paneId: string,
 ): Promise<UnresolvedStartupLaunch | null> {
-  const currentPath = absPath(opts.cwd, TeamPaths.workerLaunchCurrent(opts.teamName, opts.workerName));
+  const currentPath = absPath(
+    opts.cwd,
+    TeamPaths.workerLaunchCurrent(opts.teamName, opts.workerName),
+  );
   try {
-    const record = JSON.parse(await readFile(currentPath, 'utf8')) as Record<string, unknown>;
-    if (record.instance_id !== opts.instanceId
-      || record.team_name !== opts.teamName
-      || record.worker_name !== opts.workerName
-      || record.provider !== opts.agentType
-      || record.pane_id !== paneId
-      || typeof record.attempt_id !== 'string'
-      || typeof record.pane_id !== 'string') return null;
+    const record = JSON.parse(await readFile(currentPath, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    if (
+      record.instance_id !== opts.instanceId ||
+      record.team_name !== opts.teamName ||
+      record.worker_name !== opts.workerName ||
+      record.provider !== opts.agentType ||
+      record.pane_id !== paneId ||
+      typeof record.attempt_id !== "string" ||
+      typeof record.pane_id !== "string"
+    )
+      return null;
     const attempt = await loadWorkerLaunchAttempt({
       cwd: opts.cwd,
       teamName: opts.teamName,
@@ -1483,12 +2010,14 @@ async function readUnresolvedStartupLaunch(
       attemptId: record.attempt_id,
       runtimeCliPath: resolveRuntimeCliPath(),
     });
-    return attempt ? {
-      name: opts.workerName,
-      paneId: attempt.pane_id,
-      launchAttemptId: attempt.attempt_id,
-      provider: attempt.provider,
-    } : null;
+    return attempt
+      ? {
+          name: opts.workerName,
+          paneId: attempt.pane_id,
+          launchAttemptId: attempt.attempt_id,
+          provider: attempt.provider,
+        }
+      : null;
   } catch {
     return null;
   }
@@ -1498,30 +2027,58 @@ async function readUnresolvedStartupLaunch(
  * Spawn a single v2 worker in a tmux pane.
  * Writes CLI API inbox (no done.json), waits for ready, sends inbox path.
  */
-async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerResult> {
-  const splitTarget = opts.existingWorkerPaneIds.length === 0
-    ? opts.leaderPaneId
-    : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
-  const splitDirection = opts.existingWorkerPaneIds.length === 0 ? 'right' : 'down';
+async function spawnV2Worker(
+  opts: SpawnV2WorkerOptions,
+): Promise<SpawnV2WorkerResult> {
+  const splitTarget =
+    opts.existingWorkerPaneIds.length === 0
+      ? opts.leaderPaneId
+      : opts.existingWorkerPaneIds[opts.existingWorkerPaneIds.length - 1]!;
+  const splitDirection =
+    opts.existingWorkerPaneIds.length === 0 ? "right" : "down";
   // Issue #4261: Determine provider based on both session name and pane id format.
   // cmux's tmux-compat layer sets both TMUX and CMUX_SURFACE_ID, but the pane id is tmux-format (%...).
   // Use the same logic as verifyTeamTargetOwnership:
   // - Only use 'cmux' provider if session starts with 'cmux:' AND pane id is cmux-format (not %...).
   // - Otherwise use 'tmux' provider (including cmux with tmux-compat where paneId is %...).
-  const launchProvider = providerForTeamTarget(opts.sessionName, opts.leaderPaneId);
-  const tmuxServerIdentity = requireTmuxServerIdentity(opts.sessionName, opts.tmuxServerIdentity);
-  if (!await workerPaneBelongsToOwnedProviderTarget({
-    provider: launchProvider,
-    providerTarget: opts.sessionName,
-    paneId: splitTarget,
-    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
-  })) throw new Error('worker_pane_split_target_unverified');
+  const launchProvider = providerForTeamTarget(
+    opts.sessionName,
+    opts.leaderPaneId,
+  );
+  const tmuxServerIdentity = requireTmuxServerIdentity(
+    opts.sessionName,
+    opts.tmuxServerIdentity,
+  );
+  // The herdr leader pane deliberately remains outside the team workspace
+  // (createTeamSession allocates a dedicated workspace while the leader keeps
+  // its own pane), so the first split target cannot be proven inside the team
+  // workspace. The tab allocation itself pins the persisted workspace id, and
+  // herdrCreateWorkerTab fails typed when that workspace is gone.
+  const herdrLeaderSplitTarget =
+    launchProvider === "herdr" && splitTarget === opts.leaderPaneId;
+  if (
+    !herdrLeaderSplitTarget &&
+    !(await workerPaneBelongsToOwnedProviderTarget({
+      provider: launchProvider,
+      providerTarget: opts.sessionName,
+      paneId: splitTarget,
+      ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    }))
+  )
+    throw new Error("worker_pane_split_target_unverified");
   const split = await splitTeamWorkerPaneWithEvidence(
     splitTarget,
     splitDirection,
     opts.workerCwd ?? opts.cwd,
     launchProvider,
     tmuxServerIdentity,
+    undefined,
+    // Allocate worker tabs in the persisted team workspace; never derive the
+    // workspace from the split target, which for the first worker is the
+    // leader pane living in a different workspace.
+    launchProvider === "herdr"
+      ? herdrWorkspaceIdFromSessionTarget(opts.sessionName)
+      : undefined,
   );
   const ownershipResult = proveWorkerPaneOwnership(split, {
     providerTarget: opts.sessionName,
@@ -1530,46 +2087,86 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   });
   if (!ownershipResult.ok) {
-    return { paneId: null, startupAssigned: false, startupFailureReason: `pane_identity_${ownershipResult.reason}` };
+    return {
+      paneId: null,
+      startupAssigned: false,
+      startupFailureReason: `pane_identity_${ownershipResult.reason}`,
+    };
   }
-  if (!await workerPaneBelongsToOwnedProviderTarget({
-    provider: ownershipResult.ownership.provider,
-    providerTarget: ownershipResult.ownership.providerTarget,
-    paneId: ownershipResult.ownership.paneId,
-    ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
-  })) throw new Error(`worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`);
+  if (
+    !(await workerPaneBelongsToOwnedProviderTarget({
+      provider: ownershipResult.ownership.provider,
+      providerTarget: ownershipResult.ownership.providerTarget,
+      paneId: ownershipResult.ownership.paneId,
+      ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+    }))
+  )
+    throw new Error(
+      `worker_pane_membership_unverified:${ownershipResult.ownership.paneId}`,
+    );
   const ownership = ownershipResult.ownership;
   const paneId = ownership.paneId;
-  if (launchProvider === 'tmux') {
-    await applyRequiredLayoutBeforeOwnedLaunch(opts.sessionName, ownership, opts.workerName);
+  if (launchProvider === "tmux") {
+    await applyRequiredLayoutBeforeOwnedLaunch(
+      opts.sessionName,
+      ownership,
+      opts.workerName,
+    );
   }
   const usePromptMode = isPromptModeAgent(opts.agentType);
 
-  const injectContract = shouldInjectContract(opts.role ?? null, opts.agentType);
-  const outputFile = injectContract && opts.role
-    ? cliWorkerOutputFilePath(teamStateRoot(opts.cwd, opts.teamName), opts.workerName, {
-      taskId: opts.taskId,
-      assignmentId: opts.verdictAssignmentId,
-    })
-    : undefined;
-  const cliOutputContract = injectContract && opts.role && outputFile
-    ? renderCliWorkerOutputContract(opts.role, outputFile)
-    : undefined;
+  const injectContract = shouldInjectContract(
+    opts.role ?? null,
+    opts.agentType,
+  );
+  const outputFile =
+    injectContract && opts.role
+      ? cliWorkerOutputFilePath(
+          teamStateRoot(opts.cwd, opts.teamName),
+          opts.workerName,
+          {
+            taskId: opts.taskId,
+            assignmentId: opts.verdictAssignmentId,
+          },
+        )
+      : undefined;
+  const cliOutputContract =
+    injectContract && opts.role && outputFile
+      ? renderCliWorkerOutputContract(opts.role, outputFile)
+      : undefined;
   const instruction = buildV2TaskInstruction(
-    opts.teamName, opts.workerName, opts.task, opts.taskId, opts.agentType, cliOutputContract,
+    opts.teamName,
+    opts.workerName,
+    opts.task,
+    opts.taskId,
+    opts.agentType,
+    cliOutputContract,
   );
   const startupBaseline = await captureWorkerStartupBaseline(
-    opts.teamName, opts.workerName, opts.taskId, opts.cwd,
+    opts.teamName,
+    opts.workerName,
+    opts.taskId,
+    opts.cwd,
   );
 
   if (usePromptMode) {
     await composeInitialInbox(
-      opts.teamName, opts.workerName, instruction, opts.cwd, cliOutputContract,
+      opts.teamName,
+      opts.workerName,
+      instruction,
+      opts.cwd,
+      cliOutputContract,
     );
   }
 
   const envVars = {
-    ...getModelWorkerEnv(opts.teamName, opts.workerName, opts.agentType, process.env, opts.role),
+    ...getModelWorkerEnv(
+      opts.teamName,
+      opts.workerName,
+      opts.agentType,
+      process.env,
+      opts.role,
+    ),
     OMC_TEAM_STATE_ROOT: teamStateRoot(opts.cwd, opts.teamName),
     OMC_TEAM_LEADER_CWD: opts.cwd,
     ...(opts.worktreePath ? { OMC_TEAM_WORKTREE_PATH: opts.worktreePath } : {}),
@@ -1586,9 +2183,10 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
       enabled: true,
     };
     const cadence = await installCommitCadence(cadenceContext);
-    const poller = cadence.method === 'fallback-poll'
-      ? startFallbackPoller(opts.worktreePath, opts.workerName)
-      : undefined;
+    const poller =
+      cadence.method === "fallback-poll"
+        ? startFallbackPoller(opts.worktreePath, opts.workerName)
+        : undefined;
     registerTeamCadence(opts.teamName, cadenceContext, poller);
   }
 
@@ -1603,7 +2201,7 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     provider: opts.agentType,
     launchBootstrapPath: resolveRuntimeCliPath(),
     launchStateCwd: opts.cwd,
-    launchContext: { kind: 'initial' },
+    launchContext: { kind: "initial" },
     ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
   };
   let startupContext: StartupPaneContext;
@@ -1615,10 +2213,15 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     );
   } catch (error) {
     const unresolvedLaunch = await readUnresolvedStartupLaunch(opts, paneId);
-    if (unresolvedLaunch || (error instanceof Error && error.message.startsWith('worker_launch_cleanup_unverified'))) {
-      const enriched = error instanceof Error
-        ? error as StartupLaunchError
-        : new Error(String(error)) as StartupLaunchError;
+    if (
+      unresolvedLaunch ||
+      (error instanceof Error &&
+        error.message.startsWith("worker_launch_cleanup_unverified"))
+    ) {
+      const enriched =
+        error instanceof Error
+          ? (error as StartupLaunchError)
+          : (new Error(String(error)) as StartupLaunchError);
       enriched.unresolvedLaunch = unresolvedLaunch ?? {
         name: opts.workerName,
         paneId,
@@ -1628,91 +2231,163 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     }
     throw error;
   }
-  const inboxTriggerMessage = buildStartupInboxTrigger(opts.cwd, opts.teamName, opts.workerName, startupContext.attempt.attempt_id);
-  const cleanupStartedLaunch = async (reason: string): Promise<void> => {
-    const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(startupContext.attempt, reason, async () => {
-      try {
-        if (await getOwnedWorkerLiveness(ownership) === 'dead') return true;
-        await killOwnedWorkerPane(ownership);
-        return await getOwnedWorkerLiveness(ownership) === 'dead';
-      } catch {
-        return false;
-      }
-    }).catch(() => false);
-    if (!cleaned) throw new Error(`worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`);
-  };
-  const evidencePolicy = getWorkerStartupEvidencePolicy(opts.agentType);
-  const waitForCurrentEvidence = (budgetMs: number) => waitForWorkerStartupEvidence(
+  const inboxTriggerMessage = buildStartupInboxTrigger(
+    opts.cwd,
     opts.teamName,
     opts.workerName,
-    opts.taskId,
-    opts.cwd,
-    startupBaseline,
     startupContext.attempt.attempt_id,
-    budgetMs,
   );
-  const probeActivity = opts.agentType === 'cursor' || opts.agentType === 'codex'
-    ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
-    : undefined;
-  const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
-    settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
+  const cleanupStartedLaunch = async (reason: string): Promise<void> => {
+    const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
+      startupContext.attempt,
+      reason,
+      async () => {
+        try {
+          if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
+          await killOwnedWorkerPane(ownership);
+          return (await getOwnedWorkerLiveness(ownership)) === "dead";
+        } catch {
+          return false;
+        }
+      },
+    ).catch(() => false);
+    if (!cleaned)
+      throw new Error(
+        `worker_startup_cleanup_unverified:${opts.workerName}:${paneId}`,
+      );
+  };
+  const evidencePolicy = getWorkerStartupEvidencePolicy(opts.agentType);
+  const waitForCurrentEvidence = (budgetMs: number) =>
+    waitForWorkerStartupEvidence(
+      opts.teamName,
+      opts.workerName,
+      opts.taskId,
+      opts.cwd,
+      startupBaseline,
+      startupContext.attempt.attempt_id,
+      budgetMs,
+    );
+  const probeActivity =
+    opts.agentType === "cursor" || opts.agentType === "codex"
+      ? () =>
+          probeStartupPaneActivity(startupContext, {
+            attemptAlreadyFenced: true,
+          })
+      : undefined;
+  const waitForBoundedStartupEvidence = (
+    resubmit?: () => Promise<StartupInboxResubmitOutcome>,
+  ) =>
+    settleStartupEvidence(
+      evidencePolicy,
+      waitForCurrentEvidence,
+      resubmit,
+      probeActivity,
+    );
   let paneBusyEvidenceMiss = false;
   const fencedDispatch = await (async () => {
     try {
-      return await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-    if (!await workerPaneBelongsToOwnedProviderTarget({
-      provider: startupContext.ownership.provider,
-      providerTarget: startupContext.ownership.providerTarget,
-      paneId: startupContext.ownership.paneId,
-      ...(startupContext.ownership.tmuxServerIdentity
-        ? { tmuxServerIdentity: startupContext.ownership.tmuxServerIdentity }
-        : {}),
-    })) return { ok: false as const, reason: 'worker_pane_membership_unverified' };
-    return queueInboxInstruction({
-    teamName: opts.teamName,
-    workerName: opts.workerName,
-    workerIndex: opts.workerIndex + 1,
-    paneId,
-    inbox: instruction,
-    triggerMessage: inboxTriggerMessage,
-    cwd: opts.cwd,
-    transportPreference: usePromptMode ? 'prompt_stdin' : 'transport_direct',
-    fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
-    inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
-    notify: async (_target, triggerMessage) => {
-      paneBusyEvidenceMiss = false;
-      if (usePromptMode) {
-        const settlement = await waitForBoundedStartupEvidence();
-        paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
-        return settlement.settled
-          ? { ok: true, transport: 'prompt_stdin' as const, reason: 'prompt_mode_worker_confirmed' }
-          : { ok: false, transport: 'prompt_stdin' as const, reason: startupEvidenceMissingReason(settlement.paneBusy, opts.agentType) };
-      }
+      return await withWorkerLaunchAttemptFence(
+        startupContext.attempt,
+        async () => {
+          if (
+            !(await workerPaneBelongsToOwnedProviderTarget({
+              provider: startupContext.ownership.provider,
+              providerTarget: startupContext.ownership.providerTarget,
+              paneId: startupContext.ownership.paneId,
+              ...(startupContext.ownership.tmuxServerIdentity
+                ? {
+                    tmuxServerIdentity:
+                      startupContext.ownership.tmuxServerIdentity,
+                  }
+                : {}),
+            }))
+          )
+            return {
+              ok: false as const,
+              reason: "worker_pane_membership_unverified",
+            };
+          return queueInboxInstruction({
+            teamName: opts.teamName,
+            workerName: opts.workerName,
+            workerIndex: opts.workerIndex + 1,
+            paneId,
+            inbox: instruction,
+            triggerMessage: inboxTriggerMessage,
+            cwd: opts.cwd,
+            transportPreference: usePromptMode
+              ? "prompt_stdin"
+              : "transport_direct",
+            fallbackAllowed:
+              DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode ===
+              "hook_preferred_with_fallback",
+            inboxCorrelationKey: `startup:${opts.workerName}:${opts.taskId}:${startupContext.attempt.attempt_id}`,
+            notify: async (_target, triggerMessage) => {
+              paneBusyEvidenceMiss = false;
+              if (usePromptMode) {
+                const settlement = await waitForBoundedStartupEvidence();
+                paneBusyEvidenceMiss =
+                  !settlement.settled && settlement.paneBusy;
+                return settlement.settled
+                  ? {
+                      ok: true,
+                      transport: "prompt_stdin" as const,
+                      reason: "prompt_mode_worker_confirmed",
+                    }
+                  : {
+                      ok: false,
+                      transport: "prompt_stdin" as const,
+                      reason: startupEvidenceMissingReason(
+                        settlement.paneBusy,
+                        opts.agentType,
+                      ),
+                    };
+              }
 
-      const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
-      if (!attempted.ok) {
-        return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
-      }
-      const settlement = await waitForBoundedStartupEvidence(
-        opts.agentType === 'cursor' || opts.agentType === 'codex'
-          ? undefined
-          : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
+              const attempted = await deliverStartupInbox(
+                startupContext,
+                triggerMessage,
+                { attemptAlreadyFenced: true },
+              );
+              if (!attempted.ok) {
+                return {
+                  ok: false,
+                  transport: "tmux_send_keys" as const,
+                  reason: `worker_notify_failed:${attempted.reason}`,
+                };
+              }
+              const settlement = await waitForBoundedStartupEvidence(
+                opts.agentType === "cursor" || opts.agentType === "codex"
+                  ? undefined
+                  : () =>
+                      retryStartupInboxSubmit(startupContext, triggerMessage, {
+                        attemptAlreadyFenced: true,
+                      }),
+              );
+              paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
+              return settlement.settled
+                ? {
+                    ok: true,
+                    transport: "tmux_send_keys" as const,
+                    reason: "worker_startup_confirmed",
+                  }
+                : {
+                    ok: false,
+                    transport: "tmux_send_keys" as const,
+                    reason: startupEvidenceMissingReason(settlement.paneBusy),
+                  };
+            },
+            deps: { writeWorkerInbox },
+          });
+        },
       );
-      paneBusyEvidenceMiss = !settlement.settled && settlement.paneBusy;
-      return settlement.settled
-        ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-        : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
-    },
-    deps: { writeWorkerInbox },
-    });
-      });
     } catch (error) {
       try {
-        await cleanupStartedLaunch('startup_dispatch_exception');
+        await cleanupStartedLaunch("startup_dispatch_exception");
       } catch (cleanupError) {
-        const enriched = cleanupError instanceof Error
-          ? cleanupError as StartupLaunchError
-          : new Error(String(cleanupError)) as StartupLaunchError;
+        const enriched =
+          cleanupError instanceof Error
+            ? (cleanupError as StartupLaunchError)
+            : (new Error(String(cleanupError)) as StartupLaunchError);
         enriched.unresolvedLaunch = {
           name: opts.workerName,
           paneId,
@@ -1726,18 +2401,25 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
   })();
   const dispatchOutcome = fencedDispatch.ok
     ? fencedDispatch.value
-    : { ok: false as const, reason: 'worker_launch_attempt_superseded' };
+    : { ok: false as const, reason: "worker_launch_attempt_superseded" };
   if (!dispatchOutcome.ok) {
-    const paneBusyFailureReason = startupEvidenceMissingReason(true, usePromptMode ? opts.agentType : undefined);
-    const claimError = paneBusyEvidenceMiss && dispatchOutcome.reason === paneBusyFailureReason
-      ? claimErrorLineFromPane(await captureOwnedTeamPane(ownership, { joinWrappedLines: true }))
-      : undefined;
+    const paneBusyFailureReason = startupEvidenceMissingReason(
+      true,
+      usePromptMode ? opts.agentType : undefined,
+    );
+    const claimError =
+      paneBusyEvidenceMiss && dispatchOutcome.reason === paneBusyFailureReason
+        ? claimErrorLineFromPane(
+            await captureOwnedTeamPane(ownership, { joinWrappedLines: true }),
+          )
+        : undefined;
     try {
-      await cleanupStartedLaunch('startup_dispatch_failed');
+      await cleanupStartedLaunch("startup_dispatch_failed");
     } catch (error) {
-      const enriched = error instanceof Error
-        ? error as StartupLaunchError
-        : new Error(String(error)) as StartupLaunchError;
+      const enriched =
+        error instanceof Error
+          ? (error as StartupLaunchError)
+          : (new Error(String(error)) as StartupLaunchError);
       enriched.unresolvedLaunch = {
         name: opts.workerName,
         paneId,
@@ -1762,7 +2444,6 @@ async function spawnV2Worker(opts: SpawnV2WorkerOptions): Promise<SpawnV2WorkerR
     ...(outputFile ? { outputFile } : {}),
   };
 }
-
 
 interface PendingRecoveryPane {
   ownership: WorkerPaneOwnership;
@@ -1792,11 +2473,18 @@ function validateRecoveryAttemptSecret(
   replacementGeneration: number,
 ): RecoveryAttemptSecret {
   const secret = value as Partial<RecoveryAttemptSecret> | null;
-  if (secret?.schema_version !== 1 || secret.request_id !== input.requestId || secret.recovery_id !== recoveryId
-    || secret.worker_name !== input.workerName || secret.replacement_generation !== replacementGeneration
-    || typeof secret.adoption_token !== 'string' || secret.adoption_token.length === 0
-    || typeof secret.created_at !== 'string' || !Number.isFinite(Date.parse(secret.created_at))) {
-    throw new Error('invalid_persisted_state');
+  if (
+    secret?.schema_version !== 1 ||
+    secret.request_id !== input.requestId ||
+    secret.recovery_id !== recoveryId ||
+    secret.worker_name !== input.workerName ||
+    secret.replacement_generation !== replacementGeneration ||
+    typeof secret.adoption_token !== "string" ||
+    secret.adoption_token.length === 0 ||
+    typeof secret.created_at !== "string" ||
+    !Number.isFinite(Date.parse(secret.created_at))
+  ) {
+    throw new Error("invalid_persisted_state");
   }
   return secret as RecoveryAttemptSecret;
 }
@@ -1811,17 +2499,47 @@ async function recordRecoveryPaneRollbackFailure(
   liveness: WorkerPaneLiveness,
 ): Promise<string> {
   const recordedAt = Date.now();
-  const path = absPath(input.cwd, TeamPaths.recoveryPaneRollbackFailure(input.teamName, recoveryId, pending.paneAttemptId, recordedAt));
+  const path = absPath(
+    input.cwd,
+    TeamPaths.recoveryPaneRollbackFailure(
+      input.teamName,
+      recoveryId,
+      pending.paneAttemptId,
+      recordedAt,
+    ),
+  );
   const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
-  await mkdir(join(path, '..'), { recursive: true });
-  const handle = await open(candidate, 'wx', 0o600);
+  await mkdir(join(path, ".."), { recursive: true });
+  const handle = await open(candidate, "wx", 0o600);
   try {
-    await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
-      request_id: input.requestId, recovery_id: recoveryId, pane_id: pending.ownership.paneId,
-      pane_attempt_id: pending.paneAttemptId, reason: redactBoundedDiagnostic(reason, 500), liveness, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+    await handle.writeFile(
+      JSON.stringify(
+        {
+          schema_version: 1,
+          team_name: input.teamName,
+          worker_name: input.workerName,
+          request_id: input.requestId,
+          recovery_id: recoveryId,
+          pane_id: pending.ownership.paneId,
+          pane_attempt_id: pending.paneAttemptId,
+          reason: redactBoundedDiagnostic(reason, 500),
+          liveness,
+          recorded_at: new Date(recordedAt).toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
     await handle.sync();
-  } finally { await handle.close(); }
-  try { await link(candidate, path); } finally { await unlink(candidate).catch(() => undefined); }
+  } finally {
+    await handle.close();
+  }
+  try {
+    await link(candidate, path);
+  } finally {
+    await unlink(candidate).catch(() => undefined);
+  }
   return path;
 }
 
@@ -1833,22 +2551,56 @@ async function recordUnaddressableRecoveryPaneFailure(
   split: WorkerPaneSplitEvidence | null,
 ): Promise<string> {
   const recordedAt = Date.now();
-  const path = absPath(input.cwd, TeamPaths.recoveryPaneRollbackFailure(input.teamName, recoveryId, paneAttemptId, recordedAt));
+  const path = absPath(
+    input.cwd,
+    TeamPaths.recoveryPaneRollbackFailure(
+      input.teamName,
+      recoveryId,
+      paneAttemptId,
+      recordedAt,
+    ),
+  );
   const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
-  await mkdir(join(path, '..'), { recursive: true });
-  const handle = await open(candidate, 'wx', 0o600);
-  const boundedSplit = split ? {
-    ...split,
-    rawOutput: redactBoundedDiagnostic(split.rawOutput, 500),
-    stderr: redactBoundedDiagnostic(split.stderr, 500),
-  } : null;
+  await mkdir(join(path, ".."), { recursive: true });
+  const handle = await open(candidate, "wx", 0o600);
+  const boundedSplit = split
+    ? {
+        ...split,
+        rawOutput: redactBoundedDiagnostic(split.rawOutput, 500),
+        stderr: redactBoundedDiagnostic(split.stderr, 500),
+      }
+    : null;
   try {
-    await handle.writeFile(JSON.stringify({ schema_version: 1, team_name: input.teamName, worker_name: input.workerName,
-      request_id: input.requestId, recovery_id: recoveryId, pane_id: null, pane_attempt_id: paneAttemptId,
-      reason: redactBoundedDiagnostic(reason, 500), liveness: 'unknown', unaddressable: true, split: boundedSplit, recorded_at: new Date(recordedAt).toISOString() }, null, 2), 'utf8');
+    await handle.writeFile(
+      JSON.stringify(
+        {
+          schema_version: 1,
+          team_name: input.teamName,
+          worker_name: input.workerName,
+          request_id: input.requestId,
+          recovery_id: recoveryId,
+          pane_id: null,
+          pane_attempt_id: paneAttemptId,
+          reason: redactBoundedDiagnostic(reason, 500),
+          liveness: "unknown",
+          unaddressable: true,
+          split: boundedSplit,
+          recorded_at: new Date(recordedAt).toISOString(),
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
     await handle.sync();
-  } finally { await handle.close(); }
-  try { await link(candidate, path); } finally { await unlink(candidate).catch(() => undefined); }
+  } finally {
+    await handle.close();
+  }
+  try {
+    await link(candidate, path);
+  } finally {
+    await unlink(candidate).catch(() => undefined);
+  }
   return path;
 }
 
@@ -1869,7 +2621,7 @@ async function cleanupRecoveryPaneAttempt(
       async () => {
         try {
           await killOwnedWorkerPane(pending.ownership);
-          return await getOwnedWorkerLiveness(pending.ownership) === 'dead';
+          return (await getOwnedWorkerLiveness(pending.ownership)) === "dead";
         } catch {
           return false;
         }
@@ -1877,7 +2629,9 @@ async function cleanupRecoveryPaneAttempt(
     ).catch(() => false);
   }
   if (!providerStopped) {
-    const liveness = await getOwnedWorkerLiveness(pending.ownership).catch(() => 'unknown' as const);
+    const liveness = await getOwnedWorkerLiveness(pending.ownership).catch(
+      () => "unknown" as const,
+    );
     await recordRecoveryPaneRollbackFailure(
       input,
       recoveryId,
@@ -1887,11 +2641,13 @@ async function cleanupRecoveryPaneAttempt(
     );
     return false;
   }
-  let liveness: WorkerPaneLiveness = 'unknown';
+  let liveness: WorkerPaneLiveness = "unknown";
   for (let attempt = 0; attempt < 2; attempt++) {
     await killOwnedWorkerPane(pending.ownership).catch(() => undefined);
-    liveness = await getOwnedWorkerLiveness(pending.ownership).catch(() => 'unknown' as const);
-    if (liveness === 'dead' && providerStopped) {
+    liveness = await getOwnedWorkerLiveness(pending.ownership).catch(
+      () => "unknown" as const,
+    );
+    if (liveness === "dead" && providerStopped) {
       pendingRecoveryPanes.delete(recoveryId);
       return true;
     }
@@ -1915,11 +2671,14 @@ async function buildRecoveryPaneContext(
   paneAttemptId: string,
   instanceId: TeamInstanceId,
 ): Promise<PendingRecoveryPane> {
-  const currentProviderPath = resolvePreflightBinaryPath(descriptor.provider).path;
-  const sameProviderPath = process.platform === 'win32'
-    ? currentProviderPath.toLowerCase() === descriptor.binary.toLowerCase()
-    : currentProviderPath === descriptor.binary;
-  if (!sameProviderPath) throw new Error('provider path changed');
+  const currentProviderPath = resolvePreflightBinaryPath(
+    descriptor.provider,
+  ).path;
+  const sameProviderPath =
+    process.platform === "win32"
+      ? currentProviderPath.toLowerCase() === descriptor.binary.toLowerCase()
+      : currentProviderPath === descriptor.binary;
+  if (!sameProviderPath) throw new Error("provider path changed");
   const agentType = descriptor.provider;
   const workerCwd = worker.working_dir ?? input.cwd;
   const promptMode = isPromptModeAgent(agentType);
@@ -1927,15 +2686,43 @@ async function buildRecoveryPaneContext(
     ...getModelWorkerEnv(input.teamName, sagaInput.workerName, agentType),
     OMC_TEAM_STATE_ROOT: teamStateRoot(input.cwd, input.teamName),
     OMC_TEAM_LEADER_CWD: input.cwd,
-    ...(worker.worktree_path ? { OMC_TEAM_WORKTREE_PATH: worker.worktree_path } : {}),
+    ...(worker.worktree_path
+      ? { OMC_TEAM_WORKTREE_PATH: worker.worktree_path }
+      : {}),
   };
   const gate: RecoveryActivationGate = {
-    recoveryId: sagaInput.recoveryId, workerName: sagaInput.workerName,
-    replacementGeneration: sagaInput.replacementGeneration, paneAttemptId,
-    readyPath: absPath(input.cwd, TeamPaths.recoveryReady(input.teamName, sagaInput.recoveryId, paneAttemptId)),
-    activatePath: absPath(input.cwd, TeamPaths.recoveryActivate(input.teamName, sagaInput.recoveryId, paneAttemptId)),
-    runPath: absPath(input.cwd, TeamPaths.recoveryRun(input.teamName, sagaInput.recoveryId, paneAttemptId)),
-    providerArgv: [descriptor.binary, ...descriptor.args], cwd: workerCwd, env: providerEnv, timeoutMs: 300_000,
+    recoveryId: sagaInput.recoveryId,
+    workerName: sagaInput.workerName,
+    replacementGeneration: sagaInput.replacementGeneration,
+    paneAttemptId,
+    readyPath: absPath(
+      input.cwd,
+      TeamPaths.recoveryReady(
+        input.teamName,
+        sagaInput.recoveryId,
+        paneAttemptId,
+      ),
+    ),
+    activatePath: absPath(
+      input.cwd,
+      TeamPaths.recoveryActivate(
+        input.teamName,
+        sagaInput.recoveryId,
+        paneAttemptId,
+      ),
+    ),
+    runPath: absPath(
+      input.cwd,
+      TeamPaths.recoveryRun(
+        input.teamName,
+        sagaInput.recoveryId,
+        paneAttemptId,
+      ),
+    ),
+    providerArgv: [descriptor.binary, ...descriptor.args],
+    cwd: workerCwd,
+    env: providerEnv,
+    timeoutMs: 300_000,
   };
   let startupContext: StartupPaneContext | undefined;
   if (worker.launch_attempt_id) {
@@ -1970,7 +2757,7 @@ function recoveryError(
   message?: string,
 ): RecoverDeadWorkerV2Failure {
   return {
-    outcome: 'failed',
+    outcome: "failed",
     committed: false,
     error,
     message,
@@ -1987,31 +2774,60 @@ function persistRecoveryFinal(
   recoveryId: string,
   result: RecoverDeadWorkerV2Result,
 ): RecoverDeadWorkerV2Result {
-  if (result.requestId !== input.requestId || result.recoveryId !== recoveryId
-    || result.teamName !== input.teamName || result.workerName !== input.workerName) {
-    throw new Error('invalid_persisted_state');
+  if (
+    result.requestId !== input.requestId ||
+    result.recoveryId !== recoveryId ||
+    result.teamName !== input.teamName ||
+    result.workerName !== input.workerName
+  ) {
+    throw new Error("invalid_persisted_state");
   }
   const existingFinalState = readRecoveryFinalState(input.cwd, input.requestId);
-  if (existingFinalState.kind === 'invalid') throw new Error('invalid_persisted_state');
+  if (existingFinalState.kind === "invalid")
+    throw new Error("invalid_persisted_state");
   const existing = readRecoveryOutcome(input.cwd, input.requestId);
-  if (isMatchingRecoveryFinal(existing, { requestId: input.requestId, recoveryId,
-    teamName: input.teamName, workerName: input.workerName })) return existing.result;
-  const succeeded = result.outcome === 'recovered' || result.outcome === 'already_running';
-  const failureResult = succeeded ? undefined : result as RecoverDeadWorkerV2Failure;
+  if (
+    isMatchingRecoveryFinal(existing, {
+      requestId: input.requestId,
+      recoveryId,
+      teamName: input.teamName,
+      workerName: input.workerName,
+    })
+  )
+    return existing.result;
+  const succeeded =
+    result.outcome === "recovered" || result.outcome === "already_running";
+  const failureResult = succeeded
+    ? undefined
+    : (result as RecoverDeadWorkerV2Failure);
   writeRecoveryFinal(input.cwd, {
     schema_version: 1,
-    kind: 'final',
+    kind: "final",
     request_id: input.requestId,
     recovery_id: recoveryId,
     team_name: input.teamName,
     worker_name: input.workerName,
-    outcome: succeeded ? 'succeeded' : result.outcome === 'commit_unknown' ? 'commit_unknown' : 'failed',
+    outcome: succeeded
+      ? "succeeded"
+      : result.outcome === "commit_unknown"
+        ? "commit_unknown"
+        : "failed",
     result,
-    error: failureResult ? { code: failureResult.error, message: failureResult.message, commit_uncertain: failureResult.outcome === 'commit_unknown' } : undefined,
-    continuation: succeeded && result.requeuedTaskIds.length > 0 ? 'adopted' : 'none',
-    adoption: succeeded && result.requeuedTaskIds.length > 0 ? 'adopted' : 'not_started',
-    services: succeeded ? result.servicesSync : 'terminal_degraded',
-    manifest: succeeded ? result.manifestSync : 'repair_required',
+    error: failureResult
+      ? {
+          code: failureResult.error,
+          message: failureResult.message,
+          commit_uncertain: failureResult.outcome === "commit_unknown",
+        }
+      : undefined,
+    continuation:
+      succeeded && result.requeuedTaskIds.length > 0 ? "adopted" : "none",
+    adoption:
+      succeeded && result.requeuedTaskIds.length > 0
+        ? "adopted"
+        : "not_started",
+    services: succeeded ? result.servicesSync : "terminal_degraded",
+    manifest: succeeded ? result.manifestSync : "repair_required",
     completed_at: new Date().toISOString(),
     expires_at: new Date(Date.now() + 7 * 86400000).toISOString(),
   });
@@ -2019,17 +2835,32 @@ function persistRecoveryFinal(
 }
 
 interface RecoveryOwnerFinalizationDeps {
-  readRevisionedConfig: (teamName: string, cwd: string) => Promise<{ config: TeamConfig; stateRevision: number } | null>;
+  readRevisionedConfig: (
+    teamName: string,
+    cwd: string,
+  ) => Promise<{ config: TeamConfig; stateRevision: number } | null>;
   saveConfigAtRevision: (
     config: TeamConfig,
     expectedRevision: number,
     cwd: string,
     afterCommit?: () => Promise<void> | void,
-    options?: import('./monitor.js').SaveTeamConfigAtRevisionOptions,
+    options?: import("./monitor.js").SaveTeamConfigAtRevisionOptions,
   ) => Promise<boolean>;
-  withConfigLock?: <T>(teamName: string, cwd: string, fn: () => Promise<T> | T) => Promise<T>;
-  publishFinal: (input: RecoverDeadWorkerOwnerInput, recoveryId: string, result: RecoverDeadWorkerV2Result) => RecoverDeadWorkerV2Result;
-  readDurableContinuation?: (cwd: string, requestId: string, recoveryId: string) => 'none' | 'selected' | 'reserved' | 'adopted';
+  withConfigLock?: <T>(
+    teamName: string,
+    cwd: string,
+    fn: () => Promise<T> | T,
+  ) => Promise<T>;
+  publishFinal: (
+    input: RecoverDeadWorkerOwnerInput,
+    recoveryId: string,
+    result: RecoverDeadWorkerV2Result,
+  ) => RecoverDeadWorkerV2Result;
+  readDurableContinuation?: (
+    cwd: string,
+    requestId: string,
+    recoveryId: string,
+  ) => "none" | "selected" | "reserved" | "adopted";
 }
 
 export async function finalizeRecoveryOwnerResult(
@@ -2044,61 +2875,81 @@ export async function finalizeRecoveryOwnerResult(
   },
 ): Promise<RecoverDeadWorkerV2Result> {
   if (!hasRequiredRecoveryPaneIdentities(result)) {
-    return recoveryError(input, recoveryId, 'invalid_persisted_state',
-      'Recovery success result omitted a required actual pane identity.');
+    return recoveryError(
+      input,
+      recoveryId,
+      "invalid_persisted_state",
+      "Recovery success result omitted a required actual pane identity.",
+    );
   }
   const durableContinuation = deps.readDurableContinuation
     ? deps.readDurableContinuation(input.cwd, input.requestId, recoveryId)
     : (() => {
-      const outcome = readRecoveryOutcome(input.cwd, input.requestId);
-      return outcome?.kind === 'phase' && outcome.recovery_id === recoveryId ? outcome.continuation : 'none';
-    })();
-  const transientFailure = result.outcome === 'commit_unknown'
-    || (result.outcome === 'recovered' && result.activation === 'services_pending')
-    || (result.outcome === 'failed' && durableContinuation === 'reserved')
-    || (result.outcome === 'failed' && result.reservationsWritten === true)
-    || (result.outcome === 'failed' && [
-      'spawn_failed',
-      'startup_ack_timeout',
-      'config_commit_failed',
-      'worker_activation_failed',
-      'auto_merge_unavailable',
-      'stale_state_revision',
-      'worker_liveness_unknown',
-      'runtime_owner_unavailable',
-      'runtime_owner_fence_lost',
-      'worker_cleanup_incomplete',
-    ].includes(result.error));
+        const outcome = readRecoveryOutcome(input.cwd, input.requestId);
+        return outcome?.kind === "phase" && outcome.recovery_id === recoveryId
+          ? outcome.continuation
+          : "none";
+      })();
+  const transientFailure =
+    result.outcome === "commit_unknown" ||
+    (result.outcome === "recovered" &&
+      result.activation === "services_pending") ||
+    (result.outcome === "failed" && durableContinuation === "reserved") ||
+    (result.outcome === "failed" && result.reservationsWritten === true) ||
+    (result.outcome === "failed" &&
+      [
+        "spawn_failed",
+        "startup_ack_timeout",
+        "config_commit_failed",
+        "worker_activation_failed",
+        "auto_merge_unavailable",
+        "stale_state_revision",
+        "worker_liveness_unknown",
+        "runtime_owner_unavailable",
+        "runtime_owner_fence_lost",
+        "worker_cleanup_incomplete",
+      ].includes(result.error));
   if (transientFailure) {
     const pending = await deps.readRevisionedConfig(input.teamName, input.cwd);
     if (pending?.config.active_recovery?.recovery_id === recoveryId) {
-      const phase = result.outcome === 'recovered' && result.activation === 'services_pending'
-        ? 'services_pending' as const
-        : pending.config.active_recovery.phase;
+      const phase =
+        result.outcome === "recovered" &&
+        result.activation === "services_pending"
+          ? ("services_pending" as const)
+          : pending.config.active_recovery.phase;
       const nextRevision = pending.stateRevision + 1;
-      await deps.saveConfigAtRevision({
-        ...pending.config,
-        state_revision: nextRevision,
-        active_recovery: {
-          ...pending.config.active_recovery,
-          phase,
+      await deps.saveConfigAtRevision(
+        {
+          ...pending.config,
           state_revision: nextRevision,
-          updated_at: new Date().toISOString(),
+          active_recovery: {
+            ...pending.config.active_recovery,
+            phase,
+            state_revision: nextRevision,
+            updated_at: new Date().toISOString(),
+          },
         },
-      }, pending.stateRevision, input.cwd);
+        pending.stateRevision,
+        input.cwd,
+      );
     }
     return result;
   }
 
   const terminal = await deps.readRevisionedConfig(input.teamName, input.cwd);
   const active = terminal?.config.active_recovery;
-  if (terminal && active?.recovery_id === recoveryId
-    && active.request_id === input.requestId && active.worker_name === input.workerName
-    && active.owner_epoch === terminal.config.runtime_owner_epoch?.epoch
-    && active.owner_nonce === terminal.config.runtime_owner_epoch?.nonce) {
-    const phase = result.outcome === 'recovered' || result.outcome === 'already_running'
-      ? 'adopted' as const
-      : 'failed' as const;
+  if (
+    terminal &&
+    active?.recovery_id === recoveryId &&
+    active.request_id === input.requestId &&
+    active.worker_name === input.workerName &&
+    active.owner_epoch === terminal.config.runtime_owner_epoch?.epoch &&
+    active.owner_nonce === terminal.config.runtime_owner_epoch?.nonce
+  ) {
+    const phase =
+      result.outcome === "recovered" || result.outcome === "already_running"
+        ? ("adopted" as const)
+        : ("failed" as const);
     const finalRevision = terminal.stateRevision + 1;
     const finalConfig: TeamConfig = {
       ...terminal.config,
@@ -2114,42 +2965,85 @@ export async function finalizeRecoveryOwnerResult(
     let published: RecoverDeadWorkerV2Result | null = null;
     let saved = false;
     try {
-      saved = await deps.saveConfigAtRevision(finalConfig, terminal.stateRevision, input.cwd, async () => {
-        const verified = await deps.readRevisionedConfig(input.teamName, input.cwd);
-        const verifiedLast = verified?.config.last_recovery;
-        if (verified && !verified.config.active_recovery && verifiedLast?.recovery_id === recoveryId
-          && verifiedLast.request_id === input.requestId && verifiedLast.worker_name === input.workerName
-          && verifiedLast.phase === phase && verifiedLast.state_revision === finalRevision
-          && verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch
-          && verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce
-          && verified.stateRevision === finalRevision) {
-          published = deps.publishFinal(input, recoveryId, result);
-        }
-      }, { release: { active_recovery: true } });
+      saved = await deps.saveConfigAtRevision(
+        finalConfig,
+        terminal.stateRevision,
+        input.cwd,
+        async () => {
+          const verified = await deps.readRevisionedConfig(
+            input.teamName,
+            input.cwd,
+          );
+          const verifiedLast = verified?.config.last_recovery;
+          if (
+            verified &&
+            !verified.config.active_recovery &&
+            verifiedLast?.recovery_id === recoveryId &&
+            verifiedLast.request_id === input.requestId &&
+            verifiedLast.worker_name === input.workerName &&
+            verifiedLast.phase === phase &&
+            verifiedLast.state_revision === finalRevision &&
+            verifiedLast.owner_epoch ===
+              verified.config.runtime_owner_epoch?.epoch &&
+            verifiedLast.owner_nonce ===
+              verified.config.runtime_owner_epoch?.nonce &&
+            verified.stateRevision === finalRevision
+          ) {
+            published = deps.publishFinal(input, recoveryId, result);
+          }
+        },
+        { release: { active_recovery: true } },
+      );
     } catch {
       saved = false;
     }
     if (!saved || !published) {
-      return { ...recoveryError(input, recoveryId, 'stale_state_revision',
-        'Recovery reached a terminal state, but config cleanup could not be verified.'), outcome: 'commit_unknown' };
+      return {
+        ...recoveryError(
+          input,
+          recoveryId,
+          "stale_state_revision",
+          "Recovery reached a terminal state, but config cleanup could not be verified.",
+        ),
+        outcome: "commit_unknown",
+      };
     }
     return published;
   }
 
-  const withLock = deps.withConfigLock ?? (async <T>(_teamName: string, _cwd: string, fn: () => Promise<T> | T) => fn());
+  const withLock =
+    deps.withConfigLock ??
+    (async <T>(_teamName: string, _cwd: string, fn: () => Promise<T> | T) =>
+      fn());
   return withLock(input.teamName, input.cwd, async () => {
     const verified = await deps.readRevisionedConfig(input.teamName, input.cwd);
-    const expectedPhase = result.outcome === 'recovered' || result.outcome === 'already_running' ? 'adopted' : 'failed';
+    const expectedPhase =
+      result.outcome === "recovered" || result.outcome === "already_running"
+        ? "adopted"
+        : "failed";
     const verifiedLast = verified?.config.last_recovery;
-    if (verified && !verified.config.active_recovery && verifiedLast?.recovery_id === recoveryId
-      && verifiedLast.request_id === input.requestId && verifiedLast.worker_name === input.workerName
-      && verifiedLast.phase === expectedPhase && verifiedLast.state_revision === verified.stateRevision
-      && verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch
-      && verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce) {
+    if (
+      verified &&
+      !verified.config.active_recovery &&
+      verifiedLast?.recovery_id === recoveryId &&
+      verifiedLast.request_id === input.requestId &&
+      verifiedLast.worker_name === input.workerName &&
+      verifiedLast.phase === expectedPhase &&
+      verifiedLast.state_revision === verified.stateRevision &&
+      verifiedLast.owner_epoch === verified.config.runtime_owner_epoch?.epoch &&
+      verifiedLast.owner_nonce === verified.config.runtime_owner_epoch?.nonce
+    ) {
       return deps.publishFinal(input, recoveryId, result);
     }
-    return { ...recoveryError(input, recoveryId, 'stale_state_revision',
-      'Recovery terminal state is no longer the active or last revision-checked attempt.'), outcome: 'commit_unknown' };
+    return {
+      ...recoveryError(
+        input,
+        recoveryId,
+        "stale_state_revision",
+        "Recovery terminal state is no longer the active or last revision-checked attempt.",
+      ),
+      outcome: "commit_unknown",
+    };
   });
 }
 
@@ -2161,13 +3055,25 @@ async function finalizeBoundRecoveryOwnerTerminal(
   try {
     const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
     const active = current?.config.active_recovery;
-    if (active?.request_id === input.requestId && active.recovery_id === recoveryId
-      && active.worker_name === input.workerName) {
+    if (
+      active?.request_id === input.requestId &&
+      active.recovery_id === recoveryId &&
+      active.worker_name === input.workerName
+    ) {
       return finalizeRecoveryOwnerResult(input, recoveryId, result);
     }
-  } catch { /* owner-bound state is uncertain; retain intent and attempt */ }
-  return { ...recoveryError(input, recoveryId, 'stale_state_revision',
-    'Recovery terminal cleanup could not prove the exact active attempt.'), outcome: 'commit_unknown' };
+  } catch {
+    /* owner-bound state is uncertain; retain intent and attempt */
+  }
+  return {
+    ...recoveryError(
+      input,
+      recoveryId,
+      "stale_state_revision",
+      "Recovery terminal cleanup could not prove the exact active attempt.",
+    ),
+    outcome: "commit_unknown",
+  };
 }
 
 export function selectRecoveryReplayTasks(
@@ -2176,36 +3082,53 @@ export function selectRecoveryReplayTasks(
   recoveryId: string,
   committedPaneLiveness: WorkerPaneLiveness | null,
 ): TeamTask[] {
-  return tasks.filter(task => task.recovery_reservation?.recovery_id === recoveryId
-    || task.recovery_adoption?.recovery_id === recoveryId
-    || ((committedPaneLiveness === null || committedPaneLiveness === 'dead')
-      && task.status === 'in_progress' && task.owner === workerName));
+  return tasks.filter(
+    (task) =>
+      task.recovery_reservation?.recovery_id === recoveryId ||
+      task.recovery_adoption?.recovery_id === recoveryId ||
+      ((committedPaneLiveness === null || committedPaneLiveness === "dead") &&
+        task.status === "in_progress" &&
+        task.owner === workerName),
+  );
 }
 
 export async function resolveCommittedRecoveryManifestSync(
   readManifest: () => Promise<TeamManifestV2 | null>,
-  expected: { workerName: string; paneId: string; paneAttemptId: string; recoveryId: string; replacementGeneration: number },
-): Promise<'synced' | 'repair_required'> {
+  expected: {
+    workerName: string;
+    paneId: string;
+    paneAttemptId: string;
+    recoveryId: string;
+    replacementGeneration: number;
+  },
+): Promise<"synced" | "repair_required"> {
   try {
     const manifest = await readManifest();
-    const projected = manifest?.workers.find(candidate => candidate.name === expected.workerName);
-    return projected?.pane_id === expected.paneId && projected.pane_attempt_id === expected.paneAttemptId
-      && projected.recovery_id === expected.recoveryId
-      && projected.replacement_generation === expected.replacementGeneration
-      ? 'synced' : 'repair_required';
+    const projected = manifest?.workers.find(
+      (candidate) => candidate.name === expected.workerName,
+    );
+    return projected?.pane_id === expected.paneId &&
+      projected.pane_attempt_id === expected.paneAttemptId &&
+      projected.recovery_id === expected.recoveryId &&
+      projected.replacement_generation === expected.replacementGeneration
+      ? "synced"
+      : "repair_required";
   } catch {
-    return 'repair_required';
+    return "repair_required";
   }
 }
 
 export function resolveCommittedRecoveryPaneAttempt(
-  activeRecovery: TeamConfig['active_recovery'],
+  activeRecovery: TeamConfig["active_recovery"],
   recoveryId: string,
   replacementGeneration: number,
   worker: WorkerInfo,
 ): { paneId: string; paneAttemptId: string } | null {
-  return activeRecovery?.recovery_id === recoveryId && worker.recovery_id === recoveryId
-    && worker.replacement_generation === replacementGeneration && worker.pane_id && worker.pane_attempt_id
+  return activeRecovery?.recovery_id === recoveryId &&
+    worker.recovery_id === recoveryId &&
+    worker.replacement_generation === replacementGeneration &&
+    worker.pane_id &&
+    worker.pane_attempt_id
     ? { paneId: worker.pane_id, paneAttemptId: worker.pane_attempt_id }
     : null;
 }
@@ -2215,11 +3138,19 @@ async function readOrCreateRecoveryAttempt(
   recoveryId: string,
   replacementGeneration: number,
 ): Promise<RecoveryAttemptSecret> {
-  const path = absPath(input.cwd, TeamPaths.recoveryAttempt(input.teamName, recoveryId));
+  const path = absPath(
+    input.cwd,
+    TeamPaths.recoveryAttempt(input.teamName, recoveryId),
+  );
   try {
-    return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    return validateRecoveryAttemptSecret(
+      JSON.parse(await readFile(path, "utf8")),
+      input,
+      recoveryId,
+      replacementGeneration,
+    );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
   const secret: RecoveryAttemptSecret = {
     schema_version: 1,
@@ -2230,21 +3161,31 @@ async function readOrCreateRecoveryAttempt(
     adoption_token: randomUUID(),
     created_at: new Date().toISOString(),
   };
-  await mkdir(join(path, '..'), { recursive: true });
+  await mkdir(join(path, ".."), { recursive: true });
   const candidate = `${path}.candidate.${process.pid}.${randomUUID()}`;
-  const candidateHandle = await open(candidate, 'wx', 0o600);
+  const candidateHandle = await open(candidate, "wx", 0o600);
   try {
-    await candidateHandle.writeFile(JSON.stringify(secret, null, 2), 'utf8');
+    await candidateHandle.writeFile(JSON.stringify(secret, null, 2), "utf8");
     await candidateHandle.sync();
   } finally {
     await candidateHandle.close();
   }
   try {
     await link(candidate, path);
-    return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    return validateRecoveryAttemptSecret(
+      JSON.parse(await readFile(path, "utf8")),
+      input,
+      recoveryId,
+      replacementGeneration,
+    );
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-    return validateRecoveryAttemptSecret(JSON.parse(await readFile(path, 'utf8')), input, recoveryId, replacementGeneration);
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    return validateRecoveryAttemptSecret(
+      JSON.parse(await readFile(path, "utf8")),
+      input,
+      recoveryId,
+      replacementGeneration,
+    );
   } finally {
     await unlink(candidate).catch(() => undefined);
   }
@@ -2260,22 +3201,27 @@ interface BootstrapRecoveryEvidenceWaitOptions {
   sleep?: (delayMs: number, signal?: AbortSignal) => Promise<void>;
 }
 
-function waitForBootstrapRecoveryEvidence(delayMs: number, signal?: AbortSignal): Promise<void> {
+function waitForBootstrapRecoveryEvidence(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
-      reject(signal.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+      reject(signal.reason ?? new Error("bootstrap_recovery_evidence_aborted"));
       return;
     }
     const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
+      signal?.removeEventListener("abort", onAbort);
       resolve();
     }, delayMs);
     const onAbort = (): void => {
       clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-      reject(signal?.reason ?? new Error('bootstrap_recovery_evidence_aborted'));
+      signal?.removeEventListener("abort", onAbort);
+      reject(
+        signal?.reason ?? new Error("bootstrap_recovery_evidence_aborted"),
+      );
     };
-    signal?.addEventListener('abort', onAbort, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -2288,33 +3234,71 @@ async function hasBootstrapRecoveryEvidence(
   const bootstrap = input.bootstrap;
   if (!bootstrap) return true;
   const reservation = readRecoveryRequestReservation(cwd, input.requestId);
-  if (!reservation || reservation.kind !== 'reservation' || reservation.recovery_id !== bootstrap.recoveryId
-    || reservation.team_name !== teamName || reservation.worker_name !== input.workerName
-    || reservation.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
+  if (
+    !reservation ||
+    reservation.kind !== "reservation" ||
+    reservation.recovery_id !== bootstrap.recoveryId ||
+    reservation.team_name !== teamName ||
+    reservation.worker_name !== input.workerName ||
+    reservation.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
+  )
+    return false;
   try {
-    const intent = parseRecoveryIntent(await readFile(absPath(cwd, TeamPaths.recoveryIntent(teamName, bootstrap.recoveryId)), 'utf8'));
-    if (intent.request_id !== input.requestId || intent.recovery_id !== bootstrap.recoveryId
-      || intent.team_name !== teamName || intent.worker_name !== input.workerName
-      || intent.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
+    const intent = parseRecoveryIntent(
+      await readFile(
+        absPath(cwd, TeamPaths.recoveryIntent(teamName, bootstrap.recoveryId)),
+        "utf8",
+      ),
+    );
+    if (
+      intent.request_id !== input.requestId ||
+      intent.recovery_id !== bootstrap.recoveryId ||
+      intent.team_name !== teamName ||
+      intent.worker_name !== input.workerName ||
+      intent.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
+    )
+      return false;
     const now = waitOptions.now ?? Date.now;
-    const timeoutMs = waitOptions.timeoutMs === undefined
-      ? BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS
-      : Number.isFinite(waitOptions.timeoutMs)
-        ? Math.min(Math.max(waitOptions.timeoutMs, 0), BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS)
-        : 0;
+    const timeoutMs =
+      waitOptions.timeoutMs === undefined
+        ? BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS
+        : Number.isFinite(waitOptions.timeoutMs)
+          ? Math.min(
+              Math.max(waitOptions.timeoutMs, 0),
+              BOOTSTRAP_RECOVERY_EVIDENCE_MAX_WAIT_MS,
+            )
+          : 0;
     const deadline = now() + timeoutMs;
     const sleep = waitOptions.sleep ?? waitForBootstrapRecoveryEvidence;
-    for (let attempt = 0; attempt <= Math.ceil(timeoutMs / BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS)
-      && !waitOptions.signal?.aborted; attempt++) {
-      const candidate = await readRecoveryOwnerBootstrapCandidate(teamName, cwd, bootstrap.expectedEpoch, bootstrap.nonce);
+    for (
+      let attempt = 0;
+      attempt <= Math.ceil(timeoutMs / BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS) &&
+      !waitOptions.signal?.aborted;
+      attempt++
+    ) {
+      const candidate = await readRecoveryOwnerBootstrapCandidate(
+        teamName,
+        cwd,
+        bootstrap.expectedEpoch,
+        bootstrap.nonce,
+      );
       if (candidate && candidateMatchesBootstrap(candidate, input)) return true;
       const owner = readLatestOwnerEpoch(cwd, teamName);
-      if (owner && (owner.epoch > bootstrap.expectedEpoch
-        || (owner.epoch === bootstrap.expectedEpoch && (owner.pid !== bootstrap.pid
-          || owner.process_started_at !== bootstrap.processStartedAt || owner.nonce !== bootstrap.nonce)))) return false;
+      if (
+        owner &&
+        (owner.epoch > bootstrap.expectedEpoch ||
+          (owner.epoch === bootstrap.expectedEpoch &&
+            (owner.pid !== bootstrap.pid ||
+              owner.process_started_at !== bootstrap.processStartedAt ||
+              owner.nonce !== bootstrap.nonce)))
+      )
+        return false;
       const remainingMs = deadline - now();
       if (remainingMs <= 0) return false;
-      await sleep(Math.min(BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS, remainingMs), waitOptions.signal);
+      await sleep(
+        Math.min(BOOTSTRAP_RECOVERY_EVIDENCE_POLL_MS, remainingMs),
+        waitOptions.signal,
+      );
     }
     return false;
   } catch {
@@ -2340,34 +3324,69 @@ interface RecoveryOwnerBootstrapCandidate {
   payload_hash: string;
 }
 
-function recoveryOwnerBootstrapCandidatePath(teamName: string, expectedEpoch: number, nonce: string): string {
-  return TeamPaths.recoveryOwnerBootstrapCandidate(teamName, expectedEpoch, nonce);
+function recoveryOwnerBootstrapCandidatePath(
+  teamName: string,
+  expectedEpoch: number,
+  nonce: string,
+): string {
+  return TeamPaths.recoveryOwnerBootstrapCandidate(
+    teamName,
+    expectedEpoch,
+    nonce,
+  );
 }
 
-function isCanonicalBootstrapCandidate(value: unknown, expectedEpoch: number): value is RecoveryOwnerBootstrapCandidate {
+function isCanonicalBootstrapCandidate(
+  value: unknown,
+  expectedEpoch: number,
+): value is RecoveryOwnerBootstrapCandidate {
   const candidate = value as Partial<RecoveryOwnerBootstrapCandidate> | null;
-  if (!candidate || candidate.schema_version !== 1 || candidate.expected_epoch !== expectedEpoch
-    || typeof candidate.request_id !== 'string' || candidate.request_id.length === 0
-    || typeof candidate.recovery_id !== 'string' || candidate.recovery_id.length === 0
-    || typeof candidate.team_name !== 'string' || candidate.team_name.length === 0
-    || typeof candidate.worker_name !== 'string' || candidate.worker_name.length === 0
-    || !isValidTeamInstanceId(candidate.instance_id)
-    || typeof candidate.nonce !== 'string' || candidate.nonce.length === 0
-    || typeof candidate.pid !== 'number' || !Number.isSafeInteger(candidate.pid) || candidate.pid < 1
-    || typeof candidate.process_started_at !== 'string' || candidate.process_started_at.length === 0
-    || typeof candidate.predecessor_epoch !== 'number' || !Number.isSafeInteger(candidate.predecessor_epoch) || candidate.predecessor_epoch < 0
-    || candidate.expected_epoch !== candidate.predecessor_epoch + 1
-    || (candidate.predecessor_epoch === 0 && (candidate.predecessor_nonce !== null
-      || candidate.predecessor_pid !== null || candidate.predecessor_process_started_at !== null))
-    || (candidate.predecessor_epoch > 0 && (typeof candidate.predecessor_nonce !== 'string'
-      || candidate.predecessor_nonce.length === 0 || typeof candidate.predecessor_pid !== 'number'
-      || !Number.isSafeInteger(candidate.predecessor_pid)
-      || candidate.predecessor_pid < 1 || typeof candidate.predecessor_process_started_at !== 'string'
-      || candidate.predecessor_process_started_at.length === 0))
-    || typeof candidate.created_at !== 'string' || !Number.isFinite(Date.parse(candidate.created_at))
-    || typeof candidate.payload_hash !== 'string') return false;
+  if (
+    !candidate ||
+    candidate.schema_version !== 1 ||
+    candidate.expected_epoch !== expectedEpoch ||
+    typeof candidate.request_id !== "string" ||
+    candidate.request_id.length === 0 ||
+    typeof candidate.recovery_id !== "string" ||
+    candidate.recovery_id.length === 0 ||
+    typeof candidate.team_name !== "string" ||
+    candidate.team_name.length === 0 ||
+    typeof candidate.worker_name !== "string" ||
+    candidate.worker_name.length === 0 ||
+    !isValidTeamInstanceId(candidate.instance_id) ||
+    typeof candidate.nonce !== "string" ||
+    candidate.nonce.length === 0 ||
+    typeof candidate.pid !== "number" ||
+    !Number.isSafeInteger(candidate.pid) ||
+    candidate.pid < 1 ||
+    typeof candidate.process_started_at !== "string" ||
+    candidate.process_started_at.length === 0 ||
+    typeof candidate.predecessor_epoch !== "number" ||
+    !Number.isSafeInteger(candidate.predecessor_epoch) ||
+    candidate.predecessor_epoch < 0 ||
+    candidate.expected_epoch !== candidate.predecessor_epoch + 1 ||
+    (candidate.predecessor_epoch === 0 &&
+      (candidate.predecessor_nonce !== null ||
+        candidate.predecessor_pid !== null ||
+        candidate.predecessor_process_started_at !== null)) ||
+    (candidate.predecessor_epoch > 0 &&
+      (typeof candidate.predecessor_nonce !== "string" ||
+        candidate.predecessor_nonce.length === 0 ||
+        typeof candidate.predecessor_pid !== "number" ||
+        !Number.isSafeInteger(candidate.predecessor_pid) ||
+        candidate.predecessor_pid < 1 ||
+        typeof candidate.predecessor_process_started_at !== "string" ||
+        candidate.predecessor_process_started_at.length === 0)) ||
+    typeof candidate.created_at !== "string" ||
+    !Number.isFinite(Date.parse(candidate.created_at)) ||
+    typeof candidate.payload_hash !== "string"
+  )
+    return false;
   const { payload_hash, ...unsigned } = candidate;
-  return createHash('sha256').update(JSON.stringify(unsigned)).digest('hex') === payload_hash;
+  return (
+    createHash("sha256").update(JSON.stringify(unsigned)).digest("hex") ===
+    payload_hash
+  );
 }
 
 async function readRecoveryOwnerBootstrapCandidate(
@@ -2377,9 +3396,19 @@ async function readRecoveryOwnerBootstrapCandidate(
   nonce: string,
 ): Promise<RecoveryOwnerBootstrapCandidate | null> {
   try {
-    const value = JSON.parse(await readFile(absPath(cwd,
-      recoveryOwnerBootstrapCandidatePath(teamName, expectedEpoch, nonce)), 'utf8')) as unknown;
-    return isCanonicalBootstrapCandidate(value, expectedEpoch) && value.nonce === nonce ? value : null;
+    const value = JSON.parse(
+      await readFile(
+        absPath(
+          cwd,
+          recoveryOwnerBootstrapCandidatePath(teamName, expectedEpoch, nonce),
+        ),
+        "utf8",
+      ),
+    ) as unknown;
+    return isCanonicalBootstrapCandidate(value, expectedEpoch) &&
+      value.nonce === nonce
+      ? value
+      : null;
   } catch {
     return null;
   }
@@ -2390,15 +3419,23 @@ function candidateMatchesBootstrap(
   input: RecoverDeadWorkerOwnerInput,
 ): boolean {
   const bootstrap = input.bootstrap;
-  return !!bootstrap && candidate.request_id === input.requestId && candidate.recovery_id === bootstrap.recoveryId
-    && candidate.team_name === input.teamName && candidate.worker_name === input.workerName
-    && candidate.instance_id.toLowerCase() === input.instanceId.toLowerCase()
-    && candidate.expected_epoch === bootstrap.expectedEpoch && candidate.nonce === bootstrap.nonce
-    && candidate.pid === bootstrap.pid && candidate.process_started_at === bootstrap.processStartedAt
-    && candidate.predecessor_epoch === bootstrap.predecessorEpoch
-    && candidate.predecessor_nonce === bootstrap.predecessorNonce
-    && candidate.predecessor_pid === bootstrap.predecessorPid
-    && candidate.predecessor_process_started_at === bootstrap.predecessorProcessStartedAt;
+  return (
+    !!bootstrap &&
+    candidate.request_id === input.requestId &&
+    candidate.recovery_id === bootstrap.recoveryId &&
+    candidate.team_name === input.teamName &&
+    candidate.worker_name === input.workerName &&
+    candidate.instance_id.toLowerCase() === input.instanceId.toLowerCase() &&
+    candidate.expected_epoch === bootstrap.expectedEpoch &&
+    candidate.nonce === bootstrap.nonce &&
+    candidate.pid === bootstrap.pid &&
+    candidate.process_started_at === bootstrap.processStartedAt &&
+    candidate.predecessor_epoch === bootstrap.predecessorEpoch &&
+    candidate.predecessor_nonce === bootstrap.predecessorNonce &&
+    candidate.predecessor_pid === bootstrap.predecessorPid &&
+    candidate.predecessor_process_started_at ===
+      bootstrap.predecessorProcessStartedAt
+  );
 }
 
 async function isExactDeadOrphanBootstrapCandidate(
@@ -2409,43 +3446,79 @@ async function isExactDeadOrphanBootstrapCandidate(
   orphan: ReturnType<typeof readLatestOwnerEpoch>,
 ): Promise<boolean> {
   const bootstrap = input.bootstrap;
-  if (!bootstrap || !orphan || !isProcessIdentityDead(orphan) || orphan.epoch !== bootstrap.predecessorEpoch
-    || orphan.nonce !== bootstrap.predecessorNonce || orphan.pid !== bootstrap.predecessorPid
-    || orphan.process_started_at !== bootstrap.predecessorProcessStartedAt
-    || !config.instance_id || config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
+  if (
+    !bootstrap ||
+    !orphan ||
+    !isProcessIdentityDead(orphan) ||
+    orphan.epoch !== bootstrap.predecessorEpoch ||
+    orphan.nonce !== bootstrap.predecessorNonce ||
+    orphan.pid !== bootstrap.predecessorPid ||
+    orphan.process_started_at !== bootstrap.predecessorProcessStartedAt ||
+    !config.instance_id ||
+    config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
+  )
+    return false;
   let expectedEpoch = bootstrap.expectedEpoch;
   let candidateNonce = bootstrap.nonce;
-  let predecessor: { epoch: number; nonce: string; pid: number; process_started_at: string } = orphan;
+  let predecessor: {
+    epoch: number;
+    nonce: string;
+    pid: number;
+    process_started_at: string;
+  } = orphan;
   for (;;) {
-    const candidate = await readRecoveryOwnerBootstrapCandidate(teamName, cwd, expectedEpoch, candidateNonce);
+    const candidate = await readRecoveryOwnerBootstrapCandidate(
+      teamName,
+      cwd,
+      expectedEpoch,
+      candidateNonce,
+    );
     if (!candidate) return false;
     if (expectedEpoch === bootstrap.expectedEpoch) {
       if (!candidateMatchesBootstrap(candidate, input)) return false;
-    } else if (candidate.request_id !== input.requestId || candidate.recovery_id !== bootstrap.recoveryId
-      || candidate.team_name !== teamName || candidate.worker_name !== input.workerName
-      || candidate.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
-      || candidate.nonce !== predecessor.nonce || candidate.pid !== predecessor.pid
-      || candidate.process_started_at !== predecessor.process_started_at) {
+    } else if (
+      candidate.request_id !== input.requestId ||
+      candidate.recovery_id !== bootstrap.recoveryId ||
+      candidate.team_name !== teamName ||
+      candidate.worker_name !== input.workerName ||
+      candidate.instance_id.toLowerCase() !== input.instanceId.toLowerCase() ||
+      candidate.nonce !== predecessor.nonce ||
+      candidate.pid !== predecessor.pid ||
+      candidate.process_started_at !== predecessor.process_started_at
+    ) {
       return false;
     }
     if (candidate.predecessor_epoch === 0) {
       return !config.runtime_owner_epoch && !config.active_recovery;
     }
-    const candidatePredecessor = candidate.predecessor_epoch === 0 ? null : {
-      pid: candidate.predecessor_pid!,
-      process_started_at: candidate.predecessor_process_started_at!,
-    };
-    if (candidatePredecessor && !isProcessIdentityDead(candidatePredecessor)) return false;
-    if (config.runtime_owner_epoch?.epoch === candidate.predecessor_epoch
-      && config.runtime_owner_epoch.nonce === candidate.predecessor_nonce
-      && config.runtime_owner_epoch.pid === candidate.predecessor_pid
-      && config.runtime_owner_epoch.process_started_at === candidate.predecessor_process_started_at) {
+    const candidatePredecessor =
+      candidate.predecessor_epoch === 0
+        ? null
+        : {
+            pid: candidate.predecessor_pid!,
+            process_started_at: candidate.predecessor_process_started_at!,
+          };
+    if (candidatePredecessor && !isProcessIdentityDead(candidatePredecessor))
+      return false;
+    if (
+      config.runtime_owner_epoch?.epoch === candidate.predecessor_epoch &&
+      config.runtime_owner_epoch.nonce === candidate.predecessor_nonce &&
+      config.runtime_owner_epoch.pid === candidate.predecessor_pid &&
+      config.runtime_owner_epoch.process_started_at ===
+        candidate.predecessor_process_started_at
+    ) {
       const active = config.active_recovery;
-      return !!active && active.request_id === input.requestId && active.recovery_id === bootstrap.recoveryId
-        && active.worker_name === input.workerName && active.owner_epoch === candidate.predecessor_epoch
-        && active.owner_nonce === candidate.predecessor_nonce;
+      return (
+        !!active &&
+        active.request_id === input.requestId &&
+        active.recovery_id === bootstrap.recoveryId &&
+        active.worker_name === input.workerName &&
+        active.owner_epoch === candidate.predecessor_epoch &&
+        active.owner_nonce === candidate.predecessor_nonce
+      );
     }
-    if (expectedEpoch <= 1 || candidate.predecessor_epoch !== expectedEpoch - 1) return false;
+    if (expectedEpoch <= 1 || candidate.predecessor_epoch !== expectedEpoch - 1)
+      return false;
     predecessor = {
       epoch: candidate.predecessor_epoch,
       nonce: candidate.predecessor_nonce!,
@@ -2461,34 +3534,71 @@ function isExactRecoverySidecar(
   value: unknown,
   task: TeamTask,
   input: RecoverDeadWorkerOwnerInput,
-  active: NonNullable<TeamConfig['active_recovery']>,
+  active: NonNullable<TeamConfig["active_recovery"]>,
   replacementGeneration: number,
   adoptionToken: string,
 ): value is TaskRecoveryRequeueSidecar {
   const sidecar = value as Partial<TaskRecoveryRequeueSidecar> | null;
   const persisted = task.recovery_reservation ?? task.recovery_adoption;
-  if (!sidecar || !persisted || sidecar.schema_version !== 1 || sidecar.recovery_id !== active.recovery_id
-    || sidecar.request_id !== input.requestId || sidecar.task_id !== task.id || sidecar.old_owner !== input.workerName
-    || typeof sidecar.old_task_version !== 'number' || !Number.isSafeInteger(sidecar.old_task_version) || sidecar.old_task_version < 1
-    || typeof sidecar.old_claim_token !== 'string' || sidecar.old_claim_token.length === 0
-    || typeof sidecar.old_claim_leased_until !== 'string' || !Number.isFinite(Date.parse(sidecar.old_claim_leased_until))
-    || typeof sidecar.continuation_sequence !== 'number' || !Number.isSafeInteger(sidecar.continuation_sequence) || sidecar.continuation_sequence < 1
-    || typeof sidecar.checkpoint_path !== 'string' || sidecar.checkpoint_path.length === 0
-    || typeof sidecar.checkpoint_hash !== 'string' || !/^[a-f0-9]{64}$/.test(sidecar.checkpoint_hash)
-    || sidecar.replacement_worker !== input.workerName || sidecar.replacement_generation !== replacementGeneration
-    || sidecar.adoption_token_hash !== createHash('sha256').update(adoptionToken).digest('hex')
-    || typeof sidecar.created_at !== 'string' || !Number.isFinite(Date.parse(sidecar.created_at))) return false;
-  const sameReservation = persisted.recovery_id === sidecar.recovery_id && persisted.request_id === sidecar.request_id
-    && persisted.continuation_sequence === sidecar.continuation_sequence && persisted.checkpoint_path === sidecar.checkpoint_path
-    && persisted.checkpoint_hash === sidecar.checkpoint_hash && persisted.replacement_worker === sidecar.replacement_worker
-    && persisted.replacement_generation === sidecar.replacement_generation;
+  if (
+    !sidecar ||
+    !persisted ||
+    sidecar.schema_version !== 1 ||
+    sidecar.recovery_id !== active.recovery_id ||
+    sidecar.request_id !== input.requestId ||
+    sidecar.task_id !== task.id ||
+    sidecar.old_owner !== input.workerName ||
+    typeof sidecar.old_task_version !== "number" ||
+    !Number.isSafeInteger(sidecar.old_task_version) ||
+    sidecar.old_task_version < 1 ||
+    typeof sidecar.old_claim_token !== "string" ||
+    sidecar.old_claim_token.length === 0 ||
+    typeof sidecar.old_claim_leased_until !== "string" ||
+    !Number.isFinite(Date.parse(sidecar.old_claim_leased_until)) ||
+    typeof sidecar.continuation_sequence !== "number" ||
+    !Number.isSafeInteger(sidecar.continuation_sequence) ||
+    sidecar.continuation_sequence < 1 ||
+    typeof sidecar.checkpoint_path !== "string" ||
+    sidecar.checkpoint_path.length === 0 ||
+    typeof sidecar.checkpoint_hash !== "string" ||
+    !/^[a-f0-9]{64}$/.test(sidecar.checkpoint_hash) ||
+    sidecar.replacement_worker !== input.workerName ||
+    sidecar.replacement_generation !== replacementGeneration ||
+    sidecar.adoption_token_hash !==
+      createHash("sha256").update(adoptionToken).digest("hex") ||
+    typeof sidecar.created_at !== "string" ||
+    !Number.isFinite(Date.parse(sidecar.created_at))
+  )
+    return false;
+  const sameReservation =
+    persisted.recovery_id === sidecar.recovery_id &&
+    persisted.request_id === sidecar.request_id &&
+    persisted.continuation_sequence === sidecar.continuation_sequence &&
+    persisted.checkpoint_path === sidecar.checkpoint_path &&
+    persisted.checkpoint_hash === sidecar.checkpoint_hash &&
+    persisted.replacement_worker === sidecar.replacement_worker &&
+    persisted.replacement_generation === sidecar.replacement_generation;
   if (!sameReservation) return false;
-  if ('adoption_token_hash' in persisted && persisted.adoption_token_hash !== sidecar.adoption_token_hash) return false;
+  if (
+    "adoption_token_hash" in persisted &&
+    persisted.adoption_token_hash !== sidecar.adoption_token_hash
+  )
+    return false;
   if (task.recovery_reservation) {
-    return task.status === 'pending' && task.version === sidecar.old_task_version + 1 && !task.owner && !task.claim;
+    return (
+      task.status === "pending" &&
+      task.version === sidecar.old_task_version + 1 &&
+      !task.owner &&
+      !task.claim
+    );
   }
-  return task.status === 'in_progress' && task.version === sidecar.old_task_version + 2 && task.owner === input.workerName
-    && !!task.claim && task.claim.owner === input.workerName;
+  return (
+    task.status === "in_progress" &&
+    task.version === sidecar.old_task_version + 2 &&
+    task.owner === input.workerName &&
+    !!task.claim &&
+    task.claim.owner === input.workerName
+  );
 }
 
 async function hasBootstrapActiveRecoveryEvidence(
@@ -2500,44 +3610,111 @@ async function hasBootstrapActiveRecoveryEvidence(
   const bootstrap = input.bootstrap;
   const active = config.active_recovery;
   if (!bootstrap || !active) return true;
-  if (!config.instance_id || config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()) return false;
-  if (active.request_id !== input.requestId || active.recovery_id !== bootstrap.recoveryId
-    || active.worker_name !== input.workerName) return false;
-  const worker = config.workers.find(candidate => candidate.name === input.workerName);
-  const replacementGeneration = worker?.recovery_id === active.recovery_id && Number.isSafeInteger(worker.replacement_generation)
-    ? worker.replacement_generation!
-    : (worker?.replacement_generation ?? 0) + 1;
+  if (
+    !config.instance_id ||
+    config.instance_id.toLowerCase() !== input.instanceId.toLowerCase()
+  )
+    return false;
+  if (
+    active.request_id !== input.requestId ||
+    active.recovery_id !== bootstrap.recoveryId ||
+    active.worker_name !== input.workerName
+  )
+    return false;
+  const worker = config.workers.find(
+    (candidate) => candidate.name === input.workerName,
+  );
+  const replacementGeneration =
+    worker?.recovery_id === active.recovery_id &&
+    Number.isSafeInteger(worker.replacement_generation)
+      ? worker.replacement_generation!
+      : (worker?.replacement_generation ?? 0) + 1;
   let attempt: RecoveryAttemptSecret;
   try {
-    attempt = validateRecoveryAttemptSecret(JSON.parse(await readFile(absPath(cwd, TeamPaths.recoveryAttempt(teamName, active.recovery_id)), 'utf8')),
-      input, active.recovery_id, replacementGeneration);
+    attempt = validateRecoveryAttemptSecret(
+      JSON.parse(
+        await readFile(
+          absPath(cwd, TeamPaths.recoveryAttempt(teamName, active.recovery_id)),
+          "utf8",
+        ),
+      ),
+      input,
+      active.recovery_id,
+      replacementGeneration,
+    );
   } catch {
     return false;
   }
   let tasks: TeamTask[];
-  try { tasks = await teamListTasks(teamName, cwd); } catch { return false; }
-  const continuations = tasks.filter(task => task.recovery_reservation?.recovery_id === active.recovery_id
-    || task.recovery_adoption?.recovery_id === active.recovery_id);
-  const untouchedClaims = tasks.filter(task => task.status === 'in_progress' && task.owner === input.workerName
-    && !continuations.some(continuation => continuation.id === task.id));
+  try {
+    tasks = await teamListTasks(teamName, cwd);
+  } catch {
+    return false;
+  }
+  const continuations = tasks.filter(
+    (task) =>
+      task.recovery_reservation?.recovery_id === active.recovery_id ||
+      task.recovery_adoption?.recovery_id === active.recovery_id,
+  );
+  const untouchedClaims = tasks.filter(
+    (task) =>
+      task.status === "in_progress" &&
+      task.owner === input.workerName &&
+      !continuations.some((continuation) => continuation.id === task.id),
+  );
   if (continuations.length === 0 && untouchedClaims.length === 0) return true;
   for (const task of continuations) {
     let sidecar: unknown;
     try {
-      sidecar = JSON.parse(await readFile(absPath(cwd, TeamPaths.taskRecoverySidecar(teamName, active.recovery_id, task.id)), 'utf8'));
+      sidecar = JSON.parse(
+        await readFile(
+          absPath(
+            cwd,
+            TeamPaths.taskRecoverySidecar(
+              teamName,
+              active.recovery_id,
+              task.id,
+            ),
+          ),
+          "utf8",
+        ),
+      );
     } catch {
       return false;
     }
-    if (!isExactRecoverySidecar(sidecar, task, input, active, replacementGeneration, attempt.adoption_token)) return false;
+    if (
+      !isExactRecoverySidecar(
+        sidecar,
+        task,
+        input,
+        active,
+        replacementGeneration,
+        attempt.adoption_token,
+      )
+    )
+      return false;
     const verified = sidecar as TaskRecoveryRequeueSidecar;
-    const checkpoint = await readTaskRecoveryCheckpoint(verified.checkpoint_path);
-    if (!checkpoint.ok || checkpoint.checkpoint.team_name !== teamName || checkpoint.checkpoint.task_id !== task.id
-      || checkpoint.checkpoint.worker_name !== verified.old_owner || checkpoint.checkpoint.task_version !== verified.old_task_version
-      || checkpoint.checkpoint.claim_token !== verified.old_claim_token || checkpoint.checkpoint.sequence !== verified.continuation_sequence
-      || checkpoint.checkpoint.resume_payload_hash !== verified.checkpoint_hash) return false;
+    const checkpoint = await readTaskRecoveryCheckpoint(
+      verified.checkpoint_path,
+    );
+    if (
+      !checkpoint.ok ||
+      checkpoint.checkpoint.team_name !== teamName ||
+      checkpoint.checkpoint.task_id !== task.id ||
+      checkpoint.checkpoint.worker_name !== verified.old_owner ||
+      checkpoint.checkpoint.task_version !== verified.old_task_version ||
+      checkpoint.checkpoint.claim_token !== verified.old_claim_token ||
+      checkpoint.checkpoint.sequence !== verified.continuation_sequence ||
+      checkpoint.checkpoint.resume_payload_hash !== verified.checkpoint_hash
+    )
+      return false;
   }
   for (const task of untouchedClaims) {
-    const checkpoint = await selectTaskRecoveryCheckpoint(teamName, { ...task, version: task.version ?? 1 }, cwd);
+    const checkpoint = await selectTaskRecoveryCheckpoint(
+      teamName,
+      { ...task, version: task.version ?? 1 },
+      cwd,
+    );
     if (!checkpoint.ok) return false;
   }
   return true;
@@ -2552,121 +3729,221 @@ async function ensureRecoveryOwner(
 ): Promise<{ fence: OwnerFence; config: TeamConfig; stateRevision: number }> {
   let current = await readRevisionedTeamConfig(teamName, cwd);
   if (!current) current = await migrateTeamConfigRevision(teamName, cwd);
-  if (!current) throw new Error('invalid_persisted_state');
+  if (!current) throw new Error("invalid_persisted_state");
   await assertTeamInstanceUnderLock(instance);
 
   const processStartedAt = currentProcessStartIdentity();
-  if (!processStartedAt) throw new Error('process_start_identity_unavailable');
+  if (!processStartedAt) throw new Error("process_start_identity_unavailable");
   const bootstrap = input.bootstrap;
   let owner = readLatestOwnerEpoch(cwd, teamName);
   let bootstrapPredecessor: ReturnType<typeof readLatestOwnerEpoch> = null;
   let exactDeadOrphan = false;
   if (bootstrap) {
-    if (bootstrap.expectedEpoch !== bootstrap.predecessorEpoch + 1 || bootstrap.pid !== process.pid
-      || bootstrap.processStartedAt !== processStartedAt || bootstrap.nonce.length === 0
-      || !await hasBootstrapRecoveryEvidence(teamName, cwd, input, waitOptions)) {
-      throw new Error('runtime_owner_bootstrap_fence_lost');
+    if (
+      bootstrap.expectedEpoch !== bootstrap.predecessorEpoch + 1 ||
+      bootstrap.pid !== process.pid ||
+      bootstrap.processStartedAt !== processStartedAt ||
+      bootstrap.nonce.length === 0 ||
+      !(await hasBootstrapRecoveryEvidence(teamName, cwd, input, waitOptions))
+    ) {
+      throw new Error("runtime_owner_bootstrap_fence_lost");
     }
     const predecessor = owner;
     bootstrapPredecessor = predecessor;
-    const alreadyPublished = predecessor?.epoch === bootstrap.expectedEpoch && predecessor.pid === bootstrap.pid
-      && predecessor.process_started_at === bootstrap.processStartedAt && predecessor.nonce === bootstrap.nonce;
-    exactDeadOrphan = !alreadyPublished && await isExactDeadOrphanBootstrapCandidate(
-      teamName, cwd, input, current.config, predecessor);
+    const alreadyPublished =
+      predecessor?.epoch === bootstrap.expectedEpoch &&
+      predecessor.pid === bootstrap.pid &&
+      predecessor.process_started_at === bootstrap.processStartedAt &&
+      predecessor.nonce === bootstrap.nonce;
+    exactDeadOrphan =
+      !alreadyPublished &&
+      (await isExactDeadOrphanBootstrapCandidate(
+        teamName,
+        cwd,
+        input,
+        current.config,
+        predecessor,
+      ));
     if (alreadyPublished) {
-      const configAlreadyBound = current.config.runtime_owner_epoch?.epoch === bootstrap.expectedEpoch
-        && current.config.runtime_owner_epoch?.nonce === bootstrap.nonce;
-      const retryFromNoOwner = bootstrap.predecessorEpoch === 0 && !current.config.runtime_owner_epoch
-        && (!current.config.active_recovery || await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config));
-      const retryFromPredecessor = bootstrap.predecessorEpoch > 0
-        && current.config.runtime_owner_epoch?.epoch === bootstrap.predecessorEpoch
-        && current.config.runtime_owner_epoch?.nonce === bootstrap.predecessorNonce
-        && current.config.active_recovery?.owner_epoch === bootstrap.predecessorEpoch
-        && current.config.active_recovery?.owner_nonce === bootstrap.predecessorNonce
-        && await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config);
+      const configAlreadyBound =
+        current.config.runtime_owner_epoch?.epoch === bootstrap.expectedEpoch &&
+        current.config.runtime_owner_epoch?.nonce === bootstrap.nonce;
+      const retryFromNoOwner =
+        bootstrap.predecessorEpoch === 0 &&
+        !current.config.runtime_owner_epoch &&
+        (!current.config.active_recovery ||
+          (await hasBootstrapActiveRecoveryEvidence(
+            teamName,
+            cwd,
+            input,
+            current.config,
+          )));
+      const retryFromPredecessor =
+        bootstrap.predecessorEpoch > 0 &&
+        current.config.runtime_owner_epoch?.epoch ===
+          bootstrap.predecessorEpoch &&
+        current.config.runtime_owner_epoch?.nonce ===
+          bootstrap.predecessorNonce &&
+        current.config.active_recovery?.owner_epoch ===
+          bootstrap.predecessorEpoch &&
+        current.config.active_recovery?.owner_nonce ===
+          bootstrap.predecessorNonce &&
+        (await hasBootstrapActiveRecoveryEvidence(
+          teamName,
+          cwd,
+          input,
+          current.config,
+        ));
       if (!configAlreadyBound && !retryFromNoOwner && !retryFromPredecessor) {
-        throw new Error('runtime_owner_bootstrap_rebind_rejected');
+        throw new Error("runtime_owner_bootstrap_rebind_rejected");
       }
       owner = predecessor;
     } else {
       const bootstrapFromNoOwner = bootstrap.predecessorEpoch === 0;
       if (bootstrapFromNoOwner) {
-        if (predecessor || current.config.runtime_owner_epoch
-          || (current.config.active_recovery && !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config))) {
-          throw new Error('runtime_owner_bootstrap_fence_lost');
+        if (
+          predecessor ||
+          current.config.runtime_owner_epoch ||
+          (current.config.active_recovery &&
+            !(await hasBootstrapActiveRecoveryEvidence(
+              teamName,
+              cwd,
+              input,
+              current.config,
+            )))
+        ) {
+          throw new Error("runtime_owner_bootstrap_fence_lost");
         }
-      } else if (!exactDeadOrphan && (!predecessor || predecessor.epoch !== bootstrap.predecessorEpoch
-        || predecessor.nonce !== bootstrap.predecessorNonce || predecessor.pid !== bootstrap.predecessorPid
-        || predecessor.process_started_at !== bootstrap.predecessorProcessStartedAt || !isProcessIdentityDead(predecessor)
-        || current.config.runtime_owner_epoch?.epoch !== predecessor.epoch
-        || current.config.runtime_owner_epoch?.nonce !== predecessor.nonce
-        || current.config.active_recovery?.owner_epoch !== predecessor.epoch
-        || current.config.active_recovery?.owner_nonce !== predecessor.nonce
-        || !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config))) {
-        throw new Error('runtime_owner_bootstrap_fence_lost');
+      } else if (
+        !exactDeadOrphan &&
+        (!predecessor ||
+          predecessor.epoch !== bootstrap.predecessorEpoch ||
+          predecessor.nonce !== bootstrap.predecessorNonce ||
+          predecessor.pid !== bootstrap.predecessorPid ||
+          predecessor.process_started_at !==
+            bootstrap.predecessorProcessStartedAt ||
+          !isProcessIdentityDead(predecessor) ||
+          current.config.runtime_owner_epoch?.epoch !== predecessor.epoch ||
+          current.config.runtime_owner_epoch?.nonce !== predecessor.nonce ||
+          current.config.active_recovery?.owner_epoch !== predecessor.epoch ||
+          current.config.active_recovery?.owner_nonce !== predecessor.nonce ||
+          !(await hasBootstrapActiveRecoveryEvidence(
+            teamName,
+            cwd,
+            input,
+            current.config,
+          )))
+      ) {
+        throw new Error("runtime_owner_bootstrap_fence_lost");
       }
       owner = publishOwnerEpoch(cwd, teamName, bootstrap.expectedEpoch, {
         pid: bootstrap.pid,
         processStartedAt: bootstrap.processStartedAt,
         nonce: bootstrap.nonce,
       });
-      if (owner.epoch !== bootstrap.expectedEpoch || owner.pid !== bootstrap.pid
-        || owner.process_started_at !== bootstrap.processStartedAt || owner.nonce !== bootstrap.nonce) {
-        throw new Error('runtime_owner_bootstrap_fence_lost');
+      if (
+        owner.epoch !== bootstrap.expectedEpoch ||
+        owner.pid !== bootstrap.pid ||
+        owner.process_started_at !== bootstrap.processStartedAt ||
+        owner.nonce !== bootstrap.nonce
+      ) {
+        throw new Error("runtime_owner_bootstrap_fence_lost");
       }
     }
   } else if (!owner) {
     owner = publishOwnerEpoch(cwd, teamName, 1);
-  } else if (owner.pid !== process.pid || owner.process_started_at !== processStartedAt) {
-    throw new Error('runtime_owner_fence_lost');
+  } else if (
+    owner.pid !== process.pid ||
+    owner.process_started_at !== processStartedAt
+  ) {
+    throw new Error("runtime_owner_fence_lost");
   }
   const fence = { epoch: owner.epoch, nonce: owner.nonce };
   requireOwnerFence(cwd, teamName, fence);
   requireOwnerProcessIdentity(owner, process.pid, processStartedAt);
-  for (let bindAttempt = 0; bindAttempt < 3 && (current.config.runtime_owner_epoch?.epoch !== owner.epoch
-    || current.config.runtime_owner_epoch?.nonce !== owner.nonce); bindAttempt++) {
+  for (
+    let bindAttempt = 0;
+    bindAttempt < 3 &&
+    (current.config.runtime_owner_epoch?.epoch !== owner.epoch ||
+      current.config.runtime_owner_epoch?.nonce !== owner.nonce);
+    bindAttempt++
+  ) {
     await assertTeamInstanceUnderLock(instance);
-    if (current.config.runtime_owner_epoch && (current.config.runtime_owner_epoch.epoch !== owner.epoch
-      || current.config.runtime_owner_epoch.nonce !== owner.nonce)
-      && !(bootstrap && exactDeadOrphan && await isExactDeadOrphanBootstrapCandidate(
-        teamName, cwd, input, current.config, bootstrapPredecessor))) {
-      throw new Error('runtime_owner_bootstrap_rebind_rejected');
+    if (
+      current.config.runtime_owner_epoch &&
+      (current.config.runtime_owner_epoch.epoch !== owner.epoch ||
+        current.config.runtime_owner_epoch.nonce !== owner.nonce) &&
+      !(
+        bootstrap &&
+        exactDeadOrphan &&
+        (await isExactDeadOrphanBootstrapCandidate(
+          teamName,
+          cwd,
+          input,
+          current.config,
+          bootstrapPredecessor,
+        ))
+      )
+    ) {
+      throw new Error("runtime_owner_bootstrap_rebind_rejected");
     }
-    if (bootstrap && current.config.active_recovery
-      && !await hasBootstrapActiveRecoveryEvidence(teamName, cwd, input, current.config)) {
-      throw new Error('runtime_owner_bootstrap_fence_lost');
+    if (
+      bootstrap &&
+      current.config.active_recovery &&
+      !(await hasBootstrapActiveRecoveryEvidence(
+        teamName,
+        cwd,
+        input,
+        current.config,
+      ))
+    ) {
+      throw new Error("runtime_owner_bootstrap_fence_lost");
     }
     const nextRevision = current.stateRevision + 1;
     const bootstrapWorker = bootstrap
-      ? current.config.workers.find(candidate => candidate.name === input.workerName)
+      ? current.config.workers.find(
+          (candidate) => candidate.name === input.workerName,
+        )
       : undefined;
     const next: TeamConfig = {
       ...current.config,
       state_revision: nextRevision,
       runtime_owner_epoch: owner,
-      ...(current.config.service_descriptor ? {
-        service_descriptor: {
-          ...current.config.service_descriptor,
-          service_generation: current.config.service_descriptor.service_generation + 1,
-          service_attempt_id: `${owner.epoch}:${owner.nonce}`,
-        },
-      } : {}),
-      lifecycle_state: current.config.lifecycle_state ?? 'active',
+      ...(current.config.service_descriptor
+        ? {
+            service_descriptor: {
+              ...current.config.service_descriptor,
+              service_generation:
+                current.config.service_descriptor.service_generation + 1,
+              service_attempt_id: `${owner.epoch}:${owner.nonce}`,
+            },
+          }
+        : {}),
+      lifecycle_state: current.config.lifecycle_state ?? "active",
       active_recovery: current.config.active_recovery
-        ? { ...current.config.active_recovery, owner_epoch: owner.epoch, owner_nonce: owner.nonce,
-          state_revision: nextRevision, updated_at: new Date().toISOString() }
-        : bootstrap ? {
-          request_id: input.requestId,
-          recovery_id: bootstrap.recoveryId,
-          worker_name: input.workerName,
-          owner_epoch: owner.epoch,
-          owner_nonce: owner.nonce,
-          phase: 'reserved',
-          state_revision: nextRevision,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          ...(bootstrapWorker?.pane_id?.trim() ? { original_pane_id: bootstrapWorker.pane_id } : {}),
-        } : undefined,
+        ? {
+            ...current.config.active_recovery,
+            owner_epoch: owner.epoch,
+            owner_nonce: owner.nonce,
+            state_revision: nextRevision,
+            updated_at: new Date().toISOString(),
+          }
+        : bootstrap
+          ? {
+              request_id: input.requestId,
+              recovery_id: bootstrap.recoveryId,
+              worker_name: input.workerName,
+              owner_epoch: owner.epoch,
+              owner_nonce: owner.nonce,
+              phase: "reserved",
+              state_revision: nextRevision,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              ...(bootstrapWorker?.pane_id?.trim()
+                ? { original_pane_id: bootstrapWorker.pane_id }
+                : {}),
+            }
+          : undefined,
     };
     if (await saveTeamConfigAtRevision(next, current.stateRevision, cwd)) {
       current = { config: next, stateRevision: nextRevision };
@@ -2674,13 +3951,20 @@ async function ensureRecoveryOwner(
     }
     await assertTeamInstanceUnderLock(instance);
     const retry = await readRevisionedTeamConfig(teamName, cwd);
-    if (!retry) throw new Error('invalid_persisted_state');
+    if (!retry) throw new Error("invalid_persisted_state");
     current = retry;
   }
-  if (!current) throw new Error('invalid_persisted_state');
-  if (current.config.runtime_owner_epoch?.epoch !== owner.epoch
-    || current.config.runtime_owner_epoch?.nonce !== owner.nonce) throw new Error('stale_state_revision');
-  return { fence, config: current.config, stateRevision: current.stateRevision };
+  if (!current) throw new Error("invalid_persisted_state");
+  if (
+    current.config.runtime_owner_epoch?.epoch !== owner.epoch ||
+    current.config.runtime_owner_epoch?.nonce !== owner.nonce
+  )
+    throw new Error("stale_state_revision");
+  return {
+    fence,
+    config: current.config,
+    stateRevision: current.stateRevision,
+  };
 }
 
 /** Establish the exact successor/config binding before a detached owner may execute or maintain. */
@@ -2689,32 +3973,53 @@ export async function prepareRecoveryOwnerBootstrap(
   waitOptions?: BootstrapRecoveryEvidenceWaitOptions,
 ): Promise<void> {
   const bootstrap = input.bootstrap;
-  if (!bootstrap) throw new Error('runtime_owner_bootstrap_fence_lost');
-  if (!isValidTeamInstanceId(input.instanceId)) throw new Error('team_instance_identity_missing');
+  if (!bootstrap) throw new Error("runtime_owner_bootstrap_fence_lost");
+  if (!isValidTeamInstanceId(input.instanceId))
+    throw new Error("team_instance_identity_missing");
   const expectedInstanceId = input.instanceId;
   const initial = await readRevisionedTeamConfig(input.teamName, input.cwd);
-  if (!initial?.config.instance_id) throw new Error('team_instance_authority_missing');
-  if (initial.config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
-    throw new Error('team_instance_mismatch');
+  if (!initial?.config.instance_id)
+    throw new Error("team_instance_authority_missing");
+  if (
+    initial.config.instance_id.toLowerCase() !==
+    expectedInstanceId.toLowerCase()
+  ) {
+    throw new Error("team_instance_mismatch");
   }
   const instance = createTeamInstanceBinding({
     teamName: input.teamName,
     cwd: input.cwd,
     instanceId: expectedInstanceId,
   });
-  const owner = await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
-    ensureRecoveryOwner(input.teamName, input.cwd, input, waitOptions, instance),
+  const owner = await withTeamInstanceLifecycleLock(
+    instance.cwd,
+    instance.team_name,
+    () =>
+      ensureRecoveryOwner(
+        input.teamName,
+        input.cwd,
+        input,
+        waitOptions,
+        instance,
+      ),
   );
-  if (owner.fence.epoch !== bootstrap.expectedEpoch
-    || owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch
-    || owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce) {
-    throw new Error('runtime_owner_bootstrap_rebind_rejected');
+  if (
+    owner.fence.epoch !== bootstrap.expectedEpoch ||
+    owner.config.runtime_owner_epoch?.epoch !== owner.fence.epoch ||
+    owner.config.runtime_owner_epoch.nonce !== owner.fence.nonce
+  ) {
+    throw new Error("runtime_owner_bootstrap_rebind_rejected");
   }
   const active = owner.config.active_recovery;
-  if (!active || active.request_id !== input.requestId || active.recovery_id !== bootstrap.recoveryId
-    || active.worker_name !== input.workerName || active.owner_epoch !== owner.fence.epoch
-    || active.owner_nonce !== owner.fence.nonce) {
-    throw new Error('runtime_owner_bootstrap_rebind_rejected');
+  if (
+    !active ||
+    active.request_id !== input.requestId ||
+    active.recovery_id !== bootstrap.recoveryId ||
+    active.worker_name !== input.workerName ||
+    active.owner_epoch !== owner.fence.epoch ||
+    active.owner_nonce !== owner.fence.nonce
+  ) {
+    throw new Error("runtime_owner_bootstrap_rebind_rejected");
   }
 }
 
@@ -2722,118 +4027,241 @@ export async function prepareRecoveryOwnerBootstrap(
 export async function executeRecoverDeadWorkerV2Owner(
   input: RecoverDeadWorkerOwnerInput,
 ): Promise<RecoverDeadWorkerV2Result> {
-  const reservation = readRecoveryRequestReservation(input.cwd, input.requestId);
+  const reservation = readRecoveryRequestReservation(
+    input.cwd,
+    input.requestId,
+  );
   const recoveryId = reservation?.recovery_id ?? randomUUID();
   let ownerBound = false;
   try {
     if (!isValidTeamInstanceId(input.instanceId)) {
-      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_identity_missing');
+      return recoveryError(
+        input,
+        recoveryId,
+        "invalid_persisted_state",
+        "team_instance_identity_missing",
+      );
     }
-    if (reservation && (reservation.team_name !== input.teamName
-      || reservation.worker_name !== input.workerName
-      || reservation.instance_id.toLowerCase() !== input.instanceId.toLowerCase())) {
-      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'recovery_instance_mismatch');
+    if (
+      reservation &&
+      (reservation.team_name !== input.teamName ||
+        reservation.worker_name !== input.workerName ||
+        reservation.instance_id.toLowerCase() !==
+          input.instanceId.toLowerCase())
+    ) {
+      return recoveryError(
+        input,
+        recoveryId,
+        "invalid_persisted_state",
+        "recovery_instance_mismatch",
+      );
     }
     const expectedInstanceId = input.instanceId;
-    const beforeOwner = await readRevisionedTeamConfig(input.teamName, input.cwd);
-    if (beforeOwner?.config.active_scale_down || (beforeOwner?.config && scaleUpFenceBlocks(beforeOwner.config))) {
-      return recoveryError(input, recoveryId, 'team_mutation_busy');
+    const beforeOwner = await readRevisionedTeamConfig(
+      input.teamName,
+      input.cwd,
+    );
+    if (
+      beforeOwner?.config.active_scale_down ||
+      (beforeOwner?.config && scaleUpFenceBlocks(beforeOwner.config))
+    ) {
+      return recoveryError(input, recoveryId, "team_mutation_busy");
     }
     if (!beforeOwner?.config.instance_id) {
-      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_identity_unknown');
+      return recoveryError(
+        input,
+        recoveryId,
+        "invalid_persisted_state",
+        "team_instance_identity_unknown",
+      );
     }
-    if (beforeOwner.config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
-      return recoveryError(input, recoveryId, 'invalid_persisted_state', 'team_instance_mismatch');
+    if (
+      beforeOwner.config.instance_id.toLowerCase() !==
+      expectedInstanceId.toLowerCase()
+    ) {
+      return recoveryError(
+        input,
+        recoveryId,
+        "invalid_persisted_state",
+        "team_instance_mismatch",
+      );
     }
     const instance = createTeamInstanceBinding({
       teamName: input.teamName,
       cwd: input.cwd,
       instanceId: expectedInstanceId,
     });
-    let existingAttempt: TeamConfig['active_recovery'] | undefined;
-    const owner = await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
-      await assertTeamInstanceUnderLock(instance);
-      let electedOwner = await ensureRecoveryOwner(input.teamName, input.cwd, input, undefined, instance);
-      existingAttempt = electedOwner.config.active_recovery;
-      if (!existingAttempt) {
-        const nextRevision = electedOwner.stateRevision + 1;
-        const electedConfig: TeamConfig = {
-          ...electedOwner.config,
-          state_revision: nextRevision,
-          active_recovery: {
-            request_id: input.requestId,
-            recovery_id: recoveryId,
-            worker_name: input.workerName,
-            owner_epoch: electedOwner.fence.epoch,
-            owner_nonce: electedOwner.fence.nonce,
-            phase: 'reserved',
+    let existingAttempt: TeamConfig["active_recovery"] | undefined;
+    const owner = await withTeamInstanceLifecycleLock(
+      instance.cwd,
+      instance.team_name,
+      async () => {
+        await assertTeamInstanceUnderLock(instance);
+        let electedOwner = await ensureRecoveryOwner(
+          input.teamName,
+          input.cwd,
+          input,
+          undefined,
+          instance,
+        );
+        existingAttempt = electedOwner.config.active_recovery;
+        if (!existingAttempt) {
+          const nextRevision = electedOwner.stateRevision + 1;
+          const electedConfig: TeamConfig = {
+            ...electedOwner.config,
             state_revision: nextRevision,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          },
-        };
-        if (!await saveTeamConfigAtRevision(electedConfig, electedOwner.stateRevision, input.cwd)) {
-          throw new Error('stale_state_revision');
+            active_recovery: {
+              request_id: input.requestId,
+              recovery_id: recoveryId,
+              worker_name: input.workerName,
+              owner_epoch: electedOwner.fence.epoch,
+              owner_nonce: electedOwner.fence.nonce,
+              phase: "reserved",
+              state_revision: nextRevision,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            },
+          };
+          if (
+            !(await saveTeamConfigAtRevision(
+              electedConfig,
+              electedOwner.stateRevision,
+              input.cwd,
+            ))
+          ) {
+            throw new Error("stale_state_revision");
+          }
+          existingAttempt = electedConfig.active_recovery;
+          electedOwner = {
+            ...electedOwner,
+            config: electedConfig,
+            stateRevision: nextRevision,
+          };
         }
-        existingAttempt = electedConfig.active_recovery;
-        electedOwner = { ...electedOwner, config: electedConfig, stateRevision: nextRevision };
-      }
-      await assertTeamInstanceUnderLock(instance);
-      return electedOwner;
-    });
+        await assertTeamInstanceUnderLock(instance);
+        return electedOwner;
+      },
+    );
     ownerBound = true;
-    if (existingAttempt && (existingAttempt.request_id !== input.requestId
-      || existingAttempt.recovery_id !== recoveryId || existingAttempt.worker_name !== input.workerName)) {
-      return recoveryError(input, recoveryId, 'team_mutation_busy');
+    if (
+      existingAttempt &&
+      (existingAttempt.request_id !== input.requestId ||
+        existingAttempt.recovery_id !== recoveryId ||
+        existingAttempt.worker_name !== input.workerName)
+    ) {
+      return recoveryError(input, recoveryId, "team_mutation_busy");
     }
-    if (owner.config.lifecycle_state === 'shutting_down' || owner.config.lifecycle_state === 'stopped') {
-      return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_shutting_down'));
+    if (
+      owner.config.lifecycle_state === "shutting_down" ||
+      owner.config.lifecycle_state === "stopped"
+    ) {
+      return finalizeBoundRecoveryOwnerTerminal(
+        input,
+        recoveryId,
+        recoveryError(input, recoveryId, "team_shutting_down"),
+      );
     }
-    if (owner.config.active_scale_down || scaleUpFenceBlocks(owner.config)) return recoveryError(input, recoveryId, 'team_mutation_busy');
+    if (owner.config.active_scale_down || scaleUpFenceBlocks(owner.config))
+      return recoveryError(input, recoveryId, "team_mutation_busy");
 
-    const worker = owner.config.workers.find(candidate => candidate.name === input.workerName);
-    if (!worker) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'worker_not_found'));
-    if (!worker.launch_descriptor) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_metadata_incomplete'));
+    const worker = owner.config.workers.find(
+      (candidate) => candidate.name === input.workerName,
+    );
+    if (!worker)
+      return finalizeBoundRecoveryOwnerTerminal(
+        input,
+        recoveryId,
+        recoveryError(input, recoveryId, "worker_not_found"),
+      );
+    if (!worker.launch_descriptor)
+      return finalizeBoundRecoveryOwnerTerminal(
+        input,
+        recoveryId,
+        recoveryError(input, recoveryId, "launch_metadata_incomplete"),
+      );
     let launchDescriptor: WorkerLaunchDescriptor;
     try {
-      launchDescriptor = validateWorkerLaunchDescriptor(worker.launch_descriptor);
-      if (worker.worker_cli !== launchDescriptor.provider) throw new Error('provider mismatch');
+      launchDescriptor = validateWorkerLaunchDescriptor(
+        worker.launch_descriptor,
+      );
+      if (worker.worker_cli !== launchDescriptor.provider)
+        throw new Error("provider mismatch");
     } catch {
-      return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'launch_descriptor_unresolvable'));
+      return finalizeBoundRecoveryOwnerTerminal(
+        input,
+        recoveryId,
+        recoveryError(input, recoveryId, "launch_descriptor_unresolvable"),
+      );
     }
-    if (!owner.config.tmux_session) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
-    if (owner.config.tmux_session.startsWith('cmux:') || isHerdrSessionTarget(owner.config.tmux_session)) {
-      if (!owner.config.leader_pane_id || !await workerPaneBelongsToOwnedProviderTarget({
-        provider: providerForTeamTarget(owner.config.tmux_session),
-        providerTarget: owner.config.tmux_session,
-        paneId: owner.config.leader_pane_id,
-      })) return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+    if (!owner.config.tmux_session)
+      return finalizeBoundRecoveryOwnerTerminal(
+        input,
+        recoveryId,
+        recoveryError(input, recoveryId, "team_session_dead"),
+      );
+    if (
+      owner.config.tmux_session.startsWith("cmux:") ||
+      isHerdrSessionTarget(owner.config.tmux_session)
+    ) {
+      if (
+        !owner.config.leader_pane_id ||
+        !(await workerPaneBelongsToOwnedProviderTarget({
+          provider: providerForTeamTarget(owner.config.tmux_session),
+          providerTarget: owner.config.tmux_session,
+          paneId: owner.config.leader_pane_id,
+        }))
+      )
+        return finalizeBoundRecoveryOwnerTerminal(
+          input,
+          recoveryId,
+          recoveryError(input, recoveryId, "team_session_dead"),
+        );
     } else {
       const tmuxServerIdentity = owner.config.tmux_server_identity;
       if (!isValidTmuxServerIdentity(tmuxServerIdentity)) {
-        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+        return finalizeBoundRecoveryOwnerTerminal(
+          input,
+          recoveryId,
+          recoveryError(input, recoveryId, "team_session_dead"),
+        );
       }
       const serverState = await observeTmuxServerIdentity(tmuxServerIdentity);
-      if (serverState === 'unknown') {
-        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+      if (serverState === "unknown") {
+        return finalizeBoundRecoveryOwnerTerminal(
+          input,
+          recoveryId,
+          recoveryError(input, recoveryId, "team_session_dead"),
+        );
       }
-      if (serverState === 'matching'
-        && (!owner.config.leader_pane_id || !await workerPaneBelongsToOwnedProviderTarget({
-          provider: 'tmux',
-          providerTarget: owner.config.tmux_session,
-          paneId: owner.config.leader_pane_id,
-          tmuxServerIdentity,
-        }))) {
-        return finalizeBoundRecoveryOwnerTerminal(input, recoveryId, recoveryError(input, recoveryId, 'team_session_dead'));
+      if (
+        serverState === "matching" &&
+        (!owner.config.leader_pane_id ||
+          !(await workerPaneBelongsToOwnedProviderTarget({
+            provider: "tmux",
+            providerTarget: owner.config.tmux_session,
+            paneId: owner.config.leader_pane_id,
+            tmuxServerIdentity,
+          })))
+      ) {
+        return finalizeBoundRecoveryOwnerTerminal(
+          input,
+          recoveryId,
+          recoveryError(input, recoveryId, "team_session_dead"),
+        );
       }
     }
 
-
-    const replacementGeneration = existingAttempt && worker.recovery_id === recoveryId
-      && typeof worker.replacement_generation === 'number'
-      ? worker.replacement_generation
-      : (worker.replacement_generation ?? 0) + 1;
-    const attempt = await readOrCreateRecoveryAttempt(input, recoveryId, replacementGeneration);
+    const replacementGeneration =
+      existingAttempt &&
+      worker.recovery_id === recoveryId &&
+      typeof worker.replacement_generation === "number"
+        ? worker.replacement_generation
+        : (worker.replacement_generation ?? 0) + 1;
+    const attempt = await readOrCreateRecoveryAttempt(
+      input,
+      recoveryId,
+      replacementGeneration,
+    );
     const originalPaneId = existingAttempt?.original_pane_id ?? worker.pane_id;
     const sagaInput: RecoverySagaInput = {
       requestId: input.requestId,
@@ -2845,21 +4273,23 @@ export async function executeRecoverDeadWorkerV2Owner(
       originalPaneId,
     };
 
-
-
     const ensureFence = async (): Promise<TeamConfig> => {
       requireOwnerFence(input.cwd, input.teamName, owner.fence);
-      await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, () =>
-        assertTeamInstanceUnderLock(instance),
+      await withTeamInstanceLifecycleLock(
+        instance.cwd,
+        instance.team_name,
+        () => assertTeamInstanceUnderLock(instance),
       );
       const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
-      if (!current || current.config.active_scale_down
-        || scaleUpFenceBlocks(current.config)
-
-        || current.config.active_recovery?.recovery_id !== recoveryId
-        || current.config.active_recovery.owner_epoch !== owner.fence.epoch
-        || current.config.active_recovery.owner_nonce !== owner.fence.nonce) {
-        throw new Error('runtime_owner_fence_lost');
+      if (
+        !current ||
+        current.config.active_scale_down ||
+        scaleUpFenceBlocks(current.config) ||
+        current.config.active_recovery?.recovery_id !== recoveryId ||
+        current.config.active_recovery.owner_epoch !== owner.fence.epoch ||
+        current.config.active_recovery.owner_nonce !== owner.fence.nonce
+      ) {
+        throw new Error("runtime_owner_fence_lost");
       }
       return current.config;
     };
@@ -2867,26 +4297,37 @@ export async function executeRecoverDeadWorkerV2Owner(
 
     const deps: RecoverySagaDependencies = {
       cwd: input.cwd,
-      isCommittedReplacement: async sagaInput => {
+      isCommittedReplacement: async (sagaInput) => {
         const current = await ensureFence();
-        const currentWorker = current.workers.find(candidate => candidate.name === sagaInput.workerName);
+        const currentWorker = current.workers.find(
+          (candidate) => candidate.name === sagaInput.workerName,
+        );
         if (!currentWorker) return false;
-        return resolveCommittedRecoveryPaneAttempt(
-          current.active_recovery,
-          sagaInput.recoveryId,
-          sagaInput.replacementGeneration,
-          currentWorker,
-        ) !== null;
+        return (
+          resolveCommittedRecoveryPaneAttempt(
+            current.active_recovery,
+            sagaInput.recoveryId,
+            sagaInput.replacementGeneration,
+            currentWorker,
+          ) !== null
+        );
       },
       getLiveness: async () => {
         const config = await ensureFence();
-        const currentWorker = config.workers.find(candidate => candidate.name === input.workerName);
-        const committedReplacement = existingAttempt?.recovery_id === recoveryId
-          && currentWorker?.recovery_id === recoveryId
-          && currentWorker.replacement_generation === attempt.replacement_generation
-          && Boolean(currentWorker.pane_id && currentWorker.pane_attempt_id);
+        const currentWorker = config.workers.find(
+          (candidate) => candidate.name === input.workerName,
+        );
+        const committedReplacement =
+          existingAttempt?.recovery_id === recoveryId &&
+          currentWorker?.recovery_id === recoveryId &&
+          currentWorker.replacement_generation ===
+            attempt.replacement_generation &&
+          Boolean(currentWorker.pane_id && currentWorker.pane_attempt_id);
         if (!committedReplacement) {
-          if (!originalPaneId?.trim() || currentWorker?.pane_id !== originalPaneId) {
+          if (
+            !originalPaneId?.trim() ||
+            currentWorker?.pane_id !== originalPaneId
+          ) {
             const currentLaunch = await loadCurrentWorkerLaunchAttempt({
               cwd: input.cwd,
               teamName: input.teamName,
@@ -2894,99 +4335,146 @@ export async function executeRecoverDeadWorkerV2Owner(
               workerName: input.workerName,
               provider: launchDescriptor.provider,
             });
-            if (!currentLaunch) return 'unknown';
-            if (!config.leader_pane_id) return 'unknown';
+            if (!currentLaunch) return "unknown";
+            if (!config.leader_pane_id) return "unknown";
             let currentPaneLiveness: WorkerPaneLiveness;
             let adoptedOwnership: WorkerPaneOwnership | null = null;
-            if (currentLaunch.pane_id.startsWith('%')) {
+            // Classify through the provider-aware helper so herdr worker
+            // panes are not adopted as cmux surfaces.
+            const launchPaneProvider = providerForTeamTarget(
+              config.tmux_session,
+              currentLaunch.pane_id,
+            );
+            if (launchPaneProvider === "tmux") {
               const serverIdentity = config.tmux_server_identity;
-              if (!isValidTmuxServerIdentity(serverIdentity)) return 'unknown';
-              const serverState = await observeTmuxServerIdentity(serverIdentity);
-              if (serverState === 'unknown') return 'unknown';
-              if (serverState === 'dead') {
+              if (!isValidTmuxServerIdentity(serverIdentity)) return "unknown";
+              const serverState =
+                await observeTmuxServerIdentity(serverIdentity);
+              if (serverState === "unknown") return "unknown";
+              if (serverState === "dead") {
                 // A dead original tmux server proves its panes absent, but
                 // provider cleanup below still relies on the launch receipt.
-                currentPaneLiveness = 'dead';
+                currentPaneLiveness = "dead";
               } else {
                 const adopted = await adoptWorkerPaneOwnership({
-                  provider: 'tmux',
+                  provider: "tmux",
                   providerTarget: config.tmux_session,
                   paneId: currentLaunch.pane_id,
                   leaderPaneId: config.leader_pane_id,
                   reservedPaneIds: config.workers
-                    .filter(candidate => candidate.name !== input.workerName)
-                    .map(candidate => candidate.pane_id)
+                    .filter((candidate) => candidate.name !== input.workerName)
+                    .map((candidate) => candidate.pane_id)
                     .filter((paneId): paneId is string => Boolean(paneId)),
                   tmuxServerIdentity: serverIdentity,
                 });
-                if (!adopted.ok) return 'unknown';
+                if (!adopted.ok) return "unknown";
                 adoptedOwnership = adopted.ownership;
-                currentPaneLiveness = await getOwnedWorkerLiveness(adopted.ownership);
+                currentPaneLiveness = await getOwnedWorkerLiveness(
+                  adopted.ownership,
+                );
               }
             } else {
               const adopted = await adoptWorkerPaneOwnership({
-                provider: 'cmux',
+                provider: launchPaneProvider,
                 providerTarget: config.tmux_session,
                 paneId: currentLaunch.pane_id,
                 leaderPaneId: config.leader_pane_id,
                 reservedPaneIds: config.workers
-                  .filter(candidate => candidate.name !== input.workerName)
-                  .map(candidate => candidate.pane_id)
+                  .filter((candidate) => candidate.name !== input.workerName)
+                  .map((candidate) => candidate.pane_id)
                   .filter((paneId): paneId is string => Boolean(paneId)),
               });
-              if (!adopted.ok) return 'unknown';
+              if (!adopted.ok) return "unknown";
               adoptedOwnership = adopted.ownership;
-              currentPaneLiveness = await getOwnedWorkerLiveness(adopted.ownership);
+              currentPaneLiveness = await getOwnedWorkerLiveness(
+                adopted.ownership,
+              );
             }
-            const currentLiveness = await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
-              name: input.workerName,
-              pane_id: currentLaunch.pane_id,
-              worker_cli: launchDescriptor.provider,
-              launch_attempt_id: currentLaunch.attempt_id,
-              launch_descriptor: launchDescriptor,
-            });
-            if (currentLaunch.context?.kind === 'recovery') {
-              if (currentLaunch.context.recovery_id !== recoveryId
-                || currentLaunch.context.replacement_generation !== attempt.replacement_generation) return 'unknown';
-              if (currentLiveness === 'unknown') return 'unknown';
-              if (currentLiveness === 'alive' && currentPaneLiveness !== 'alive') return 'alive';
-              return 'dead';
+            const currentLiveness = await getWorkerExecutionLiveness(
+              input.teamName,
+              input.cwd,
+              instance.instance_id,
+              {
+                name: input.workerName,
+                pane_id: currentLaunch.pane_id,
+                worker_cli: launchDescriptor.provider,
+                launch_attempt_id: currentLaunch.attempt_id,
+                launch_descriptor: launchDescriptor,
+              },
+            );
+            if (currentLaunch.context?.kind === "recovery") {
+              if (
+                currentLaunch.context.recovery_id !== recoveryId ||
+                currentLaunch.context.replacement_generation !==
+                  attempt.replacement_generation
+              )
+                return "unknown";
+              if (currentLiveness === "unknown") return "unknown";
+              if (
+                currentLiveness === "alive" &&
+                currentPaneLiveness !== "alive"
+              )
+                return "alive";
+              return "dead";
             }
-            if (currentLaunch.context?.kind !== 'initial' || currentLiveness !== 'alive' || !currentWorker) {
+            if (
+              currentLaunch.context?.kind !== "initial" ||
+              currentLiveness !== "alive" ||
+              !currentWorker
+            ) {
               return currentLiveness;
             }
-            if (currentPaneLiveness !== 'alive') return 'alive';
+            if (currentPaneLiveness !== "alive") return "alive";
             if (!adoptedOwnership) return currentLiveness;
-            const reconciled = await withWorkerLaunchAttemptFence(currentLaunch, async () => {
-              await ensureFence();
-              const latest = await readRevisionedTeamConfig(input.teamName, input.cwd);
-              if (!latest) return false;
-              const latestWorker = latest.config.workers.find(candidate => candidate.name === input.workerName);
-              if (!latestWorker) return false;
-              const nextRevision = latest.stateRevision + 1;
-              const next: TeamConfig = {
-                ...latest.config,
-                state_revision: nextRevision,
-                active_recovery: latest.config.active_recovery
-                  ? { ...latest.config.active_recovery, state_revision: nextRevision, updated_at: new Date().toISOString() }
-                  : undefined,
-                workers: latest.config.workers.map(candidate => candidate.name === input.workerName
-                  ? {
-                    ...candidate,
-                    pane_id: currentLaunch.pane_id,
-                    launch_attempt_id: currentLaunch.attempt_id,
-                    worker_cli: currentLaunch.provider,
-                    operational_state: 'active' as const,
-                  }
-                  : candidate),
-              };
-              return saveTeamConfigAtRevision(next, latest.stateRevision, input.cwd);
-            });
-            if (!reconciled.ok || !reconciled.value) return 'unknown';
+            const reconciled = await withWorkerLaunchAttemptFence(
+              currentLaunch,
+              async () => {
+                await ensureFence();
+                const latest = await readRevisionedTeamConfig(
+                  input.teamName,
+                  input.cwd,
+                );
+                if (!latest) return false;
+                const latestWorker = latest.config.workers.find(
+                  (candidate) => candidate.name === input.workerName,
+                );
+                if (!latestWorker) return false;
+                const nextRevision = latest.stateRevision + 1;
+                const next: TeamConfig = {
+                  ...latest.config,
+                  state_revision: nextRevision,
+                  active_recovery: latest.config.active_recovery
+                    ? {
+                        ...latest.config.active_recovery,
+                        state_revision: nextRevision,
+                        updated_at: new Date().toISOString(),
+                      }
+                    : undefined,
+                  workers: latest.config.workers.map((candidate) =>
+                    candidate.name === input.workerName
+                      ? {
+                          ...candidate,
+                          pane_id: currentLaunch.pane_id,
+                          launch_attempt_id: currentLaunch.attempt_id,
+                          worker_cli: currentLaunch.provider,
+                          operational_state: "active" as const,
+                        }
+                      : candidate,
+                  ),
+                };
+                return saveTeamConfigAtRevision(
+                  next,
+                  latest.stateRevision,
+                  input.cwd,
+                );
+              },
+            );
+            if (!reconciled.ok || !reconciled.value) return "unknown";
             sagaInput.originalPaneId = currentLaunch.pane_id;
-            return 'alive';
+            return "alive";
           }
-          if (!currentWorker?.launch_attempt_id || !currentWorker.pane_id) return 'unknown';
+          if (!currentWorker?.launch_attempt_id || !currentWorker.pane_id)
+            return "unknown";
           const originalLaunch = await loadWorkerLaunchAttempt({
             cwd: input.cwd,
             teamName: input.teamName,
@@ -2997,75 +4485,125 @@ export async function executeRecoverDeadWorkerV2Owner(
             attemptId: currentWorker.launch_attempt_id,
             runtimeCliPath: resolveRuntimeCliPath(),
           });
-          if (!originalLaunch) return 'unknown';
-          return getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
-            name: input.workerName,
-            pane_id: currentWorker.pane_id,
-            worker_cli: launchDescriptor.provider,
-            launch_attempt_id: currentWorker.launch_attempt_id,
-            launch_descriptor: launchDescriptor,
-          });
+          if (!originalLaunch) return "unknown";
+          return getWorkerExecutionLiveness(
+            input.teamName,
+            input.cwd,
+            instance.instance_id,
+            {
+              name: input.workerName,
+              pane_id: currentWorker.pane_id,
+              worker_cli: launchDescriptor.provider,
+              launch_attempt_id: currentWorker.launch_attempt_id,
+              launch_descriptor: launchDescriptor,
+            },
+          );
         }
 
         committedReplacementLiveness = currentWorker
-          ? await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, currentWorker)
-          : 'unknown';
+          ? await getWorkerExecutionLiveness(
+              input.teamName,
+              input.cwd,
+              instance.instance_id,
+              currentWorker,
+            )
+          : "unknown";
         return committedReplacementLiveness;
       },
-      listOwnedInProgressTasks: async () => selectRecoveryReplayTasks(
-        await teamListTasks(input.teamName, input.cwd), input.workerName, recoveryId, committedReplacementLiveness,
-      ),
+      listOwnedInProgressTasks: async () =>
+        selectRecoveryReplayTasks(
+          await teamListTasks(input.teamName, input.cwd),
+          input.workerName,
+          recoveryId,
+          committedReplacementLiveness,
+        ),
       validateCheckpoint: async (teamName, task) => {
         const persisted = task.recovery_reservation ?? task.recovery_adoption;
         if (persisted?.recovery_id === recoveryId) {
-          const selected = await readTaskRecoveryCheckpoint(persisted.checkpoint_path);
-          if (selected.ok && selected.checkpoint.sequence === persisted.continuation_sequence
-            && selected.checkpoint.resume_payload_hash === persisted.checkpoint_hash) {
+          const selected = await readTaskRecoveryCheckpoint(
+            persisted.checkpoint_path,
+          );
+          if (
+            selected.ok &&
+            selected.checkpoint.sequence === persisted.continuation_sequence &&
+            selected.checkpoint.resume_payload_hash ===
+              persisted.checkpoint_hash
+          ) {
             return { ok: true, sequence: selected.checkpoint.sequence };
           }
-          return { ok: false, error: selected.ok ? 'recovery_checkpoint_stale'
-            : (`recovery_checkpoint_${selected.error}` as RecoverDeadWorkerV2Error) };
+          return {
+            ok: false,
+            error: selected.ok
+              ? "recovery_checkpoint_stale"
+              : (`recovery_checkpoint_${selected.error}` as RecoverDeadWorkerV2Error),
+          };
         }
-        const selected = await selectTaskRecoveryCheckpoint(teamName, { ...task, version: task.version ?? 1 }, input.cwd);
-        if (selected.ok) return { ok: true, sequence: selected.checkpoint.sequence };
-        const errorByState: Record<typeof selected.error, RecoverDeadWorkerV2Error> = {
-          missing: 'recovery_checkpoint_missing',
-          malformed: 'recovery_checkpoint_malformed',
-          stale: 'recovery_checkpoint_stale',
-          ambiguous: 'recovery_checkpoint_ambiguous',
+        const selected = await selectTaskRecoveryCheckpoint(
+          teamName,
+          { ...task, version: task.version ?? 1 },
+          input.cwd,
+        );
+        if (selected.ok)
+          return { ok: true, sequence: selected.checkpoint.sequence };
+        const errorByState: Record<
+          typeof selected.error,
+          RecoverDeadWorkerV2Error
+        > = {
+          missing: "recovery_checkpoint_missing",
+          malformed: "recovery_checkpoint_malformed",
+          stale: "recovery_checkpoint_stale",
+          ambiguous: "recovery_checkpoint_ambiguous",
         };
         return { ok: false, error: errorByState[selected.error] };
       },
       requeue: async (sagaInput, taskId, adoptionTokenHash) => {
         await ensureFence();
-        const currentTask = await teamReadTask(input.teamName, taskId, input.cwd);
-        if (currentTask?.recovery_adoption?.recovery_id === sagaInput.recoveryId) {
-          return { ok: true, sequence: currentTask.recovery_adoption.continuation_sequence };
-        }
-        const result = await teamRequeueRecoveredTask(input.teamName, input.cwd, {
-          recoveryId: sagaInput.recoveryId,
-          requestId: sagaInput.requestId,
+        const currentTask = await teamReadTask(
+          input.teamName,
           taskId,
-          replacementWorker: sagaInput.workerName,
-          replacementGeneration: sagaInput.replacementGeneration,
-          adoptionTokenHash,
-        });
+          input.cwd,
+        );
+        if (
+          currentTask?.recovery_adoption?.recovery_id === sagaInput.recoveryId
+        ) {
+          return {
+            ok: true,
+            sequence: currentTask.recovery_adoption.continuation_sequence,
+          };
+        }
+        const result = await teamRequeueRecoveredTask(
+          input.teamName,
+          input.cwd,
+          {
+            recoveryId: sagaInput.recoveryId,
+            requestId: sagaInput.requestId,
+            taskId,
+            replacementWorker: sagaInput.workerName,
+            replacementGeneration: sagaInput.replacementGeneration,
+            adoptionTokenHash,
+          },
+        );
         return result.ok
           ? { ok: true, sequence: result.reservation.continuation_sequence }
-          : { ok: false, error: result.error.startsWith('checkpoint_')
-            ? (`recovery_${result.error}` as RecoverDeadWorkerV2Error)
-            : 'task_requeue_failed' };
+          : {
+              ok: false,
+              error: result.error.startsWith("checkpoint_")
+                ? (`recovery_${result.error}` as RecoverDeadWorkerV2Error)
+                : "task_requeue_failed",
+            };
       },
-      spawnGatedPane: async sagaInput => {
+      spawnGatedPane: async (sagaInput) => {
         const config = await ensureFence();
-        const currentWorker = config.workers.find(candidate => candidate.name === sagaInput.workerName);
-        if (!currentWorker) return { ok: false, error: 'worker_not_found' };
+        const currentWorker = config.workers.find(
+          (candidate) => candidate.name === sagaInput.workerName,
+        );
+        if (!currentWorker) return { ok: false, error: "worker_not_found" };
         const reservedPaneIds = config.workers
-          .filter(candidate => candidate.name !== sagaInput.workerName)
-          .map(candidate => candidate.pane_id)
+          .filter((candidate) => candidate.name !== sagaInput.workerName)
+          .map((candidate) => candidate.pane_id)
           .filter((paneId): paneId is string => Boolean(paneId));
-        const leaderPaneId = config.leader_pane_id ?? '';
-        if (!leaderPaneId) return { ok: false, error: 'spawn_failed' };
+        const leaderPaneId = config.leader_pane_id ?? "";
+        if (!leaderPaneId) return { ok: false, error: "spawn_failed" };
         const committedPane = resolveCommittedRecoveryPaneAttempt(
           existingAttempt,
           sagaInput.recoveryId,
@@ -3073,25 +4611,40 @@ export async function executeRecoverDeadWorkerV2Owner(
           currentWorker,
         );
         if (committedPane) {
-          const committedOwnership = configuredPaneOwnership(config, { pane_id: committedPane.paneId });
+          const committedOwnership = configuredPaneOwnership(config, {
+            pane_id: committedPane.paneId,
+          });
           const committedPaneLiveness = committedOwnership
             ? await getOwnedWorkerLiveness(committedOwnership)
-            : 'unknown';
-          if (committedPaneLiveness === 'unknown') return { ok: false, error: 'runtime_owner_unavailable' };
-          if (committedPaneLiveness === 'alive') {
+            : "unknown";
+          if (committedPaneLiveness === "unknown")
+            return { ok: false, error: "runtime_owner_unavailable" };
+          if (committedPaneLiveness === "alive") {
             let pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
             if (!pending) {
               const adopted = await adoptWorkerPaneOwnership({
-                provider: committedPane.paneId.startsWith('%') ? 'tmux' : 'cmux',
+                provider: providerForTeamTarget(
+                  owner.config.tmux_session!,
+                  committedPane.paneId,
+                ),
                 providerTarget: owner.config.tmux_session!,
                 paneId: committedPane.paneId,
                 leaderPaneId,
                 reservedPaneIds,
-                ...(tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity)
-                  ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity) }
+                ...(tmuxServerIdentityForTarget(
+                  owner.config.tmux_session!,
+                  owner.config.tmux_server_identity,
+                )
+                  ? {
+                      tmuxServerIdentity: tmuxServerIdentityForTarget(
+                        owner.config.tmux_session!,
+                        owner.config.tmux_server_identity,
+                      ),
+                    }
                   : {}),
               });
-              if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
+              if (!adopted.ok)
+                return { ok: false, error: "worker_activation_failed" };
               try {
                 pending = await buildRecoveryPaneContext(
                   input,
@@ -3102,10 +4655,11 @@ export async function executeRecoverDeadWorkerV2Owner(
                   committedPane.paneAttemptId,
                   instance.instance_id,
                 );
-                if (!pending.startupContext) return { ok: false, error: 'worker_activation_failed' };
+                if (!pending.startupContext)
+                  return { ok: false, error: "worker_activation_failed" };
                 pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
               } catch {
-                return { ok: false, error: 'launch_descriptor_unresolvable' };
+                return { ok: false, error: "launch_descriptor_unresolvable" };
               }
             }
             const expected = {
@@ -3116,21 +4670,30 @@ export async function executeRecoverDeadWorkerV2Owner(
               launch_attempt_id: pending.startupContext!.attempt.attempt_id,
               launch_nonce: pending.startupContext!.attempt.nonce,
             };
-            const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, expected, 1_000);
+            const ready = await waitForRecoveryGateRecord(
+              pending.gate.readyPath,
+              expected,
+              1_000,
+            );
             const manifest = await readTeamManifest(input.teamName, input.cwd);
-            const projected = manifest?.workers.find(candidate => candidate.name === sagaInput.workerName);
-            const projectedSameAttempt = projected?.pane_id === committedPane.paneId
-              && projected.pane_attempt_id === committedPane.paneAttemptId
-              && projected.recovery_id === sagaInput.recoveryId
-              && projected.replacement_generation === sagaInput.replacementGeneration;
-            if (!ready || !projectedSameAttempt) return { ok: false, error: 'worker_activation_failed' };
+            const projected = manifest?.workers.find(
+              (candidate) => candidate.name === sagaInput.workerName,
+            );
+            const projectedSameAttempt =
+              projected?.pane_id === committedPane.paneId &&
+              projected.pane_attempt_id === committedPane.paneAttemptId &&
+              projected.recovery_id === sagaInput.recoveryId &&
+              projected.replacement_generation ===
+                sagaInput.replacementGeneration;
+            if (!ready || !projectedSameAttempt)
+              return { ok: false, error: "worker_activation_failed" };
             return {
               ok: true,
               paneId: pending.ownership.paneId,
               paneAttemptId: pending.paneAttemptId,
               committed: true,
               stateRevision: config.state_revision ?? 0,
-              manifestSync: 'synced',
+              manifestSync: "synced",
             };
           }
         }
@@ -3144,30 +4707,50 @@ export async function executeRecoverDeadWorkerV2Owner(
           provider: launchDescriptor.provider,
         });
         if (currentLaunch) {
-          const currentLiveness = await getWorkerExecutionLiveness(input.teamName, input.cwd, instance.instance_id, {
-            name: sagaInput.workerName,
-            pane_id: currentLaunch.pane_id,
-            worker_cli: launchDescriptor.provider,
-            launch_attempt_id: currentLaunch.attempt_id,
-            launch_descriptor: launchDescriptor,
-          });
-          if (currentLiveness !== 'dead') {
+          const currentLiveness = await getWorkerExecutionLiveness(
+            input.teamName,
+            input.cwd,
+            instance.instance_id,
+            {
+              name: sagaInput.workerName,
+              pane_id: currentLaunch.pane_id,
+              worker_cli: launchDescriptor.provider,
+              launch_attempt_id: currentLaunch.attempt_id,
+              launch_descriptor: launchDescriptor,
+            },
+          );
+          if (currentLiveness !== "dead") {
             const context = currentLaunch.context;
-            if (context?.kind !== 'recovery' || context.recovery_id !== sagaInput.recoveryId
-              || context.replacement_generation !== sagaInput.replacementGeneration) {
-              return { ok: false, error: 'worker_activation_failed' };
+            if (
+              context?.kind !== "recovery" ||
+              context.recovery_id !== sagaInput.recoveryId ||
+              context.replacement_generation !== sagaInput.replacementGeneration
+            ) {
+              return { ok: false, error: "worker_activation_failed" };
             }
             const adopted = await adoptWorkerPaneOwnership({
-              provider: currentLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+              provider: providerForTeamTarget(
+                owner.config.tmux_session!,
+                currentLaunch.pane_id,
+              ),
               providerTarget: owner.config.tmux_session!,
               paneId: currentLaunch.pane_id,
               leaderPaneId,
               reservedPaneIds,
-              ...(tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity)
-                ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session!, owner.config.tmux_server_identity) }
+              ...(tmuxServerIdentityForTarget(
+                owner.config.tmux_session!,
+                owner.config.tmux_server_identity,
+              )
+                ? {
+                    tmuxServerIdentity: tmuxServerIdentityForTarget(
+                      owner.config.tmux_session!,
+                      owner.config.tmux_server_identity,
+                    ),
+                  }
                 : {}),
             });
-            if (!adopted.ok) return { ok: false, error: 'worker_activation_failed' };
+            if (!adopted.ok)
+              return { ok: false, error: "worker_activation_failed" };
             const resumed = await buildRecoveryPaneContext(
               input,
               sagaInput,
@@ -3183,26 +4766,36 @@ export async function executeRecoverDeadWorkerV2Owner(
               provider: launchDescriptor.provider,
             };
             pendingRecoveryPanes.set(sagaInput.recoveryId, resumed);
-            const ready = await waitForRecoveryGateRecord(resumed.gate.readyPath, {
-              recovery_id: sagaInput.recoveryId,
-              worker_name: sagaInput.workerName,
-              replacement_generation: sagaInput.replacementGeneration,
-              pane_attempt_id: context.pane_attempt_id,
-              launch_attempt_id: currentLaunch.attempt_id,
-              launch_nonce: currentLaunch.nonce,
-            }, 5_000);
+            const ready = await waitForRecoveryGateRecord(
+              resumed.gate.readyPath,
+              {
+                recovery_id: sagaInput.recoveryId,
+                worker_name: sagaInput.workerName,
+                replacement_generation: sagaInput.replacementGeneration,
+                pane_attempt_id: context.pane_attempt_id,
+                launch_attempt_id: currentLaunch.attempt_id,
+                launch_nonce: currentLaunch.nonce,
+              },
+              5_000,
+            );
             return ready
-              ? { ok: true, paneId: currentLaunch.pane_id, paneAttemptId: context.pane_attempt_id, committed: false }
-              : { ok: false, error: 'startup_ack_timeout' };
+              ? {
+                  ok: true,
+                  paneId: currentLaunch.pane_id,
+                  paneAttemptId: context.pane_attempt_id,
+                  committed: false,
+                }
+              : { ok: false, error: "startup_ack_timeout" };
           }
         }
 
         const priorLaunches = currentLaunch ? [currentLaunch] : [];
         if (currentWorker.launch_attempt_id) {
-          if (!currentWorker.pane_id) return { ok: false, error: 'worker_cleanup_incomplete' };
+          if (!currentWorker.pane_id)
+            return { ok: false, error: "worker_cleanup_incomplete" };
           if (currentLaunch?.attempt_id === currentWorker.launch_attempt_id) {
             if (currentLaunch.pane_id !== currentWorker.pane_id) {
-              return { ok: false, error: 'worker_cleanup_incomplete' };
+              return { ok: false, error: "worker_cleanup_incomplete" };
             }
           } else {
             const persistedLaunch = await loadWorkerLaunchAttempt({
@@ -3215,89 +4808,146 @@ export async function executeRecoverDeadWorkerV2Owner(
               attemptId: currentWorker.launch_attempt_id,
               runtimeCliPath,
             });
-            if (!persistedLaunch || !await isWorkerLaunchAttemptAccepted(persistedLaunch)) {
-              return { ok: false, error: 'worker_cleanup_incomplete' };
+            if (
+              !persistedLaunch ||
+              !(await isWorkerLaunchAttemptAccepted(persistedLaunch))
+            ) {
+              return { ok: false, error: "worker_cleanup_incomplete" };
             }
             priorLaunches.push(persistedLaunch);
           }
         } else if (currentWorker.pane_id) {
           // A pane without an exact launch attempt has no provider
           // termination authority. Never fall back to pane-only cleanup.
-          return { ok: false, error: 'worker_cleanup_incomplete' };
+          return { ok: false, error: "worker_cleanup_incomplete" };
         }
         for (const priorLaunch of priorLaunches) {
           const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
             priorLaunch,
-            'recovery_replacement',
+            "recovery_replacement",
             async () => {
-              const priorOwnership = configuredPaneOwnership(owner.config, { pane_id: priorLaunch.pane_id });
+              const priorOwnership = configuredPaneOwnership(owner.config, {
+                pane_id: priorLaunch.pane_id,
+              });
               let paneLiveness = priorOwnership
-                ? await getOwnedWorkerLiveness(priorOwnership).catch(() => 'unknown' as const)
-                : 'unknown' as const;
-              if (paneLiveness === 'dead') return true;
-              if (paneLiveness !== 'alive' || !owner.config.tmux_session || !leaderPaneId) return false;
+                ? await getOwnedWorkerLiveness(priorOwnership).catch(
+                    () => "unknown" as const,
+                  )
+                : ("unknown" as const);
+              if (paneLiveness === "dead") return true;
+              if (
+                paneLiveness !== "alive" ||
+                !owner.config.tmux_session ||
+                !leaderPaneId
+              )
+                return false;
               const adopted = await adoptWorkerPaneOwnership({
-                provider: priorLaunch.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+                provider: providerForTeamTarget(
+                  owner.config.tmux_session,
+                  priorLaunch.pane_id,
+                ),
                 providerTarget: owner.config.tmux_session,
                 paneId: priorLaunch.pane_id,
                 leaderPaneId,
                 reservedPaneIds,
-                ...(tmuxServerIdentityForTarget(owner.config.tmux_session, owner.config.tmux_server_identity)
-                  ? { tmuxServerIdentity: tmuxServerIdentityForTarget(owner.config.tmux_session, owner.config.tmux_server_identity) }
+                ...(tmuxServerIdentityForTarget(
+                  owner.config.tmux_session,
+                  owner.config.tmux_server_identity,
+                )
+                  ? {
+                      tmuxServerIdentity: tmuxServerIdentityForTarget(
+                        owner.config.tmux_session,
+                        owner.config.tmux_server_identity,
+                      ),
+                    }
                   : {}),
               });
               if (!adopted.ok) return false;
-              for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
-                await killOwnedWorkerPane(adopted.ownership).catch(() => undefined);
-                paneLiveness = await getOwnedWorkerLiveness(adopted.ownership).catch(() => 'unknown' as const);
-                if (paneLiveness === 'dead') return true;
-                if (paneLiveness !== 'alive') return false;
+              for (
+                let cleanupAttempt = 0;
+                cleanupAttempt < 2;
+                cleanupAttempt++
+              ) {
+                await killOwnedWorkerPane(adopted.ownership).catch(
+                  () => undefined,
+                );
+                paneLiveness = await getOwnedWorkerLiveness(
+                  adopted.ownership,
+                ).catch(() => "unknown" as const);
+                if (paneLiveness === "dead") return true;
+                if (paneLiveness !== "alive") return false;
               }
               return false;
             },
           );
-          if (!cleaned) return { ok: false, error: 'worker_cleanup_incomplete' };
+          if (!cleaned)
+            return { ok: false, error: "worker_cleanup_incomplete" };
         }
 
         try {
-          const currentProviderPath = resolvePreflightBinaryPath(launchDescriptor.provider).path;
-          const sameProviderPath = process.platform === 'win32'
-            ? currentProviderPath.toLowerCase() === launchDescriptor.binary.toLowerCase()
-            : currentProviderPath === launchDescriptor.binary;
-          if (!sameProviderPath) throw new Error('provider path changed');
+          const currentProviderPath = resolvePreflightBinaryPath(
+            launchDescriptor.provider,
+          ).path;
+          const sameProviderPath =
+            process.platform === "win32"
+              ? currentProviderPath.toLowerCase() ===
+                launchDescriptor.binary.toLowerCase()
+              : currentProviderPath === launchDescriptor.binary;
+          if (!sameProviderPath) throw new Error("provider path changed");
         } catch {
-          return { ok: false, error: 'launch_descriptor_unresolvable' };
+          return { ok: false, error: "launch_descriptor_unresolvable" };
         }
 
         const paneAttemptId = randomUUID();
         const livePaneIds: string[] = [];
         for (const candidate of config.workers) {
-          if (!candidate.pane_id || candidate.name === sagaInput.workerName) continue;
+          if (!candidate.pane_id || candidate.name === sagaInput.workerName)
+            continue;
           const candidateOwnership = configuredPaneOwnership(config, candidate);
-          if (candidateOwnership && await getOwnedWorkerLiveness(candidateOwnership) === 'alive') {
+          if (
+            candidateOwnership &&
+            (await getOwnedWorkerLiveness(candidateOwnership)) === "alive"
+          ) {
             livePaneIds.push(candidate.pane_id);
           }
         }
         const splitTarget = livePaneIds.at(-1) ?? leaderPaneId;
-        const splitDirection = livePaneIds.length > 0 ? 'down' as const : 'right' as const;
+        const splitDirection =
+          livePaneIds.length > 0 ? ("down" as const) : ("right" as const);
         const workerCwd = currentWorker.working_dir ?? input.cwd;
-        const recoveryProvider = owner.config.tmux_session!.startsWith('cmux:') ? 'cmux' as const : 'tmux' as const;
+        const recoveryProvider = providerForTeamTarget(
+          owner.config.tmux_session!,
+          splitTarget,
+        );
         const tmuxServerIdentity = requireTmuxServerIdentity(
           owner.config.tmux_session!,
           owner.config.tmux_server_identity,
         );
-        if (!await workerPaneBelongsToOwnedProviderTarget({
-          provider: recoveryProvider,
-          providerTarget: owner.config.tmux_session!,
-          paneId: splitTarget,
-          ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
-        })) return { ok: false, error: 'worker_activation_failed' };
+        // Same herdr leader exemption as spawnV2Worker: the leader pane
+        // deliberately lives outside the team workspace, and the allocation
+        // pins the persisted workspace id.
+        const herdrLeaderSplitTarget =
+          recoveryProvider === "herdr" && splitTarget === leaderPaneId;
+        if (
+          !herdrLeaderSplitTarget &&
+          !(await workerPaneBelongsToOwnedProviderTarget({
+            provider: recoveryProvider,
+            providerTarget: owner.config.tmux_session!,
+            paneId: splitTarget,
+            ...(tmuxServerIdentity ? { tmuxServerIdentity } : {}),
+          }))
+        )
+          return { ok: false, error: "worker_activation_failed" };
         const split = await splitTeamWorkerPaneWithEvidence(
           splitTarget,
           splitDirection,
           workerCwd,
           recoveryProvider,
           tmuxServerIdentity,
+          undefined,
+          recoveryProvider === "herdr"
+            ? herdrWorkspaceIdFromSessionTarget(owner.config.tmux_session!)
+            : undefined,
         );
         const ownershipResult = proveWorkerPaneOwnership(split, {
           providerTarget: owner.config.tmux_session!,
@@ -3313,26 +4963,31 @@ export async function executeRecoverDeadWorkerV2Owner(
             `pane_identity_${ownershipResult.reason}`,
             split,
           );
-          return { ok: false, error: 'spawn_failed' };
+          return { ok: false, error: "spawn_failed" };
         }
-        if (!await workerPaneBelongsToOwnedProviderTarget({
-          provider: ownershipResult.ownership.provider,
-          providerTarget: ownershipResult.ownership.providerTarget,
-          paneId: ownershipResult.ownership.paneId,
-          ...(ownershipResult.ownership.tmuxServerIdentity
-            ? { tmuxServerIdentity: ownershipResult.ownership.tmuxServerIdentity }
-            : {}),
-        })) {
+        if (
+          !(await workerPaneBelongsToOwnedProviderTarget({
+            provider: ownershipResult.ownership.provider,
+            providerTarget: ownershipResult.ownership.providerTarget,
+            paneId: ownershipResult.ownership.paneId,
+            ...(ownershipResult.ownership.tmuxServerIdentity
+              ? {
+                  tmuxServerIdentity:
+                    ownershipResult.ownership.tmuxServerIdentity,
+                }
+              : {}),
+          }))
+        ) {
           await recordUnaddressableRecoveryPaneFailure(
             input,
             sagaInput.recoveryId,
             paneAttemptId,
-            'pane_membership_unverified',
+            "pane_membership_unverified",
             split,
           );
-          return { ok: false, error: 'worker_activation_failed' };
+          return { ok: false, error: "worker_activation_failed" };
         }
-        if (recoveryProvider === 'tmux') {
+        if (recoveryProvider === "tmux") {
           try {
             await applyRequiredLayoutBeforeOwnedLaunch(
               owner.config.tmux_session!,
@@ -3342,9 +4997,11 @@ export async function executeRecoverDeadWorkerV2Owner(
           } catch (error) {
             return {
               ok: false,
-              error: error instanceof Error && error.message.startsWith('worker_layout_cleanup_unverified:')
-                ? 'worker_cleanup_incomplete'
-                : 'spawn_failed',
+              error:
+                error instanceof Error &&
+                error.message.startsWith("worker_layout_cleanup_unverified:")
+                  ? "worker_cleanup_incomplete"
+                  : "spawn_failed",
             };
           }
         }
@@ -3360,232 +5017,374 @@ export async function executeRecoverDeadWorkerV2Owner(
             instance.instance_id,
           );
         } catch {
-          return { ok: false, error: 'launch_descriptor_unresolvable' };
+          return { ok: false, error: "launch_descriptor_unresolvable" };
         }
         pendingRecoveryPanes.set(sagaInput.recoveryId, pending);
         try {
-          pending.startupContext = await spawnOwnedWorkerInPane(config.tmux_session, pending.ownership, {
-            teamName: input.teamName,
-            instanceId: instance.instance_id,
-            workerName: sagaInput.workerName,
-            envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(pending.gate) },
-            launchBinary: process.execPath,
-            launchArgs: [runtimeCliPath, '--recovery-gate'],
-            cwd: pending.gate.cwd,
-            provider: pending.agentType,
-            launchBootstrapPath: runtimeCliPath,
-            launchStateCwd: input.cwd,
-            launchContext: {
-              kind: 'recovery',
+          pending.startupContext = await spawnOwnedWorkerInPane(
+            config.tmux_session,
+            pending.ownership,
+            {
+              teamName: input.teamName,
+              instanceId: instance.instance_id,
+              workerName: sagaInput.workerName,
+              envVars: { OMC_RECOVERY_GATE_SPEC: JSON.stringify(pending.gate) },
+              launchBinary: process.execPath,
+              launchArgs: [runtimeCliPath, "--recovery-gate"],
+              cwd: pending.gate.cwd,
+              provider: pending.agentType,
+              launchBootstrapPath: runtimeCliPath,
+              launchStateCwd: input.cwd,
+              launchContext: {
+                kind: "recovery",
+                recovery_id: sagaInput.recoveryId,
+                replacement_generation: sagaInput.replacementGeneration,
+                pane_attempt_id: paneAttemptId,
+              },
+              ...(ownershipResult.ownership.tmuxServerIdentity
+                ? {
+                    tmuxServerIdentity:
+                      ownershipResult.ownership.tmuxServerIdentity,
+                  }
+                : {}),
+            },
+          );
+          const ready = await waitForRecoveryGateRecord(
+            pending.gate.readyPath,
+            {
               recovery_id: sagaInput.recoveryId,
+              worker_name: sagaInput.workerName,
               replacement_generation: sagaInput.replacementGeneration,
               pane_attempt_id: paneAttemptId,
+              launch_attempt_id: pending.startupContext!.attempt.attempt_id,
+              launch_nonce: pending.startupContext!.attempt.nonce,
             },
-            ...(ownershipResult.ownership.tmuxServerIdentity
-              ? { tmuxServerIdentity: ownershipResult.ownership.tmuxServerIdentity }
-              : {}),
-          });
-          const ready = await waitForRecoveryGateRecord(pending.gate.readyPath, {
-            recovery_id: sagaInput.recoveryId,
-            worker_name: sagaInput.workerName,
-            replacement_generation: sagaInput.replacementGeneration,
-            pane_attempt_id: paneAttemptId,
-            launch_attempt_id: pending.startupContext!.attempt.attempt_id,
-            launch_nonce: pending.startupContext!.attempt.nonce,
-          }, 30_000);
-          if (!ready) throw new Error('startup_ack_timeout');
-          return { ok: true, paneId: pending.ownership.paneId, paneAttemptId, committed: false };
+            30_000,
+          );
+          if (!ready) throw new Error("startup_ack_timeout");
+          return {
+            ok: true,
+            paneId: pending.ownership.paneId,
+            paneAttemptId,
+            committed: false,
+          };
         } catch (error) {
-          await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
-            await assertTeamInstanceUnderLock(instance);
-            await cleanupRecoveryPaneAttempt(
-              input,
-              sagaInput.recoveryId,
-              pending,
-              error instanceof Error ? error.message : 'spawn_failed',
-            );
-          });
+          await withTeamInstanceLifecycleLock(
+            instance.cwd,
+            instance.team_name,
+            async () => {
+              await assertTeamInstanceUnderLock(instance);
+              await cleanupRecoveryPaneAttempt(
+                input,
+                sagaInput.recoveryId,
+                pending,
+                error instanceof Error ? error.message : "spawn_failed",
+              );
+            },
+          );
           return {
             ok: false,
-            error: error instanceof Error && error.message === 'startup_ack_timeout'
-              ? 'startup_ack_timeout'
-              : 'spawn_failed',
+            error:
+              error instanceof Error && error.message === "startup_ack_timeout"
+                ? "startup_ack_timeout"
+                : "spawn_failed",
           };
         }
       },
       persistActive: async (sagaInput, paneId) => {
         await ensureFence();
-        const current = await readRevisionedTeamConfig(input.teamName, input.cwd);
-        if (!current) throw new Error('invalid_persisted_state');
+        const current = await readRevisionedTeamConfig(
+          input.teamName,
+          input.cwd,
+        );
+        if (!current) throw new Error("invalid_persisted_state");
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending?.startupContext) throw new Error('worker_activation_failed');
-        const nextWorkers = current.config.workers.map(candidate => candidate.name === sagaInput.workerName
-          ? {
-              ...candidate,
-              pane_id: paneId,
-              pane_attempt_id: pending.paneAttemptId,
-              recovery_id: sagaInput.recoveryId,
-              replacement_generation: sagaInput.replacementGeneration,
-              operational_state: 'active' as const,
-              ...(pending.startupContext ? { launch_attempt_id: pending.startupContext.attempt.attempt_id } : {}),
-              ...(pending.agentType === 'cursor'
-                && shouldInjectContract(normalizeDelegationRole(pending.worker.role) as CanonicalTeamRole, pending.agentType)
-                ? { output_file: cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
-                  taskId: pending.worker.assigned_tasks?.[0],
-                  assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
-                }) }
-                : {}),
-            }
-          : candidate);
+        if (!pending?.startupContext)
+          throw new Error("worker_activation_failed");
+        const nextWorkers = current.config.workers.map((candidate) =>
+          candidate.name === sagaInput.workerName
+            ? {
+                ...candidate,
+                pane_id: paneId,
+                pane_attempt_id: pending.paneAttemptId,
+                recovery_id: sagaInput.recoveryId,
+                replacement_generation: sagaInput.replacementGeneration,
+                operational_state: "active" as const,
+                ...(pending.startupContext
+                  ? {
+                      launch_attempt_id:
+                        pending.startupContext.attempt.attempt_id,
+                    }
+                  : {}),
+                ...(pending.agentType === "cursor" &&
+                shouldInjectContract(
+                  normalizeDelegationRole(
+                    pending.worker.role,
+                  ) as CanonicalTeamRole,
+                  pending.agentType,
+                )
+                  ? {
+                      output_file: cliWorkerOutputFilePath(
+                        teamStateRoot(input.cwd, input.teamName),
+                        sagaInput.workerName,
+                        {
+                          taskId: pending.worker.assigned_tasks?.[0],
+                          assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                        },
+                      ),
+                    }
+                  : {}),
+              }
+            : candidate,
+        );
         const nextRevision = current.stateRevision + 1;
         const next: TeamConfig = {
           ...current.config,
           workers: nextWorkers,
           state_revision: nextRevision,
           active_recovery: current.config.active_recovery
-            ? { ...current.config.active_recovery, phase: 'active', state_revision: nextRevision, updated_at: new Date().toISOString() }
+            ? {
+                ...current.config.active_recovery,
+                phase: "active",
+                state_revision: nextRevision,
+                updated_at: new Date().toISOString(),
+              }
             : current.config.active_recovery,
         };
-        const persisted = await withWorkerLaunchAttemptFence(pending.startupContext.attempt, () => (
-          saveTeamConfigAtRevision(next, current.stateRevision, input.cwd)
-        ));
-        if (!persisted.ok) throw new Error('worker_activation_failed');
-        if (!persisted.value) throw new Error('stale_state_revision');
+        const persisted = await withWorkerLaunchAttemptFence(
+          pending.startupContext.attempt,
+          () =>
+            saveTeamConfigAtRevision(next, current.stateRevision, input.cwd),
+        );
+        if (!persisted.ok) throw new Error("worker_activation_failed");
+        if (!persisted.value) throw new Error("stale_state_revision");
         const manifestSync = await resolveCommittedRecoveryManifestSync(
           () => readTeamManifest(input.teamName, input.cwd),
-          { workerName: sagaInput.workerName, paneId, paneAttemptId: pending.paneAttemptId,
-            recoveryId: sagaInput.recoveryId, replacementGeneration: sagaInput.replacementGeneration },
+          {
+            workerName: sagaInput.workerName,
+            paneId,
+            paneAttemptId: pending.paneAttemptId,
+            recoveryId: sagaInput.recoveryId,
+            replacementGeneration: sagaInput.replacementGeneration,
+          },
         );
         return { stateRevision: nextRevision, manifestSync };
       },
       activatePane: async (sagaInput, paneAttemptId) => {
         await ensureFence();
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending || pending.paneAttemptId !== paneAttemptId) return { ok: false, error: 'worker_activation_failed' };
-        if (!pending.startupContext || !await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)) {
-          return { ok: false, error: 'worker_activation_failed' };
+        if (!pending || pending.paneAttemptId !== paneAttemptId)
+          return { ok: false, error: "worker_activation_failed" };
+        if (
+          !pending.startupContext ||
+          !(await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt))
+        ) {
+          return { ok: false, error: "worker_activation_failed" };
         }
-        const record = { recovery_id: sagaInput.recoveryId, worker_name: sagaInput.workerName,
-          replacement_generation: sagaInput.replacementGeneration, pane_attempt_id: paneAttemptId,
+        const record = {
+          recovery_id: sagaInput.recoveryId,
+          worker_name: sagaInput.workerName,
+          replacement_generation: sagaInput.replacementGeneration,
+          pane_attempt_id: paneAttemptId,
           launch_attempt_id: pending.startupContext.attempt.attempt_id,
           launch_nonce: pending.startupContext.attempt.nonce,
-          written_at: new Date().toISOString() };
-        await mkdir(join(pending.gate.activatePath, '..'), { recursive: true });
-        await writeFile(pending.gate.activatePath, JSON.stringify(record), 'utf8');
-        const adoptedReady = await waitForRecoveryGateRecord(`${pending.gate.readyPath}.adoption-ready`, record, 30_000);
-        return adoptedReady && await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt)
+          written_at: new Date().toISOString(),
+        };
+        await mkdir(join(pending.gate.activatePath, ".."), { recursive: true });
+        await writeFile(
+          pending.gate.activatePath,
+          JSON.stringify(record),
+          "utf8",
+        );
+        const adoptedReady = await waitForRecoveryGateRecord(
+          `${pending.gate.readyPath}.adoption-ready`,
+          record,
+          30_000,
+        );
+        return adoptedReady &&
+          (await isWorkerLaunchAttemptCurrent(pending.startupContext.attempt))
           ? { ok: true }
-          : { ok: false, error: 'worker_activation_failed' };
+          : { ok: false, error: "worker_activation_failed" };
       },
       adoptAll: async (sagaInput, proof, taskIds) => {
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending?.startupContext) return { ok: false, error: 'worker_activation_failed' };
+        if (!pending?.startupContext)
+          return { ok: false, error: "worker_activation_failed" };
         const startupAttemptId = pending.startupContext.attempt.attempt_id;
-        const adoption = await withWorkerLaunchAttemptFence(pending.startupContext.attempt, async () => {
-          await ensureFence();
-          return teamAdoptRecoveryReservations(
-            input.teamName,
-            input.cwd,
-            taskIds,
-            sagaInput.workerName,
-            proof,
-            startupAttemptId,
-          );
-        });
-        if (!adoption.ok) return { ok: false, error: 'worker_activation_failed' };
+        const adoption = await withWorkerLaunchAttemptFence(
+          pending.startupContext.attempt,
+          async () => {
+            await ensureFence();
+            return teamAdoptRecoveryReservations(
+              input.teamName,
+              input.cwd,
+              taskIds,
+              sagaInput.workerName,
+              proof,
+              startupAttemptId,
+            );
+          },
+        );
+        if (!adoption.ok)
+          return { ok: false, error: "worker_activation_failed" };
         const results = adoption.value;
-        const failed = results.find(result => !result.ok);
+        const failed = results.find((result) => !result.ok);
         if (failed && !failed.ok) {
-          return { ok: false, error: failed.error.startsWith('checkpoint_')
-            ? (`recovery_${failed.error}` as RecoverDeadWorkerV2Error)
-            : 'worker_activation_failed' };
+          return {
+            ok: false,
+            error: failed.error.startsWith("checkpoint_")
+              ? (`recovery_${failed.error}` as RecoverDeadWorkerV2Error)
+              : "worker_activation_failed",
+          };
         }
         const continuations = results
-          .filter((result): result is Extract<TaskRecoveryAdoptionResult, { ok: true }> => result.ok)
-          .map(result => ({ taskId: result.task.id, taskVersion: result.task.version ?? 1,
-            sequence: result.checkpoint.sequence, payload: result.checkpoint.resume_payload, claimToken: result.claimToken }));
+          .filter(
+            (
+              result,
+            ): result is Extract<TaskRecoveryAdoptionResult, { ok: true }> =>
+              result.ok,
+          )
+          .map((result) => ({
+            taskId: result.task.id,
+            taskVersion: result.task.version ?? 1,
+            sequence: result.checkpoint.sequence,
+            payload: result.checkpoint.resume_payload,
+            claimToken: result.claimToken,
+          }));
         return { ok: true, continuations };
       },
       repairServices: async () => {
         await ensureFence();
         const config = await readTeamConfig(input.teamName, input.cwd);
-        return config ? reconcileCommittedTeamServices(config, input.cwd) : 'repair_required';
+        return config
+          ? reconcileCommittedTeamServices(config, input.cwd)
+          : "repair_required";
       },
       writeRun: async (sagaInput, paneAttemptId, continuations) => {
         await ensureFence();
         const pending = pendingRecoveryPanes.get(sagaInput.recoveryId);
-        if (!pending || pending.paneAttemptId !== paneAttemptId || !pending.startupContext) {
-          throw new Error('worker_activation_failed');
+        if (
+          !pending ||
+          pending.paneAttemptId !== paneAttemptId ||
+          !pending.startupContext
+        ) {
+          throw new Error("worker_activation_failed");
         }
         const startupContext = pending.startupContext;
         const startupAttemptId = startupContext.attempt.attempt_id;
         const primaryTaskId = continuations[0]?.taskId;
         const startupBaseline = primaryTaskId
-          ? await captureWorkerStartupBaseline(input.teamName, sagaInput.workerName, primaryTaskId, input.cwd)
-          : null;
-        const statusBaseline = startupBaseline?.statusFingerprint
-          ?? workerStatusStartupFingerprint(await readWorkerStatus(input.teamName, sagaInput.workerName, input.cwd));
-        const evidencePolicy = getWorkerStartupEvidencePolicy(pending.agentType);
-        const waitForCurrentEvidence = (budgetMs: number) => primaryTaskId && startupBaseline
-          ? waitForWorkerStartupEvidence(
+          ? await captureWorkerStartupBaseline(
               input.teamName,
               sagaInput.workerName,
               primaryTaskId,
               input.cwd,
-              startupBaseline,
-              startupAttemptId,
-              budgetMs,
             )
-          : waitForWorkerStatusTransition(
+          : null;
+        const statusBaseline =
+          startupBaseline?.statusFingerprint ??
+          workerStatusStartupFingerprint(
+            await readWorkerStatus(
               input.teamName,
               sagaInput.workerName,
               input.cwd,
-              statusBaseline,
-              startupAttemptId,
-              budgetMs,
-            );
-        const probeActivity = pending.agentType === 'cursor' || pending.agentType === 'codex'
-          ? () => probeStartupPaneActivity(startupContext, { attemptAlreadyFenced: true })
-          : undefined;
-        const waitForBoundedStartupEvidence = (resubmit?: () => Promise<StartupInboxResubmitOutcome>) =>
-          settleStartupEvidence(evidencePolicy, waitForCurrentEvidence, resubmit, probeActivity);
-        const instruction = continuations.length > 0
-          ? continuations.map(continuation => {
-            const continuationInstruction = renderRecoveryContinuationInstruction({
-              teamName: input.teamName,
-              workerName: sagaInput.workerName,
-              taskId: continuation.taskId,
-              taskVersion: continuation.taskVersion,
-              claimToken: continuation.claimToken,
-              sequence: continuation.sequence,
-              resumePayload: continuation.payload,
-            });
-            const recoveryRole = normalizeDelegationRole(pending.worker.role) as CanonicalTeamRole;
-            const recoveryContract = pending.agentType === 'cursor'
-              && shouldInjectContract(recoveryRole, pending.agentType)
-              ? renderCliWorkerOutputContract(
-                recoveryRole,
-                cliWorkerOutputFilePath(teamStateRoot(input.cwd, input.teamName), sagaInput.workerName, {
-                  taskId: continuation.taskId,
-                  assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
-                }),
-                {
-                  taskId: continuation.taskId,
-                  claimToken: continuation.claimToken,
-                  taskVersion: continuation.taskVersion,
-                  launchAttemptId: startupAttemptId,
-                },
+            ),
+          );
+        const evidencePolicy = getWorkerStartupEvidencePolicy(
+          pending.agentType,
+        );
+        const waitForCurrentEvidence = (budgetMs: number) =>
+          primaryTaskId && startupBaseline
+            ? waitForWorkerStartupEvidence(
+                input.teamName,
+                sagaInput.workerName,
+                primaryTaskId,
+                input.cwd,
+                startupBaseline,
+                startupAttemptId,
+                budgetMs,
               )
-              : '';
-            return `${continuationInstruction}${recoveryContract ? `\n${recoveryContract}` : ''}`;
-          }).join('\n\n')
-          : 'Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.';
-        const inboxPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-          await ensureFence();
-          await composeInitialInbox(input.teamName, sagaInput.workerName, instruction, input.cwd);
-          return true;
-        });
-        if (!inboxPublished.ok || !inboxPublished.value) throw new Error('worker_activation_failed');
+            : waitForWorkerStatusTransition(
+                input.teamName,
+                sagaInput.workerName,
+                input.cwd,
+                statusBaseline,
+                startupAttemptId,
+                budgetMs,
+              );
+        const probeActivity =
+          pending.agentType === "cursor" || pending.agentType === "codex"
+            ? () =>
+                probeStartupPaneActivity(startupContext, {
+                  attemptAlreadyFenced: true,
+                })
+            : undefined;
+        const waitForBoundedStartupEvidence = (
+          resubmit?: () => Promise<StartupInboxResubmitOutcome>,
+        ) =>
+          settleStartupEvidence(
+            evidencePolicy,
+            waitForCurrentEvidence,
+            resubmit,
+            probeActivity,
+          );
+        const instruction =
+          continuations.length > 0
+            ? continuations
+                .map((continuation) => {
+                  const continuationInstruction =
+                    renderRecoveryContinuationInstruction({
+                      teamName: input.teamName,
+                      workerName: sagaInput.workerName,
+                      taskId: continuation.taskId,
+                      taskVersion: continuation.taskVersion,
+                      claimToken: continuation.claimToken,
+                      sequence: continuation.sequence,
+                      resumePayload: continuation.payload,
+                    });
+                  const recoveryRole = normalizeDelegationRole(
+                    pending.worker.role,
+                  ) as CanonicalTeamRole;
+                  const recoveryContract =
+                    pending.agentType === "cursor" &&
+                    shouldInjectContract(recoveryRole, pending.agentType)
+                      ? renderCliWorkerOutputContract(
+                          recoveryRole,
+                          cliWorkerOutputFilePath(
+                            teamStateRoot(input.cwd, input.teamName),
+                            sagaInput.workerName,
+                            {
+                              taskId: continuation.taskId,
+                              assignmentId: `${sagaInput.recoveryId}-${sagaInput.replacementGeneration}`,
+                            },
+                          ),
+                          {
+                            taskId: continuation.taskId,
+                            claimToken: continuation.claimToken,
+                            taskVersion: continuation.taskVersion,
+                            launchAttemptId: startupAttemptId,
+                          },
+                        )
+                      : "";
+                  return `${continuationInstruction}${recoveryContract ? `\n${recoveryContract}` : ""}`;
+                })
+                .join("\n\n")
+            : "Recovery completed for this idle worker. Wait for a real team task assignment and do not create or claim fake work.";
+        const inboxPublished = await withWorkerLaunchAttemptFence(
+          startupContext.attempt,
+          async () => {
+            await ensureFence();
+            await composeInitialInbox(
+              input.teamName,
+              sagaInput.workerName,
+              instruction,
+              input.cwd,
+            );
+            return true;
+          },
+        );
+        if (!inboxPublished.ok || !inboxPublished.value)
+          throw new Error("worker_activation_failed");
         const record = {
           recovery_id: sagaInput.recoveryId,
           worker_name: sagaInput.workerName,
@@ -3596,99 +5395,180 @@ export async function executeRecoverDeadWorkerV2Owner(
           written_at: new Date().toISOString(),
         };
         const launchedPath = `${pending.gate.runPath}.launched`;
-        let launched = await waitForRecoveryGateRecord(launchedPath, record, 25, 5);
+        let launched = await waitForRecoveryGateRecord(
+          launchedPath,
+          record,
+          25,
+          5,
+        );
         if (!launched) {
-          const runPublished = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-            await ensureFence();
-            await writeFile(pending.gate.runPath, JSON.stringify(record), 'utf8');
-            return true;
-          });
-          if (!runPublished.ok || !runPublished.value) throw new Error('worker_activation_failed');
-          launched = await waitForRecoveryGateRecord(launchedPath, record, 30_000);
+          const runPublished = await withWorkerLaunchAttemptFence(
+            startupContext.attempt,
+            async () => {
+              await ensureFence();
+              await writeFile(
+                pending.gate.runPath,
+                JSON.stringify(record),
+                "utf8",
+              );
+              return true;
+            },
+          );
+          if (!runPublished.ok || !runPublished.value)
+            throw new Error("worker_activation_failed");
+          launched = await waitForRecoveryGateRecord(
+            launchedPath,
+            record,
+            30_000,
+          );
         }
-        if (!launched) throw new Error('startup_ack_timeout');
+        if (!launched) throw new Error("startup_ack_timeout");
         let providerLive = false;
         try {
-          const launchedRecord = JSON.parse(await readFile(launchedPath, 'utf8')) as {
+          const launchedRecord = JSON.parse(
+            await readFile(launchedPath, "utf8"),
+          ) as {
             provider_pid?: unknown;
             provider_start_identity?: unknown;
             supervisor_completion_path?: unknown;
           };
-          providerLive = Number.isInteger(launchedRecord.provider_pid)
-            && typeof launchedRecord.provider_start_identity === 'string'
-            && (launchedRecord.supervisor_completion_path === undefined
-              || (typeof launchedRecord.supervisor_completion_path === 'string'
-                && launchedRecord.supervisor_completion_path.trim().length > 0
-                && !existsSync(launchedRecord.supervisor_completion_path)))
-            && await isProcessIdentityLive(
+          providerLive =
+            Number.isInteger(launchedRecord.provider_pid) &&
+            typeof launchedRecord.provider_start_identity === "string" &&
+            (launchedRecord.supervisor_completion_path === undefined ||
+              (typeof launchedRecord.supervisor_completion_path === "string" &&
+                launchedRecord.supervisor_completion_path.trim().length > 0 &&
+                !existsSync(launchedRecord.supervisor_completion_path))) &&
+            (await isProcessIdentityLive(
               launchedRecord.provider_pid as number,
               launchedRecord.provider_start_identity,
               Date.now() + 1_000,
-            ) === 'live';
-        } catch { /* malformed or stale provider-start evidence fails closed */ }
-        if (!providerLive) throw new Error('worker_activation_failed');
-        if (!await isWorkerLaunchAttemptCurrent(startupContext.attempt)
-          || await getOwnedWorkerLiveness(pending.ownership) !== 'alive') {
-          throw new Error('worker_activation_failed');
+            )) === "live";
+        } catch {
+          /* malformed or stale provider-start evidence fails closed */
         }
-        const effects = await withWorkerLaunchAttemptFence(startupContext.attempt, async () => {
-          await ensureFence();
-          if (promptModeRecoveryRequiresProgressEvidence(pending.promptMode, continuations.length)) {
-            const settlement = await waitForBoundedStartupEvidence();
-            if (!settlement.settled) return { ok: false as const, error: startupEvidenceMissingReason(settlement.paneBusy, pending.agentType) };
-          } else if (pending.promptMode) {
-            // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
-            // intentionally have no task/status progress to prove. At this point
-            // the activation gate has published launched evidence and the provider
-            // identity has been verified live, so waiting for fabricated progress
-            // would turn a successful idle recovery into a deterministic timeout.
-          } else {
-          const recoveryTriggerMessage = buildStartupInboxTrigger(
-            input.cwd, input.teamName, sagaInput.workerName, startupContext.attempt.attempt_id,
-          );
-          const outcome = await queueInboxInstruction({
-            teamName: input.teamName,
-            workerName: sagaInput.workerName,
-            workerIndex: pending.worker.index,
-            paneId: pending.ownership.paneId,
-            inbox: instruction,
-            triggerMessage: recoveryTriggerMessage,
-            cwd: input.cwd,
-            transportPreference: 'transport_direct',
-            fallbackAllowed: DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode === 'hook_preferred_with_fallback',
-            inboxCorrelationKey: `recovery:${sagaInput.recoveryId}:${startupContext.attempt.attempt_id}`,
-            notify: async (_target, triggerMessage) => {
-                const attempted = await deliverStartupInbox(startupContext, triggerMessage, { attemptAlreadyFenced: true });
-              if (!attempted.ok) {
-                return { ok: false, transport: 'tmux_send_keys' as const, reason: `worker_notify_failed:${attempted.reason}` };
-              }
-              const settlement = await waitForBoundedStartupEvidence(
-                pending.agentType === 'cursor' || pending.agentType === 'codex'
-                  ? undefined
-                  : () => retryStartupInboxSubmit(startupContext, triggerMessage, { attemptAlreadyFenced: true }),
+        if (!providerLive) throw new Error("worker_activation_failed");
+        if (
+          !(await isWorkerLaunchAttemptCurrent(startupContext.attempt)) ||
+          (await getOwnedWorkerLiveness(pending.ownership)) !== "alive"
+        ) {
+          throw new Error("worker_activation_failed");
+        }
+        const effects = await withWorkerLaunchAttemptFence(
+          startupContext.attempt,
+          async () => {
+            await ensureFence();
+            if (
+              promptModeRecoveryRequiresProgressEvidence(
+                pending.promptMode,
+                continuations.length,
+              )
+            ) {
+              const settlement = await waitForBoundedStartupEvidence();
+              if (!settlement.settled)
+                return {
+                  ok: false as const,
+                  error: startupEvidenceMissingReason(
+                    settlement.paneBusy,
+                    pending.agentType,
+                  ),
+                };
+            } else if (pending.promptMode) {
+              // Idle prompt-mode recoveries (for example Gemini with no owned tasks)
+              // intentionally have no task/status progress to prove. At this point
+              // the activation gate has published launched evidence and the provider
+              // identity has been verified live, so waiting for fabricated progress
+              // would turn a successful idle recovery into a deterministic timeout.
+            } else {
+              const recoveryTriggerMessage = buildStartupInboxTrigger(
+                input.cwd,
+                input.teamName,
+                sagaInput.workerName,
+                startupContext.attempt.attempt_id,
               );
-              return settlement.settled
-                ? { ok: true, transport: 'tmux_send_keys' as const, reason: 'worker_startup_confirmed' }
-                : { ok: false, transport: 'tmux_send_keys' as const, reason: startupEvidenceMissingReason(settlement.paneBusy) };
-            },
-            deps: { writeWorkerInbox },
-          });
-            if (!outcome.ok) return { ok: false as const, error: outcome.reason ?? 'worker_notify_failed' };
-          }
-          return { ok: true as const };
-        });
-        if (!effects.ok) throw new Error('worker_activation_failed');
+              const outcome = await queueInboxInstruction({
+                teamName: input.teamName,
+                workerName: sagaInput.workerName,
+                workerIndex: pending.worker.index,
+                paneId: pending.ownership.paneId,
+                inbox: instruction,
+                triggerMessage: recoveryTriggerMessage,
+                cwd: input.cwd,
+                transportPreference: "transport_direct",
+                fallbackAllowed:
+                  DEFAULT_TEAM_TRANSPORT_POLICY.dispatch_mode ===
+                  "hook_preferred_with_fallback",
+                inboxCorrelationKey: `recovery:${sagaInput.recoveryId}:${startupContext.attempt.attempt_id}`,
+                notify: async (_target, triggerMessage) => {
+                  const attempted = await deliverStartupInbox(
+                    startupContext,
+                    triggerMessage,
+                    { attemptAlreadyFenced: true },
+                  );
+                  if (!attempted.ok) {
+                    return {
+                      ok: false,
+                      transport: "tmux_send_keys" as const,
+                      reason: `worker_notify_failed:${attempted.reason}`,
+                    };
+                  }
+                  const settlement = await waitForBoundedStartupEvidence(
+                    pending.agentType === "cursor" ||
+                      pending.agentType === "codex"
+                      ? undefined
+                      : () =>
+                          retryStartupInboxSubmit(
+                            startupContext,
+                            triggerMessage,
+                            { attemptAlreadyFenced: true },
+                          ),
+                  );
+                  return settlement.settled
+                    ? {
+                        ok: true,
+                        transport: "tmux_send_keys" as const,
+                        reason: "worker_startup_confirmed",
+                      }
+                    : {
+                        ok: false,
+                        transport: "tmux_send_keys" as const,
+                        reason: startupEvidenceMissingReason(
+                          settlement.paneBusy,
+                        ),
+                      };
+                },
+                deps: { writeWorkerInbox },
+              });
+              if (!outcome.ok)
+                return {
+                  ok: false as const,
+                  error: outcome.reason ?? "worker_notify_failed",
+                };
+            }
+            return { ok: true as const };
+          },
+        );
+        if (!effects.ok) throw new Error("worker_activation_failed");
         if (!effects.value.ok) throw new Error(effects.value.error);
         pendingRecoveryPanes.delete(sagaInput.recoveryId);
       },
-      killAttemptPane: async paneAttemptId => {
+      killAttemptPane: async (paneAttemptId) => {
         const pending = pendingRecoveryPanes.get(recoveryId);
         if (!pending || pending.paneAttemptId !== paneAttemptId) return;
-        await withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
-          await assertTeamInstanceUnderLock(instance);
-          const cleaned = await cleanupRecoveryPaneAttempt(input, recoveryId, pending, 'recovery_saga_rollback');
-          if (!cleaned) throw new Error('worker_cleanup_incomplete');
-        });
+        await withTeamInstanceLifecycleLock(
+          instance.cwd,
+          instance.team_name,
+          async () => {
+            await assertTeamInstanceUnderLock(instance);
+            const cleaned = await cleanupRecoveryPaneAttempt(
+              input,
+              recoveryId,
+              pending,
+              "recovery_saga_rollback",
+            );
+            if (!cleaned) throw new Error("worker_cleanup_incomplete");
+          },
+        );
       },
     };
 
@@ -3697,34 +5577,37 @@ export async function executeRecoverDeadWorkerV2Owner(
     return finalizeRecoveryOwnerResult(input, recoveryId, result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const code: RecoverDeadWorkerV2Error = message === 'team_not_found'
-      ? 'team_not_found'
-      : message === 'invalid_persisted_state'
-        ? 'invalid_persisted_state'
-        : message === 'stale_state_revision'
-          ? 'stale_state_revision'
-          : message === 'runtime_owner_fence_lost'
-            ? 'runtime_owner_fence_lost'
-            : message === 'worker_cleanup_incomplete'
-              ? 'worker_cleanup_incomplete'
-                : message.startsWith('team_instance_')
-                  ? 'invalid_persisted_state'
-              : 'runtime_owner_unavailable';
+    const code: RecoverDeadWorkerV2Error =
+      message === "team_not_found"
+        ? "team_not_found"
+        : message === "invalid_persisted_state"
+          ? "invalid_persisted_state"
+          : message === "stale_state_revision"
+            ? "stale_state_revision"
+            : message === "runtime_owner_fence_lost"
+              ? "runtime_owner_fence_lost"
+              : message === "worker_cleanup_incomplete"
+                ? "worker_cleanup_incomplete"
+                : message.startsWith("team_instance_")
+                  ? "invalid_persisted_state"
+                  : "runtime_owner_unavailable";
     const result = recoveryError(input, recoveryId, code, message);
-    return ownerBound && (code === 'team_not_found' || code === 'invalid_persisted_state')
+    return ownerBound &&
+      (code === "team_not_found" || code === "invalid_persisted_state")
       ? await finalizeBoundRecoveryOwnerTerminal(input, recoveryId, result)
-      : code === 'team_not_found' || code === 'invalid_persisted_state'
+      : code === "team_not_found" || code === "invalid_persisted_state"
         ? persistRecoveryFinal(input, recoveryId, result)
         : result;
   }
 }
 
-const TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION: TeamInstanceDisposalAuthorization = {
-  protocol: 'caller-owned-final-state-v1',
-  providers: 'disposed',
-  panes: 'disposed',
-  worktrees: 'disposed',
-};
+const TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION: TeamInstanceDisposalAuthorization =
+  {
+    protocol: "caller-owned-final-state-v1",
+    providers: "disposed",
+    panes: "disposed",
+    worktrees: "disposed",
+  };
 
 /**
  * Roll back effects that occurred before an identity-bearing config was
@@ -3743,12 +5626,20 @@ async function rollbackUnpersistedNativeWorktreeStartup(
   const recordedAt = new Date().toISOString();
   const writeFailureMarker = async (extra: Record<string, unknown> = {}) => {
     await mkdir(teamRoot, { recursive: true });
-    await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
-      reason: 'startup_failed_before_config_persisted',
-      error: errorMessage,
-      recorded_at: recordedAt,
-      ...extra,
-    }, null, 2), 'utf-8');
+    await writeFile(
+      join(teamRoot, "startup-failure.json"),
+      JSON.stringify(
+        {
+          reason: "startup_failed_before_config_persisted",
+          error: errorMessage,
+          recorded_at: recordedAt,
+          ...extra,
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
   };
 
   // createTeamSession can have created a tmux/cmux resource before its
@@ -3756,14 +5647,19 @@ async function rollbackUnpersistedNativeWorktreeStartup(
   // config/worktrees or release the external reservation in that case: the
   // partial session and creation evidence are the only durable authority left
   // for a later, explicitly bound cleanup attempt.
-  if (cause instanceof TeamSessionCreationError && cause.cleanupStatus !== 'verified') {
+  if (
+    cause instanceof TeamSessionCreationError &&
+    cause.cleanupStatus !== "verified"
+  ) {
     try {
       await writeFailureMarker({
         instance_id: instance.instance_id,
         instance_binding: instance,
         partial_session: cause.partialSession,
-        ...(cause.creationEvidence ? { creation_evidence: cause.creationEvidence } : {}),
-        cleanup_status: cause.cleanupStatus ?? 'unknown',
+        ...(cause.creationEvidence
+          ? { creation_evidence: cause.creationEvidence }
+          : {}),
+        cleanup_status: cause.cleanupStatus ?? "unknown",
         cleanup_incomplete: true,
       });
     } catch {
@@ -3784,7 +5680,9 @@ async function rollbackUnpersistedNativeWorktreeStartup(
     }
     await rm(teamRoot, { recursive: true, force: true });
     if (existsSync(teamRoot)) {
-      await writeFailureMarker({ rollback_error: 'startup_state_removal_unverified' });
+      await writeFailureMarker({
+        rollback_error: "startup_state_removal_unverified",
+      });
       return false;
     }
     try {
@@ -3798,7 +5696,10 @@ async function rollbackUnpersistedNativeWorktreeStartup(
   } catch (rollbackError) {
     try {
       await writeFailureMarker({
-        rollback_error: rollbackError instanceof Error ? rollbackError.message : String(rollbackError),
+        rollback_error:
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : String(rollbackError),
         cleanup_incomplete: true,
       });
     } catch {
@@ -3814,31 +5715,49 @@ async function writeStartedStartupRollbackEvidence(args: {
   cause: unknown;
   reason: string;
   worker?: string;
-  launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
+  launchedWorkers?: Array<{
+    name: string;
+    paneId: string;
+    launchAttemptId?: string;
+    provider: string;
+  }>;
   markerReason?: string;
 }): Promise<void> {
   const teamRoot = absPath(args.cwd, TeamPaths.root(args.teamName));
   await mkdir(teamRoot, { recursive: true });
-  await writeFile(join(teamRoot, 'startup-failure.json'), JSON.stringify({
-    reason: args.markerReason ?? 'startup_rollback_cleanup_incomplete',
-    error: args.cause instanceof Error ? args.cause.message : String(args.cause),
-    rollback_error: args.reason,
-    ...(args.worker ? { worker: args.worker } : {}),
-    ...(args.launchedWorkers && args.launchedWorkers.length > 0
-      ? { launch_attempts: args.launchedWorkers.map(launch => ({
-        worker: launch.name,
-        pane_id: launch.paneId,
-        provider: launch.provider,
-        ...(launch.launchAttemptId ? { launch_attempt_id: launch.launchAttemptId } : {}),
-      })) }
-      : {}),
-    cleanup_incomplete: args.markerReason === undefined,
-    recorded_at: new Date().toISOString(),
-  }, null, 2), 'utf-8');
+  await writeFile(
+    join(teamRoot, "startup-failure.json"),
+    JSON.stringify(
+      {
+        reason: args.markerReason ?? "startup_rollback_cleanup_incomplete",
+        error:
+          args.cause instanceof Error ? args.cause.message : String(args.cause),
+        rollback_error: args.reason,
+        ...(args.worker ? { worker: args.worker } : {}),
+        ...(args.launchedWorkers && args.launchedWorkers.length > 0
+          ? {
+              launch_attempts: args.launchedWorkers.map((launch) => ({
+                worker: launch.name,
+                pane_id: launch.paneId,
+                provider: launch.provider,
+                ...(launch.launchAttemptId
+                  ? { launch_attempt_id: launch.launchAttemptId }
+                  : {}),
+              })),
+            }
+          : {}),
+        cleanup_incomplete: args.markerReason === undefined,
+        recorded_at: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
 }
 
 function startupCleanupIncompleteError(cause: unknown): Error {
-  const error = new Error('worker_cleanup_incomplete');
+  const error = new Error("worker_cleanup_incomplete");
   (error as Error & { cause?: unknown }).cause = cause;
   return error;
 }
@@ -3852,18 +5771,27 @@ async function rollbackStartedNativeWorktreeStartup(args: {
   workerPaneIds: string[];
   sessionMode: TeamSessionMode;
   tmuxServerIdentity?: TmuxServerIdentity;
-  launchedWorkers?: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }>;
+  launchedWorkers?: Array<{
+    name: string;
+    paneId: string;
+    launchAttemptId?: string;
+    provider: string;
+  }>;
   instance: TeamInstanceBinding;
 }): Promise<void> {
-  const worktreeCleanupRequired = inspectTeamWorktreeCleanupSafety(args.teamName, args.cwd).hasEvidence;
-  const sessionCleanupRequired = (args.launchedWorkers?.length ?? 0) > 0
-    || args.workerPaneIds.length > 0
-    || args.sessionMode !== 'split-pane';
+  const worktreeCleanupRequired = inspectTeamWorktreeCleanupSafety(
+    args.teamName,
+    args.cwd,
+  ).hasEvidence;
+  const sessionCleanupRequired =
+    (args.launchedWorkers?.length ?? 0) > 0 ||
+    args.workerPaneIds.length > 0 ||
+    args.sessionMode !== "split-pane";
   try {
     await writeStartedStartupRollbackEvidence({
       ...args,
-      reason: 'startup_failure',
-      markerReason: 'startup_failed_before_config_persisted',
+      reason: "startup_failure",
+      markerReason: "startup_failed_before_config_persisted",
     });
   } catch {
     // Preserve the initiating startup error; evidence write failure is handled
@@ -3872,64 +5800,115 @@ async function rollbackStartedNativeWorktreeStartup(args: {
   try {
     for (const worker of args.launchedWorkers ?? []) {
       if (!worker.launchAttemptId) {
-        await writeStartedStartupRollbackEvidence({ ...args, reason: 'missing_launch_attempt_id', worker: worker.name });
-        throw new Error(`worker_cleanup_incomplete:${worker.name}:missing_launch_attempt_id`);
+        await writeStartedStartupRollbackEvidence({
+          ...args,
+          reason: "missing_launch_attempt_id",
+          worker: worker.name,
+        });
+        throw new Error(
+          `worker_cleanup_incomplete:${worker.name}:missing_launch_attempt_id`,
+        );
       }
       const attempt = await loadWorkerLaunchAttempt({
-        cwd: args.cwd, teamName: args.teamName,
+        cwd: args.cwd,
+        teamName: args.teamName,
         instanceId: args.instance.instance_id,
         workerName: worker.name,
-        paneId: worker.paneId, provider: worker.provider as CliAgentType,
-        attemptId: worker.launchAttemptId, runtimeCliPath: resolveRuntimeCliPath(),
+        paneId: worker.paneId,
+        provider: worker.provider as CliAgentType,
+        attemptId: worker.launchAttemptId,
+        runtimeCliPath: resolveRuntimeCliPath(),
       });
-      if (!attempt || attempt.attempt_id !== worker.launchAttemptId || attempt.pane_id !== worker.paneId) {
-        await writeStartedStartupRollbackEvidence({ ...args, reason: 'launch_attempt_identity_unverified', worker: worker.name });
-        throw new Error(`worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`);
-      }
-      const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'startup_rollback', async () => {
-        const ownership: WorkerPaneOwnership = {
-          provider: worker.paneId.startsWith('%') ? 'tmux' as const : 'cmux' as const,
-          providerTarget: args.sessionName,
-          paneId: worker.paneId,
-          splitTarget: '',
-          leaderPaneId: args.leaderPaneId ?? '',
-          reservedPaneIds: args.workerPaneIds.filter(p => p !== worker.paneId),
-          source: 'adopted',
-          ...(worker.paneId.startsWith('%') && args.tmuxServerIdentity
-            ? { tmuxServerIdentity: args.tmuxServerIdentity }
-            : {}),
-        };
-        if (await getOwnedWorkerLiveness(ownership) === 'dead') return true;
-        await killOwnedWorkerPane({
-          ...ownership,
+      if (
+        !attempt ||
+        attempt.attempt_id !== worker.launchAttemptId ||
+        attempt.pane_id !== worker.paneId
+      ) {
+        await writeStartedStartupRollbackEvidence({
+          ...args,
+          reason: "launch_attempt_identity_unverified",
+          worker: worker.name,
         });
-        return await getOwnedWorkerLiveness(ownership) === 'dead';
-      });
+        throw new Error(
+          `worker_cleanup_incomplete:${worker.name}:launch_attempt_identity_unverified`,
+        );
+      }
+      const cleaned = await retireAndCleanupCurrentWorkerLaunchAttempt(
+        attempt,
+        "startup_rollback",
+        async () => {
+          const ownership: WorkerPaneOwnership = {
+            provider: providerForTeamTarget(args.sessionName, worker.paneId),
+            providerTarget: args.sessionName,
+            paneId: worker.paneId,
+            splitTarget: "",
+            leaderPaneId: args.leaderPaneId ?? "",
+            reservedPaneIds: args.workerPaneIds.filter(
+              (p) => p !== worker.paneId,
+            ),
+            source: "adopted",
+            ...(worker.paneId.startsWith("%") && args.tmuxServerIdentity
+              ? { tmuxServerIdentity: args.tmuxServerIdentity }
+              : {}),
+          };
+          if ((await getOwnedWorkerLiveness(ownership)) === "dead") return true;
+          await killOwnedWorkerPane({
+            ...ownership,
+          });
+          return (await getOwnedWorkerLiveness(ownership)) === "dead";
+        },
+      );
       if (cleaned !== true) {
-        await writeStartedStartupRollbackEvidence({ ...args, reason: 'provider_cleanup_unverified', worker: worker.name });
-        throw new Error(`worker_cleanup_incomplete:${worker.name}:provider_cleanup_unverified`);
+        await writeStartedStartupRollbackEvidence({
+          ...args,
+          reason: "provider_cleanup_unverified",
+          worker: worker.name,
+        });
+        throw new Error(
+          `worker_cleanup_incomplete:${worker.name}:provider_cleanup_unverified`,
+        );
       }
     }
-    if (sessionCleanupRequired && !(args.workerPaneIds.length === 0 && args.sessionMode === 'split-pane' && (args.launchedWorkers?.length ?? 0) > 0)) {
+    if (
+      sessionCleanupRequired &&
+      !(
+        args.workerPaneIds.length === 0 &&
+        args.sessionMode === "split-pane" &&
+        (args.launchedWorkers?.length ?? 0) > 0
+      )
+    ) {
       const sessionCleaned = await killTeamSession(
-        args.sessionName, args.workerPaneIds, args.leaderPaneId ?? undefined, {
+        args.sessionName,
+        args.workerPaneIds,
+        args.leaderPaneId ?? undefined,
+        {
           sessionMode: args.sessionMode,
-          ...(args.tmuxServerIdentity ? { tmuxServerIdentity: args.tmuxServerIdentity } : {}),
+          ...(args.tmuxServerIdentity
+            ? { tmuxServerIdentity: args.tmuxServerIdentity }
+            : {}),
         },
       );
       if (sessionCleaned === false) {
-        await writeStartedStartupRollbackEvidence({ ...args, reason: 'session_cleanup_unverified' });
-        throw new Error('worker_cleanup_incomplete:session_cleanup_unverified');
+        await writeStartedStartupRollbackEvidence({
+          ...args,
+          reason: "session_cleanup_unverified",
+        });
+        throw new Error("worker_cleanup_incomplete:session_cleanup_unverified");
       }
     }
     if (worktreeCleanupRequired) {
       const cleanup = cleanupTeamWorktrees(args.teamName, args.cwd);
       if (cleanup.preserved.length > 0) {
-        throw new Error('worker_cleanup_incomplete:worktree_cleanup_unverified');
+        throw new Error(
+          "worker_cleanup_incomplete:worktree_cleanup_unverified",
+        );
       }
     }
     try {
-      await disposeTeamInstanceUnderLock(args.instance, TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION);
+      await disposeTeamInstanceUnderLock(
+        args.instance,
+        TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION,
+      );
     } catch (error) {
       throw new Error(
         `worker_cleanup_incomplete:state_cleanup_unverified:${error instanceof Error ? error.message : String(error)}`,
@@ -3937,7 +5916,10 @@ async function rollbackStartedNativeWorktreeStartup(args: {
     }
   } catch (error) {
     try {
-      await writeStartedStartupRollbackEvidence({ ...args, reason: error instanceof Error ? error.message : String(error) });
+      await writeStartedStartupRollbackEvidence({
+        ...args,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     } catch {
       // Evidence write failures remain a cleanup failure.
     }
@@ -3950,8 +5932,11 @@ async function rollbackStartedNativeWorktreeStartup(args: {
 // ---------------------------------------------------------------------------
 
 function resolveLeaderClaudeSessionId(): string | undefined {
-  for (const raw of [process.env.CLAUDE_SESSION_ID, process.env.OMC_SESSION_ID]) {
-    const candidate = typeof raw === 'string' ? raw.trim() : '';
+  for (const raw of [
+    process.env.CLAUDE_SESSION_ID,
+    process.env.OMC_SESSION_ID,
+  ]) {
+    const candidate = typeof raw === "string" ? raw.trim() : "";
     if (!candidate) continue;
     try {
       validateSessionId(candidate);
@@ -3964,15 +5949,18 @@ function resolveLeaderClaudeSessionId(): string | undefined {
 }
 
 function resolveWorkerBootstrapInstructions(
-  config: Pick<StartTeamV2Config, 'rolePrompt' | 'rolePromptByRole' | 'workerRoles'>,
+  config: Pick<
+    StartTeamV2Config,
+    "rolePrompt" | "rolePromptByRole" | "workerRoles"
+  >,
   workerIndex: number,
   preparedRole?: CanonicalTeamRole,
 ): string | undefined {
   const roles = [preparedRole, config.workerRoles?.[workerIndex]];
   for (const role of roles) {
-    if (typeof role !== 'string' || role.length === 0) continue;
+    if (typeof role !== "string" || role.length === 0) continue;
     const prompt = config.rolePromptByRole?.[role];
-    if (typeof prompt === 'string' && prompt.length > 0) return prompt;
+    if (typeof prompt === "string" && prompt.length > 0) return prompt;
   }
   return config.rolePrompt;
 }
@@ -3983,31 +5971,49 @@ function resolveWorkerBootstrapInstructions(
  * tmux split-panes, and writes CLI API inbox instructions. NO done.json.
  * NO watchdog polling — the leader drives monitoring via monitorTeamV2().
  */
-export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntimeV2> {
+export async function startTeamV2(
+  config: StartTeamV2Config,
+): Promise<TeamRuntimeV2> {
   if (!Array.isArray(config.agentTypes) || config.agentTypes.length === 0) {
-    throw new Error('Invalid agent types. Expected at least one provider.');
+    throw new Error("Invalid agent types. Expected at least one provider.");
   }
-  if (!Number.isInteger(config.workerCount) || config.workerCount < 1 || config.workerCount > ABSOLUTE_MAX_WORKERS) {
-    throw new Error(`Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`);
+  if (
+    !Number.isInteger(config.workerCount) ||
+    config.workerCount < 1 ||
+    config.workerCount > ABSOLUTE_MAX_WORKERS
+  ) {
+    throw new Error(
+      `Invalid worker count "${config.workerCount}". Expected 1-${ABSOLUTE_MAX_WORKERS}.`,
+    );
   }
   const sanitized = sanitizeTeamName(config.teamName);
   validateTeamName(sanitized);
-  if (!Array.isArray(config.tasks)) throw new Error('invalid_task_dependencies');
+  if (!Array.isArray(config.tasks))
+    throw new Error("invalid_task_dependencies");
   const dependencyByIndex = validateStartTaskDependencies(config.tasks);
-  const workerNames = Array.from({ length: config.workerCount }, (_, index) => `worker-${index + 1}`);
+  const workerNames = Array.from(
+    { length: config.workerCount },
+    (_, index) => `worker-${index + 1}`,
+  );
   const workerNameSet = new Set(workerNames);
   for (let index = 0; index < config.tasks.length; index++) {
     const task = config.tasks[index]!;
     const owner = task.owner;
     if (owner === undefined) continue;
-    if (typeof owner !== 'string' || owner.trim() === '' || !workerNameSet.has(owner)) {
+    if (
+      typeof owner !== "string" ||
+      owner.trim() === "" ||
+      !workerNameSet.has(owner)
+    ) {
       throw new Error(`invalid_task_owner:task-${index + 1}`);
     }
   }
   const instance = createTeamInstanceBinding({
     teamName: sanitized,
     cwd: resolve(config.cwd),
-    ...(config.instanceId !== undefined ? { instanceId: config.instanceId } : {}),
+    ...(config.instanceId !== undefined
+      ? { instanceId: config.instanceId }
+      : {}),
   });
   const leaderCwd = instance.cwd;
 
@@ -4026,57 +6032,85 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   let autoMergeLeaderBranch: string | undefined;
   if (config.autoMerge) {
     if (!isRuntimeV2Enabled()) {
-      throw new Error('auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).');
+      throw new Error(
+        "auto-merge requires OMC_RUNTIME_V2=1 (this feature is v2-only).",
+      );
     }
     autoMergeLeaderBranch = resolveLeaderBranch(leaderCwd);
-    const stripped = autoMergeLeaderBranch.replace(/^refs\/heads\//i, '').toLowerCase();
-    if (stripped === 'main' || stripped === 'master') {
-      throw new Error('auto-merge refuses main/master leader branch — use a feature branch');
+    const stripped = autoMergeLeaderBranch
+      .replace(/^refs\/heads\//i, "")
+      .toLowerCase();
+    if (stripped === "main" || stripped === "master") {
+      throw new Error(
+        "auto-merge refuses main/master leader branch — use a feature branch",
+      );
     }
-    if (worktreeMode !== 'named') {
+    if (worktreeMode !== "named") {
       // Force named-branch worktree mode so workers get a real branch.
-      worktreeMode = 'named';
+      worktreeMode = "named";
     }
   }
 
-  const workspaceMode = worktreeMode === 'disabled' ? 'single' as const : 'worktree' as const;
+  const workspaceMode =
+    worktreeMode === "disabled" ? ("single" as const) : ("worktree" as const);
 
   const agentTypes = config.agentTypes as CliAgentType[];
-  const externalModelsDefaults = resolveExternalModelsDefaults(pluginCfg.externalModels?.defaults, process.env);
+  const externalModelsDefaults = resolveExternalModelsDefaults(
+    pluginCfg.externalModels?.defaults,
+    process.env,
+  );
   const resolveDefaultModel = (agentType: CliAgentType): string | undefined => {
-    return resolveDefaultWorkerModel(agentType, process.env, externalModelsDefaults);
+    return resolveDefaultWorkerModel(
+      agentType,
+      process.env,
+      externalModelsDefaults,
+    );
   };
 
   // Resolve the exact startup allocation before any side effects so preflight
   // covers only providers that can actually be launched. Explicit owners win;
   // the remaining tasks use the same role-aware allocator as startup below.
-  const startupAllocations: Array<{ workerName: string; taskIndex: number }> = [];
+  const startupAllocations: Array<{ workerName: string; taskIndex: number }> =
+    [];
   const unownedTaskIndices: number[] = [];
   for (let i = 0; i < config.tasks.length; i++) {
     const dependencies = dependencyByIndex.get(i) ?? [];
     if (dependencies.length > 0) continue;
     const owner = config.tasks[i]?.owner;
-    if (typeof owner === 'string' && workerNameSet.has(owner)) {
+    if (typeof owner === "string" && workerNameSet.has(owner)) {
       startupAllocations.push({ workerName: owner, taskIndex: i });
     } else {
       unownedTaskIndices.push(i);
     }
   }
   if (unownedTaskIndices.length > 0) {
-    const allocationTasks: TaskAllocationInput[] = unownedTaskIndices.map(idx => ({
-      id: String(idx),
-      subject: config.tasks[idx].subject,
-      description: config.tasks[idx].description,
-      ...(config.tasks[idx].role ? { role: config.tasks[idx].role } : {}),
-    }));
-    const allocationWorkers: WorkerAllocationInput[] = workerNames.map((name, i) => ({
-      name,
-      role: config.workerRoles?.[i]
-        ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
-      currentLoad: 0,
-    }));
-    for (const r of allocateTasksToWorkers(allocationTasks, allocationWorkers)) {
-      startupAllocations.push({ workerName: r.workerName, taskIndex: Number(r.taskId) });
+    const allocationTasks: TaskAllocationInput[] = unownedTaskIndices.map(
+      (idx) => ({
+        id: String(idx),
+        subject: config.tasks[idx].subject,
+        description: config.tasks[idx].description,
+        ...(config.tasks[idx].role ? { role: config.tasks[idx].role } : {}),
+      }),
+    );
+    const allocationWorkers: WorkerAllocationInput[] = workerNames.map(
+      (name, i) => ({
+        name,
+        role:
+          config.workerRoles?.[i] ??
+          ((agentTypes[i % agentTypes.length] ??
+            agentTypes[0] ??
+            "claude") as string),
+        currentLoad: 0,
+      }),
+    );
+    for (const r of allocateTasksToWorkers(
+      allocationTasks,
+      allocationWorkers,
+    )) {
+      startupAllocations.push({
+        workerName: r.workerName,
+        taskIndex: Number(r.taskId),
+      });
     }
   }
   // Keep the first allocation for each worker as the initial startup task.
@@ -4093,7 +6127,10 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   // assignments only. Unsupported, relative, missing, or untrusted selected
   // providers fail before any team state or multiplexer side effect is created.
   const resolvedBinaryPaths: Partial<Record<CliAgentType, string>> = {};
-  const missingBinaryReasons: Array<{ agentType: CliAgentType; reason: string }> = [];
+  const missingBinaryReasons: Array<{
+    agentType: CliAgentType;
+    reason: string;
+  }> = [];
   type StartupAssignment = {
     agentType: CliAgentType;
     model?: string;
@@ -4105,15 +6142,30 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   for (let i = 0; i < workerNames.length; i++) {
     const workerName = workerNames[i]!;
     const taskIndex = startupByWorker.get(workerName);
-    const fallbackAgent = (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as CliAgentType;
-    const resolvedAssignment = taskIndex === undefined
-      ? { agentType: fallbackAgent, model: '', reasoningEffort: undefined, role: undefined }
-      : resolveTaskAssignment(config.tasks[taskIndex]!, resolvedRouting,
-        pluginCfg.team?.roleRouting as Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>> | undefined,
-        fallbackAgent);
+    const fallbackAgent = (agentTypes[i % agentTypes.length] ??
+      agentTypes[0] ??
+      "claude") as CliAgentType;
+    const resolvedAssignment =
+      taskIndex === undefined
+        ? {
+            agentType: fallbackAgent,
+            model: "",
+            reasoningEffort: undefined,
+            role: undefined,
+          }
+        : resolveTaskAssignment(
+            config.tasks[taskIndex]!,
+            resolvedRouting,
+            pluginCfg.team?.roleRouting as
+              | Partial<Record<CanonicalTeamRole, TeamRoleAssignmentSpec>>
+              | undefined,
+            fallbackAgent,
+          );
     const assignment: StartupAssignment = {
       agentType: resolvedAssignment.agentType,
-      model: resolvedAssignment.model || resolveDefaultModel(resolvedAssignment.agentType),
+      model:
+        resolvedAssignment.model ||
+        resolveDefaultModel(resolvedAssignment.agentType),
       reasoningEffort: resolvedAssignment.reasoningEffort,
       ...(resolvedAssignment.role ? { role: resolvedAssignment.role } : {}),
     };
@@ -4122,14 +6174,17 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
   for (const agentType of effectiveAgentTypes) {
     try {
-      resolvedBinaryPaths[agentType] = resolvePreflightBinaryPath(agentType).path;
+      resolvedBinaryPaths[agentType] =
+        resolvePreflightBinaryPath(agentType).path;
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       missingBinaryReasons.push({ agentType, reason });
     }
   }
   if (missingBinaryReasons.length > 0) {
-    const missing = missingBinaryReasons.map(({ agentType, reason }) => `${agentType}:${reason}`).join(';');
+    const missing = missingBinaryReasons
+      .map(({ agentType, reason }) => `${agentType}:${reason}`)
+      .join(";");
     throw new Error(`cli_binary_preflight_failed:${missing}`);
   }
 
@@ -4142,7 +6197,6 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
   }
 
   return withTeamInstanceLifecycleLock(leaderCwd, sanitized, async () => {
-    
     // Reserve the name before creating any state, worktree, pane, or provider
     // effect.  The reservation remains external and blocks same-name startup
     // until this incarnation is either fully activated or safely released.
@@ -4151,16 +6205,26 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
       cwd: instance.cwd,
       instanceId: instance.instance_id,
     });
-    if (reservation.phase === 'active') {
-      throw new Error('team_instance_reservation_conflict');
+    if (reservation.phase === "active") {
+      throw new Error("team_instance_reservation_conflict");
     }
     let startupRollbackIssued = false;
     const rollbackBeforeConfig = async (cause: unknown): Promise<boolean> => {
       if (startupRollbackIssued) return true;
       startupRollbackIssued = true;
-      return rollbackUnpersistedNativeWorktreeStartup(sanitized, leaderCwd, cause, instance);
+      return rollbackUnpersistedNativeWorktreeStartup(
+        sanitized,
+        leaderCwd,
+        cause,
+        instance,
+      );
     };
-    const rollbackAfterConfig = async (args: Omit<Parameters<typeof rollbackStartedNativeWorktreeStartup>[0], 'instance'>): Promise<void> => {
+    const rollbackAfterConfig = async (
+      args: Omit<
+        Parameters<typeof rollbackStartedNativeWorktreeStartup>[0],
+        "instance"
+      >,
+    ): Promise<void> => {
       if (startupRollbackIssued) return;
       startupRollbackIssued = true;
       await rollbackStartedNativeWorktreeStartup({ ...args, instance });
@@ -4168,484 +6232,660 @@ export async function startTeamV2(config: StartTeamV2Config): Promise<TeamRuntim
     try {
       const pendingConfig = buildTeamInstancePendingConfig(instance);
       const pendingConfigPath = absPath(leaderCwd, TeamPaths.config(sanitized));
-      await mkdir(join(pendingConfigPath, '..'), { recursive: true });
-      await writeFile(pendingConfigPath, JSON.stringify(pendingConfig, null, 2), 'utf-8');
+      await mkdir(join(pendingConfigPath, ".."), { recursive: true });
+      await writeFile(
+        pendingConfigPath,
+        JSON.stringify(pendingConfig, null, 2),
+        "utf-8",
+      );
     } catch (error) {
-      if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
+      if (!(await rollbackBeforeConfig(error)))
+        throw startupCleanupIncompleteError(error);
       throw error;
     }
 
-  const workerWorktrees = new Map<string, NonNullable<ReturnType<typeof ensureWorkerWorktree>>>();
-  const preparedLaunches = new Map<string, { agentType: CliAgentType; role?: CanonicalTeamRole; descriptor: WorkerLaunchDescriptor; verdictAssignmentId?: string }>();
-  try {
-  // Create state directories
-  await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), { recursive: true });
-  await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), { recursive: true });
-  await mkdir(join(getOmcRoot(leaderCwd), 'state', 'team', sanitized, 'mailbox'), { recursive: true });
-
-
-  // Write task files
-  for (let i = 0; i < config.tasks.length; i++) {
-    const taskId = String(i + 1);
-    const task = config.tasks[i]!;
-    const taskFilePath = absPath(leaderCwd, TeamPaths.taskFile(sanitized, taskId));
-    const taskRecord = normalizeTaskRecord(createTaskRecord(taskId, {
-      subject: task.subject,
-      description: task.description,
-      status: 'pending',
-      ...(task.owner !== undefined ? { owner: task.owner } : {}),
-      ...(task.role !== undefined ? { role: task.role } : {}),
-      ...(task.blocked_by !== undefined ? { blocked_by: [...task.blocked_by] } : {}),
-      ...(dependencyByIndex.get(i)?.length
-        ? { depends_on: [...dependencyByIndex.get(i)!] }
-        : {}),
-      ...(task.delegation !== undefined ? { delegation: task.delegation } : {}),
-    }));
-    await writeAtomic(taskFilePath, JSON.stringify(taskRecord, null, 2));
-  }
-
-  try {
-    if (worktreeMode !== 'disabled') {
-      for (const workerName of workerNames) {
-        const worktree = ensureWorkerWorktree(sanitized, workerName, leaderCwd, {
-          mode: worktreeMode,
-          requireCleanLeader: true,
-        });
-        if (worktree) workerWorktrees.set(workerName, worktree);
-      }
-    }
-  } catch (error) {
-    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
-    throw error;
-  }
-  for (let i = 0; i < workerNames.length; i++) {
-    const workerName = workerNames[i]!;
-    const taskIndex = startupByWorker.get(workerName);
-    const assignment = startupAssignments.get(workerName);
-    if (!assignment) throw new Error(`Missing startup assignment for ${workerName}`);
-    const worktree = workerWorktrees.get(workerName);
-    const verdictAssignmentId = taskIndex !== undefined ? randomUUID() : undefined;
-    const outputFile = taskIndex !== undefined && assignment.role && shouldInjectContract(assignment.role, assignment.agentType)
-      ? cliWorkerOutputFilePath(teamStateRoot(leaderCwd, sanitized), workerName, {
-        taskId: String(taskIndex + 1),
-        assignmentId: verdictAssignmentId,
-      }) : undefined;
-    const outputContract = outputFile && assignment.role ? renderCliWorkerOutputContract(assignment.role, outputFile) : undefined;
-    const binary = resolvedBinaryPaths[assignment.agentType];
-    if (!binary) throw new Error(`No validated binary available for ${assignment.agentType}`);
-    const startupPrompt = taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
-      ? generatePromptModeStartupPrompt(sanitized, workerName,
-        workerInstructionStateRoot(leaderCwd, sanitized), outputContract)
-      : undefined;
-    const transportPrompt = startupPrompt && process.platform === 'win32' && /\.(?:cmd|bat)$/i.test(binary)
-      ? startupPrompt.replace(/\s*\r?\n\s*/g, ' ')
-      : startupPrompt;
-    const promptArgs = transportPrompt ? getPromptModeArgs(assignment.agentType, transportPrompt) : [];
-    const descriptor = buildValidatedWorkerLaunchDescriptor(assignment.agentType, {
-      teamName: sanitized, workerName, cwd: worktree?.path ?? leaderCwd, resolvedBinaryPath: binary,
-      model: assignment.model,
-      reasoningEffort: assignment.reasoningEffort,
-    }, promptArgs);
-    preparedLaunches.set(workerName, { agentType: assignment.agentType,
-      ...(assignment.role ? { role: assignment.role } : {}), descriptor,
-      ...(verdictAssignmentId ? { verdictAssignmentId } : {}) });
-  }
-  } catch (error) {
-    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
-    throw error;
-  }
-
-  // Set up worker state dirs and overlays (with v2 CLI API instructions)
-  try {
-    for (let i = 0; i < workerNames.length; i++) {
-      const wName = workerNames[i];
-      const prepared = preparedLaunches.get(wName);
-      if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
-      await ensureWorkerStateDir(sanitized, wName, leaderCwd);
-      const bootstrapInstructions = resolveWorkerBootstrapInstructions(config, i, prepared.role);
-      const overlayPath = await writeWorkerOverlay({
-        teamName: sanitized, workerName: wName, agentType: prepared.agentType,
-        tasks: config.tasks.map((t, idx) => ({
-          id: String(idx + 1), subject: t.subject, description: t.description,
-        })),
-        cwd: leaderCwd,
-        ...(bootstrapInstructions ? { bootstrapInstructions } : {}),
-        instructionStateRoot: workerInstructionStateRoot(leaderCwd, sanitized),
-        ...(prepared.role && shouldInjectContract(prepared.role, prepared.agentType)
-          ? { reviewerRole: true } : {}),
-      });
-      const worktree = workerWorktrees.get(wName);
-      if (worktree) {
-        const overlayContent = await readFile(overlayPath, 'utf-8');
-        installWorktreeRootAgents(sanitized, wName, leaderCwd, worktree.path, overlayContent);
-      }
-    }
-  } catch (error) {
-    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
-    throw error;
-  }
-
-  // Create tmux session (leader only — workers spawned below)
-  let session: Awaited<ReturnType<typeof createTeamSession>>;
-  try {
-    session = await createTeamSession(sanitized, 0, leaderCwd, {
-      newWindow: Boolean(config.newWindow),
-    });
-  } catch (error) {
-    if (!await rollbackBeforeConfig(error)) throw startupCleanupIncompleteError(error);
-    throw error;
-  }
-  const sessionName = session.sessionName;
-  const leaderPaneId = session.leaderPaneId;
-  const ownsWindow = session.sessionMode !== 'split-pane';
-  const workerPaneIds: string[] = [];
-  const leaderSessionId = resolveLeaderClaudeSessionId();
-
-  // Build workers info for config
-  const workersInfo: WorkerInfo[] = workerNames.map((wName, i) => {
-    const worktree = workerWorktrees.get(wName);
-    return {
-      name: wName,
-      index: i + 1,
-      role: preparedLaunches.get(wName)?.role
-        ?? config.workerRoles?.[i]
-        ?? (agentTypes[i % agentTypes.length] ?? agentTypes[0] ?? 'claude') as string,
-      worker_cli: preparedLaunches.get(wName)!.descriptor.provider,
-      launch_descriptor: preparedLaunches.get(wName)!.descriptor,
-      assigned_tasks: [] as string[],
-      working_dir: worktree?.path ?? leaderCwd,
-      team_state_root: teamStateRoot(leaderCwd, sanitized),
-      ...(worktree ? {
-        worktree_repo_root: leaderCwd,
-        worktree_path: worktree.path,
-        worktree_branch: worktree.branch,
-        worktree_detached: worktree.detached,
-        worktree_created: worktree.created,
-      } : {}),
-    };
-  });
-
-  // Write initial v2 config
-  const teamConfig: TeamConfig = {
-    name: sanitized,
-    instance_id: instance.instance_id,
-    ...(session.tmuxServerIdentity ? { tmux_server_identity: session.tmuxServerIdentity } : {}),
-    state_revision: 0,
-    task: config.tasks.map(t => t.subject).join('; '),
-    agent_type: agentTypes[0] || 'claude',
-    worker_launch_mode: 'interactive',
-    policy: DEFAULT_TEAM_TRANSPORT_POLICY,
-    governance: DEFAULT_TEAM_GOVERNANCE,
-    worker_count: config.workerCount,
-    max_workers: ABSOLUTE_MAX_WORKERS,
-    workers: workersInfo,
-    created_at: new Date().toISOString(),
-    tmux_session: sessionName,
-    tmux_window_owned: ownsWindow,
-    next_task_id: config.tasks.length + 1,
-    ...(leaderSessionId ? { leader_session_id: leaderSessionId } : {}),
-    leader_cwd: leaderCwd,
-    team_state_root: teamStateRoot(leaderCwd, sanitized),
-    leader_pane_id: leaderPaneId,
-    hud_pane_id: null,
-    resize_hook_name: null,
-    resize_hook_target: null,
-    resolved_routing: resolvedRouting,
-    resolved_routing_roles: Object.keys(pluginCfg.team?.roleRouting ?? {})
-      .map(role => normalizeDelegationRole(role))
-      .filter((role): role is CanonicalTeamRole => (CANONICAL_TEAM_ROLES as readonly string[]).includes(role)),
-    external_models_defaults: externalModelsDefaults,
-    workspace_mode: workspaceMode,
-    worktree_mode: worktreeMode,
-    lifecycle_state: 'starting',
-    service_descriptor: config.autoMerge
-      ? { schema_version: 1, service_generation: 1, service_attempt_id: randomUUID(), auto_merge_enabled: true,
-        workspace_root: leaderCwd, leader_branch: autoMergeLeaderBranch!, cadence_policy: 'worker-auto-commit-v1' }
-      : { schema_version: 1, service_generation: 1, service_attempt_id: randomUUID(), auto_merge_enabled: false,
-        workspace_root: leaderCwd, cadence_policy: 'disabled' },
-  };
-  try {
-    await commitInitialTeamConfigUnderLock(teamConfig, leaderCwd, instance);
-  } catch (error) {
-    await rollbackAfterConfig({
-      teamName: sanitized,
-      cwd: leaderCwd,
-      cause: error,
-      sessionName,
-      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
-      leaderPaneId,
-      workerPaneIds,
-      sessionMode: session.sessionMode,
-    });
-    throw error;
-  }
-  const permissionsSnapshot = {
-    approval_mode: process.env.OMC_APPROVAL_MODE || 'default',
-    sandbox_mode: process.env.OMC_SANDBOX_MODE || 'default',
-    network_access: process.env.OMC_NETWORK_ACCESS === '1',
-  };
-  const teamManifest: TeamManifestV2 = {
-    schema_version: 2,
-    state_revision: 0,
-    name: sanitized,
-    instance_id: instance.instance_id,
-    ...(session.tmuxServerIdentity ? { tmux_server_identity: session.tmuxServerIdentity } : {}),
-    task: teamConfig.task,
-    leader: {
-      session_id: leaderSessionId ?? sessionName,
-      worker_id: 'leader-fixed',
-      role: 'leader',
-    },
-    policy: DEFAULT_TEAM_TRANSPORT_POLICY,
-    governance: DEFAULT_TEAM_GOVERNANCE,
-    permissions_snapshot: permissionsSnapshot,
-    tmux_session: sessionName,
-    worker_count: teamConfig.worker_count,
-    workers: workersInfo,
-    next_task_id: teamConfig.next_task_id,
-    created_at: teamConfig.created_at,
-    leader_cwd: leaderCwd,
-    team_state_root: teamConfig.team_state_root,
-    workspace_mode: teamConfig.workspace_mode,
-    worktree_mode: teamConfig.worktree_mode,
-    leader_pane_id: leaderPaneId,
-    hud_pane_id: null,
-    resize_hook_name: null,
-    resize_hook_target: null,
-    next_worker_index: teamConfig.next_worker_index,
-    resolved_routing: teamConfig.resolved_routing,
-    resolved_routing_roles: teamConfig.resolved_routing_roles,
-    external_models_defaults: teamConfig.external_models_defaults,
-    service_descriptor: teamConfig.service_descriptor,
-  };
-  try {
-    await writeFile(absPath(leaderCwd, TeamPaths.manifest(sanitized)), JSON.stringify(teamManifest, null, 2), 'utf-8');
-    await activateTeamInstanceUnderLock(instance);
-  } catch (error) {
-    await rollbackAfterConfig({
-      teamName: sanitized,
-      cwd: leaderCwd,
-      cause: error,
-      sessionName,
-      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
-      leaderPaneId,
-      workerPaneIds,
-      sessionMode: session.sessionMode,
-    });
-    throw error;
-  }
-
-  const launchedWorkers: Array<{ name: string; paneId: string; launchAttemptId?: string; provider: string }> = [];
-  const startupFailures: TeamStartupFailure[] = [];
-  try {
-    // Reuse the same first-per-worker selection used by assignment and
-    // preflight; no second dedupe policy may diverge from startupByWorker.
-    for (const [wName, taskIndex] of startupByWorker) {
-    const workerIndex = Number.parseInt(wName.replace('worker-', ''), 10) - 1;
-    const taskId = String(taskIndex + 1);
-    const task = config.tasks[taskIndex];
-    if (!task || workerIndex < 0) continue;
-
-    const prepared = preparedLaunches.get(wName);
-    if (!prepared) continue;
-    const workerInfo = workersInfo[workerIndex];
-    if (!workerInfo) continue;
-    const workerLaunch = await spawnV2Worker({
-      sessionName,
-      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
-      leaderPaneId,
-      existingWorkerPaneIds: workerPaneIds,
-      teamName: sanitized,
-      instanceId: instance.instance_id,
-      workerName: wName,
-      workerIndex,
-      agentType: prepared.agentType,
-      launchDescriptor: prepared.descriptor,
-      task,
-      taskId,
-      cwd: leaderCwd,
-      workerCwd: workerInfo.working_dir ?? leaderCwd,
-      worktreePath: workerInfo.worktree_path,
-      autoMerge: Boolean(config.autoMerge),
-      ...(prepared.role ? { role: prepared.role } : {}),
-      ...(prepared.verdictAssignmentId ? { verdictAssignmentId: prepared.verdictAssignmentId } : {}),
-    });
-
-    if (workerLaunch.paneId) {
-      if (workerLaunch.startupAssigned) workerPaneIds.push(workerLaunch.paneId);
-      launchedWorkers.push({
-        name: wName, paneId: workerLaunch.paneId,
-        ...(workerLaunch.launchAttemptId ? { launchAttemptId: workerLaunch.launchAttemptId } : {}),
-        provider: prepared.agentType,
-      });
+    const workerWorktrees = new Map<
+      string,
+      NonNullable<ReturnType<typeof ensureWorkerWorktree>>
+    >();
+    const preparedLaunches = new Map<
+      string,
       {
-        workerInfo.pane_id = workerLaunch.paneId;
-        workerInfo.assigned_tasks = workerLaunch.startupAssigned ? [taskId] : [];
-        workerInfo.worker_cli = prepared.agentType;
-        if (workerLaunch.launchAttemptId) {
-          workerInfo.launch_attempt_id = workerLaunch.launchAttemptId;
-        }
-        if (workerLaunch.outputFile) {
-          workerInfo.output_file = workerLaunch.outputFile;
-        }
+        agentType: CliAgentType;
+        role?: CanonicalTeamRole;
+        descriptor: WorkerLaunchDescriptor;
+        verdictAssignmentId?: string;
       }
-    }
-
-    if (workerLaunch.startupFailureReason) {
-      startupFailures.push({
-        worker: wName,
-        reason: workerLaunch.startupFailureReason,
-        ...(workerLaunch.claimError ? { claimError: workerLaunch.claimError } : {}),
-      });
-      const logEventFailure = createSwallowedErrorLogger(
-        'team.runtime-v2.startTeamV2 appendTeamEvent failed',
-      );
-      appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `startup_manual_intervention_required:${wName}:${workerLaunch.startupFailureReason}`,
-      }, leaderCwd).catch(logEventFailure);
-    }
-  }
-  } catch (error) {
-    const unresolvedLaunch = error && typeof error === 'object' && 'unresolvedLaunch' in error
-      ? (error as StartupLaunchError).unresolvedLaunch
-      : undefined;
-    if (unresolvedLaunch && !launchedWorkers.some(candidate =>
-      candidate.launchAttemptId === unresolvedLaunch.launchAttemptId)) {
-      launchedWorkers.push(unresolvedLaunch);
-      const workerInfo = workersInfo.find(candidate => candidate.name === unresolvedLaunch.name);
-      if (workerInfo) {
-        workerInfo.pane_id = unresolvedLaunch.paneId;
-        workerInfo.launch_attempt_id = unresolvedLaunch.launchAttemptId;
-        workerInfo.worker_cli = unresolvedLaunch.provider;
-        workerInfo.operational_state = 'starting';
-        teamConfig.workers = workersInfo;
-        try {
-          await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
-        } catch {
-          // The durable launch receipt and rollback marker remain the
-          // fallback evidence; never proceed to destructive cleanup without
-          // the unresolved launch in `launchedWorkers`.
-        }
-      }
-    }
-    await rollbackAfterConfig({
-      teamName: sanitized,
-      cwd: leaderCwd,
-      cause: error,
-      sessionName,
-      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
-      leaderPaneId,
-      workerPaneIds,
-      sessionMode: session.sessionMode,
-      launchedWorkers,
-    });
-    throw error;
-  }
-
-  // Persist config with pane IDs
-  teamConfig.workers = workersInfo;
-  teamConfig.lifecycle_state = 'active';
-  try {
-    await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
-  } catch (error) {
-    await rollbackAfterConfig({
-      teamName: sanitized,
-      cwd: leaderCwd,
-      cause: error,
-      sessionName,
-      ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
-      leaderPaneId,
-      workerPaneIds,
-      sessionMode: session.sessionMode,
-      launchedWorkers,
-    });
-    throw error;
-  }
-
-  const logEventFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.startTeamV2 appendTeamEvent failed',
-  );
-  // Emit start event — NO watchdog, leader drives via monitorTeamV2()
-  appendTeamEvent(sanitized, {
-    type: 'team_leader_nudge',
-    worker: 'leader-fixed',
-    reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`,
-  }, leaderCwd).catch(logEventFailure);
-
-  // Auto-merge orchestrator startup. Because --auto-merge is an explicit
-  // safety opt-in, startup/registration failures are fatal: continuing would
-  // leave users believing worker edits are being merged when they are not.
-  if (config.autoMerge && autoMergeLeaderBranch) {
+    >();
     try {
-      await ensureLeaderInbox(sanitized, leaderCwd);
-      // Seed an introductory leader-inbox note so the leader knows the inbox
-      // exists and where to read it. This mirrors the worker bootstrap pattern.
-      await appendToLeaderInbox(
-        sanitized,
-        extendLeaderBootstrapPrompt(sanitized, leaderCwd),
-        leaderCwd,
+      // Create state directories
+      await mkdir(absPath(leaderCwd, TeamPaths.tasks(sanitized)), {
+        recursive: true,
+      });
+      await mkdir(absPath(leaderCwd, TeamPaths.workers(sanitized)), {
+        recursive: true,
+      });
+      await mkdir(
+        join(getOmcRoot(leaderCwd), "state", "team", sanitized, "mailbox"),
+        { recursive: true },
       );
 
-      // M6: try to recover from a previous run before starting fresh.
+      // Write task files
+      for (let i = 0; i < config.tasks.length; i++) {
+        const taskId = String(i + 1);
+        const task = config.tasks[i]!;
+        const taskFilePath = absPath(
+          leaderCwd,
+          TeamPaths.taskFile(sanitized, taskId),
+        );
+        const taskRecord = normalizeTaskRecord(
+          createTaskRecord(taskId, {
+            subject: task.subject,
+            description: task.description,
+            status: "pending",
+            ...(task.owner !== undefined ? { owner: task.owner } : {}),
+            ...(task.role !== undefined ? { role: task.role } : {}),
+            ...(task.blocked_by !== undefined
+              ? { blocked_by: [...task.blocked_by] }
+              : {}),
+            ...(dependencyByIndex.get(i)?.length
+              ? { depends_on: [...dependencyByIndex.get(i)!] }
+              : {}),
+            ...(task.delegation !== undefined
+              ? { delegation: task.delegation }
+              : {}),
+          }),
+        );
+        await writeAtomic(taskFilePath, JSON.stringify(taskRecord, null, 2));
+      }
+
       try {
-        await recoverFromRestart({
-          teamName: sanitized,
-          repoRoot: leaderCwd,
-          leaderBranch: autoMergeLeaderBranch,
-          cwd: leaderCwd,
+        if (worktreeMode !== "disabled") {
+          for (const workerName of workerNames) {
+            const worktree = ensureWorkerWorktree(
+              sanitized,
+              workerName,
+              leaderCwd,
+              {
+                mode: worktreeMode,
+                requireCleanLeader: true,
+              },
+            );
+            if (worktree) workerWorktrees.set(workerName, worktree);
+          }
+        }
+      } catch (error) {
+        if (!(await rollbackBeforeConfig(error)))
+          throw startupCleanupIncompleteError(error);
+        throw error;
+      }
+      for (let i = 0; i < workerNames.length; i++) {
+        const workerName = workerNames[i]!;
+        const taskIndex = startupByWorker.get(workerName);
+        const assignment = startupAssignments.get(workerName);
+        if (!assignment)
+          throw new Error(`Missing startup assignment for ${workerName}`);
+        const worktree = workerWorktrees.get(workerName);
+        const verdictAssignmentId =
+          taskIndex !== undefined ? randomUUID() : undefined;
+        const outputFile =
+          taskIndex !== undefined &&
+          assignment.role &&
+          shouldInjectContract(assignment.role, assignment.agentType)
+            ? cliWorkerOutputFilePath(
+                teamStateRoot(leaderCwd, sanitized),
+                workerName,
+                {
+                  taskId: String(taskIndex + 1),
+                  assignmentId: verdictAssignmentId,
+                },
+              )
+            : undefined;
+        const outputContract =
+          outputFile && assignment.role
+            ? renderCliWorkerOutputContract(assignment.role, outputFile)
+            : undefined;
+        const binary = resolvedBinaryPaths[assignment.agentType];
+        if (!binary)
+          throw new Error(
+            `No validated binary available for ${assignment.agentType}`,
+          );
+        const startupPrompt =
+          taskIndex !== undefined && isPromptModeAgent(assignment.agentType)
+            ? generatePromptModeStartupPrompt(
+                sanitized,
+                workerName,
+                workerInstructionStateRoot(leaderCwd, sanitized),
+                outputContract,
+              )
+            : undefined;
+        const transportPrompt =
+          startupPrompt &&
+          process.platform === "win32" &&
+          /\.(?:cmd|bat)$/i.test(binary)
+            ? startupPrompt.replace(/\s*\r?\n\s*/g, " ")
+            : startupPrompt;
+        const promptArgs = transportPrompt
+          ? getPromptModeArgs(assignment.agentType, transportPrompt)
+          : [];
+        const descriptor = buildValidatedWorkerLaunchDescriptor(
+          assignment.agentType,
+          {
+            teamName: sanitized,
+            workerName,
+            cwd: worktree?.path ?? leaderCwd,
+            resolvedBinaryPath: binary,
+            model: assignment.model,
+            reasoningEffort: assignment.reasoningEffort,
+          },
+          promptArgs,
+        );
+        preparedLaunches.set(workerName, {
+          agentType: assignment.agentType,
+          ...(assignment.role ? { role: assignment.role } : {}),
+          descriptor,
+          ...(verdictAssignmentId ? { verdictAssignmentId } : {}),
         });
-      } catch (recErr) {
-        process.stderr.write(`[team/runtime-v2] auto-merge recover-from-restart failed: ${recErr}\n`);
       }
+    } catch (error) {
+      if (!(await rollbackBeforeConfig(error)))
+        throw startupCleanupIncompleteError(error);
+      throw error;
+    }
 
-      const orchestrator = await startMergeOrchestrator({
-        teamName: sanitized,
-        repoRoot: leaderCwd,
-        leaderBranch: autoMergeLeaderBranch,
-        cwd: leaderCwd,
-        serviceGeneration: teamConfig.service_descriptor!.service_generation,
-        serviceAttemptId: teamConfig.service_descriptor!.service_attempt_id,
+    // Set up worker state dirs and overlays (with v2 CLI API instructions)
+    try {
+      for (let i = 0; i < workerNames.length; i++) {
+        const wName = workerNames[i];
+        const prepared = preparedLaunches.get(wName);
+        if (!prepared) throw new Error(`Missing prepared launch for ${wName}`);
+        await ensureWorkerStateDir(sanitized, wName, leaderCwd);
+        const bootstrapInstructions = resolveWorkerBootstrapInstructions(
+          config,
+          i,
+          prepared.role,
+        );
+        const overlayPath = await writeWorkerOverlay({
+          teamName: sanitized,
+          workerName: wName,
+          agentType: prepared.agentType,
+          tasks: config.tasks.map((t, idx) => ({
+            id: String(idx + 1),
+            subject: t.subject,
+            description: t.description,
+          })),
+          cwd: leaderCwd,
+          ...(bootstrapInstructions ? { bootstrapInstructions } : {}),
+          instructionStateRoot: workerInstructionStateRoot(
+            leaderCwd,
+            sanitized,
+          ),
+          ...(prepared.role &&
+          shouldInjectContract(prepared.role, prepared.agentType)
+            ? { reviewerRole: true }
+            : {}),
+        });
+        const worktree = workerWorktrees.get(wName);
+        if (worktree) {
+          const overlayContent = await readFile(overlayPath, "utf-8");
+          installWorktreeRootAgents(
+            sanitized,
+            wName,
+            leaderCwd,
+            worktree.path,
+            overlayContent,
+          );
+        }
+      }
+    } catch (error) {
+      if (!(await rollbackBeforeConfig(error)))
+        throw startupCleanupIncompleteError(error);
+      throw error;
+    }
+
+    // Create tmux session (leader only — workers spawned below)
+    let session: Awaited<ReturnType<typeof createTeamSession>>;
+    try {
+      session = await createTeamSession(sanitized, 0, leaderCwd, {
+        newWindow: Boolean(config.newWindow),
       });
-      registerTeamOrchestrator(sanitized, orchestrator, { serviceGeneration: teamConfig.service_descriptor!.service_generation,
-        serviceAttemptId: teamConfig.service_descriptor!.service_attempt_id });
+    } catch (error) {
+      if (!(await rollbackBeforeConfig(error)))
+        throw startupCleanupIncompleteError(error);
+      throw error;
+    }
+    const sessionName = session.sessionName;
+    const leaderPaneId = session.leaderPaneId;
+    const ownsWindow = session.sessionMode !== "split-pane";
+    const workerPaneIds: string[] = [];
+    const leaderSessionId = resolveLeaderClaudeSessionId();
 
-      // Register every spawned worker (named worktree mode is enforced above
-      // when autoMerge is on, so worker branches exist). A single failed
-      // registration makes the auto-merge contract unsafe, so fail loudly.
-      for (const w of workersInfo) {
-        await orchestrator.registerWorker(w.name);
-      }
-    } catch (orchErr) {
-      await stopTeamCadence(sanitized);
-      unregisterTeamOrchestrator(sanitized);
+    // Build workers info for config
+    const workersInfo: WorkerInfo[] = workerNames.map((wName, i) => {
+      const worktree = workerWorktrees.get(wName);
+      return {
+        name: wName,
+        index: i + 1,
+        role:
+          preparedLaunches.get(wName)?.role ??
+          config.workerRoles?.[i] ??
+          ((agentTypes[i % agentTypes.length] ??
+            agentTypes[0] ??
+            "claude") as string),
+        worker_cli: preparedLaunches.get(wName)!.descriptor.provider,
+        launch_descriptor: preparedLaunches.get(wName)!.descriptor,
+        assigned_tasks: [] as string[],
+        working_dir: worktree?.path ?? leaderCwd,
+        team_state_root: teamStateRoot(leaderCwd, sanitized),
+        ...(worktree
+          ? {
+              worktree_repo_root: leaderCwd,
+              worktree_path: worktree.path,
+              worktree_branch: worktree.branch,
+              worktree_detached: worktree.detached,
+              worktree_created: worktree.created,
+            }
+          : {}),
+      };
+    });
+
+    // Write initial v2 config
+    const teamConfig: TeamConfig = {
+      name: sanitized,
+      instance_id: instance.instance_id,
+      ...(session.tmuxServerIdentity
+        ? { tmux_server_identity: session.tmuxServerIdentity }
+        : {}),
+      state_revision: 0,
+      task: config.tasks.map((t) => t.subject).join("; "),
+      agent_type: agentTypes[0] || "claude",
+      worker_launch_mode: "interactive",
+      policy: DEFAULT_TEAM_TRANSPORT_POLICY,
+      governance: DEFAULT_TEAM_GOVERNANCE,
+      worker_count: config.workerCount,
+      max_workers: ABSOLUTE_MAX_WORKERS,
+      workers: workersInfo,
+      created_at: new Date().toISOString(),
+      tmux_session: sessionName,
+      tmux_window_owned: ownsWindow,
+      next_task_id: config.tasks.length + 1,
+      ...(leaderSessionId ? { leader_session_id: leaderSessionId } : {}),
+      leader_cwd: leaderCwd,
+      team_state_root: teamStateRoot(leaderCwd, sanitized),
+      leader_pane_id: leaderPaneId,
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+      resolved_routing: resolvedRouting,
+      resolved_routing_roles: Object.keys(pluginCfg.team?.roleRouting ?? {})
+        .map((role) => normalizeDelegationRole(role))
+        .filter((role): role is CanonicalTeamRole =>
+          (CANONICAL_TEAM_ROLES as readonly string[]).includes(role),
+        ),
+      external_models_defaults: externalModelsDefaults,
+      workspace_mode: workspaceMode,
+      worktree_mode: worktreeMode,
+      lifecycle_state: "starting",
+      service_descriptor: config.autoMerge
+        ? {
+            schema_version: 1,
+            service_generation: 1,
+            service_attempt_id: randomUUID(),
+            auto_merge_enabled: true,
+            workspace_root: leaderCwd,
+            leader_branch: autoMergeLeaderBranch!,
+            cadence_policy: "worker-auto-commit-v1",
+          }
+        : {
+            schema_version: 1,
+            service_generation: 1,
+            service_attempt_id: randomUUID(),
+            auto_merge_enabled: false,
+            workspace_root: leaderCwd,
+            cadence_policy: "disabled",
+          },
+    };
+    try {
+      await commitInitialTeamConfigUnderLock(teamConfig, leaderCwd, instance);
+    } catch (error) {
       await rollbackAfterConfig({
         teamName: sanitized,
         cwd: leaderCwd,
-        cause: orchErr,
+        cause: error,
         sessionName,
-        ...(session.tmuxServerIdentity ? { tmuxServerIdentity: session.tmuxServerIdentity } : {}),
+        ...(session.tmuxServerIdentity
+          ? { tmuxServerIdentity: session.tmuxServerIdentity }
+          : {}),
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode,
+      });
+      throw error;
+    }
+    const permissionsSnapshot = {
+      approval_mode: process.env.OMC_APPROVAL_MODE || "default",
+      sandbox_mode: process.env.OMC_SANDBOX_MODE || "default",
+      network_access: process.env.OMC_NETWORK_ACCESS === "1",
+    };
+    const teamManifest: TeamManifestV2 = {
+      schema_version: 2,
+      state_revision: 0,
+      name: sanitized,
+      instance_id: instance.instance_id,
+      ...(session.tmuxServerIdentity
+        ? { tmux_server_identity: session.tmuxServerIdentity }
+        : {}),
+      task: teamConfig.task,
+      leader: {
+        session_id: leaderSessionId ?? sessionName,
+        worker_id: "leader-fixed",
+        role: "leader",
+      },
+      policy: DEFAULT_TEAM_TRANSPORT_POLICY,
+      governance: DEFAULT_TEAM_GOVERNANCE,
+      permissions_snapshot: permissionsSnapshot,
+      tmux_session: sessionName,
+      worker_count: teamConfig.worker_count,
+      workers: workersInfo,
+      next_task_id: teamConfig.next_task_id,
+      created_at: teamConfig.created_at,
+      leader_cwd: leaderCwd,
+      team_state_root: teamConfig.team_state_root,
+      workspace_mode: teamConfig.workspace_mode,
+      worktree_mode: teamConfig.worktree_mode,
+      leader_pane_id: leaderPaneId,
+      hud_pane_id: null,
+      resize_hook_name: null,
+      resize_hook_target: null,
+      next_worker_index: teamConfig.next_worker_index,
+      resolved_routing: teamConfig.resolved_routing,
+      resolved_routing_roles: teamConfig.resolved_routing_roles,
+      external_models_defaults: teamConfig.external_models_defaults,
+      service_descriptor: teamConfig.service_descriptor,
+    };
+    try {
+      await writeFile(
+        absPath(leaderCwd, TeamPaths.manifest(sanitized)),
+        JSON.stringify(teamManifest, null, 2),
+        "utf-8",
+      );
+      await activateTeamInstanceUnderLock(instance);
+    } catch (error) {
+      await rollbackAfterConfig({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: error,
+        sessionName,
+        ...(session.tmuxServerIdentity
+          ? { tmuxServerIdentity: session.tmuxServerIdentity }
+          : {}),
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode,
+      });
+      throw error;
+    }
+
+    const launchedWorkers: Array<{
+      name: string;
+      paneId: string;
+      launchAttemptId?: string;
+      provider: string;
+    }> = [];
+    const startupFailures: TeamStartupFailure[] = [];
+    try {
+      // Reuse the same first-per-worker selection used by assignment and
+      // preflight; no second dedupe policy may diverge from startupByWorker.
+      for (const [wName, taskIndex] of startupByWorker) {
+        const workerIndex =
+          Number.parseInt(wName.replace("worker-", ""), 10) - 1;
+        const taskId = String(taskIndex + 1);
+        const task = config.tasks[taskIndex];
+        if (!task || workerIndex < 0) continue;
+
+        const prepared = preparedLaunches.get(wName);
+        if (!prepared) continue;
+        const workerInfo = workersInfo[workerIndex];
+        if (!workerInfo) continue;
+        const workerLaunch = await spawnV2Worker({
+          sessionName,
+          ...(session.tmuxServerIdentity
+            ? { tmuxServerIdentity: session.tmuxServerIdentity }
+            : {}),
+          leaderPaneId,
+          existingWorkerPaneIds: workerPaneIds,
+          teamName: sanitized,
+          instanceId: instance.instance_id,
+          workerName: wName,
+          workerIndex,
+          agentType: prepared.agentType,
+          launchDescriptor: prepared.descriptor,
+          task,
+          taskId,
+          cwd: leaderCwd,
+          workerCwd: workerInfo.working_dir ?? leaderCwd,
+          worktreePath: workerInfo.worktree_path,
+          autoMerge: Boolean(config.autoMerge),
+          ...(prepared.role ? { role: prepared.role } : {}),
+          ...(prepared.verdictAssignmentId
+            ? { verdictAssignmentId: prepared.verdictAssignmentId }
+            : {}),
+        });
+
+        if (workerLaunch.paneId) {
+          if (workerLaunch.startupAssigned)
+            workerPaneIds.push(workerLaunch.paneId);
+          launchedWorkers.push({
+            name: wName,
+            paneId: workerLaunch.paneId,
+            ...(workerLaunch.launchAttemptId
+              ? { launchAttemptId: workerLaunch.launchAttemptId }
+              : {}),
+            provider: prepared.agentType,
+          });
+          {
+            workerInfo.pane_id = workerLaunch.paneId;
+            workerInfo.assigned_tasks = workerLaunch.startupAssigned
+              ? [taskId]
+              : [];
+            workerInfo.worker_cli = prepared.agentType;
+            if (workerLaunch.launchAttemptId) {
+              workerInfo.launch_attempt_id = workerLaunch.launchAttemptId;
+            }
+            if (workerLaunch.outputFile) {
+              workerInfo.output_file = workerLaunch.outputFile;
+            }
+          }
+        }
+
+        if (workerLaunch.startupFailureReason) {
+          startupFailures.push({
+            worker: wName,
+            reason: workerLaunch.startupFailureReason,
+            ...(workerLaunch.claimError
+              ? { claimError: workerLaunch.claimError }
+              : {}),
+          });
+          const logEventFailure = createSwallowedErrorLogger(
+            "team.runtime-v2.startTeamV2 appendTeamEvent failed",
+          );
+          appendTeamEvent(
+            sanitized,
+            {
+              type: "team_leader_nudge",
+              worker: "leader-fixed",
+              reason: `startup_manual_intervention_required:${wName}:${workerLaunch.startupFailureReason}`,
+            },
+            leaderCwd,
+          ).catch(logEventFailure);
+        }
+      }
+    } catch (error) {
+      const unresolvedLaunch =
+        error && typeof error === "object" && "unresolvedLaunch" in error
+          ? (error as StartupLaunchError).unresolvedLaunch
+          : undefined;
+      if (
+        unresolvedLaunch &&
+        !launchedWorkers.some(
+          (candidate) =>
+            candidate.launchAttemptId === unresolvedLaunch.launchAttemptId,
+        )
+      ) {
+        launchedWorkers.push(unresolvedLaunch);
+        const workerInfo = workersInfo.find(
+          (candidate) => candidate.name === unresolvedLaunch.name,
+        );
+        if (workerInfo) {
+          workerInfo.pane_id = unresolvedLaunch.paneId;
+          workerInfo.launch_attempt_id = unresolvedLaunch.launchAttemptId;
+          workerInfo.worker_cli = unresolvedLaunch.provider;
+          workerInfo.operational_state = "starting";
+          teamConfig.workers = workersInfo;
+          try {
+            await saveTeamConfig(
+              teamConfig,
+              leaderCwd,
+              teamConfig.state_revision,
+            );
+          } catch {
+            // The durable launch receipt and rollback marker remain the
+            // fallback evidence; never proceed to destructive cleanup without
+            // the unresolved launch in `launchedWorkers`.
+          }
+        }
+      }
+      await rollbackAfterConfig({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: error,
+        sessionName,
+        ...(session.tmuxServerIdentity
+          ? { tmuxServerIdentity: session.tmuxServerIdentity }
+          : {}),
         leaderPaneId,
         workerPaneIds,
         sessionMode: session.sessionMode,
         launchedWorkers,
       });
-      const reason = orchErr instanceof Error ? orchErr.message : String(orchErr);
-      throw new Error(`auto-merge startup failed: ${reason}`);
+      throw error;
     }
-  }
 
-  return {
-    teamName: sanitized,
-    sanitizedName: sanitized,
-    instanceId: instance.instance_id,
-    sessionName,
-    config: teamConfig,
-    cwd: leaderCwd,
-    ownsWindow: ownsWindow,
-    startupFailures,
-  };
+    // Persist config with pane IDs
+    teamConfig.workers = workersInfo;
+    teamConfig.lifecycle_state = "active";
+    try {
+      await saveTeamConfig(teamConfig, leaderCwd, teamConfig.state_revision);
+    } catch (error) {
+      await rollbackAfterConfig({
+        teamName: sanitized,
+        cwd: leaderCwd,
+        cause: error,
+        sessionName,
+        ...(session.tmuxServerIdentity
+          ? { tmuxServerIdentity: session.tmuxServerIdentity }
+          : {}),
+        leaderPaneId,
+        workerPaneIds,
+        sessionMode: session.sessionMode,
+        launchedWorkers,
+      });
+      throw error;
+    }
+
+    const logEventFailure = createSwallowedErrorLogger(
+      "team.runtime-v2.startTeamV2 appendTeamEvent failed",
+    );
+    // Emit start event — NO watchdog, leader drives via monitorTeamV2()
+    appendTeamEvent(
+      sanitized,
+      {
+        type: "team_leader_nudge",
+        worker: "leader-fixed",
+        reason: `start_team_v2: workers=${config.workerCount} tasks=${config.tasks.length} panes=${workerPaneIds.length}`,
+      },
+      leaderCwd,
+    ).catch(logEventFailure);
+
+    // Auto-merge orchestrator startup. Because --auto-merge is an explicit
+    // safety opt-in, startup/registration failures are fatal: continuing would
+    // leave users believing worker edits are being merged when they are not.
+    if (config.autoMerge && autoMergeLeaderBranch) {
+      try {
+        await ensureLeaderInbox(sanitized, leaderCwd);
+        // Seed an introductory leader-inbox note so the leader knows the inbox
+        // exists and where to read it. This mirrors the worker bootstrap pattern.
+        await appendToLeaderInbox(
+          sanitized,
+          extendLeaderBootstrapPrompt(sanitized, leaderCwd),
+          leaderCwd,
+        );
+
+        // M6: try to recover from a previous run before starting fresh.
+        try {
+          await recoverFromRestart({
+            teamName: sanitized,
+            repoRoot: leaderCwd,
+            leaderBranch: autoMergeLeaderBranch,
+            cwd: leaderCwd,
+          });
+        } catch (recErr) {
+          process.stderr.write(
+            `[team/runtime-v2] auto-merge recover-from-restart failed: ${recErr}\n`,
+          );
+        }
+
+        const orchestrator = await startMergeOrchestrator({
+          teamName: sanitized,
+          repoRoot: leaderCwd,
+          leaderBranch: autoMergeLeaderBranch,
+          cwd: leaderCwd,
+          serviceGeneration: teamConfig.service_descriptor!.service_generation,
+          serviceAttemptId: teamConfig.service_descriptor!.service_attempt_id,
+        });
+        registerTeamOrchestrator(sanitized, orchestrator, {
+          serviceGeneration: teamConfig.service_descriptor!.service_generation,
+          serviceAttemptId: teamConfig.service_descriptor!.service_attempt_id,
+        });
+
+        // Register every spawned worker (named worktree mode is enforced above
+        // when autoMerge is on, so worker branches exist). A single failed
+        // registration makes the auto-merge contract unsafe, so fail loudly.
+        for (const w of workersInfo) {
+          await orchestrator.registerWorker(w.name);
+        }
+      } catch (orchErr) {
+        await stopTeamCadence(sanitized);
+        unregisterTeamOrchestrator(sanitized);
+        await rollbackAfterConfig({
+          teamName: sanitized,
+          cwd: leaderCwd,
+          cause: orchErr,
+          sessionName,
+          ...(session.tmuxServerIdentity
+            ? { tmuxServerIdentity: session.tmuxServerIdentity }
+            : {}),
+          leaderPaneId,
+          workerPaneIds,
+          sessionMode: session.sessionMode,
+          launchedWorkers,
+        });
+        const reason =
+          orchErr instanceof Error ? orchErr.message : String(orchErr);
+        throw new Error(`auto-merge startup failed: ${reason}`);
+      }
+    }
+
+    return {
+      teamName: sanitized,
+      sanitizedName: sanitized,
+      instanceId: instance.instance_id,
+      sessionName,
+      config: teamConfig,
+      cwd: leaderCwd,
+      ownsWindow: ownsWindow,
+      startupFailures,
+    };
   });
 }
 
@@ -4660,16 +6900,16 @@ export async function writeWatchdogFailedMarker(
   cwd: string,
   reason: string,
 ): Promise<void> {
-  const { writeFile } = await import('fs/promises');
+  const { writeFile } = await import("fs/promises");
   const marker = {
     failedAt: Date.now(),
     reason,
-    writtenBy: 'runtime-v2',
+    writtenBy: "runtime-v2",
   };
   const root = absPath(cwd, TeamPaths.root(sanitizeTeamName(teamName)));
-  const markerPath = join(root, 'watchdog-failed.json');
+  const markerPath = join(root, "watchdog-failed.json");
   await mkdir(root, { recursive: true });
-  await writeFile(markerPath, JSON.stringify(marker, null, 2), 'utf-8');
+  await writeFile(markerPath, JSON.stringify(marker, null, 2), "utf-8");
 }
 
 /**
@@ -4724,7 +6964,7 @@ export async function requeueDeadWorkerTasks(
   const requeued = new Set<string>();
   for (const workerName of deadWorkerNames) {
     const outcome = await recoverDeadWorkerV2(sanitized, cwd, { workerName });
-    if (outcome.outcome === 'recovered') {
+    if (outcome.outcome === "recovered") {
       for (const taskId of outcome.requeuedTaskIds) requeued.add(taskId);
     }
   }
@@ -4735,31 +6975,33 @@ export async function requeueDeadWorkerTasks(
 // AC-7: CLI worker verdict completion handler
 // ---------------------------------------------------------------------------
 
-const CURSOR_RUNTIME_POLICY_SKIP_REASON = 'runtime worker protocol forbids nested subagents';
-const CURSOR_RUNTIME_POLICY_SKIP_PROVENANCE = 'runtime-policy';
-const CURSOR_DELEGATION_EVIDENCE_LINE = /^\s*Subagent (?:spawn evidence|skip reason):/i;
+const CURSOR_RUNTIME_POLICY_SKIP_REASON =
+  "runtime worker protocol forbids nested subagents";
+const CURSOR_RUNTIME_POLICY_SKIP_PROVENANCE = "runtime-policy";
+const CURSOR_DELEGATION_EVIDENCE_LINE =
+  /^\s*Subagent (?:spawn evidence|skip reason):/i;
 
 function stripCursorDelegationEvidenceMarkers(summary: string): string {
   return summary
     .split(/\r\n|\r|\n/)
-    .filter(line => !CURSOR_DELEGATION_EVIDENCE_LINE.test(line))
-    .join('\n');
+    .filter((line) => !CURSOR_DELEGATION_EVIDENCE_LINE.test(line))
+    .join("\n");
 }
 
 export type CliWorkerVerdictStatus =
-  | 'completed'
-  | 'failed'
-  | 'file_missing'
-  | 'parse_failed'
-  | 'no_in_progress_task'
-  | 'already_terminal'
-  | 'skipped';
+  | "completed"
+  | "failed"
+  | "file_missing"
+  | "parse_failed"
+  | "no_in_progress_task"
+  | "already_terminal"
+  | "skipped";
 
 export interface CliWorkerVerdictResult {
   workerName: string;
   taskId: string | null;
   status: CliWorkerVerdictStatus;
-  verdict?: CliWorkerOutputPayload['verdict'];
+  verdict?: CliWorkerOutputPayload["verdict"];
   reason?: string;
 }
 
@@ -4784,24 +7026,28 @@ function cursorTransitionFailureMarkerKey(input: {
   taskVersion: number;
   error: string;
 }): string {
-  return createHash('sha256')
-    .update(JSON.stringify([
-      input.instanceId,
-      input.workerName,
-      input.launchAttemptId ?? null,
-      input.claimToken,
-      input.taskId,
-      input.taskVersion,
-      input.error,
-    ]))
-    .digest('hex');
+  return createHash("sha256")
+    .update(
+      JSON.stringify([
+        input.instanceId,
+        input.workerName,
+        input.launchAttemptId ?? null,
+        input.claimToken,
+        input.taskId,
+        input.taskVersion,
+        input.error,
+      ]),
+    )
+    .digest("hex");
 }
 
 async function readCursorTransitionFailureMarker(
   outputFile: string,
 ): Promise<string | null> {
   try {
-    const marker = (await readFile(cursorTransitionFailureMarkerPath(outputFile), 'utf8')).trim();
+    const marker = (
+      await readFile(cursorTransitionFailureMarkerPath(outputFile), "utf8")
+    ).trim();
     return marker || null;
   } catch {
     return null;
@@ -4809,19 +7055,25 @@ async function readCursorTransitionFailureMarker(
 }
 
 type NonCursorVerdictBindingRead =
-  | { kind: 'missing' }
-  | { kind: 'valid'; binding: NonCursorVerdictBinding }
-  | { kind: 'invalid' };
+  | { kind: "missing" }
+  | { kind: "valid"; binding: NonCursorVerdictBinding }
+  | { kind: "invalid" };
 
 function nonCursorVerdictBindingPath(outputFile: string): string {
   return `${outputFile}.binding`;
 }
 
-function nonCursorVerdictStalePath(outputFile: string, artifactFingerprint: string): string {
+function nonCursorVerdictStalePath(
+  outputFile: string,
+  artifactFingerprint: string,
+): string {
   return `${outputFile}.stale.${artifactFingerprint}`;
 }
 
-function nonCursorVerdictStaleMarkerPath(outputFile: string, artifactFingerprint: string): string {
+function nonCursorVerdictStaleMarkerPath(
+  outputFile: string,
+  artifactFingerprint: string,
+): string {
   return `${nonCursorVerdictStalePath(outputFile, artifactFingerprint)}.marker`;
 }
 
@@ -4838,7 +7090,7 @@ function nonCursorVerdictFileIdentity(stats: {
     String(stats.ino),
     String(stats.size),
     String(stats.mtimeMs),
-  ].join('-');
+  ].join("-");
 }
 
 function fingerprintCliWorkerVerdictArtifact(
@@ -4850,7 +7102,7 @@ function fingerprintCliWorkerVerdictArtifact(
     mtimeMs: number;
   },
 ): string {
-  const contentSha256 = createHash('sha256').update(raw, 'utf8').digest('hex');
+  const contentSha256 = createHash("sha256").update(raw, "utf8").digest("hex");
   return `${contentSha256}-${nonCursorVerdictFileIdentity(stats)}`;
 }
 
@@ -4858,10 +7110,12 @@ async function readNonCursorVerdictArtifact(
   outputFile: string,
 ): Promise<{ raw: string; artifactFingerprint: string }> {
   const before = await lstat(outputFile);
-  const raw = await readFile(outputFile, 'utf8');
+  const raw = await readFile(outputFile, "utf8");
   const after = await lstat(outputFile);
-  if (nonCursorVerdictFileIdentity(before) !== nonCursorVerdictFileIdentity(after)) {
-    throw new Error('verdict_artifact_changed');
+  if (
+    nonCursorVerdictFileIdentity(before) !== nonCursorVerdictFileIdentity(after)
+  ) {
+    throw new Error("verdict_artifact_changed");
   }
   return {
     raw,
@@ -4869,41 +7123,50 @@ async function readNonCursorVerdictArtifact(
   };
 }
 
-function isNonCursorVerdictBinding(value: unknown): value is NonCursorVerdictBinding {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+function isNonCursorVerdictBinding(
+  value: unknown,
+): value is NonCursorVerdictBinding {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const candidate = value as Record<string, unknown>;
-  const fingerprintParts = typeof candidate.artifact_fingerprint === 'string'
-    ? candidate.artifact_fingerprint.split('-')
-    : [];
-  return candidate.schema_version === 1
-    && typeof candidate.artifact_fingerprint === 'string'
-    && fingerprintParts.length === 5
-    && /^[a-f0-9]{64}$/.test(fingerprintParts[0] ?? '')
-    && fingerprintParts.slice(1).every(part => part.length > 0 && Number.isFinite(Number(part)))
-    && typeof candidate.worker_name === 'string'
-    && candidate.worker_name.length > 0
-    && typeof candidate.task_id === 'string'
-    && TASK_ID_SAFE_PATTERN.test(candidate.task_id)
-    && Number.isSafeInteger(candidate.task_version)
-    && (candidate.task_version as number) >= 1;
+  const fingerprintParts =
+    typeof candidate.artifact_fingerprint === "string"
+      ? candidate.artifact_fingerprint.split("-")
+      : [];
+  return (
+    candidate.schema_version === 1 &&
+    typeof candidate.artifact_fingerprint === "string" &&
+    fingerprintParts.length === 5 &&
+    /^[a-f0-9]{64}$/.test(fingerprintParts[0] ?? "") &&
+    fingerprintParts
+      .slice(1)
+      .every((part) => part.length > 0 && Number.isFinite(Number(part))) &&
+    typeof candidate.worker_name === "string" &&
+    candidate.worker_name.length > 0 &&
+    typeof candidate.task_id === "string" &&
+    TASK_ID_SAFE_PATTERN.test(candidate.task_id) &&
+    Number.isSafeInteger(candidate.task_version) &&
+    (candidate.task_version as number) >= 1
+  );
 }
 
-async function readNonCursorVerdictBinding(path: string): Promise<NonCursorVerdictBindingRead> {
+async function readNonCursorVerdictBinding(
+  path: string,
+): Promise<NonCursorVerdictBindingRead> {
   let raw: string;
   try {
-    raw = await readFile(path, 'utf8');
+    raw = await readFile(path, "utf8");
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT'
-      ? { kind: 'missing' }
-      : { kind: 'invalid' };
+    return (error as NodeJS.ErrnoException).code === "ENOENT"
+      ? { kind: "missing" }
+      : { kind: "invalid" };
   }
   try {
     const value: unknown = JSON.parse(raw);
     return isNonCursorVerdictBinding(value)
-      ? { kind: 'valid', binding: value }
-      : { kind: 'invalid' };
+      ? { kind: "valid", binding: value }
+      : { kind: "invalid" };
   } catch {
-    return { kind: 'invalid' };
+    return { kind: "invalid" };
   }
 }
 
@@ -4944,11 +7207,23 @@ export async function processCliWorkerVerdicts(
     if (!current?.instance_id) return [];
     instanceId = current.instance_id;
   }
-  const instance = createTeamInstanceBinding({ teamName: sanitized, cwd, instanceId });
-  return withTeamInstanceLifecycleLock(instance.cwd, instance.team_name, async () => {
-    await assertTeamInstanceUnderLock(instance);
-    return processCliWorkerVerdictsUnderLock(teamName, cwd, instance.instance_id);
+  const instance = createTeamInstanceBinding({
+    teamName: sanitized,
+    cwd,
+    instanceId,
   });
+  return withTeamInstanceLifecycleLock(
+    instance.cwd,
+    instance.team_name,
+    async () => {
+      await assertTeamInstanceUnderLock(instance);
+      return processCliWorkerVerdictsUnderLock(
+        teamName,
+        cwd,
+        instance.instance_id,
+      );
+    },
+  );
 }
 
 /** Mutating verdict body; callers must already hold the instance lifecycle lock. */
@@ -4961,17 +7236,21 @@ async function processCliWorkerVerdictsUnderLock(
   const config = await readTeamConfig(sanitized, cwd);
   if (!config) return [];
   const configInstanceId = config.instance_id;
-  if (!configInstanceId || configInstanceId.toLowerCase() !== expectedInstanceId) return [];
+  if (
+    !configInstanceId ||
+    configInstanceId.toLowerCase() !== expectedInstanceId
+  )
+    return [];
 
   const results: CliWorkerVerdictResult[] = [];
   const logEventFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed',
+    "team.runtime-v2.processCliWorkerVerdicts appendTeamEvent failed",
   );
   const logCompletionMarkerFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.processCliWorkerVerdicts teamMarkTaskCompleted failed',
+    "team.runtime-v2.processCliWorkerVerdicts teamMarkTaskCompleted failed",
   );
   const logCursorTransitionMarkerFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.processCliWorkerVerdicts Cursor transition marker failed',
+    "team.runtime-v2.processCliWorkerVerdicts Cursor transition marker failed",
   );
   const logCursorTransitionFailure = async (
     outputFile: string,
@@ -4982,7 +7261,7 @@ async function processCliWorkerVerdictsUnderLock(
     launchAttemptId: string | undefined,
     error: string,
   ): Promise<void> => {
-    if (error === 'already_terminal') return;
+    if (error === "already_terminal") return;
     const marker = cursorTransitionFailureMarkerKey({
       instanceId: configInstanceId,
       workerName,
@@ -4992,14 +7271,19 @@ async function processCliWorkerVerdictsUnderLock(
       taskVersion,
       error,
     });
-    if (await readCursorTransitionFailureMarker(outputFile) === marker) return;
+    if ((await readCursorTransitionFailureMarker(outputFile)) === marker)
+      return;
     try {
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        task_id: taskId,
-        reason: `cli_worker_verdict_transition_failed:${workerName}:${taskId}:${error}`,
-      }, cwd);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          task_id: taskId,
+          reason: `cli_worker_verdict_transition_failed:${workerName}:${taskId}:${error}`,
+        },
+        cwd,
+      );
     } catch (eventError) {
       logEventFailure(eventError);
       return;
@@ -5010,9 +7294,13 @@ async function processCliWorkerVerdictsUnderLock(
     ).catch(logCursorTransitionMarkerFailure);
   };
 
-  const { rename } = await import('fs/promises');
-  const { renameSync, readFileSync, existsSync: fsExistsSync } = await import('fs');
-  const { withFileLockSync } = await import('../lib/file-lock.js');
+  const { rename } = await import("fs/promises");
+  const {
+    renameSync,
+    readFileSync,
+    existsSync: fsExistsSync,
+  } = await import("fs");
+  const { withFileLockSync } = await import("../lib/file-lock.js");
 
   const quarantineNonCursorVerdict = async (
     outputFile: string,
@@ -5022,7 +7310,10 @@ async function processCliWorkerVerdictsUnderLock(
     taskVersion: number,
     reason: string,
   ): Promise<boolean> => {
-    const stalePath = nonCursorVerdictStalePath(outputFile, artifactFingerprint);
+    const stalePath = nonCursorVerdictStalePath(
+      outputFile,
+      artifactFingerprint,
+    );
     let moved = false;
     try {
       await rename(outputFile, stalePath);
@@ -5042,7 +7333,7 @@ async function processCliWorkerVerdictsUnderLock(
           reason,
           quarantined_at: new Date().toISOString(),
         }),
-        'utf8',
+        "utf8",
       );
       return true;
     } catch {
@@ -5051,7 +7342,6 @@ async function processCliWorkerVerdictsUnderLock(
     }
   };
 
-
   for (const worker of config.workers) {
     const outputFile = worker.output_file;
     if (!outputFile) continue;
@@ -5059,27 +7349,35 @@ async function processCliWorkerVerdictsUnderLock(
     const paneOwnership = configuredPaneOwnership(config, worker);
     const liveness = paneOwnership
       ? await getOwnedWorkerLiveness(paneOwnership)
-      : 'unknown';
+      : "unknown";
     const workerRole = normalizeDelegationRole(worker.role);
-    const cursorReviewer = worker.worker_cli === 'cursor'
-      && CONTRACT_ROLES.has(workerRole as CanonicalTeamRole);
-    const liveCursorReviewer = liveness === 'alive'
-      && worker.worker_cli === 'cursor'
-      && CONTRACT_ROLES.has(workerRole as CanonicalTeamRole);
+    const cursorReviewer =
+      worker.worker_cli === "cursor" &&
+      CONTRACT_ROLES.has(workerRole as CanonicalTeamRole);
+    const liveCursorReviewer =
+      liveness === "alive" &&
+      worker.worker_cli === "cursor" &&
+      CONTRACT_ROLES.has(workerRole as CanonicalTeamRole);
     // Cursor reviewers remain in their interactive pane after publishing a
     // verdict. A valid output file is the explicit completion signal for that
     // reviewer task; do not wait for the pane to exit. Other providers retain
     // the post-exit contract so their live output cannot be consumed early.
-    if (liveness !== 'dead' && !liveCursorReviewer) continue;
-    const processedOutputFile = outputFile + '.processed';
-    const processingOutputFile = outputFile + '.processing';
+    if (liveness !== "dead" && !liveCursorReviewer) continue;
+    const processedOutputFile = outputFile + ".processed";
+    const processingOutputFile = outputFile + ".processing";
     if (cursorReviewer) {
-      if (!isCliWorkerOutputFilePath(teamStateRoot(cwd, sanitized), worker.name, outputFile)) {
+      if (
+        !isCliWorkerOutputFilePath(
+          teamStateRoot(cwd, sanitized),
+          worker.name,
+          outputFile,
+        )
+      ) {
         results.push({
           workerName: worker.name,
           taskId: null,
-          status: 'skipped',
-          reason: 'cursor_verdict_output_path_unverified',
+          status: "skipped",
+          reason: "cursor_verdict_output_path_unverified",
         });
         continue;
       }
@@ -5094,13 +7392,21 @@ async function processCliWorkerVerdictsUnderLock(
         // not a missing verdict. This keeps the handler idempotent for persistent
         // Cursor panes and avoids repeated file_missing results/events.
         if (liveCursorReviewer && fsExistsSync(processedOutputFile)) continue;
-        results.push({ workerName: worker.name, taskId: null, status: 'file_missing' });
+        results.push({
+          workerName: worker.name,
+          taskId: null,
+          status: "file_missing",
+        });
         continue;
       }
     }
 
     let verdictFile = outputFile;
-    if (cursorReviewer && !fsExistsSync(outputFile) && fsExistsSync(processingOutputFile)) {
+    if (
+      cursorReviewer &&
+      !fsExistsSync(outputFile) &&
+      fsExistsSync(processingOutputFile)
+    ) {
       verdictFile = processingOutputFile;
     }
     let payload: CliWorkerOutputPayload;
@@ -5111,7 +7417,7 @@ async function processCliWorkerVerdictsUnderLock(
         // Claim a complete verdict before mutating task state. The per-output
         // lock makes concurrent monitor cycles single-consumer and the
         // `.processing` name lets a later cycle finish an interrupted commit.
-        withFileLockSync(outputFile + '.lock', () => {
+        withFileLockSync(outputFile + ".lock", () => {
           if (fsExistsSync(processingOutputFile)) {
             // A replacement assignment may publish a fresh verdict while a
             // previous monitor cycle is still holding an interrupted claim.
@@ -5119,48 +7425,68 @@ async function processCliWorkerVerdictsUnderLock(
             // evidence instead of allowing it to mask replacement output.
             if (fsExistsSync(outputFile)) {
               const stalePath = `${processingOutputFile}.stale`;
-              try { renameSync(processingOutputFile, stalePath); } catch { /* leave it for the next cycle */ }
+              try {
+                renameSync(processingOutputFile, stalePath);
+              } catch {
+                /* leave it for the next cycle */
+              }
             } else {
               verdictFile = processingOutputFile;
               return;
             }
           }
-          const raw = readFileSync(outputFile, 'utf-8');
+          const raw = readFileSync(outputFile, "utf-8");
           parseCliWorkerVerdict(raw);
           renameSync(outputFile, processingOutputFile);
           verdictFile = processingOutputFile;
         });
       }
       if (cursorReviewer) {
-        const raw = await readFile(verdictFile, 'utf-8');
+        const raw = await readFile(verdictFile, "utf-8");
         payload = parseCliWorkerVerdict(raw);
       } else {
         const artifactState = await withProcessIdentityFileLock(
           `${outputFile}.lock`,
           async () => {
             const artifact = await readNonCursorVerdictArtifact(outputFile);
-            if (fsExistsSync(nonCursorVerdictStaleMarkerPath(outputFile, artifact.artifactFingerprint))) {
-              return { kind: 'quarantined' as const, artifactFingerprint: artifact.artifactFingerprint };
+            if (
+              fsExistsSync(
+                nonCursorVerdictStaleMarkerPath(
+                  outputFile,
+                  artifact.artifactFingerprint,
+                ),
+              )
+            ) {
+              return {
+                kind: "quarantined" as const,
+                artifactFingerprint: artifact.artifactFingerprint,
+              };
             }
             const parsed = parseCliWorkerVerdict(artifact.raw);
             const bindingPath = nonCursorVerdictBindingPath(outputFile);
             const bindingRead = await readNonCursorVerdictBinding(bindingPath);
-            if (bindingRead.kind === 'invalid') {
+            if (bindingRead.kind === "invalid") {
               const quarantined = await quarantineNonCursorVerdict(
                 outputFile,
                 artifact.artifactFingerprint,
                 worker.name,
                 parsed.task_id,
                 1,
-                'verdict_binding_malformed',
+                "verdict_binding_malformed",
               );
               return {
-                kind: quarantined ? 'quarantined' as const : 'quarantine_failed' as const,
+                kind: quarantined
+                  ? ("quarantined" as const)
+                  : ("quarantine_failed" as const),
                 artifactFingerprint: artifact.artifactFingerprint,
               };
             }
-            let binding = bindingRead.kind === 'valid' ? bindingRead.binding : null;
-            if (binding && binding.artifact_fingerprint !== artifact.artifactFingerprint) {
+            let binding =
+              bindingRead.kind === "valid" ? bindingRead.binding : null;
+            if (
+              binding &&
+              binding.artifact_fingerprint !== artifact.artifactFingerprint
+            ) {
               await rm(bindingPath, { force: true });
               binding = null;
             }
@@ -5171,25 +7497,33 @@ async function processCliWorkerVerdictsUnderLock(
                 worker.name,
                 binding.task_id,
                 binding.task_version,
-                'verdict_binding_worker_mismatch',
+                "verdict_binding_worker_mismatch",
               );
               return {
-                kind: quarantined ? 'quarantined' as const : 'quarantine_failed' as const,
+                kind: quarantined
+                  ? ("quarantined" as const)
+                  : ("quarantine_failed" as const),
                 artifactFingerprint: artifact.artifactFingerprint,
               };
             }
-            return { kind: 'ready' as const, payload: parsed, artifactFingerprint: artifact.artifactFingerprint, binding };
+            return {
+              kind: "ready" as const,
+              payload: parsed,
+              artifactFingerprint: artifact.artifactFingerprint,
+              binding,
+            };
           },
           100,
         );
-        if (artifactState.kind !== 'ready') {
+        if (artifactState.kind !== "ready") {
           results.push({
             workerName: worker.name,
             taskId: null,
-            status: 'skipped',
-            reason: artifactState.kind === 'quarantined'
-              ? 'stale_verdict_quarantined'
-              : 'verdict_quarantine_failed',
+            status: "skipped",
+            reason:
+              artifactState.kind === "quarantined"
+                ? "stale_verdict_quarantined"
+                : "verdict_quarantine_failed",
           });
           continue;
         }
@@ -5199,48 +7533,65 @@ async function processCliWorkerVerdictsUnderLock(
       }
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      if (!cursorReviewer && reason === 'process_identity_lock_timeout') {
+      if (!cursorReviewer && reason === "process_identity_lock_timeout") {
         results.push({
           workerName: worker.name,
           taskId: null,
-          status: 'skipped',
-          reason: 'verdict_artifact_lock_contention',
+          status: "skipped",
+          reason: "verdict_artifact_lock_contention",
         });
         continue;
       }
-      if (!cursorReviewer && reason === 'verdict_artifact_changed') {
+      if (!cursorReviewer && reason === "verdict_artifact_changed") {
         results.push({
           workerName: worker.name,
           taskId: null,
-          status: 'skipped',
+          status: "skipped",
           reason,
         });
         continue;
       }
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `cli_worker_verdict_parse_failed:${worker.name}:${reason}`,
-      }, cwd).catch(logEventFailure);
-      results.push({ workerName: worker.name, taskId: null, status: 'parse_failed', reason });
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `cli_worker_verdict_parse_failed:${worker.name}:${reason}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
+      results.push({
+        workerName: worker.name,
+        taskId: null,
+        status: "parse_failed",
+        reason,
+      });
       continue;
     }
 
     if (cursorReviewer && payload.role !== workerRole) {
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `cli_worker_verdict_role_mismatch:${worker.name}:expected=${workerRole}:actual=${payload.role}`,
-      }, cwd).catch(logEventFailure);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `cli_worker_verdict_role_mismatch:${worker.name}:expected=${workerRole}:actual=${payload.role}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
       if (verdictFile === processingOutputFile) {
-        try { await rename(verdictFile, processedOutputFile); } catch { /* best-effort quarantine */ }
+        try {
+          await rename(verdictFile, processedOutputFile);
+        } catch {
+          /* best-effort quarantine */
+        }
       }
       results.push({
         workerName: worker.name,
         taskId: payload.task_id,
-        status: 'skipped',
+        status: "skipped",
         verdict: payload.verdict,
-        reason: 'cursor_verdict_role_mismatch',
+        reason: "cursor_verdict_role_mismatch",
       });
       continue;
     }
@@ -5261,7 +7612,10 @@ async function processCliWorkerVerdictsUnderLock(
     let targetTaskDelegation: TeamTaskDelegationPlan | undefined;
     if (!cursorReviewer && nonCursorBinding) {
       targetTaskId = nonCursorBinding.task_id;
-      targetTaskPath = absPath(cwd, TeamPaths.taskFile(sanitized, nonCursorBinding.task_id));
+      targetTaskPath = absPath(
+        cwd,
+        TeamPaths.taskFile(sanitized, nonCursorBinding.task_id),
+      );
       targetTaskVersion = nonCursorBinding.task_version;
     }
     // Canonical read of the Cursor verdict's task: undefined when it could not
@@ -5282,23 +7636,29 @@ async function processCliWorkerVerdictsUnderLock(
       if (cursorReviewer) cursorVerdictTask = taskData;
       if (!taskData) continue;
       try {
-        const taskRole = typeof taskData.role === 'string'
-          ? normalizeDelegationRole(taskData.role)
-          : null;
-        const claim = taskData.claim && typeof taskData.claim === 'object'
-          ? taskData.claim as unknown as Record<string, unknown>
-          : null;
-        const claimMatchesCursorWorker = !cursorReviewer || (
-          claim?.owner === worker.name
-          && payload.claim_token === claim.token
-          && payload.task_version === taskData.version
-          && (worker.launch_attempt_id === undefined || claim.launch_attempt_id === worker.launch_attempt_id)
-          && (worker.launch_attempt_id === undefined || payload.launch_attempt_id === worker.launch_attempt_id)
-        );
-        if (taskData.owner === worker.name
-          && taskData.status === 'in_progress'
-          && (!cursorReviewer || taskRole === workerRole)
-          && claimMatchesCursorWorker) {
+        const taskRole =
+          typeof taskData.role === "string"
+            ? normalizeDelegationRole(taskData.role)
+            : null;
+        const claim =
+          taskData.claim && typeof taskData.claim === "object"
+            ? (taskData.claim as unknown as Record<string, unknown>)
+            : null;
+        const claimMatchesCursorWorker =
+          !cursorReviewer ||
+          (claim?.owner === worker.name &&
+            payload.claim_token === claim.token &&
+            payload.task_version === taskData.version &&
+            (worker.launch_attempt_id === undefined ||
+              claim.launch_attempt_id === worker.launch_attempt_id) &&
+            (worker.launch_attempt_id === undefined ||
+              payload.launch_attempt_id === worker.launch_attempt_id));
+        if (
+          taskData.owner === worker.name &&
+          taskData.status === "in_progress" &&
+          (!cursorReviewer || taskRole === workerRole) &&
+          claimMatchesCursorWorker
+        ) {
           targetTaskId = taskId;
           targetTaskPath = taskPath;
           targetTaskVersion = taskData.version ?? 1;
@@ -5312,134 +7672,162 @@ async function processCliWorkerVerdictsUnderLock(
 
     if (!targetTaskId || !targetTaskPath || targetTaskVersion === null) {
       if (cursorReviewer && verdictFile === processingOutputFile) {
-        const reportCursorVerdictRetained = (error: string) => logCursorTransitionFailure(
-          outputFile,
-          worker.name,
-          payload.task_id,
-          payload.task_version ?? 0,
-          payload.claim_token ?? '',
-          worker.launch_attempt_id ?? payload.launch_attempt_id,
-          error,
-        );
+        const reportCursorVerdictRetained = (error: string) =>
+          logCursorTransitionFailure(
+            outputFile,
+            worker.name,
+            payload.task_id,
+            payload.task_version ?? 0,
+            payload.claim_token ?? "",
+            worker.launch_attempt_id ?? payload.launch_attempt_id,
+            error,
+          );
         if (!cursorVerdictTask) {
           // Missing or unreadable task state cannot prove the claim stale;
           // keep the claimed verdict for the next cycle.
-          await reportCursorVerdictRetained('task_unavailable');
+          await reportCursorVerdictRetained("task_unavailable");
           results.push({
             workerName: worker.name,
             taskId: payload.task_id,
-            status: 'skipped',
+            status: "skipped",
             verdict: payload.verdict,
-            reason: 'cursor_verdict_task_unavailable',
+            reason: "cursor_verdict_task_unavailable",
           });
           continue;
         }
         const metadata = cursorVerdictTask.metadata;
-        const taskAlreadyRecorded = cursorVerdictTask.owner === worker.name
-          && (cursorVerdictTask.status === 'completed' || cursorVerdictTask.status === 'failed')
-          && typeof cursorVerdictTask.role === 'string'
-          && normalizeDelegationRole(cursorVerdictTask.role) === workerRole
-          && metadata?.verdict_source === 'cli_worker_output_contract'
-          && metadata.verdict_claim_token === payload.claim_token
-          && metadata.verdict_task_version === payload.task_version
-          && (worker.launch_attempt_id === undefined
-            || metadata.verdict_worker_launch_attempt_id === worker.launch_attempt_id)
-          && metadata.verdict === payload.verdict;
+        const taskAlreadyRecorded =
+          cursorVerdictTask.owner === worker.name &&
+          (cursorVerdictTask.status === "completed" ||
+            cursorVerdictTask.status === "failed") &&
+          typeof cursorVerdictTask.role === "string" &&
+          normalizeDelegationRole(cursorVerdictTask.role) === workerRole &&
+          metadata?.verdict_source === "cli_worker_output_contract" &&
+          metadata.verdict_claim_token === payload.claim_token &&
+          metadata.verdict_task_version === payload.task_version &&
+          (worker.launch_attempt_id === undefined ||
+            metadata.verdict_worker_launch_attempt_id ===
+              worker.launch_attempt_id) &&
+          metadata.verdict === payload.verdict;
         // The canonical task no longer carries this verdict's claim (requeued,
         // reassigned, terminal elsewhere, or token/version/attempt changed),
         // so the verdict can never apply. Quarantine it as processed.
         let quarantined = true;
-        try { await rename(verdictFile, processedOutputFile); } catch { quarantined = false; }
+        try {
+          await rename(verdictFile, processedOutputFile);
+        } catch {
+          quarantined = false;
+        }
         if (taskAlreadyRecorded) {
           results.push({
             workerName: worker.name,
             taskId: payload.task_id,
-            status: 'already_terminal',
+            status: "already_terminal",
             verdict: payload.verdict,
           });
           continue;
         }
-        if (!quarantined) await reportCursorVerdictRetained('stale_verdict_quarantine_failed');
+        if (!quarantined)
+          await reportCursorVerdictRetained("stale_verdict_quarantine_failed");
         results.push({
           workerName: worker.name,
           taskId: payload.task_id,
-          status: 'skipped',
+          status: "skipped",
           verdict: payload.verdict,
-          reason: quarantined ? 'cursor_verdict_claim_mismatch' : 'cursor_verdict_quarantine_failed',
+          reason: quarantined
+            ? "cursor_verdict_claim_mismatch"
+            : "cursor_verdict_quarantine_failed",
         });
         continue;
       }
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `cli_worker_verdict_no_in_progress_task:${worker.name}:verdict=${payload.verdict}`,
-      }, cwd).catch(logEventFailure);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `cli_worker_verdict_no_in_progress_task:${worker.name}:verdict=${payload.verdict}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
       results.push({
         workerName: worker.name,
         taskId: payload.task_id,
-        status: 'no_in_progress_task',
+        status: "no_in_progress_task",
         verdict: payload.verdict,
       });
       continue;
     }
 
-    const terminalStatus = payload.verdict === 'approve' ? 'completed' : 'failed';
+    const terminalStatus =
+      payload.verdict === "approve" ? "completed" : "failed";
     const canonicalTaskPath = targetTaskPath;
     const observedTaskVersion = targetTaskVersion;
     let transitionOk = false;
     let publishFailureReason: string | undefined;
     try {
       if (cursorReviewer) {
-        const cursorReviewerSkipEvidenceAllowed = terminalStatus === 'completed'
-          && targetTaskDelegation?.skip_allowed_reason_required === true
-          && (targetTaskDelegation.mode === 'auto'
-            || targetTaskDelegation.mode === 'required'
-            || targetTaskDelegation.required_parallel_probe === true);
-        const cursorSummary = stripCursorDelegationEvidenceMarkers(payload.summary);
+        const cursorReviewerSkipEvidenceAllowed =
+          terminalStatus === "completed" &&
+          targetTaskDelegation?.skip_allowed_reason_required === true &&
+          (targetTaskDelegation.mode === "auto" ||
+            targetTaskDelegation.mode === "required" ||
+            targetTaskDelegation.required_parallel_probe === true);
+        const cursorSummary = stripCursorDelegationEvidenceMarkers(
+          payload.summary,
+        );
         const transitionResult = cursorReviewerSkipEvidenceAllowed
           ? `${cursorSummary}\nSubagent skip reason: ${CURSOR_RUNTIME_POLICY_SKIP_REASON}`
           : cursorSummary;
         const transition = await teamTransitionTaskStatus(
           sanitized,
           targetTaskId,
-          'in_progress',
+          "in_progress",
           terminalStatus,
           payload.claim_token!,
           cwd,
-          terminalStatus === 'completed'
+          terminalStatus === "completed"
             ? {
-              result: transitionResult,
-              metadata: {
-                verdict: payload.verdict,
-                verdict_summary: payload.summary,
-                verdict_findings: payload.findings,
-                verdict_role: payload.role,
-                verdict_source: 'cli_worker_output_contract',
-                verdict_claim_token: payload.claim_token,
-                verdict_task_version: payload.task_version,
-                ...(cursorReviewerSkipEvidenceAllowed
-                  ? { verdict_delegation_provenance: CURSOR_RUNTIME_POLICY_SKIP_PROVENANCE }
-                  : {}),
-                ...(worker.launch_attempt_id
-                  ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
-                  : {}),
-              },
-            }
+                result: transitionResult,
+                metadata: {
+                  verdict: payload.verdict,
+                  verdict_summary: payload.summary,
+                  verdict_findings: payload.findings,
+                  verdict_role: payload.role,
+                  verdict_source: "cli_worker_output_contract",
+                  verdict_claim_token: payload.claim_token,
+                  verdict_task_version: payload.task_version,
+                  ...(cursorReviewerSkipEvidenceAllowed
+                    ? {
+                        verdict_delegation_provenance:
+                          CURSOR_RUNTIME_POLICY_SKIP_PROVENANCE,
+                      }
+                    : {}),
+                  ...(worker.launch_attempt_id
+                    ? {
+                        verdict_worker_launch_attempt_id:
+                          worker.launch_attempt_id,
+                      }
+                    : {}),
+                },
+              }
             : {
-              error: `cli_worker_verdict:${payload.verdict}:${payload.summary}`,
-              metadata: {
-                verdict: payload.verdict,
-                verdict_summary: payload.summary,
-                verdict_findings: payload.findings,
-                verdict_role: payload.role,
-                verdict_source: 'cli_worker_output_contract',
-                verdict_claim_token: payload.claim_token,
-                verdict_task_version: payload.task_version,
-                ...(worker.launch_attempt_id
-                  ? { verdict_worker_launch_attempt_id: worker.launch_attempt_id }
-                  : {}),
+                error: `cli_worker_verdict:${payload.verdict}:${payload.summary}`,
+                metadata: {
+                  verdict: payload.verdict,
+                  verdict_summary: payload.summary,
+                  verdict_findings: payload.findings,
+                  verdict_role: payload.role,
+                  verdict_source: "cli_worker_output_contract",
+                  verdict_claim_token: payload.claim_token,
+                  verdict_task_version: payload.task_version,
+                  ...(worker.launch_attempt_id
+                    ? {
+                        verdict_worker_launch_attempt_id:
+                          worker.launch_attempt_id,
+                      }
+                    : {}),
+                },
               },
-            },
         );
         transitionOk = transition.ok;
         if (!transition.ok) publishFailureReason = transition.error;
@@ -5453,58 +7841,75 @@ async function processCliWorkerVerdictsUnderLock(
             } catch (error) {
               return {
                 ok: false as const,
-                reason: error instanceof Error && error.message === 'verdict_artifact_changed'
-                  ? 'verdict_artifact_changed' as const
-                  : 'verdict_artifact_missing' as const,
+                reason:
+                  error instanceof Error &&
+                  error.message === "verdict_artifact_changed"
+                    ? ("verdict_artifact_changed" as const)
+                    : ("verdict_artifact_missing" as const),
               };
             }
             const artifactFingerprint = artifact.artifactFingerprint;
             if (artifactFingerprint !== nonCursorArtifactFingerprint) {
-              return { ok: false as const, reason: 'verdict_artifact_changed' as const };
+              return {
+                ok: false as const,
+                reason: "verdict_artifact_changed" as const,
+              };
             }
-            if (fsExistsSync(nonCursorVerdictStaleMarkerPath(outputFile, artifactFingerprint))) {
-              return { ok: false as const, reason: 'stale_verdict_quarantined' as const };
+            if (
+              fsExistsSync(
+                nonCursorVerdictStaleMarkerPath(
+                  outputFile,
+                  artifactFingerprint,
+                ),
+              )
+            ) {
+              return {
+                ok: false as const,
+                reason: "stale_verdict_quarantined" as const,
+              };
             }
 
             const bindingPath = nonCursorVerdictBindingPath(outputFile);
             const bindingRead = await readNonCursorVerdictBinding(bindingPath);
-            if (bindingRead.kind === 'invalid') {
+            if (bindingRead.kind === "invalid") {
               const quarantined = await quarantineNonCursorVerdict(
                 outputFile,
                 artifactFingerprint,
                 worker.name,
                 targetTaskId,
                 observedTaskVersion,
-                'verdict_binding_malformed',
+                "verdict_binding_malformed",
               );
               return {
                 ok: false as const,
                 reason: quarantined
-                  ? 'stale_verdict_quarantined' as const
-                  : 'verdict_quarantine_failed' as const,
+                  ? ("stale_verdict_quarantined" as const)
+                  : ("verdict_quarantine_failed" as const),
               };
             }
 
-            let binding = bindingRead.kind === 'valid' ? bindingRead.binding : null;
-            if (binding && (
-              binding.artifact_fingerprint !== artifactFingerprint
-              || binding.worker_name !== worker.name
-              || binding.task_id !== targetTaskId
-              || binding.task_version !== observedTaskVersion
-            )) {
+            let binding =
+              bindingRead.kind === "valid" ? bindingRead.binding : null;
+            if (
+              binding &&
+              (binding.artifact_fingerprint !== artifactFingerprint ||
+                binding.worker_name !== worker.name ||
+                binding.task_id !== targetTaskId ||
+                binding.task_version !== observedTaskVersion)
+            ) {
               const quarantined = await quarantineNonCursorVerdict(
                 outputFile,
                 artifactFingerprint,
                 worker.name,
                 binding.task_id,
                 binding.task_version,
-                'verdict_binding_identity_conflict',
+                "verdict_binding_identity_conflict",
               );
               return {
                 ok: false as const,
                 reason: quarantined
-                  ? 'stale_verdict_quarantined' as const
-                  : 'verdict_quarantine_failed' as const,
+                  ? ("stale_verdict_quarantined" as const)
+                  : ("verdict_quarantine_failed" as const),
               };
             }
 
@@ -5517,7 +7922,10 @@ async function processCliWorkerVerdictsUnderLock(
                 task_version: observedTaskVersion,
               };
               try {
-                await writeAtomic(bindingPath, JSON.stringify(binding, null, 2));
+                await writeAtomic(
+                  bindingPath,
+                  JSON.stringify(binding, null, 2),
+                );
               } catch {
                 const quarantined = await quarantineNonCursorVerdict(
                   outputFile,
@@ -5525,68 +7933,103 @@ async function processCliWorkerVerdictsUnderLock(
                   worker.name,
                   targetTaskId,
                   observedTaskVersion,
-                  'verdict_binding_persist_failed',
+                  "verdict_binding_persist_failed",
                 );
                 return {
                   ok: false as const,
                   reason: quarantined
-                    ? 'verdict_binding_persist_failed' as const
-                    : 'verdict_quarantine_failed' as const,
+                    ? ("verdict_binding_persist_failed" as const)
+                    : ("verdict_quarantine_failed" as const),
                 };
               }
             }
 
-            const lock = await withTaskClaimLock(sanitized, targetTaskId, cwd, async () => {
-              let current: TeamTask | null;
-              try {
-                current = await teamReadTask(sanitized, targetTaskId, cwd);
-              } catch {
-                return { ok: false as const, reason: 'task_schema_conflict' as const };
-              }
-              if (!current) return { ok: false as const, reason: 'task_missing' as const };
-              const currentVersion = current.version ?? 1;
-              if (currentVersion !== observedTaskVersion) {
-                return { ok: false as const, reason: 'task_version_conflict' as const };
-              }
-              if (current.status !== 'in_progress' || current.owner !== worker.name) {
-                return { ok: false as const, reason: 'task_claim_conflict' as const };
-              }
+            const lock = await withTaskClaimLock(
+              sanitized,
+              targetTaskId,
+              cwd,
+              async () => {
+                let current: TeamTask | null;
+                try {
+                  current = await teamReadTask(sanitized, targetTaskId, cwd);
+                } catch {
+                  return {
+                    ok: false as const,
+                    reason: "task_schema_conflict" as const,
+                  };
+                }
+                if (!current)
+                  return {
+                    ok: false as const,
+                    reason: "task_missing" as const,
+                  };
+                const currentVersion = current.version ?? 1;
+                if (currentVersion !== observedTaskVersion) {
+                  return {
+                    ok: false as const,
+                    reason: "task_version_conflict" as const,
+                  };
+                }
+                if (
+                  current.status !== "in_progress" ||
+                  current.owner !== worker.name
+                ) {
+                  return {
+                    ok: false as const,
+                    reason: "task_claim_conflict" as const,
+                  };
+                }
 
-              let terminalCandidate: ReturnType<typeof normalizeTaskRecord>;
-              try {
-                terminalCandidate = normalizeTaskRecord({
-                  ...current,
-                  status: terminalStatus,
-                  completed_at: new Date().toISOString(),
-                  claim: undefined,
-                  version: currentVersion + 1,
-                  metadata: {
-                    ...(current.metadata ?? {}),
-                    verdict: payload.verdict,
-                    verdict_summary: payload.summary,
-                    verdict_findings: payload.findings,
-                    verdict_role: payload.role,
-                    verdict_source: 'cli_worker_output_contract',
-                  },
-                  ...(terminalStatus === 'failed'
-                    ? { error: `cli_worker_verdict:${payload.verdict}:${payload.summary}` }
-                    : {}),
-                });
-              } catch {
-                return { ok: false as const, reason: 'task_schema_conflict' as const };
-              }
-              try {
-                await writeAtomic(canonicalTaskPath, JSON.stringify(terminalCandidate, null, 2));
-              } catch {
-                return { ok: false as const, reason: 'task_publish_failed' as const };
-              }
-              return { ok: true as const };
-            });
+                let terminalCandidate: ReturnType<typeof normalizeTaskRecord>;
+                try {
+                  terminalCandidate = normalizeTaskRecord({
+                    ...current,
+                    status: terminalStatus,
+                    completed_at: new Date().toISOString(),
+                    claim: undefined,
+                    version: currentVersion + 1,
+                    metadata: {
+                      ...(current.metadata ?? {}),
+                      verdict: payload.verdict,
+                      verdict_summary: payload.summary,
+                      verdict_findings: payload.findings,
+                      verdict_role: payload.role,
+                      verdict_source: "cli_worker_output_contract",
+                    },
+                    ...(terminalStatus === "failed"
+                      ? {
+                          error: `cli_worker_verdict:${payload.verdict}:${payload.summary}`,
+                        }
+                      : {}),
+                  });
+                } catch {
+                  return {
+                    ok: false as const,
+                    reason: "task_schema_conflict" as const,
+                  };
+                }
+                try {
+                  await writeAtomic(
+                    canonicalTaskPath,
+                    JSON.stringify(terminalCandidate, null, 2),
+                  );
+                } catch {
+                  return {
+                    ok: false as const,
+                    reason: "task_publish_failed" as const,
+                  };
+                }
+                return { ok: true as const };
+              },
+            );
             if (!lock.ok) {
-              return { ok: false as const, reason: 'task_claim_lock_contention' as const };
+              return {
+                ok: false as const,
+                reason: "task_claim_lock_contention" as const,
+              };
             }
             if (!lock.value.ok) {
-              if (lock.value.reason === 'task_publish_failed') {
+              if (lock.value.reason === "task_publish_failed") {
                 return lock.value;
               }
               const quarantined = await quarantineNonCursorVerdict(
@@ -5600,8 +8043,8 @@ async function processCliWorkerVerdictsUnderLock(
               return {
                 ok: false as const,
                 reason: quarantined
-                  ? `stale_${lock.value.reason}_quarantined` as const
-                  : 'verdict_quarantine_failed' as const,
+                  ? (`stale_${lock.value.reason}_quarantined` as const)
+                  : ("verdict_quarantine_failed" as const),
               };
             }
             return { ok: true as const };
@@ -5617,11 +8060,12 @@ async function processCliWorkerVerdictsUnderLock(
     } catch (error) {
       // Leave the verdict artifact retryable when the canonical publication
       // cannot be completed.
-      publishFailureReason = !cursorReviewer
-        && error instanceof Error
-        && error.message === 'process_identity_lock_timeout'
-        ? 'verdict_artifact_lock_contention'
-        : 'task_publish_failed';
+      publishFailureReason =
+        !cursorReviewer &&
+        error instanceof Error &&
+        error.message === "process_identity_lock_timeout"
+          ? "verdict_artifact_lock_contention"
+          : "task_publish_failed";
     }
 
     if (!transitionOk) {
@@ -5636,18 +8080,19 @@ async function processCliWorkerVerdictsUnderLock(
           publishFailureReason,
         );
       }
-      const cursorTransitionStatus = publishFailureReason === 'already_terminal'
-        ? 'already_terminal'
-        : 'skipped';
+      const cursorTransitionStatus =
+        publishFailureReason === "already_terminal"
+          ? "already_terminal"
+          : "skipped";
       const transitionReason = cursorReviewer
-        ? cursorTransitionStatus === 'skipped'
-          ? publishFailureReason ?? 'task_transition_rejected'
+        ? cursorTransitionStatus === "skipped"
+          ? (publishFailureReason ?? "task_transition_rejected")
           : undefined
-        : publishFailureReason ?? 'task_transition_rejected';
+        : (publishFailureReason ?? "task_transition_rejected");
       results.push({
         workerName: worker.name,
         taskId: targetTaskId,
-        status: cursorReviewer ? cursorTransitionStatus : 'skipped',
+        status: cursorReviewer ? cursorTransitionStatus : "skipped",
         verdict: payload.verdict,
         ...(transitionReason ? { reason: transitionReason } : {}),
       });
@@ -5657,38 +8102,54 @@ async function processCliWorkerVerdictsUnderLock(
     if (!cursorReviewer) {
       let eventAppended = false;
       try {
-        await appendTeamEvent(sanitized, {
-          type: terminalStatus === 'completed' ? 'task_completed' : 'task_failed',
-          worker: worker.name,
-          task_id: targetTaskId,
-          reason: `cli_worker_verdict:${payload.verdict}`,
-        }, cwd);
+        await appendTeamEvent(
+          sanitized,
+          {
+            type:
+              terminalStatus === "completed" ? "task_completed" : "task_failed",
+            worker: worker.name,
+            task_id: targetTaskId,
+            reason: `cli_worker_verdict:${payload.verdict}`,
+          },
+          cwd,
+        );
         eventAppended = true;
       } catch (error) {
         logEventFailure(error);
       }
-      if (terminalStatus === 'completed' && eventAppended) {
-        await teamMarkTaskCompleted(sanitized, targetTaskId, cwd).catch(logCompletionMarkerFailure);
+      if (terminalStatus === "completed" && eventAppended) {
+        await teamMarkTaskCompleted(sanitized, targetTaskId, cwd).catch(
+          logCompletionMarkerFailure,
+        );
       }
     }
 
     if (!cursorReviewer) {
       try {
-        await withProcessIdentityFileLock(`${outputFile}.lock`, async () => {
-          const artifact = await readNonCursorVerdictArtifact(verdictFile);
-          if (artifact.artifactFingerprint !== nonCursorArtifactFingerprint) return;
-          const bindingPath = nonCursorVerdictBindingPath(outputFile);
-          const binding = await readNonCursorVerdictBinding(bindingPath);
-          if (binding.kind !== 'valid'
-            || binding.binding.artifact_fingerprint !== nonCursorArtifactFingerprint
-            || binding.binding.worker_name !== worker.name
-            || binding.binding.task_id !== targetTaskId
-            || binding.binding.task_version !== observedTaskVersion) return;
-          // Only consume this invocation's artifact. A failed rename leaves
-          // its binding intact so retries cannot adopt a replacement claim.
-          await rename(verdictFile, processedOutputFile);
-          await rm(bindingPath, { force: true });
-        }, 100);
+        await withProcessIdentityFileLock(
+          `${outputFile}.lock`,
+          async () => {
+            const artifact = await readNonCursorVerdictArtifact(verdictFile);
+            if (artifact.artifactFingerprint !== nonCursorArtifactFingerprint)
+              return;
+            const bindingPath = nonCursorVerdictBindingPath(outputFile);
+            const binding = await readNonCursorVerdictBinding(bindingPath);
+            if (
+              binding.kind !== "valid" ||
+              binding.binding.artifact_fingerprint !==
+                nonCursorArtifactFingerprint ||
+              binding.binding.worker_name !== worker.name ||
+              binding.binding.task_id !== targetTaskId ||
+              binding.binding.task_version !== observedTaskVersion
+            )
+              return;
+            // Only consume this invocation's artifact. A failed rename leaves
+            // its binding intact so retries cannot adopt a replacement claim.
+            await rename(verdictFile, processedOutputFile);
+            await rm(bindingPath, { force: true });
+          },
+          100,
+        );
       } catch {
         // Task publication already committed. Cleanup remains best-effort.
       }
@@ -5729,11 +8190,15 @@ export async function monitorTeamV2(
   const config = await readTeamConfig(sanitized, cwd);
   if (!config) return null;
   if (!config.instance_id) {
-    if (expectedInstanceId !== undefined) throw new Error('team_instance_authority_missing');
+    if (expectedInstanceId !== undefined)
+      throw new Error("team_instance_authority_missing");
     return null;
   }
-  if (expectedInstanceId !== undefined && config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()) {
-    throw new Error('team_instance_mismatch');
+  if (
+    expectedInstanceId !== undefined &&
+    config.instance_id.toLowerCase() !== expectedInstanceId.toLowerCase()
+  ) {
+    throw new Error("team_instance_mismatch");
   }
   const monitorInstance = createTeamInstanceBinding({
     teamName: sanitized,
@@ -5762,14 +8227,14 @@ export async function monitorTeamV2(
   const taskById = new Map(allTasks.map((task) => [task.id, task] as const));
   const inProgressByOwner = new Map<string, TeamTask[]>();
   for (const task of allTasks) {
-    if (task.status !== 'in_progress' || !task.owner) continue;
+    if (task.status !== "in_progress" || !task.owner) continue;
     const existing = inProgressByOwner.get(task.owner) || [];
     existing.push(task);
     inProgressByOwner.set(task.owner, existing);
   }
 
   // Scan workers
-  const workers: TeamSnapshotV2['workers'] = [];
+  const workers: TeamSnapshotV2["workers"] = [];
   const deadWorkers: string[] = [];
   const nonReportingWorkers: string[] = [];
   const recommendations: string[] = [];
@@ -5778,33 +8243,68 @@ export async function monitorTeamV2(
   const workerSignals = await Promise.all(
     config.workers.map(async (worker) => {
       const ownership = configuredPaneOwnership(config, worker);
-      const liveness = ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown';
-      const providerLiveness = await getWorkerProviderLiveness(sanitized, cwd, config.instance_id, worker);
-      const paneAlive = liveness === 'alive';
+      const liveness = ownership
+        ? await getOwnedWorkerLiveness(ownership)
+        : "unknown";
+      const providerLiveness = await getWorkerProviderLiveness(
+        sanitized,
+        cwd,
+        config.instance_id,
+        worker,
+      );
+      const paneAlive = liveness === "alive";
       const [status, heartbeat, paneCapture] = await Promise.all([
         readWorkerStatus(sanitized, worker.name, cwd),
         readWorkerHeartbeat(sanitized, worker.name, cwd),
-        paneAlive && ownership ? captureOwnedTeamPane(ownership) : Promise.resolve(''),
+        paneAlive && ownership
+          ? captureOwnedTeamPane(ownership)
+          : Promise.resolve(""),
       ]);
-      return { worker, alive: paneAlive, liveness, providerLiveness, status, heartbeat, paneCapture };
+      return {
+        worker,
+        alive: paneAlive,
+        liveness,
+        providerLiveness,
+        status,
+        heartbeat,
+        paneCapture,
+      };
     }),
   );
   const workerScanMs = performance.now() - workerScanStartMs;
 
-  for (const { worker: w, alive, liveness, providerLiveness, status, heartbeat, paneCapture } of workerSignals) {
-    const currentTask = status.current_task_id ? taskById.get(status.current_task_id) ?? null : null;
-    const outstandingTask = currentTask ?? findOutstandingWorkerTask(w, taskById, inProgressByOwner);
-    const expectedTaskId = status.current_task_id ?? outstandingTask?.id ?? w.assigned_tasks[0] ?? '';
-    const previousTurns = previousSnapshot ? (previousSnapshot.workerTurnCountByName[w.name] ?? 0) : null;
-    const previousTaskId = previousSnapshot?.workerTaskIdByName[w.name] ?? '';
-    const currentTaskId = status.current_task_id ?? '';
+  for (const {
+    worker: w,
+    alive,
+    liveness,
+    providerLiveness,
+    status,
+    heartbeat,
+    paneCapture,
+  } of workerSignals) {
+    const currentTask = status.current_task_id
+      ? (taskById.get(status.current_task_id) ?? null)
+      : null;
+    const outstandingTask =
+      currentTask ?? findOutstandingWorkerTask(w, taskById, inProgressByOwner);
+    const expectedTaskId =
+      status.current_task_id ??
+      outstandingTask?.id ??
+      w.assigned_tasks[0] ??
+      "";
+    const previousTurns = previousSnapshot
+      ? (previousSnapshot.workerTurnCountByName[w.name] ?? 0)
+      : null;
+    const previousTaskId = previousSnapshot?.workerTaskIdByName[w.name] ?? "";
+    const currentTaskId = status.current_task_id ?? "";
     const turnsWithoutProgress =
       heartbeat &&
       previousTurns !== null &&
-      status.state === 'working' &&
+      status.state === "working" &&
       currentTask &&
-      (currentTask.status === 'pending' || currentTask.status === 'in_progress') &&
-      currentTaskId !== '' &&
+      (currentTask.status === "pending" ||
+        currentTask.status === "in_progress") &&
+      currentTaskId !== "" &&
       previousTaskId === currentTaskId
         ? Math.max(0, heartbeat.turn_count - previousTurns)
         : 0;
@@ -5827,7 +8327,7 @@ export async function monitorTeamV2(
       turnsWithoutProgress,
     });
 
-    if (providerLiveness === 'dead') {
+    if (providerLiveness === "dead") {
       deadWorkers.push(w.name);
       const deadWorkerTasks = inProgressByOwner.get(w.name) || [];
       for (const t of deadWorkerTasks) {
@@ -5835,37 +8335,53 @@ export async function monitorTeamV2(
       }
     }
 
-    const paneSuggestsIdle = alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
+    const paneSuggestsIdle =
+      alive && paneLooksReady(paneCapture) && !paneHasActiveTask(paneCapture);
     const statusFresh = isFreshTimestamp(status.updated_at);
     const heartbeatFresh = isFreshTimestamp(heartbeat?.last_turn_at);
-    const hasWorkStartEvidence = expectedTaskId !== '' && hasWorkerStatusProgress(status, expectedTaskId);
+    const hasWorkStartEvidence =
+      expectedTaskId !== "" && hasWorkerStatusProgress(status, expectedTaskId);
     const missingDependencyIds = outstandingTask
       ? getMissingDependencyIds(outstandingTask, taskById)
       : [];
 
     let stallReason: string | null = null;
     if (paneSuggestsIdle && missingDependencyIds.length > 0) {
-      stallReason = 'missing_dependency';
-    } else if (paneSuggestsIdle && expectedTaskId !== '' && !hasWorkStartEvidence) {
-      stallReason = 'no_work_start_evidence';
-    } else if (paneSuggestsIdle && expectedTaskId !== '' && (!statusFresh || !heartbeatFresh)) {
-      stallReason = 'stale_or_missing_worker_reports';
+      stallReason = "missing_dependency";
+    } else if (
+      paneSuggestsIdle &&
+      expectedTaskId !== "" &&
+      !hasWorkStartEvidence
+    ) {
+      stallReason = "no_work_start_evidence";
+    } else if (
+      paneSuggestsIdle &&
+      expectedTaskId !== "" &&
+      (!statusFresh || !heartbeatFresh)
+    ) {
+      stallReason = "stale_or_missing_worker_reports";
     } else if (paneSuggestsIdle && turnsWithoutProgress > 5) {
-      stallReason = 'no_meaningful_turn_progress';
+      stallReason = "no_meaningful_turn_progress";
     }
 
     if (stallReason) {
       nonReportingWorkers.push(w.name);
-      if (stallReason === 'missing_dependency') {
+      if (stallReason === "missing_dependency") {
         recommendations.push(
-          `Investigate ${w.name}: task-${outstandingTask?.id ?? expectedTaskId} is blocked by missing task ids [${missingDependencyIds.join(', ')}]; pane is idle at prompt`,
+          `Investigate ${w.name}: task-${outstandingTask?.id ?? expectedTaskId} is blocked by missing task ids [${missingDependencyIds.join(", ")}]; pane is idle at prompt`,
         );
-      } else if (stallReason === 'no_work_start_evidence') {
-        recommendations.push(`Investigate ${w.name}: assigned work but no work-start evidence; pane is idle at prompt`);
-      } else if (stallReason === 'stale_or_missing_worker_reports') {
-        recommendations.push(`Investigate ${w.name}: pane is idle while status/heartbeat are stale or missing`);
+      } else if (stallReason === "no_work_start_evidence") {
+        recommendations.push(
+          `Investigate ${w.name}: assigned work but no work-start evidence; pane is idle at prompt`,
+        );
+      } else if (stallReason === "stale_or_missing_worker_reports") {
+        recommendations.push(
+          `Investigate ${w.name}: pane is idle while status/heartbeat are stale or missing`,
+        );
       } else {
-        recommendations.push(`Investigate ${w.name}: no meaningful turn progress and pane is idle at prompt`);
+        recommendations.push(
+          `Investigate ${w.name}: no meaningful turn progress and pane is idle at prompt`,
+        );
       }
     }
   }
@@ -5873,14 +8389,17 @@ export async function monitorTeamV2(
   // Count tasks
   const taskCounts = {
     total: allTasks.length,
-    pending: allTasks.filter((t) => t.status === 'pending').length,
-    blocked: allTasks.filter((t) => t.status === 'blocked').length,
-    in_progress: allTasks.filter((t) => t.status === 'in_progress').length,
-    completed: allTasks.filter((t) => t.status === 'completed').length,
-    failed: allTasks.filter((t) => t.status === 'failed').length,
+    pending: allTasks.filter((t) => t.status === "pending").length,
+    blocked: allTasks.filter((t) => t.status === "blocked").length,
+    in_progress: allTasks.filter((t) => t.status === "in_progress").length,
+    completed: allTasks.filter((t) => t.status === "completed").length,
+    failed: allTasks.filter((t) => t.status === "failed").length,
   };
 
-  const allTasksTerminal = taskCounts.pending === 0 && taskCounts.blocked === 0 && taskCounts.in_progress === 0;
+  const allTasksTerminal =
+    taskCounts.pending === 0 &&
+    taskCounts.blocked === 0 &&
+    taskCounts.in_progress === 0;
 
   for (const task of allTasks) {
     const missingDependencyIds = getMissingDependencyIds(task, taskById);
@@ -5889,49 +8408,77 @@ export async function monitorTeamV2(
     }
 
     recommendations.push(
-      `Investigate task-${task.id}: depends on missing task ids [${missingDependencyIds.join(', ')}]`,
+      `Investigate task-${task.id}: depends on missing task ids [${missingDependencyIds.join(", ")}]`,
     );
   }
 
   // Infer phase from task distribution
-  const phase = inferPhase(allTasks.map((t) => ({
-    status: t.status,
-    metadata: undefined,
-  })));
+  const phase = inferPhase(
+    allTasks.map((t) => ({
+      status: t.status,
+      metadata: undefined,
+    })),
+  );
 
   const updatedAt = new Date().toISOString();
   const totalMs = performance.now() - monitorStartMs;
-  await withTeamInstanceLifecycleLock(monitorInstance.cwd, monitorInstance.team_name, async () => {
-    // Revalidate the originally observed incarnation immediately before all
-    // monitor mutations. A cycle that scanned A must never emit/write into B.
-    await assertTeamInstanceUnderLock(monitorInstance);
-    await emitMonitorDerivedEvents(
-      sanitized,
-      allTasks,
-      workers.map((w) => ({ name: w.name, alive: w.alive, liveness: w.liveness, status: w.status })),
-      previousSnapshot,
-      cwd,
-    );
+  await withTeamInstanceLifecycleLock(
+    monitorInstance.cwd,
+    monitorInstance.team_name,
+    async () => {
+      // Revalidate the originally observed incarnation immediately before all
+      // monitor mutations. A cycle that scanned A must never emit/write into B.
+      await assertTeamInstanceUnderLock(monitorInstance);
+      await emitMonitorDerivedEvents(
+        sanitized,
+        allTasks,
+        workers.map((w) => ({
+          name: w.name,
+          alive: w.alive,
+          liveness: w.liveness,
+          status: w.status,
+        })),
+        previousSnapshot,
+        cwd,
+      );
 
-    await assertTeamInstanceUnderLock(monitorInstance);
-    await teamWriteMonitorSnapshot(sanitized, {
-      taskStatusById: Object.fromEntries(allTasks.map((t) => [t.id, t.status])),
-      workerAliveByName: Object.fromEntries(workers.map((w) => [w.name, w.alive])),
-      workerLivenessByName: Object.fromEntries(workers.map((w) => [w.name, w.liveness])),
-      workerStateByName: Object.fromEntries(workers.map((w) => [w.name, w.status.state])),
-      workerTurnCountByName: Object.fromEntries(workers.map((w) => [w.name, w.heartbeat?.turn_count ?? 0])),
-      workerTaskIdByName: Object.fromEntries(workers.map((w) => [w.name, w.status.current_task_id ?? ''])),
-      mailboxNotifiedByMessageId: previousSnapshot?.mailboxNotifiedByMessageId ?? {},
-      completedEventTaskIds: previousSnapshot?.completedEventTaskIds ?? {},
-      monitorTimings: {
-        list_tasks_ms: Number(listTasksMs.toFixed(2)),
-        worker_scan_ms: Number(workerScanMs.toFixed(2)),
-        mailbox_delivery_ms: 0,
-        total_ms: Number(totalMs.toFixed(2)),
-        updated_at: updatedAt,
-      },
-    }, cwd);
-  });
+      await assertTeamInstanceUnderLock(monitorInstance);
+      await teamWriteMonitorSnapshot(
+        sanitized,
+        {
+          taskStatusById: Object.fromEntries(
+            allTasks.map((t) => [t.id, t.status]),
+          ),
+          workerAliveByName: Object.fromEntries(
+            workers.map((w) => [w.name, w.alive]),
+          ),
+          workerLivenessByName: Object.fromEntries(
+            workers.map((w) => [w.name, w.liveness]),
+          ),
+          workerStateByName: Object.fromEntries(
+            workers.map((w) => [w.name, w.status.state]),
+          ),
+          workerTurnCountByName: Object.fromEntries(
+            workers.map((w) => [w.name, w.heartbeat?.turn_count ?? 0]),
+          ),
+          workerTaskIdByName: Object.fromEntries(
+            workers.map((w) => [w.name, w.status.current_task_id ?? ""]),
+          ),
+          mailboxNotifiedByMessageId:
+            previousSnapshot?.mailboxNotifiedByMessageId ?? {},
+          completedEventTaskIds: previousSnapshot?.completedEventTaskIds ?? {},
+          monitorTimings: {
+            list_tasks_ms: Number(listTasksMs.toFixed(2)),
+            worker_scan_ms: Number(workerScanMs.toFixed(2)),
+            mailbox_delivery_ms: 0,
+            total_ms: Number(totalMs.toFixed(2)),
+            updated_at: updatedAt,
+          },
+        },
+        cwd,
+      );
+    },
+  );
 
   return {
     teamName: sanitized,
@@ -5970,54 +8517,65 @@ export async function cleanupStaleReservations(
 ): Promise<void> {
   const sanitized = sanitizeTeamName(teamName);
   try {
-    await withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
-      const workspaceHash = teamWorkspaceHash(cwd, sanitized);
-      const reservationPath = canonicalTeamStatePath(
-        cwd,
-        TeamPaths.teamInstanceReservation(workspaceHash, sanitized),
-      );
+    await withTeamInstanceLifecycleLock(
+      cwd,
+      sanitized,
+      async () => {
+        const workspaceHash = teamWorkspaceHash(cwd, sanitized);
+        const reservationPath = canonicalTeamStatePath(
+          cwd,
+          TeamPaths.teamInstanceReservation(workspaceHash, sanitized),
+        );
 
-      if (!existsSync(reservationPath)) return;
+        if (!existsSync(reservationPath)) return;
 
-      const contentStr = await readFile(reservationPath, 'utf-8');
-      const reservation = JSON.parse(contentStr) as unknown;
+        const contentStr = await readFile(reservationPath, "utf-8");
+        const reservation = JSON.parse(contentStr) as unknown;
 
-      // Validate basic shape
-      if (
-        !(
-          reservation &&
-          typeof reservation === 'object' &&
-          !Array.isArray(reservation) &&
-          'owner' in reservation &&
-          typeof (reservation as Record<string, unknown>).owner === 'object'
-        )
-      ) {
-        return; // Malformed, leave alone
-      }
+        // Validate basic shape
+        if (
+          !(
+            reservation &&
+            typeof reservation === "object" &&
+            !Array.isArray(reservation) &&
+            "owner" in reservation &&
+            typeof (reservation as Record<string, unknown>).owner === "object"
+          )
+        ) {
+          return; // Malformed, leave alone
+        }
 
-      const owner = (reservation as Record<string, unknown>).owner as unknown;
-      if (!(
-        owner &&
-        typeof owner === 'object' &&
-        !Array.isArray(owner) &&
-        'pid' in owner &&
-        'process_started_at' in owner
-      )) {
-        return; // Malformed owner, leave alone
-      }
+        const owner = (reservation as Record<string, unknown>).owner as unknown;
+        if (
+          !(
+            owner &&
+            typeof owner === "object" &&
+            !Array.isArray(owner) &&
+            "pid" in owner &&
+            "process_started_at" in owner
+          )
+        ) {
+          return; // Malformed owner, leave alone
+        }
 
-      // Only a pending reservation can be stale. An active reservation is the
-      // running team's instance authority: its owner is the `team start` CLI,
-      // which exits once the team is up, and shutdown itself releases it.
-      if ((reservation as Record<string, unknown>).phase !== 'pending') return;
+        // Only a pending reservation can be stale. An active reservation is the
+        // running team's instance authority: its owner is the `team start` CLI,
+        // which exits once the team is up, and shutdown itself releases it.
+        if ((reservation as Record<string, unknown>).phase !== "pending")
+          return;
 
-      // Check if the process is dead
-      const ownerRecord = owner as Pick<OwnerEpochRecord, 'pid' | 'process_started_at'>;
-      if (isProcessIdentityDead(ownerRecord)) {
-        // Owner process is dead; clean up this reservation
-        await unlink(reservationPath);
-      }
-    }, 5_000);
+        // Check if the process is dead
+        const ownerRecord = owner as Pick<
+          OwnerEpochRecord,
+          "pid" | "process_started_at"
+        >;
+        if (isProcessIdentityDead(ownerRecord)) {
+          // Owner process is dead; clean up this reservation
+          await unlink(reservationPath);
+        }
+      },
+      5_000,
+    );
   } catch {
     // Best-effort; silently proceed on any error
   }
@@ -6032,51 +8590,70 @@ export async function cleanupAbandonedTeamState(
   cwd: string,
 ): Promise<void> {
   const sanitized = sanitizeTeamName(teamName);
-  
-  await withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
-    // Clean up the reservation if it exists and owner is dead or missing
-    const workspaceHash = teamWorkspaceHash(cwd, sanitized);
-    const reservationPath = canonicalTeamStatePath(
-      cwd,
-      TeamPaths.teamInstanceReservation(workspaceHash, sanitized),
-    );
-    
-    if (existsSync(reservationPath)) {
-      try {
-        const contentStr = await readFile(reservationPath, 'utf-8');
-        const reservation = JSON.parse(contentStr) as Record<string, unknown>;
-        const owner = reservation.owner as Pick<OwnerEpochRecord, 'pid' | 'process_started_at'> | undefined;
-        
-        // Remove if owner is dead or if this process owns it
-        if (!owner || isProcessIdentityDead(owner) || ownerMatchesCurrent(owner)) {
-          await unlink(reservationPath);
-        }
-      } catch {
-        // If reservation is malformed, try to remove it anyway
+
+  await withTeamInstanceLifecycleLock(
+    cwd,
+    sanitized,
+    async () => {
+      // Clean up the reservation if it exists and owner is dead or missing
+      const workspaceHash = teamWorkspaceHash(cwd, sanitized);
+      const reservationPath = canonicalTeamStatePath(
+        cwd,
+        TeamPaths.teamInstanceReservation(workspaceHash, sanitized),
+      );
+
+      if (existsSync(reservationPath)) {
         try {
-          await unlink(reservationPath);
+          const contentStr = await readFile(reservationPath, "utf-8");
+          const reservation = JSON.parse(contentStr) as Record<string, unknown>;
+          const owner = reservation.owner as
+            | Pick<OwnerEpochRecord, "pid" | "process_started_at">
+            | undefined;
+
+          // Remove if owner is dead or if this process owns it
+          if (
+            !owner ||
+            isProcessIdentityDead(owner) ||
+            ownerMatchesCurrent(owner)
+          ) {
+            await unlink(reservationPath);
+          }
         } catch {
-          // Reservation removal failed; continue with state dir cleanup
+          // If reservation is malformed, try to remove it anyway
+          try {
+            await unlink(reservationPath);
+          } catch {
+            // Reservation removal failed; continue with state dir cleanup
+          }
         }
       }
-    }
-    
-    // Clean up the team state directory
-    const teamRoot = teamStateRoot(cwd, sanitized);
-    if (existsSync(teamRoot)) {
-      try {
-        await rm(teamRoot, { recursive: true, force: true });
-      } catch (error) {
-        throw new Error(`Failed to remove team state directory at ${teamRoot}: ${error instanceof Error ? error.message : String(error)}`);
+
+      // Clean up the team state directory
+      const teamRoot = teamStateRoot(cwd, sanitized);
+      if (existsSync(teamRoot)) {
+        try {
+          await rm(teamRoot, { recursive: true, force: true });
+        } catch (error) {
+          throw new Error(
+            `Failed to remove team state directory at ${teamRoot}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
-    }
-  }, 10_000);
+    },
+    10_000,
+  );
 }
 
 // Helper to check if owner matches current process
-function ownerMatchesCurrent(owner: Pick<TeamInstanceProcessIdentity, 'pid' | 'process_started_at'>): boolean {
+function ownerMatchesCurrent(
+  owner: Pick<TeamInstanceProcessIdentity, "pid" | "process_started_at">,
+): boolean {
   const processStartedAt = currentProcessStartIdentity();
-  return processStartedAt !== null && owner.pid === process.pid && processStartedAt === owner.process_started_at;
+  return (
+    processStartedAt !== null &&
+    owner.pid === process.pid &&
+    processStartedAt === owner.process_started_at
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -6097,7 +8674,7 @@ export async function shutdownTeamV2(
   options: ShutdownOptionsV2 = {},
 ): Promise<ShutdownTeamV2Result> {
   const logEventFailure = createSwallowedErrorLogger(
-    'team.runtime-v2.shutdownTeamV2 appendTeamEvent failed',
+    "team.runtime-v2.shutdownTeamV2 appendTeamEvent failed",
   );
   const force = options.force === true;
   const ralph = options.ralph === true;
@@ -6112,51 +8689,82 @@ export async function shutdownTeamV2(
     try {
       // A retained receipt authorizes only this original transaction, even
       // when a replacement now occupies the canonical team name.
-      await retryTeamInstanceDisposal(originalInstance, TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION);
-      return { outcome: 'cleaned' };
+      await retryTeamInstanceDisposal(
+        originalInstance,
+        TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION,
+      );
+      return { outcome: "cleaned" };
     } catch (error) {
-      if (!(error instanceof TeamInstanceError && error.code === 'team_instance_authority_missing')) {
-        return { outcome: 'failed', reason: 'state_cleanup_failed', detail: error instanceof Error ? error.message : String(error) };
+      if (
+        !(
+          error instanceof TeamInstanceError &&
+          error.code === "team_instance_authority_missing"
+        )
+      ) {
+        return {
+          outcome: "failed",
+          reason: "state_cleanup_failed",
+          detail: error instanceof Error ? error.message : String(error),
+        };
       }
     }
   }
-  const assertShutdownGate = async (currentConfig: TeamConfig): Promise<void> => {
+  const assertShutdownGate = async (
+    currentConfig: TeamConfig,
+  ): Promise<void> => {
     if (force) return;
     const allTasks = await teamListTasks(sanitized, cwd);
     const governance = getConfigGovernance(currentConfig);
     const gate: ShutdownGateCounts = {
       total: allTasks.length,
-      pending: allTasks.filter((t) => t.status === 'pending').length,
-      blocked: allTasks.filter((t) => t.status === 'blocked').length,
-      in_progress: allTasks.filter((t) => t.status === 'in_progress').length,
-      completed: allTasks.filter((t) => t.status === 'completed').length,
-      failed: allTasks.filter((t) => t.status === 'failed').length,
+      pending: allTasks.filter((t) => t.status === "pending").length,
+      blocked: allTasks.filter((t) => t.status === "blocked").length,
+      in_progress: allTasks.filter((t) => t.status === "in_progress").length,
+      completed: allTasks.filter((t) => t.status === "completed").length,
+      failed: allTasks.filter((t) => t.status === "failed").length,
       allowed: false,
     };
-    gate.allowed = gate.pending === 0 && gate.blocked === 0 && gate.in_progress === 0 && gate.failed === 0;
+    gate.allowed =
+      gate.pending === 0 &&
+      gate.blocked === 0 &&
+      gate.in_progress === 0 &&
+      gate.failed === 0;
 
-    await appendTeamEvent(sanitized, {
-      type: 'shutdown_gate',
-      worker: 'leader-fixed',
-      reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? ' policy=ralph' : ''}`,
-    }, cwd).catch(logEventFailure);
+    await appendTeamEvent(
+      sanitized,
+      {
+        type: "shutdown_gate",
+        worker: "leader-fixed",
+        reason: `allowed=${gate.allowed} total=${gate.total} pending=${gate.pending} blocked=${gate.blocked} in_progress=${gate.in_progress} completed=${gate.completed} failed=${gate.failed}${ralph ? " policy=ralph" : ""}`,
+      },
+      cwd,
+    ).catch(logEventFailure);
 
     if (gate.allowed) return;
-    const hasActiveWork = gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
+    const hasActiveWork =
+      gate.pending > 0 || gate.blocked > 0 || gate.in_progress > 0;
     if (!governance.cleanup_requires_all_workers_inactive) {
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-      }, cwd).catch(logEventFailure);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `cleanup_override_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
       return;
     }
     if (ralph && !hasActiveWork) {
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
-      }, cwd).catch(logEventFailure);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `gate_bypassed:pending=${gate.pending},blocked=${gate.blocked},in_progress=${gate.in_progress},failed=${gate.failed}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
       return;
     }
     throw new Error(
@@ -6165,130 +8773,256 @@ export async function shutdownTeamV2(
   };
   let ownedShutdownNonce: string | null = null;
   let instance!: TeamInstanceBinding;
-  let config: TeamConfig | null = await withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
-    const observed = await readTeamConfig(sanitized, cwd);
-    if (observed && options.instanceId !== undefined
-      && (!observed.instance_id || observed.instance_id.toLowerCase() !== options.instanceId.toLowerCase())) {
-      throw new Error(observed.instance_id ? 'team_instance_mismatch' : 'team_instance_authority_missing');
-    }
-    const current = await migrateTeamConfigRevision(sanitized, cwd);
-    if (!current) return null;
-    if (!current.config.instance_id) throw new Error('team_instance_authority_missing');
-    if (options.instanceId !== undefined && current.config.instance_id.toLowerCase() !== options.instanceId.toLowerCase()) {
-      throw new Error('team_instance_mismatch');
-    }
-    const boundInstance = createTeamInstanceBinding({
-      teamName: sanitized,
-      cwd,
-      instanceId: current.config.instance_id,
+  let config: TeamConfig | null = await withTeamInstanceLifecycleLock(
+    cwd,
+    sanitized,
+    async () => {
+      const observed = await readTeamConfig(sanitized, cwd);
+      if (
+        observed &&
+        options.instanceId !== undefined &&
+        (!observed.instance_id ||
+          observed.instance_id.toLowerCase() !==
+            options.instanceId.toLowerCase())
+      ) {
+        throw new Error(
+          observed.instance_id
+            ? "team_instance_mismatch"
+            : "team_instance_authority_missing",
+        );
+      }
+      const current = await migrateTeamConfigRevision(sanitized, cwd);
+      if (!current) return null;
+      if (!current.config.instance_id)
+        throw new Error("team_instance_authority_missing");
+      if (
+        options.instanceId !== undefined &&
+        current.config.instance_id.toLowerCase() !==
+          options.instanceId.toLowerCase()
+      ) {
+        throw new Error("team_instance_mismatch");
+      }
+      const boundInstance = createTeamInstanceBinding({
+        teamName: sanitized,
+        cwd,
+        instanceId: current.config.instance_id,
+      });
+      instance = boundInstance;
+      await assertTeamInstanceUnderLock(boundInstance);
+      if (
+        !current.config.tmux_session ||
+        (!current.config.tmux_session.startsWith("cmux:") &&
+          !isHerdrSessionTarget(current.config.tmux_session) &&
+          !isValidTmuxServerIdentity(current.config.tmux_server_identity))
+      ) {
+        throw new Error("tmux_server_identity_missing");
+      }
+      if (current.config.active_recovery)
+        throw new Error(
+          `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`,
+        );
+      if (current.config.active_scale_down)
+        throw new Error(
+          `shutdown_blocked:active_scale_down:${current.config.active_scale_down.operation_id}`,
+        );
+      if (
+        current.config.active_scale_up &&
+        current.config.active_scale_up.phase !== "committed"
+      ) {
+        throw new Error(
+          `shutdown_blocked:active_scale_up:${current.config.active_scale_up.operation_id}`,
+        );
+      }
+      if (current.config.lifecycle_state === "shutting_down") {
+        const attempt = current.config.shutdown_attempt;
+        if (
+          !attempt ||
+          !Number.isInteger(attempt.pid) ||
+          attempt.pid <= 0 ||
+          !attempt.process_started_at
+        ) {
+          throw new Error("shutdown_fence_unowned");
+        }
+        const attemptInstanceId = attempt.instance_id;
+        if (attemptInstanceId !== boundInstance.instance_id) {
+          throw new Error("shutdown_fence_unowned");
+        }
+        // Verify all-dead-expiry provenance: the nonce must encode the
+        // deadline, and the state_revision must match the config (proving
+        // the shutdown_attempt was written atomically with lifecycle_state).
+        const isAllDeadExpiry =
+          attempt.nonce.startsWith("all-dead-expiry:") &&
+          attempt.state_revision === current.config.state_revision;
+        const ownerIsDead = isProcessIdentityDead({
+          pid: attempt.pid,
+          process_started_at: attempt.process_started_at,
+        });
+        // Allow the exact same owner to adopt/resume their own all-dead-expiry
+        // attempt (same pid + start identity). This handles the case where the
+        // expiry and shutdown run in the same process. Also allow adoption when
+        // the owner is dead. Reject all other live owners.
+        const isSameOwner =
+          attempt.pid === process.pid &&
+          attempt.process_started_at === currentProcessStartIdentity();
+        if (!ownerIsDead && !isAllDeadExpiry) {
+          throw new Error("shutdown_in_progress");
+        }
+        if (isAllDeadExpiry && !ownerIsDead && !isSameOwner) {
+          throw new Error("shutdown_in_progress");
+        }
+      } else if (current.config.lifecycle_state !== "stopped") {
+        await assertShutdownGate(current.config);
+      }
+      const processStartedAt = currentProcessStartIdentity();
+      if (!processStartedAt)
+        throw new Error("process_start_identity_unavailable");
+      ownedShutdownNonce = randomUUID();
+      const nextRevision = current.stateRevision + 1;
+      const next = {
+        ...current.config,
+        lifecycle_state: "shutting_down" as const,
+        state_revision: nextRevision,
+        shutdown_attempt: {
+          nonce: ownedShutdownNonce,
+          pid: process.pid,
+          process_started_at: processStartedAt,
+          state_revision: nextRevision,
+          created_at: new Date().toISOString(),
+          instance_id: boundInstance.instance_id,
+        },
+        // Clearing all_dead_recovery when adopting into a real shutdown attempt.
+        all_dead_recovery: undefined,
+      };
+      if (
+        !(await saveTeamConfigAtRevision(
+          next,
+          current.stateRevision,
+          cwd,
+          undefined,
+          {
+            ...(current.config.shutdown_attempt
+              ? { reclaim: { shutdown_attempt: true as const } }
+              : {}),
+            ...(current.config.all_dead_recovery
+              ? { release: { all_dead_recovery: true as const } }
+              : {}),
+          },
+        ))
+      )
+        throw new Error("stale_state_revision");
+      return next;
+    },
+  );
+  const revalidateShutdownFence = async (): Promise<TeamConfig> =>
+    withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
+      const current = await readRevisionedTeamConfig(sanitized, cwd);
+      const attempt = current?.config.shutdown_attempt;
+      const attemptInstanceId = attempt?.instance_id;
+      if (
+        !ownedShutdownNonce ||
+        !current ||
+        current.config.lifecycle_state !== "shutting_down" ||
+        current.config.active_recovery ||
+        (current.config.active_scale_up &&
+          current.config.active_scale_up.phase !== "committed") ||
+        !attempt ||
+        attempt.nonce !== ownedShutdownNonce ||
+        attempt.pid !== process.pid ||
+        attempt.process_started_at !== currentProcessStartIdentity() ||
+        !instance ||
+        attemptInstanceId !== instance.instance_id
+      ) {
+        throw new Error(
+          current?.config.active_recovery
+            ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`
+            : "shutdown_fence_lost",
+        );
+      }
+      return current.config;
     });
-    instance = boundInstance;
-    await assertTeamInstanceUnderLock(boundInstance);
-    if (!current.config.tmux_session
-      || (!current.config.tmux_session.startsWith('cmux:')
-        && !isHerdrSessionTarget(current.config.tmux_session)
-        && !isValidTmuxServerIdentity(current.config.tmux_server_identity))) {
-      throw new Error('tmux_server_identity_missing');
-    }
-    if (current.config.active_recovery) throw new Error(`shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`);
-    if (current.config.active_scale_down) throw new Error(`shutdown_blocked:active_scale_down:${current.config.active_scale_down.operation_id}`);
-    if (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') {
-      throw new Error(`shutdown_blocked:active_scale_up:${current.config.active_scale_up.operation_id}`);
-    }
-    if (current.config.lifecycle_state === 'shutting_down') {
-      const attempt = current.config.shutdown_attempt;
-      if (!attempt || !Number.isInteger(attempt.pid) || attempt.pid <= 0 || !attempt.process_started_at) {
-        throw new Error('shutdown_fence_unowned');
-      }
-      const attemptInstanceId = attempt.instance_id;
-      if (attemptInstanceId !== boundInstance.instance_id) {
-        throw new Error('shutdown_fence_unowned');
-      }
-      // Verify all-dead-expiry provenance: the nonce must encode the
-      // deadline, and the state_revision must match the config (proving
-      // the shutdown_attempt was written atomically with lifecycle_state).
-      const isAllDeadExpiry = attempt.nonce.startsWith('all-dead-expiry:')
-        && attempt.state_revision === current.config.state_revision;
-      const ownerIsDead = isProcessIdentityDead({ pid: attempt.pid, process_started_at: attempt.process_started_at });
-      // Allow the exact same owner to adopt/resume their own all-dead-expiry
-      // attempt (same pid + start identity). This handles the case where the
-      // expiry and shutdown run in the same process. Also allow adoption when
-      // the owner is dead. Reject all other live owners.
-      const isSameOwner = attempt.pid === process.pid
-        && attempt.process_started_at === currentProcessStartIdentity();
-      if (!ownerIsDead && !isAllDeadExpiry) {
-        throw new Error('shutdown_in_progress');
-      }
-      if (isAllDeadExpiry && !ownerIsDead && !isSameOwner) {
-        throw new Error('shutdown_in_progress');
-      }
-    } else if (current.config.lifecycle_state !== 'stopped') {
-      await assertShutdownGate(current.config);
-    }
-    const processStartedAt = currentProcessStartIdentity();
-    if (!processStartedAt) throw new Error('process_start_identity_unavailable');
-    ownedShutdownNonce = randomUUID();
-    const nextRevision = current.stateRevision + 1;
-    const next = { ...current.config, lifecycle_state: 'shutting_down' as const, state_revision: nextRevision,
-      shutdown_attempt: { nonce: ownedShutdownNonce, pid: process.pid, process_started_at: processStartedAt,
-        state_revision: nextRevision, created_at: new Date().toISOString(),
-        instance_id: boundInstance.instance_id },
-      // Clearing all_dead_recovery when adopting into a real shutdown attempt.
-      all_dead_recovery: undefined,
-    };
-    if (!await saveTeamConfigAtRevision(next, current.stateRevision, cwd, undefined, {
-      ...(current.config.shutdown_attempt ? { reclaim: { shutdown_attempt: true as const } } : {}),
-      ...(current.config.all_dead_recovery ? { release: { all_dead_recovery: true as const } } : {}),
-    })) throw new Error('stale_state_revision');
-    return next;
-  });
-  const revalidateShutdownFence = async (): Promise<TeamConfig> => withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
-    const current = await readRevisionedTeamConfig(sanitized, cwd);
-    const attempt = current?.config.shutdown_attempt;
-    const attemptInstanceId = attempt?.instance_id;
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
-      || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') || !attempt || attempt.nonce !== ownedShutdownNonce
-      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()
-      || !instance || attemptInstanceId !== instance.instance_id) {
-      throw new Error(current?.config.active_recovery
-        ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
-    }
-    return current.config;
-  });
   const commitStoppedFenceUnderLock = async (): Promise<void> => {
     const current = await readRevisionedTeamConfig(sanitized, cwd);
     const attempt = current?.config.shutdown_attempt;
     const attemptInstanceId = attempt?.instance_id;
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
-      || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed') || !attempt || attempt.nonce !== ownedShutdownNonce
-      || attempt.pid !== process.pid || attempt.process_started_at !== currentProcessStartIdentity()
-      || !instance || attemptInstanceId !== instance.instance_id) {
-      throw new Error(current?.config.active_recovery
-        ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}` : 'shutdown_fence_lost');
+    if (
+      !ownedShutdownNonce ||
+      !current ||
+      current.config.lifecycle_state !== "shutting_down" ||
+      current.config.active_recovery ||
+      (current.config.active_scale_up &&
+        current.config.active_scale_up.phase !== "committed") ||
+      !attempt ||
+      attempt.nonce !== ownedShutdownNonce ||
+      attempt.pid !== process.pid ||
+      attempt.process_started_at !== currentProcessStartIdentity() ||
+      !instance ||
+      attemptInstanceId !== instance.instance_id
+    ) {
+      throw new Error(
+        current?.config.active_recovery
+          ? `shutdown_blocked:active_recovery:${current.config.active_recovery.recovery_id}`
+          : "shutdown_fence_lost",
+      );
     }
-    const stopped = { ...current.config, lifecycle_state: 'stopped' as const, shutdown_attempt: undefined,
-      state_revision: current.stateRevision + 1 };
-    if (!await saveTeamConfigAtRevision(stopped, current.stateRevision, cwd, undefined, {
-      release: { shutdown_attempt: true },
-    })) throw new Error('stale_state_revision');
+    const stopped = {
+      ...current.config,
+      lifecycle_state: "stopped" as const,
+      shutdown_attempt: undefined,
+      state_revision: current.stateRevision + 1,
+    };
+    if (
+      !(await saveTeamConfigAtRevision(
+        stopped,
+        current.stateRevision,
+        cwd,
+        undefined,
+        {
+          release: { shutdown_attempt: true },
+        },
+      ))
+    )
+      throw new Error("stale_state_revision");
   };
-  const rollbackRejectedShutdownFence = async (expected: TeamConfig): Promise<boolean> => withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
-    const current = await readRevisionedTeamConfig(sanitized, cwd);
-    const attemptInstanceId = current?.config.shutdown_attempt?.instance_id;
-    if (!ownedShutdownNonce || !current || current.config.lifecycle_state !== 'shutting_down' || current.config.active_recovery
-      || (current.config.active_scale_up && current.config.active_scale_up.phase !== 'committed')
-
-      || current.stateRevision !== expected.state_revision || current.config.shutdown_attempt?.nonce !== ownedShutdownNonce
-      || !instance || attemptInstanceId !== instance.instance_id) return false;
-    const active = { ...current.config, lifecycle_state: 'active' as const, shutdown_attempt: undefined,
-      state_revision: current.stateRevision + 1 };
-    return saveTeamConfigAtRevision(active, current.stateRevision, cwd, undefined, {
-      release: { shutdown_attempt: true },
+  const rollbackRejectedShutdownFence = async (
+    expected: TeamConfig,
+  ): Promise<boolean> =>
+    withTeamInstanceLifecycleLock(cwd, sanitized, async () => {
+      const current = await readRevisionedTeamConfig(sanitized, cwd);
+      const attemptInstanceId = current?.config.shutdown_attempt?.instance_id;
+      if (
+        !ownedShutdownNonce ||
+        !current ||
+        current.config.lifecycle_state !== "shutting_down" ||
+        current.config.active_recovery ||
+        (current.config.active_scale_up &&
+          current.config.active_scale_up.phase !== "committed") ||
+        current.stateRevision !== expected.state_revision ||
+        current.config.shutdown_attempt?.nonce !== ownedShutdownNonce ||
+        !instance ||
+        attemptInstanceId !== instance.instance_id
+      )
+        return false;
+      const active = {
+        ...current.config,
+        lifecycle_state: "active" as const,
+        shutdown_attempt: undefined,
+        state_revision: current.stateRevision + 1,
+      };
+      return saveTeamConfigAtRevision(
+        active,
+        current.stateRevision,
+        cwd,
+        undefined,
+        {
+          release: { shutdown_attempt: true },
+        },
+      );
     });
-  });
   const rollbackShutdownForRetry = async (): Promise<boolean> => {
     if (!config) return false;
-    const rolled = await rollbackRejectedShutdownFence(config).catch(() => false);
+    const rolled = await rollbackRejectedShutdownFence(config).catch(
+      () => false,
+    );
     if (rolled) {
       // Fence was rolled back to 'active'; update local config snapshot.
       // Do NOT call finalizeAutoMerge — the team is going back to active
@@ -6310,11 +9044,15 @@ export async function shutdownTeamV2(
       try {
         const drainResult = await orchestrator.drainAndStop();
         if (drainResult.unmerged.length > 0) {
-          await appendTeamEvent(sanitized, {
-            type: 'team_leader_nudge',
-            worker: 'leader-fixed',
-            reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(',')}`,
-          }, cwd).catch(logEventFailure);
+          await appendTeamEvent(
+            sanitized,
+            {
+              type: "team_leader_nudge",
+              worker: "leader-fixed",
+              reason: `auto_merge_drain_unmerged:${drainResult.unmerged.map((u) => `${u.workerName}:${u.reason}`).join(",")}`,
+            },
+            cwd,
+          ).catch(logEventFailure);
         }
         for (const w of config?.workers ?? []) {
           try {
@@ -6326,7 +9064,9 @@ export async function shutdownTeamV2(
           }
         }
       } catch (err) {
-        process.stderr.write(`[team/runtime-v2] orchestrator drainAndStop: ${err}\n`);
+        process.stderr.write(
+          `[team/runtime-v2] orchestrator drainAndStop: ${err}\n`,
+        );
       } finally {
         await stopTeamCadence(sanitized);
         unregisterTeamOrchestrator(sanitized);
@@ -6343,21 +9083,37 @@ export async function shutdownTeamV2(
     // tree, so use non-mutating inspection and preserve state whenever any
     // recovery evidence exists.
     const cleanupSafety = inspectTeamWorktreeCleanupSafety(sanitized, cwd);
-    if (cleanupSafety.hasEvidence || existsSync(absPath(cwd, TeamPaths.root(sanitized)))) {
-      process.stderr.write('[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n');
-      return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
+    if (
+      cleanupSafety.hasEvidence ||
+      existsSync(absPath(cwd, TeamPaths.root(sanitized)))
+    ) {
+      process.stderr.write(
+        "[team/runtime-v2] preserving team state because config is missing and worktree cleanup evidence remains\n",
+      );
+      return {
+        outcome: "preserved",
+        reason: "config_missing_cleanup_evidence",
+        workers: [],
+      };
     }
-    return { outcome: 'preserved', reason: 'config_missing_cleanup_evidence', workers: [] };
+    return {
+      outcome: "preserved",
+      reason: "config_missing_cleanup_evidence",
+      workers: [],
+    };
   }
   const shutdownInstance = instance;
 
-
   if (force) {
-    await appendTeamEvent(sanitized, {
-      type: 'shutdown_gate_forced',
-      worker: 'leader-fixed',
-      reason: 'force_bypass',
-    }, cwd).catch(logEventFailure);
+    await appendTeamEvent(
+      sanitized,
+      {
+        type: "shutdown_gate_forced",
+        worker: "leader-fixed",
+        reason: "force_bypass",
+      },
+      cwd,
+    ).catch(logEventFailure);
   }
 
   // 2. Send shutdown request to each worker
@@ -6365,7 +9121,7 @@ export async function shutdownTeamV2(
   for (const w of config.workers) {
     try {
       const requestedAt = new Date().toISOString();
-      await writeShutdownRequest(sanitized, w.name, 'leader-fixed', cwd);
+      await writeShutdownRequest(sanitized, w.name, "leader-fixed", cwd);
       shutdownRequestTimes.set(w.name, requestedAt);
       // Write shutdown inbox
       const shutdownRoot = workerInstructionStateRoot(cwd, sanitized);
@@ -6375,7 +9131,9 @@ export async function shutdownTeamV2(
         : `# Shutdown Request\n\nThe leader requests shutdown. Please wrap up if possible and respond with your shutdown decision.\n\nWrite your ack to: ${shutdownAckPath}\nFormat:\n- Accept: {"status":"accept","reason":"ok","updated_at":"<iso>"}\n- Reject: {"status":"reject","reason":"still working","updated_at":"<iso>"}\n\nIf you accept, exit your session. If you reject, remain active for task work and mailbox instructions; do not exit because of this request.\n`;
       await writeWorkerInbox(sanitized, w.name, shutdownInbox, cwd);
     } catch (err) {
-      process.stderr.write(`[team/runtime-v2] shutdown request failed for ${w.name}: ${err}\n`);
+      process.stderr.write(
+        `[team/runtime-v2] shutdown request failed for ${w.name}: ${err}\n`,
+      );
     }
   }
 
@@ -6387,23 +9145,35 @@ export async function shutdownTeamV2(
   while (Date.now() < deadline) {
     for (const w of config.workers) {
       if (ackedWorkers.has(w.name)) continue;
-      const ack = await readShutdownAck(sanitized, w.name, cwd, shutdownRequestTimes.get(w.name));
+      const ack = await readShutdownAck(
+        sanitized,
+        w.name,
+        cwd,
+        shutdownRequestTimes.get(w.name),
+      );
       if (ack) {
         ackedWorkers.add(w.name);
-        await appendTeamEvent(sanitized, {
-          type: 'shutdown_ack',
-          worker: w.name,
-          reason: ack.status === 'reject' ? `reject:${ack.reason || 'no_reason'}` : 'accept',
-        }, cwd).catch(logEventFailure);
-        if (ack.status === 'reject') {
-          rejected.push({ worker: w.name, reason: ack.reason || 'no_reason' });
+        await appendTeamEvent(
+          sanitized,
+          {
+            type: "shutdown_ack",
+            worker: w.name,
+            reason:
+              ack.status === "reject"
+                ? `reject:${ack.reason || "no_reason"}`
+                : "accept",
+          },
+          cwd,
+        ).catch(logEventFailure);
+        if (ack.status === "reject") {
+          rejected.push({ worker: w.name, reason: ack.reason || "no_reason" });
         }
       }
     }
 
     if (rejected.length > 0 && !force) {
-      const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(',');
-      if (!await rollbackRejectedShutdownFence(config)) {
+      const detail = rejected.map((r) => `${r.worker}:${r.reason}`).join(",");
+      if (!(await rollbackRejectedShutdownFence(config))) {
         throw new Error(`shutdown_rejected_fence_lost:${detail}`);
       }
       throw new Error(`shutdown_rejected:${detail}`);
@@ -6420,7 +9190,7 @@ export async function shutdownTeamV2(
   // 4. Force kill remaining tmux panes
   const recordedWorkerPaneIds = config.workers
     .map((w) => w.pane_id)
-    .filter((p): p is string => typeof p === 'string' && p.trim().length > 0);
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0);
   const providerCleanupFailures: string[] = [];
   const paneCleanupAlive: string[] = [];
   const paneCleanupUnknown: string[] = [];
@@ -6449,16 +9219,18 @@ export async function shutdownTeamV2(
     const initialOwnership = configuredPaneOwnership(config, worker);
     const initialPaneLiveness = initialOwnership
       ? await getOwnedWorkerLiveness(initialOwnership)
-      : 'unknown';
+      : "unknown";
     let paneOwnership: WorkerPaneOwnership | null = null;
-    if (initialPaneLiveness !== 'dead') {
+    if (initialPaneLiveness !== "dead") {
       const ownership = await adoptWorkerPaneOwnership({
-        provider: worker.pane_id.startsWith('%') ? 'tmux' : 'cmux',
+        provider: providerForTeamTarget(config.tmux_session, worker.pane_id),
         providerTarget: config.tmux_session,
         paneId: worker.pane_id,
-        leaderPaneId: config.leader_pane_id ?? '',
-        reservedPaneIds: config.workers.filter(candidate => candidate.name !== worker.name)
-          .map(candidate => candidate.pane_id).filter((paneId): paneId is string => Boolean(paneId)),
+        leaderPaneId: config.leader_pane_id ?? "",
+        reservedPaneIds: config.workers
+          .filter((candidate) => candidate.name !== worker.name)
+          .map((candidate) => candidate.pane_id)
+          .filter((paneId): paneId is string => Boolean(paneId)),
         ...(config.tmux_server_identity
           ? { tmuxServerIdentity: config.tmux_server_identity }
           : {}),
@@ -6483,68 +9255,105 @@ export async function shutdownTeamV2(
       attemptId: worker.launch_attempt_id,
       runtimeCliPath: resolveRuntimeCliPath(),
     });
-    if (!attempt || !await retireAndCleanupCurrentWorkerLaunchAttempt(attempt, 'team_shutdown', async () => {
-      try {
-        let lastLiveness: WorkerPaneLiveness = paneOwnership
-          ? await getOwnedWorkerLiveness(paneOwnership)
-          : initialPaneLiveness;
-        if (lastLiveness === 'dead') return true;
-        if (!paneOwnership) return false;
-        for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
-          await killOwnedWorkerPane(paneOwnership);
-          lastLiveness = await getOwnedWorkerLiveness(paneOwnership);
-          if (lastLiveness === 'dead') return true;
-        }
-        if (lastLiveness === 'alive') paneCleanupAlive.push(worker.name);
-        else paneCleanupUnknown.push(worker.name);
-        return false;
-      } catch (err) {
-        process.stderr.write(`[team/runtime-v2] worker pane cleanup failed for ${worker.name}: ${err instanceof Error ? err.message : String(err)}\n`);
-        paneCleanupUnknown.push(worker.name);
-        return false;
-      }
-    })) providerCleanupFailures.push(worker.name);
+    if (
+      !attempt ||
+      !(await retireAndCleanupCurrentWorkerLaunchAttempt(
+        attempt,
+        "team_shutdown",
+        async () => {
+          try {
+            let lastLiveness: WorkerPaneLiveness = paneOwnership
+              ? await getOwnedWorkerLiveness(paneOwnership)
+              : initialPaneLiveness;
+            if (lastLiveness === "dead") return true;
+            if (!paneOwnership) return false;
+            for (let cleanupAttempt = 0; cleanupAttempt < 2; cleanupAttempt++) {
+              await killOwnedWorkerPane(paneOwnership);
+              lastLiveness = await getOwnedWorkerLiveness(paneOwnership);
+              if (lastLiveness === "dead") return true;
+            }
+            if (lastLiveness === "alive") paneCleanupAlive.push(worker.name);
+            else paneCleanupUnknown.push(worker.name);
+            return false;
+          } catch (err) {
+            process.stderr.write(
+              `[team/runtime-v2] worker pane cleanup failed for ${worker.name}: ${err instanceof Error ? err.message : String(err)}\n`,
+            );
+            paneCleanupUnknown.push(worker.name);
+            return false;
+          }
+        },
+      ))
+    )
+      providerCleanupFailures.push(worker.name);
   }
   if (paneCleanupAlive.length > 0) {
-    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-    return { outcome: 'preserved', reason: 'worker_panes_alive', workers: paneCleanupAlive };
+    if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+    return {
+      outcome: "preserved",
+      reason: "worker_panes_alive",
+      workers: paneCleanupAlive,
+    };
   }
   if (paneCleanupUnknown.length > 0) {
     // Identity-bound process reaping already succeeded. Unknown pane liveness still preserves state, including under --force.
-    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-    return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: paneCleanupUnknown };
+    if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+    return {
+      outcome: "preserved",
+      reason: "worker_process_reaped_pane_unconfirmed",
+      workers: paneCleanupUnknown,
+    };
   }
   if (providerCleanupFailures.length > 0) {
-    process.stderr.write(`[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(', ')}\n`);
-    if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-    return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: providerCleanupFailures };
+    process.stderr.write(
+      `[team/runtime-v2] preserving panes/worktrees/state because provider cleanup is unverified: ${providerCleanupFailures.join(", ")}\n`,
+    );
+    if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+    return {
+      outcome: "preserved",
+      reason: "provider_cleanup_unverified",
+      workers: providerCleanupFailures,
+    };
   }
 
   try {
-    const {
-      killTeamSession: killOwnedTeamSession,
-    } = await import('./tmux-session.js');
+    const { killTeamSession: killOwnedTeamSession } =
+      await import("./tmux-session.js");
     const ownsWindow = config.tmux_window_owned === true;
     const workerPaneIds = recordedWorkerPaneIds;
-    const splitPaneMode = Boolean(config.tmux_session && !ownsWindow && config.tmux_session.includes(':'));
+    const splitPaneMode = Boolean(
+      config.tmux_session && !ownsWindow && config.tmux_session.includes(":"),
+    );
     if (!splitPaneMode && config.tmux_session) {
       if (!config.leader_pane_id) {
-        if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-        return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+        if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+        return {
+          outcome: "preserved",
+          reason: "provider_cleanup_unverified",
+          workers: ["leader-fixed"],
+        };
       }
-      const serverState = (config.tmux_session.startsWith('cmux:') || isHerdrSessionTarget(config.tmux_session))
-        ? 'matching' as const
-        : isValidTmuxServerIdentity(config.tmux_server_identity)
-          ? await observeTmuxServerIdentity(config.tmux_server_identity)
-          : 'unknown' as const;
-      if (serverState === 'unknown') {
-        if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-        return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+      const serverState =
+        config.tmux_session.startsWith("cmux:") ||
+        isHerdrSessionTarget(config.tmux_session)
+          ? ("matching" as const)
+          : isValidTmuxServerIdentity(config.tmux_server_identity)
+            ? await observeTmuxServerIdentity(config.tmux_server_identity)
+            : ("unknown" as const);
+      if (serverState === "unknown") {
+        if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+        return {
+          outcome: "preserved",
+          reason: "provider_cleanup_unverified",
+          workers: ["leader-fixed"],
+        };
       }
       const sessionMode = ownsWindow
-        ? (config.tmux_session.includes(':') ? 'dedicated-window' : 'detached-session')
-        : 'detached-session';
-      if (serverState === 'matching') {
+        ? config.tmux_session.includes(":")
+          ? "dedicated-window"
+          : "detached-session"
+        : "detached-session";
+      if (serverState === "matching") {
         const leaderPresence = await observeTeamSessionTargetPresence({
           sessionName: config.tmux_session,
           sessionMode,
@@ -6553,55 +9362,96 @@ export async function shutdownTeamV2(
             ? { tmuxServerIdentity: config.tmux_server_identity }
             : {}),
         });
-        if (leaderPresence.kind !== 'owned' && leaderPresence.kind !== 'absent') {
-          if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-          return { outcome: 'preserved', reason: 'provider_cleanup_unverified', workers: ['leader-fixed'] };
+        if (
+          leaderPresence.kind !== "owned" &&
+          leaderPresence.kind !== "absent"
+        ) {
+          if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+          return {
+            outcome: "preserved",
+            reason: "provider_cleanup_unverified",
+            workers: ["leader-fixed"],
+          };
         }
       }
-      if (!await killOwnedTeamSession(config.tmux_session, [], config.leader_pane_id, {
-        sessionMode,
-        ...(config.tmux_server_identity
-          ? { tmuxServerIdentity: config.tmux_server_identity }
-          : {}),
-      })) {
-        throw new Error('tmux cleanup unverified');
+      if (
+        !(await killOwnedTeamSession(
+          config.tmux_session,
+          [],
+          config.leader_pane_id,
+          {
+            sessionMode,
+            ...(config.tmux_server_identity
+              ? { tmuxServerIdentity: config.tmux_server_identity }
+              : {}),
+          },
+        ))
+      ) {
+        throw new Error("tmux cleanup unverified");
       }
     }
     const cleanupConfig = config;
-    const paneById = new Map(cleanupConfig.workers
-      .filter((w) => typeof w.pane_id === 'string' && w.pane_id.trim().length > 0)
-      .map((w) => [w.pane_id as string, w.name]));
-    const liveness = await Promise.all(workerPaneIds.map(async (paneId) => {
-      const worker = cleanupConfig.workers.find(candidate => candidate.pane_id === paneId);
-      const ownership = worker
-        ? configuredPaneOwnership(cleanupConfig, worker)
-        : configuredPaneOwnership(cleanupConfig, { pane_id: paneId });
-      return [paneId, ownership ? await getOwnedWorkerLiveness(ownership) : 'unknown'] as const;
-    }));
+    const paneById = new Map(
+      cleanupConfig.workers
+        .filter(
+          (w) => typeof w.pane_id === "string" && w.pane_id.trim().length > 0,
+        )
+        .map((w) => [w.pane_id as string, w.name]),
+    );
+    const liveness = await Promise.all(
+      workerPaneIds.map(async (paneId) => {
+        const worker = cleanupConfig.workers.find(
+          (candidate) => candidate.pane_id === paneId,
+        );
+        const ownership = worker
+          ? configuredPaneOwnership(cleanupConfig, worker)
+          : configuredPaneOwnership(cleanupConfig, { pane_id: paneId });
+        return [
+          paneId,
+          ownership ? await getOwnedWorkerLiveness(ownership) : "unknown",
+        ] as const;
+      }),
+    );
     const aliveWorkers = liveness
-      .filter(([, state]) => state === 'alive')
+      .filter(([, state]) => state === "alive")
       .map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (aliveWorkers.length > 0) {
-      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(', ')}
+      process.stderr
+        .write(`[team/runtime-v2] preserving worktrees/state because worker pane(s) are still alive: ${aliveWorkers.join(", ")}
 `);
-      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-      return { outcome: 'preserved', reason: 'worker_panes_alive', workers: aliveWorkers };
+      if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+      return {
+        outcome: "preserved",
+        reason: "worker_panes_alive",
+        workers: aliveWorkers,
+      };
     }
     const unknownWorkers = liveness
-      .filter(([, state]) => state === 'unknown')
+      .filter(([, state]) => state === "unknown")
       .map(([paneId]) => paneById.get(paneId) ?? paneId);
     if (unknownWorkers.length > 0) {
-      process.stderr.write(`[team/runtime-v2] preserving worktrees/state because worker process reaping is verified but pane liveness is unconfirmed: ${unknownWorkers.join(', ')}
+      process.stderr
+        .write(`[team/runtime-v2] preserving worktrees/state because worker process reaping is verified but pane liveness is unconfirmed: ${unknownWorkers.join(", ")}
 `);
-      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-      return { outcome: 'preserved', reason: 'worker_process_reaped_pane_unconfirmed', workers: unknownWorkers };
+      if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+      return {
+        outcome: "preserved",
+        reason: "worker_process_reaped_pane_unconfirmed",
+        workers: unknownWorkers,
+      };
     }
   } catch (err) {
     process.stderr.write(`[team/runtime-v2] tmux cleanup: ${err}\n`);
     if (recordedWorkerPaneIds.length > 0) {
-      process.stderr.write('[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n');
-      if (!await rollbackShutdownForRetry()) await finalizeAutoMerge();
-      return { outcome: 'failed', reason: 'tmux_cleanup_failed', detail: err instanceof Error ? err.message : String(err) };
+      process.stderr.write(
+        "[team/runtime-v2] preserving worktrees/state because tmux cleanup did not prove worker panes exited\n",
+      );
+      if (!(await rollbackShutdownForRetry())) await finalizeAutoMerge();
+      return {
+        outcome: "failed",
+        reason: "tmux_cleanup_failed",
+        detail: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
@@ -6609,23 +9459,36 @@ export async function shutdownTeamV2(
   if (ralph) {
     try {
       const finalTasks = await teamListTasks(sanitized, cwd);
-      const completed = finalTasks.filter((t) => t.status === 'completed').length;
-      const failed = finalTasks.filter((t) => t.status === 'failed').length;
-      const pending = finalTasks.filter((t) => t.status === 'pending').length;
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
-      }, cwd).catch(logEventFailure);
+      const completed = finalTasks.filter(
+        (t) => t.status === "completed",
+      ).length;
+      const failed = finalTasks.filter((t) => t.status === "failed").length;
+      const pending = finalTasks.filter((t) => t.status === "pending").length;
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason: `ralph_cleanup_summary: total=${finalTasks.length} completed=${completed} failed=${failed} pending=${pending} force=${force}`,
+        },
+        cwd,
+      ).catch(logEventFailure);
     } catch (error) {
-      const detail = redactBoundedDiagnostic(error instanceof Error ? error.message : String(error), 500);
+      const detail = redactBoundedDiagnostic(
+        error instanceof Error ? error.message : String(error),
+        500,
+      );
       const reason = `ralph_cleanup_summary_unavailable:${detail}`;
       process.stderr.write(`[team/runtime-v2] ${reason}\n`);
-      await appendTeamEvent(sanitized, {
-        type: 'team_leader_nudge',
-        worker: 'leader-fixed',
-        reason,
-      }, cwd).catch(logEventFailure);
+      await appendTeamEvent(
+        sanitized,
+        {
+          type: "team_leader_nudge",
+          worker: "leader-fixed",
+          reason,
+        },
+        cwd,
+      ).catch(logEventFailure);
     }
   }
 
@@ -6637,40 +9500,55 @@ export async function shutdownTeamV2(
   // 6. Worktree cleanup and final state disposal are one instance-protected
   // transaction.  The external receipt is published before detaching the
   // disposable state root, so a later retry never discovers authority by name.
-  return withTeamInstanceLifecycleLock<ShutdownTeamV2Result>(cwd, sanitized, async () => {
-    await assertTeamInstanceUnderLock(shutdownInstance);
-    await commitStoppedFenceUnderLock();
-    let worktreeCleanupFailure: string | null = null;
-    let preservedWorktrees = 0;
-    try {
-      const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
-      preservedWorktrees = worktreeCleanup.preserved.length;
-    } catch (err) {
-      preservedWorktrees = 1;
-      worktreeCleanupFailure = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
-    }
-    if (worktreeCleanupFailure) {
-      return { outcome: 'failed', reason: 'worktree_cleanup_failed', detail: worktreeCleanupFailure };
-    }
-    if (preservedWorktrees > 0) {
-      process.stderr.write(`[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`);
-      return { outcome: 'preserved', reason: 'worktrees_preserved', workers: [] };
-    }
-    try {
-      await disposeTeamInstanceUnderLock(
-        shutdownInstance,
-        TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION,
-      );
-    } catch (err) {
-      return {
-        outcome: 'failed',
-        reason: 'state_cleanup_failed',
-        detail: err instanceof Error ? err.message : String(err),
-      };
-    }
-    return { outcome: 'cleaned' };
-  });
+  return withTeamInstanceLifecycleLock<ShutdownTeamV2Result>(
+    cwd,
+    sanitized,
+    async () => {
+      await assertTeamInstanceUnderLock(shutdownInstance);
+      await commitStoppedFenceUnderLock();
+      let worktreeCleanupFailure: string | null = null;
+      let preservedWorktrees = 0;
+      try {
+        const worktreeCleanup = cleanupTeamWorktrees(sanitized, cwd);
+        preservedWorktrees = worktreeCleanup.preserved.length;
+      } catch (err) {
+        preservedWorktrees = 1;
+        worktreeCleanupFailure =
+          err instanceof Error ? err.message : String(err);
+        process.stderr.write(`[team/runtime-v2] worktree cleanup: ${err}\n`);
+      }
+      if (worktreeCleanupFailure) {
+        return {
+          outcome: "failed",
+          reason: "worktree_cleanup_failed",
+          detail: worktreeCleanupFailure,
+        };
+      }
+      if (preservedWorktrees > 0) {
+        process.stderr.write(
+          `[team/runtime-v2] preserved ${preservedWorktrees} worktree(s); keeping team state for follow-up cleanup\n`,
+        );
+        return {
+          outcome: "preserved",
+          reason: "worktrees_preserved",
+          workers: [],
+        };
+      }
+      try {
+        await disposeTeamInstanceUnderLock(
+          shutdownInstance,
+          TEAM_INSTANCE_FINAL_DISPOSAL_AUTHORIZATION,
+        );
+      } catch (err) {
+        return {
+          outcome: "failed",
+          reason: "state_cleanup_failed",
+          detail: err instanceof Error ? err.message : String(err),
+        };
+      }
+      return { outcome: "cleaned" };
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -6687,7 +9565,7 @@ export async function resumeTeamV2(
 
   // Verify tmux session is alive
   const sessionName = config.tmux_session || `omc-team-${sanitized}`;
-  if (sessionName.startsWith('cmux:') || isHerdrSessionTarget(sessionName)) {
+  if (sessionName.startsWith("cmux:") || isHerdrSessionTarget(sessionName)) {
     return {
       teamName: sanitized,
       sanitizedName: sanitized,
@@ -6698,20 +9576,23 @@ export async function resumeTeamV2(
       cwd,
     };
   }
-  if (!isValidTmuxServerIdentity(config.tmux_server_identity)
-    || await observeTmuxServerIdentity(config.tmux_server_identity) !== 'matching') {
+  if (
+    !isValidTmuxServerIdentity(config.tmux_server_identity) ||
+    (await observeTmuxServerIdentity(config.tmux_server_identity)) !==
+      "matching"
+  ) {
     return null;
   }
   if (!config.leader_pane_id) return null;
   const targetOwnership = await verifyTeamTargetOwnership({
-    provider: 'tmux',
+    provider: "tmux",
     providerTarget: sessionName,
-    recipient: 'leader-fixed',
-    recipientRole: 'leader',
+    recipient: "leader-fixed",
+    recipientRole: "leader",
     paneId: config.leader_pane_id,
     tmuxServerIdentity: config.tmux_server_identity,
   });
-  if (targetOwnership.kind !== 'owned') return null;
+  if (targetOwnership.kind !== "owned") return null;
   return {
     teamName: sanitized,
     sanitizedName: sanitized,
@@ -6728,7 +9609,7 @@ export async function resumeTeamV2(
 // ---------------------------------------------------------------------------
 
 export async function findActiveTeamsV2(cwd: string): Promise<string[]> {
-  const root = join(getOmcRoot(cwd), 'state', 'team');
+  const root = join(getOmcRoot(cwd), "state", "team");
   if (!existsSync(root)) return [];
   const entries = await readdir(root, { withFileTypes: true });
   const active: string[] = [];

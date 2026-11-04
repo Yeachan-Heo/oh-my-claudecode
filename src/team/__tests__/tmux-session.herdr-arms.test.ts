@@ -7,6 +7,7 @@
  * utilities are module-mocked so no tmux binary is required.
  */
 
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const tmuxMocks = vi.hoisted(() => ({
@@ -24,6 +25,7 @@ const herdrMocks = vi.hoisted(() => ({
   herdrClosePane: vi.fn(),
   isHerdrWorkerAlive: vi.fn(),
   herdrPaneWorkspaceMembership: vi.fn(),
+  herdrCreateWorkerTab: vi.fn(),
 }));
 
 vi.mock("../herdr-session.js", async (importOriginal) => {
@@ -32,6 +34,7 @@ vi.mock("../herdr-session.js", async (importOriginal) => {
     ...actual,
     herdrClosePane: herdrMocks.herdrClosePane,
     isHerdrWorkerAlive: herdrMocks.isHerdrWorkerAlive,
+    herdrCreateWorkerTab: herdrMocks.herdrCreateWorkerTab,
     // Passthrough by default so exec-injection tests exercise the real
     // membership logic; individual tests shortcut it where the call site
     // offers no dependency injection (killOwnedWorkerPane).
@@ -54,6 +57,7 @@ import {
   getWorkerLiveness,
   killOwnedWorkerPane,
   paneCopyModeObservation,
+  splitTeamWorkerPaneWithEvidence,
   verifyTeamTargetOwnership,
   type MailboxTargetOwnershipDependencies,
   type WorkerPaneOwnership,
@@ -227,5 +231,120 @@ describe("killOwnedWorkerPane herdr arm", () => {
       /owned_pane_membership_unverified/,
     );
     expect(herdrMocks.herdrClosePane).not.toHaveBeenCalled();
+  });
+});
+
+describe("splitTeamWorkerPaneWithEvidence herdr workspace threading", () => {
+  beforeEach(() => {
+    herdrMocks.herdrCreateWorkerTab.mockReset();
+    herdrMocks.herdrCreateWorkerTab.mockResolvedValue({
+      paneId: "w2:p7",
+      tabId: "w2:t7",
+    });
+  });
+
+  it("allocates in the explicitly provided team workspace, not the leader's", async () => {
+    // The leader occupies w1:p1 while the team workspace is herdr:w2; the
+    // persisted workspace argument must win over derivation from the split
+    // target (spawnV2Worker/scaleUpOwned/recovery all thread it).
+    const evidence = await splitTeamWorkerPaneWithEvidence(
+      "w1:p1",
+      "right",
+      "/repo",
+      "herdr",
+      undefined,
+      undefined,
+      "w2",
+    );
+    expect(evidence).toMatchObject({
+      commandSucceeded: true,
+      provider: "herdr",
+      paneId: "w2:p7",
+    });
+    expect(herdrMocks.herdrCreateWorkerTab).toHaveBeenCalledWith(
+      "w2",
+      "/repo",
+      "worker-split",
+    );
+  });
+
+  it("still derives the workspace from a herdr split target when omitted", async () => {
+    await splitTeamWorkerPaneWithEvidence(
+      "w2:p5",
+      "down",
+      "/repo",
+      "herdr",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(herdrMocks.herdrCreateWorkerTab).toHaveBeenCalledWith(
+      "w2",
+      "/repo",
+      "worker-split",
+    );
+  });
+
+  it("refuses without any workspace when the split target is not a herdr pane", async () => {
+    const evidence = await splitTeamWorkerPaneWithEvidence(
+      "%5",
+      "right",
+      "/repo",
+      "herdr",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(evidence).toMatchObject({
+      commandSucceeded: false,
+      stderr: "herdr_workspace_unknown",
+      paneId: null,
+    });
+    expect(herdrMocks.herdrCreateWorkerTab).not.toHaveBeenCalled();
+  });
+});
+
+describe("herdr split callers thread the persisted team workspace", () => {
+  // Source-level assertions (same pattern as the adaptive-retry source
+  // test): spawnV2Worker, the recovery saga, and scaleUpOwned must hand the
+  // PERSISTED workspace id (derived from the session target) to the splitter
+  // instead of letting it derive one from the leader pane, and must exempt
+  // the herdr leader pane from the in-workspace membership proof.
+  const whitespaceCollapsed = (source: string): string =>
+    source.replace(/\s+/g, " ");
+  const runtimeSource = readFileSync(
+    new URL("../runtime-v2.ts", import.meta.url),
+    "utf8",
+  );
+  const scalingSource = readFileSync(
+    new URL("../scaling.ts", import.meta.url),
+    "utf8",
+  );
+
+  it("spawnV2Worker threads the session workspace and exempts the leader split target", () => {
+    expect(runtimeSource).toContain(
+      "herdrWorkspaceIdFromSessionTarget(opts.sessionName)",
+    );
+    expect(runtimeSource).toContain(
+      'launchProvider === "herdr" && splitTarget === opts.leaderPaneId',
+    );
+  });
+
+  it("the recovery saga classifies the provider and threads the workspace", () => {
+    expect(whitespaceCollapsed(runtimeSource)).toContain(
+      "providerForTeamTarget( owner.config.tmux_session!, splitTarget, )",
+    );
+    expect(runtimeSource).toContain(
+      "herdrWorkspaceIdFromSessionTarget(owner.config.tmux_session!)",
+    );
+  });
+
+  it("scaleUpOwned threads the configured workspace and adopts herdr panes as herdr", () => {
+    expect(scalingSource).toContain(
+      "herdrWorkspaceIdFromSessionTarget(config.tmux_session)",
+    );
+    expect(scalingSource).toContain(
+      "providerForTeamTarget(config.tmux_session, paneId)",
+    );
   });
 });
