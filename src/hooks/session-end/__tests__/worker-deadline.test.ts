@@ -32,9 +32,10 @@ afterEach(() => {
 });
 
 describe('SessionEnd worker run deadline', () => {
-  it.each(['completed', 'failed', 'unrecorded'])('reschedules unstarted required actions after a deadline (first action: %s)', async (outcome) => {
+  it.each(['completed', 'failed', 'unrecorded'])('handles deadline reached correctly for each outcome (first action: %s)', async (outcome) => {
     const completed = outcome === 'completed';
-    if (outcome === 'unrecorded') vi.spyOn(manifest, 'finishSessionEndAction').mockReturnValueOnce(null);
+    const unrecorded = outcome === 'unrecorded';
+    if (unrecorded) vi.spyOn(manifest, 'finishSessionEndAction').mockReturnValueOnce(null);
     const sessionId = 'deadline-reschedule';
     expect(prepareCoreManifest(directory, sessionId, {})).not.toBeNull();
     expect(sealCoreManifest(directory, sessionId)).not.toBeNull();
@@ -49,7 +50,19 @@ describe('SessionEnd worker run deadline', () => {
     const job = readSessionEndJob(directory, sessionId)!;
     expect(job.owner).toBeNull();
     expect(job.recoverableFailure?.reason).toBe('run-deadline-reached');
-    expect(job.actions['foreground-cleanup'].status).toBe(completed ? 'completed' : 'retryable');
+    // When deadline is reached:
+    // - If action finishes successfully: status = 'completed', runner.phase = 'terminal'
+    // - If action finishes with failure: status = 'retryable', runner.phase = 'terminal'
+    // - If action result fails to persist (unrecorded): status stays 'claimed',
+    //   runner.phase = 'started' (NOT reset, prevents double-running)
+    if (unrecorded) {
+      expect(job.actions['foreground-cleanup'].status).toBe('claimed');
+      expect(job.actions['foreground-cleanup'].runner?.phase).toBe('started');
+    } else {
+      expect(job.actions['foreground-cleanup'].status).toBe(completed ? 'completed' : 'retryable');
+      expect(job.actions['foreground-cleanup'].runner?.phase).toBe('terminal');
+    }
+    // Actions never claimed (reserved phase) are reset to retryable
     expect(job.actions['team-cleanup']).toMatchObject({ status: 'retryable', attempts: 0 });
     expect(job.actions['python-cleanup']).toMatchObject({ status: 'retryable', attempts: 0 });
     expect(job.actions.callback.status).toBe('pending');
