@@ -292,6 +292,145 @@ describe('git-worktree', () => {
   });
 
   describe('cleanupTeamWorktrees', () => {
+    function commitInWorktree(path: string): string {
+      writeFileSync(join(path, 'work.txt'), 'worker output\n');
+      execFileSync('git', ['add', 'work.txt'], { cwd: path, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', 'Worker commit'], { cwd: path, stdio: 'pipe' });
+      return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path, encoding: 'utf-8' }).trim();
+    }
+
+    function refsContaining(sha: string): string {
+      return execFileSync('git', ['for-each-ref', '--contains', sha], { cwd: repoDir, encoding: 'utf-8' }).trim();
+    }
+
+    it.each(['named', 'detached'] as const)('preserves a clean %s worktree whose commit is on no other ref', (mode) => {
+      const info = ensureWorkerWorktree(teamName, 'worker1', repoDir, { mode });
+      const sha = commitInWorktree(info!.path);
+
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.removed).toEqual([]);
+      expect(result.preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: info!.path, encoding: 'utf-8' }).trim()).toBe(sha);
+    });
+
+    it('keeps the branch when the worker moved its worktree off the unmerged commit', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      execFileSync('git', ['switch', '--detach', 'HEAD~1'], { cwd: info.path, stdio: 'pipe' });
+
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('keeps the branch when the worktree directory is already gone', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      rmSync(info.path, { recursive: true, force: true });
+
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('does not count a stash as keeping the commit safe', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      writeFileSync(join(info.path, 'work.txt'), 'uncommitted\n');
+      execFileSync('git', ['stash'], { cwd: info.path, stdio: 'pipe' });
+
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(execFileSync('git', ['for-each-ref', '--contains', sha, 'refs/heads'], { cwd: repoDir, encoding: 'utf-8' }).trim()).not.toBe('');
+    });
+
+    it('removes the worktree on retry once its commit is merged into the leader branch', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      expect(cleanupTeamWorktrees(teamName, repoDir).removed).toEqual([]);
+
+      execFileSync('git', ['merge', '--no-ff', '-m', 'Merge worker', info.branch], { cwd: repoDir, stdio: 'pipe' });
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.removed).toEqual(['worker1']);
+      expect(existsSync(info.path)).toBe(false);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('does not count a sibling worker branch as keeping a shared commit safe', () => {
+      const first = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(first.path);
+      createWorkerWorktree(teamName, 'worker2', repoDir, sha);
+
+      const result = cleanupTeamWorktrees(teamName, repoDir);
+
+      expect(result.preserved.map((entry) => entry.workerName)).toEqual(['worker1']);
+      expect(existsSync(first.path)).toBe(true);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('does not count another team\'s worker branch as keeping a commit safe', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      createWorkerWorktree('other-team', 'worker1', repoDir, sha);
+
+      expect(cleanupTeamWorktrees(teamName, repoDir).preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      cleanupTeamWorktrees('other-team', repoDir);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('removes a worker with no commits after a leader amend drops its base from every branch', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      execFileSync('git', ['commit', '--amend', '-m', 'Amended'], { cwd: repoDir, stdio: 'pipe' });
+
+      expect(cleanupTeamWorktrees(teamName, repoDir).removed).toEqual(['worker1']);
+      expect(existsSync(info.path)).toBe(false);
+    });
+
+    it('keeps worker commits protected when the worktree is reused', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+      createWorkerWorktree(teamName, 'worker1', repoDir);
+
+      expect(cleanupTeamWorktrees(teamName, repoDir).preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('still removes a worker reset to the leader after git prunes its recorded base', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf-8' }).trim();
+      execFileSync('git', ['commit', '--amend', '-m', 'Amended'], { cwd: repoDir, stdio: 'pipe' });
+      const amended = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf-8' }).trim();
+      execFileSync('git', ['reset', '--hard', amended], { cwd: info.path, stdio: 'pipe' });
+      execFileSync('git', ['reflog', 'expire', '--expire=now', '--all'], { cwd: repoDir, stdio: 'pipe' });
+      execFileSync('git', ['gc', '--prune=now'], { cwd: repoDir, stdio: 'pipe' });
+      expect(() => execFileSync('git', ['cat-file', '-e', base], { cwd: repoDir, stdio: 'pipe' })).toThrow();
+
+      expect(cleanupTeamWorktrees(teamName, repoDir).removed).toEqual(['worker1']);
+      expect(existsSync(info.path)).toBe(false);
+    });
+
+    it('still keeps worker commits made on top of a base that left every branch', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      execFileSync('git', ['commit', '--amend', '-m', 'Amended'], { cwd: repoDir, stdio: 'pipe' });
+      const sha = commitInWorktree(info.path);
+
+      expect(cleanupTeamWorktrees(teamName, repoDir).preserved[0]?.reason).toMatch(/worktree_unmerged/);
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
+    it('lets a kept worktree be prepared for scale-down without touching its commits', () => {
+      const info = createWorkerWorktree(teamName, 'worker1', repoDir);
+      const sha = commitInWorktree(info.path);
+
+      expect(() => prepareWorkerWorktreeForRemoval(teamName, 'worker1', repoDir)).not.toThrow();
+      expect(refsContaining(sha)).not.toBe('');
+    });
+
     it('removes all worktrees for a team', () => {
       createWorkerWorktree(teamName, 'worker1', repoDir);
       createWorkerWorktree(teamName, 'worker2', repoDir);
