@@ -84,7 +84,18 @@ export const NO_CHECKS_FIRST_SIGHTING_REASON =
  * pending checks, and an unserved no-checks window → waiting; otherwise
  * ready with the head SHA as proof.
  */
-export function decideWatchVerdict(facts: WatchPrFacts, options: WatchOptions): WatchVerdict {
+export function decideWatchVerdict(rawFacts: WatchPrFacts, options: WatchOptions): WatchVerdict {
+  // Normalize every enum-shaped field once: raw GitHub values arrive
+  // uppercase, and an empty mergeability means GitHub is still computing.
+  const lower = (v: string) => v.toLowerCase();
+  const facts = {
+    ...rawFacts,
+    state: lower(String(rawFacts.state)) as WatchPrFacts['state'],
+    reviewDecision: lower(String(rawFacts.reviewDecision)) as WatchPrFacts['reviewDecision'],
+    mergeable: (lower(String(rawFacts.mergeable)) || 'unknown') as WatchPrFacts['mergeable'],
+    mergeStateStatus: lower(String(rawFacts.mergeStateStatus)) as WatchPrFacts['mergeStateStatus'],
+    checks: rawFacts.checks.map((c) => ({ ...c, state: lower(String(c.state)) as typeof c.state })),
+  };
   if (facts.state !== 'open') {
     return { kind: 'gone', reasons: [`pr is ${facts.state}`] };
   }
