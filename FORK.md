@@ -11,6 +11,7 @@ Upstream: https://github.com/Yeachan-Heo/oh-my-claudecode. This fork is what Fra
 
 ## The 5-day rule
 Nothing goes upstream (no PR, issue patch or push to Yeachan-Heo/oh-my-claudecode) and nothing is promoted to
-`stable` until `dev` has been green for 5 consecutive days: CI and Upgrade Test passing on every `dev` push, and on
-the machine `omc doctor conflicts` clean with the plugin enabled. A red day restarts the count. Local clones set the
+`stable` until `dev` has been green for 5 consecutive days. Green is measured against upstream: CI and Upgrade Test on
+`dev` fail no test that upstream's own CI passes on the same upstream commit (upstream is sometimes red itself), and on
+the machine `omc doctor conflicts` is clean with the plugin enabled. A day with a fork-only failure restarts the count. Local clones set the
 upstream push URL to `DISABLED-no-push-to-upstream`.
