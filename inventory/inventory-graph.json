@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "ed454ddb07bf3a10245fdbae0e493ca52719edf4",
-    "sourceSha256": "4a683fe22d66efe2644c7216e598666f8c4554fe11bbb893360d6f0bef292e5b",
+    "head": "82ea49bf00246e596e39cd760839b297a9e13198",
+    "sourceSha256": "d18550696d73a9bb532d05f061322de4543a1b4e70282fd8f48ad1ba78ea0a19",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "ed454ddb07bf3a10245fdbae0e493ca52719edf4",
-  "sourceSha256": "4a683fe22d66efe2644c7216e598666f8c4554fe11bbb893360d6f0bef292e5b",
+  "head": "82ea49bf00246e596e39cd760839b297a9e13198",
+  "sourceSha256": "d18550696d73a9bb532d05f061322de4543a1b4e70282fd8f48ad1ba78ea0a19",
   "counts": {
     "public": {
       "skills": 48,
@@ -24,12 +24,12 @@
     },
     "internal": {
       "hookFiles": 333,
-      "featureFiles": 89,
+      "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1432,
-      "total": 1457
+      "srcFiles": 1438,
+      "total": 1463
     },
     "generated": {
       "distFiles": 5471,
@@ -576,9 +576,15 @@
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
+      "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
+      "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
-      "src/features/verification/types.ts"
+      "src/features/verification/types.ts",
+      "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
+      "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
       "src/tools/AGENTS.md",
@@ -798,6 +804,7 @@
       "scripts/build-skill-bridge.mjs",
       "scripts/build-team-server.mjs",
       "scripts/build-workflow-stage-prompts.mjs",
+      "scripts/check-omc-playbooks.mjs",
       "scripts/ci/check-multirepo-paths.mjs",
       "scripts/ci/check-no-committed-build-artifacts.mjs",
       "scripts/ci/multirepo-patterns.yml",
@@ -6891,9 +6898,15 @@
       "src/features/state-manager/types.ts",
       "src/features/task-decomposer/index.ts",
       "src/features/task-decomposer/types.ts",
+      "src/features/verification-ledger/__tests__/ledger.test.ts",
+      "src/features/verification-ledger/index.ts",
+      "src/features/verification-ledger/ledger.ts",
       "src/features/verification/README.md",
       "src/features/verification/index.ts",
-      "src/features/verification/types.ts"
+      "src/features/verification/types.ts",
+      "src/features/watch-pr/__tests__/policy.test.ts",
+      "src/features/watch-pr/index.ts",
+      "src/features/watch-pr/policy.ts"
     ],
     "toolFiles": [
       "src/tools/AGENTS.md",
@@ -35266,6 +35279,11 @@
         "path": "docs/COMPATIBILITY.md"
       },
       {
+        "id": "docs/CREDITS.md",
+        "kind": "other",
+        "path": "docs/CREDITS.md"
+      },
+      {
         "id": "docs/DELEGATION-ENFORCER.md",
         "kind": "other",
         "path": "docs/DELEGATION-ENFORCER.md"
@@ -36124,6 +36142,11 @@
         "id": "scripts/build-workflow-stage-prompts.mjs",
         "kind": "script",
         "path": "scripts/build-workflow-stage-prompts.mjs"
+      },
+      {
+        "id": "scripts/check-omc-playbooks.mjs",
+        "kind": "script",
+        "path": "scripts/check-omc-playbooks.mjs"
       },
       {
         "id": "scripts/ci/check-multirepo-paths.mjs",
@@ -39881,6 +39904,21 @@
         "path": "src/features/task-decomposer/types.ts"
       },
       {
+        "id": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/__tests__/ledger.test.ts"
+      },
+      {
+        "id": "src/features/verification-ledger/index.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/index.ts"
+      },
+      {
+        "id": "src/features/verification-ledger/ledger.ts",
+        "kind": "feature",
+        "path": "src/features/verification-ledger/ledger.ts"
+      },
+      {
         "id": "src/features/verification/README.md",
         "kind": "feature",
         "path": "src/features/verification/README.md"
@@ -39894,6 +39932,21 @@
         "id": "src/features/verification/types.ts",
         "kind": "feature",
         "path": "src/features/verification/types.ts"
+      },
+      {
+        "id": "src/features/watch-pr/__tests__/policy.test.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/__tests__/policy.test.ts"
+      },
+      {
+        "id": "src/features/watch-pr/index.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/index.ts"
+      },
+      {
+        "id": "src/features/watch-pr/policy.ts",
+        "kind": "feature",
+        "path": "src/features/watch-pr/policy.ts"
       },
       {
         "id": "src/goal-workflows/__tests__/claude-goal-snapshot.test.ts",
@@ -44776,6 +44829,16 @@
         "path": "tests/lint/issue-4267-tmux-guard-shell-syntax.test.ts"
       },
       {
+        "id": "tests/lint/omc-playbooks.test.ts",
+        "kind": "other",
+        "path": "tests/lint/omc-playbooks.test.ts"
+      },
+      {
+        "id": "tests/lint/plugin-manifest-parity.test.ts",
+        "kind": "other",
+        "path": "tests/lint/plugin-manifest-parity.test.ts"
+      },
+      {
         "id": "tests/lint/session-end-forwarder-no-op.test.ts",
         "kind": "other",
         "path": "tests/lint/session-end-forwarder-no-op.test.ts"
@@ -45505,6 +45568,31 @@
       {
         "from": "scripts/build-workflow-stage-prompts.mjs",
         "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "scripts/lib/state-root.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/check-omc-playbooks.mjs",
+        "to": "scripts/lib/utf8-bom.mjs",
         "kind": "imports"
       },
       {
@@ -59774,12 +59862,32 @@
       },
       {
         "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/verification-ledger/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
         "kind": "exports"
       },
       {
         "from": "src/features/index.ts",
         "to": "src/features/verification/index.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/index.ts",
+        "to": "src/features/watch-pr/index.ts",
         "kind": "type-exports"
       },
       {
@@ -60583,6 +60691,66 @@
         "kind": "type-imports"
       },
       {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/__tests__/ledger.test.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/verification-ledger/index.ts",
+        "to": "src/features/verification-ledger/ledger.ts",
+        "kind": "type-exports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:fs/promises",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "src/lib/file-lock.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/verification-ledger/ledger.ts",
+        "to": "src/lib/worktree-paths.ts",
+        "kind": "imports"
+      },
+      {
         "from": "src/features/verification/index.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -60601,6 +60769,31 @@
         "from": "src/features/verification/index.ts",
         "to": "src/features/verification/types.ts",
         "kind": "type-imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/features/watch-pr/__tests__/policy.test.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "exports"
+      },
+      {
+        "from": "src/features/watch-pr/index.ts",
+        "to": "src/features/watch-pr/policy.ts",
+        "kind": "type-exports"
       },
       {
         "from": "src/goal-workflows/__tests__/claude-goal-snapshot.test.ts",
@@ -86373,6 +86566,46 @@
         "kind": "imports"
       },
       {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/omc-playbooks.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/lint/plugin-manifest-parity.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/lint/session-end-forwarder-no-op.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -86579,12 +86812,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7577,
-      "edgeCount": 8345,
-      "importEdgeCount": 6981,
+      "nodeCount": 7587,
+      "edgeCount": 8379,
+      "importEdgeCount": 7006,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "1efedd195d2f902dd7fc23122339a54c0213257929f539ffe6bc5c1fe3681aa7",
-  "manifestSha256": "11d8728a14f389c2a2255bc0a15c8f36198adbc7d0b3577962fe1f397a804ed0"
+  "inventorySha256": "04b2c783a5dacc34d8ee766d23de021f4af7202d1b9eae83ba8d485646c0b677",
+  "manifestSha256": "8a7dc561e25c89164c22b0a06c8cd098ce6b54600aaac5439b1e1446edd5ff51"
 }
