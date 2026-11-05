@@ -2,7 +2,7 @@ import { childEnv } from '../../utils/windows-search.js';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
-import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedExhaustedForegroundCleanup, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease, updateSessionEndActionPayload } from './cleanup-manifest.js';
+import { claimSessionEndAction, claimSessionEndDiscoveryTickets, claimSessionEndJob, failClosedExhaustedForegroundCleanup, failClosedMissingCoreProducer, finishSessionEndAction, markSessionEndActionRunner, readSessionEndJob, reapStaleSessionEndOwner, recoverPreparedCoreProducer, releaseSessionEndDiscoveryTicket, releaseSessionEndJob, renewSessionEndLease, updateSessionEndActionPayload, updateSessionEndJob } from './cleanup-manifest.js';
 import { runSessionEndAction } from './action-runner.js';
 import { armSessionEndActionWatchdog } from './action-watchdog.js';
 import { getProcessStartIdentity, isProcessIdentityLive } from '../../platform/process-utils.js';
@@ -221,7 +221,35 @@ export async function processSessionEndWorker(payload) {
         }
     }
     finally {
+        if (exitReason === 'run-deadline-reached') {
+            // A worker time slice is not the job's retry deadline. Preserve required
+            // work, including results whose durable completion write did not stick.
+            updateSessionEndJob(payload.directory, payload.sessionId, nonce, (job) => {
+                for (const action of Object.values(job.actions)) {
+                    if (action.class !== 'required')
+                        continue;
+                    if (action.status === 'pending')
+                        action.status = 'retryable';
+                    else if (action.status === 'claimed' && action.claimantNonce === nonce) {
+                        // Only reset if runner is in reserved phase (not yet started).
+                        // Do NOT reset if runner is started/armed/result-recorded (action may be running
+                        // or finishing; resetting would run it again in parallel or after completion).
+                        if (action.runner?.phase !== 'reserved')
+                            continue;
+                        action.attempts--;
+                        action.status = 'retryable';
+                        action.claimantNonce = undefined;
+                        action.claimedAt = undefined;
+                        if (action.runner)
+                            action.runner.phase = 'terminal';
+                    }
+                }
+            });
+        }
         const released = releaseSessionEndJob(payload.directory, payload.sessionId, nonce, generation, exitReason);
+        if (!released) {
+            console.warn('[session-end] Failed to release worker job: release returned null (job still owned)');
+        }
         const terminalized = failClosedExhaustedForegroundCleanup(payload.directory, payload.sessionId);
         reschedulePendingWorker(payload, terminalized ?? released ?? readSessionEndJob(payload.directory, payload.sessionId));
     }
