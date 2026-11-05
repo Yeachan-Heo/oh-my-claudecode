@@ -22,11 +22,15 @@ either intent is a bug with a clean git status.
 1. **Establish ownership**: you resolve conflicts on a branch you own, against
    a base others own. Conflicts on a shared branch get reported to the
    owner, not resolved unilaterally.
-2. **Start the approved integration first**: fetch the remote base
-   (`git fetch origin <base>`) and merge the fetched SHA — `git merge
-   FETCH_HEAD` (or the project's rebase convention, when the caller has not
+2. **Start the approved integration first**: fetch the remote that owns the
+   base and merge the fetched SHA — `git fetch <upstream-remote> <base>` then
+   `git merge FETCH_HEAD` (or the project's rebase convention, when the caller has not
    constrained it) — so the conflicts you inspect match what GitHub
-   reported; a local base ref can be absent or behind `origin/<base>`, and
+   reported. In a contributor's fork clone `origin` is the fork, while
+   GitHub computed the conflicts against the upstream base: name the
+   upstream remote explicitly (from the caller or `git remote -v`), never
+   assume `origin` owns `<base>`; a local base ref can be absent or behind,
+   and
    `git merge` never refreshes it implicitly. A `mergeable: conflicting`
    answer from the remote, or a clean local branch, has no `MERGE_HEAD` —
    `git log --merge` before integrating exits 128.
