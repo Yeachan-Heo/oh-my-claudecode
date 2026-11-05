@@ -98,11 +98,6 @@ export declare function applyMainVerticalLayout(teamTarget: string, options?: {
     required?: boolean;
     tmuxServerIdentity?: TmuxServerIdentity;
 }): Promise<void>;
-/**
- * A pane id names a cmux surface only inside a cmux session (issue #4816).
- * tmux ids (`%N`) and herdr ids (`w<id>:p<id>`, e.g. `w2FQ:p16`) never do.
- */
-export declare function isCmuxSurfaceTarget(value: string | undefined): value is string;
 export declare const TMUX_MAILBOX_PANE_ID: RegExp;
 export declare const TMUX_MAILBOX_TARGET: RegExp;
 type MailboxOwnershipCommand = (args: string[]) => Promise<{

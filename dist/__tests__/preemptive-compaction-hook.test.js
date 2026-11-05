@@ -56,16 +56,12 @@ function writeHudCache(dir, sessionId, usedPercentage) {
     return cachePath;
 }
 function runPostToolVerifier(input, env = {}) {
-    // Do not inherit Jev opt-ins or credentials from the developer shell: an
-    // active context-pruning point would change the warnings under test and
-    // send real requests.
-    const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OMC_JEV') && key !== 'TYPESAFE_API_KEY'));
     const stdout = execFileSync('node', [SCRIPT_PATH], {
         input: JSON.stringify(input),
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
-        env: { ...baseEnv, NODE_ENV: 'test', ...env },
+        env: { ...process.env, NODE_ENV: 'test', ...env },
     });
     return JSON.parse(stdout.trim());
 }

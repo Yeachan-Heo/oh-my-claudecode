@@ -9,8 +9,6 @@ export interface WorktreeInfo {
     detached?: boolean;
     created?: boolean;
     reused?: boolean;
-    /** Commit the worktree started from. Absent on metadata written before this field existed. */
-    baseCommit?: string;
 }
 export interface EnsureWorkerWorktreeOptions {
     mode?: TeamWorktreeMode;
@@ -86,11 +84,11 @@ export declare function checkWorkerWorktreeRemovalSafety(teamName: string, worke
  * intact with the managed overlay and backup still available for a later retry.
  */
 export declare function prepareWorkerWorktreeForRemoval(teamName: string, workerName: string, repoRoot: string, worktreePath?: string): void;
-/** Remove a worker's worktree and branch, preserving dirty worktrees and unmerged commits. */
+/** Remove a worker's worktree and branch, preserving dirty worktrees. */
 export declare function removeWorkerWorktree(teamName: string, workerName: string, repoRoot: string): void;
 /** List all worktrees for a team. */
 export declare function listTeamWorktrees(teamName: string, repoRoot: string): WorktreeInfo[];
 export declare function inspectTeamWorktreeCleanupSafety(teamName: string, repoRoot: string): TeamWorktreeCleanupSafety;
-/** Remove all safe worktrees for a team, preserving dirty worktrees and unmerged commits. */
+/** Remove all clean worktrees for a team, preserving dirty worktrees. */
 export declare function cleanupTeamWorktrees(teamName: string, repoRoot: string): CleanupTeamWorktreesResult;
 //# sourceMappingURL=git-worktree.d.ts.map

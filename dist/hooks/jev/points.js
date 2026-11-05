@@ -17,17 +17,14 @@ import { resolveJudgment } from './resolver.js';
 /**
  * Top emit-able keyword types, derived from the detector's own priority
  * constants (team is excluded: its regex never matches, detection is
- * explicit-only via /team). Note: script-emitted triggers like 'ultragoal',
- * 'ai-slop-cleaner', and 'wiki' are not TypeScript KeywordType members and
- * will be logged as non-comparable by the mapHeuristic function.
+ * explicit-only via /team).
  */
 function skillTriggerCriteria() {
     const priority = Array.isArray(KEYWORD_PRIORITY) ? KEYWORD_PRIORITY : [];
-    // Include all keywords except 'team' (explicit-only). Do not slice:
-    // all keywords that can be detected and emitted should be in the criteria.
     return {
         ...Object.fromEntries(priority
             .filter((type) => type !== 'team')
+            .slice(0, 12)
             .map((type) => [type, `The prompt explicitly invokes the ${type} trigger.`])),
         none: 'No trigger fires; handle the prompt without a mode or skill.',
     };
@@ -79,9 +76,7 @@ const SCORE_QUESTIONS = {
 /**
  * Point "model-routing" (ticket 04): tier guidance from CLAUDE.md
  * <model_routing> and docs/DELEGATION-ENFORCER.md - haiku for quick lookups,
- * sonnet for standard work, opus for architecture. The "effort" score (0-3)
- * picks the subagent reasoning effort; scripts/pre-tool-enforcer.mjs maps it
- * to low/medium/high/xhigh/max in active mode, capped by OMC_JEV_MAX_EFFORT.
+ * sonnet for standard work, opus for architecture.
  */
 const MODEL_ROUTING_QUESTIONS = {
     'model-tier': {
@@ -91,16 +86,6 @@ const MODEL_ROUTING_QUESTIONS = {
             haiku: 'Quick lookups and lightweight, mechanical work',
             sonnet: 'Standard coding and orchestration work',
             opus: 'Complex architecture and deep analysis',
-        },
-    },
-    effort: {
-        type: 'score',
-        instructions: 'How much reasoning effort does this delegated task need?',
-        criteria: {
-            trivial: 'Trivial: the answer or action is obvious, no thinking needed',
-            some: 'Some thought: a few straightforward steps',
-            careful: 'Careful multi-step reasoning: several dependent steps or things to check',
-            deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
         },
     },
 };
@@ -239,8 +224,6 @@ export function recordJudgment(pointName, call) {
         questions: typeof questions === 'function' ? questions() : questions,
         twin: call.twin,
         mapAnswer: call.mapAnswer,
-        mapHeuristic: call.mapHeuristic,
-        questionSet,
         blocking: point.blocking,
         fetchFn: call.fetchFn,
     });

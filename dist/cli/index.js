@@ -13,12 +13,12 @@ import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { Command, CommanderError, Option } from 'commander';
 import chalk from 'chalk';
 import { join } from 'path';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { writeFileSync, existsSync } from 'fs';
 import { getClaudeConfigDir } from '../utils/config-dir.js';
 import { OMC_PLUGIN_ROOT_ENV } from '../lib/env-vars.js';
 import { loadConfig, getConfigPaths, } from '../config/loader.js';
 import { createOmcSession } from '../index.js';
-import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
+import { checkForUpdates, performUpdate, formatUpdateNotification, getInstalledVersion, getOMCConfig, reconcileUpdateRuntime, CONFIG_FILE, } from '../features/auto-update.js';
 import { install as installOmc, isInstalled, getInstallInfo } from '../installer/index.js';
 import { waitCommand, waitStatusCommand, waitDaemonCommand, waitDetectCommand } from './commands/wait.js';
 import { doctorConflictsCommand } from './commands/doctor-conflicts.js';
@@ -72,24 +72,6 @@ export function applyPluginDirOption(rawPath) {
         console.warn(chalk.yellow(`Warning: --plugin-dir "${resolved}" overrides ${OMC_PLUGIN_ROOT_ENV}="${existing}"`));
     }
     process.env[OMC_PLUGIN_ROOT_ENV] = resolved;
-}
-// For commands that write the config back: getOMCConfig returns only the fields auto-update knows,
-// so writing its result would drop every other key.
-function loadConfigForUpdate() {
-    try {
-        if (!existsSync(CONFIG_FILE))
-            return { silentAutoUpdate: false };
-        const parsed = JSON.parse(readFileSync(CONFIG_FILE, 'utf-8'));
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-            throw new Error('expected a JSON object');
-        }
-        return parsed;
-    }
-    catch (error) {
-        console.error(chalk.red(`Cannot read ${CONFIG_FILE}: ${error instanceof Error ? error.message : String(error)}`));
-        console.error(chalk.gray('Fix or remove the file, then run this command again.'));
-        process.exit(1);
-    }
 }
 const program = new Command();
 // Win32 platform warning - OMC requires tmux which is not available on native Windows
@@ -274,7 +256,7 @@ Examples:
             console.error(chalk.gray(`Valid types: ${profileValidTypes.join(', ')}`));
             process.exit(1);
         }
-        const config = loadConfigForUpdate();
+        const config = getOMCConfig();
         config.notificationProfiles = config.notificationProfiles || {};
         const profileName = options.profile;
         const profile = config.notificationProfiles[profileName] || { enabled: true };
@@ -402,7 +384,7 @@ Examples:
         console.error(chalk.gray(`Valid types: ${validTypes.join(', ')}`));
         process.exit(1);
     }
-    const config = loadConfigForUpdate();
+    const config = getOMCConfig();
     config.stopHookCallbacks = config.stopHookCallbacks || {};
     // Show current config
     if (options.show) {
@@ -458,7 +440,6 @@ Examples:
         case 'file': {
             const current = config.stopHookCallbacks.file;
             config.stopHookCallbacks.file = {
-                ...current,
                 enabled: enabled ?? current?.enabled ?? false,
                 path: options.path ?? current?.path ?? join(getClaudeConfigDir(), 'session-logs/{session_id}.md'),
                 format: options.format ?? current?.format ?? 'markdown',
@@ -545,7 +526,7 @@ Examples:
   # Select profile at launch:
   $ OMC_NOTIFY_PROFILE=work claude`)
     .action(async (name, options) => {
-    const config = loadConfigForUpdate();
+    const config = getOMCConfig();
     const profiles = config.notificationProfiles || {};
     if (options.list || !name) {
         const names = Object.keys(profiles);

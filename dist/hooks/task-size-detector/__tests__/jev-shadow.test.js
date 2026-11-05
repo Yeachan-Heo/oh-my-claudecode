@@ -78,7 +78,7 @@ describe('task-size-detector shadow judgment point', () => {
             point: 'task-size',
             mode: 'shadow',
             state: { prompt: PROMPT, source: 'user-prompt-submit' },
-            heuristic: classifyTaskSize(PROMPT).size,
+            heuristic: classifyTaskSize(PROMPT),
             jev: { type: 'choice', choice: 'medium', confidence: 0.6 },
         });
         expect(calls).toHaveLength(1);
