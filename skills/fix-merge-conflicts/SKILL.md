@@ -37,9 +37,12 @@ either intent is a bug with a clean git status.
 3. **Read both intents**: `git log --merge -p -- <file>` for each conflicted
    file once the merge is in progress — what did each side change and why
    (commit messages are evidence). Conflict markers show the what; the
-   commits show the why. When the caller forbids starting a merge (e.g.
-   read-only inspection), compare explicit ranges instead:
-   `git log -p <base>...HEAD -- <file>`.
+   commits show the why. On the rebase path there is no `MERGE_HEAD` —
+   `git log --merge` reads nothing there; inspect the replay with
+   `git log -p REBASE_HEAD..HEAD -- <file>` (or, before continuing a paused
+   rebase, `git log -p <base>...HEAD -- <file>`). When the caller forbids
+   starting an integration at all (e.g. read-only inspection), compare
+   explicit ranges instead: `git log -p <base>...HEAD -- <file>`.
 4. **Resolve**: the default is both-intent-preserving — base side's change
    and branch side's change both survive, composed. When the intents are
    genuinely incompatible, the base (upstream) intent wins on shared
