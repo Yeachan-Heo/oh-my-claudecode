@@ -38,8 +38,8 @@ Declare the mode before the first poll: which PR, and whether bot comments
 are in scope.
 
 1. **Read state** via `gh`, always naming the upstream repository:
-   `gh pr view <N> --repo <OWNER/REPO> --json state,mergeable,mergeStateStatus,reviewDecision,isDraft,headRefOid,headRefName`
-   and `gh pr checks <N> --repo <OWNER/REPO> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`). A bare `<N>` resolves against whatever repository the current checkout belongs to — in a fork clone that is the fork, not the upstream PR being polled.
+   `gh pr view <N> --repo <OWNER/REPO> --json state,mergeable,mergeStateStatus,reviewDecision,isDraft,headRefOid,headRefName,baseRefName`
+   and `gh pr checks <N> --repo <OWNER/REPO> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`). A bare `<N>` resolves against whatever repository the current checkout belongs to — in a fork clone that is the fork, not the upstream PR being polled. Carry `baseRefName` with the head identity: the branch-protection lookup and the CI/conflict lanes integrate against the base the PR targets, not the checkout's default branch.
    Normalize before classifying: `mergeable` arrives uppercased
    (`MERGEABLE`/`CONFLICTING`, `UNKNOWN` or empty while GitHub computes it),
    and `reviewDecision` is an **empty string** when no review exists — not

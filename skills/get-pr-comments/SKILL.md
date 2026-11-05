@@ -18,11 +18,13 @@ Bring the review surface into one list a human (or a fix lane) can act on.
 
 ## Workflow
 
-1. **Fetch**: `gh pr view <n> --comments` for top-level,
+1. **Fetch**: `gh pr view <n> -R <OWNER/REPO> --comments` for top-level,
    `gh api --paginate repos/{owner}/{repo}/pulls/{n}/comments` for inline
-   review comment bodies, and `gh pr view <n> --json reviews` for whole-review
+   review comment bodies, and `gh pr view <n> -R <OWNER/REPO> --json reviews` for whole-review
    bodies — all three surfaces are needed, and every page of the inline list
-   is required. A `CHANGES_REQUESTED` review with only an overall body and no
+   is required. Thread the delegated repository into every `gh pr` call: a
+   bare `<n>` resolves against the current checkout's repository, which in a
+   fork clone is not the PR being triaged. A `CHANGES_REQUESTED` review with only an overall body and no
    inline comments appears in `reviews` alone, so skip it and triage can miss
    a blocking gate. Resolution state is not on those REST objects:
    fetch threads with `isResolved` through the GraphQL API — paginate with
