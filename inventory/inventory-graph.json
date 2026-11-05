@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "6ba677af5bcdb4262f3bf73755dbdf4ec638d5d9",
-    "sourceSha256": "f42e4d32d6429d94a326f5d0a990cc0886606ae59c826015f7d0c454b82fcce9",
+    "head": "d9005ad4c0183d2708e1f49d66f5cc0867ffbd99",
+    "sourceSha256": "a7aa96fa2a83d92d3734ab9f155960361ba2b85348b6a79e9e2c7c4aada9189a",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "6ba677af5bcdb4262f3bf73755dbdf4ec638d5d9",
-  "sourceSha256": "f42e4d32d6429d94a326f5d0a990cc0886606ae59c826015f7d0c454b82fcce9",
+  "head": "d9005ad4c0183d2708e1f49d66f5cc0867ffbd99",
+  "sourceSha256": "a7aa96fa2a83d92d3734ab9f155960361ba2b85348b6a79e9e2c7c4aada9189a",
   "counts": {
     "public": {
       "skills": 48,
@@ -23,13 +23,13 @@
       "total": 97
     },
     "internal": {
-      "hookFiles": 331,
+      "hookFiles": 333,
       "featureFiles": 89,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1430,
-      "total": 1455
+      "srcFiles": 1432,
+      "total": 1457
     },
     "generated": {
       "distFiles": 5471,
@@ -41,7 +41,7 @@
     },
     "skills": 48,
     "commands": 21,
-    "hookFiles": 331,
+    "hookFiles": 333,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 58
@@ -397,10 +397,12 @@
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+      "src/hooks/session-end/__tests__/foreground-budget.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
+      "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
       "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
       "src/hooks/session-end/__tests__/routing.test.ts",
@@ -6640,10 +6642,12 @@
       "src/hooks/session-end/__tests__/cleanup-manifest.test.ts",
       "src/hooks/session-end/__tests__/duplicate-notifications.test.ts",
       "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts",
+      "src/hooks/session-end/__tests__/foreground-budget.test.ts",
       "src/hooks/session-end/__tests__/guardrails.test.ts",
       "src/hooks/session-end/__tests__/lease-cas-drift.test.ts",
       "src/hooks/session-end/__tests__/mode-state-cleanup.test.ts",
       "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
+      "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
       "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
       "src/hooks/session-end/__tests__/python-repl-cleanup.test.ts",
       "src/hooks/session-end/__tests__/routing.test.ts",
@@ -41322,6 +41326,11 @@
         "path": "src/hooks/session-end/__tests__/foreground-bootstrap.test.ts"
       },
       {
+        "id": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/foreground-budget.test.ts"
+      },
+      {
         "id": "src/hooks/session-end/__tests__/guardrails.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/guardrails.test.ts"
@@ -41340,6 +41349,11 @@
         "id": "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
         "kind": "hook",
         "path": "src/hooks/session-end/__tests__/openclaw-session-end.test.ts"
+      },
+      {
+        "id": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/session-end/__tests__/orphaned-actions.test.ts"
       },
       {
         "id": "src/hooks/session-end/__tests__/process-session-end-worker-spawn.test.ts",
@@ -68234,6 +68248,31 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "to": "external:node:vm",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/foreground-budget.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "src/hooks/session-end/__tests__/guardrails.test.ts",
         "to": "external:fs",
         "kind": "imports"
@@ -68366,6 +68405,31 @@
       {
         "from": "src/hooks/session-end/__tests__/openclaw-session-end.test.ts",
         "to": "src/openclaw/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/session-end/__tests__/orphaned-actions.test.ts",
+        "to": "src/hooks/session-end/cleanup-manifest.ts",
         "kind": "imports"
       },
       {
@@ -86515,12 +86579,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7575,
-      "edgeCount": 8335,
-      "importEdgeCount": 6971,
+      "nodeCount": 7577,
+      "edgeCount": 8345,
+      "importEdgeCount": 6981,
       "registerEdgeCount": 69
     }
   },
-  "inventorySha256": "b3f0d0c6522ce1ad3f6cc47082fc1d52ca895c624d9befe8a5f2de83a0f299e8",
-  "manifestSha256": "25a139afe8591c4be9c15a2d5d7ddfbb46a813f012546fc06d0aa82cb51e8fb9"
+  "inventorySha256": "1efedd195d2f902dd7fc23122339a54c0213257929f539ffe6bc5c1fe3681aa7",
+  "manifestSha256": "c795cd3962d7084a321b369c8a0790ff40acd6166bfada106c3912fa150e0047"
 }
