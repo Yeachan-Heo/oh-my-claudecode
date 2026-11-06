@@ -31,12 +31,18 @@
     "./skills/autoresearch/",
     "./skills/babysit/",
     "./skills/blast-radius/",
+<<<<<<< HEAD
     "./skills/bro/",
     "./skills/cancel/",
     "./skills/configure-notifications/",
     "./skills/correct/",
     "./skills/create-formal-verification-skill/",
     "./skills/create-verification-skill/",
+=======
+    "./skills/cancel/",
+    "./skills/configure-notifications/",
+    "./skills/correct/",
+>>>>>>> origin/dev
     "./skills/debug/",
     "./skills/deep-interview/",
     "./skills/deepinit/",
@@ -90,6 +96,7 @@
     "./skills/visual-verdict/",
     "./skills/what-did-i-get-done/",
     "./skills/why/",
+    "./skills/interrogate/",
     "./skills/wiki/"
   ],
   "mcpServers": "./.mcp.json",
