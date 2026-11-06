@@ -37,9 +37,8 @@ rebases, or force-pushes.
 Declare the mode before the first poll: which PR, and whether bot comments
 are in scope.
 
-1. **Read state** via `gh`, always naming the upstream repository:
-   `gh pr view <N> --repo <OWNER/REPO> --json state,mergeable,mergeStateStatus,reviewDecision,isDraft,headRefOid,headRefName,baseRefName`
-   and `gh pr checks <N> --repo <OWNER/REPO> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`). A bare `<N>` resolves against whatever repository the current checkout belongs to — in a fork clone that is the fork, not the upstream PR being polled. Carry `baseRefName` with the head identity: the branch-protection lookup and the CI/conflict lanes integrate against the base the PR targets, not the checkout's default branch.
+1. **Read state** via `gh`: `gh pr view <N> --json state,mergeable,mergeStateStatus,reviewDecision,isDraft,headRefOid,headRefName`
+   and `gh pr checks <N> --json name,bucket` (bucket is `pass`/`fail`/`pending`/`skipping`/`cancel`).
    Normalize before classifying: `mergeable` arrives uppercased
    (`MERGEABLE`/`CONFLICTING`, `UNKNOWN` or empty while GitHub computes it),
    and `reviewDecision` is an **empty string** when no review exists — not
@@ -47,8 +46,13 @@ are in scope.
    **fail** — judge by `bucket`, never the exit code; with no checks
    configured it exits 1 printing "no checks reported", which is the
    no-checks path, not an error.
-   `mergeStateStatus` is an aggregate merge gate; classify `BLOCKED` or
-   `BEHIND` as blocked and `UNKNOWN` as waiting before allowing ready. Confirm the first
+   Normalize every GraphQL enum before passing facts to the policy: `state`
+   `OPEN|CLOSED|MERGED` → `open|closed|merged`, `reviewDecision`
+   `APPROVED|CHANGES_REQUESTED|''` → `approved|changes_requested|none`,
+   `mergeable` and `mergeStateStatus` to their lowercase policy values.
+   Map `DIRTY`, `BEHIND`, and `UNSTABLE` to blocked; treat `HAS_HOOKS` as
+   mergeable; map `BLOCKED` as blocked and `UNKNOWN` as waiting before
+   allowing ready. Confirm the first
    read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
@@ -97,7 +101,7 @@ are in scope.
    blocking, and the exact commands you ran. Every claim carries its
    evidence.
 
-Poll with `gh pr checks <N> --repo <OWNER/REPO> --watch` or a sleep loop at a stated interval; state
+Poll with `gh pr checks --watch` or a sleep loop at a stated interval; state
 the interval. Stop when the PR is merge-ready, merged, closed, or the user
 says stop, and say which.
 

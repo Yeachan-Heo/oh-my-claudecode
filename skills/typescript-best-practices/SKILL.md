@@ -14,9 +14,8 @@ metadata:
 
 # TypeScript Best Practices
 
-The type system is the cheapest place to make illegal states
-unrepresentable: brand primitives, and parse external data at the
-boundary instead of trusting it. Concrete forms:
+The type system is the cheapest place to make illegal states unrepresentable
+(`principles` skill, Type system discipline). Concrete forms:
 
 - **Discriminated unions over boolean flags.** `type Ev = {kind:'click'; x:number} | {kind:'focus'}` — not `{isClick:boolean; x?:number}`. Exhaustive `switch` on `kind` turns missing cases into compile errors.
 - **`satisfies` for configuration literals.** `{...} satisfies Config` keeps literal inference while checking the shape.

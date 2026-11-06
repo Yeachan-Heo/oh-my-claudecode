@@ -29,10 +29,8 @@ Three parts, plain language:
 3. **The success check**: how we will know it worked.
 
 Then one line: "Right? Correct me where I drifted." — and stop for the
-answer on risky work; proceed-and-report on clearly reversible work.
-Never block on the human: proceed on reversible work, present the result,
-and let the human course-correct — reserve questions for genuine product
-calls no experiment can settle.
+answer on risky work; proceed-and-report on clearly reversible work
+(`principles` skill, Never block on the human).
 
 ## Rules
 

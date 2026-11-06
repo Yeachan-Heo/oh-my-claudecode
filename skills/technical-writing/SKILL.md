@@ -47,5 +47,5 @@ follows one standard so readers can navigate any of them the same way.
 - Write clean as you draft; a cleanup pass after drafting does not remove
   these patterns.
 - Every claim carries its evidence or its label in the same sentence.
-- Delete more than you add; the reader's time is the budget, and every
-  layer, wrapper, or caveat a reader must trace spends it.
+- Delete more than you add; the reader's time is the budget
+  (`principles` skill, Minimize reader load).
