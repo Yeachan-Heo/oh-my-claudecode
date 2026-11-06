@@ -78,7 +78,8 @@ describe('HUD Windows Compatibility', () => {
       // render that reaches the npm fallback. Same class as #3379/#3482/#3498.
       const templatePath = join(packageRoot, 'scripts', 'lib', 'hud-wrapper-template.txt');
       const content = readFileSync(templatePath, 'utf-8');
-      const spawnCalls = content.match(/\b(?:execFileSync|execSync|spawnSync|execFile|spawn|exec)\(/g) ?? [];
+      // Lookbehind skips method calls such as RE.exec(name); the template imports spawn helpers by name.
+      const spawnCalls = content.match(/(?<![.\w])(?:execFileSync|execSync|spawnSync|execFile|spawn|exec)\(/g) ?? [];
       const hiddenSpawns = content.match(/\bwindowsHide: true\b/g) ?? [];
       expect(spawnCalls.length).toBeGreaterThan(0);
       expect(hiddenSpawns.length).toBe(spawnCalls.length);
