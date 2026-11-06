@@ -52,17 +52,23 @@ are in scope.
    read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
-3. **Act on the verdict**:
+3. **Act on the verdict** — every lane gets the polled identity: pass the
+   repo and PR number explicitly and verify the checkout sits on that PR's
+   head before mutating anything. Bare `gh pr checks`/`gh pr view` select
+   whatever PR owns the current branch, which need not be the one babysit
+   polls.
    - failing check → `fix-ci` (classify real/flaky/environmental, then fix; pass the target repo, PR number, head SHA, and base branch)
-   - requested changes or unresolved review threads → `get-pr-comments` to
-     triage threads, then address each through the review lane; reply to
+   - requested changes or unresolved review threads → `get-pr-comments` on
+     the polled repo and PR number — triage threads, then address each
+     through the review lane; reply to
      threads you resolve; dismiss bot noise with a concrete reason instead
      of churning code. Read the threads surface (`comments`/`reviews` via
      the get-pr-comments fetch) even when `reviewDecision` is empty or
      `approved` — a non-blocking review or a comment after approval leaves
      the decision clean while real threads stand — and never report `ready`
      while an in-scope thread is untriaged
-   - conflicts → `fix-merge-conflicts` **in its no-rebase mode**: resolve
+   - conflicts → `fix-merge-conflicts` **in its no-rebase mode**, run on the
+     polled PR's owned checkout: resolve
      with a merge commit only. Never rebase and never force-push here —
      this constraint overrides that skill's own-branch rebase option,
      because babysit's contract forbids both. If the branch is not ours to
@@ -70,20 +76,28 @@ are in scope.
    - mergeability unknown → wait one interval and re-read; it is never an
      error
    - draft or missing review → report what is missing; do not self-approve
-   - aggregate `BLOCKED` without requested changes → inspect unresolved review
-     threads with `get-pr-comments <N>` before reporting an unactionable block
 4. **Ledger discipline**: watch verdicts (`ready`/`waiting`/`blocked`/`gone`)
    are gate states, not verification — never write them into the
    verification ledger, whose vocabulary is separate. Append a verification
-   ledger row (at the writer's canonical path under OMC's state root) only
+   ledger row (the writer's canonical path under OMC's state root) only
    when *you* executed a check
    yourself — e.g. a `fix-ci` rerun went green (`unit-test-verified`, with
    the command as evidence). One row per executed check, never per poll.
+   Write it through the repository writer so header creation, locking, and
+   validation are enforced. Resolve the installed package root the
+   figure-it-out way: plugin-root variables first, then walk the installed
+   `oh-my-claudecode` package from the working directory — and report the
+   resolution failure instead of skipping the write:
+
+   ```sh
+   node --input-type=module -e "const {createRequire}=await import('node:module'); const path=await import('node:path'); const {pathToFileURL}=await import('node:url'); let root=process.env.CLAUDE_PLUGIN_ROOT||process.env.OMC_PLUGIN_ROOT; if(!root){ const req=createRequire(process.cwd()+'/package.json'); for (const name of ['oh-my-claude-sisyphus','oh-my-claudecode']) { try { root=path.dirname(req.resolve(name+'/package.json')); break; } catch {} } } if(!root) throw new Error('cannot resolve the installed package root; set CLAUDE_PLUGIN_ROOT or OMC_PLUGIN_ROOT'); const {appendLedgerEntry,defaultLedgerPath}=await import(pathToFileURL(root+'/dist/features/verification-ledger/index.js').href); await appendLedgerEntry(defaultLedgerPath(),{ts:new Date().toISOString(),kind:'babysit',ref:'<N>',sha:'<HEAD_SHA>',verdict:'unit-test-verified',evidence:'<command>',verifier:'babysit'});"
+   ```
+   The writer owns the exact seven-column TSV layout; do not append raw rows.
 5. **Report**: verdict, what changed since the last poll, what is still
    blocking, and the exact commands you ran. Every claim carries its
    evidence.
 
-Poll with `gh pr checks <N> --watch` or a sleep loop at a stated interval; state
+Poll with `gh pr checks <N> --repo <OWNER/REPO> --watch` or a sleep loop at a stated interval; state
 the interval. Stop when the PR is merge-ready, merged, closed, or the user
 says stop, and say which.
 
@@ -91,7 +105,7 @@ says stop, and say which.
 
 Classification order, first match wins:
 
-- conflicts, `mergeStateStatus=BLOCKED`, `BEHIND`, or `DIRTY` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
+- conflicts, `mergeStateStatus=BLOCKED`, `DIRTY`, or `BEHIND` → **blocked** (merge conflicts or another aggregate gate; the branch owner decides the resolution)
 - any failed check → **blocked** (fix lane)
 - any canceled check → **blocked** (bucket `cancel`; rerun or clear it — a canceled check is not a green gate)
 - changes requested → **blocked** (review lane)
