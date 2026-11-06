@@ -54,6 +54,24 @@ describe('decideWatchVerdict', () => {
     expect(behind.reasons.join(' ')).toContain('behind');
   });
 
+  it('normalizes GitHub raw uppercase enums before classification', () => {
+    const raw = decideWatchVerdict(
+      facts({
+        state: 'OPEN' as unknown as 'open',
+        reviewDecision: 'CHANGES_REQUESTED' as unknown as 'changes_requested',
+        mergeable: 'CONFLICTING' as unknown as 'conflicting',
+        mergeStateStatus: 'BLOCKED' as unknown as 'blocked',
+        checks: [{ name: 'ci', state: 'FAIL' as unknown as 'fail' }],
+      }),
+      { nowMs: NOW },
+    );
+    expect(raw.kind).toBe('blocked');
+    expect(raw.reasons.join(' ')).toContain('changes requested in review');
+    expect(raw.reasons.join(' ')).toContain('merge conflicts');
+    const gone = decideWatchVerdict(facts({ state: 'MERGED' as unknown as 'merged' }), { nowMs: NOW });
+    expect(gone.kind).toBe('gone');
+  });
+
   it('waits on draft and has_hooks merge states instead of reporting ready', () => {
     const draft = decideWatchVerdict(facts({ mergeStateStatus: 'draft' }), { nowMs: NOW });
     expect(draft.kind).toBe('waiting');

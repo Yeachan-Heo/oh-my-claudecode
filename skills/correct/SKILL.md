@@ -26,8 +26,12 @@ agent mistake into an enforcement the mistake cannot survive.
 
 ## Workflow
 
-1. **Collect.** Mine the evidence: `.omc/notepads/*/problems.md`,
-   `.omc/state/verification-ledger.tsv` failures, review comments, recent
+1. **Collect.** Mine the evidence — resolve OMC's state root first (the
+   checkout's `.omc/` by default; `OMC_STATE_DIR` or a parent
+   `.omc-workspace` moves it, and a package-subdirectory launch must not
+   read a stray checkout-local `.omc`): the notepads under
+   `<state-root>/notepads/*/problems.md`, the verification ledger at
+   `<state-root>/state/verification-ledger.tsv`, review comments, recent
    fix commits. Group by root cause, not by symptom.
 2. **Rank.** Frequency × cost. Take the top mistakes; one at a time.
 3. **Pick the highest enforcement level that works**:
@@ -52,7 +56,8 @@ agent mistake into an enforcement the mistake cannot survive.
 
 - Never weaken an enforcement to make a test pass; the enforcement is the
   requirement now.
-- Record what was encoded in `.omc/state/verification-ledger.tsv` with the
+- Record what was encoded in the state-root ledger
+  (`<state-root>/state/verification-ledger.tsv` per the collection step) with the
   verdict the repro actually exercised (see workflow step 6) and the repro
   command as evidence.
 - Text added at level 5 references this skill, so the next occurrence tries

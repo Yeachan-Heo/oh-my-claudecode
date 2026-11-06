@@ -25,16 +25,12 @@ the trail is. One row per non-obvious decision, written as it is made.
 
 ## The trail
 
-Append to `state/decision-trail.tsv` under OMC's state root (create with a
-header row on first write; one file per task slug when sessions share a
-checkout). Scope the filename by project as well — sibling repositories
-sharing a state root that pick the same task slug must not collide: derive
-a project identifier from the checkout (the git top-level basename, or the
-`projectId` the state-root helper computes) and write
-`state/decision-trail-<project-id>-<task-slug>.tsv`. Resolve the state root
-the way OMC's own scripts do — the
-checkout's `.omc/` by default; when `OMC_STATE_DIR` is set or a parent
-`.omc-workspace` redirects state, the root moves with it, so sibling
+Append to `state/decision-trail-{task-slug}.tsv` under OMC's state root
+(create with a header row on first write; one file per task slug when
+sessions share a checkout). The task slug is lowercase kebab-case and is
+part of the canonical path. Resolve the state root the way OMC's own scripts
+do — the checkout's `.omc/` by default; when `OMC_STATE_DIR` is set or a
+parent `.omc-workspace` redirects state, the root moves with it, so sibling
 sessions on the shared root see the same trail. Sibling sessions sharing
 that root also share the file: hold a lock around the header-exists check
 and each append — the same file-lock the verification-ledger writer uses
