@@ -19,10 +19,12 @@ two passes:
 
 1. **Explore** (read-only, fast): dispatch `oh-my-claudecode:explore` to map
    the subsystem — entry points, main flows, data shapes, state, external
-   calls, and the files that own each. Explorer returns a map with file:line
+   calls, and the files that own each, per
+   `references/explorer-prompt.md`. Explorer returns a map with file:line
    citations, not prose.
 2. **Explain** (lead): write the walkthrough from the map, reading the cited
-   code yourself where the claim is load-bearing.
+   code yourself where the claim is load-bearing. The voice and structure
+   come from `references/explainer-prompt.md`.
 
 ## Output shape
 

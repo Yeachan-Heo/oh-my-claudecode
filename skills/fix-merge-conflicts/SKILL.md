@@ -49,14 +49,10 @@ either intent is a bug with a clean git status.
 5. **Validate**: run the project's checks (build/test/lint at minimum) on
    the resolved tree. A resolution that compiles but breaks a test took the
    wrong side somewhere.
-   If intent analysis, resolution, or validation cannot complete after a
-   merge starts, run `git merge --abort`; after a rebase starts, run
-   `git rebase --abort`. If abort is unsafe or unavailable, stop and hand off
-   the repository with the active `MERGE_HEAD`/`REBASE_HEAD` and conflict list
-   explicitly reported.
-6. **Finalize**: for a rebase, stage each resolved file and run
-   `git rebase --continue` repeatedly until `git status` shows no active
-   rebase. Validate that final tree before pushing. Then commit the resolution with a message naming what each side
+   If analysis, resolution, or validation cannot complete after integration
+   starts, run `git merge --abort` or `git rebase --abort`; if abort is unsafe,
+   hand off with the active head and conflict list explicitly reported.
+6. **Finalize**: commit the resolution with a message naming what each side
    wanted. No force-push to shared branches, ever; a rebased own-branch
    uses `--force-with-lease` — unless a caller (e.g. `babysit`) forbids
    rebase and force-push entirely, in which case merge-commit resolution is

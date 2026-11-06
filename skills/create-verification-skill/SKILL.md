@@ -32,7 +32,10 @@ by guessing from a README.
    Makefile, CI config) and **run it**. Record the real invocation, the
    expected passing output shape, the runtime, and the known gotchas
    (env vars, seed data, order dependence). A command you have not run is a
-   hypothesis, not a check.
+   hypothesis, not a check. Write-mode formatters (`prettier --write`,
+   `eslint --fix`) mutate tracked files — record the read-only check form
+   (`prettier --check`, `eslint --check`) as the verification command, never
+   the mutating one.
 2. **Record the manual surface.** What cannot be checked by command here:
    the pages or flows a human (or `run`/`visual-verdict`) exercises, and
    what "looks right" means for each.
@@ -42,7 +45,10 @@ by guessing from a README.
 4. **Generate** `.claude/skills/verify/SKILL.md` containing: the exact
    commands with expected outcomes, the manual checks, the feature map, and
    the escalation path (which failure means what, who owns it). Keep it
-   short enough that a fresh session reads it whole.
+   short enough that a fresh session reads it whole. If a verify skill
+   already exists at the canonical root (`.omc/skills/verify/SKILL.md` or
+   `.claude/skills/verify/SKILL.md`), respect it: update its commands and
+   feature map in place rather than overwriting, and say what changed.
 5. **Prove it.** Run the generated skill's own flow once end to end on a
    real change and record the result through the ledger's locked writer —
    `appendLedgerEntry` and `defaultLedgerPath` from the installed package's

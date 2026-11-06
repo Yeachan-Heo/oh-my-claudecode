@@ -50,18 +50,6 @@ Cell guard: a cell starting with `=`, `+`, `-`, or `@` is prefixed with `'`
 so spreadsheet readers cannot parse it as a formula; tabs and newlines
 inside a cell become spaces. Append only — the trail is never rewritten.
 
-The locked append is concrete, not a convention. Resolve the installed
-package root as the verification-ledger writer does, then hold its
-`withFileLock` (from `dist/lib/file-lock.js`) around the header check and
-the `appendFileSync` call:
-
-```sh
-node --input-type=module -e "const {createRequire}=await import('node:module'); const path=await import('node:path'); const {pathToFileURL}=await import('node:url'); let root=process.env.CLAUDE_PLUGIN_ROOT||process.env.OMC_PLUGIN_ROOT; if(!root){ const req=createRequire(process.cwd()+'/package.json'); for (const name of ['oh-my-claude-sisyphus','oh-my-claudecode']) { try { root=path.dirname(req.resolve(name+'/package.json')); break; } catch {} } } const {withFileLock}=await import(pathToFileURL(root+'/dist/lib/file-lock.js').href); const trail='<state-root>/state/decision-trail-<project-id>-<task-slug>.tsv'; await withFileLock(trail+'.lock', async () => { const fs=await import('node:fs'); let header=''; try { header=fs.readFileSync(trail,'utf8').split('\n')[0]; } catch {} if (header !== 'ts\ttask\tdecision\trejected\tevidence') { fs.appendFileSync(trail, 'ts\ttask\tdecision\trejected\tevidence\n'); } fs.appendFileSync(trail, '<row>\n'); });"
-```
-The lock path is `<trail>.lock`, matching the ledger writer's sidecar
-convention, so every writer that follows this skill serializes against the
-same lock.
-
 ## Rules
 
 - Log at decision time, not at recap time; a trail reconstructed at the end

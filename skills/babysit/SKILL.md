@@ -46,16 +46,16 @@ are in scope.
    **fail** — judge by `bucket`, never the exit code; with no checks
    configured it exits 1 printing "no checks reported", which is the
    no-checks path, not an error.
-   Normalize every GraphQL enum before passing facts to the policy: `state`
-   `OPEN|CLOSED|MERGED` → `open|closed|merged`, `reviewDecision`
-   `APPROVED|CHANGES_REQUESTED|''` → `approved|changes_requested|none`,
-   `mergeable` and `mergeStateStatus` to their lowercase policy values.
-   Map `DIRTY`, `BEHIND`, and `UNSTABLE` to blocked; treat `HAS_HOOKS` as
-   mergeable; map `BLOCKED` as blocked and `UNKNOWN` as waiting before
-   allowing ready. Confirm the first
-   read reports the requested PR before acting on it.
+   Treat aggregate `mergeStateStatus=BLOCKED` as blocked and `UNKNOWN` as waiting before allowing ready. Confirm the first read reports the requested PR before acting on it.
 2. **Apply the watch-pr verdict policy** (`src/features/watch-pr/policy.ts`
    semantics, embedded below). Do not eyeball; classify.
+   Determine `reviewRequired` from the repository's branch-protection
+   settings (for example, `gh api repos/OWNER/REPO/branches/BRANCH/protection`
+   and the `required_pull_request_reviews` field); a ruleset that requires
+   reviews independently of classic branch protection counts the same way.
+   Pass that boolean into the
+   policy; do not treat an empty review decision as a blocker when the branch
+   does not require approval.
 3. **Act on the verdict** — every lane gets the polled identity: pass the
    repo and PR number explicitly and verify the checkout sits on that PR's
    head before mutating anything. Bare `gh pr checks`/`gh pr view` select
@@ -70,10 +70,12 @@ are in scope.
      the get-pr-comments fetch) even when `reviewDecision` is empty or
      `approved` — a non-blocking review or a comment after approval leaves
      the decision clean while real threads stand — and never report `ready`
-     while an in-scope thread is untriaged
+     while an in-scope thread is untriaged. Automated review-bot findings
+     triage per `references/bugbot-triage.md`
    - conflicts → `fix-merge-conflicts` **in its no-rebase mode**, run on the
      polled PR's owned checkout: resolve
-     with a merge commit only. Never rebase and never force-push here —
+     with a merge commit only, under `references/merge-safety.md`. Never
+     rebase and never force-push here —
      this constraint overrides that skill's own-branch rebase option,
      because babysit's contract forbids both. If the branch is not ours to
      resolve, report to the branch owner instead
