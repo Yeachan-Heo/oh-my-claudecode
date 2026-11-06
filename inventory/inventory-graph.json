@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "a9c65798d9ad28d4cb1e5b25bca440c2f6e95368",
-    "sourceSha256": "f64d5f084a95cde1d03be0cd9ba7cfe049219f436bcdeebb406ad3ae55687e97",
+    "head": "2bcba1b57c959375636917e718496cbc0aab0758",
+    "sourceSha256": "65b6304faa58f1ada83069d415ffcc222078a0f3fe43ee6d313e93208711d316",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "a9c65798d9ad28d4cb1e5b25bca440c2f6e95368",
-  "sourceSha256": "f64d5f084a95cde1d03be0cd9ba7cfe049219f436bcdeebb406ad3ae55687e97",
+  "head": "2bcba1b57c959375636917e718496cbc0aab0758",
+  "sourceSha256": "65b6304faa58f1ada83069d415ffcc222078a0f3fe43ee6d313e93208711d316",
   "counts": {
     "public": {
-      "skills": 48,
+      "skills": 52,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 97
+      "total": 101
     },
     "internal": {
       "hookFiles": 333,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 58
     },
-    "skills": 48,
+    "skills": 52,
     "commands": 21,
     "hookFiles": 333,
     "workflows": 8,
@@ -55,6 +55,7 @@
       "ask-navigator",
       "autopilot",
       "autoresearch",
+      "babysit",
       "cancel",
       "configure-notifications",
       "debug",
@@ -64,6 +65,9 @@
       "drydock",
       "execute",
       "external-context",
+      "fix-ci",
+      "fix-merge-conflicts",
+      "get-pr-comments",
       "graph",
       "harbor",
       "hud",
@@ -36844,6 +36848,11 @@
         "path": "skills/autoresearch/SKILL.md"
       },
       {
+        "id": "skills/babysit/SKILL.md",
+        "kind": "skill",
+        "path": "skills/babysit/SKILL.md"
+      },
+      {
         "id": "skills/cancel/SKILL.md",
         "kind": "skill",
         "path": "skills/cancel/SKILL.md"
@@ -36887,6 +36896,21 @@
         "id": "skills/external-context/SKILL.md",
         "kind": "skill",
         "path": "skills/external-context/SKILL.md"
+      },
+      {
+        "id": "skills/fix-ci/SKILL.md",
+        "kind": "skill",
+        "path": "skills/fix-ci/SKILL.md"
+      },
+      {
+        "id": "skills/fix-merge-conflicts/SKILL.md",
+        "kind": "skill",
+        "path": "skills/fix-merge-conflicts/SKILL.md"
+      },
+      {
+        "id": "skills/get-pr-comments/SKILL.md",
+        "kind": "skill",
+        "path": "skills/get-pr-comments/SKILL.md"
       },
       {
         "id": "skills/graph/SKILL.md",
@@ -47716,6 +47740,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/babysit/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/cancel/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -47757,6 +47786,21 @@
       },
       {
         "from": "skills/external-context/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/fix-ci/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/fix-merge-conflicts/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/get-pr-comments/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -86817,12 +86861,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7587,
-      "edgeCount": 8380,
+      "nodeCount": 7591,
+      "edgeCount": 8384,
       "importEdgeCount": 7007,
-      "registerEdgeCount": 69
+      "registerEdgeCount": 73
     }
   },
-  "inventorySha256": "04b2c783a5dacc34d8ee766d23de021f4af7202d1b9eae83ba8d485646c0b677",
-  "manifestSha256": "647b3d9aaf7b72ce353759a5ec0e898215969e9ebccc9ee72b9fddbdeec7222b"
+  "inventorySha256": "e88934f35bc6743cb31d728fbb306a12df3767a746a99ea9ecb9c4f9137b3160",
+  "manifestSha256": "eed2921d7bb604097f7e1b2b6f2676ffd4cf9c2db050c5e67e5ca33064b04eb4"
 }

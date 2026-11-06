@@ -126,6 +126,13 @@ async function main() {
     console.error(`check-omc-playbooks: project root does not exist or is not a directory: ${projectRoot}`);
     return 1;
   }
+  // Producers resolve the directory through the checker so a playbook lands
+  // where validation looks, even when OMC_STATE_DIR or a workspace marker
+  // redirects state away from the checkout's literal .omc/.
+  if (args.includes('--print-playbooks-dir')) {
+    console.log(join(await resolveOmcStateRoot(projectRoot), 'playbooks'));
+    return 0;
+  }
   const playbooksDir = join(await resolveOmcStateRoot(projectRoot), 'playbooks');
   if (!existsSync(playbooksDir)) {
     console.log('check-omc-playbooks: no .omc/playbooks directory — nothing to check');

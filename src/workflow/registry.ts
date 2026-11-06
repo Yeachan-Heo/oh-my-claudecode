@@ -135,7 +135,7 @@ function entry(e: WorkflowEntry): WorkflowEntry {
 const ALIAS_MILESTONE = REMOVAL_MILESTONE;
 
 // ---------------------------------------------------------------------------
-// Skills — all 48 installed surfaces + defined Tier-0 targets + legacy alias
+// Skills — all 52 installed surfaces + defined Tier-0 targets + legacy alias
 // names. Classification per plan §4.2 with the owner's authoritative Tier-0
 // decision (plan/execute/review/verify; specialists remain internal).
 // ---------------------------------------------------------------------------
@@ -193,6 +193,10 @@ const SKILL_ENTRIES: readonly WorkflowEntry[] = [
   entry({ name: 'tdd', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Test-first discipline at pre-agreed seams; opt-in, never a default gate.' }),
   entry({ name: 'ai-slop-cleaner', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review tool; never a default gate.' }),
   entry({ name: 'minimal-code-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline; never a default gate.' }),
+  entry({ name: 'babysit', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in PR watch-and-fix loop on the watch-pr verdict policy (idea credit: pstack); never merges, rebases, force-pushes, or self-approves.' }),
+  entry({ name: 'fix-ci', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in CI failure triage: real/flaky/environmental before any fix (idea credit: pstack).' }),
+  entry({ name: 'fix-merge-conflicts', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in both-intent-preserving conflict resolution (idea credit: pstack); no force-push to shared branches.' }),
+  entry({ name: 'get-pr-comments', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in review-thread dedupe and fix/dismiss/ask triage (idea credit: pstack); reports, never edits.' }),
   entry({ name: 'agent-doc-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline for agent-facing documents; mandatory at drydock seed generation and launch C5 sediment; never a default gate.' }),
   entry({ name: 'minimal-prose-discipline', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in writing-time discipline for the prose an agent speaks to a human; suspends itself for security warnings, irreversible-action confirmations, and multi-step sequences; never a default gate.' }),
   entry({ name: 'launch', kind: 'skill', decision: 'keep', riskClass: 'advisory', owner: REGISTRY_OWNER, notes: 'Opt-in governed delivery pipeline (spec -> tickets -> frontier); never a default gate.' }),
