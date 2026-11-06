@@ -55,9 +55,16 @@ const testFiles = readdirSync(join(scriptsDir, 'test'))
 // Per-file budgets: cli.test.ts drives the full CLI once per corpus case
 // (hundreds of node startups — upstream gives it its own 20-minute runner),
 // so it alone gets the largest budget; every other file settles well under
-// a minute.
+// a minute. On the 20.x line the per-run type stripping has no compile
+// cache, so each CLI + shim process costs ~10s and the 126-case file needs
+// a proportionally larger budget (measured: ~20 minutes there; ~2 minutes
+// on 22+).
+const legacyNodeStripping = (() => {
+  const [major] = process.versions.node.split('.').map(Number);
+  return major < 22;
+})();
 const FILE_TIMEOUT_MS: Record<string, number> = {
-  [join('test', 'cli.test.ts')]: 1_140_000,
+  [join('test', 'cli.test.ts')]: legacyNodeStripping ? 2_850_000 : 1_140_000,
 };
 
 describe('statechart native suite', () => {
