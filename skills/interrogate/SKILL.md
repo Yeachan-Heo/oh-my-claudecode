@@ -52,32 +52,19 @@ Spawn three reviewers in one message, in the background, each read-only:
 - **wait for every reviewer to reach a terminal state and collect its output
   before Phase 3** — the team route starts workers asynchronously, and
   merging before they finish reports an empty panel; a worker that stalls
-- **wait for every reviewer to reach a terminal state and collect its output
-  before Phase 3** — the team route starts workers asynchronously, and
-  merging before they finish reports an empty panel; a worker that stalls
   past the stated interval is named as missing, not silently dropped. Keep
   worktrees and team state alive through judging, and run
   `omc team shutdown <team-name> --force` (the name the startup snapshot prints; --force skips the confirmation prompt)
   only in the final cleanup step after verification, as the
   arena skill sequences it
-- instruct each to prove every finding with a run against the real code — a
-  failing test, a repro script, or command output that shows the wrong
-  behavior; for a design or plan, a prototype or a probe of the current
-  tree — and to leave out anything it did not run. No findings is a valid
-  result. Findings come back as
-  `{severity: blocker|major|minor, claim, evidence, location}` where the
-  evidence is the command and the output it printed — a finding without a
-  run is dropped
+- instruct each to return findings as `{severity: blocker|major|minor, claim, evidence, location}`
+  with evidence quoted from the target — a finding without evidence is dropped
 
 ## Phase 3 — Merge
 
-You own the merge. Collect the panels' findings, re-run each finding's
-command yourself, and keep only what reproduces and breaks the invariants;
-merge findings that share a root cause, and rank the rest by severity. A
-claim two reviewers disagree on is a question for the code, not a vote —
-resolve it by reading or running. In the reply, say how many findings each
-reviewer produced and how many did not survive the rerun, so a clean panel
-reads as a result, not a silence.
+You own the merge. Collect the panels' findings, drop duplicates and
+unevidenced claims, and rank by severity. A claim two reviewers disagree on
+is a question for the code, not a vote — resolve it by reading or running.
 
 ## Phase 4 — Verdict
 
