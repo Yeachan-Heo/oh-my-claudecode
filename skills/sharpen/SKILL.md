@@ -30,9 +30,8 @@ itself should decide.
 4. **One question, if a real fork remains**: if two different tasks both
    satisfy the brief and the choice changes the work materially, ask —
    one question, with the options and what each would cost. Otherwise
-   proceed and report the interpretation you took; never block on the
-   human for reversible work — reserve questions for genuine product
-   calls no experiment can settle.
+   proceed and report the interpretation you took (`principles` skill,
+   Never block on the human).
 
 ## Rules
 

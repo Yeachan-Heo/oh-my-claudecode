@@ -26,7 +26,6 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { resolveOmcStateRoot } from './lib/state-root.mjs';
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 
@@ -49,11 +48,6 @@ function resolveSkillsRoot() {
   // bundled skills live only under that root, so it must be honored.
   if (process.env.OMC_PLUGIN_ROOT) return join(process.env.OMC_PLUGIN_ROOT, 'skills');
   if (process.env.CLAUDE_PLUGIN_ROOT) return join(process.env.CLAUDE_PLUGIN_ROOT, 'skills');
-  // Standalone installs reach this script by walking up from the omc binary;
-  // the skills tree ships beside it. Prefer the script's own package over a
-  // config-dir guess that may hold another install's skills.
-  const ownSkills = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills');
-  if (existsSync(ownSkills)) return ownSkills;
   const configDir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
   return join(configDir, 'skills');
 }

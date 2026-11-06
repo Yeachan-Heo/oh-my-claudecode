@@ -179,7 +179,7 @@ explore --> analyst --> planner --> critic --> executor --> verifier
 
 ### Overview
 
-Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 41 shipped skills.
+Skills are **behavior injections** that modify how the orchestrator operates. Instead of swapping agents, skills add capabilities on top of existing agents. OMC provides 77 shipped skills — the pstack-port series alone added 36 (mechanisms, PR-care, investigation/design, panel generation, principles/benchmark, review-climb, statechart), including opt-in delivery lanes such as `arena` (N-candidate bakeoff) and `interrogate` (adversarial panel) that compose with the delivery loop below.
 
 ### Skill Layers
 

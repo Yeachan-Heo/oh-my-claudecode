@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (75 Total)](#skills-75-total)
+- [Skills (77 Total)](#skills-77-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -960,7 +960,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (75 Total)
+## Skills (77 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -997,7 +997,6 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `execute`                 | Carry an approved task through to working, verified code                       | `/oh-my-claudecode:execute`                |
 | `external-context`        | Parallel document-specialist research                                          | `/oh-my-claudecode:external-context`       |
 | `figure-it-out`           | Design a bespoke playbook for tasks no bundled skill fits                      | `/oh-my-claudecode:figure-it-out`           |
-| `graph`                   | Inspect and run graph workflows                                                | `/oh-my-claudecode:graph`                  |
 | `fix-ci`                  | Classify CI failures (real/flaky/environmental) and fix the real ones          | `/oh-my-claudecode:fix-ci`                  |
 | `fix-merge-conflicts`     | Resolve conflicts preserving both sides' intent, non-interactively             | `/oh-my-claudecode:fix-merge-conflicts`     |
 | `get-pr-comments`         | Fetch and triage review threads: fix / dismiss / ask                           | `/oh-my-claudecode:get-pr-comments`         |
@@ -1011,6 +1010,11 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
 | `map`                     | The yard's skill map: which skill owns which job, in delivery-loop order; routes, never executes | `/oh-my-claudecode:map`                  |
+| `omc-plan`                | Compatibility registration for the plan workflow                                | `/oh-my-claudecode:omc-plan`             |
+| `omc-review`              | Compatibility registration for the review workflow                              | `/oh-my-claudecode:omc-review`           |
+| `cancel-ralph`            | Compatibility cancellation command                                              | `/oh-my-claudecode:cancel-ralph`         |
+| `compact`                 | Manual compaction helper                                                        | `/oh-my-claudecode:compact`              |
+| `psm`                     | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                     |
 | `minimal-code-discipline` | YAGNI-ladder writing-time discipline: reuse first, shortest correct diff        | `/oh-my-claudecode:minimal-code-discipline` |
 | `minimal-prose-discipline` | Writing-time discipline for the agent's own prose: protected core, no filler, close on the action | `/oh-my-claudecode:minimal-prose-discipline` |
 | `models`                  | Setup wizard for role-based model routing (`team.roleRouting`) and panel diversity | `/oh-my-claudecode:models`              |
@@ -1018,8 +1022,6 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `omc-setup`               | Install or refresh OMC for plugin, npm, and local-development setups           | `/oh-my-claudecode:omc-setup`              |
 | `pr`                      | PR body assembly from OMC's paper trail: smallest visual, verify evidence, ADR-test reversibility | `/oh-my-claudecode:pr` |
 | `project-session-manager` | Manage isolated development environments (git worktrees + tmux)                | `/oh-my-claudecode:project-session-manager` |
-| `psm`                    | Deprecated compatibility alias for `project-session-manager`                    | `/oh-my-claudecode:psm`                    |
-| `plan`                    | Create a strategic execution plan                                               | `/oh-my-claudecode:plan`                   |
 | `ralph`                   | Persistence loop until verified completion                                     | `/oh-my-claudecode:ralph`                   |
 | `ralplan`                 | Consensus planning entrypoint                                                   | `/oh-my-claudecode:ralplan`                 |
 | `recall`                  | Reconstruct working context from artifacts in trust order                      | `/oh-my-claudecode:recall`                  |
@@ -1027,7 +1029,6 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `refit`                   | Cross-session retrospective; instrument evidence to user-approved environment fixes | `/oh-my-claudecode:refit` |
 | `remember`                | Save and retrieve durable session memory                                        | `/oh-my-claudecode:remember`                |
 | `research`                | Investigate an open question and return grounded findings                       | `/oh-my-claudecode:research`               |
-| `review`                  | Review changes for correctness and risk                                         | `/oh-my-claudecode:review`                 |
 | `self-improve`            | Autonomous evolutionary code improvement engine                                | `/oh-my-claudecode:self-improve`           |
 | `session-flow`            | Reorient in the current session with an evidence-backed map of its flow        | `/oh-my-claudecode:session-flow`           |
 | `sharpen`                 | Aim a task at its real objective: consumer, done-check, non-goals              | `/oh-my-claudecode:sharpen`                 |
@@ -1225,6 +1226,8 @@ explicitly enabled via the global OMC config file:
 | Option       | Type       | Default                                         | Description                        |
 | ------------ | ---------- | ----------------------------------------------- | ---------------------------------- |
 | `maxFiles`   | `number`   | `10`                                            | Maximum files simplified per turn  |
+| `enabled`    | `boolean`  | `false`                                         | Enable or disable the hook         |
+| `extensions` | `string[]` | listed source extensions                       | File extensions eligible for simplification |
 
 **How it works:**
 
@@ -1266,6 +1269,10 @@ The keyword detector recognizes localized aliases in addition to the English tri
 | `deep-interview` | 딥인터뷰    | ディープインタビュー |
 | `tdd`            | 테스트 퍼스트 | テスト ファースト |
 | `security-review`| 보안 리뷰   | セキュリティ レビュー |
+| `ultrathink`     | 울트라싱크  | ウルトラシンク |
+| `code-review`    | 코드 리뷰   | コードレビュー |
+| `deepsearch`     | 딥서치      | ディープサーチ |
+| `analyze`        | 분석        | 分析 |
 
 `cancelomc` / `stopomc` have no localized alias (cancellation is matched only by the English tokens).
 

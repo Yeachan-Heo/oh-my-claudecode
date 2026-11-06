@@ -6,21 +6,21 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "2bcba1b57c959375636917e718496cbc0aab0758",
-    "sourceSha256": "5bcc72ed7ce1f5da2c64effaa1cf4664074a4a60a6a075473ddfe741f08c2c65",
+    "sourceSha256": "0b6eed4fe2fd5157dbde88dcdc4855337b4ffc58d7b7088d70c6dd3a9fbcd1da",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "2bcba1b57c959375636917e718496cbc0aab0758",
-  "sourceSha256": "5bcc72ed7ce1f5da2c64effaa1cf4664074a4a60a6a075473ddfe741f08c2c65",
+  "sourceSha256": "0b6eed4fe2fd5157dbde88dcdc4855337b4ffc58d7b7088d70c6dd3a9fbcd1da",
   "counts": {
     "public": {
-      "skills": 75,
+      "skills": 77,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 124
+      "total": 126
     },
     "internal": {
       "hookFiles": 333,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 58
     },
-    "skills": 75,
+    "skills": 77,
     "commands": 21,
     "hookFiles": 333,
     "workflows": 8,
@@ -58,6 +58,7 @@
       "autopilot",
       "autoresearch",
       "babysit",
+      "benchmark-checklist",
       "blast-radius",
       "bro",
       "cancel",
@@ -96,6 +97,7 @@
       "omc-setup",
       "plan",
       "pr",
+      "principles",
       "project-session-manager",
       "ralph",
       "ralplan",
@@ -36886,6 +36888,11 @@
         "path": "skills/babysit/SKILL.md"
       },
       {
+        "id": "skills/benchmark-checklist/SKILL.md",
+        "kind": "skill",
+        "path": "skills/benchmark-checklist/SKILL.md"
+      },
+      {
         "id": "skills/blast-radius/SKILL.md",
         "kind": "skill",
         "path": "skills/blast-radius/SKILL.md"
@@ -37099,6 +37106,11 @@
         "id": "skills/pr/SKILL.md",
         "kind": "skill",
         "path": "skills/pr/SKILL.md"
+      },
+      {
+        "id": "skills/principles/SKILL.md",
+        "kind": "skill",
+        "path": "skills/principles/SKILL.md"
       },
       {
         "id": "skills/project-session-manager/SKILL.md",
@@ -45749,11 +45761,6 @@
       },
       {
         "from": "scripts/check-omc-playbooks.mjs",
-        "to": "external:node:url",
-        "kind": "imports"
-      },
-      {
-        "from": "scripts/check-omc-playbooks.mjs",
         "to": "scripts/lib/state-root.mjs",
         "kind": "imports"
       },
@@ -47898,6 +47905,11 @@
         "kind": "registers"
       },
       {
+        "from": "skills/benchmark-checklist/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
         "from": "skills/blast-radius/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
@@ -48084,6 +48096,11 @@
       },
       {
         "from": "skills/pr/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/principles/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -87119,12 +87136,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7614,
-      "edgeCount": 8408,
-      "importEdgeCount": 7008,
-      "registerEdgeCount": 96
+      "nodeCount": 7616,
+      "edgeCount": 8409,
+      "importEdgeCount": 7007,
+      "registerEdgeCount": 98
     }
   },
-  "inventorySha256": "9163a271374c6924ad90b31f872eb75b58c8ac149904ffaf98e715cec6022b19",
-  "manifestSha256": "c6e614f2c62a1a5635312c3d8973c06954b6ca9bfc448d033c3ad1566f21c547"
+  "inventorySha256": "cea8af7a449e03f8ee2e9d9397ca09ec1da6ab6614fec93e1d2ae6e9b42d70d1",
+  "manifestSha256": "cd8ff470912c7a94c62f7e092b3f378a7d1554b7eed32f8226876b451b1edf61"
 }
