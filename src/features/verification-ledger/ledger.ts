@@ -13,7 +13,7 @@ import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, appendFileSync, statSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { withFileLock, lockPathFor } from '../../lib/file-lock.js';
-import { getOmcRoot } from '../../lib/worktree-paths.js';
+import { getOmcRoot, getProjectIdentifier } from '../../lib/worktree-paths.js';
 
 export const VERIFICATION_VERDICTS = [
   'live-ui-verified',
@@ -57,10 +57,12 @@ export const LEDGER_STATE_RELATIVE_PATH = 'state/verification-ledger.tsv';
  * The canonical ledger path under OMC's state root, so callers never
  * hard-code `.omc/state/`: with `OMC_STATE_DIR` (or a workspace marker)
  * mapping project state elsewhere, a hard-coded working-tree path would
- * split the ledger from the rest of OMC state.
+ * split the ledger from the rest of OMC state. Under a shared workspace
+ * root the ledger is scoped per project, so independent sibling repos do
+ * not append into one another's history.
  */
 export function defaultLedgerPath(): string {
-  return join(getOmcRoot(), LEDGER_STATE_RELATIVE_PATH);
+  return join(getOmcRoot(), getProjectIdentifier(), LEDGER_STATE_RELATIVE_PATH);
 }
 
 /**
