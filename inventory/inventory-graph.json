@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "da2d803831945da101f3557b76c1bc32925c474f",
-    "sourceSha256": "94bd94fe3dfb3168a20df812ebaa1f5e822c4a503127bb6ca9fd13a088bb8e2e",
+    "head": "2bcba1b57c959375636917e718496cbc0aab0758",
+    "sourceSha256": "65b6304faa58f1ada83069d415ffcc222078a0f3fe43ee6d313e93208711d316",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "da2d803831945da101f3557b76c1bc32925c474f",
-  "sourceSha256": "94bd94fe3dfb3168a20df812ebaa1f5e822c4a503127bb6ca9fd13a088bb8e2e",
+  "head": "2bcba1b57c959375636917e718496cbc0aab0758",
+  "sourceSha256": "65b6304faa58f1ada83069d415ffcc222078a0f3fe43ee6d313e93208711d316",
   "counts": {
     "public": {
-      "skills": 53,
+      "skills": 52,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 102
+      "total": 101
     },
     "internal": {
       "hookFiles": 333,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 58
     },
-    "skills": 53,
+    "skills": 52,
     "commands": 21,
     "hookFiles": 333,
     "workflows": 8,
@@ -72,7 +72,6 @@
       "harbor",
       "hud",
       "intent",
-      "interrogate",
       "launch",
       "loft",
       "map",
@@ -36934,11 +36933,6 @@
         "path": "skills/intent/SKILL.md"
       },
       {
-        "id": "skills/interrogate/SKILL.md",
-        "kind": "skill",
-        "path": "skills/interrogate/SKILL.md"
-      },
-      {
         "id": "skills/launch/SKILL.md",
         "kind": "skill",
         "path": "skills/launch/SKILL.md"
@@ -47827,11 +47821,6 @@
       },
       {
         "from": "skills/intent/SKILL.md",
-        "to": "src/features/builtin-skills/skills.ts",
-        "kind": "registers"
-      },
-      {
-        "from": "skills/interrogate/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -86872,12 +86861,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 7592,
-      "edgeCount": 8385,
+      "nodeCount": 7591,
+      "edgeCount": 8384,
       "importEdgeCount": 7007,
-      "registerEdgeCount": 74
+      "registerEdgeCount": 73
     }
   },
-  "inventorySha256": "1b8a1249f14e917e9002fa7386dc3daa4eb6091a890fe039249e0298c3bd8c4a",
-  "manifestSha256": "5acfd9a8ecf90bb212907ccb43993f41aacd05a112a088f2f4e1744a9a66314c"
+  "inventorySha256": "e88934f35bc6743cb31d728fbb306a12df3767a746a99ea9ecb9c4f9137b3160",
+  "manifestSha256": "eed2921d7bb604097f7e1b2b6f2676ffd4cf9c2db050c5e67e5ca33064b04eb4"
 }
