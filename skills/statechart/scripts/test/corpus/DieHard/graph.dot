@@ -1,0 +1,126 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+1721042995228635026 [label="/\\ big = 0\n/\\ small = 0",style = filled]
+1721042995228635026 -> 8981770525750446274 [label="FillSmall",color="black",fontcolor="black"];
+8981770525750446274 [label="/\\ big = 0\n/\\ small = 3"];
+1721042995228635026 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+-7007095103426876375 [label="/\\ big = 5\n/\\ small = 0"];
+1721042995228635026 -> 1721042995228635026 [label="EmptySmall",color="black",fontcolor="black"];
+1721042995228635026 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+1721042995228635026 -> 1721042995228635026 [label="SmallToBig",color="black",fontcolor="black"];
+1721042995228635026 -> 1721042995228635026 [label="BigToSmall",color="black",fontcolor="black"];
+8981770525750446274 -> 8981770525750446274 [label="FillSmall",color="black",fontcolor="black"];
+8981770525750446274 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+-754850019643257991 [label="/\\ big = 5\n/\\ small = 3"];
+8981770525750446274 -> 1721042995228635026 [label="EmptySmall",color="black",fontcolor="black"];
+8981770525750446274 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+8981770525750446274 -> -8150320689892294048 [label="SmallToBig",color="black",fontcolor="black"];
+-8150320689892294048 [label="/\\ big = 3\n/\\ small = 0"];
+8981770525750446274 -> 8981770525750446274 [label="BigToSmall",color="black",fontcolor="black"];
+-7007095103426876375 -> -754850019643257991 [label="FillSmall",color="black",fontcolor="black"];
+-7007095103426876375 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+-7007095103426876375 -> -7007095103426876375 [label="EmptySmall",color="black",fontcolor="black"];
+-7007095103426876375 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+-7007095103426876375 -> -7007095103426876375 [label="SmallToBig",color="black",fontcolor="black"];
+-7007095103426876375 -> -7880760717151927906 [label="BigToSmall",color="black",fontcolor="black"];
+-7880760717151927906 [label="/\\ big = 2\n/\\ small = 3"];
+-754850019643257991 -> -754850019643257991 [label="FillSmall",color="black",fontcolor="black"];
+-754850019643257991 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+-754850019643257991 -> -7007095103426876375 [label="EmptySmall",color="black",fontcolor="black"];
+-754850019643257991 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+-754850019643257991 -> -754850019643257991 [label="SmallToBig",color="black",fontcolor="black"];
+-754850019643257991 -> -754850019643257991 [label="BigToSmall",color="black",fontcolor="black"];
+-8150320689892294048 -> -1899453292956670672 [label="FillSmall",color="black",fontcolor="black"];
+-1899453292956670672 [label="/\\ big = 3\n/\\ small = 3"];
+-8150320689892294048 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+-8150320689892294048 -> -8150320689892294048 [label="EmptySmall",color="black",fontcolor="black"];
+-8150320689892294048 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+-8150320689892294048 -> -8150320689892294048 [label="SmallToBig",color="black",fontcolor="black"];
+-8150320689892294048 -> 8981770525750446274 [label="BigToSmall",color="black",fontcolor="black"];
+-7880760717151927906 -> -7880760717151927906 [label="FillSmall",color="black",fontcolor="black"];
+-7880760717151927906 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+-7880760717151927906 -> -439630751057205554 [label="EmptySmall",color="black",fontcolor="black"];
+-439630751057205554 [label="/\\ big = 2\n/\\ small = 0"];
+-7880760717151927906 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+-7880760717151927906 -> -7007095103426876375 [label="SmallToBig",color="black",fontcolor="black"];
+-7880760717151927906 -> -7880760717151927906 [label="BigToSmall",color="black",fontcolor="black"];
+-1899453292956670672 -> -1899453292956670672 [label="FillSmall",color="black",fontcolor="black"];
+-1899453292956670672 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+-1899453292956670672 -> -8150320689892294048 [label="EmptySmall",color="black",fontcolor="black"];
+-1899453292956670672 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+-1899453292956670672 -> -5187195249595404007 [label="SmallToBig",color="black",fontcolor="black"];
+-5187195249595404007 [label="/\\ big = 5\n/\\ small = 1"];
+-1899453292956670672 -> -1899453292956670672 [label="BigToSmall",color="black",fontcolor="black"];
+-439630751057205554 -> -7880760717151927906 [label="FillSmall",color="black",fontcolor="black"];
+-439630751057205554 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+-439630751057205554 -> -439630751057205554 [label="EmptySmall",color="black",fontcolor="black"];
+-439630751057205554 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+-439630751057205554 -> -439630751057205554 [label="SmallToBig",color="black",fontcolor="black"];
+-439630751057205554 -> 6514181927299503602 [label="BigToSmall",color="black",fontcolor="black"];
+6514181927299503602 [label="/\\ big = 0\n/\\ small = 2"];
+-5187195249595404007 -> -754850019643257991 [label="FillSmall",color="black",fontcolor="black"];
+-5187195249595404007 -> -5187195249595404007 [label="FillBig",color="black",fontcolor="black"];
+-5187195249595404007 -> -7007095103426876375 [label="EmptySmall",color="black",fontcolor="black"];
+-5187195249595404007 -> 3540095646597903010 [label="EmptyBig",color="black",fontcolor="black"];
+3540095646597903010 [label="/\\ big = 0\n/\\ small = 1"];
+-5187195249595404007 -> -5187195249595404007 [label="SmallToBig",color="black",fontcolor="black"];
+-5187195249595404007 -> -1899453292956670672 [label="BigToSmall",color="black",fontcolor="black"];
+6514181927299503602 -> 8981770525750446274 [label="FillSmall",color="black",fontcolor="black"];
+6514181927299503602 -> -3223285751774013879 [label="FillBig",color="black",fontcolor="black"];
+-3223285751774013879 [label="/\\ big = 5\n/\\ small = 2"];
+6514181927299503602 -> 1721042995228635026 [label="EmptySmall",color="black",fontcolor="black"];
+6514181927299503602 -> 6514181927299503602 [label="EmptyBig",color="black",fontcolor="black"];
+6514181927299503602 -> -439630751057205554 [label="SmallToBig",color="black",fontcolor="black"];
+6514181927299503602 -> 6514181927299503602 [label="BigToSmall",color="black",fontcolor="black"];
+3540095646597903010 -> 8981770525750446274 [label="FillSmall",color="black",fontcolor="black"];
+3540095646597903010 -> -5187195249595404007 [label="FillBig",color="black",fontcolor="black"];
+3540095646597903010 -> 1721042995228635026 [label="EmptySmall",color="black",fontcolor="black"];
+3540095646597903010 -> 3540095646597903010 [label="EmptyBig",color="black",fontcolor="black"];
+3540095646597903010 -> 6980719983254260540 [label="SmallToBig",color="black",fontcolor="black"];
+6980719983254260540 [label="/\\ big = 1\n/\\ small = 0"];
+3540095646597903010 -> 3540095646597903010 [label="BigToSmall",color="black",fontcolor="black"];
+-3223285751774013879 -> -754850019643257991 [label="FillSmall",color="black",fontcolor="black"];
+-3223285751774013879 -> -3223285751774013879 [label="FillBig",color="black",fontcolor="black"];
+-3223285751774013879 -> -7007095103426876375 [label="EmptySmall",color="black",fontcolor="black"];
+-3223285751774013879 -> 6514181927299503602 [label="EmptyBig",color="black",fontcolor="black"];
+-3223285751774013879 -> -3223285751774013879 [label="SmallToBig",color="black",fontcolor="black"];
+-3223285751774013879 -> -9042072178955767849 [label="BigToSmall",color="black",fontcolor="black"];
+-9042072178955767849 [label="/\\ big = 4\n/\\ small = 3"];
+6980719983254260540 -> 839789518545251436 [label="FillSmall",color="black",fontcolor="black"];
+839789518545251436 [label="/\\ big = 1\n/\\ small = 3"];
+6980719983254260540 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+6980719983254260540 -> 6980719983254260540 [label="EmptySmall",color="black",fontcolor="black"];
+6980719983254260540 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+6980719983254260540 -> 6980719983254260540 [label="SmallToBig",color="black",fontcolor="black"];
+6980719983254260540 -> 3540095646597903010 [label="BigToSmall",color="black",fontcolor="black"];
+-9042072178955767849 -> -9042072178955767849 [label="FillSmall",color="black",fontcolor="black"];
+-9042072178955767849 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+-9042072178955767849 -> -1602176963231020921 [label="EmptySmall",color="black",fontcolor="black"];
+-1602176963231020921 [label="/\\ big = 4\n/\\ small = 0"];
+-9042072178955767849 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+-9042072178955767849 -> -3223285751774013879 [label="SmallToBig",color="black",fontcolor="black"];
+-9042072178955767849 -> -9042072178955767849 [label="BigToSmall",color="black",fontcolor="black"];
+839789518545251436 -> 839789518545251436 [label="FillSmall",color="black",fontcolor="black"];
+839789518545251436 -> -754850019643257991 [label="FillBig",color="black",fontcolor="black"];
+839789518545251436 -> 6980719983254260540 [label="EmptySmall",color="black",fontcolor="black"];
+839789518545251436 -> 8981770525750446274 [label="EmptyBig",color="black",fontcolor="black"];
+839789518545251436 -> -1602176963231020921 [label="SmallToBig",color="black",fontcolor="black"];
+839789518545251436 -> 839789518545251436 [label="BigToSmall",color="black",fontcolor="black"];
+-1602176963231020921 -> -9042072178955767849 [label="FillSmall",color="black",fontcolor="black"];
+-1602176963231020921 -> -7007095103426876375 [label="FillBig",color="black",fontcolor="black"];
+-1602176963231020921 -> -1602176963231020921 [label="EmptySmall",color="black",fontcolor="black"];
+-1602176963231020921 -> 1721042995228635026 [label="EmptyBig",color="black",fontcolor="black"];
+-1602176963231020921 -> -1602176963231020921 [label="SmallToBig",color="black",fontcolor="black"];
+-1602176963231020921 -> 839789518545251436 [label="BigToSmall",color="black",fontcolor="black"];
+{rank = same; 1721042995228635026;}
+{rank = same; -7007095103426876375;8981770525750446274;}
+{rank = same; -754850019643257991;-7880760717151927906;-8150320689892294048;}
+{rank = same; -439630751057205554;-1899453292956670672;}
+{rank = same; 6514181927299503602;-5187195249595404007;}
+{rank = same; 3540095646597903010;-3223285751774013879;}
+{rank = same; -9042072178955767849;6980719983254260540;}
+{rank = same; -1602176963231020921;839789518545251436;}
+}
+}

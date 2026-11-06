@@ -34,8 +34,7 @@ into proposed edits to OMC's own skills — before the lessons evaporate.
 1. **Locate the transcript** for this session and hand each reviewer the
    path, not a paste — reviewers read it themselves.
 2. **Seat the panel**: three read-only reviewers in one message, in the
-   background, each with one lens (the lens briefs live in
-   `references/reviewer-lenses.md`):
+   background, each with one lens:
    - **tooling reviewer** — which commands, skills, and agents helped or
      wasted time; what a script or skill should have existed
    - **judgment reviewer** — where calls were wrong, late, or unverifiable;

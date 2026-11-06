@@ -1,7 +1,7 @@
 # Review Rubric
 
 Review through whichever lenses are relevant. Not every lens applies to every
-change. Adapted from pstack's review rubric — MIT, (c) 2026 Lauren Tan, https://github.com/cursor/plugins/tree/main/pstack, ported via michael-denyer/pstack-claude (see docs/CREDITS.md).
+change. Adapted from pstack's review rubric (see docs/CREDITS.md).
 
 ## Correctness
 

@@ -23,8 +23,10 @@ trust:
    `.omc/state/<mode>-state.json` fallback for runs persisted before a
    session id existed (docs/HOOKS.md keeps both live) — what was in flight,
    what iteration, what was blocked.
-2. **Ledgers and trails**: `.omc/state/verification-ledger.tsv` (what was
-   proven, on which SHA) and every `.omc/state/decision-trail-*.tsv` file
+2. **Ledgers and trails**: under OMC's state root — the verification ledger
+   (`state/verification-ledger.tsv`, by default the checkout's `.omc/state/`;
+   `OMC_STATE_DIR` or a parent `.omc-workspace` moves the root) and every
+   `state/decision-trail-*.tsv` file
    (what was decided and why); enumerate the glob before reconstructing.
 3. **The transcript tail**: the last N messages of this session — what was
    said, what was promised.

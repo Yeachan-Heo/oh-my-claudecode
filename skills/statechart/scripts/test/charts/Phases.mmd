@@ -1,0 +1,29 @@
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: Box in step
+    lg1: Box stale
+    lg2: Breaks a rule
+  }
+  class lg0 teal
+  class lg1 orange
+  class lg2 breaks
+  state "At the same time" as all {
+    state "Transport" as r0 {
+      s0: Connected
+      s1: Offline
+      [*] --> s1
+      s0 --> s1: the transport drops
+      s1 --> s0: the transport reconnects
+    }
+    --
+    state "Resync" as r1 {
+      s2: box stale
+      s3: box in step
+      [*] --> s2
+      s2 --> s3: the pass writes the box
+    }
+  }
+  class s2 orange
+  class s3 teal
+  class s3 breaks

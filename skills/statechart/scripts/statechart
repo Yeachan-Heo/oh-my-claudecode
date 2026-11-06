@@ -1,0 +1,50 @@
+#!/bin/sh
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname "$self")/$link ;;
+  esac
+done
+entry=$(dirname "$self")/statechart.ts
+version() {
+  command -v "$1" >/dev/null || { echo 0; return; }
+  "$1" --version 2>/dev/null | sed -n '1s/[^0-9]*\([0-9]*\)\.\([0-9]*\)\.\([0-9]*\).*/\1 \2 \3/p' | {
+    read -r major minor patch
+    echo $((${major:-0} * 1000000 + ${minor:-0} * 1000 + ${patch:-0}))
+  }
+}
+node=$(version node)
+# Node's built-in TypeScript loader refuses .ts files below node_modules
+# (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING), so an npm-installed skill
+# must go through tsx even on a stripping-capable node.
+case $self in
+  *node_modules*) node=0 ;;
+esac
+if [ "$node" -ge 23006000 ] || { [ "$node" -ge 22018000 ] && [ "$node" -lt 23000000 ]; }; then
+  exec node --disable-warning=ExperimentalWarning "$entry" "$@"
+fi
+if [ "$(version bun)" -ge 1001005 ]; then
+  exec bun "$entry" "$@"
+fi
+if [ "$(version deno)" -ge 2000000 ]; then
+  exec deno run --quiet --no-prompt --allow-read --allow-write --allow-run --allow-env "$entry" "$@"
+fi
+# tsx is a production dependency, so an installed package ships a runtime for
+# nodes without type stripping (Node 20 is still in engines). tsx itself runs
+# on node, so the fallback applies only when a working node exists: with no
+# usable node, tsx cannot run either, and the launcher reports the supported
+# runtimes instead — the no-runtime PATH layouts the CLI suite exercises.
+if node --version >/dev/null 2>&1; then
+  repo_tsx="$(dirname "$entry")/../../../node_modules/.bin/tsx"
+  if [ -x "$repo_tsx" ]; then
+    exec "$repo_tsx" "$entry" "$@"
+  fi
+  if command -v tsx >/dev/null 2>&1; then
+    exec tsx "$entry" "$@"
+  fi
+  cd "$(dirname "$entry")" && exec npx --no-install tsx "$entry" "$@"
+fi
+echo "statechart needs Node 22.18 to 22.x, Node 23.6 or later, Bun 1.1.5 or later, or Deno 2.0 or later." >&2
+exit 127

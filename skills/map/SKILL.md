@@ -45,6 +45,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Long autonomous work needs an audit trail | `show-me-your-work` |
 | No bundled skill fits the task shape | `figure-it-out` (designs one, validated against anchors) |
 | A property tests cannot reach needs formal proof | `create-formal-verification-skill`; drifted spec: `maintain-formal-verification-skill` |
+| A flow or protocol bug shows up as a path through states | `statechart` |
 | The repo needs its own verification commands recorded | `create-verification-skill`; drifted commands: `maintain-verification-skill` |
 | Roles should run on chosen models | `models` |
 | Tests should drive the implementation | `tdd` |
@@ -67,7 +68,7 @@ You know something needs doing; you do not know which skill owns it. Find the jo
 | Inspect orchestration state | `trace` (also the tracing lane); `graph` (DAG runtime) |
 | Cancel a mode | `cancel` |
 | CI is red on a PR you own | `fix-ci`; review threads: `get-pr-comments`; conflicts: `fix-merge-conflicts` |
-| The user missed the session | `ketchup`; after a break or crash: `recall` |
+| The user missed the session | `ketchup`; as a subtitled video: `ketchup-video`; after a break or crash: `recall` |
 | A brief is vague | `sharpen`; playback before starting: `in-your-own-words` |
 | A reply was too dense | `bro` |
 | Shipping prose needs the standard | `technical-writing`; TS type discipline: `typescript-best-practices` |

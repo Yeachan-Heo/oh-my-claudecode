@@ -125,6 +125,8 @@ jobs:
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
           src/utils/__tests__/windows-search.test.ts
+          tests/statechart/native-suite.test.ts
+          tests/statechart/windows-smoke.test.ts
 
       - name: Run Windows legacy state-lock tests
         run: >-

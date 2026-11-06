@@ -1,0 +1,30 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks NotFive or NotOdd or NotThree
+    lg1: Path to the NotFive or NotOdd or NotThree bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: 0
+  s1: 1
+  s2: 3
+  s3: 2
+  s4: 4
+  s5: 5
+  [*] --> s0
+  s0 --> s1: Inc
+  s0 --> s2: Bump
+  s1 --> s3: Inc
+  s3 --> s2: Inc
+  s2 --> s4: Inc
+  s4 --> s5: Inc
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 breaks
+  class s1 bugPath
+  class s2 breaks
+  class s2 bugPath
+  class s3 bugPath
+  class s4 bugPath
+  class s5 breaks
+  class s5 bugPath

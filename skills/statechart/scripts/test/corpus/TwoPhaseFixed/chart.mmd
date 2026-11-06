@@ -1,0 +1,37 @@
+stateDiagram-v2
+  direction LR
+  state "At the same time" as all {
+    state "Manager" as r0 {
+      s0: init
+      s1: done
+      [*] --> s0
+      s0 --> s1: TMAbort
+      s0 --> s1: TMCommit [when r1 is prepared and r2 is prepared]
+    }
+    --
+    state "r1" as r1 {
+      s2: working
+      s3: prepared
+      s4: aborted
+      s5: committed
+      [*] --> s2
+      s2 --> s3: RMPrepare
+      s2 --> s4: RMChooseToAbort
+      s2 --> s4: RMRcvAbortMsg [when Manager is done]
+      s3 --> s4: RMRcvAbortMsg [when Manager is done and r2 is not committed]
+      s3 --> s5: RMRcvCommitMsg [when Manager is done and r2 is one of committed, prepared]
+    }
+    --
+    state "r2" as r2 {
+      s6: working
+      s7: prepared
+      s8: aborted
+      s9: committed
+      [*] --> s6
+      s6 --> s7: RMPrepare
+      s6 --> s8: RMChooseToAbort
+      s6 --> s8: RMRcvAbortMsg [when Manager is done]
+      s7 --> s8: RMRcvAbortMsg [when Manager is done and r1 is not committed]
+      s7 --> s9: RMRcvCommitMsg [when Manager is done and r1 is one of committed, prepared]
+    }
+  }

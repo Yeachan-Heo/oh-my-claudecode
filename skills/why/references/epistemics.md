@@ -6,7 +6,7 @@ into false certainty. Code shows what it does, not *why* it exists. The why
 lives in commits, PRs, tickets, docs, and conversations — all incomplete,
 biased, and sometimes missing.
 
-Adapted from pstack's epistemics reference — MIT, (c) 2026 Lauren Tan, https://github.com/cursor/plugins/tree/main/pstack, ported via michael-denyer/pstack-claude (see docs/CREDITS.md).
+Adapted from pstack's epistemics reference (see docs/CREDITS.md).
 
 ## Claims about human decisions
 

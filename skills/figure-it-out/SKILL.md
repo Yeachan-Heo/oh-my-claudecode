@@ -24,6 +24,8 @@ artifact.
   unusual monorepo, a compliance sweep, a data backfill dance)
 - a one-off that is high-stakes enough to deserve a designed procedure
   rather than improvisation
+- a request matches the `when:` of a generated playbook — in that case this
+  skill's job is to **follow** the stored playbook, not design another one
 
 ## When not to use
 
@@ -45,6 +47,10 @@ artifact.
    playbook where reality disagreed, not the other way around.
 
 ## Storage and validation
+
+This skill is also the router for its own outputs: on a later request, list
+the stored playbooks in the resolved directory, and when one's `when:`
+matches the request, follow that playbook instead of designing a new one.
 
 Resolve the checker and the playbooks directory it validates first — from a
 target project the script does not exist at `./scripts/`, ordinary launches

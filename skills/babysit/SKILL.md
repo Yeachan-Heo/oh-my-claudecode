@@ -70,12 +70,10 @@ are in scope.
      the get-pr-comments fetch) even when `reviewDecision` is empty or
      `approved` — a non-blocking review or a comment after approval leaves
      the decision clean while real threads stand — and never report `ready`
-     while an in-scope thread is untriaged. Automated review-bot findings
-     triage per `references/bugbot-triage.md`
+     while an in-scope thread is untriaged
    - conflicts → `fix-merge-conflicts` **in its no-rebase mode**, run on the
      polled PR's owned checkout: resolve
-     with a merge commit only, under `references/merge-safety.md`. Never
-     rebase and never force-push here —
+     with a merge commit only. Never rebase and never force-push here —
      this constraint overrides that skill's own-branch rebase option,
      because babysit's contract forbids both. If the branch is not ours to
      resolve, report to the branch owner instead
