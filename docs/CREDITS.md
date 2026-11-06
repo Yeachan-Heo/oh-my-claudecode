@@ -24,6 +24,14 @@ are summarized once per upstream source here rather than file-by-file.
 | `pr` summary visuals | idea | [show-me](https://github.com/humanlayer/skills/blob/main/plugins/show-me/skills/show-me/SKILL.md) (Dex Horthy, Humanlayer) | smallest visual that proves the change |
 | `pr` merge-danger framing | idea | [mattpocock/skills](https://github.com/mattpocock/skills) | |
 | `babysit` skill | idea | pstack babysit | PR watch-and-fix loop; merge authority stays with the human |
+| `models` skill | idea | pstack setup-pstack | setup wizard for OMC's existing `team.roleRouting` plus panel-diversity guidance |
+| `why` skill | idea | pstack why | multi-source investigation epistemics; human-rulings-verbatim rule |
+| `how` skill | idea | pstack how | explorer/explainer two-pass subsystem walkthrough |
+| `correct` skill | idea | pstack correct | repeated-mistake elimination ladder (lint > type > runtime > script > text) |
+| `blast-radius` skill | idea | pstack blast-radius | dependents mapping and classification with executed proof |
+| `architect` skill | idea | pstack architect | parallel design exploration with accepted-deviations register |
+| `figure-it-out` skill | idea | pstack figure-it-out | bespoke playbook designer, stored under `.omc/playbooks/` |
+| `show-me-your-work` skill | idea | pstack show-me-your-work | TSV decision trail with formula-cell guard |
 | `fix-ci` skill | idea | pstack fix-ci | real/flaky/environmental CI failure classification |
 | `fix-merge-conflicts` skill | idea | pstack fix-merge-conflicts | both-intent-preserving non-interactive resolution |
 | `get-pr-comments` skill | idea | pstack get-pr-comments | review-thread dedupe and fix/dismiss/ask triage |
