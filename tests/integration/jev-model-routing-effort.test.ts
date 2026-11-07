@@ -182,9 +182,8 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(requests[1].questions.effort).toEqual(baseline);
   }, 15000);
 
-  // Default cap (high): the score is rounded to the nearest of the five
-  // levels, an exact tie goes to the even level (low, high, high, max), and
-  // everything above high stops at the cap.
+  // Default cap (max): the score is rounded to the nearest of the five levels
+  // and an exact tie goes to the even level (low, high, high, max).
   it.each([
     [0, "low"],
     [0.25, "low"],
@@ -197,14 +196,27 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     [2, "high"],
     [2.49, "high"],
     [2.5, "high"],
-    [2.51, "high"],
-    [3.5, "high"],
-    [4, "high"],
+    [2.51, "xhigh"],
+    [3.49, "xhigh"],
+    [3.5, "max"],
+    [4, "max"],
   ])("maps effort score %s to %s under the default cap", async (score, expected) => {
     answersFor = () => ({ effort: scoreAnswer(score), "model-tier": choiceAnswer("sonnet") });
     const routed = await routedInput(agentInput());
     expect(routed.model).toBe("sonnet");
     expect(routed.effort).toBe(expected);
+  }, 15000);
+
+  it.each([
+    [0.4, "low"],
+    [1.2, "medium"],
+    [2.4, "high"],
+    [2.6, "high"],
+    [3.6, "high"],
+    [4, "high"],
+  ])("maps effort score %s to %s under OMC_JEV_MAX_EFFORT=high", async (score, expected) => {
+    answersFor = () => ({ effort: scoreAnswer(score), "model-tier": choiceAnswer("sonnet") });
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe(expected);
   }, 15000);
 
   it("ignores the confidence of the effort answer", async () => {
@@ -266,11 +278,11 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     answersFor = () => ({ effort: scoreAnswer(3.8, 1), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "medium" })).effort).toBe("medium");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "low" })).effort).toBe("low");
-    // Unknown cap values fall back to the default cap (high).
-    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "turbo" })).effort).toBe("high");
-    // A higher cap is a real opt-in for the top levels.
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe("high");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "xhigh" })).effort).toBe("xhigh");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
+    // Unknown cap values fall back to the default cap (max).
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "turbo" })).effort).toBe("max");
     // Lower levels are not raised by a higher cap.
     answersFor = () => ({ effort: scoreAnswer(1.6, 1), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("high");
@@ -281,12 +293,13 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("high");
 
     answersFor = () => ({ "model-tier": choiceAnswer("opus") });
-    const capped = await routedInput(agentInput({ effort: "max" }));
+    const capped = await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "high" });
     expect(capped).toEqual({ ...agentInput().tool_input, model: "opus", effort: "high" });
+    // The default cap is max, so an explicit max stays.
+    expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("max");
     expect((await routedInput(agentInput({ effort: "xhigh" }), { OMC_JEV_MAX_EFFORT: "medium" })).effort).toBe(
       "medium",
     );
-    // Opting in to a higher cap keeps the explicit value.
     expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
     expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "xhigh" })).effort).toBe("xhigh");
   }, 15000);
@@ -321,7 +334,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     // No explicit effort: none is added.
     expect(await routedInput(agentInput())).not.toHaveProperty("effort");
     // Explicit effort above the cap is lowered to the cap, as with no effort answer.
-    expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("high");
+    expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe("high");
   }, 15000);
 
   it("applies the effort answer when model-tier is missing", async () => {

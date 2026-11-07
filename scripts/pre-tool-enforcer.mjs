@@ -601,12 +601,13 @@ const MODEL_ROUTING_QUESTIONS = {
 // exact tie (0.5, 1.5, 2.5, 3.5) goes to the even level (low, high, high, max)
 // so ties do not push the judgment in one direction. Every result is capped by
 // OMC_JEV_MAX_EFFORT (low, medium, high, xhigh, or max). The default cap is
-// high: xhigh and max spend several times the tokens of high, so a router
-// raises a subagent there only when the user opts in with a higher cap.
+// max: with the calibrated question xhigh and max are rare answers (max about
+// one in eighty in the measurement), so the cap is not needed as a brake and
+// would cut them where the work needs them. Set a lower cap to restrict it.
 // When the point is active and Jev returns no usable effort score, an
 // explicit effort above the cap is lowered to the cap.
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const DEFAULT_MAX_EFFORT = 'high';
+const DEFAULT_MAX_EFFORT = 'max';
 
 function resolveMaxEffort(env = process.env) {
   const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
