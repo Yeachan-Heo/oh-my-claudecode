@@ -6,14 +6,14 @@
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
     "head": "c5b71636ebcd34f27491ad1b0605a0e5d039996f",
-    "sourceSha256": "401adda87ab700af09507d42f1cf6754dee7ec4aee27a918fa3065c00bbbfbcb",
+    "sourceSha256": "b933299ac20617c65e3bef7d05e20bd2c9035097134309cbd7687a787a2f96e6",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
   "head": "c5b71636ebcd34f27491ad1b0605a0e5d039996f",
-  "sourceSha256": "401adda87ab700af09507d42f1cf6754dee7ec4aee27a918fa3065c00bbbfbcb",
+  "sourceSha256": "b933299ac20617c65e3bef7d05e20bd2c9035097134309cbd7687a787a2f96e6",
   "counts": {
     "public": {
       "skills": 83,
@@ -37634,6 +37634,11 @@
         "path": "skills/statechart/scripts/test/charts/Phases.mmd"
       },
       {
+        "id": "skills/statechart/scripts/test/child-env.test.ts",
+        "kind": "other",
+        "path": "skills/statechart/scripts/test/child-env.test.ts"
+      },
+      {
         "id": "skills/statechart/scripts/test/cli.test.ts",
         "kind": "other",
         "path": "skills/statechart/scripts/test/cli.test.ts"
@@ -51002,6 +51007,36 @@
       },
       {
         "from": "skills/statechart/scripts/test/chart.test.ts",
+        "to": "skills/statechart/scripts/run.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
+        "to": "external:node:assert/strict",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
+        "to": "external:node:module",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
+        "to": "external:node:test",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "skills/statechart/scripts/test/child-env.test.ts",
         "to": "skills/statechart/scripts/run.ts",
         "kind": "imports"
       },
@@ -90512,12 +90547,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8051,
-      "edgeCount": 8646,
-      "importEdgeCount": 7207,
+      "nodeCount": 8052,
+      "edgeCount": 8652,
+      "importEdgeCount": 7213,
       "registerEdgeCount": 104
     }
   },
-  "inventorySha256": "c5750c3d813732f1ef75e89dc448cd15002fadb6da4e38b9a39ac04524258181",
-  "manifestSha256": "1698617307e4c648acbf694ec649901833c16fb3d46d4226fb90d528c4a92ac6"
+  "inventorySha256": "3048cab4cf9afb372aeb4f601903218beb53a3bf1d5780fb7900f665258c1a9f",
+  "manifestSha256": "de143a5ffa4d0e61942585be595935e4ab8151c6d6129968c5ae5241e6144280"
 }
