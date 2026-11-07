@@ -1011,7 +1011,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `how`                     | Two-pass subsystem walkthrough: explore, then explain with file:line citations | `/oh-my-claudecode:how`                     |
 | `hud`                     | Configure HUD/statusline                                                        | `/oh-my-claudecode:hud`                     |
 | `intent`                  | Internal requirements intake for non-engineer contributors                      | `/oh-my-claudecode:intent`                  |
-| `interrogate`             | Adversarial three-reviewer panel over a diff or design; severity-merged verdict | `/oh-my-claudecode:interrogate`             |
+| `interrogate`             | Adversarial three-reviewer panel over a diff or design; run-proven findings, severity-merged verdict | `/oh-my-claudecode:interrogate`             |
 | `in-your-own-words`       | Play back the goal, problem, and success check before work starts              | `/oh-my-claudecode:in-your-own-words`       |
 | `ketchup`                 | Catch up on everything since your last message, with status lines              | `/oh-my-claudecode:ketchup`                 |
 | `ketchup-video`           | Catch up like `ketchup`, as a short subtitled video of slides                  | `/oh-my-claudecode:ketchup-video`           |
@@ -1041,7 +1041,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `research`                | Investigate an open question and return grounded findings                       | `/oh-my-claudecode:research`               |
 | `self-improve`            | Autonomous evolutionary code improvement engine                                | `/oh-my-claudecode:self-improve`           |
 | `session-flow`            | Reorient in the current session with an evidence-backed map of its flow        | `/oh-my-claudecode:session-flow`           |
-| `sharpen`                 | Aim a task at its real objective: consumer, done-check, non-goals              | `/oh-my-claudecode:sharpen`                 |
+| `sharpen`                 | Aim a task at its real objective: consumer, expert lens, done-check, non-goals | `/oh-my-claudecode:sharpen`                 |
 | `stacked-delivery`         | Deliver a queue as one linear stacked PR chain, bottom-up landing              | `/oh-my-claudecode:stacked-delivery`        |
 | `/oh-my-claudecode:stacked-delivery <queue>`             | Deliver a queue as one stacked PR chain, bottom-up                                             |
 | `show-me-your-work`       | Append-only TSV decision trail for auditable autonomous work                   | `/oh-my-claudecode:show-me-your-work`       |
@@ -1128,7 +1128,7 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:ralph <task>`                         | Persistence loop until task completion (`--critic=architect \| critic \| codex`)             |
 | `/oh-my-claudecode:ralplan <description>`                | Iterative planning with consensus structured deliberation                                     |
 | `/oh-my-claudecode:recall`                               | Reconstruct working context from artifacts in trust order                                     |
-| `/oh-my-claudecode:sharpen <brief>`                      | Aim a task at its real objective: consumer, done-check, non-goals                             |
+| `/oh-my-claudecode:sharpen <brief>`                      | Aim a task at its real objective: consumer, expert lens, done-check, non-goals                |
 | `/oh-my-claudecode:show-me-your-work`                    | Start (or read) the append-only decision trail                                                |
 | `/oh-my-claudecode:release`                              | Automated release workflow                                                                    |
 | `/oh-my-claudecode:refit [--scope <area>] [--last <N sessions>]` | Retrospect on OMC instrumentation and propose user-approved environment fixes            |

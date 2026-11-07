@@ -62,5 +62,10 @@ into proposed edits to OMC's own skills — before the lessons evaporate.
 - Reviewers cite the transcript; a finding without a citation is dropped.
 - The panel never edits skills itself — proposals go to the user and then
   to `skillify` for execution.
+- Never edit a skill inside the installed plugin cache. Before the user
+  approves an edit, show its destination — the repo's `skills/<name>/` for
+  a shipped skill, or the user's `.claude/skills/<name>/` copy — and after
+  approval edit that destination in place. Reflection never opens a PR or
+  pushes.
 - Findings about the user's own choices are reported as observations, not
   corrections.
