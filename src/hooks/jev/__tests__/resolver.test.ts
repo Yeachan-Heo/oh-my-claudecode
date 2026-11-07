@@ -287,7 +287,7 @@ describe('resolveJudgment', () => {
     };
     const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
     await resolveJudgment({
-      point: 'model-routing',
+      point: 'intent',
       state: { prompt: 'a'.repeat(500) },
       questions,
       twin: () => 'haiku',

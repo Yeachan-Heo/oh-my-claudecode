@@ -24,7 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
-import { pointExcerptChars } from './jev-resolve.mjs';
+import { resolveExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -641,11 +641,11 @@ function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
 }
 
 const MODEL_ROUTING_METADATA_MAX_CHARS = 500;
-// How much of the task and the description the hook passes on. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING
-// raises it; the resolver then bounds the state to the same limit. Unset: 500 here and
-// OMC_JEV_EXCERPT_CHARS (default 200) in the resolver, as before. The fields that decide
-// the routing (subagent_type, model, effort, resume) always keep the fixed limit.
-const MODEL_ROUTING_TEXT_MAX_CHARS = pointExcerptChars('model-routing') ?? MODEL_ROUTING_METADATA_MAX_CHARS;
+// How much of the task and the description the hook passes on: the model-routing excerpt
+// limit (12000 by default, OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING to change it), the same
+// limit the resolver then applies to the state. The fields that decide the routing
+// (subagent_type, model, effort, resume) always keep the fixed limit.
+const MODEL_ROUTING_TEXT_MAX_CHARS = resolveExcerptChars('model-routing');
 
 // OMC_JEV_MODEL_ROUTING_CONTEXT=1 adds two fields to the model-routing state: the call's
 // `description` and the last real user message of the parent session, read from the tail

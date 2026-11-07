@@ -60,11 +60,24 @@ export function pointExcerptChars(point, env = process.env) {
   return positiveInt(env[name], undefined);
 }
 
-/** Excerpt limit for one point: its own variable, else OMC_JEV_EXCERPT_CHARS, else 200. */
+/**
+ * Points whose state needs more than the global default to be judged at all.
+ * model-routing judges the work behind the task, which 200 characters hide.
+ * Mirror of POINT_DEFAULT_EXCERPT_CHARS in config.ts.
+ */
+const POINT_DEFAULT_EXCERPT_CHARS = { "model-routing": 12000 };
+
+/**
+ * Excerpt limit for one point: its own variable, else the point's default
+ * (model-routing only), else OMC_JEV_EXCERPT_CHARS, else 200. The global
+ * variable does not apply to a point with its own default.
+ */
 export function resolveExcerptChars(point, env = process.env) {
   return (
     pointExcerptChars(point, env) ??
-    positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS)
+    (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point)
+      ? POINT_DEFAULT_EXCERPT_CHARS[point]
+      : positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS))
   );
 }
 

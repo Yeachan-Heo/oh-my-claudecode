@@ -11,7 +11,9 @@
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
  * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
- *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING)
+ *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
+ *   model-routing defaults to 12000 and ignores OMC_JEV_EXCERPT_CHARS; set its
+ *   own variable to change it.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
@@ -108,9 +110,25 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
   };
 }
 
-/** Excerpt limit for one point: its own variable, else OMC_JEV_EXCERPT_CHARS. */
+/**
+ * Points whose state needs more than the global default to be judged at all.
+ * model-routing judges the work behind the task, which 200 characters hide.
+ * Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs.
+ */
+export const POINT_DEFAULT_EXCERPT_CHARS: Readonly<Record<string, number>> = { 'model-routing': 12000 };
+
+/**
+ * Excerpt limit for one point: its own variable, else the point's default
+ * (model-routing only), else OMC_JEV_EXCERPT_CHARS. The global variable does
+ * not apply to a point with its own default.
+ */
 export function excerptCharsFor(point: string, config: JevConfig): number {
-  return config.pointExcerptChars[point.toUpperCase().replace(/-/g, '_')] ?? config.excerptChars;
+  return (
+    config.pointExcerptChars[point.toUpperCase().replace(/-/g, '_')] ??
+    (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point)
+      ? POINT_DEFAULT_EXCERPT_CHARS[point]
+      : config.excerptChars)
+  );
 }
 
 /** Master gate: is Jev enabled at all, independent of per-point state? */

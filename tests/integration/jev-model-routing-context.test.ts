@@ -146,10 +146,10 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
     ...extra,
   });
 
-  it("sends the subagent type and the task only, bounded to 200 characters, by default", async () => {
-    const state = await sentState(agentInput("t".repeat(3000)));
+  it("sends the subagent type and the task only, up to 12000 characters of it, by default", async () => {
+    const state = await sentState(agentInput("t".repeat(13000)));
     expect(Object.keys(state).sort()).toEqual(["subagent_type", "task", "tool_name"]);
-    expect(state.task).toBe("t".repeat(200));
+    expect(state.task).toBe("t".repeat(12000));
   }, 15000);
 
   it("OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING raises the task limit", async () => {
@@ -165,10 +165,9 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
     expect(state.task).toBe("t".repeat(80));
   }, 15000);
 
-  it("keeps the old limit when only OMC_JEV_EXCERPT_CHARS is set", async () => {
-    // The hook passes at most 500 characters on; the resolver then applies OMC_JEV_EXCERPT_CHARS.
+  it("ignores the global OMC_JEV_EXCERPT_CHARS, which does not apply to model-routing", async () => {
     const state = await sentState(agentInput("t".repeat(3000)), { OMC_JEV_EXCERPT_CHARS: "1000" });
-    expect(state.task).toBe("t".repeat(500));
+    expect(state.task).toBe("t".repeat(3000));
   }, 15000);
 
   it("adds the description and the last user message of the parent session when enabled", async () => {
