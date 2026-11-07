@@ -2,8 +2,10 @@ import { Buffer } from "node:buffer";
 import { type ChildProcess, execFile, type ExecFileException, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
 import { boundRun, chartRun, configText } from "./backends/cfg.ts";
 import { plainText } from "./backends/plain-text.ts";
@@ -183,6 +185,42 @@ type FileResult = {
   error: Error | undefined;
 };
 
+// A ".ts" java target (the test shim) needs this process's own loader flags:
+// on a node without type stripping the shebang alone cannot load it, so the
+// spawn goes through node with the runtime flags that booted this CLI — with
+// any bare "tsx" import replaced by the absolute loader path, because the
+// shim's working directory is a temp folder that cannot resolve package
+// names.
+const tsxLoaderUrl = (() => {
+  try {
+    return pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+  } catch {
+    return undefined;
+  }
+})();
+
+const shimRuntimeArgs = () => {
+  const args = process.execArgv.filter((a) => a !== "--test");
+  if (!tsxLoaderUrl) return args;
+  const bare = args.indexOf("tsx");
+  if (bare >= 0) {
+    args[bare] = tsxLoaderUrl;
+    return args;
+  }
+  if (!args.includes(tsxLoaderUrl) && process.features.typescript === undefined)
+    return [...args, "--import", tsxLoaderUrl];
+  return args;
+};
+
+const javaSpawn = (
+  java: string,
+  args: string[],
+  options: { out: string; cwd: string; env: NodeJS.ProcessEnv },
+) => {
+  if (!java.endsWith(".ts")) return runToFiles(java, args, options);
+  return runToFiles(process.execPath, [...shimRuntimeArgs(), java, ...args], options);
+};
+
 const runToFiles = (
   file: string,
   args: string[],
@@ -217,14 +255,7 @@ const runToFiles = (
 
 async function findTlc(cwd: string) {
   const { TLA2TOOLS, JAVA } = process.env;
-  if (TLA2TOOLS) {
-    // Every child later runs with cwd set to a fresh temp directory, so
-    // canonicalize path-valued overrides against the invocation directory
-    // now — a relative jar or java path would otherwise resolve under the
-    // temp dir. Bare commands such as "java" stay on PATH untouched.
-    const java = JAVA ? (/[\\/]/.test(JAVA) ? path.resolve(JAVA) : JAVA) : "java";
-    return { jar: path.resolve(TLA2TOOLS), java };
-  }
+  if (TLA2TOOLS) return { jar: TLA2TOOLS, java: JAVA || "java" };
   const mise = (...args: string[]) =>
     runChild("mise", args, { cwd, env: { ...process.env, MISE_CEILING_PATHS: cwd } });
   const where = () =>
@@ -313,7 +344,7 @@ export async function check(specFile: string, configFile: string): Promise<Check
     const runJava = (name: string, main: string, args: string[], jvm: string[] = []) => {
       const tmp = path.join(dir, `tmp-${name}`);
       fs.mkdirSync(tmp);
-      return runToFiles(
+      return javaSpawn(
         tlc.java,
         [
           `-Djava.io.tmpdir=${tmp}`,
@@ -513,7 +544,7 @@ export async function check(specFile: string, configFile: string): Promise<Check
     try {
       fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     } catch (e) {
-      console.warn(`[statechart] cleanup left ${dir}: ${(e as Error).message}`);
+      console.log(`[statechart] cleanup left ${dir}: ${(e as Error).message}`);
     }
   }
 }

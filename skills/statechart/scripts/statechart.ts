@@ -185,7 +185,7 @@ try {
       try {
         fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
       } catch (e) {
-        console.warn(`[statechart] cleanup left ${dir}: ${(e as Error).message}`);
+        console.log(`[statechart] cleanup left ${dir}: ${(e as Error).message}`);
       }
     }
     if (janitor) {
