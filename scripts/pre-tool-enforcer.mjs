@@ -24,6 +24,7 @@ import { resolveConfiguredAgentModel } from './lib/agent-model-config.mjs';
 import { BOUNDED_GIT_TIMEOUT_MS } from './lib/bounded-git-timeout.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { isJevShadowOptedIn, recordJevShadow } from './lib/jev-shadow.mjs';
+import { pointExcerptChars } from './jev-resolve.mjs';
 
 // Inlined from src/config/models.ts — avoids a dist/ import so the hook works
 // before a build and stays consistent with the TypeScript source.
@@ -633,7 +634,58 @@ function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
   });
 }
 
-const MODEL_ROUTING_METADATA_MAX_CHARS = 500;
+// How much of each Task/Agent field the hook passes on. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING
+// raises it; the resolver then bounds the state to the same limit. Unset: 500 here and
+// OMC_JEV_EXCERPT_CHARS (default 200) in the resolver, as before.
+const MODEL_ROUTING_METADATA_MAX_CHARS = pointExcerptChars('model-routing') ?? 500;
+
+// OMC_JEV_MODEL_ROUTING_CONTEXT=1 adds two fields to the model-routing state: the call's
+// `description` and the last real user message of the parent session, read from the tail
+// of its transcript. Off by default: the state is then the subagent type and the task only.
+function isModelRoutingContextEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_CONTEXT ?? '').trim().toLowerCase());
+}
+
+const PARENT_MESSAGE_MAX_CHARS = 4000;
+const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
+// User-type transcript entries that are system messages, not the user's own words.
+const PARENT_MESSAGE_SKIP_PREFIXES = [
+  '<task-notification>', '<teammate-message', '<command-name>', '<command-message>',
+  '<local-command-stdout>', '<local-command-stderr>',
+];
+
+function readParentLastUserMessage(transcriptPath) {
+  if (!transcriptPath) return undefined;
+  let fd;
+  try {
+    fd = openSync(transcriptPath, 'r');
+    const size = fstatSync(fd).size;
+    const length = Math.min(size, TRANSCRIPT_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      let entry;
+      try { entry = JSON.parse(lines[i]); } catch { continue; }
+      if (entry?.type !== 'user' || entry.isMeta || entry.isCompactSummary) continue;
+      const content = entry.message?.content;
+      if (Array.isArray(content) && content.some((block) => block?.type === 'tool_result')) continue;
+      const text = (typeof content === 'string' ? content : Array.isArray(content)
+        ? content.filter((block) => block?.type === 'text' && typeof block.text === 'string').map((block) => block.text).join('\n')
+        : '').replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, '').trim();
+      if (text && !PARENT_MESSAGE_SKIP_PREFIXES.some((prefix) => text.startsWith(prefix))) {
+        return text.slice(0, PARENT_MESSAGE_MAX_CHARS);
+      }
+    }
+  } catch {
+    // Missing or unreadable transcript: the field is omitted.
+  } finally {
+    if (fd !== undefined) {
+      try { closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+  return undefined;
+}
 
 function boundModelRoutingInput(toolInput) {
   const bounded = {};
@@ -648,7 +700,7 @@ function boundModelRoutingInput(toolInput) {
   return bounded;
 }
 
-function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode) {
+function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permissionMode, transcriptPath, directory) {
   if (!isJevShadowOptedIn('model-routing', process.env, permissionMode)) return;
 
   const originalInput = boundModelRoutingInput(toolInput);
@@ -658,13 +710,23 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
   
   const heuristic = model;
-  
+
+  let context = {};
+  if (isModelRoutingContextEnabled()) {
+    const parentMessage = readParentLastUserMessage(resolveTranscriptPath(transcriptPath, directory));
+    context = {
+      description: originalInput.description || '',
+      ...(parentMessage ? { parent_last_user_message: parentMessage } : {}),
+    };
+  }
+
   const jevResult = recordJevShadow({
     point: 'model-routing',
     state: {
       tool_name: toolName,
       subagent_type: originalInput.subagent_type || '',
       task: originalInput.prompt || '',
+      ...context,
     },
     questions: MODEL_ROUTING_QUESTIONS,
     heuristic,
@@ -2071,7 +2133,7 @@ async function main() {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const toolInput = data.toolInput || data.tool_input || {};
-      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode);
+      const jevUpdated = recordModelRoutingShadow(toolName, toolInput, updatedToolInput, data.permission_mode, data.transcript_path || data.transcriptPath || '', directory);
       // In active mode, Jev may override the model choice
       if (jevUpdated) updatedToolInput = jevUpdated;
     }

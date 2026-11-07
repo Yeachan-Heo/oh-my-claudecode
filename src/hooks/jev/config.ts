@@ -10,6 +10,8 @@
  *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
+ * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
+ *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING)
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
@@ -55,6 +57,8 @@ export interface JevConfig {
   /** 0 = unlimited. */
   maxRequests: number;
   excerptChars: number;
+  /** OMC_JEV_EXCERPT_CHARS_<POINT> overrides, keyed by the upper-cased variable suffix. */
+  pointExcerptChars: Readonly<Record<string, number>>;
   endpoint: string;
   logDir: string;
 }
@@ -82,6 +86,12 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
       }
     }
   }
+  const pointExcerptChars: Record<string, number> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const match = /^OMC_JEV_EXCERPT_CHARS_([A-Z0-9_]+)$/.exec(key);
+    const parsed = match ? positiveInt(value, 0) : 0;
+    if (match && parsed > 0) pointExcerptChars[match[1]] = parsed;
+  }
   return {
     apiKey: env.TYPESAFE_API_KEY || null,
     masterOff,
@@ -92,9 +102,15 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
+    pointExcerptChars,
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env.OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev'),
   };
+}
+
+/** Excerpt limit for one point: its own variable, else OMC_JEV_EXCERPT_CHARS. */
+export function excerptCharsFor(point: string, config: JevConfig): number {
+  return config.pointExcerptChars[point.toUpperCase().replace(/-/g, '_')] ?? config.excerptChars;
 }
 
 /** Master gate: is Jev enabled at all, independent of per-point state? */

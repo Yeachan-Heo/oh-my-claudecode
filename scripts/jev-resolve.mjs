@@ -50,6 +50,25 @@ function positiveInt(raw, fallback, max = Number.MAX_SAFE_INTEGER) {
 }
 
 /**
+ * Per-point excerpt limit: OMC_JEV_EXCERPT_CHARS_<POINT>, with the point name
+ * upper-cased and dashes turned into underscores (model-routing reads
+ * OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING). Undefined when that variable is unset
+ * or not a canonical positive integer. Mirror of excerptCharsFor in config.ts.
+ */
+export function pointExcerptChars(point, env = process.env) {
+  const name = "OMC_JEV_EXCERPT_CHARS_" + String(point).toUpperCase().replace(/-/g, "_");
+  return positiveInt(env[name], undefined);
+}
+
+/** Excerpt limit for one point: its own variable, else OMC_JEV_EXCERPT_CHARS, else 200. */
+export function resolveExcerptChars(point, env = process.env) {
+  return (
+    pointExcerptChars(point, env) ??
+    positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS)
+  );
+}
+
+/**
  * Resolve the script-side Jev timeout using the same strict contract for the
  * HTTP resolver and its synchronous active-mode parent process.
  */
@@ -230,10 +249,7 @@ export async function resolveRequest(
   // written by the hook scripts and go out whole: bounding them would cut the
   // longer criteria and instructions (the model-routing effort question).
   const bound = {
-    state: boundExcerpts(
-      request.state,
-      positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
-    ),
+    state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
     questions: request.questions,
   };
   const controller = new AbortController();

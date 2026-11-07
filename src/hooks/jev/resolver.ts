@@ -16,7 +16,7 @@
 import { appendFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { queryJev } from './client.js';
-import { ACTIVATED_POINTS, boundExcerpts, parseJevConfig, pointState } from './config.js';
+import { ACTIVATED_POINTS, boundExcerpts, excerptCharsFor, parseJevConfig, pointState } from './config.js';
 import type { JevAnswer, JevQuestions, JevResponse, JevUsage, ResolveMode, ResolveResult } from './types.js';
 
 const CIRCUIT_FAILURE_THRESHOLD = 3;
@@ -207,7 +207,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
   }
 
   // Only the state carries user text; question definitions are static and go out whole.
-  const boundedState = boundExcerpts(args.state, config.excerptChars);
+  const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
 
   const attempt = (async () => {

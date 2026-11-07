@@ -584,10 +584,12 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
 | `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. |
+| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING`. Wins over `OMC_JEV_EXCERPT_CHARS` for that point; an invalid value is ignored. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -730,6 +732,15 @@ This needs a Claude Code version whose Agent/Task tool schema has an `effort` fi
 - Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included.
 
 Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With `OMC_JEV_MAX_EFFORT=max` and the effort score 2.9 the same call runs with `"effort": "xhigh"`, and with the score 3.7 with `"effort": "max"`.
+
+### Model routing: what Jev sees
+
+By default the `model-routing` state is `tool_name`, `subagent_type` and the first 200 characters of the task (`OMC_JEV_EXCERPT_CHARS`). The effort question judges the work the delegated agent must do, so a longer view of the task and of the request that led to it can matter:
+
+- `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING=12000` sends up to 12000 characters of the task, and of the extra fields below, without changing the limit of any other point. Without it the hook passes at most 500 characters on, as before.
+- `OMC_JEV_MODEL_ROUTING_CONTEXT=1` adds `description` and `parent_last_user_message` to the state. These fields leave your machine like the task does, so enable them only where sending the task is acceptable. The parent message is cut to 4000 characters by the hook and then to the point limit.
+
+Both are off by default, and nothing changes without them.
 
 ### Context pruning: staleness score
 
