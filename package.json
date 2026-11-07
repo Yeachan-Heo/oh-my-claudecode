@@ -102,6 +102,7 @@
     "commander": "^12.1.0",
     "jsonc-parser": "^3.3.1",
     "safe-regex": "^2.1.1",
+    "tsx": "^4.19.2",
     "vscode-languageserver-protocol": "^3.17.5",
     "zod": "^3.23.8"
   },
@@ -115,6 +116,7 @@
     "concurrently": "^9.2.1",
     "esbuild": "^0.27.2",
     "eslint": "^9.17.0",
+    "fast-check": "^4.5.3",
     "prettier": "^3.4.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",

@@ -1,0 +1,3 @@
+---- MODULE ShadowSub ----
+CONSTANT c
+====

@@ -16,7 +16,7 @@ For v5.3.0, the plugin ships 19 agents, 40 skills, 21 command files, and one con
 - [Legacy MCP Team Runtime Tools (Deprecated)](#legacy-mcp-team-runtime-tools-deprecated-opt-in-only)
 - [Agents (19 Total)](#agents-19-total)
 - [Goal Workflow UX: `/goal`, Ralph, Team, Ultragoal](#goal-workflow-ux-goal-ralph-team-ultragoal)
-- [Skills (81 Total)](#skills-81-total)
+- [Skills (83 Total)](#skills-83-total)
 - [Slash Commands](#slash-commands)
 - [Shipyard Methodology](./shipyard.md) — governed delivery & shared harness map
 - [Claude Code `/goal` Adapter Design](#claude-code-goal-adapter-design)
@@ -964,7 +964,7 @@ Autopilot continues to own cancel, resume, cleanup, state inspection, HUD, and S
 
 V1 deliberately defers `stageModels` and all model/provider/role routing, inline/no-spawn execution, dynamic commands/modes/state files, arbitrary stages/prompts/plugins and control-flow extensions, and the separate custom-skill inline-array frontmatter parser mismatch. See [ADR 03487](./adr/03487-named-autopilot-stage-profiles.md) for the decision record.
 
-## Skills (81 Total)
+## Skills (83 Total)
 
 Includes bundled workflow, utility, domain, and compatibility skills. Runtime truth comes from the builtin skill loader scanning `skills/*/SKILL.md` and expanding aliases declared in frontmatter.
 
@@ -1014,6 +1014,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `interrogate`             | Adversarial three-reviewer panel over a diff or design; severity-merged verdict | `/oh-my-claudecode:interrogate`             |
 | `in-your-own-words`       | Play back the goal, problem, and success check before work starts              | `/oh-my-claudecode:in-your-own-words`       |
 | `ketchup`                 | Catch up on everything since your last message, with status lines              | `/oh-my-claudecode:ketchup`                 |
+| `ketchup-video`           | Catch up like `ketchup`, as a short subtitled video of slides                  | `/oh-my-claudecode:ketchup-video`           |
 | `launch`                  | Shipyard governed delivery pipeline: spec, tickets, frontier execution          | `/oh-my-claudecode:launch`                  |
 | `loft`                    | Shipyard shape-before-steel discipline: throwaway artifacts answer design questions | `/oh-my-claudecode:loft`              |
 | `map`                     | The yard's skill map: which skill owns which job, in delivery-loop order; routes, never executes | `/oh-my-claudecode:map`                  |
@@ -1046,6 +1047,7 @@ Marketplace/plugin installs compact the native plugin `skills/*/SKILL.md` files 
 | `show-me-your-work`       | Append-only TSV decision trail for auditable autonomous work                   | `/oh-my-claudecode:show-me-your-work`       |
 | `skill`                   | Manage local skills (list/add/remove/search/edit)                              | `/oh-my-claudecode:skill`                   |
 | `skillify`                | Extract a reusable skill from the current session                              | `/oh-my-claudecode:skillify`                |
+| `statechart`              | Check a TLA+ model as a Mermaid statechart; shortest path to each broken rule  | `/oh-my-claudecode:statechart`              |
 | `team`                    | Coordinated multi-agent workflow                                               | `/oh-my-claudecode:team`                    |
 | `teach`                   | Explain a subsystem by composing how and why, with a landing check             | `/oh-my-claudecode:teach`                   |
 | `technical-writing`       | Layered prose standard for docs, RFCs, PR descriptions, commit messages        | `/oh-my-claudecode:technical-writing`       |
@@ -1108,6 +1110,8 @@ Most installed skills are exposed as `/oh-my-claudecode:<registered-name>`. The 
 | `/oh-my-claudecode:interrogate [path]`                   | Adversarial three-reviewer panel over a diff or design                                        |
 | `/oh-my-claudecode:in-your-own-words`                     | Play back the goal, problem, and success check before starting                                |
 | `/oh-my-claudecode:ketchup`                               | Catch up on everything since your last message                                                |
+| `/oh-my-claudecode:ketchup-video`                         | Catch up as a short subtitled video of slides                                                 |
+| `/oh-my-claudecode:statechart <spec.tla>`                 | Check a TLA+ model and draw the statechart with bug paths                                     |
 | `/oh-my-claudecode:how <subsystem>`                       | Two-pass subsystem walkthrough with file:line citations                                       |
 | `/oh-my-claudecode:loft <design-question>`               | Loft the shape before cutting steel: a throwaway artifact answers a design question prose cannot settle |
 | `/oh-my-claudecode:minimal-code-discipline`              | Apply the YAGNI-ladder writing-time discipline while implementing                              |

@@ -43,10 +43,7 @@ transcripts — not from a questionnaire.
 3. **Confirm with the user** — every line of a personal mode is a standing
    call the user is making about their own agents; nothing lands unconfirmed.
 4. **Write** the confirmed profile to a separate user skills entry,
-   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/omc-learned/personal-mode-profile/SKILL.md`
-   — the `omc-learned` root is what the `skill` command scans, so the profile
-   stays discoverable; say the path in the report and tell the user the
-   profile is edited by opening that file.
+   `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/personal-mode-profile/SKILL.md`.
    Keep this generated profile separate from the bundled `personal-mode`
    workflow so the generator remains discoverable and editable. A user skill
    is opt-in context; it is not a global instruction applied to every task.
@@ -54,8 +51,7 @@ transcripts — not from a questionnaire.
    that restates platitudes is dead weight
    (`minimal-prose-discipline` applies).
 5. **Report** what was captured, what was hypothesized but unconfirmed,
-   and how to edit it later: open the profile file directly, or manage it
-   through the `skill` command (which scans `omc-learned`).
+   and how to edit it later (`skill` command).
 
 ## Rules
 

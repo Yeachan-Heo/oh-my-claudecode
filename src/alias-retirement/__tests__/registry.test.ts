@@ -97,11 +97,13 @@ describe('alias-retirement registry', () => {
     // Raised 77 -> 81 canonical when hillclimb/reflect/personal-mode/
     // stacked-delivery shipped as real skill directories; this is an
     // addition, not an alias retirement.
+    // Raised 81 -> 83 canonical when statechart/ketchup-video shipped as
+    // real skill directories; this is an addition, not an alias retirement.
     const all = createBuiltinSkills();
-    expect(all).toHaveLength(83);
+    expect(all).toHaveLength(85);
     const canonical = all.filter((s) => !s.aliasOf);
     const aliases = all.filter((s) => !!s.aliasOf);
-    expect(canonical).toHaveLength(81);
+    expect(canonical).toHaveLength(83);
     expect(aliases).toHaveLength(2);
     expect(aliases.map((s) => s.name).sort()).toEqual(['cancel-ralph', 'psm'].sort());
   });

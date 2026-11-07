@@ -1,0 +1,40 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+6134424968883234724 [label="main = \"Signed out\"",style = filled]
+6134424968883234724 -> 1793712430360637780 [label="YouSubmitAPassword",color="black",fontcolor="black"];
+1793712430360637780 [label="main = \"Trying to sign in.Checking first try\""];
+1793712430360637780 -> -6255590060745246808 [label="ThePasswordIsRight",color="black",fontcolor="black"];
+-6255590060745246808 [label="main = \"Signed in\""];
+1793712430360637780 -> -1117450842235050042 [label="ThePasswordIsWrong",color="black",fontcolor="black"];
+-1117450842235050042 [label="main = \"Trying to sign in.Wrong password, 2 tries left\""];
+1793712430360637780 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-4221182032741592594 [label="main = \"Reset email sent\""];
+-6255590060745246808 -> 6134424968883234724 [label="YouSignOut",color="black",fontcolor="black"];
+-1117450842235050042 -> 2109940746944825604 [label="YouSubmitAPassword",color="black",fontcolor="black"];
+2109940746944825604 [label="main = \"Trying to sign in.Checking second try\""];
+-1117450842235050042 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-4221182032741592594 -> 6134424968883234724 [label="YouSetANewPassword",color="black",fontcolor="black"];
+2109940746944825604 -> -6255590060745246808 [label="ThePasswordIsRight",color="black",fontcolor="black"];
+2109940746944825604 -> -6523651931018580292 [label="ThePasswordIsWrong",color="black",fontcolor="black"];
+-6523651931018580292 [label="main = \"Trying to sign in.Wrong password, 1 try left\""];
+2109940746944825604 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-6523651931018580292 -> -1319198507712391249 [label="YouSubmitAPassword",color="black",fontcolor="black"];
+-1319198507712391249 [label="main = \"Trying to sign in.Checking last try\""];
+-6523651931018580292 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-1319198507712391249 -> -6255590060745246808 [label="ThePasswordIsRight",color="black",fontcolor="black"];
+-1319198507712391249 -> -3088981858554872420 [label="ThePasswordIsWrong",color="black",fontcolor="black"];
+-3088981858554872420 [label="main = \"Locked out\""];
+-1319198507712391249 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-3088981858554872420 -> -4221182032741592594 [label="YouTapForgotPassword",color="black",fontcolor="black"];
+-3088981858554872420 -> 6134424968883234724 [label="S15MinutesPass",color="black",fontcolor="black"];
+{rank = same; 6134424968883234724;}
+{rank = same; 1793712430360637780;}
+{rank = same; -4221182032741592594;-1117450842235050042;-6255590060745246808;}
+{rank = same; 2109940746944825604;}
+{rank = same; -6523651931018580292;}
+{rank = same; -1319198507712391249;}
+{rank = same; -3088981858554872420;}
+}
+}

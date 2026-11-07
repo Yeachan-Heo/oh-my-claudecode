@@ -1,7 +1,7 @@
 # Explainer Prompt
 
 Template for the explainer that synthesizes explorer findings into the
-walkthrough. Adapted from pstack's explainer prompt — MIT, (c) 2026 Lauren Tan, https://github.com/cursor/plugins/tree/main/pstack, ported via michael-denyer/pstack-claude (see docs/CREDITS.md).
+walkthrough. Adapted from pstack's explainer prompt (see docs/CREDITS.md).
 
 You are writing an architectural explanation for a senior engineer.
 Multiple explorer agents have traced different slices in parallel.

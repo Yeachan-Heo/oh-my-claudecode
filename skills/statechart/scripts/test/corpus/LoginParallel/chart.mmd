@@ -1,0 +1,44 @@
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: Breaks SignedInWhileLocked in some cases
+    lg1: Path to the SignedInWhileLocked bug
+  }
+  class lg0 mayBreak
+  class lg1 bugPath
+  state "At the same time" as all {
+    state "Session" as r0 {
+      s0: Signed out
+      s1: Checking the password
+      s2: Signed in
+      [*] --> s0
+      s0 --> s1: YouSubmitAPassword
+      s1 --> s0: ThePasswordIsWrong
+      s1 --> s2: ThePasswordIsRight
+      s2 --> s0: YouSignOut
+    }
+    --
+    state "Tries" as r1 {
+      s3: No wrong tries
+      s4: 1 wrong try
+      s5: 2 wrong tries
+      s6: Locked out
+      [*] --> s3
+      s3 --> s4: ThePasswordIsWrong
+      s4 --> s3: ThePasswordIsRight
+      s4 --> s5: ThePasswordIsWrong
+      s5 --> s3: ThePasswordIsRight
+      s5 --> s6: ThePasswordIsWrong
+      s6 --> s3: S15MinutesPass
+    }
+  }
+  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
+  class s0 bugPath
+  class s1 bugPath
+  class s2 mayBreak
+  class s2 bugPath
+  class s3 bugPath
+  class s4 bugPath
+  class s5 bugPath
+  class s6 mayBreak
+  class s6 bugPath

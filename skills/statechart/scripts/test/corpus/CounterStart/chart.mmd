@@ -1,0 +1,18 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks TypeOK
+    lg1: Path to the TypeOK bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: 0
+  s1: 7
+  s2: 1
+  s3: 2
+  [*] --> s0
+  [*] --> s1
+  s0 --> s2: Inc
+  s2 --> s3: Inc
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s1 breaks
+  class s1 bugPath

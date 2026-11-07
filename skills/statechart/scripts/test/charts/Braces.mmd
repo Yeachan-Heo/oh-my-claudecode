@@ -1,0 +1,7 @@
+stateDiagram-v2
+  s0: pc={#quot;1#quot;#58;#quot;idle#quot;,#quot;2#quot;#58;#quot;wait#quot;} q=[] p=a\b e={}
+  s1: pc={#quot;1#quot;#58;#quot;busy#quot;,#quot;2#quot;#58;#quot;wait#quot;} q=[1,2] p={x} e={#quot;k#quot;#58;[1]} (breaks NoBusy)
+  [*] --> s0
+  s0 --> s1: Take
+  s1 --> s0: Give
+  class s1 breaks
