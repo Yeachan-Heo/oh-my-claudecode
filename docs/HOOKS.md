@@ -590,6 +590,7 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
 | `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels. See [Model routing: subagent effort](#model-routing-subagent-effort). |
 | `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
+| `OMC_JEV_MODEL_ROUTING_ALL_AGENTS` | (unset) | Set to `1` or `true` to ask the `model-routing` point about Task/Agent calls that name no model (a `general-purpose` agent without one, `model: "inherit"`) as well. By default Jev is asked only when the call or the agent definition names `haiku`, `sonnet`, or `opus`. Calls that name `fable` or a provider-specific model ID are always left alone. Script hooks only. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -740,7 +741,9 @@ By default the `model-routing` state is `tool_name`, `subagent_type` and the fir
 - `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING=12000` sends up to 12000 characters of the task, and of the extra fields below, without changing the limit of any other point. Without it the hook passes at most 500 characters on, as before.
 - `OMC_JEV_MODEL_ROUTING_CONTEXT=1` adds `description` and `parent_last_user_message` to the state. These fields leave your machine like the task does, so enable them only where sending the task is acceptable. The parent message is cut to 4000 characters by the hook and then to the point limit.
 
-Both are off by default, and nothing changes without them.
+- `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1` asks about calls that name no model too. Without it those calls, which are most calls to `general-purpose` and to any agent definition without a `model:` field, never reach Jev, so Jev can set neither their model nor their effort. With it, in shadow mode the comparison is logged with a null heuristic (there is no twin tier to compare), and in active mode Jev's answers set the model and the effort as usual.
+
+All three are off by default, and nothing changes without them.
 
 ### Context pruning: staleness score
 

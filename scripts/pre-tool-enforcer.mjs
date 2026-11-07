@@ -646,6 +646,19 @@ function isModelRoutingContextEnabled(env = process.env) {
   return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_CONTEXT ?? '').trim().toLowerCase());
 }
 
+// By default Jev is asked only when the call or the agent definition names haiku, sonnet or
+// opus. OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1 also asks for calls with no model (a
+// general-purpose agent without one, an agent definition that inherits): Jev's answer then
+// sets the model and the effort as usual. A call that names fable or a provider-specific
+// model ID is a deliberate choice and is still left alone.
+function isUnpinnedModel(model) {
+  return !model || String(model).trim().toLowerCase() === 'inherit';
+}
+
+function isModelRoutingAllAgentsEnabled(env = process.env) {
+  return ['1', 'true'].includes(String(env.OMC_JEV_MODEL_ROUTING_ALL_AGENTS ?? '').trim().toLowerCase());
+}
+
 const PARENT_MESSAGE_MAX_CHARS = 4000;
 const TRANSCRIPT_TAIL_BYTES = 4 * 1024 * 1024;
 // User-type transcript entries that are system messages, not the user's own words.
@@ -707,9 +720,11 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
   const modifiedInput = boundModelRoutingInput(updatedToolInput || toolInput);
   const selectedModel = modifiedInput.model || readAgentDefinitionModel(originalInput.subagent_type);
   const model = isTierAlias(selectedModel) ? selectedModel.toLowerCase() : normalizeToCcAlias(selectedModel);
-  if (!['haiku', 'sonnet', 'opus'].includes(model)) return;
-  
-  const heuristic = model;
+  const knownTier = ['haiku', 'sonnet', 'opus'].includes(model);
+  if (!knownTier && !(isModelRoutingAllAgentsEnabled() && isUnpinnedModel(selectedModel))) return;
+
+  // No twin tier for a call without a known model: nothing comparable to log.
+  const heuristic = knownTier ? model : null;
 
   let context = {};
   if (isModelRoutingContextEnabled()) {
