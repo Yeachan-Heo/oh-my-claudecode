@@ -199,15 +199,18 @@ const tsxLoaderUrl = (() => {
   }
 })();
 
-const shimRuntimeArgs = () => {
-  const args = process.execArgv.filter((a) => a !== "--test");
+export const shimRuntimeArgs = (
+  execArgv: string[] = process.execArgv,
+  features: { typescript?: unknown } = process.features,
+) => {
+  const args = execArgv.filter((a) => a !== "--test");
   if (!tsxLoaderUrl) return args;
   const bare = args.indexOf("tsx");
   if (bare >= 0) {
     args[bare] = tsxLoaderUrl;
     return args;
   }
-  if (!args.includes(tsxLoaderUrl) && process.features.typescript === undefined)
+  if (!args.includes(tsxLoaderUrl) && features.typescript === undefined)
     return [...args, "--import", tsxLoaderUrl];
   return args;
 };
