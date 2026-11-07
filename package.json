@@ -118,7 +118,6 @@
     "eslint": "^9.17.0",
     "fast-check": "^4.5.3",
     "prettier": "^3.4.2",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "typescript-eslint": "^8.53.0",
     "vitest": "^4.1.11"

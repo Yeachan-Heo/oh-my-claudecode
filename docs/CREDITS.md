@@ -43,7 +43,7 @@ are summarized once per upstream source here rather than file-by-file.
 | `typescript-best-practices` skill | idea | pstack typescript-best-practices | TS syntax grounding for type-system discipline |
 | `teach` skill | idea | pstack teach | how+why composition with a landing check |
 | `bro` skill | idea | pstack bro | plain-language restatement keeping every fact |
-| `sharpen` skill | idea | pstack sharpen | task aiming: consumer, done-check, non-goals |
+| `sharpen` skill | idea | pstack sharpen | task aiming: consumer, done-check, non-goals, expert lens |
 | `in-your-own-words` skill | idea | pstack in-your-own-words | goal/problem/success playback before work starts |
 | `recall` skill | idea | pstack recall | artifact-first context recovery in trust order |
 | `ketchup` skill | idea | pstack ketchup | session catch-up with executive summary and status lines |
@@ -55,7 +55,3 @@ are summarized once per upstream source here rather than file-by-file.
 | `src/features/watch-pr/policy.ts` | mechanism | pstack watch-pr | gate ordering, mergeability-unknown wait, no-checks confirmation window; pure reimplementation |
 | `src/features/verification-ledger/ledger.ts` | mechanism | pstack orch ledger | verdict vocabulary, append-only TSV shape, formula-cell guard |
 | `scripts/check-omc-playbooks.mjs` | mechanism | pstack check-playbooks | extends/anchor validation for project playbook extensions |
-| `hillclimb` skill | idea | pstack hillclimb | single-metric climbing loop with fixed baseline and decision trail |
-| `reflect` skill | idea | pstack reflect | three-reviewer transcript audit feeding skill edits |
-| `personal-mode` skill | idea | pstack automate-me | cross-project user behavior profile drafted from transcript evidence |
-| `stacked-delivery` skill | idea | pstack autopilot-stack | linear stacked-PR delivery with patch-id verdicts and bottom-up landing |

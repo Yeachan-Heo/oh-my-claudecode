@@ -22,16 +22,29 @@ itself should decide.
 
 1. **Name the consumer**: who feels the result (an end user, a teammate, a
    future reader), and what changes for them, observably.
-2. **Name the done-check**: the cheapest observable that says the task is
+2. **Run the expert lens** — the goal is a deeper task, not a bigger one.
+   Before rewriting the brief, answer four questions and fold the answers
+   in:
+   - what a top professional in this field would do here that the brief
+     does not ask for
+   - the rawest material they would start from, instead of what has
+     already been digested for the session
+   - the specific methods and tools they would use
+   - what, other than the session or the user, would show the result is
+     right — always keep one such outside check
+3. **Name the done-check**: the cheapest observable that says the task is
    done — a command that passes, a page that renders, a question that
    answers.
-3. **Name the non-goals**: what is explicitly out of scope this round.
+4. **Name the non-goals**: what is explicitly out of scope this round.
    Non-goals are the cheapest scope protection there is.
-4. **One question, if a real fork remains**: if two different tasks both
+5. **One question, if a real fork remains**: if two different tasks both
    satisfy the brief and the choice changes the work materially, ask —
    one question, with the options and what each would cost. Otherwise
    proceed and report the interpretation you took (`principles` skill,
    Never block on the human).
+
+The deliverable is the rewritten brief, deeper not bigger, with choices
+that are the user's left open instead of decided.
 
 ## Rules
 

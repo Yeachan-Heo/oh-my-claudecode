@@ -65,19 +65,27 @@ Every candidate gets the same brief, so the brief is the contract.
 Spawn all candidates in one message, in the background, each with the brief,
 its output location, and instructions to return the artifact plus a short
 rationale naming the alternatives it considered and rejected. If a candidate
-produces nothing, proceed with N-1 and note the dropout.
+produces nothing, proceed with N-1 and note the dropout. Keep at least two
+candidates: when dropouts leave fewer, spawn replacements — each on a
+remaining candidate's model, or on the parent's model when none remain —
+until two produce artifacts, and say so.
 
 ## Phase C — Cross-judge
 
-After all candidates finish, spawn one read-only judge on a different model —
-or a different provider family — from the candidates. The judge sees the
-rubric and the candidates by path label, scores each criterion, and
-recommends a base with rationale. It runs while you read.
+After all candidates finish, spawn one read-only judge on a model from a
+provider family none of the candidates ran on. If that dispatch is rejected,
+fall back down the remaining cross-family models; when no cross-family
+dispatch runs, skip the judge, pick the base alone in Phase D, and say so.
+If you cannot tell which family the candidates ran on, try the models you
+would have picked and name in the verdict that the family check did not run.
+The judge sees the rubric and the candidates by path label, scores each
+criterion, and recommends a base with rationale. It runs while you read.
 
 ## Phase D — Pick
 
 Read every candidate end to end. Score each against the rubric criterion by
-criterion, not on holistic feel, and compare with the cross-judge. Agreement
+criterion, not on holistic feel, and compare with the cross-judge when
+Phase C ran one. Agreement
 on the base confirms the pick; disagreement means one of you is biased or the
 rubric is ambiguous — read both rationales before deciding. Tie-break toward
 the smaller API and the cleaner boundary (`minimal-code-discipline`).
