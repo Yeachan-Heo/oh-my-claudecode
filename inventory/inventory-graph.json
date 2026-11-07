@@ -5,15 +5,15 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "c5b71636ebcd34f27491ad1b0605a0e5d039996f",
-    "sourceSha256": "b933299ac20617c65e3bef7d05e20bd2c9035097134309cbd7687a787a2f96e6",
+    "head": "56bf556f25027d7d0fdddba7b8a9f803eff2d66e",
+    "sourceSha256": "c67c20288482a2efdc6ef44a491fa7c59b5a176f2f430a5a62344f6369442039",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "c5b71636ebcd34f27491ad1b0605a0e5d039996f",
-  "sourceSha256": "b933299ac20617c65e3bef7d05e20bd2c9035097134309cbd7687a787a2f96e6",
+  "head": "56bf556f25027d7d0fdddba7b8a9f803eff2d66e",
+  "sourceSha256": "c67c20288482a2efdc6ef44a491fa7c59b5a176f2f430a5a62344f6369442039",
   "counts": {
     "public": {
       "skills": 83,
@@ -47059,6 +47059,16 @@
         "path": "tests/integration/jev-active-mode-repro.test.ts"
       },
       {
+        "id": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-model-routing-all-agents.test.ts"
+      },
+      {
+        "id": "tests/integration/jev-model-routing-context.test.ts",
+        "kind": "other",
+        "path": "tests/integration/jev-model-routing-context.test.ts"
+      },
+      {
         "id": "tests/integration/jev-model-routing-effort.test.ts",
         "kind": "other",
         "path": "tests/integration/jev-model-routing-effort.test.ts"
@@ -49208,6 +49218,11 @@
       {
         "from": "scripts/pre-tool-enforcer.mjs",
         "to": "external:url",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/pre-tool-enforcer.mjs",
+        "to": "scripts/jev-resolve.mjs",
         "kind": "imports"
       },
       {
@@ -54713,6 +54728,11 @@
       {
         "from": "src/__tests__/jev-resolve-script.test.mjs",
         "to": "scripts/jev-resolve.mjs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/__tests__/jev-resolve-script.test.mjs",
+        "to": "src/hooks/jev/config.ts",
         "kind": "imports"
       },
       {
@@ -89586,6 +89606,86 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-all-agents.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:http",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:http",
+        "kind": "type-imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-context.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/jev-model-routing-effort.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -89623,6 +89723,16 @@
       {
         "from": "tests/integration/jev-model-routing-effort.test.ts",
         "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "src/hooks/jev/client.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/jev-model-routing-effort.test.ts",
+        "to": "src/hooks/jev/points.ts",
         "kind": "imports"
       },
       {
@@ -90547,12 +90657,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8052,
-      "edgeCount": 8652,
-      "importEdgeCount": 7213,
+      "nodeCount": 8054,
+      "edgeCount": 8672,
+      "importEdgeCount": 7231,
       "registerEdgeCount": 104
     }
   },
-  "inventorySha256": "3048cab4cf9afb372aeb4f601903218beb53a3bf1d5780fb7900f665258c1a9f",
-  "manifestSha256": "de143a5ffa4d0e61942585be595935e4ab8151c6d6129968c5ae5241e6144280"
+  "inventorySha256": "42233718e3a692b51157c3b5ec4b88e1cf8e1465e1d077b9b48982ede697ae85",
+  "manifestSha256": "ce0b0ed42d357635dc223d9a43942992ce0c24867546b886e893428964149281"
 }

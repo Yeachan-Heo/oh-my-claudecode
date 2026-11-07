@@ -11,6 +11,7 @@ const ENV_KEYS = [
   'OMC_JEV_TIMEOUT_MS',
   'OMC_JEV_MAX_REQUESTS',
   'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -276,6 +277,26 @@ describe('resolveJudgment', () => {
     const line = JSON.parse(await readLog());
     expect(line.state.prompt).toHaveLength(50);
     expect(line.state.nested.deep).toHaveLength(50);
+  });
+
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const questions = {
+      route: { type: 'choice' as const, instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } },
+    };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
+    await resolveJudgment({
+      point: 'intent',
+      state: { prompt: 'a'.repeat(500) },
+      questions,
+      twin: () => 'haiku',
+      fetchFn,
+    });
+    const body = JSON.parse(calls[0].init?.body as string);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
   });
 
   it('propagates twin errors instead of masking them', async () => {

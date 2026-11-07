@@ -583,11 +583,14 @@ export OMC_JEV="point1,point2:active,all"
 | `OMC_JEV` | (absent) | Per-point opt-in: `point`, `point:active`, `all` (every point, shadow), or `all:active` (every point, active). Comma-separated; unknown point names are ignored. |
 | `OMC_JEV_TIMEOUT_MS` | `2000` | Per-call timeout in milliseconds (single round-trip measured at 465–605 ms; default allows margin). |
 | `OMC_JEV_MAX_REQUESTS` | `0` (unlimited) | Maximum Jev requests per process. When reached, heuristic twins run for remaining calls. |
-| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment payload. |
+| `OMC_JEV_EXCERPT_CHARS` | `200` | Maximum string length sent in state and shadow log. Recursively bounds all strings in the judgment state; question definitions are static text and are sent whole. Does not apply to `model-routing`, which has its own default (next row). |
+| `OMC_JEV_EXCERPT_CHARS_<POINT>` | (unset) | The same limit for one point: the point name upper-cased with dashes as underscores, for example `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING` (the variable name itself must be upper case). Order for a point: its own variable, then the point's default (`model-routing`: `12000`), then `OMC_JEV_EXCERPT_CHARS`. An invalid value is ignored. |
 | `OMC_JEV_ENDPOINT` | `https://api.typesafe.ai/v1/systemone` | Override for stub servers or tests. |
 | `OMC_JEV_LOG_DIR` | `.omc/state/jev` | Shadow-log directory override (test only). |
 | `OMC_JEV_QUIET` | (unset) | Set to `1` to silence the env-activation stderr warning. |
-| `OMC_JEV_MAX_EFFORT` | `high` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping; `xhigh` or `max` opts in to the top effort levels for deep-reasoning tasks. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MAX_EFFORT` | `max` | Cap for the subagent reasoning effort set by the active `model-routing` point: `low`, `medium`, `high`, `xhigh`, or `max`, case-insensitive, surrounding spaces ignored. Other values use the default. A lower cap lowers the mapping: `high` restores the cap of earlier releases. A value that is set but not one of these is reported on stderr (unless `OMC_JEV_QUIET=1`) and the default is used. See [Model routing: subagent effort](#model-routing-subagent-effort). |
+| `OMC_JEV_MODEL_ROUTING_CONTEXT` | (unset) | Set to `1` or `true` to add two fields to the `model-routing` state: the Task/Agent call's `description` and `parent_last_user_message`, the last real user message of the parent session (read from the tail of its transcript; tool results, hook-injected reminders and system notices are skipped). Both are bounded by the point's excerpt limit. Script hooks only; the TypeScript resolver ignores it. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
+| `OMC_JEV_MODEL_ROUTING_ALL_AGENTS` | (unset) | Set to `1` or `true` to ask the `model-routing` point about Task/Agent calls that name no model (a `general-purpose` agent without one, `model: "inherit"`) as well. By default Jev is asked only when the call or the agent definition names `haiku`, `sonnet`, or `opus`. Calls and agent definitions that name any other model (for example `fable`) are left alone. Script hooks only. See [Model routing: what Jev sees](#model-routing-what-jev-sees). |
 | `OMC_JEV_PLAN_MODE` | (unset) | Behavior while Claude Code is in plan mode (`permission_mode: "plan"`): `shadow` runs every opted-in point in shadow, `off` disables every point. Unset or any other value changes nothing. See [Plan mode](#plan-mode). |
 | `OMC_JEV=off` | — | Master switch: disables every point regardless of key or other config. |
 
@@ -682,7 +685,7 @@ Every registered judgment point with its lifecycle hook, decision type, and bloc
 | `intent` | UserPromptSubmit | keyword-detector | Is this an Intent-intake request? | Noul (yes/no) | No | — |
 | `skill-trigger` | UserPromptSubmit | keyword-detector | Which skill should this prompt trigger? | Choice (cancel/ralph/autopilot/…) | No | — |
 | `task-size` | UserPromptSubmit | task-size-detector | Is this small/medium/large? | Choice (small/medium/large) | No | — |
-| `model-routing` | PreToolUse | delegation-enforcer | Which model tier (haiku/sonnet/opus)? + How much reasoning effort? | Choice (haiku/sonnet/opus) + Score (effort 0-3) | No | — |
+| `model-routing` | PreToolUse | delegation-enforcer | Which model tier (haiku/sonnet/opus)? + How much reasoning effort? | Choice (haiku/sonnet/opus) + Score (effort 0-4) | No | — |
 | `slop-warning` | PreToolUse | jev-slop-warning | Does this tool input have advisory language? | Noul (yes/no) | No | — |
 | `context-pruning` | PostToolUse | post-tool-verifier | How stale is this context candidate? | Score (fresh/recent/aging/stale) | No | — |
 | `loop-continuation` | Stop | persistent-mode | Is task complete? + Progress level? | Noul + Score | **Yes** | — |
@@ -703,28 +706,43 @@ The `model-routing` point asks two questions in one request, so choosing the eff
 | Question | Type | Answer |
 |----------|------|--------|
 | `model-tier` | Choice | `haiku`, `sonnet`, or `opus` |
-| `effort` | Score 0-3 | 0 trivial, 1 some thought, 2 careful multi-step reasoning, 3 deep reasoning |
+| `effort` | Score 0-4 | 0 low (mechanical work), 1 medium (a typical change or analysis with clear steps), 2 high (multi-file work that needs its own decisions, a diagnosis, or writing a document), 3 xhigh (in-depth analysis, architecture, a high-stakes review, a hard bug), 4 max (exceptionally hard, rare) |
 
-In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds the effort score onto its legend and maps it onto the `effort` field of the Task/Agent call:
+The question asks about the work the delegated agent must actually do and says that the length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, file locations, report format, words in capitals) do not raise the level. The five criteria map one to one onto `low`, `medium`, `high`, `xhigh`, `max`.
 
-| Score | Legend | Effort |
-|-------|--------|--------|
-| < 0.5 | trivial | `low` |
-| 0.5 to < 1.5 | some thought | `medium` |
-| 1.5 to < 2.5 | careful multi-step reasoning | `high` |
-| 2.5 to 3 | deep reasoning | top bucket: `max` when `OMC_JEV_MAX_EFFORT=max` and the effort answer's `confidence` is at least 0.95, otherwise `xhigh` when the cap is `xhigh` or `max`, otherwise the cap |
+In active mode (`OMC_JEV=model-routing:active`), `pre-tool-enforcer.mjs` rounds the effort score to the nearest level and maps it onto the `effort` field of the Task/Agent call:
 
-Every result is capped by `OMC_JEV_MAX_EFFORT`. A missing `confidence`, or one that is not a number from 0 to 1, counts as below 0.95, so it never selects `max`.
+| Score | Effort |
+|-------|--------|
+| 0 to 0.5 | `low` |
+| above 0.5 and below 1.5 | `medium` |
+| 1.5 to 2.5 | `high` |
+| above 2.5 and below 3.5 | `xhigh` |
+| 3.5 to 4 | `max` |
+
+The ends of the ranges are the exact ties: a score exactly halfway between two levels (0.5, 1.5, 2.5, 3.5) goes to the even level (`low`, `high`, `high`, `max`), so ties do not push the judgment in one direction. There is no confidence threshold and no other adjustment of the score.
+
+Every result is capped by `OMC_JEV_MAX_EFFORT`.
 
 This needs a Claude Code version whose Agent/Task tool schema has an `effort` field (checked on Claude Code 2.1.316).
 
-- Answers are read by question name. An effort answer counts only when its `type` is `score` and its `score` is a number from 0 to 3. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
+- Answers are read by question name. An effort answer counts only when its `type` is `score` and its `score` is a number from 0 to 4. A missing or malformed answer leaves its field as it was: a response without `effort` changes only the model, and one without `model-tier` changes only the effort.
 - As with the model, Jev's effort replaces an explicit `effort` in the call.
-- `OMC_JEV_MAX_EFFORT` defaults to `high`, so by default the top bucket runs at `high`: `xhigh` and `max` can spend several times the tokens of `high` across every delegated call. Set the cap to `xhigh` to let deep-reasoning tasks run at `xhigh`, or to `max` to also allow `max` when Jev is at least 95% confident; a lower cap such as `medium` lowers every bucket above it.
-- When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap, for example `max` becomes `high`. Raise the cap to let explicit `xhigh` or `max` through.
+- `OMC_JEV_MAX_EFFORT` defaults to `max`, so the mapping is not capped. `xhigh` and `max` can spend several times the tokens of `high` on a delegated call, but the calibrated question gives them for a minority of briefs. Set the cap to `high` or lower to hold every delegated call at that level: a lower cap such as `medium` lowers every level above it.
+- When the point is active and Jev returns no usable effort score, an explicit `effort` above the cap is lowered to the cap; with the default cap (`max`) nothing is lowered, and with `OMC_JEV_MAX_EFFORT=high`, for example, `max` becomes `high`.
 - Shadow mode, a degraded call (timeout, HTTP error, invalid response), and plan mode with `OMC_JEV_PLAN_MODE` leave the call exactly as it was, explicit effort included.
 
-Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With `OMC_JEV_MAX_EFFORT=max` and the effort answer `{ "type": "score", "score": 2.9, "confidence": 0.9, ... }` the same call runs with `"effort": "xhigh"`; at `"confidence": 0.97` it runs with `"effort": "max"`.
+Example: `OMC_JEV=model-routing:active` with `OMC_JEV_MAX_EFFORT=medium`. A call `{ "subagent_type": "executor", "model": "haiku", "effort": "max", ... }` and the answers `{ "effort": { "type": "score", "score": 2.3, ... }, "model-tier": { "type": "choice", "choice": "opus", ... } }` run with `"model": "opus", "effort": "medium"`. With the default cap and the effort score 2.9 the same call runs with `"effort": "xhigh"`, and with the score 3.7 with `"effort": "max"`.
+
+### Model routing: what Jev sees and which calls are asked
+
+By default the `model-routing` state is `tool_name`, `subagent_type` and up to 12000 characters of the task. The effort question judges the work the delegated agent must do, and a task cut to 200 characters hides most of it, so this point has its own default limit and ignores the global `OMC_JEV_EXCERPT_CHARS` (which still bounds every other point). To change it, set `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING`; a smaller value sends less of the task and, in the measurement behind the calibrated question, makes its answers too low. The request carries more text than before, and the round trip stayed about the same in a small test (three requests each: 1.5 s at 300 characters, 1.6 s at 12000). Three variables control what is sent and which calls are asked:
+
+- `OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING=<n>` sets the limit for the task and for the extra fields below. The fields that decide the routing (`subagent_type`, `model`, `effort`, `resume`) always keep a fixed 500 characters in the hook.
+- `OMC_JEV_MODEL_ROUTING_CONTEXT=1` adds `description` and `parent_last_user_message` to the state. The message is the user's own last real message in the parent session, a new kind of data next to the task, and it leaves your machine like the task does, so enable it only where that is acceptable. Both fields are also written to the local shadow log (`state`), and the message, before it is cut, to the short-lived request file in the temporary directory. The hook reads it from the tail of the session's own transcript (`<session_id>.jsonl`, a regular file, not a symlink), skips tool results, hook-injected reminders, compact summaries, sidechain entries and task, teammate and command notices, cuts it to 4000 characters and then to the point limit. When no matching transcript is found, only the description is added.
+- `OMC_JEV_MODEL_ROUTING_ALL_AGENTS=1` asks about calls that name no model too: calls to `general-purpose` without a model and calls to an agent whose definition (plugin, project or user) has no `model:` field or says `inherit`. Without it those calls never reach Jev, so Jev can set neither their model nor their effort. A call that names any other model than haiku, sonnet or opus (`fable`, a non-Claude proxy model), or an agent definition that does, is left alone; a provider-specific Claude ID such as `us.anthropic.claude-sonnet-...` counts as its tier and is routed with or without the variable. In shadow mode the comparison is logged with a null heuristic (there is no twin tier to compare); in active mode Jev's answers set the model and the effort as usual. With `forceInherit` a call without a model keeps inheriting the session model unless the provider resolves the tier alias Jev picks (`ANTHROPIC_DEFAULT_<TIER>_MODEL` and the other variables the hook already checks); its effort is still set.
+
+All three are off by default, and nothing changes without them.
 
 ### Context pruning: staleness score
 

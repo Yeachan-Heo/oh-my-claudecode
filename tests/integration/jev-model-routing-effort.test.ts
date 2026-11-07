@@ -11,6 +11,8 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { serializeQuestions } from "../../src/hooks/jev/client.js";
+import { getJudgmentPoint } from "../../src/hooks/jev/points.js";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_KEY = "test-key-123";
@@ -36,12 +38,13 @@ function scoreAnswer(score: number, confidence = 0.7) {
     score,
     confidence,
     legend: {
-      "0": "Trivial: the answer or action is obvious, no thinking needed",
-      "1": "Some thought: a few straightforward steps",
-      "2": "Careful multi-step reasoning: several dependent steps or things to check",
-      "3": "Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong",
+      "0": "Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data",
+      "1": "Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief",
+      "2": "High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document",
+      "3": "Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug",
+      "4": "Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare",
     },
-    probabilities: { "0": 0.1, "1": 0.4, "2": 0.4, "3": 0.1 },
+    probabilities: { "0": 0.1, "1": 0.4, "2": 0.4, "3": 0.05, "4": 0.05 },
   };
 }
 
@@ -166,24 +169,46 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(requests).toHaveLength(1);
     expect(Object.keys(requests[0].questions)).toEqual(["model-tier", "effort"]);
     expect(requests[0].questions.effort.type).toBe("score");
-    // Score criteria go out as an ordered list, low to high.
-    expect(requests[0].questions.effort.criteria).toHaveLength(4);
+    // Score criteria go out as an ordered list, low to high, one per effort level.
+    const criteria = requests[0].questions.effort.criteria as string[];
+    expect(criteria).toHaveLength(5);
+    expect(criteria.map((text) => text.split(":")[0])).toEqual(["Low", "Medium", "High", "Extra high", "Maximum"]);
   }, 15000);
 
-  // Default cap (high): the score is rounded onto its 0-3 legend and the top
-  // bucket ("deep reasoning") stops at the cap.
+  it("asks the questions of the TypeScript point registry", async () => {
+    await routedInput(agentInput());
+    const [questionSet] = getJudgmentPoint("model-routing").questions;
+    const questions = typeof questionSet === "function" ? questionSet() : questionSet;
+    expect(requests[0].questions).toEqual(JSON.parse(JSON.stringify(serializeQuestions(questions))));
+  }, 15000);
+
+  it("sends the effort question whole, whatever OMC_JEV_EXCERPT_CHARS is", async () => {
+    await routedInput(agentInput());
+    const baseline = requests[0].questions.effort as unknown as { instructions: string; criteria: string[] };
+    expect(baseline.instructions.length).toBeGreaterThan(200);
+    expect(baseline.instructions).toContain("do not raise the level");
+    await routedInput(agentInput(), { OMC_JEV_EXCERPT_CHARS: "50" });
+    expect(requests[1].questions.effort).toEqual(baseline);
+  }, 15000);
+
+  // Default cap (max): the score is rounded to the nearest of the five levels
+  // and an exact tie goes to the even level (low, high, high, max).
   it.each([
     [0, "low"],
     [0.25, "low"],
     [0.49, "low"],
-    [0.5, "medium"],
-    [0.75, "medium"],
-    [1.2, "medium"],
+    [0.5, "low"],
+    [0.51, "medium"],
+    [1, "medium"],
     [1.49, "medium"],
     [1.5, "high"],
+    [2, "high"],
     [2.49, "high"],
     [2.5, "high"],
-    [3, "high"],
+    [2.51, "xhigh"],
+    [3.49, "xhigh"],
+    [3.5, "max"],
+    [4, "max"],
   ])("maps effort score %s to %s under the default cap", async (score, expected) => {
     answersFor = () => ({ effort: scoreAnswer(score), "model-tier": choiceAnswer("sonnet") });
     const routed = await routedInput(agentInput());
@@ -191,43 +216,50 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(routed.effort).toBe(expected);
   }, 15000);
 
-  it("keeps the top bucket at high under the default cap, whatever the confidence", async () => {
-    answersFor = () => ({ effort: scoreAnswer(3, 1), "model-tier": choiceAnswer("opus") });
-    expect((await routedInput(agentInput())).effort).toBe("high");
-  }, 15000);
-
   it.each([
-    // [cap, score, confidence, expected]
-    ["xhigh", 2.5, 0.7, "xhigh"],
-    ["xhigh", 3, 1, "xhigh"],
-    ["xhigh", 2.49, 1, "high"],
-    ["max", 2.5, 0.7, "xhigh"],
-    ["max", 3, 0.9, "xhigh"],
-    ["max", 3, 0.949, "xhigh"],
-    ["max", 2.95, 0.95, "max"],
-    ["max", 3, 1, "max"],
-    ["max", 2.49, 1, "high"],
-    ["max", 0.4, 1, "low"],
-    ["MAX", 3, 1, "max"],
-    [" max ", 3, 1, "max"],
-  ])("with OMC_JEV_MAX_EFFORT=%s maps score %s at confidence %s to %s", async (cap, score, confidence, expected) => {
-    answersFor = () => ({ effort: scoreAnswer(score, confidence), "model-tier": choiceAnswer("opus") });
-    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: cap })).effort).toBe(expected);
+    [0.4, "low"],
+    [1.2, "medium"],
+    [2.4, "high"],
+    [2.6, "high"],
+    [3.6, "high"],
+    [4, "high"],
+  ])("maps effort score %s to %s under OMC_JEV_MAX_EFFORT=high", async (score, expected) => {
+    answersFor = () => ({ effort: scoreAnswer(score), "model-tier": choiceAnswer("sonnet") });
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe(expected);
   }, 15000);
 
-  it("does not pick max when the effort answer has no confidence", async () => {
-    const { confidence: _confidence, ...withoutConfidence } = scoreAnswer(3);
+  it("ignores the confidence of the effort answer", async () => {
+    for (const confidence of [0, 0.5, 0.99, 1]) {
+      answersFor = () => ({ effort: scoreAnswer(3.6, confidence), "model-tier": choiceAnswer("opus") });
+      expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
+    }
+    const withoutConfidence: Record<string, unknown> = { ...scoreAnswer(3.6) };
+    delete withoutConfidence.confidence;
     answersFor = () => ({ effort: withoutConfidence, "model-tier": choiceAnswer("opus") });
-    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("xhigh");
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
   }, 15000);
 
   it.each([
-    ["a string", "0.99"],
-    ["null", null],
-    ["above 1", 1.5],
-  ])("does not pick max when the effort confidence is %s", async (_label, confidence) => {
-    answersFor = () => ({ effort: { ...scoreAnswer(3), confidence }, "model-tier": choiceAnswer("opus") });
-    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("xhigh");
+    // [cap, score, expected]
+    ["xhigh", 2.51, "xhigh"],
+    ["xhigh", 3, "xhigh"],
+    ["xhigh", 3.5, "xhigh"],
+    ["xhigh", 4, "xhigh"],
+    ["xhigh", 2.49, "high"],
+    ["max", 2.5, "high"],
+    ["max", 2.51, "xhigh"],
+    ["max", 3, "xhigh"],
+    ["max", 3.49, "xhigh"],
+    ["max", 3.5, "max"],
+    ["max", 3.51, "max"],
+    ["max", 4, "max"],
+    ["max", 2.49, "high"],
+    ["max", 0.4, "low"],
+    ["MAX", 4, "max"],
+    [" max ", 4, "max"],
+  ])("with OMC_JEV_MAX_EFFORT=%s maps score %s to %s", async (cap, score, expected) => {
+    answersFor = () => ({ effort: scoreAnswer(score), "model-tier": choiceAnswer("opus") });
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: cap })).effort).toBe(expected);
   }, 15000);
 
   it("reads answers by name when effort comes before model-tier", async () => {
@@ -253,30 +285,41 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
   }, 15000);
 
   it("caps the mapped effort at OMC_JEV_MAX_EFFORT", async () => {
-    answersFor = () => ({ effort: scoreAnswer(2.8, 1), "model-tier": choiceAnswer("opus") });
+    answersFor = () => ({ effort: scoreAnswer(3.8, 1), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "medium" })).effort).toBe("medium");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "low" })).effort).toBe("low");
-    // Unknown cap values fall back to the default cap (high).
-    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "turbo" })).effort).toBe("high");
-    // A higher cap is a real opt-in for the top bucket.
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe("high");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "xhigh" })).effort).toBe("xhigh");
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
-    // Lower buckets are not raised by a higher cap.
+    // Unknown cap values fall back to the default cap (max).
+    expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "turbo" })).effort).toBe("max");
+    // Lower levels are not raised by a higher cap.
     answersFor = () => ({ effort: scoreAnswer(1.6, 1), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("high");
   }, 15000);
+
+  it("reports an unknown OMC_JEV_MAX_EFFORT on stderr unless OMC_JEV_QUIET=1", async () => {
+    const loud = await runEnforcer(agentInput(), { ...env, OMC_JEV_QUIET: undefined, OMC_JEV_MAX_EFFORT: "hihg" }, cwd);
+    expect(loud.exitCode, loud.stderr).toBe(0);
+    expect(loud.stderr).toContain("OMC_JEV_MAX_EFFORT=hihg");
+    const quiet = await runEnforcer(agentInput(), { ...env, OMC_JEV_MAX_EFFORT: "hihg" }, cwd);
+    expect(quiet.stderr).not.toContain("OMC_JEV_MAX_EFFORT");
+    const valid = await runEnforcer(agentInput(), { ...env, OMC_JEV_QUIET: undefined, OMC_JEV_MAX_EFFORT: "high" }, cwd);
+    expect(valid.stderr).not.toContain("OMC_JEV_MAX_EFFORT");
+  }, 30000);
 
   it("explicit max is replaced by Jev effort, or capped when Jev gives no effort answer", async () => {
     answersFor = () => ({ effort: scoreAnswer(1.9), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("high");
 
     answersFor = () => ({ "model-tier": choiceAnswer("opus") });
-    const capped = await routedInput(agentInput({ effort: "max" }));
+    const capped = await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "high" });
     expect(capped).toEqual({ ...agentInput().tool_input, model: "opus", effort: "high" });
+    // The default cap is max, so an explicit max stays.
+    expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("max");
     expect((await routedInput(agentInput({ effort: "xhigh" }), { OMC_JEV_MAX_EFFORT: "medium" })).effort).toBe(
       "medium",
     );
-    // Opting in to a higher cap keeps the explicit value.
     expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
     expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "xhigh" })).effort).toBe("xhigh");
   }, 15000);
@@ -297,6 +340,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
   it.each([
     ["score -1", { ...scoreAnswer(0), score: -1 }],
     ["score 99", { ...scoreAnswer(0), score: 99 }],
+    ["score 4.01", { ...scoreAnswer(0), score: 4.01 }],
     ["a choice answer carrying a score", { ...choiceAnswer("high"), score: 2 }],
     ["score NaN as text", { ...scoreAnswer(0), score: "NaN" }],
   ])("treats %s as a missing effort answer", async (_label, effortAnswer) => {
@@ -310,7 +354,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     // No explicit effort: none is added.
     expect(await routedInput(agentInput())).not.toHaveProperty("effort");
     // Explicit effort above the cap is lowered to the cap, as with no effort answer.
-    expect((await routedInput(agentInput({ effort: "max" }))).effort).toBe("high");
+    expect((await routedInput(agentInput({ effort: "max" }), { OMC_JEV_MAX_EFFORT: "high" })).effort).toBe("high");
   }, 15000);
 
   it("applies the effort answer when model-tier is missing", async () => {

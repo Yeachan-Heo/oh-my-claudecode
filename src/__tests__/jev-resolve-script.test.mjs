@@ -18,7 +18,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { parseJevEnv, readRequestFile, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { parseJevEnv, pointExcerptChars, readRequestFile, resolveExcerptChars, resolveJevTimeoutMs, resolveRequest, serializeQuestions, validateJevResponse } from '../../scripts/jev-resolve.mjs';
+import { excerptCharsFor, parseJevConfig } from '../hooks/jev/config.ts';
 
 const root = join(fileURLToPath(import.meta.url), '..', '..', '..');
 const NODE = process.execPath;
@@ -78,6 +79,30 @@ describe('parseJevEnv tri-state parity', () => {
     expect(parseJevEnv('model-routing', baseEnv({ OMC_JEV: 'model-routing:active' }))).toBe('active');
     expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all' }))).toBe('shadow');
     expect(parseJevEnv('task-size', baseEnv({ OMC_JEV: 'all:active' }))).toBe('active');
+  });
+});
+
+describe('excerpt limit parity with the TS config contract', () => {
+  it.each([
+    [{}, 'model-routing'],
+    [{}, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS: '512', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '12000' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_TASK_SIZE: '4000' }, 'task-size'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '1e3' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '0' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: ' 80 ' }, 'model-routing'],
+    [{ OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '80' }, 'context-pruning'],
+  ])('script and TS agree for %j and point %s', (env, point) => {
+    expect(resolveExcerptChars(point, env)).toBe(excerptCharsFor(point, parseJevConfig(env)));
+  });
+
+  it('reads only the point variable in pointExcerptChars', () => {
+    expect(pointExcerptChars('model-routing', { OMC_JEV_EXCERPT_CHARS: '512' })).toBeUndefined();
+    expect(pointExcerptChars('model-routing', { OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '700' })).toBe(700);
   });
 });
 
@@ -227,12 +252,12 @@ describe('resolveRequest', () => {
 
   it('returns and logs every answer by question name, whatever their order', async () => {
     const answers = {
-      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'trivial', 1: 'some', 2: 'careful', 3: 'deep' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.1 } },
+      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'low', 1: 'medium', 2: 'high', 3: 'xhigh', 4: 'max' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.05, 4: 0.05 } },
       'model-tier': { type: 'choice', choice: 'sonnet', confidence: 0.9, probabilities: { haiku: 0.05, sonnet: 0.9, opus: 0.05 } },
     };
     const questions = {
       'model-tier': QUESTIONS.route,
-      effort: { type: 'score', criteria: { trivial: 'trivial', some: 'some', careful: 'careful', deep: 'deep' } },
+      effort: { type: 'score', criteria: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' } },
     };
     const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers }) });
     const result = await resolveRequest({ point: 'model-routing', state: {}, questions }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);
@@ -255,14 +280,41 @@ describe('resolveRequest', () => {
   it('bounds excerpts before send and log', async () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
-    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
     expect(body.state.prompt).toHaveLength(50);
+  });
+
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const questions = { route: { type: 'choice', instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } } };
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
+  });
+
+  it('model-routing sends up to 12000 characters of state by default and ignores OMC_JEV_EXCERPT_CHARS', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(13000) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(12000);
+  });
+
+  it('bounds the state of one point with its own OMC_JEV_EXCERPT_CHARS_<POINT> variable', async () => {
+    const bodies = [];
+    const fetchFn = async (_url, init) => { bodies.push(JSON.parse(init.body)); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const env = baseEnv({ OMC_JEV: 'model-routing,task-size', OMC_JEV_EXCERPT_CHARS: '50', OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: '300' });
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, env, fetchFn);
+    expect(bodies[0].state.prompt).toHaveLength(300);
+    expect(bodies[1].state.prompt).toHaveLength(50);
   });
 
   it('falls back to the safe excerpt default for a truncated numeric override', async () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
-    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
+    await resolveRequest({ point: 'task-size', state: { prompt: 'a'.repeat(500) }, questions: QUESTIONS }, baseEnv({ OMC_JEV: 'task-size', OMC_JEV_EXCERPT_CHARS: '1e3' }), fetchFn);
     expect(body.state.prompt).toHaveLength(200);
   });
 

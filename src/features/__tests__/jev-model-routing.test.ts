@@ -17,7 +17,14 @@ import { processPreToolUse, type AgentInput, type EnforcementResult } from '../d
 import { resetJevResolverState } from '../../hooks/jev/index.js';
 
 const TEST_KEY = 'test-key-123';
-const JEV_ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT'] as const;
+const JEV_ENV_KEYS = [
+  'TYPESAFE_API_KEY',
+  'OMC_JEV',
+  'OMC_JEV_LOG_DIR',
+  'OMC_JEV_ENDPOINT',
+  'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
+] as const;
 // Provider-detection env vars that forceInherit keys off (issue #1201) —
 // cleared so the enforcement-identity test runs in a standard Claude
 // environment regardless of the host shell (mirrors delegation-enforcer.test.ts).
@@ -142,10 +149,26 @@ describe('jev-model-routing shadow wiring', () => {
     expect(entry.jev?.choice).toBe('opus');
   });
 
-  it('bounds the task excerpt sent to Jev to OMC_JEV_EXCERPT_CHARS', async () => {
+  it('sends up to 12000 characters of the task by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
     process.env.TYPESAFE_API_KEY = TEST_KEY;
     process.env.OMC_JEV = 'model-routing';
     process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const fetchFn = makeJevFetchStub();
+    const pinned = makePinned();
+    pinned.originalInput.prompt = 'x'.repeat(13000);
+
+    await recordModelRoutingShadow('Task', pinned, fetchFn as unknown as typeof fetch);
+
+    const body = JSON.parse(String(vi.mocked(fetchFn).mock.calls[0][1]?.body)) as {
+      state: { task: string };
+    };
+    expect(body.state.task).toHaveLength(12000);
+  });
+
+  it('bounds the task excerpt sent to Jev to OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING', async () => {
+    process.env.TYPESAFE_API_KEY = TEST_KEY;
+    process.env.OMC_JEV = 'model-routing';
+    process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '50';
     const fetchFn = makeJevFetchStub();
     const pinned = makePinned();
     pinned.originalInput.prompt = 'x'.repeat(500);
