@@ -247,7 +247,8 @@ export async function resolveRequest(
   }
   // Only the state carries user text. Question definitions are static text
   // written by the hook scripts and go out whole: bounding them would cut the
-  // longer criteria and instructions (the model-routing effort question).
+  // model-routing effort instructions (295 characters) and the intent
+  // criterion (209). A question must never embed user text.
   const bound = {
     state: boundExcerpts(request.state, resolveExcerptChars(request.point, env)),
     questions: request.questions,

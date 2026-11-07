@@ -103,10 +103,10 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   });
 
-  function agentInput(prompt: string, transcriptPath?: string) {
+  function agentInput(prompt: string, transcriptPath?: string, toolInput: Record<string, unknown> = {}) {
     return {
       hook_event_name: "PreToolUse",
       tool_name: "Agent",
@@ -115,6 +115,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
         prompt,
         subagent_type: "general-purpose",
         model: "haiku",
+        ...toolInput,
       },
       cwd,
       session_id: "test-sess-context",
@@ -132,9 +133,10 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
     return requests[0].state;
   }
 
-  function writeTranscript(entries: unknown[]): string {
-    const path = join(cwd, "transcript.jsonl");
-    writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+  // Claude Code names the transcript of a session `<session_id>.jsonl`.
+  function writeTranscript(entries: unknown[], name = "test-sess-context.jsonl", eol = "\n"): string {
+    const path = join(cwd, name);
+    writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join(eol) + eol, "utf8");
     return path;
   }
 
@@ -192,6 +194,51 @@ describe("pre-tool-enforcer.mjs: Jev model-routing state", () => {
     });
     expect(state.description).toBe("Trace the flaky auth test");
     expect(state).not.toHaveProperty("parent_last_user_message");
+  }, 15000);
+
+  it("cuts the parent message to 4000 characters even with a higher point limit", async () => {
+    const transcript = writeTranscript([userEntry("m".repeat(5000))]);
+    const state = await sentState(agentInput("Look at the test.", transcript), {
+      OMC_JEV_MODEL_ROUTING_CONTEXT: "1",
+      OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: "12000",
+    });
+    expect(state.parent_last_user_message).toBe("m".repeat(4000));
+  }, 15000);
+
+  it("skips compact summaries, command notices and sidechain entries, and reads CRLF transcripts", async () => {
+    const transcript = writeTranscript(
+      [
+        userEntry("Fix the flaky auth test"),
+        userEntry("This session is being continued from a previous conversation.", { isCompactSummary: true }),
+        userEntry("<command-name>/compact</command-name>"),
+        userEntry("a subagent prompt", { isSidechain: true }),
+      ],
+      "test-sess-context.jsonl",
+      "\r\n",
+    );
+    const state = await sentState(agentInput("Look at the test.", transcript), {
+      OMC_JEV_MODEL_ROUTING_CONTEXT: "1",
+    });
+    expect(state.parent_last_user_message).toBe("Fix the flaky auth test");
+  }, 15000);
+
+  it("reads only the transcript of the active session", async () => {
+    const transcript = writeTranscript([userEntry("Fix the flaky auth test")], "another-session.jsonl");
+    const state = await sentState(agentInput("Look at the test.", transcript), {
+      OMC_JEV_MODEL_ROUTING_CONTEXT: "1",
+    });
+    expect(state.description).toBe("Trace the flaky auth test");
+    expect(state).not.toHaveProperty("parent_last_user_message");
+  }, 15000);
+
+  it("does not let a small point limit change which calls are asked about", async () => {
+    // The executor agent defines its own model, which the hook finds by subagent_type. A point limit
+    // of 12 bounds the state sent to Jev, not the fields the hook decides on.
+    const state = await sentState(
+      agentInput("t".repeat(100), undefined, { subagent_type: "oh-my-claudecode:executor", model: undefined }),
+      { OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: "12" },
+    );
+    expect(state.task).toBe("t".repeat(12));
   }, 15000);
 
   it("bounds the parent message with the point limit", async () => {

@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,7 +102,7 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
 
   afterEach(async () => {
     await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
-    rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    rmSync(cwd, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   });
 
   function agentInput(extra: Record<string, unknown> = {}) {
@@ -167,6 +167,59 @@ describe("pre-tool-enforcer.mjs: Jev model-routing for every agent call", () => 
     await routedInput(agentInput({ model: "opus" }), { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" });
     expect(requests).toHaveLength(2);
   }, 30000);
+
+  function writeAgent(dir: string, name: string, frontmatter: string) {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${name}.md`), `---\nname: ${name}\n${frontmatter}---\n\nYou are an agent.\n`, "utf8");
+  }
+
+  it.each([
+    ["user", () => join(cwd, "claude", "agents")],
+    ["project", () => join(cwd, ".claude", "agents")],
+  ])("leaves a %s agent whose definition names fable alone", async (_where, dir) => {
+    writeAgent(dir(), "my-agent", "model: fable\n");
+    const routed = await routedInput(agentInput({ subagent_type: "my-agent" }), {
+      OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1",
+    });
+    expect(requests).toHaveLength(0);
+    expect(routed).toEqual(agentInput({ subagent_type: "my-agent" }).tool_input);
+  }, 15000);
+
+  it("asks about a user agent whose definition has no model or inherits", async () => {
+    writeAgent(join(cwd, "claude", "agents"), "plain-agent", "");
+    writeAgent(join(cwd, "claude", "agents"), "inheriting-agent", "model: inherit\n");
+    for (const subagent_type of ["plain-agent", "inheriting-agent"]) {
+      const routed = await routedInput(agentInput({ subagent_type }), { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" });
+      expect(routed.model).toBe("sonnet");
+    }
+    expect(requests).toHaveLength(2);
+  }, 30000);
+
+  it("routes a provider-specific Claude model ID by its tier, with or without the variable", async () => {
+    const model = "us.anthropic.claude-opus-4-6-v1:0";
+    expect((await routedInput(agentInput({ model }))).model).toBe("sonnet");
+    expect((await routedInput(agentInput({ model }), { OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" })).model).toBe("sonnet");
+    expect(requests).toHaveLength(2);
+  }, 30000);
+
+  describe("with forceInherit", () => {
+    const forceInherit = { OMC_ROUTING_FORCE_INHERIT: "true", CLAUDE_CODE_USE_BEDROCK: "1" };
+
+    it("sets the effort but not a tier alias the provider cannot resolve", async () => {
+      const routed = await routedInput(agentInput(), { ...forceInherit, OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1" });
+      expect(requests).toHaveLength(1);
+      expect(routed).toEqual({ ...agentInput().tool_input, effort: "medium" });
+    }, 15000);
+
+    it("sets the tier alias when the provider resolves it", async () => {
+      const routed = await routedInput(agentInput(), {
+        ...forceInherit,
+        OMC_JEV_MODEL_ROUTING_ALL_AGENTS: "1",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "global.anthropic.claude-sonnet-4-6",
+      });
+      expect(routed).toEqual({ ...agentInput().tool_input, model: "sonnet", effort: "medium" });
+    }, 15000);
+  });
 
   it("a degraded Jev call leaves a call without a model as it was", async () => {
     status = 500;

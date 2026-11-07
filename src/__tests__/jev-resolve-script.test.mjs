@@ -250,12 +250,12 @@ describe('resolveRequest', () => {
 
   it('returns and logs every answer by question name, whatever their order', async () => {
     const answers = {
-      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'trivial', 1: 'some', 2: 'careful', 3: 'deep' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.1 } },
+      effort: { type: 'score', score: 1.2, confidence: 0.7, legend: { 0: 'low', 1: 'medium', 2: 'high', 3: 'xhigh', 4: 'max' }, probabilities: { 0: 0.1, 1: 0.5, 2: 0.3, 3: 0.05, 4: 0.05 } },
       'model-tier': { type: 'choice', choice: 'sonnet', confidence: 0.9, probabilities: { haiku: 0.05, sonnet: 0.9, opus: 0.05 } },
     };
     const questions = {
       'model-tier': QUESTIONS.route,
-      effort: { type: 'score', criteria: { trivial: 'trivial', some: 'some', careful: 'careful', deep: 'deep' } },
+      effort: { type: 'score', criteria: { low: 'low', medium: 'medium', high: 'high', xhigh: 'xhigh', max: 'max' } },
     };
     const fetchFn = async () => ({ ok: true, status: 200, json: async () => ({ answers }) });
     const result = await resolveRequest({ point: 'model-routing', state: {}, questions }, baseEnv({ OMC_JEV: 'model-routing:active' }), fetchFn);

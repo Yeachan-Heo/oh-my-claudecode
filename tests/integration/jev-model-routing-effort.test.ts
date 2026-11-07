@@ -11,6 +11,8 @@ import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { serializeQuestions } from "../../src/hooks/jev/client.js";
+import { getJudgmentPoint } from "../../src/hooks/jev/points.js";
 
 const PROJECT_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const API_KEY = "test-key-123";
@@ -173,6 +175,13 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(criteria.map((text) => text.split(":")[0])).toEqual(["Low", "Medium", "High", "Extra high", "Maximum"]);
   }, 15000);
 
+  it("asks the questions of the TypeScript point registry", async () => {
+    await routedInput(agentInput());
+    const [questionSet] = getJudgmentPoint("model-routing").questions;
+    const questions = typeof questionSet === "function" ? questionSet() : questionSet;
+    expect(requests[0].questions).toEqual(JSON.parse(JSON.stringify(serializeQuestions(questions))));
+  }, 15000);
+
   it("sends the effort question whole, whatever OMC_JEV_EXCERPT_CHARS is", async () => {
     await routedInput(agentInput());
     const baseline = requests[0].questions.effort as unknown as { instructions: string; criteria: string[] };
@@ -224,7 +233,8 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
       answersFor = () => ({ effort: scoreAnswer(3.6, confidence), "model-tier": choiceAnswer("opus") });
       expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
     }
-    const { confidence: _confidence, ...withoutConfidence } = scoreAnswer(3.6);
+    const withoutConfidence: Record<string, unknown> = { ...scoreAnswer(3.6) };
+    delete withoutConfidence.confidence;
     answersFor = () => ({ effort: withoutConfidence, "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("max");
   }, 15000);
@@ -287,6 +297,16 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     answersFor = () => ({ effort: scoreAnswer(1.6, 1), "model-tier": choiceAnswer("opus") });
     expect((await routedInput(agentInput(), { OMC_JEV_MAX_EFFORT: "max" })).effort).toBe("high");
   }, 15000);
+
+  it("reports an unknown OMC_JEV_MAX_EFFORT on stderr unless OMC_JEV_QUIET=1", async () => {
+    const loud = await runEnforcer(agentInput(), { ...env, OMC_JEV_QUIET: undefined, OMC_JEV_MAX_EFFORT: "hihg" }, cwd);
+    expect(loud.exitCode, loud.stderr).toBe(0);
+    expect(loud.stderr).toContain("OMC_JEV_MAX_EFFORT=hihg");
+    const quiet = await runEnforcer(agentInput(), { ...env, OMC_JEV_MAX_EFFORT: "hihg" }, cwd);
+    expect(quiet.stderr).not.toContain("OMC_JEV_MAX_EFFORT");
+    const valid = await runEnforcer(agentInput(), { ...env, OMC_JEV_QUIET: undefined, OMC_JEV_MAX_EFFORT: "high" }, cwd);
+    expect(valid.stderr).not.toContain("OMC_JEV_MAX_EFFORT");
+  }, 30000);
 
   it("explicit max is replaced by Jev effort, or capped when Jev gives no effort answer", async () => {
     answersFor = () => ({ effort: scoreAnswer(1.9), "model-tier": choiceAnswer("opus") });

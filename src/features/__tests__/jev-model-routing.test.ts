@@ -17,7 +17,14 @@ import { processPreToolUse, type AgentInput, type EnforcementResult } from '../d
 import { resetJevResolverState } from '../../hooks/jev/index.js';
 
 const TEST_KEY = 'test-key-123';
-const JEV_ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT'] as const;
+const JEV_ENV_KEYS = [
+  'TYPESAFE_API_KEY',
+  'OMC_JEV',
+  'OMC_JEV_LOG_DIR',
+  'OMC_JEV_ENDPOINT',
+  'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
+] as const;
 // Provider-detection env vars that forceInherit keys off (issue #1201) —
 // cleared so the enforcement-identity test runs in a standard Claude
 // environment regardless of the host shell (mirrors delegation-enforcer.test.ts).

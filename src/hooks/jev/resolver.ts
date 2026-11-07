@@ -206,7 +206,7 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
   }
 
-  // Only the state carries user text; question definitions are static and go out whole.
+  // Only the state carries user text; question definitions are static (they must never embed user text) and go out whole.
   const boundedState = boundExcerpts(args.state, excerptCharsFor(args.point, config));
   const startedAt = Date.now();
 
