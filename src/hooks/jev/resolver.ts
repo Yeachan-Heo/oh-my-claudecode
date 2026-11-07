@@ -206,13 +206,13 @@ export async function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArg
     return { answer: twinAnswer(), source: 'twin', mode: 'cap' };
   }
 
+  // Only the state carries user text; question definitions are static and go out whole.
   const boundedState = boundExcerpts(args.state, config.excerptChars);
-  const boundedQuestions = boundExcerpts(args.questions, config.excerptChars);
   const startedAt = Date.now();
 
   const attempt = (async () => {
     try {
-      return { ok: true as const, response: await queryJev(boundedState, boundedQuestions as JevQuestions, {
+      return { ok: true as const, response: await queryJev(boundedState, args.questions, {
         endpoint: config.endpoint,
         apiKey: config.apiKey as string,
         timeoutMs: config.timeoutMs,

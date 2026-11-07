@@ -226,10 +226,16 @@ export async function resolveRequest(
   if (mode === "off") {
     return { mode, answer: null, answers: null, confidence: undefined, durationMs: 0 };
   }
-  const bound = boundExcerpts(
-    { state: request.state, questions: request.questions },
-    positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
-  );
+  // Only the state carries user text. Question definitions are static text
+  // written by the hook scripts and go out whole: bounding them would cut the
+  // longer criteria and instructions (the model-routing effort question).
+  const bound = {
+    state: boundExcerpts(
+      request.state,
+      positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
+    ),
+    questions: request.questions,
+  };
   const controller = new AbortController();
   let timer;
   const timeoutMs = resolveJevTimeoutMs(env);

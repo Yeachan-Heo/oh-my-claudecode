@@ -278,6 +278,26 @@ describe('resolveJudgment', () => {
     expect(line.state.nested.deep).toHaveLength(50);
   });
 
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const questions = {
+      route: { type: 'choice' as const, instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } },
+    };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
+    await resolveJudgment({
+      point: 'model-routing',
+      state: { prompt: 'a'.repeat(500) },
+      questions,
+      twin: () => 'haiku',
+      fetchFn,
+    });
+    const body = JSON.parse(calls[0].init?.body as string);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
+  });
+
   it('propagates twin errors instead of masking them', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     const { fetchFn } = captureFetch(() => jevOk({ choice: 'opus' }));

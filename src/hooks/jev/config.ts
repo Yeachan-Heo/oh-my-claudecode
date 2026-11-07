@@ -122,8 +122,8 @@ export function pointState(
 
 /**
  * Recursively bound every string value to `max` chars. Applied to the state
- * sent to Jev and to the state recorded in the shadow log; question
- * definitions are bounded too since they can embed user text.
+ * sent to Jev and to the state recorded in the shadow log. Question
+ * definitions are static text and are not bounded.
  */
 export function boundExcerpts(value: unknown, max: number): unknown {
   if (typeof value === 'string') {

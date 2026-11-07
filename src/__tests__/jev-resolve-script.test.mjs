@@ -259,6 +259,16 @@ describe('resolveRequest', () => {
     expect(body.state.prompt).toHaveLength(50);
   });
 
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    let body;
+    const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };
+    const questions = { route: { type: 'choice', instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } } };
+    await resolveRequest({ point: 'model-routing', state: { prompt: 'a'.repeat(500) }, questions }, baseEnv({ OMC_JEV_EXCERPT_CHARS: '50' }), fetchFn);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
+  });
+
   it('falls back to the safe excerpt default for a truncated numeric override', async () => {
     let body;
     const fetchFn = async (_url, init) => { body = JSON.parse(init.body); return { ok: true, status: 200, json: async () => ({ answers: { route: { type: 'choice', choice: 'x' } } }) }; };

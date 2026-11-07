@@ -580,22 +580,25 @@ const MODEL_ROUTING_QUESTIONS = {
   },
   effort: {
     type: 'score',
-    instructions: 'How much reasoning effort does this delegated task need?',
+    instructions:
+      'How much reasoning effort does this delegated task need? Judge the work the delegated agent must actually do. ' +
+      'The length of the brief and its formal conditions (language and style rules, permission to use subagents, bans, ' +
+      'file locations, report format, words in capitals) do not raise the level.',
     criteria: {
-      trivial: 'Trivial: the answer or action is obvious, no thinking needed',
-      some: 'Some thought: a few straightforward steps',
-      careful: 'Careful multi-step reasoning: several dependent steps or things to check',
-      deep: 'Deep reasoning: many tradeoffs, hidden pitfalls, or easy to get subtly wrong',
+      low: 'Low: mechanical work: read, look up, list, copy or transcribe, count; the result follows directly from the data',
+      medium: 'Medium: a typical change or analysis with clear steps, in one place or following a given procedure or brief',
+      high: 'High: multi-file work that needs its own decisions, a diagnosis weighing a few hypotheses, or writing a document',
+      xhigh: 'Extra high: in-depth analysis, architecture, a high-stakes review, or a hard bug',
+      max: 'Maximum: exceptionally hard, hours of reasoning at the limit of difficulty; rare',
     },
   },
 };
 
-// Subagent reasoning effort chosen by the model-routing "effort" score (0-3).
-// The score is rounded onto its legend: < 0.5 low (trivial), < 1.5 medium
-// (some thought), < 2.5 high (careful multi-step), otherwise the top bucket
-// (deep reasoning). The top bucket is max when the cap is max and the effort
-// answer's confidence (0-1) is at least MAX_EFFORT_MIN_CONFIDENCE, else
-// xhigh when the cap allows xhigh, else the cap. Every result is capped by
+// Subagent reasoning effort chosen by the model-routing "effort" score (0-4).
+// The five criteria are ordered low, medium, high, xhigh, max, so the score is
+// the expected value over that scale. It is rounded to the nearest level; an
+// exact tie (0.5, 1.5, 2.5, 3.5) goes to the even level (low, high, high, max)
+// so ties do not push the judgment in one direction. Every result is capped by
 // OMC_JEV_MAX_EFFORT (low, medium, high, xhigh, or max). The default cap is
 // high: xhigh and max spend several times the tokens of high, so a router
 // raises a subagent there only when the user opts in with a higher cap.
@@ -603,7 +606,6 @@ const MODEL_ROUTING_QUESTIONS = {
 // explicit effort above the cap is lowered to the cap.
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const DEFAULT_MAX_EFFORT = 'high';
-const MAX_EFFORT_MIN_CONFIDENCE = 0.95;
 
 function resolveMaxEffort(env = process.env) {
   const raw = String(env.OMC_JEV_MAX_EFFORT ?? '').trim().toLowerCase();
@@ -614,10 +616,11 @@ function capEffort(effort, maxEffort) {
   return EFFORT_LEVELS.indexOf(effort.toLowerCase()) > EFFORT_LEVELS.indexOf(maxEffort) ? maxEffort : effort;
 }
 
-function effortFromScore(score, confidence, maxEffort) {
-  if (score < 2.5) return capEffort(score < 0.5 ? 'low' : score < 1.5 ? 'medium' : 'high', maxEffort);
-  if (maxEffort === 'max' && typeof confidence === 'number' && confidence >= MAX_EFFORT_MIN_CONFIDENCE && confidence <= 1) return 'max';
-  return capEffort('xhigh', maxEffort);
+function effortFromScore(score, maxEffort) {
+  const below = Math.floor(score);
+  const fraction = score - below;
+  const index = fraction < 0.5 ? below : fraction > 0.5 ? below + 1 : below % 2 === 0 ? below : below + 1;
+  return capEffort(EFFORT_LEVELS[index], maxEffort);
 }
 
 function recordSlopWarningShadow(toolName, toolInput, warned, permissionMode) {
@@ -685,13 +688,13 @@ function recordModelRoutingShadow(toolName, toolInput, updatedToolInput, permiss
     }
 
     const maxEffort = resolveMaxEffort();
-    // Only a score answer inside the declared 0-3 range counts; anything else
+    // Only a score answer inside the declared 0-4 range counts; anything else
     // is treated as a missing effort answer.
     const effortAnswer = answers.effort;
     const effortScore = effortAnswer?.type === 'score' ? effortAnswer.score : undefined;
     const currentEffort = (updatedToolInput || toolInput).effort;
-    if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 3) {
-      ensureUpdated().effort = effortFromScore(effortScore, effortAnswer.confidence, maxEffort);
+    if (typeof effortScore === 'number' && Number.isFinite(effortScore) && effortScore >= 0 && effortScore <= 4) {
+      ensureUpdated().effort = effortFromScore(effortScore, maxEffort);
     } else if (typeof currentEffort === 'string' && capEffort(currentEffort, maxEffort) !== currentEffort) {
       ensureUpdated().effort = capEffort(currentEffort, maxEffort);
     }
