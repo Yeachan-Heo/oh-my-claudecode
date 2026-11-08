@@ -42,3 +42,8 @@ native/*.node
 # npm pack output
 *.tgz
 .wt/
+fix-dev-green
+omc-4330-fixfwd
+origin/
+pr-*/
+release-*/
