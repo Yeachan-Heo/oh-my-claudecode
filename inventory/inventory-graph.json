@@ -5,31 +5,31 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "b0b951f0981a5b2b94ac508b981bf0c1db30bcf8",
-    "sourceSha256": "67f1fddb22f367cc2042ca6d334afd25f9628cbae9ab380afeeb179953f6b67e",
+    "head": "520578f55e9a2fe8c7a1d94ad657d1e6133bc0fc",
+    "sourceSha256": "ef6fc4e0c956924f09a08f206136e03822e7f350cf55f678d8a41179fcceaf38",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "b0b951f0981a5b2b94ac508b981bf0c1db30bcf8",
-  "sourceSha256": "67f1fddb22f367cc2042ca6d334afd25f9628cbae9ab380afeeb179953f6b67e",
+  "head": "520578f55e9a2fe8c7a1d94ad657d1e6133bc0fc",
+  "sourceSha256": "ef6fc4e0c956924f09a08f206136e03822e7f350cf55f678d8a41179fcceaf38",
   "counts": {
     "public": {
-      "skills": 84,
+      "skills": 83,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 133
+      "total": 132
     },
     "internal": {
-      "hookFiles": 333,
+      "hookFiles": 334,
       "featureFiles": 95,
       "toolFiles": 65,
       "libFiles": 49,
       "templateHooks": 25,
-      "srcFiles": 1438,
-      "total": 1463
+      "srcFiles": 1440,
+      "total": 1465
     },
     "generated": {
       "distFiles": 5471,
@@ -39,9 +39,9 @@
     "prompt": {
       "promptLikeFiles": 63
     },
-    "skills": 84,
+    "skills": 83,
     "commands": 21,
-    "hookFiles": 333,
+    "hookFiles": 334,
     "workflows": 8,
     "agentDefinitions": 18,
     "promptLikeFiles": 63
@@ -111,7 +111,6 @@
       "remember",
       "research",
       "review",
-      "sdd",
       "self-improve",
       "session-flow",
       "sharpen",
@@ -331,6 +330,7 @@
       "src/hooks/omc-orchestrator/index.ts",
       "src/hooks/permission-handler/__tests__/index.test.ts",
       "src/hooks/permission-handler/index.ts",
+      "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
       "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
       "src/hooks/persistent-mode/__tests__/deleted-state-writeback.test.ts",
       "src/hooks/persistent-mode/__tests__/error-handling.test.ts",
@@ -6588,6 +6588,7 @@
       "src/hooks/omc-orchestrator/index.ts",
       "src/hooks/permission-handler/__tests__/index.test.ts",
       "src/hooks/permission-handler/index.ts",
+      "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
       "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
       "src/hooks/persistent-mode/__tests__/deleted-state-writeback.test.ts",
       "src/hooks/persistent-mode/__tests__/error-handling.test.ts",
@@ -37365,41 +37366,6 @@
         "path": "skills/review/SKILL.md"
       },
       {
-        "id": "skills/sdd/SKILL.md",
-        "kind": "skill",
-        "path": "skills/sdd/SKILL.md"
-      },
-      {
-        "id": "skills/sdd/phases/criteria.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/criteria.md"
-      },
-      {
-        "id": "skills/sdd/phases/execute.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/execute.md"
-      },
-      {
-        "id": "skills/sdd/phases/review.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/review.md"
-      },
-      {
-        "id": "skills/sdd/phases/rules.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/rules.md"
-      },
-      {
-        "id": "skills/sdd/phases/spec.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/spec.md"
-      },
-      {
-        "id": "skills/sdd/phases/tasks.md",
-        "kind": "other",
-        "path": "skills/sdd/phases/tasks.md"
-      },
-      {
         "id": "skills/self-improve/SKILL.md",
         "kind": "skill",
         "path": "skills/self-improve/SKILL.md"
@@ -43265,6 +43231,11 @@
         "path": "src/hooks/permission-handler/index.ts"
       },
       {
+        "id": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "kind": "hook",
+        "path": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts"
+      },
+      {
         "id": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
         "kind": "hook",
         "path": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts"
@@ -44508,6 +44479,11 @@
         "id": "src/installer/__tests__/bundled-skill-sync.test.ts",
         "kind": "src",
         "path": "src/installer/__tests__/bundled-skill-sync.test.ts"
+      },
+      {
+        "id": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "kind": "src",
+        "path": "src/installer/__tests__/claude-mcp-config-path.test.ts"
       },
       {
         "id": "src/installer/__tests__/claude-md-analysis.test.ts",
@@ -47120,6 +47096,11 @@
         "path": "tests/integration/plugin-hud-node-modules-free.test.ts"
       },
       {
+        "id": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "kind": "other",
+        "path": "tests/integration/ralph-architect-verification-stop.test.ts"
+      },
+      {
         "id": "tests/integration/runs-reconciler.test.ts",
         "kind": "other",
         "path": "tests/integration/runs-reconciler.test.ts"
@@ -48913,6 +48894,11 @@
       },
       {
         "from": "scripts/persistent-mode.cjs",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "scripts/persistent-mode.cjs",
         "to": "external:os",
         "kind": "imports"
       },
@@ -50413,11 +50399,6 @@
       },
       {
         "from": "skills/review/SKILL.md",
-        "to": "src/features/builtin-skills/skills.ts",
-        "kind": "registers"
-      },
-      {
-        "from": "skills/sdd/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -69397,6 +69378,51 @@
         "kind": "imports"
       },
       {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "src/hooks/persistent-mode/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "src/hooks/ralph/loop.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/persistent-mode/__tests__/architect-approval-transcript.test.ts",
+        "to": "src/hooks/ralph/prd.ts",
+        "kind": "type-imports"
+      },
+      {
         "from": "src/hooks/persistent-mode/__tests__/cancel-race.test.ts",
         "to": "external:child_process",
         "kind": "imports"
@@ -70983,6 +71009,16 @@
       },
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:child_process",
+        "kind": "type-imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -70994,6 +71030,11 @@
       {
         "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
         "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/hooks/ralph/__tests__/feedback-baseline.test.ts",
+        "to": "external:url",
         "kind": "imports"
       },
       {
@@ -75984,6 +76025,31 @@
       {
         "from": "src/installer/__tests__/bundled-skill-sync.test.ts",
         "to": "src/installer/index.ts",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:os",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:path",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
+        "from": "src/installer/__tests__/claude-mcp-config-path.test.ts",
+        "to": "src/installer/mcp-registry.ts",
         "kind": "imports"
       },
       {
@@ -88908,6 +88974,11 @@
       },
       {
         "from": "templates/hooks/persistent-mode.mjs",
+        "to": "external:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "templates/hooks/persistent-mode.mjs",
         "to": "external:fs",
         "kind": "imports"
       },
@@ -89832,6 +89903,41 @@
         "kind": "imports"
       },
       {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:child_process",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:crypto",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:fs",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:os",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:path",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:node:url",
+        "kind": "imports"
+      },
+      {
+        "from": "tests/integration/ralph-architect-verification-stop.test.ts",
+        "to": "external:vitest",
+        "kind": "imports"
+      },
+      {
         "from": "tests/integration/runs-reconciler.test.ts",
         "to": "external:node:child_process",
         "kind": "imports"
@@ -90698,12 +90804,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8061,
-      "edgeCount": 8673,
-      "importEdgeCount": 7231,
-      "registerEdgeCount": 105
+      "nodeCount": 8057,
+      "edgeCount": 8698,
+      "importEdgeCount": 7255,
+      "registerEdgeCount": 104
     }
   },
-  "inventorySha256": "3302b79aa903a9af878c3b5f7cb81b36b09d5bd37f115d7e21d63eadfea445d2",
-  "manifestSha256": "ef265cab89b20f41d5efeeb93746fb739b019431669af9e0f1a1afdc41771642"
+  "inventorySha256": "ad634a0992f471e08530b5f5fd403d8f383038e53026465f54a4f3c53531cd03",
+  "manifestSha256": "32367e328be8a8a90649d3d7c24c51545c7b41ebbb94cd4de12b9991cc997f68"
 }
