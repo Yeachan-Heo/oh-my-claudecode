@@ -182,6 +182,38 @@ describe("pre-tool-enforcer.mjs: Jev model-routing chooses subagent effort", () 
     expect(requests[0].questions).toEqual(JSON.parse(JSON.stringify(serializeQuestions(questions))));
   }, 15000);
 
+  it("asks for the cheapest model that does the work well, with a description per model", async () => {
+    await routedInput(agentInput());
+    const tier = requests[0].questions["model-tier"] as unknown as {
+      type: string;
+      instructions: string;
+      criteria: Record<string, string>;
+    };
+    expect(tier.type).toBe("choice");
+    // The answer keys are the model names the hook maps onto the call; the descriptions say what each one is for.
+    expect(Object.keys(tier.criteria)).toEqual(["haiku", "sonnet", "opus"]);
+    expect(tier.criteria.haiku).toMatch(/^Haiku: mechanical work/);
+    expect(tier.criteria.sonnet).toMatch(/^Sonnet: typical developer and analyst work/);
+    expect(tier.criteria.opus).toMatch(/^Opus: work where a mistake is costly or hard to notice/);
+    expect(tier.instructions).toContain("cheapest model that will do the work well");
+    expect(tier.instructions).toContain("hardest important part of the work");
+    // Effort is the other question's job, and neither the brief's length nor its formal conditions raise the model.
+    expect(tier.instructions).toContain("Reasoning effort is chosen by a separate question");
+    expect(tier.instructions).toContain("do not raise the choice");
+  }, 15000);
+
+  it("sends the model-tier question whole, whatever OMC_JEV_EXCERPT_CHARS is", async () => {
+    await routedInput(agentInput());
+    const baseline = requests[0].questions["model-tier"] as unknown as { instructions: string; criteria: Record<string, string> };
+    expect(baseline.instructions.length).toBeGreaterThan(200);
+    expect(baseline.criteria.sonnet.length).toBeGreaterThan(200);
+    await routedInput(agentInput(), { OMC_JEV_EXCERPT_CHARS: "50" });
+    expect(requests[1].questions["model-tier"]).toEqual(baseline);
+    // model-routing has its own excerpt limit, which bounds the state and never the question definitions.
+    await routedInput(agentInput(), { OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING: "50" });
+    expect(requests[2].questions["model-tier"]).toEqual(baseline);
+  }, 15000);
+
   it("sends the effort question whole, whatever OMC_JEV_EXCERPT_CHARS is", async () => {
     await routedInput(agentInput());
     const baseline = requests[0].questions.effort as unknown as { instructions: string; criteria: string[] };
