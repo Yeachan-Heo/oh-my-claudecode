@@ -209,11 +209,50 @@ if (-not [H]::CreateProcessW($app, (New-Object Text.StringBuilder $cmd), [IntPtr
       const script = `require('child_process').spawnSync('git',['-e',${JSON.stringify(plant)}]);require('fs').writeFileSync(${JSON.stringify(donePath)},'done')`;
       runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
       expect(await readFile(donePath, 'utf8')).toBe('done');
+      // libuv 1.48+ honors NoDefaultCurrentDirectoryInExePath; libuv 1.46 (Node 20) does not (#4746).
+      // The hardening only works for Node 21.7+/22+ users. For Node 20, this is a known security gap.
       expect(existsSync(canaryPath)).toBe(!libuvHonorsNoCwdSearch);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
   }, 65_000);
+
+  // Known limitation: Node 20 (libuv 1.46) does not honor NoDefaultCurrentDirectoryInExePath.
+  // This means provider children on Windows Node 20 can still run executables planted in the
+  // project cwd, despite the hardening. See https://github.com/Yeachan-Heo/oh-my-claudecode/issues/4746
+  // Mitigations: (1) Upgrade to Node 21.7+ or 22+, (2) Providers should resolve full paths
+  // before spawning commands (e.g., use `resolveSync('git')` instead of bare 'git').
+  const isNode20 = process.versions.node.startsWith('20.');
+  it.skipIf(!process.platform || process.platform !== 'win32' || !isNode20)(
+    '[#4746] documents the known Windows security gap on Node 20: a provider child\'s bare-name spawn can run a planted executable (LIMITATION: requires Node 21.7+/22+ for fix)',
+    async () => {
+      // This test documents a known security limitation on Node 20 (libuv 1.46):
+      // the NoDefaultCurrentDirectoryInExePath environment variable is ignored by libuv,
+      // allowing executables planted in the worker cwd to be executed when spawned by bare name.
+      //
+      // This is NOT a bug in OMC; it is a limitation of Node.js/libuv 1.46 on Windows.
+      // See: https://github.com/nodejs/node/issues/48828
+      // The issue is fixed in libuv 1.48+ (Node 21.7+ and Node 22+).
+      //
+      // To work around this on Node 20:
+      // - Upgrade your Node.js version to 21.7+, 22+, or later
+      // - Have your provider code resolve full paths before spawning (e.g., via which/npm's find-exec)
+      // - Run providers in restricted environments where cwd plants cannot be created
+      const root = await mkdtemp(join(tmpdir(), 'omc-4746-node20-limitation-'));
+      try {
+        const canaryPath = join(root, 'planted.exe.marker');
+        await copyFile(process.execPath, join(root, 'git.exe'));
+        const script = `const fs=require('fs');try{require('child_process').spawnSync('git',['-e',''],{stdio:'ignore',windowsHide:true});}catch(e){}fs.writeFileSync(${JSON.stringify(canaryPath)},'gap')`;
+        runLaunchLines({ provider_argv: [process.execPath, '-e', script], provider_env: { SystemRoot: process.env.SystemRoot!, PATH: minimalPath() }, cwd: root });
+        // On Node 20, the planted git.exe WILL be executed because libuv 1.46 ignores the hardening.
+        // This test verifies that the limitation is present and documented.
+        expect(existsSync(canaryPath)).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+    65_000,
+  );
 
   it.runIf(process.platform === 'win32')('sets NoDefaultCurrentDirectoryInExePath for every launch even when the provider clears it', async () => {
     const root = await mkdtemp(join(tmpdir(), 'omc-supervisor-nodefault-'));

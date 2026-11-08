@@ -78,6 +78,11 @@ export declare function getArchitectVerificationPrompt(state: VerificationState,
 export declare function getArchitectRejectionContinuationPrompt(state: VerificationState): string;
 export declare function detectArchitectApproval(text: string, expected?: Pick<VerificationState, 'request_id' | 'story_id'>): boolean;
 /**
+ * True when the text contains any rejection wording at all. A superset test
+ * only — `detectArchitectRejection` is what decides.
+ */
+export declare function hasRejectionSignal(text: string): boolean;
+/**
  * Check if text contains architect rejection indicators
  */
 export declare function detectArchitectRejection(text: string): {
