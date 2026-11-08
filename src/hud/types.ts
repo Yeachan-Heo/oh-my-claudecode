@@ -654,6 +654,7 @@ export interface HudElementConfig {
   thinking: boolean;          // Show extended thinking indicator
   thinkingFormat: ThinkingFormat;  // Thinking indicator format
   apiKeySource: boolean;       // Show API key source (project/global/env)
+  account: boolean;            // Show signed-in Claude account email (opt-in due to screen sharing)
   hostname: boolean;           // Show machine hostname (useful for multi-host SSH workflows)
   profile: boolean;            // Show active profile name (from CLAUDE_CONFIG_DIR)
   missionBoard?: boolean;      // Show opt-in mission board above existing HUD detail lines
@@ -717,7 +718,7 @@ export interface LayoutConfig {
  * Used as fallback when no layout is configured.
  */
 export const DEFAULT_ELEMENT_ORDER: Required<LayoutConfig> = {
-  line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'profile'],
+  line1: ['hostname', 'cwd', 'gitRepo', 'gitBranch', 'gitStatus', 'apiKeySource', 'account', 'profile'],
   main: [
     'omcLabel', 'model', 'effort', 'claudeLabel', 'enterpriseCost', 'rateLimits', 'customBuckets', 'permission', 'thinking',
     'promptTime', 'session', 'tokens', 'ralph', 'autopilot', 'prd',
@@ -788,6 +789,7 @@ export const DEFAULT_HUD_CONFIG: HudConfig = {
     thinking: true,
     thinkingFormat: 'text',   // Text format for backward compatibility
     apiKeySource: false, // Disabled by default
+    account: false, // Opt-in to avoid exposing email on screen shares/streams
     hostname: false,
     profile: true,  // Show profile name when CLAUDE_CONFIG_DIR is set
     missionBoard: false,  // Opt-in mission board for whole-run progress tracking
@@ -850,6 +852,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinking: false,
     thinkingFormat: 'text',
     apiKeySource: false,
+    account: false,
     hostname: false,
     profile: true,
     missionBoard: false,
@@ -894,6 +897,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinking: true,
     thinkingFormat: 'text',
     apiKeySource: false,
+    account: false,
     hostname: false,
     profile: true,
     missionBoard: false,
@@ -938,6 +942,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinking: true,
     thinkingFormat: 'text',
     apiKeySource: true,
+    account: false,
     hostname: false,
     profile: true,
     missionBoard: false,
@@ -982,6 +987,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinking: true,
     thinkingFormat: 'text',
     apiKeySource: false,
+    account: false,
     hostname: false,
     profile: true,
     missionBoard: false,
@@ -1026,6 +1032,7 @@ export const PRESET_CONFIGS: Record<HudPreset, Partial<HudElementConfig>> = {
     thinking: true,
     thinkingFormat: 'text',
     apiKeySource: true,
+    account: false,
     hostname: false,
     profile: true,
     missionBoard: false,

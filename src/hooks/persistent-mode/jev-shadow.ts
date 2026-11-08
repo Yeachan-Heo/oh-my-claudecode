@@ -74,17 +74,35 @@ export async function applyLoopContinuationShadow(args: LoopContinuationShadowAr
     }
   };
   
+  const mapHeuristicForLoopContinuation = (r: PersistentModeResult, questionSet?: number): boolean | number | null => {
+    if (questionSet === 1) {
+      // Score question (iteration progress): shouldBlock does not reliably indicate
+      // actual progress made. Continuing (shouldBlock=true) does not mean we made
+      // progress; stopping (shouldBlock=false) does not mean zero progress. Without
+      // actual progress metrics, return null to make this comparison non-comparable.
+      return null;
+    }
+    // Question set 0 (Noul): "Is the task complete?"
+    // Blocking the stop is an explicit "not complete" judgment. Releasing the stop
+    // is not evidence of completion in any mode: failures, cancellations, circuit
+    // breakers, diagnostics and exhausted runtimes all release without finishing.
+    // The result carries no explicit completion signal, so a release is non-comparable.
+    return r.shouldBlock ? false : null;
+  };
+
   const results = await Promise.all([
     recordJudgment<PersistentModeResult>('loop-continuation', {
       state,
       twin: () => result,
       mapAnswer: mapTaskCompletionAnswer,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn,
     }),
     recordJudgment<PersistentModeResult>('loop-continuation', {
       state,
       twin: () => result,
       questionSet: 1,
+      mapHeuristic: mapHeuristicForLoopContinuation,
       fetchFn: args.fetchFn,
     }),
   ]);

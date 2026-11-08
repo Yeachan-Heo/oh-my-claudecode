@@ -22,7 +22,7 @@ import {
 } from "fs";
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
 import { createHash } from "node:crypto";
-import { spawn } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
@@ -34,6 +34,8 @@ const __dirname = dirname(__filename);
 const SAFE_CONTINUE = { continue: true, suppressOutput: true };
 const DEFAULT_SAFETY_TIMEOUT_MS = 8500;
 const SAFE_EXIT_FLUSH_TIMEOUT_MS = 100;
+/** Shared budget for all bridge delegation attempts inside one Stop event. */
+const BRIDGE_DELEGATION_TIMEOUT_MS = 6000;
 const LOOP_CONTINUATION_NOUL_QUESTIONS = {
   task_complete: {
     type: "noul",
@@ -52,12 +54,22 @@ const LEARNER_EXTRACTION_QUESTIONS = {
   },
 };
 
+function boundLastAssistantMessage(text, maxChars = 2000) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxChars ? trimmed.substring(0, maxChars) : trimmed;
+}
+
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
-  recordJevShadow({
+  // Noul question ("Is the task complete?"): blocking the stop is an explicit
+  // "not complete"; a release carries no completion signal, so it is non-comparable.
+  const mappedHeuristic = heuristic.shouldBlock ? false : null;
+  return recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
-    heuristic,
+    heuristic: mappedHeuristic,
     permissionMode,
   });
 }
@@ -72,7 +84,8 @@ async function recordLearnerExtractionShadow(data) {
     const detectorPath = join(__dirname, "..", "dist", "hooks", "learner", "detector.js");
     if (!existsSync(detectorPath)) return;
     const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
-    const heuristic = detectExtractableMoment(assistantMessage);
+    const detectionResult = detectExtractableMoment(assistantMessage);
+    const heuristic = detectionResult.detected;
     recordJevShadow({
       point: "learner-extraction",
       state: { assistant_message: assistantMessage, user_message: null },
@@ -156,7 +169,7 @@ const { getClaudeConfigDir } = await import(pathToFileURL(join(__dirname, "lib",
 const { readStdin } = await import(
   pathToFileURL(join(__dirname, "lib", "stdin.mjs")).href
 );
-const { resolveOmcStateRoot } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
+const { resolveOmcStateRoot, resolveSessionStatePathsForHook } = await import(pathToFileURL(join(__dirname, "lib", "state-root.mjs")).href);
 
 function readJsonFile(path) {
   try {
@@ -165,6 +178,44 @@ function readJsonFile(path) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Check if the state file has been modified since it was last read.
+ * Re-reads the state from disk and verifies that key identifiers
+ * (session_id, iteration, updated_at) haven't changed.
+ * Returns true if the state is safe to write (unchanged), false otherwise.
+ */
+function isStateUnchangedSinceJevRequest(originalState, statePath) {
+  if (!originalState || !statePath) return false;
+  const currentState = readJsonFile(statePath);
+  if (!currentState) return false;
+  
+  // Verify key identifiers haven't changed
+  if (originalState.session_id !== currentState.session_id) return false;
+  if (originalState.iteration !== currentState.iteration) return false;
+  if (originalState.updated_at !== currentState.updated_at) return false;
+  
+  return true;
+}
+
+function jevSaysTaskComplete(result) {
+  const noul = result?.answer?.noul;
+  return result?.mode === "active" &&
+    (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
+}
+
+function completeModeFromJev(state, statePath) {
+  if (!isStateUnchangedSinceJevRequest(state, statePath)) return false;
+
+  state.active = false;
+  state.current_phase = "complete";
+  state.phase = "complete";
+  state.completed_at = new Date().toISOString();
+  if (shouldWriteStateBack(statePath)) {
+    writeJsonFile(statePath, state);
+  }
+  return true;
 }
 
 /**
@@ -1248,6 +1299,249 @@ function isScheduledWakeupStop(data) {
   return reasons.some((reason) => stopPatterns.some((pattern) => reason.includes(pattern)));
 }
 
+const PRD_FILENAME = "prd.json";
+
+/**
+ * Same PRD lookup order as findPrdPath() in src/hooks/ralph/prd.ts:
+ * session-scoped first, then the project root, then .omc/, then .omc/state/.
+ * Deriving the path from the Ralph state file alone misses every PRD that
+ * lives at one of the project-level locations.
+ */
+async function resolvePrdPath(stateDir, omcRoot, directory, sessionId) {
+  const candidates = [];
+  if (sessionId) {
+    const { sessionScopedPath } = await resolveSessionStatePathsForHook(
+      directory,
+      "ralph",
+      sessionId,
+      { fileName: PRD_FILENAME },
+    );
+    if (sessionScopedPath) candidates.push(sessionScopedPath);
+  }
+  if (directory) {
+    candidates.push(join(directory, PRD_FILENAME));
+  }
+  candidates.push(join(omcRoot, PRD_FILENAME));
+  candidates.push(join(stateDir, PRD_FILENAME));
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Rebuild amendment entries in normalizeCriterionAmendment()'s canonical field
+ * order before hashing. Hashing the raw JSON would make the digest depend on
+ * the key order a writer happened to use, so a PRD the loader accepts could
+ * look like a different revision here.
+ */
+function canonicalAmendments(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((amendment) => ({
+    kind: amendment?.kind,
+    original: amendment?.original,
+    replacement: amendment?.kind === "replaced" ? amendment?.replacement : undefined,
+    reason: amendment?.reason,
+    evidence: amendment?.evidence,
+    authority: amendment?.authority,
+    timestamp: amendment?.timestamp,
+  }));
+}
+
+function governingCriteriaRevisionOf(story) {
+  const acceptanceCriteria = Array.isArray(story?.acceptanceCriteria) ? story.acceptanceCriteria : [];
+  const criterionAmendments = canonicalAmendments(story?.criterionAmendments);
+  return `sha256:${createHash("sha256")
+    .update(JSON.stringify({ acceptanceCriteria, criterionAmendments }))
+    .digest("hex")}`;
+}
+
+/**
+ * True when a story carries a completion claim that still needs reviewer
+ * sign-off.
+ *
+ * The skill tells the agent never to write `architectVerified` itself
+ * (skills/ralph/SKILL.md, Step 5) — approval binds it separately. That binding
+ * lives in the full persistent-mode implementation, which this standalone
+ * script does not contain, so a story that passed stays unverified forever
+ * unless we hand the stop event to the bridge.
+ */
+function storyNeedsReviewerSignoff(story) {
+  if (!story || story.passes !== true) {
+    return false;
+  }
+  // Mirror normalizeStory()'s revision binding on both sides:
+  // - `passes: true` without the matching completionCriteriaRevision is not a
+  //   completion claim, and
+  // - `architectVerified: true` without the matching
+  //   architectVerificationCriteriaRevision is an approval for an older
+  //   revision, i.e. still unverified.
+  // Delegating for either would spawn the bridge on every Stop of a
+  // hand-edited PRD; the bridge reaches the same conclusion, so skipping is
+  // not a loss.
+  const governingCriteriaRevision = governingCriteriaRevisionOf(story);
+  if (story.completionCriteriaRevision !== governingCriteriaRevision) {
+    return false;
+  }
+  return !(
+    story.architectVerified === true
+    && story.architectVerificationCriteriaRevision === governingCriteriaRevision
+  );
+}
+
+function hasPendingArchitectVerification(prd) {
+  const stories = Array.isArray(prd?.userStories) ? prd.userStories : [];
+  return stories.some(storyNeedsReviewerSignoff);
+}
+
+/**
+ * A pending verification request also needs the bridge. Once the last story is
+ * signed off, checkRalphLoop() starts a run-level (completion) request, and no
+ * story is left in the passes-but-unverified state the predicate above watches.
+ *
+ * The path comes from the canonical resolver so this agrees with what
+ * readVerificationState() reads. With a session id that means the
+ * session-scoped file only: falling back to the unscoped legacy file would
+ * delegate for a request the bridge deliberately does not read.
+ */
+async function readPendingVerificationRequest(directory, omcRoot, sessionId) {
+  if (sessionId) {
+    try {
+      const { sessionScopedPath } = await resolveSessionStatePathsForHook(
+        directory,
+        "ralph-verification",
+        sessionId,
+      );
+      const state = sessionScopedPath ? readJsonFile(sessionScopedPath) : null;
+      return state && state.pending === true ? state : null;
+    } catch {
+      return null;
+    }
+  }
+
+  const state = readJsonFile(join(omcRoot, "ralph-verification.json"));
+  return state && state.pending === true ? state : null;
+}
+
+/**
+ * Everything the delegation predicates need for one Stop event.
+ *
+ * The request identity is what lets the re-entrant path tell "the bridge
+ * produced new work" apart from "the bridge re-emitted the request that is
+ * already pending": a fresh request carries a new id, and a rejection keeps
+ * the id but advances verification_attempts.
+ */
+async function reviewerWorkState({ directory, sessionId, omcRoot, stateDir }) {
+  const request = await readPendingVerificationRequest(directory, omcRoot, sessionId);
+  if (request) {
+    return {
+      pending: true,
+      requestId: request.request_id,
+      attempts: request.verification_attempts,
+      storyId: request.story_id,
+    };
+  }
+  const prdPath = await resolvePrdPath(stateDir, omcRoot, directory, sessionId);
+  const prd = prdPath ? readJsonFile(prdPath) : null;
+  return { pending: hasPendingArchitectVerification(prd) };
+}
+
+function reviewerWorkKey(work) {
+  if (!work.pending) return "none";
+  return `pending:${work.requestId ?? ""}:${work.attempts ?? ""}:${work.storyId ?? ""}`;
+}
+
+/**
+ * Translate the bridge's hook output into the Stop-hook protocol.
+ *
+ * createHookOutput() returns `{ continue, message }`, while Stop needs
+ * `{ decision: "block", reason }` to keep the agent running with a prompt.
+ * Passing `continue: false` through unchanged stops the agent silently and
+ * drops the reviewer prompt.
+ */
+function adaptBridgeOutput(stdout) {
+  const trimmed = (stdout || "").trim();
+  if (!trimmed) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+
+  if (typeof parsed.decision === "string" && parsed.decision) {
+    return parsed;
+  }
+  // createHookOutput() pairs `continue: true` with the loop-complete notice, so
+  // an allow-stop may carry a message. Honouring `continue` before the message
+  // keeps that notice from being converted into one more forced turn.
+  if (parsed.continue === true) {
+    return { continue: true, suppressOutput: true };
+  }
+  if (typeof parsed.message === "string" && parsed.message.trim()) {
+    return { decision: "block", reason: parsed.message };
+  }
+  return null;
+}
+
+/**
+ * Run the full persistent-mode implementation (bridge) for one stop event.
+ * Returns a Stop-hook response, or null so the caller can fall back to the
+ * plain continuation path — a missing or broken bridge must never wedge the
+ * loop.
+ */
+function delegateToBridge(input) {
+  const candidates = [];
+  const bundled = join(__dirname, "..", "bridge", "cli.cjs");
+  if (existsSync(bundled)) {
+    candidates.push({ command: process.execPath, args: [bundled, "--hook=persistent-mode"] });
+  }
+  // Standalone installs copy this script to ~/.claude/hooks/, where the bundled
+  // bridge is not reachable; the npm bin shim is. On Windows that shim is
+  // `omc-cli.cmd`, which spawnSync cannot execute without an interpreter, so
+  // route it through the command processor.
+  if (process.platform === "win32") {
+    candidates.push({
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "omc-cli", "--hook=persistent-mode"],
+    });
+  } else {
+    candidates.push({ command: "omc-cli", args: ["--hook=persistent-mode"] });
+  }
+
+  // One shared deadline. hooks.json allows 10s for this script and the run.cjs
+  // supervisor 9.5s, so a second candidate must not get a fresh budget; a
+  // synchronous spawn also blocks this script's own watchdog.
+  const deadline = Date.now() + BRIDGE_DELEGATION_TIMEOUT_MS;
+
+  for (const { command, args } of candidates) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    try {
+      const result = spawnSync(command, args, {
+        input: JSON.stringify(input),
+        encoding: "utf-8",
+        timeout: remaining,
+        env: {
+          ...process.env,
+          // The bridge is also the interactive CLI. Without this it parses
+          // argv as a user command and refuses to run inside a [CC] session.
+          OMC_CLI_SKIP_PARSE: "1",
+        },
+      });
+      if (result.status !== 0) continue;
+      const adapted = adaptBridgeOutput(result.stdout);
+      if (adapted) return adapted;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 async function main() {
   try {
     if (shouldSkipPersistentModeHook()) {
@@ -1264,13 +1558,9 @@ async function main() {
       return;
     }
 
-    // Claude Code sets stop_hook_active when a Stop hook is already running.
-    // Never emit another decision:block in that re-entrant path: doing so trips
-    // Claude Code's safety override for repeatedly blocked Stop hooks.
-    if (data.stop_hook_active === true) {
-      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
-      return;
-    }
+    // The stop_hook_active guard runs after the Ralph state read: a forced
+    // continuation re-enters here carrying the reviewer's verdict, and that
+    // verdict still has to be consumed. See the guard below.
 
     // Stop supplies the assistant response text directly; only load the
     // existing detector when this advisory point is explicitly enabled.
@@ -1327,6 +1617,47 @@ async function main() {
       "ralph-state.json",
       sessionId,
     );
+
+    // [CC] sets stop_hook_active when a Stop hook is already running.
+    // Never emit another decision:block in that re-entrant path: doing so trips
+    // [CC]'s safety override for repeatedly blocked Stop hooks.
+    //
+    // That re-entry is also the Stop that carries the reviewer verdict for the
+    // prompt we just blocked with, so it still has to be consumed: delegate for
+    // the state mutation. A block is delivered only when the bridge actually
+    // produced new work (a fresh request, or an advanced attempt count) —
+    // re-emitting the request that was already pending is exactly the re-block
+    // this guard exists to prevent.
+    if (data.stop_hook_active === true) {
+      if (ralph.state && ralph.state.active === true && !isStaleState(ralph.state)) {
+        const before = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
+        if (before.pending) {
+          const beforeKey = reviewerWorkKey(before);
+          const beforeIteration = typeof ralph.state.iteration === "number" ? ralph.state.iteration : null;
+          const beforeStoryId = ralph.state.current_story_id;
+          const delegated = delegateToBridge(data);
+          const after = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
+          const afterRalph = readStateFileWithSession(
+            stateDir,
+            globalStateDir,
+            "ralph-state.json",
+            sessionId,
+          );
+          const ralphProgressed = afterRalph.state?.active === true
+            && ((beforeIteration !== null
+              && typeof afterRalph.state.iteration === "number"
+              && afterRalph.state.iteration > beforeIteration)
+              || afterRalph.state.current_story_id !== beforeStoryId);
+          const verificationAdvanced = after.pending && reviewerWorkKey(after) !== beforeKey;
+          if (delegated && delegated.decision === "block" && (verificationAdvanced || ralphProgressed)) {
+            console.log(JSON.stringify(delegated));
+            return;
+          }
+        }
+      }
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
+      return;
+    }
     const ultragoal = readStateFileWithSession(
       stateDir,
       globalStateDir,
@@ -1393,7 +1724,7 @@ async function main() {
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
-    if (
+    ralphPriority: if (
       isAuthoritativeModeActive(stateDir, "ralph", ralph, sessionId) && !isAwaitingConfirmation(ralph.state) &&
       !isStaleState(ralph.state) &&
       isStateForCurrentProject(ralph.state, directory, ralph.isGlobal)
@@ -1404,7 +1735,15 @@ async function main() {
       if (sessionMatches) {
         const iteration = ralph.state.iteration || 1;
         const maxIter = ralph.state.max_iterations || 100;
-
+        const autopilotSessionMatches = hasValidSessionId
+          ? autopilot.state?.session_id === sessionId
+          : !autopilot.state?.session_id || autopilot.state.session_id === sessionId;
+        const hasActiveAutopilotForSession = Boolean(
+          autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
+          (!isStaleState(autopilot.state) || autopilot.state.workflow) &&
+          isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal) &&
+          autopilotSessionMatches
+        );
         // Hard max: check the iteration count directly against the security
         // limit before continuing or extending, so a high max_iterations value
         // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
@@ -1425,6 +1764,19 @@ async function main() {
             }),
           );
           return;
+        }
+
+        // A story that passed but was never signed off, or a pending
+        // verification request, has to go through the reviewer gate before the
+        // loop can advance. Only the bridge holds that state machine, so hand
+        // this stop event to it and use its decision.
+        const work = await reviewerWorkState({ directory, sessionId, omcRoot, stateDir });
+        if (work.pending) {
+          const delegated = delegateToBridge(data);
+          if (delegated) {
+            console.log(JSON.stringify(delegated));
+            return;
+          }
         }
 
         if (iteration < maxIter) {
@@ -1457,13 +1809,36 @@ async function main() {
             phase: null,
             should_block: true,
             continuation_excerpt: reason,
+            last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
           };
-          recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+          const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+
+          const jevCompletionAccepted =
+            jevSaysTaskComplete(jevResult) &&
+            completeModeFromJev(ralph.state, ralph.path);
+
+          if (jevCompletionAccepted) {
+            if (!hasActiveAutopilotForSession) {
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+                }),
+              );
+              return;
+            }
+
+            // Ralph is a child workflow here; let the active autopilot handler
+            // below enforce Stop instead of releasing the turn.
+            break ralphPriority;
+          }
+
+          const shouldBlock = heuristic.shouldBlock;
 
           console.log(
             JSON.stringify({
-              decision: "block",
-              reason,
+              decision: shouldBlock ? "block" : "continue",
+              reason: reason,
             }),
           );
           return;
@@ -1479,26 +1854,47 @@ async function main() {
         writeJsonFile(ralph.path, ralph.state);
 
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
-        recordLoopContinuationShadow({
+        const jevExtendResult = recordLoopContinuationShadow({
           mode_name: "ralph",
           session_id: sessionId || null,
           iteration: ralph.state.iteration,
           phase: null,
           should_block: true,
           continuation_excerpt: ralphExtendedReason,
+          last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
         }, {
           mode: "ralph",
           shouldBlock: true,
           iteration: ralph.state.iteration,
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
-        console.log(
-          JSON.stringify({
-            decision: "block",
-            reason: ralphExtendedReason,
-          }),
-        );
-        return;
+        
+        const jevCompletionAcceptedAtExtend =
+          jevSaysTaskComplete(jevExtendResult) &&
+          completeModeFromJev(ralph.state, ralph.path);
+
+        if (!jevCompletionAcceptedAtExtend) {
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: ralphExtendedReason,
+            }),
+          );
+          return;
+        }
+
+        if (!hasActiveAutopilotForSession) {
+          console.log(
+            JSON.stringify({
+              decision: "continue",
+              reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+            }),
+          );
+          return;
+        }
+
+        // Continue into the active autopilot handler below.
+        break ralphPriority;
       }
     }
 
@@ -1646,13 +2042,14 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            recordLoopContinuationShadow({
+            const jevAutopilotResult = recordLoopContinuationShadow({
               mode_name: "autopilot",
               session_id: sessionId || null,
               iteration: newCount,
               phase,
               should_block: true,
               continuation_excerpt: reason,
+              last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
             }, {
               mode: "autopilot",
               shouldBlock: true,
@@ -1660,10 +2057,25 @@ async function main() {
               phase,
             }, data.permission_mode);
 
+            if (
+              jevSaysTaskComplete(jevAutopilotResult) &&
+              completeModeFromJev(autopilot.state, autopilot.path)
+            ) {
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; autopilot mode exited and transitioned to completion.',
+                }),
+              );
+              return;
+            }
+
+            const shouldBlockAP = true; // Always block after reaching iteration limit (original behavior)
+
             console.log(
               JSON.stringify({
-                decision: "block",
-                reason,
+                decision: shouldBlockAP ? "block" : "continue",
+                reason: reason,
               }),
             );
             return;

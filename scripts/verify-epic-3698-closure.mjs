@@ -24,6 +24,7 @@ import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, writeFi
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 
 export class VerificationError extends Error {
   constructor(message) {
@@ -1958,7 +1959,7 @@ export function main(argv = process.argv.slice(2)) {
   return report.exitCode;
 }
 
-const isDirectRun = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+const isDirectRun = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isDirectRun) {
   try {
     process.exitCode = main();

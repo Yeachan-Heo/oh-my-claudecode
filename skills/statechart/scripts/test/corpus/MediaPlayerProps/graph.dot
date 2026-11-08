@@ -1,0 +1,93 @@
+strict digraph DiskGraph {
+nodesep=0.35;
+subgraph cluster_graph {
+color="white";
+5563385505008591753 [label="/\\ volume = \"Normal volume\"\n/\\ playback = \"Stopped\"",style = filled]
+5563385505008591753 -> 5459496424546159692 [label="YouPressPlay",color="black",fontcolor="black"];
+5459496424546159692 [label="/\\ volume = \"Normal volume\"\n/\\ playback = \"Buffering\""];
+5563385505008591753 -> 5767665807507136125 [label="ACallComesIn",color="black",fontcolor="black"];
+5767665807507136125 [label="/\\ volume = \"Muted\"\n/\\ playback = \"Stopped\""];
+5563385505008591753 -> -2451015957366623459 [label="YouTurnItUp",color="black",fontcolor="black"];
+-2451015957366623459 [label="/\\ volume = \"Loud\"\n/\\ playback = \"Stopped\""];
+5563385505008591753 -> 5767665807507136125 [label="YouPressMute",color="black",fontcolor="black"];
+5459496424546159692 -> 1832028610407887694 [label="EnoughDataArrives",color="black",fontcolor="black"];
+1832028610407887694 [label="/\\ volume = \"Normal volume\"\n/\\ playback = \"Playing\""];
+5459496424546159692 -> -2694137276511983669 [label="ACallComesIn",color="black",fontcolor="black"];
+-2694137276511983669 [label="/\\ volume = \"Muted\"\n/\\ playback = \"Buffering\""];
+5459496424546159692 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+5459496424546159692 -> -4711367017372802180 [label="YouTurnItUp",color="black",fontcolor="black"];
+-4711367017372802180 [label="/\\ volume = \"Loud\"\n/\\ playback = \"Buffering\""];
+5459496424546159692 -> -2694137276511983669 [label="YouPressMute",color="black",fontcolor="black"];
+5767665807507136125 -> -2694137276511983669 [label="YouPressPlay",color="black",fontcolor="black"];
+5767665807507136125 -> 5563385505008591753 [label="YouPressMute",color="black",fontcolor="black"];
+5767665807507136125 -> 5563385505008591753 [label="TheCallEnds",color="black",fontcolor="black"];
+-2451015957366623459 -> -4711367017372802180 [label="YouPressPlay",color="black",fontcolor="black"];
+-2451015957366623459 -> 5767665807507136125 [label="ACallComesIn",color="black",fontcolor="black"];
+-2451015957366623459 -> 5563385505008591753 [label="TheTrackEnds",color="black",fontcolor="black"];
+-2451015957366623459 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-2451015957366623459 -> 5563385505008591753 [label="YouTurnItDown",color="black",fontcolor="black"];
+-2451015957366623459 -> 5767665807507136125 [label="YouPressMute",color="black",fontcolor="black"];
+1832028610407887694 -> 5459496424546159692 [label="TheNetworkSlows",color="black",fontcolor="black"];
+1832028610407887694 -> -6282895301051251831 [label="YouPressPause",color="black",fontcolor="black"];
+-6282895301051251831 [label="/\\ volume = \"Normal volume\"\n/\\ playback = \"Paused\""];
+1832028610407887694 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+7503646495610027487 [label="/\\ volume = \"Muted\"\n/\\ playback = \"Paused\""];
+1832028610407887694 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+1832028610407887694 -> 5563385505008591753 [label="TheTrackEnds",color="black",fontcolor="black"];
+1832028610407887694 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+1832028610407887694 -> -8528256329721584678 [label="YouTurnItUp",color="black",fontcolor="black"];
+-8528256329721584678 [label="/\\ volume = \"Loud\"\n/\\ playback = \"Playing\""];
+1832028610407887694 -> 311712142880394938 [label="YouPressMute",color="black",fontcolor="black"];
+311712142880394938 [label="/\\ volume = \"Muted\"\n/\\ playback = \"Playing\""];
+-2694137276511983669 -> 311712142880394938 [label="EnoughDataArrives",color="black",fontcolor="black"];
+-2694137276511983669 -> 5767665807507136125 [label="YouPressStop",color="black",fontcolor="black"];
+-2694137276511983669 -> 5459496424546159692 [label="YouPressMute",color="black",fontcolor="black"];
+-2694137276511983669 -> 5459496424546159692 [label="TheCallEnds",color="black",fontcolor="black"];
+-4711367017372802180 -> -8528256329721584678 [label="EnoughDataArrives",color="black",fontcolor="black"];
+-4711367017372802180 -> -2694137276511983669 [label="ACallComesIn",color="black",fontcolor="black"];
+-4711367017372802180 -> 5459496424546159692 [label="TheTrackEnds",color="black",fontcolor="black"];
+-4711367017372802180 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-4711367017372802180 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-4711367017372802180 -> 5459496424546159692 [label="YouTurnItDown",color="black",fontcolor="black"];
+-4711367017372802180 -> -2694137276511983669 [label="YouPressMute",color="black",fontcolor="black"];
+-6282895301051251831 -> 1832028610407887694 [label="YouPressPlay",color="black",fontcolor="black"];
+-6282895301051251831 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+-6282895301051251831 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-6282895301051251831 -> 6295872152763217060 [label="YouTurnItUp",color="black",fontcolor="black"];
+6295872152763217060 [label="/\\ volume = \"Loud\"\n/\\ playback = \"Paused\""];
+-6282895301051251831 -> 7503646495610027487 [label="YouPressMute",color="black",fontcolor="black"];
+7503646495610027487 -> 311712142880394938 [label="YouPressPlay",color="black",fontcolor="black"];
+7503646495610027487 -> 5767665807507136125 [label="YouPressStop",color="black",fontcolor="black"];
+7503646495610027487 -> -6282895301051251831 [label="YouPressMute",color="black",fontcolor="black"];
+7503646495610027487 -> -6282895301051251831 [label="TheCallEnds",color="black",fontcolor="black"];
+-8528256329721584678 -> -4711367017372802180 [label="TheNetworkSlows",color="black",fontcolor="black"];
+-8528256329721584678 -> 6295872152763217060 [label="YouPressPause",color="black",fontcolor="black"];
+-8528256329721584678 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+-8528256329721584678 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+-8528256329721584678 -> 5563385505008591753 [label="TheTrackEnds",color="black",fontcolor="black"];
+-8528256329721584678 -> 5563385505008591753 [label="TheTrackEnds",color="black",fontcolor="black"];
+-8528256329721584678 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-8528256329721584678 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+-8528256329721584678 -> 1832028610407887694 [label="YouTurnItDown",color="black",fontcolor="black"];
+-8528256329721584678 -> 311712142880394938 [label="YouPressMute",color="black",fontcolor="black"];
+311712142880394938 -> -2694137276511983669 [label="TheNetworkSlows",color="black",fontcolor="black"];
+311712142880394938 -> 7503646495610027487 [label="YouPressPause",color="black",fontcolor="black"];
+311712142880394938 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+311712142880394938 -> 5767665807507136125 [label="TheTrackEnds",color="black",fontcolor="black"];
+311712142880394938 -> 5767665807507136125 [label="YouPressStop",color="black",fontcolor="black"];
+311712142880394938 -> 1832028610407887694 [label="YouPressMute",color="black",fontcolor="black"];
+311712142880394938 -> 1832028610407887694 [label="TheCallEnds",color="black",fontcolor="black"];
+6295872152763217060 -> -8528256329721584678 [label="YouPressPlay",color="black",fontcolor="black"];
+6295872152763217060 -> 7503646495610027487 [label="ACallComesIn",color="black",fontcolor="black"];
+6295872152763217060 -> -6282895301051251831 [label="TheTrackEnds",color="black",fontcolor="black"];
+6295872152763217060 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+6295872152763217060 -> 5563385505008591753 [label="YouPressStop",color="black",fontcolor="black"];
+6295872152763217060 -> -6282895301051251831 [label="YouTurnItDown",color="black",fontcolor="black"];
+6295872152763217060 -> 7503646495610027487 [label="YouPressMute",color="black",fontcolor="black"];
+{rank = same; 5563385505008591753;}
+{rank = same; -2451015957366623459;5767665807507136125;5459496424546159692;}
+{rank = same; -2694137276511983669;1832028610407887694;-4711367017372802180;}
+{rank = same; -8528256329721584678;7503646495610027487;-6282895301051251831;311712142880394938;}
+{rank = same; 6295872152763217060;}
+}
+}

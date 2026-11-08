@@ -1432,9 +1432,11 @@ describe('team cli', () => {
     logSpy.mockRestore();
   });
 
-  it('team resume invokes runtime resumeTeam', async () => {
+  it('team resume invokes runtime resumeTeam when runtime v2 is disabled', async () => {
     const { teamCommand } = await import('../team.js');
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    mocks.isRuntimeV2Enabled.mockReturnValue(false);
 
     mocks.resumeTeam.mockResolvedValue({
       teamName: 'alpha-team',

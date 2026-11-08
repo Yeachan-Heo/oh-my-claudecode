@@ -351,4 +351,32 @@ export {
   type LookoutVerdict,
   type ScanLookoutOptions,
 } from './lookout/index.js';
+// watch-pr - pure PR-readiness classification (babysit skill's verdict policy)
+export {
+  decideWatchVerdict,
+  NO_CHECKS_FIRST_SIGHTING_REASON,
+  type WatchCheckRun,
+  type WatchCheckState,
+  type WatchMergeability,
+  type WatchMergeStateStatus,
+  type WatchOptions,
+  type WatchPrFacts,
+  type WatchReviewDecision,
+  type WatchVerdict,
+  type WatchVerdictKind,
+} from './watch-pr/index.js';
+// verification-ledger - durable append-only verification verdict TSV
+export {
+  appendLedgerEntry,
+  defaultLedgerPath,
+  isVerificationVerdict,
+  LEDGER_HEADER,
+  LEDGER_STATE_RELATIVE_PATH,
+  readLedger,
+  renderLedgerCell,
+  renderLedgerRow,
+  VERIFICATION_VERDICTS,
+  type LedgerEntry,
+  type VerificationVerdict,
+} from './verification-ledger/index.js';
 

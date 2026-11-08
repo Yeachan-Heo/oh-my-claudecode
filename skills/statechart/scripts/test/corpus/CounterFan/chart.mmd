@@ -1,0 +1,85 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks NotDone
+    lg1: Path to the NotDone bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: done=FALSE x=0
+  s1: done=FALSE x=1
+  s2: done=FALSE x=10
+  s3: done=FALSE x=11
+  s4: done=FALSE x=12
+  s5: done=FALSE x=2
+  s6: done=FALSE x=3
+  s7: done=FALSE x=4
+  s8: done=FALSE x=5
+  s9: done=FALSE x=6
+  s10: done=FALSE x=7
+  s11: done=FALSE x=8
+  s12: done=FALSE x=9
+  s13: done=TRUE x=1
+  s14: done=TRUE x=10
+  s15: done=TRUE x=11
+  s16: done=TRUE x=12
+  s17: done=TRUE x=2
+  s18: done=TRUE x=3
+  s19: done=TRUE x=4
+  s20: done=TRUE x=5
+  s21: done=TRUE x=6
+  s22: done=TRUE x=7
+  s23: done=TRUE x=8
+  s24: done=TRUE x=9
+  [*] --> s0
+  s0 --> s1: Pick
+  s0 --> s2: Pick
+  s0 --> s3: Pick
+  s0 --> s4: Pick
+  s0 --> s5: Pick
+  s0 --> s6: Pick
+  s0 --> s7: Pick
+  s0 --> s8: Pick
+  s0 --> s9: Pick
+  s0 --> s10: Pick
+  s0 --> s11: Pick
+  s0 --> s12: Pick
+  s1 --> s13: Finish
+  s2 --> s14: Finish
+  s3 --> s15: Finish
+  s4 --> s16: Finish
+  s5 --> s17: Finish
+  s6 --> s18: Finish
+  s7 --> s19: Finish
+  s8 --> s20: Finish
+  s9 --> s21: Finish
+  s10 --> s22: Finish
+  s11 --> s23: Finish
+  s12 --> s24: Finish
+  s13 --> s0: Again
+  s14 --> s0: Again
+  s15 --> s0: Again
+  s16 --> s0: Again
+  s17 --> s0: Again
+  s18 --> s0: Again
+  s19 --> s0: Again
+  s20 --> s0: Again
+  s21 --> s0: Again
+  s22 --> s0: Again
+  s23 --> s0: Again
+  s24 --> s0: Again
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 bugPath
+  class s13 breaks
+  class s13 bugPath
+  class s14 breaks
+  class s15 breaks
+  class s16 breaks
+  class s17 breaks
+  class s18 breaks
+  class s19 breaks
+  class s20 breaks
+  class s21 breaks
+  class s22 breaks
+  class s23 breaks
+  class s24 breaks

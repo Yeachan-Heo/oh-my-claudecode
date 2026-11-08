@@ -677,66 +677,6 @@ For large ambiguous tasks, run analysis before team creation:
 
 This is especially useful when the task scope is unclear and benefits from external reasoning before committing to a specific decomposition.
 
-## Monitor Enhancement: Outbox Auto-Ingestion
-
-The lead can proactively ingest outbox messages from CLI workers using the outbox reader utilities, enabling event-driven monitoring alongside native team/conversation delivery.
-
-### Outbox Reader Functions
-
-**`readNewOutboxMessages(teamName, workerName)`** -- Read new outbox messages for a single worker using a byte-offset cursor. Each call advances the cursor, so subsequent calls only return messages written since the last read. Mirrors the inbox cursor pattern from `readNewInboxMessages()`.
-
-**`readAllTeamOutboxMessages(teamName)`** -- Read new outbox messages from ALL workers in a team. Returns an array of `{ workerName, messages }` entries, skipping workers with no new messages. Useful for batch polling in the monitor loop.
-
-**`resetOutboxCursor(teamName, workerName)`** -- Reset the outbox cursor for a worker back to byte 0. Useful when re-reading historical messages after a lead restart or for debugging.
-
-### Using `getTeamStatus()` in the Monitor Phase
-
-The `getTeamStatus(teamName, workingDirectory, heartbeatMaxAgeMs?)` function provides a unified snapshot combining:
-
-- **Worker registration** -- Which MCP workers are registered (from shadow registry / config.json)
-- **Heartbeat freshness** -- Whether each worker is alive based on heartbeat age
-- **Task progress** -- Per-worker and team-wide task counts (pending, in_progress, completed)
-- **Current task** -- Which task each worker is actively executing
-- **Recent outbox messages** -- New messages since the last status check
-
-Example usage in the monitor loop:
-
-```typescript
-const status = getTeamStatus("fix-ts-errors", workingDirectory);
-
-for (const worker of status.workers) {
-  if (!worker.isAlive) {
-    // Worker is dead -- reassign its in-progress tasks
-  }
-  for (const msg of worker.recentMessages) {
-    if (msg.type === "task_complete") {
-      // Mark task complete, unblock dependents
-    } else if (msg.type === "task_failed") {
-      // Handle failure, possibly retry or reassign
-    } else if (msg.type === "error") {
-      // Log error, check if worker needs intervention
-    }
-  }
-}
-
-if (status.taskSummary.pending === 0 && status.taskSummary.inProgress === 0) {
-  // All work done -- proceed to shutdown
-}
-```
-
-### Event-Based Actions from Outbox Messages
-
-| Message Type    | Action                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------- |
-| `task_complete` | Mark task completed, check if blocked tasks are now unblocked, notify dependent workers     |
-| `task_failed`   | Increment failure sidecar, decide retry vs reassign vs skip                                 |
-| `idle`          | Worker has no assigned tasks -- assign pending work or begin shutdown                       |
-| `error`         | Log the error, check `consecutiveErrors` in heartbeat for quarantine threshold              |
-| `shutdown_ack`  | Worker acknowledged shutdown -- safe to remove from team                                    |
-| `heartbeat`     | Update liveness tracking (redundant with heartbeat files but useful for latency monitoring) |
-
-This approach complements native team/conversation messaging by providing a pull-based mechanism for MCP workers that cannot use Claude Code's team messaging tools.
-
 ## Error Handling
 
 ### Teammate Fails a Task
@@ -996,7 +936,7 @@ MCP workers can operate in isolated git worktrees to prevent file conflicts betw
 
 1. **Worktree creation**: Before spawning a worker, call `createWorkerWorktree(teamName, workerName, repoRoot)` to create an isolated worktree at `.omc/worktrees/{team}/{worker}` with branch `omc-team/{teamName}/{workerName}`.
 
-2. **Worker isolation**: Pass the worktree path as the `workingDirectory` in the worker's `BridgeConfig`. The worker operates exclusively in its own worktree.
+2. **Worker isolation**: Run the worker with the worktree path as its working directory. The worker operates exclusively in its own worktree.
 
 3. **Merge coordination**: After a worker completes its tasks, use `checkMergeConflicts()` to verify the branch can be cleanly merged, then `mergeWorkerBranch()` to merge with `--no-ff` for clear history.
 

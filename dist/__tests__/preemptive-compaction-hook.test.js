@@ -56,12 +56,16 @@ function writeHudCache(dir, sessionId, usedPercentage) {
     return cachePath;
 }
 function runPostToolVerifier(input, env = {}) {
+    // Do not inherit Jev opt-ins or credentials from the developer shell: an
+    // active context-pruning point would change the warnings under test and
+    // send real requests.
+    const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('OMC_JEV') && key !== 'TYPESAFE_API_KEY'));
     const stdout = execFileSync('node', [SCRIPT_PATH], {
         input: JSON.stringify(input),
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
-        env: { ...process.env, NODE_ENV: 'test', ...env },
+        env: { ...baseEnv, NODE_ENV: 'test', ...env },
     });
     return JSON.parse(stdout.trim());
 }
@@ -154,6 +158,64 @@ describe('post-tool-verifier preemptive compaction warnings', () => {
         }, env);
         expect(first.hookSpecificOutput).toBeDefined();
         expect(second.hookSpecificOutput).toBeDefined();
+    });
+    it('keeps the documented warning threshold when OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT is truncated by parseInt', () => {
+        // parseInt('1e2', 10) is 1, so a 100% override warned at 1% context.
+        // parseInt('85.9', 10) is 85, so a fractional override silently moved the line.
+        const dir = makeTempDir();
+        const transcriptPath = writeTranscript(dir, 50, 100);
+        const input = {
+            cwd: dir,
+            transcript_path: transcriptPath,
+            tool_name: 'Read',
+            session_id: 'preemptive-truncated-warning-percent',
+            tool_response: 'read output',
+        };
+        const scientific = runPostToolVerifier(input, {
+            OMC_QUIET: '2',
+            OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '1e2',
+            OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '90',
+        });
+        const fractional = runPostToolVerifier({
+            ...input,
+            transcript_path: writeTranscript(dir, 72, 100),
+            session_id: 'preemptive-fractional-warning-percent',
+        }, {
+            OMC_QUIET: '2',
+            OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '85.9',
+            OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '90',
+        });
+        expect(scientific).toEqual({ continue: true });
+        expect(fractional).toEqual({
+            continue: true,
+            hookSpecificOutput: {
+                hookEventName: 'PostToolUse',
+                additionalContext: '[OMC WARNING] Context at 72% (warning threshold: 70%). Plan a /compact soon to preserve room for the next large tool output.',
+            },
+        });
+    });
+    it('keeps the documented critical threshold when OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT is truncated by parseInt', () => {
+        // parseInt('9e1', 10) is 9, so context at 72% was told to compact immediately.
+        const dir = makeTempDir();
+        const transcriptPath = writeTranscript(dir, 72, 100);
+        const result = runPostToolVerifier({
+            cwd: dir,
+            transcript_path: transcriptPath,
+            tool_name: 'Read',
+            session_id: 'preemptive-truncated-critical-percent',
+            tool_response: 'read output',
+        }, {
+            OMC_QUIET: '2',
+            OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT: '70',
+            OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT: '9e1',
+        });
+        expect(result).toEqual({
+            continue: true,
+            hookSpecificOutput: {
+                hookEventName: 'PostToolUse',
+                additionalContext: '[OMC WARNING] Context at 72% (warning threshold: 70%). Plan a /compact soon to preserve room for the next large tool output.',
+            },
+        });
     });
     it('honors the default cooldown when OMC_PREEMPTIVE_COMPACTION_COOLDOWN_MS is malformed', () => {
         // A bare parseInt() turned a malformed override into NaN, and

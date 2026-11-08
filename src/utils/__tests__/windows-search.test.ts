@@ -132,7 +132,7 @@ describe('every Node entry point hardens the Windows executable search', () => {
   it('finds the known entry points', () => {
     const found = entryPoints();
     for (const known of ['scripts/run.cjs', 'src/cli/index.ts', 'src/cli/team.ts', 'src/mcp/standalone-server.ts', 'src/mcp/team-server.ts',
-      'src/team/runtime-cli.ts', 'src/team/bridge-entry.ts', 'scripts/cleanup-orphans.mjs', 'templates/hooks/pre-tool-use.mjs']) {
+      'src/team/runtime-cli.ts', 'scripts/cleanup-orphans.mjs', 'templates/hooks/pre-tool-use.mjs']) {
       expect(found).toContain(known);
     }
   });

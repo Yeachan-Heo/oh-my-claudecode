@@ -44,11 +44,41 @@ const CONTEXT_PRUNING_QUESTIONS = {
   },
 };
 
+const STALENESS_LABELS = Object.keys(CONTEXT_PRUNING_QUESTIONS.staleness.criteria);
+
+/**
+ * Staleness label from a Jev answer. Only a score answer counts; another
+ * answer type yields no label, even when it carries a `choice`. A score answer
+ * carries only `score` (0 = fresh ... 3 = stale), so it is rounded to the
+ * nearest label; a score outside 0..3 or a non-number yields no label. A
+ * string `choice` that names one of the labels (case-insensitively) wins.
+ */
+function stalenessLabelOf(answer) {
+  if (answer?.type !== 'score') return undefined;
+  const choice = typeof answer.choice === 'string' ? answer.choice.toLowerCase() : undefined;
+  if (choice !== undefined && STALENESS_LABELS.includes(choice)) return choice;
+  const { score } = answer;
+  if (typeof score !== 'number' || !Number.isFinite(score)) return undefined;
+  if (score < 0 || score > STALENESS_LABELS.length - 1) return undefined;
+  return STALENESS_LABELS[Math.round(score)];
+}
+
 function readPositiveIntegerEnv(name, fallback) {
   const raw = process.env[name];
   if (typeof raw !== 'string' || !/^[1-9]\d*$/.test(raw)) return fallback;
 
   const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) ? parsed : fallback;
+}
+
+function readPercentThresholdEnv(name, fallback) {
+  const raw = process.env[name];
+  if (typeof raw !== 'string' || raw.trim() === '') return fallback;
+  const trimmed = raw.trim();
+  // parseInt('1e2', 10) is 1 and parseInt('85.9', 10) is 85. Either spelling
+  // moved the compaction warning to a percent the user did not set.
+  if (!/^[+-]?\d+$/.test(trimmed)) return fallback;
+  const parsed = Number(trimmed);
   return Number.isSafeInteger(parsed) ? parsed : fallback;
 }
 
@@ -60,8 +90,14 @@ const AGENT_OUTPUT_SUMMARY_LIMIT = readPositiveIntegerEnv(
   'OMC_AGENT_OUTPUT_SUMMARY_LIMIT',
   DEFAULT_AGENT_OUTPUT_SUMMARY_LIMIT,
 );
-const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT || '70', 10);
-const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = parseInt(process.env.OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT || '90', 10);
+const PREEMPTIVE_WARNING_THRESHOLD_PERCENT = readPercentThresholdEnv(
+  'OMC_PREEMPTIVE_COMPACTION_WARNING_PERCENT',
+  70,
+);
+const PREEMPTIVE_CRITICAL_THRESHOLD_PERCENT = readPercentThresholdEnv(
+  'OMC_PREEMPTIVE_COMPACTION_CRITICAL_PERCENT',
+  90,
+);
 // Unlike the two percent thresholds above, this value has no clamp downstream:
 // `now - lastWarningTime >= NaN` is false, so a malformed override made the
 // cooldown never expire and suppressed preemptive warnings for the session.
@@ -574,14 +610,31 @@ async function maybeBuildPreemptiveCompactionMessage(toolName, data, directory) 
     permissionMode: data.permission_mode,
   });
   
-  // In active mode, use Jev's action instead of heuristic
-  if (jevResult && jevResult.mode === 'active' && jevResult.source === 'jev') {
-    action = jevResult.answer || action;
+  // In active mode, use Jev's action instead of heuristic, but only below the
+  // critical threshold: at or above it the hook always asks for /compact.
+  // The Jev call above still runs there so the shadow log keeps the
+  // comparison; it is the rare case and is bounded by OMC_JEV_TIMEOUT_MS.
+  if (jevResult && jevResult.mode === 'active' && jevResult.answer && percentUsed < criticalThreshold) {
+    const label = stalenessLabelOf(jevResult.answer);
+    // Map staleness to action: fresh/recent -> none, aging -> warn, stale -> compact
+    if (label === 'fresh' || label === 'recent') {
+      action = 'none';
+    } else if (label === 'aging') {
+      action = 'warn';
+    } else if (label === 'stale') {
+      action = 'compact';
+    }
+    // Otherwise keep the heuristic action
   }
 
-  const severity = percentUsed >= criticalThreshold ? 'critical' : 'warning';
+  // Build message based on the computed action
+  if (action === 'none') {
+    return '';
+  }
+
   const now = Date.now();
   const sessionId = data.session_id || data.sessionId || 'unknown';
+  const severity = action === 'compact' ? 'critical' : 'warning';
 
   if (shouldSuppressPreemptiveWarning(directory, sessionId, severity, now)) {
     return '';

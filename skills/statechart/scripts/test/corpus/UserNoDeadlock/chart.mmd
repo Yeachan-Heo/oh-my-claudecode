@@ -1,0 +1,22 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks CHECK_DEADLOCK or NoDeadlock
+    lg1: Path to the CHECK_DEADLOCK or NoDeadlock bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: 0
+  s1: 1
+  s2: 2
+  s3: 3
+  [*] --> s0
+  s0 --> s1: Next
+  s1 --> s2: Next
+  s2 --> s3: Next
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s1 breaks
+  class s1 bugPath
+  class s2 bugPath
+  class s3 breaks
+  class s3 bugPath

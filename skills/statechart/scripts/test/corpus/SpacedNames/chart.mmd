@@ -1,0 +1,23 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks Going or NoDeadlock
+    lg1: Path to the Going or NoDeadlock bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: s="" t="z"
+  s1: s="a b" t="c"
+  s2: s="a" t="z"
+  s3: s="!" t="c"
+  s4: s="!" t="z"
+  [*] --> s0
+  s0 --> s1: Go
+  s0 --> s2: Go
+  s1 --> s3: Stop
+  s2 --> s4: Stop
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s2 bugPath
+  class s3 breaks
+  class s4 breaks
+  class s4 bugPath

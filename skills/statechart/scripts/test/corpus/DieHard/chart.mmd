@@ -1,0 +1,92 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Breaks NotSolved
+    lg1: Path to the NotSolved bug
+  }
+  class lg0 breaks
+  class lg1 bugPath
+  s0: big=0 small=0
+  s1: big=0 small=3
+  s2: big=5 small=0
+  s3: big=2 small=3
+  s4: big=3 small=0
+  s5: big=5 small=3
+  s6: big=2 small=0
+  s7: big=3 small=3
+  s8: big=0 small=2
+  s9: big=5 small=1
+  s10: big=0 small=1
+  s11: big=5 small=2
+  s12: big=1 small=0
+  s13: big=4 small=3
+  s14: big=1 small=3
+  s15: big=4 small=0
+  [*] --> s0
+  s0 --> s1: FillSmall
+  s0 --> s2: FillBig
+  s1 --> s0: EmptySmall
+  s1 --> s4: SmallToBig
+  s1 --> s5: FillBig
+  s2 --> s0: EmptyBig
+  s2 --> s3: BigToSmall
+  s2 --> s5: FillSmall
+  s3 --> s1: EmptyBig
+  s3 --> s2: SmallToBig
+  s3 --> s5: FillBig
+  s3 --> s6: EmptySmall
+  s4 --> s0: EmptyBig
+  s4 --> s1: BigToSmall
+  s4 --> s2: FillBig
+  s4 --> s7: FillSmall
+  s5 --> s1: EmptyBig
+  s5 --> s2: EmptySmall
+  s6 --> s0: EmptyBig
+  s6 --> s2: FillBig
+  s6 --> s3: FillSmall
+  s6 --> s8: BigToSmall
+  s7 --> s1: EmptyBig
+  s7 --> s4: EmptySmall
+  s7 --> s5: FillBig
+  s7 --> s9: SmallToBig
+  s8 --> s0: EmptySmall
+  s8 --> s1: FillSmall
+  s8 --> s6: SmallToBig
+  s8 --> s11: FillBig
+  s9 --> s2: EmptySmall
+  s9 --> s5: FillSmall
+  s9 --> s7: BigToSmall
+  s9 --> s10: EmptyBig
+  s10 --> s0: EmptySmall
+  s10 --> s1: FillSmall
+  s10 --> s9: FillBig
+  s10 --> s12: SmallToBig
+  s11 --> s2: EmptySmall
+  s11 --> s5: FillSmall
+  s11 --> s8: EmptyBig
+  s11 --> s13: BigToSmall
+  s12 --> s0: EmptyBig
+  s12 --> s2: FillBig
+  s12 --> s10: BigToSmall
+  s12 --> s14: FillSmall
+  s13 --> s1: EmptyBig
+  s13 --> s5: FillBig
+  s13 --> s11: SmallToBig
+  s13 --> s15: EmptySmall
+  s14 --> s1: EmptyBig
+  s14 --> s5: FillBig
+  s14 --> s12: EmptySmall
+  s14 --> s15: SmallToBig
+  s15 --> s0: EmptyBig
+  s15 --> s2: FillBig
+  s15 --> s13: FillSmall
+  s15 --> s14: BigToSmall
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  class s0 bugPath
+  class s2 bugPath
+  class s3 bugPath
+  class s6 bugPath
+  class s8 bugPath
+  class s11 bugPath
+  class s13 breaks
+  class s13 bugPath
+  class s15 breaks
