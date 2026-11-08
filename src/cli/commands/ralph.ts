@@ -36,9 +36,11 @@ import {
   readBaseline,
   recordBaseline,
   signatureLines,
+  writeBaseline,
   type CommandBaseline,
 } from '../../hooks/ralph/feedback-baseline.js';
-import { findPrdPath, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
+import { findPrdPath, getPrdGoverningCriteriaRevision, getPrdStatus, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
+import { closeoutPath, isCloseoutSatisfied, isDeslopStatus, readCloseout, writeCloseout } from '../../hooks/ralph/closeout.js';
 import { executePlanActions, loadMapRecords, parseMapRef, planFromMap, renderActionOutcomes, renderMapPlan } from '../../factory/map-ingest.js';
 import { composeMapPrd, finalizeMapRun, launchGate, mapRunTaskPrompt, readMapRunSidecar } from '../../factory/map-run.js';
 import { defaultSpawnFn, factoryLinkArgv } from '../../hooks/session-end/spawn-next.js';
@@ -462,6 +464,104 @@ export function runFeedbackCommand(
   }
 }
 
+/**
+ * Closeout state for the session's PRD.
+ *
+ * Ralph's terminal steps (the Step 7.5 deslop pass and the Step 8 closeout)
+ * are prose in the skill; nothing failed when an agent skipped them. Once
+ * every story is complete the gate therefore requires a record, bound to the
+ * governing criteria revision so a later amendment invalidates it.
+ */
+export interface CloseoutGate {
+  required: boolean;
+  satisfied: boolean;
+  criteriaRevision: string | null;
+  deslop: string | null;
+}
+
+export function evaluateCloseoutGate(directory: string, stateRoot: string, sessionId: string): CloseoutGate {
+  // The record is session-scoped. Without a session there is nowhere to write
+  // or read it, so there is nothing to gate (verify still judges feedback).
+  if (!sessionId) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const prdPath = findPrdPath(directory, sessionId || undefined);
+  if (!prdPath) return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  const { prd } = readPrdFromPath(prdPath);
+  if (!prd || !getPrdStatus(prd).allComplete) {
+    return { required: false, satisfied: true, criteriaRevision: null, deslop: null };
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const record = sessionId ? readCloseout(closeoutPath(stateRoot, sessionId)) : null;
+  return {
+    required: true,
+    satisfied: isCloseoutSatisfied(record, criteriaRevision),
+    criteriaRevision,
+    deslop: record?.deslop ?? null,
+  };
+}
+
+/** The closeout action: write a revision-bound record, or check the existing one. */
+export function ralphCloseout(
+  options: { deslop?: string; check?: boolean; json?: boolean; session?: string },
+  directory: string = process.cwd(),
+  now: Date = new Date(),
+): number {
+  const stateRoot = getOmcRoot(directory);
+  const sessionId = options.session ?? process.env.OMC_SESSION_ID ?? '';
+  if (!sessionId) {
+    console.error('omc ralph closeout: no session id — pass --session <id> (or set OMC_SESSION_ID)');
+    return 1;
+  }
+  try {
+    validateSessionId(sessionId);
+  } catch (error) {
+    console.error(`omc ralph closeout: ${error instanceof Error ? error.message : String(error)}`);
+    return 1;
+  }
+  const prdPath = findPrdPath(directory, sessionId);
+  if (!prdPath) {
+    console.error('omc ralph closeout: no PRD for this session — a closeout records a completed ralph run');
+    return 1;
+  }
+  const { prd, error } = readPrdFromPath(prdPath);
+  if (!prd) {
+    console.error(`omc ralph closeout: ${error ?? 'invalid PRD'}`);
+    return 1;
+  }
+  const criteriaRevision = getPrdGoverningCriteriaRevision(prd);
+  const path = closeoutPath(stateRoot, sessionId);
+
+  if (options.check) {
+    const record = readCloseout(path);
+    const satisfied = isCloseoutSatisfied(record, criteriaRevision);
+    if (options.json) {
+      console.log(JSON.stringify({ sessionId, satisfied, criteriaRevision, closeout: record }));
+    } else if (satisfied) {
+      console.log(`ralph closeout: recorded (deslop: ${record?.deslop})`);
+    } else {
+      console.log('ralph closeout: no record matches the current criteria revision — run `omc ralph closeout --deslop completed|skipped`');
+    }
+    return satisfied ? 0 : 1;
+  }
+
+  if (!getPrdStatus(prd).allComplete) {
+    console.error('omc ralph closeout: the PRD still has incomplete stories — record the closeout only after Step 6 completes');
+    return 1;
+  }
+  if (!isDeslopStatus(options.deslop)) {
+    console.error('omc ralph closeout: pass --deslop completed or --deslop skipped (Step 7.5)');
+    return 1;
+  }
+  const written = writeCloseout(path, { sessionId, deslop: options.deslop, criteriaRevision }, now);
+  if (options.json) {
+    console.log(JSON.stringify({ sessionId, written, path, criteriaRevision, deslop: options.deslop }));
+  } else if (written) {
+    console.log(`ralph closeout: recorded (deslop: ${options.deslop}) at ${path}`);
+  } else {
+    console.error(`omc ralph closeout: could not write ${path}`);
+  }
+  return written ? 0 : 1;
+}
+
 /** The verify action, extracted so tests can drive it directly. Exit code is the contract. */
 export function ralphVerify(options: { json?: boolean; session?: string; writeBaseline?: boolean; timeoutMs?: number }, directory: string = process.cwd(), now: Date = new Date()): number {
   const stateRoot = getOmcRoot(directory);
@@ -539,9 +639,16 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
     // A timeout already present in the baseline is environment noise, like a
     // baseline failure; a new one means the gate could not run at all.
     const newlyTimedOut = timedOutCommands.filter((command) => !gateBaseline?.commands[command]?.timedOut);
+    const closeout = options.writeBaseline
+      ? { required: false, satisfied: true, criteriaRevision: null, deslop: null }
+      : evaluateCloseoutGate(directory, stateRoot, sessionId || '');
+    const closeoutBlocked = closeout.required && !closeout.satisfied;
+    const closeoutNote = closeoutBlocked
+      ? 'the PRD is complete but no closeout record matches its criteria revision; run `omc ralph closeout --deslop completed|skipped` before Step 7.6'
+      : null;
     if (options.json) {
-      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands }));
-      return diff.newSignatures.length > 0 || newlyTimedOut.length > 0 ? 1 : 0;
+      console.log(JSON.stringify({ sessionId: sessionId || null, baselinePresent: Boolean(gateBaseline), commands, newFailures: diff.newSignatures, resolvedFailures: diff.resolvedSignatures, unrunnableCommands, timedOutCommands, closeout, closeoutError: closeoutNote }));
+      return diff.newSignatures.length > 0 || newlyTimedOut.length > 0 || closeoutBlocked ? 1 : 0;
     }
     if (newlyTimedOut.length > 0) {
       const budgetSeconds = Math.round((options.timeoutMs ?? DEFAULT_FEEDBACK_TIMEOUT_MS) / 1000);
@@ -559,26 +666,37 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
         console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — ${otherNew.length} failure signature(s) reported as candidates, not regressions`);
         for (const signature of otherNew) console.log(`  candidate: ${signature}`);
       }
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
       return 1;
     }
     if (!gateBaseline) {
       console.log(`ralph verify: no baseline for session ${sessionId || '(unknown)'} — current failures can serve as the baseline; run with --write-baseline at startup`);
       for (const signature of diff.newSignatures) console.log(`  candidate: ${signature}`);
+      if (closeoutNote) {
+        console.log(`ralph verify: ${closeoutNote}`);
+        return 1;
+      }
       return 0;
     }
     if (diff.newSignatures.length > 0) {
       console.log(`ralph verify: ${diff.newSignatures.length} NEW failure(s) since baseline`);
       for (const signature of diff.newSignatures) console.log(`  new: ${signature}`);
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
       return 1;
     }
     const stillUnrunnable = unrunnableCommands.filter((command) => gateBaseline.commands[command]?.unrunnable);
     if (stillUnrunnable.length > 0) {
       console.log(`ralph verify: ${stillUnrunnable.length} feedback command(s) remain unrunnable; no comparison was possible`);
       for (const command of stillUnrunnable) console.log(`  unavailable: ${command}`);
-      return 0;
+      if (closeoutNote) console.log(`ralph verify: ${closeoutNote}`);
+      return closeoutBlocked ? 1 : 0;
     }
     const note = diff.resolvedSignatures.length > 0 ? ` (${diff.resolvedSignatures.length} baseline failure(s) resolved)` : '';
-    console.log(`ralph verify: clean vs baseline${note}`);
+    if (closeoutBlocked) {
+      console.log(`ralph verify: ${closeoutNote}`);
+      return 1;
+    }
+    console.log(`ralph verify: clean vs baseline${note}${closeout.required ? ' + closeout recorded' : ''}`);
     return 0;
   };
 
