@@ -20,7 +20,7 @@ MCP servers extend Claude Code with additional tools (web search, GitHub, etc.).
 
 If the user asks about MCP servers, point them at the native registration path:
 
-- Claude Code: `claude mcp add <name> ...` (see `claude mcp --help`), or the native MCP config selected by `CLAUDE_MCP_CONFIG_PATH` (by default, `$CLAUDE_CONFIG_DIR/.claude.json` when `CLAUDE_CONFIG_DIR` names a profile other than `~/.claude`, otherwise `~/.claude.json`)
+- Claude Code: `claude mcp add <name> ...` (see `claude mcp --help`), or the native MCP config selected by `CLAUDE_MCP_CONFIG_PATH` (by default, the sibling `.claude.json` next to `${CLAUDE_CONFIG_DIR:-$HOME/.claude}`)
 - OMC keeps its own bundled MCP server (`bridge/mcp-server.cjs`) registered via `.mcp.json`; it requires no user action
 - Company-context guidance, if used, is documented in `docs/company-context-interface.md`
 

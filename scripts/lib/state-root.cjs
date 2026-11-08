@@ -121,10 +121,9 @@ async function resolveOmcStateRoot(directory) {
  * @param {string} directory - Worktree root directory
  * @param {string} stateName - State name (e.g., "ralph", "ultrawork")
  * @param {string} [sessionId] - Optional session identifier
- * @param {{fileName?: string}} [options] - Optional exact JSON filename.
- * @returns {Promise<{readPath: string, writePath: string, sessionScopedPath: string|null, legacyPath: string}>} Unbranded paths
+ * @returns {Promise<{readPath: string, writePath: string}>} Unbranded path pair
  */
-async function resolveSessionStatePathsForHook(directory, stateName, sessionId, options = {}) {
+async function resolveSessionStatePathsForHook(directory, stateName, sessionId) {
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (pluginRoot) {
     try {
@@ -132,13 +131,8 @@ async function resolveSessionStatePathsForHook(directory, stateName, sessionId, 
       const { resolveSessionStatePaths } = await import(
         pathToFileURL(join(pluginRoot, 'dist', 'lib', 'worktree-paths.js')).href
       );
-      const result = resolveSessionStatePaths(stateName, sessionId, directory, options);
-      return {
-        readPath: result.effectiveRead,
-        writePath: result.effectiveWrite,
-        sessionScopedPath: result.sessionScoped || null,
-        legacyPath: result.legacy,
-      };
+      const result = resolveSessionStatePaths(stateName, sessionId, directory);
+      return { readPath: result.effectiveRead, writePath: result.effectiveWrite };
     } catch {
       // dist not built or unavailable — fall through to inline fallback
     }
@@ -146,21 +140,16 @@ async function resolveSessionStatePathsForHook(directory, stateName, sessionId, 
 
   // Inline fallback: basic session-scoped path derivation (production always uses dist above)
   const omcRoot = await resolveOmcStateRoot(directory);
-  if (options.fileName !== undefined
-    && (options.fileName.trim() !== options.fileName || !/^[A-Za-z0-9][A-Za-z0-9_-]*\.json$/.test(options.fileName))) {
-    throw new Error(`Invalid session state filename: ${options.fileName}`);
-  }
   const normalizedName = stateName.endsWith('-state') ? stateName : `${stateName}-state`;
-  const fileName = options.fileName ?? `${normalizedName}.json`;
-  const legacy = join(omcRoot, 'state', options.fileName ?? `${normalizedName}.json`);
+  const legacy = join(omcRoot, 'state', `${normalizedName}.json`);
   if (!sessionId) {
-    return { readPath: legacy, writePath: legacy, sessionScopedPath: null, legacyPath: legacy };
+    return { readPath: legacy, writePath: legacy };
   }
-  const sessionScoped = join(omcRoot, 'state', 'sessions', sessionId, fileName);
+  const sessionScoped = join(omcRoot, 'state', 'sessions', sessionId, `${normalizedName}.json`);
   // effectiveRead probes the session-scoped file first and falls back to the
   // legacy path when it does not exist yet (mirrors resolveSessionStatePaths).
   const readPath = existsSync(sessionScoped) ? sessionScoped : legacy;
-  return { readPath, writePath: sessionScoped, sessionScopedPath: sessionScoped, legacyPath: legacy };
+  return { readPath, writePath: sessionScoped };
 }
 
 module.exports = { resolveOmcStateRoot, resolveSessionStatePathsForHook };
