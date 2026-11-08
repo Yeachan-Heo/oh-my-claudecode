@@ -69097,12 +69097,12 @@
       "pullNumber": 4852,
       "targetRef": "main",
       "mergeBaseSha": "0564555b63dfedd158669c6799d53743abd7d6bf",
-      "headSha": "db3b3052e9222bb61651225ef4bdf4ef27caa95f",
+      "headSha": "58d73d0392b58a3d0217a3f711515aa1658dd595",
       "owner": "Yeachan-Heo",
       "expiresAt": "2026-12-08T00:00:00.000Z",
       "generatedDelta": {
-        "count": 377,
-        "sha256": "fb58db35b3629129fe3d5e7236acd43666b469ff5f237c57c4c3704ef49829b4"
+        "count": 400,
+        "sha256": "7cbb3166af53f267b7a9000495961947b272c0c9068e5596c02d57c0dfdf4eba"
       },
       "generatedFiles": [
         {
@@ -69114,7 +69114,7 @@
         {
           "status": "modified",
           "filename": "bridge/cli.cjs",
-          "sha": "41a624709b2f4f9accd4f50326d5cd8439b1e728",
+          "sha": "76de248a1f44259e2dc407d0e9c82c28ee4feb95",
           "previousFilename": null
         },
         {
@@ -69383,6 +69383,12 @@
         },
         {
           "status": "modified",
+          "filename": "dist/cli/commands/ralph.js",
+          "sha": "cd2b678f56fe5e575132ab7c66a4f6ffa207dca9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/cli/index.d.ts.map",
           "sha": "7a71da711575d2f8eff120e7fbb4eb31714e0b99",
           "previousFilename": null
@@ -69397,6 +69403,12 @@
           "status": "modified",
           "filename": "dist/cli/index.js.map",
           "sha": "d7215ef21bfea981e5d6206b7cb7e5e81ff684d4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/launch.js",
+          "sha": "9ef54e27304888da61cc371f5e181968d224370d",
           "previousFilename": null
         },
         {
@@ -69475,6 +69487,54 @@
           "status": "modified",
           "filename": "dist/features/jev-slop-warning.js.map",
           "sha": "5cd9f125624fcad1ac0a80f7bccdaca917ae05ac",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/verification-ledger/index.d.ts",
+          "sha": "7525347e4eb344c714ff2ac84a0aed071794c515",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/verification-ledger/index.js",
+          "sha": "25193a1080d59d5b1aea01db98fa179bb89be2b9",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/verification-ledger/ledger.d.ts",
+          "sha": "6f1935ee7bac8fbf73af1b45cd68109148010f8d",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/verification-ledger/ledger.js",
+          "sha": "3a73ec0917feb6774de73c6042d5050bdc6ad964",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/watch-pr/index.d.ts",
+          "sha": "fd5355fd1361a9cbd428605fe85b4dfc8a284771",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/watch-pr/index.js",
+          "sha": "6e242a86543dfe19fafd173670744bb4641992be",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/watch-pr/policy.d.ts",
+          "sha": "8466f7df0e5a95202af8fad6f5de8689b37da16d",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/features/watch-pr/policy.js",
+          "sha": "1707adc58a9c0cec0284599059859a85d226ec57",
           "previousFilename": null
         },
         {
@@ -69593,6 +69653,12 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "5a56d42d92f48dcf5a2c1583dd5e68d402db2827",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/keyword-detector/index.js.map",
           "sha": "080f9aa6f551c6e6182924d28790a98b57a9dbd4",
           "previousFilename": null
@@ -69659,6 +69725,12 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/persistent-mode/index.js",
+          "sha": "e5ded2077c17ae372278eb4ebfe9556a121bc927",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/persistent-mode/jev-shadow.d.ts.map",
           "sha": "3b109cfc74c88fb5d95d688b8164ab5abefc1788",
           "previousFilename": null
@@ -69707,6 +69779,12 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts",
+          "sha": "765d518d8188ab7be9fa4192a230dfc16f2a386c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
           "sha": "e67b41b4dfb1c1e72e68a3e4a9263051db0a0df2",
           "previousFilename": null
@@ -69714,13 +69792,25 @@
         {
           "status": "modified",
           "filename": "dist/hooks/ralph/feedback-baseline.js",
-          "sha": "a96cfa6b18668645920321750b79ca2edec7c7df",
+          "sha": "7a4ce6f8e122fc5e016df2dfd618813539615c73",
           "previousFilename": null
         },
         {
           "status": "modified",
           "filename": "dist/hooks/ralph/feedback-baseline.js.map",
           "sha": "4642cd936b2cb097a128beb23cc8348ea064c237",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.d.ts",
+          "sha": "a01b104bda57218b08f51eb3e97e8070a22fdd1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/index.js",
+          "sha": "40ae2d5069c423cb0a15c5b6659e59e9fdeb53f5",
           "previousFilename": null
         },
         {
@@ -69733,6 +69823,18 @@
           "status": "modified",
           "filename": "dist/hooks/ralph/jev-shadow.js.map",
           "sha": "6e5dadc4fcf14c00968fb33b3db77d9b926058ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.d.ts",
+          "sha": "c64ddfa6756b481412fb6301b08825f80e504dab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/verifier.js",
+          "sha": "670753eca5fea76da7a6d7374adefd3dce7f03a6",
           "previousFilename": null
         },
         {
@@ -69761,6 +69863,12 @@
         },
         {
           "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts",
+          "sha": "02e236315f30808cc80d69594f12d3e19846c738",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
           "filename": "dist/hooks/session-end/cleanup-manifest.d.ts.map",
           "sha": "555ffaf8806a7e7f961bef5b241cc77f4451c4e8",
           "previousFilename": null
@@ -69768,7 +69876,7 @@
         {
           "status": "modified",
           "filename": "dist/hooks/session-end/cleanup-manifest.js",
-          "sha": "13cc6be9a2eab7fc1f2732d71bcc92da780dfa69",
+          "sha": "e606747a347414d1c5c3a51e7a5a6295c46d506d",
           "previousFilename": null
         },
         {
@@ -69817,6 +69925,18 @@
           "status": "modified",
           "filename": "dist/hooks/task-size-detector/jev-shadow.js.map",
           "sha": "58eeac075e026f1552ee31725532435034f97aee",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hud/elements/account.d.ts",
+          "sha": "2a7ba105c96de5954a53513b999ee0e155a6ee47",
+          "previousFilename": null
+        },
+        {
+          "status": "added",
+          "filename": "dist/hud/elements/account.js",
+          "sha": "9a6cc375d4936a6a94807c75408101c41cff04d7",
           "previousFilename": null
         },
         {
@@ -69895,6 +70015,24 @@
           "status": "modified",
           "filename": "dist/installer/index.js.map",
           "sha": "ac4cfecc9abadd5369c8b4dd4387904322946c40",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.d.ts",
+          "sha": "18cd3a415177c7966b458096ca95ae4676c64401",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/mcp-registry.js",
+          "sha": "ec503e6274f2bb9ac53ebdff0f2a8ba89b1df205",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/notifications/reply-listener.js",
+          "sha": "82b9d03b15bed8f19f5163a11f506f075ffc0433",
           "previousFilename": null
         },
         {
