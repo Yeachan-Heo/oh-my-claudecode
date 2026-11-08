@@ -33,8 +33,8 @@ import {
   baselinePath,
   diffAgainstBaseline,
   readBaseline,
+  recordBaseline,
   signatureLines,
-  writeBaseline,
   type CommandBaseline,
 } from '../../hooks/ralph/feedback-baseline.js';
 import { findPrdPath, getPrdGoverningCriteriaRevision, getPrdStatus, readPrd, readPrdFromPath } from '../../hooks/ralph/prd.js';
@@ -419,7 +419,12 @@ export function runFeedbackCommand(command: string, directory: string): CommandB
       || result.status === 126
       || result.status === 127
       || (!result.error && hasShellMissingCommand && otherSignatures.length === 0);
-    return { signatures: unrunnable ? [] : signatures, ...(unrunnable ? { unrunnable: true } : {}) };
+    const exitCode = !unrunnable && typeof result.status === 'number' ? result.status : undefined;
+    return {
+      signatures: unrunnable ? [] : signatures,
+      ...(exitCode !== undefined ? { exitCode } : {}),
+      ...(unrunnable ? { unrunnable: true } : {}),
+    };
   } catch (error) {
     const errorCode = typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string'
       ? error.code
@@ -579,9 +584,19 @@ export function ralphVerify(options: { json?: boolean; session?: string; writeBa
   const unrunnableCommands = Object.entries(current).filter(([, entry]) => entry.unrunnable).map(([command]) => command);
 
   if (options.writeBaseline) {
-    const written = path ? writeBaseline(path, current, now) : false;
-    const note = written ? `baseline recorded at ${path}` : 'could not write a baseline (no session id; pass --session)';
-    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
+    const result = path ? recordBaseline(path, current, now) : { written: false, added: 0, removed: 0 };
+    const { written, previousPath } = result;
+    const transitionNote = result.becameUnrunnable?.length
+      ? `, ${result.becameUnrunnable.length} command${result.becameUnrunnable.length === 1 ? '' : 's'} became unrunnable (${result.becameUnrunnable.join(', ')})`
+      : '';
+    const note = written
+      ? previousPath
+        ? `baseline replaced: +${result.added} signature${result.added === 1 ? '' : 's'}, -${result.removed} signature${result.removed === 1 ? '' : 's'}${transitionNote} (previous saved at ${previousPath})`
+        : `baseline recorded at ${path}`
+      : path
+        ? 'could not write a baseline'
+        : 'could not write a baseline (no session id; pass --session)';
+    if (options.json) console.log(JSON.stringify({ sessionId: sessionId || null, baselineWritten: written, previousPath: previousPath ?? null, added: result.added, removed: result.removed, becameUnrunnable: result.becameUnrunnable ?? [], commands, signatures: Object.fromEntries(Object.entries(current).map(([c, e]) => [c, e.signatures.length])), unrunnableCommands }));
     else console.log(`ralph verify: ${note}`);
     return written ? 0 : 1;
   }

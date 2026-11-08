@@ -14,14 +14,26 @@
  */
 
 import * as fs from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 
 export const FEEDBACK_BASELINE_FILENAME = 'feedback-baseline.json';
+/** Sibling directory that keeps replaced baselines recoverable. */
+export const FEEDBACK_BASELINE_HISTORY_DIRNAME = 'feedback-baseline.history';
+/** Bounded history: older re-records are pruned so the state directory cannot grow without limit. */
+export const MAX_FEEDBACK_BASELINE_HISTORY = 20;
 /** Per-command signature cap: a pathological runaway output must not become a giant baseline. */
 export const MAX_SIGNATURES_PER_COMMAND = 200;
+/** Cross-process baseline write lock: how long to wait between acquisition attempts. */
+const BASELINE_LOCK_RETRY_MS = 10;
+/** A lock file older than this is treated as abandoned by a crashed writer. */
+const BASELINE_LOCK_STALE_MS = 30_000;
+/** Upper bound on waiting for the write lock; past it the write fails closed. */
+const BASELINE_LOCK_TIMEOUT_MS = 10_000;
 
 /** ANSI escape sequences, stripped before fingerprinting. */
 const ANSI_PATTERN = /\x1b\[[0-9;]*m/g;
+/** Failure vocabulary shared by the log-level, progress, and summary filters. */
+const FAILURE_WORD_PATTERN = /\bfail(?:ed|ure|ures|ing)?\b|\w*(?:Error|Exception)s?\b|✗|×/i;
 /** Volatile substrings normalized away: durations, timestamps, tmp paths, hex ids. */
 const VOLATILE_PATTERNS: RegExp[] = [
   // Pytest's wall-clock parenthesized duration, e.g. "... in 194.32s (0:03:14)".
@@ -37,19 +49,60 @@ const VOLATILE_PATTERNS: RegExp[] = [
   // The process id in Node's warning prefix, "(node:12345) [DEP0040] DeprecationWarning: ...", differs on every run.
   // Only an id followed by an optional [code] and a "Name:" is replaced, so "(node:42) ready" in an assertion keeps its signal.
   /(?<=\(node:)\d+(?=\) (?:\[[^\]]+\] )?\w+:)/g,
+  // macOS per-user temp dirs (os.tmpdir()) are handled by
+  // normalizeMacosTempPaths(): only the mkdtemp-style random segment is
+  // replaced so stable suffixes (file:line:column) still distinguish failures.
   /\b[0-9a-f]{8,}\b/gi,
 ];
+
+/** macOS temp roots: /var/folders/<xx>/<hash>/T/<segments>, optionally /private-prefixed. */
+const MACOS_TEMP_PATH_PATTERN = /(?:\/private)?\/var\/folders\/[^/\s"']+\/[^/\s"']+\/T((?:\/[^/\s"']*)*)/g;
+
+/** mkdtemp appends six random alphanumerics (e.g. 85IacC, jxgQGA, 0yogcC). */
+const RANDOM_TEMP_SEGMENT_PATTERN = /^[A-Za-z0-9._-]*[A-Za-z0-9]{6}$/;
+
+function isRandomTempSegment(segment: string): boolean {
+  if (!RANDOM_TEMP_SEGMENT_PATTERN.test(segment)) return false;
+  const suffix = segment.slice(-6);
+  return /[0-9]/.test(suffix) || (/[A-Z]/.test(suffix) && /[a-z]/.test(suffix));
+}
+
+/**
+ * Replace the temp root, the first directory beneath it (the mkdtemp dir), and
+ * any later mkdtemp-style segment, while keeping stable repo-relative
+ * directories and the leaf filename/line:
+ * `/var/folders/x/y/T/repo-A/packages/a/index.ts:1:1` becomes
+ * `<v>/packages/a/index.ts:1:1`, so failures in different packages stay
+ * distinct across runs.
+ */
+function normalizeMacosTempPaths(line: string): string {
+  return line.replace(MACOS_TEMP_PATH_PATTERN, (_match, rest: string) => {
+    const segments = rest.split('/').filter(Boolean);
+    const normalized = segments.map((segment, index) => {
+      const isLeaf = index === segments.length - 1;
+      if (isLeaf && /[.:]/.test(segment)) return segment;
+      if (index === 0 || isRandomTempSegment(segment)) return '<v>';
+      return segment;
+    });
+    const joined = normalized.join('/');
+    // A lone leaf filename has no directory to anchor it; keep the temp-root
+    // marker so it cannot collide with a real relative path.
+    return segments.length === 1 && /[.:]/.test(segments[0]) ? `<v>/${joined}` : joined;
+  });
+}
 
 /**
  * Reduce one command's combined output to its failure signature set:
  * ANSI stripped, volatile fragments normalized, boilerplate dropped,
  * deduplicated, capped, and sorted for a stable diff. Lines that look like
  * progress rather than failure ("Running tests...", spinner frames) are
- * dropped. Pass/test count summary lines (e.g., '# pass N', '# tests N') are
- * excluded but failure count lines (e.g., '# fail N') are kept — a changed
- * fail count is signal that something moved. Individual passing test results
- * ("ok N ...") are excluded to prevent false positives when tests are added;
- * failing results ("not ok ...") are kept.
+ * dropped, as are below-WARN log levels and package-manager/runner chrome
+ * that is identical on a green run. Pass/test count summary lines (e.g.,
+ * '# pass N', '# tests N') are excluded but failure count lines (e.g.,
+ * '# fail N') are kept — a changed fail count is signal that something moved.
+ * Individual passing test results ("ok N ...", "✓ ...") are excluded to
+ * prevent false positives when tests are added; failing results ("not ok
+ * ...", "✗ ...") are kept.
  */
 export function signatureLines(output: string): string[] {
   const seen = new Set<string>();
@@ -57,10 +110,27 @@ export function signatureLines(output: string): string[] {
     let line = raw.trim();
     if (!line) continue;
     for (const pattern of VOLATILE_PATTERNS) line = line.replace(pattern, '<v>');
+    line = normalizeMacosTempPaths(line);
     line = line.replace(/\s+/g, ' ').trim();
     if (!line || line.length > 500) continue;
+    // Below-WARN logs are noise unless the message itself reports a failure
+    // ("INFO validation failed"), which is the only signal a quiet failing
+    // command may emit.
+    if ((/^(?:\[[^\]]*\]\s*)*(?:<v>\s+)?(?:TRACE|DEBUG|INFO|NOTICE)\b/i.test(line)
+      || /^\[(?:TRACE|DEBUG|INFO|NOTICE)\]/i.test(line)) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    if (/^(?:npm|yarn|pnpm)\s+warn\b/i.test(line)) continue;
+    if (/^>\s+\S+@\S+/.test(line)) continue;
+    if (/^>\s+(?:tsc|vite|vitest|jest|node|npm|yarn|pnpm|eslint|tsx|ts-node)\b/i.test(line)) continue;
+    if (/^(?:RUN\s+v?\d|Duration\s)/i.test(line)) continue;
+    // Green summaries are chrome; summaries naming any failure variant are signal.
+    if (/^(?:Test Files|Tests)\b/.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
+    // Source-context frames repeat the failing code but shift on every edit.
+    if (/^\d+\|\s/.test(line) || /^\|\s*\^/.test(line)) continue;
+    // Vitest/Jest mark passing cases with ✓/√ — never failure signal, even
+    // when the test name itself mentions "Error" (e.g. EmptyDiffError).
+    if (/^(?:✓|√)/.test(line)) continue;
     // Pure progress chatter and test format headers carry no failure signal.
-    if (/^(running|collecting|compiling|building|passing|tap\s+version|✓|√|%|\s*at\s)/i.test(line) && !/fail|error|✗|×/i.test(line)) continue;
+    if (/^(running|collecting|compiling|building|passing|tap\s+version|%|\s*at\s)/i.test(line) && !FAILURE_WORD_PATTERN.test(line)) continue;
     // Drop all-pass pytest progress lines (dots plus skipped/xfail/xpass markers with an optional "[ NN%]" suffix); their width and percentages shift with the test count. A line containing F/E is a failure marker and must survive, because quiet runs can emit only that line.
     if (/^[.sxX]+(?:\s*\[\s*\d+%\]\s*)?$/.test(line)) continue;
     // Exclude pytest all-pass summaries ("N passed in <v>", optionally with warnings/skipped/...
@@ -89,6 +159,8 @@ export function signatureLines(output: string): string[] {
 export interface CommandBaseline {
   /** Normalized failure signatures observed for this command at baseline time. */
   signatures: string[];
+  /** Process exit status observed at baseline time; absent when the command never ran. */
+  exitCode?: number;
   /** True when the command could not execute at all (tool missing, suite unrunnable). */
   unrunnable?: boolean;
 }
@@ -107,9 +179,20 @@ export interface BaselineDiff {
   resolvedSignatures: string[];
 }
 
+function exitCodeFailure(command: string, entry: CommandBaseline): string | null {
+  return entry.exitCode !== undefined && entry.exitCode !== 0
+    ? `${command}: <exited with code ${entry.exitCode}>`
+    : null;
+}
+
 /**
  * Pure diff: a signature is new when it is absent from the baseline. A command
- * that used to run and now cannot execute is itself a regression. With no
+ * that used to run and now cannot execute is itself a regression. So is a
+ * command that used to exit 0 and now exits nonzero — a failure whose only
+ * diagnostic is below WARN (e.g. `INFO validation failed`) normalizes to no
+ * signatures, so the status transition is the only signal it leaves. A command
+ * absent from the baseline inherits the same rule: a newly discovered failing
+ * command must not slip through just because it has no history. With no
  * baseline at all, everything present is reported as new — the caller decides
  * what that means (baseline creation reports instead of failing).
  */
@@ -119,21 +202,44 @@ export function diffAgainstBaseline(
 ): BaselineDiff {
   if (!baseline) {
     return {
-      newSignatures: Object.entries(current).flatMap(([command, entry]) => entry.signatures.map((signature) => `${command}: ${signature}`)),
+      newSignatures: Object.entries(current).flatMap(([command, entry]) => {
+        const exitFailure = exitCodeFailure(command, entry);
+        return [
+          ...entry.signatures.map((signature) => `${command}: ${signature}`),
+          ...(exitFailure ? [exitFailure] : []),
+        ];
+      }),
       resolvedSignatures: [],
     };
   }
   const newSignatures: string[] = [];
   const resolvedSignatures: string[] = [];
-  for (const [command, entry] of Object.entries(current)) {
+  // Iterate the union so a command dropped from the current set still reports
+  // its baseline signatures as resolved/removed instead of vanishing silently.
+  for (const command of new Set([...Object.keys(baseline.commands), ...Object.keys(current)])) {
+    const entry = current[command];
     const before = baseline.commands[command];
+    if (!entry) {
+      if (before) resolvedSignatures.push(...before.signatures.map((signature) => `${command}: ${signature}`));
+      continue;
+    }
     if (!before) {
       newSignatures.push(...entry.signatures.map((signature) => `${command}: ${signature}`));
+      const exitFailure = exitCodeFailure(command, entry);
+      if (exitFailure) newSignatures.push(exitFailure);
       continue;
     }
     if (entry.unrunnable && !before.unrunnable) {
       newSignatures.push(`${command}: <command became unrunnable>`);
       continue;
+    }
+    // Baselines recorded before exitCode existed default to success; they must
+    // be re-recorded, and the one-time transition is the nudge to do so.
+    const beforeExitCode = before.exitCode ?? 0;
+    if (entry.exitCode !== undefined && beforeExitCode === 0 && entry.exitCode !== 0) {
+      newSignatures.push(`${command}: <exited with code ${entry.exitCode}>`);
+    } else if (entry.exitCode === 0 && beforeExitCode !== 0) {
+      resolvedSignatures.push(`${command}: <no longer exits with code ${beforeExitCode}>`);
     }
     const beforeSet = new Set(before.signatures);
     const afterSet = new Set(entry.signatures);
@@ -159,12 +265,223 @@ export function readBaseline(path: string): FeedbackBaseline | null {
   }
 }
 
-export function writeBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): boolean {
+/**
+ * Copy the live baseline into its sibling history directory before it is
+ * replaced, returning the history path (or null when there is nothing to
+ * archive or the copy failed). The file name uses the replaced document's own
+ * `recordedAt` (sanitized for cross-platform paths) plus a counter, so history
+ * sorts chronologically.
+ */
+export function archiveBaseline(path: string, now: Date = new Date()): string | null {
   try {
-    fs.mkdirSync(join(path, '..'), { recursive: true });
-    fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
-    return true;
+    if (!fs.existsSync(path)) return null;
+    const dir = join(dirname(path), FEEDBACK_BASELINE_HISTORY_DIRNAME);
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = (readBaseline(path)?.recordedAt || now.toISOString()).replace(/[^0-9A-Za-z.-]+/g, '-');
+    // Continue past the highest counter for this stamp. Reusing a hole left by
+    // pruning would let a newer archive land on an older-looking name, breaking
+    // both chronological sorting and newest-first retention.
+    let counter = 1;
+    try {
+      for (const name of fs.readdirSync(dir)) {
+        if (!name.startsWith(`${stamp}-`)) continue;
+        const match = /-(\d+)\.json$/.exec(name);
+        if (match) counter = Math.max(counter, Number(match[1]) + 1);
+      }
+    } catch {
+      // The directory was just created; start from the first slot.
+    }
+    let target = join(dir, `${stamp}-${counter}.json`);
+    // Reserve the target atomically: COPYFILE_EXCL prevents overwriting an
+    // existing file (critical when concurrent writers create the same timestamp).
+    // Retry with an incremented counter on collision.
+    while (true) {
+      try {
+        fs.copyFileSync(path, target, fs.constants.COPYFILE_EXCL);
+        break;
+      } catch (err) {
+        const isEEXIST = (err as NodeJS.ErrnoException)?.code === 'EEXIST';
+        if (isEEXIST) {
+          counter += 1;
+          target = join(dir, `${stamp}-${counter}.json`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    // No pruning here: the archive must not be evicted until the replacement
+    // that depends on it has actually landed. recordBaseline prunes after a
+    // successful live write; pruning first would evict history when that write
+    // fails and the caller retries.
+    return target;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function pruneBaselineHistory(dir: string, keepPath: string): void {
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir).filter((name) => name.endsWith('.json') && join(dir, name) !== keepPath).sort(compareHistoryNames);
+  } catch {
+    return;
+  }
+  // Reserve one slot for `keepPath`, so the total never exceeds the cap.
+  const budget = Math.max(0, MAX_FEEDBACK_BASELINE_HISTORY - 1);
+  for (const name of entries.slice(0, Math.max(0, entries.length - budget))) {
+    try {
+      fs.rmSync(join(dir, name), { force: true });
+    } catch {
+      // A file we cannot prune must not block the re-record.
+    }
+  }
+}
+
+/**
+ * Chronological history order: the recordedAt stem first, then numeric suffix.
+ * A plain string sort would place `...-10.json` before `...-2.json`, so pruning
+ * a run of same-timestamp collisions would delete the wrong (newer) archives.
+ */
+function compareHistoryNames(left: string, right: string): number {
+  const leftMatch = /^(.*)-(\d+)\.json$/.exec(left);
+  const rightMatch = /^(.*)-(\d+)\.json$/.exec(right);
+  if (!leftMatch || !rightMatch) return left < right ? -1 : left > right ? 1 : 0;
+  if (leftMatch[1] !== rightMatch[1]) return leftMatch[1] < rightMatch[1] ? -1 : 1;
+  return Number(leftMatch[2]) - Number(rightMatch[2]);
+}
+
+export interface BaselineWriteResult {
+  written: boolean;
+  /** History path preserving the replaced baseline, when one existed. */
+  previousPath?: string;
+  /** Signatures present now but absent from the replaced baseline. */
+  added: number;
+  /** Signatures in the replaced baseline that are gone now. */
+  removed: number;
+  /** Commands that ran in the replaced baseline but could not execute now. */
+  becameUnrunnable?: string[];
+}
+
+/** Synchronous sleep: this module is synchronous, so a blocking wait is the only option. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Take the sibling `.lock` for a baseline transaction, returning the open fd
+ * (kept open until release) or null on timeout/failure. `openSync(..., 'wx')`
+ * is an atomic exclusive create, so exactly one writer wins each round.
+ * A lock older than BASELINE_LOCK_STALE_MS is assumed abandoned by a crashed
+ * writer and removed, otherwise one crash would wedge the baseline forever.
+ */
+function acquireBaselineLock(lockPath: string): number | null {
+  const deadline = Date.now() + BASELINE_LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      return fs.openSync(lockPath, 'wx');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') return null;
+    }
+    try {
+      const age = Date.now() - fs.statSync(lockPath).mtimeMs;
+      if (age > BASELINE_LOCK_STALE_MS) {
+        fs.rmSync(lockPath, { force: true });
+        continue;
+      }
+    } catch {
+      // The lock vanished between open and stat; retry the atomic create.
+      continue;
+    }
+    if (Date.now() >= deadline) return null;
+    sleepSync(BASELINE_LOCK_RETRY_MS);
+  }
+}
+
+/** Release the lock on every path, so a failed transaction cannot leak the file. */
+function releaseBaselineLock(fd: number, lockPath: string): void {
+  try {
+    fs.closeSync(fd);
+  } catch {
+    // Already closed; the path removal below is what actually releases the lock.
+  }
+  try {
+    fs.rmSync(lockPath, { force: true });
+  } catch {
+    // A stale lock is broken by age on the next acquisition.
+  }
+}
+
+/**
+ * Write a baseline, archiving any existing document first. The archive must
+ * succeed before the live file is replaced: losing history silently is the bug
+ * this guards against, so an unarchivable previous baseline fails the write.
+ *
+ * The whole read/archive/write transaction runs under a sibling `.lock` file.
+ * `COPYFILE_EXCL` only makes archive NAMES unique; without serialization two
+ * writers could archive the same original and the second could overwrite the
+ * first replacement without archiving it. A writer that cannot take the lock
+ * fails closed rather than proceeding unlocked.
+ *
+ * A failed live write leaves the archive in place: when `writeFileSync` fails
+ * partway (ENOSPC/EFBIG) that archive is the only intact recovery copy.
+ */
+export function recordBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): BaselineWriteResult {
+  // The lock lives beside the baseline, so its parent must exist first.
+  try {
+    fs.mkdirSync(dirname(path), { recursive: true });
+  } catch {
+    return { written: false, added: 0, removed: 0 };
+  }
+  const lockPath = `${path}.lock`;
+  const lockFd = acquireBaselineLock(lockPath);
+  if (lockFd === null) return { written: false, added: 0, removed: 0 };
+  try {
+    const previous = readBaseline(path);
+    const previousPath = archiveBaseline(path, now);
+    if (previousPath === null && fs.existsSync(path)) return { written: false, added: 0, removed: 0 };
+    try {
+      fs.writeFileSync(path, `${JSON.stringify({ version: 1, recordedAt: now.toISOString(), commands }, null, 2)}\n`, 'utf8');
+    } catch {
+      // Deliberately keep the archive: a partial live write makes it the only
+      // intact copy of the document the caller was replacing.
+      return { written: false, added: 0, removed: 0 };
+    }
+    // Prune only now that the live replacement succeeded, so a failed write and
+    // its retry never evict history for a replacement that never landed.
+    if (previousPath) pruneBaselineHistory(dirname(previousPath), previousPath);
+    // Audit the document replacement from the raw signature sets, independent of
+    // the gate judgment in diffAgainstBaseline: that function collapses a newly
+    // unrunnable command into one synthetic marker, which would misreport the
+    // stored signatures the replacement actually removed.
+    let added = 0;
+    let removed = 0;
+    const becameUnrunnable: string[] = [];
+    if (previous && previousPath) {
+      for (const command of new Set([...Object.keys(previous.commands), ...Object.keys(commands)])) {
+        const before = previous.commands[command];
+        const after = commands[command];
+        const beforeSet = new Set(before?.signatures ?? []);
+        const afterSet = new Set(after?.signatures ?? []);
+        for (const signature of afterSet) if (!beforeSet.has(signature)) added += 1;
+        for (const signature of beforeSet) if (!afterSet.has(signature)) removed += 1;
+        // Only mark as becameUnrunnable if the command existed in the previous baseline.
+        // A newly added unrunnable command was never runnable, so it doesn't "become" unrunnable.
+        if (before && after?.unrunnable && !before?.unrunnable) becameUnrunnable.push(command);
+      }
+    }
+    return {
+      written: true,
+      ...(previousPath ? { previousPath } : {}),
+      added,
+      removed,
+      ...(becameUnrunnable.length > 0 ? { becameUnrunnable } : {}),
+    };
+  } finally {
+    releaseBaselineLock(lockFd, lockPath);
+  }
+}
+
+/** Backward-compatible wrapper: the boolean says only whether the write succeeded. */
+export function writeBaseline(path: string, commands: Record<string, CommandBaseline>, now: Date = new Date()): boolean {
+  return recordBaseline(path, commands, now).written;
 }
