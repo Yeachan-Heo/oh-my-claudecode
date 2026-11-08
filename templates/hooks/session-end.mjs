@@ -11,10 +11,13 @@
 // Best-effort by design: any delegation failure exits 0 so a broken forward
 // can never block Claude Code shutdown.
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { existsSync, readdirSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const { readStdin } = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);

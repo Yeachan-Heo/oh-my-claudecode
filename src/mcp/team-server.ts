@@ -3,6 +3,7 @@
  * Team MCP Server - tmux CLI worker runtime tools
  */
 
+import { hardenWindowsExeSearch } from '../utils/windows-search.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -53,6 +54,8 @@ import {
 } from '../team/team-instance.js';
 import { canonicalTeamCwd } from '../team/state-paths.js';
 import { getGlobalOmcStatePath } from '../utils/paths.js';
+
+hardenWindowsExeSearch();
 
 const OMC_JOBS_DIR = process.env.OMC_JOBS_DIR || getGlobalOmcStatePath('team-jobs');
 const DEPRECATION_CODE = 'deprecated_cli_only' as const;

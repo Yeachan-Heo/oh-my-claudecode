@@ -15,6 +15,9 @@ const path = require('path');
 const { join, basename, dirname } = path;
 const { pathToFileURL } = require('url');
 const { Worker } = require('worker_threads');
+const { hardenWindowsExeSearch } = require('./lib/windows-search.cjs');
+
+hardenWindowsExeSearch();
 
 
 function isPluginRoot(pluginRoot) {
@@ -1060,15 +1063,17 @@ if (require.main === module) {
       } else {
         const sessionEndManifestHook = resolveTrustedSessionEndTarget(resolution, extraArgs);
         if (sessionEndManifestHook) {
-          // The shipped foreground budget stays 300ms unconditionally; only the
-          // test harness may widen it, and only under NODE_ENV=test.
+          // Reserve half the manifest budget, with at least 1000ms for Node cold start
+          // when the declared timeout permits it. Only tests may override this budget.
+          const manifestTimeoutMs = resolveGenericTimeoutMs(sessionEndManifestHook);
+          const MIN_SESSION_END_BUDGET_MS = 1000;
           const requestedTestTimeout = process.env.NODE_ENV === 'test'
             ? Number(process.env.OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS)
             : NaN;
           const budgetMs = Number.isFinite(requestedTestTimeout) && requestedTestTimeout > 0
             ? requestedTestTimeout
-            : 300;
-          const timeoutMs = Math.min(resolveGenericTimeoutMs(sessionEndManifestHook), budgetMs);
+            : Math.max(MIN_SESSION_END_BUDGET_MS, Math.floor(manifestTimeoutMs * 0.5));
+          const timeoutMs = Math.min(manifestTimeoutMs, budgetMs);
           runWorker(resolution.targetPath, sessionEndManifestHook, timeoutMs).then(status => {
             process.exitCode = status;
           });

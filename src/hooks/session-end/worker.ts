@@ -1,3 +1,4 @@
+import { childEnv } from '../../utils/windows-search.js';
 import { spawn } from 'child_process';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -23,7 +24,7 @@ export function workerEnvironment(): NodeJS.ProcessEnv {
 }
 export function spawnSessionEndWorker(payload: SessionEndWorkerPayload): boolean {
   try {
-    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: workerEnvironment(), windowsHide: true });
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), WORKER_ARG, JSON.stringify(payload)], { detached: true, stdio: 'ignore', env: childEnv(workerEnvironment()), windowsHide: true });
     child.unref();
     return true;
   } catch { return false; }
@@ -106,12 +107,24 @@ function reschedulePendingWorker(payload: SessionEndWorkerPayload, job: ReturnTy
   setTimeout(() => { void processSessionEndWorker(payload); }, delay);
 }
 
+/** An ownerless job whose claim is refused by a still-bounded runner gets one retry once every such runner deadline has passed. */
+function retryAfterBoundedRunners(payload: SessionEndWorkerPayload, job: ReturnType<typeof readSessionEndJob>): void {
+  if (!job || job.owner || job.phase === 'complete') return;
+  const now = Date.now();
+  const deadlines = Object.values(job.actions)
+    .filter(action => action.status === 'claimed' && action.runner && action.runner.phase !== 'terminal')
+    .map(action => Date.parse(action.runner!.deadlineAt))
+    .filter(deadline => deadline > now);
+  if (deadlines.length === 0) return;
+  setTimeout(() => { void processSessionEndWorker(payload); }, Math.max(...deadlines) - now + 1);
+}
+
 export async function processSessionEndWorker(payload: SessionEndWorkerPayload): Promise<void> {
   const deadlineAt = Date.now() + MAX_WORKER_MS; const nonce = randomUUID(); const identity = await getProcessStartIdentity(process.pid, Math.min(deadlineAt, Date.now() + 2_500));
   if (!identity) return;
   let claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt);
   if (!claimed) { await reapIfProvenStale(payload, deadlineAt); claimed = claimSessionEndJob(payload.directory, payload.sessionId, nonce, identity, deadlineAt); }
-  if (!claimed || !claimed.owner) return;
+  if (!claimed || !claimed.owner) { retryAfterBoundedRunners(payload, readSessionEndJob(payload.directory, payload.sessionId)); return; }
   let admitted = readSessionEndJob(payload.directory, payload.sessionId);
   const graceExpired = admitted ? Date.now() >= Date.parse(admitted.producerGraceExpiresAt) : false;
   if (admitted && graceExpired) {

@@ -481,6 +481,38 @@ describe('atomicWriteJson', () => {
             }
         }
     });
+    it('retries an early SQLite BUSY from lock database setup but not one that waited out the busy timeout', () => {
+        const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-sqlite-early-busy-'));
+        directories.push(directory);
+        const stateLockUrl = pathToFileURL(join(__dirname, '..', '..', '..', 'scripts', 'lib', 'state-lock.mjs')).href;
+        // Concurrent first-time setup of the lock database can make journal_mode
+        // return SQLITE_BUSY without SQLite ever running the busy handler.
+        const script = `
+      import { createRequire } from 'node:module';
+      const Database = createRequire(process.argv[1])('better-sqlite3');
+      const busyDelayMs = Number(process.argv[3]);
+      const pragma = Database.prototype.pragma;
+      let journalModeCalls = 0;
+      Database.prototype.pragma = function (source, ...rest) {
+        if (source === 'journal_mode = WAL' && ++journalModeCalls === 1) {
+          if (busyDelayMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, busyDelayMs);
+          throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' });
+        }
+        return pragma.call(this, source, ...rest);
+      };
+      const { acquireStateFileLockAtPathSync, getStateFileLockFailureKind, releaseStateFileLockSync } = await import(process.argv[1]);
+      const lock = acquireStateFileLockAtPathSync(process.argv[2], Number(process.argv[4]), true, false, ${SQLITE_CONTENTION_BUSY_TIMEOUT_MS});
+      const failure = getStateFileLockFailureKind();
+      if (lock) releaseStateFileLockSync(lock);
+      process.stdout.write(JSON.stringify({ lockAcquired: Boolean(lock), failure, journalModeCalls }));
+    `;
+        const run = (busyDelayMs, name, attempts = 2) => JSON.parse(execFileSync(process.execPath, ['--input-type=module', '-e', script, stateLockUrl, join(directory, name), String(busyDelayMs), String(attempts)], { encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' } }));
+        expect(run(0, 'early-busy.json.lock')).toEqual({ lockAcquired: true, failure: null, journalModeCalls: 2 });
+        expect(run(SQLITE_CONTENTION_BUSY_TIMEOUT_MS + 25, 'timed-out-busy.json.lock'))
+            .toEqual({ lockAcquired: false, failure: 'contention', journalModeCalls: 1 });
+        expect(run(0, 'last-attempt-busy.json.lock', 1))
+            .toEqual({ lockAcquired: false, failure: 'contention', journalModeCalls: 1 });
+    });
     it('recovers SQLite lock release after contention', async () => {
         const directory = mkdtempSync(join(tmpdir(), 'atomic-write-lock-release-contention-'));
         directories.push(directory);

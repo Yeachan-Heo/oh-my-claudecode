@@ -46,6 +46,20 @@ This skill can be bounded to an explicit file list or changed-file scope when th
 - Preserve the same regression-safe workflow even when the scope is a short file list
 - Do not silently expand a changed-file scope into broader cleanup work unless the user explicitly asks for it
 
+## Branch-Delta Focus
+
+When invoked on a branch (the usual case for review-driven cleanup), the
+default surface is the slop **this branch introduced**, not the whole repo:
+
+- Diff the branch against its base: the PR's base branch, else the branch
+  this one was cut from, else the repository's default branch.
+- Include uncommitted changes in the surface.
+- Clean only what the diff touches unless the user explicitly widens the
+  scope — pre-existing slop outside the delta is reported, not edited.
+
+This bounds the pass to work whose review context is already open, and keeps
+unrelated legacy cleanup from riding in under an anti-slop flag.
+
 ## Ralph Integration
 
 Ralph can invoke this skill as a bounded post-review cleanup pass.

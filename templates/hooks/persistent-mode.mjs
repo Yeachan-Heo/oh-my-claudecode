@@ -8,6 +8,7 @@
  * Supported modes: ralph, autopilot, ultrapilot, swarm, pipeline, team
  */
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import {
   existsSync,
   readFileSync,
@@ -23,6 +24,8 @@ import { createHash } from 'node:crypto';
 import { join, dirname, resolve, normalize, sep } from "path";
 import { homedir } from "os";
 import { fileURLToPath, pathToFileURL } from "url";
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

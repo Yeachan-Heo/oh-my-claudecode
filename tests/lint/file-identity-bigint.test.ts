@@ -26,8 +26,15 @@ describe('file identity helpers stat with BigInt ids', () => {
     ['templates/hooks/lib/atomic-write.mjs', 'function fileIdentity(path)'],
     ['src/lib/atomic-write.ts', 'function descriptorStats('],
     ['src/lib/atomic-write.ts', 'function pathnameStats('],
+    ['src/tools/deepinit-manifest.ts', 'function scanDirectories('],
   ])('%s %s', (file, signature) => {
     expect(functionBody(read(...file.split('/')), signature)).toContain('{ bigint: true }');
+  });
+
+  it('plugin-cache sameFileSystemIdentity compares BigInt dev and ino', () => {
+    const body = functionBody(read('src', 'utils', 'plugin-cache-validation.ts'), 'function sameFileSystemIdentity(');
+    expect(body).toContain("typeof left.ino === 'bigint'");
+    expect(body).toContain("typeof right.ino === 'bigint'");
   });
 
   it('state-lock twins compare identities through the zero-dev tolerant helper', () => {

@@ -1,3 +1,65 @@
+# oh-my-claudecode v5.7.30: Fix Windows executable search in project folder
+
+## Release Notes
+
+This release fixes a security issue where omc processes on Windows could inadvertently run executables planted in the project folder.
+
+### Bug Fixes
+
+- **fix: stop omc processes on Windows from running executables planted in the project folder** (#4768)
+
+### Stats
+
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 test improvements** | **0 chore**
+
+---
+
+# oh-my-claudecode v5.7.29: Windows provider resolution and state-lock contention fixes
+
+## Release Notes
+
+This release resolves Windows-specific provider resolution issues for both npm-installed and planted-cwd binaries, fixes state-lock contention from early probe attempts, and improves SessionEnd action claim and manifest handling. Note: v5.7.28 was cut from the wrong branch (main instead of dev) and contained only a version bump with no functionality changes; it was not published to npm or GitHub releases. This release incorporates all intended fixes from the 5.7.27→5.7.28→5.7.29 sequence.
+
+### Bug Fixes
+
+- **fix(team): resolve the PATHEXT candidate for Windows providers** (#4726 follow-up, #4741)
+- **fix: prevent Windows where command from searching cwd** (#4728) (#4734)
+- **fix: state-lock owner probe outside BEGIN IMMEDIATE to avoid contention** (#4727) (#4736)
+- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
+- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
+- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
+- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
+- **chore: remove src modules no runtime entry point reaches**
+
+### Test Improvements
+
+- **test(team): fix the #4726 Windows planted-git test and expose the libuv cwd-search gap** (#4746) (#4739)
+
+### Stats
+
+- **10 PRs merged** | **0 new features** | **8 bug fixes** | **1 test improvement** | **1 chore**
+
+---
+
+# oh-my-claudecode v5.7.27: SQLITE_BUSY retry, BigInt file identities, and SessionEnd manifest drift handling
+
+## Release Notes
+
+This release introduces compatibility improvements for NTFS file systems with BigInt inode support, adds retry logic for early SQLITE_BUSY errors during state-lock setup, and improves SessionEnd action claim handling to prevent zombie claims. Thanks to the maintainers for #4717, #4719, #4721, and #4723.
+
+### Bug Fixes
+
+- **fix(lib): retry an early SQLITE_BUSY from state-lock database setup** (#4717)
+- **fix(utils): use BigInt inodes for NTFS compatibility** (#4719)
+- **fix(hooks): retry owner-fenced SessionEnd manifest writes on revision drift** (#4721)
+- **fix(ralph): release undoes SessionEnd action claims that never started** (#4723)
+
+### Stats
+
+- **4 PRs merged** | **0 new features** | **4 bug fixes**
+
+---
+
 # oh-my-claudecode v5.7.26: Keep project memory and workflow routing current
 
 ## Release Notes

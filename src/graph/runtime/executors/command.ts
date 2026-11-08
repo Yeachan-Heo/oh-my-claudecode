@@ -13,6 +13,7 @@
  * the host's full environment.
  */
 
+import { childEnv } from "../../../utils/windows-search.js";
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
@@ -126,7 +127,7 @@ function runShellCommand(
         shell: true,
         windowsHide: true,
         cwd: process.cwd(),
-        env: buildCommandEnv(idempotencyKey),
+        env: childEnv(buildCommandEnv(idempotencyKey)),
         stdio: ["ignore", "pipe", "pipe"],
         // Detached => own process group => the NEGATIVE-pid group kill in
         // terminateProcessTree can reach grandchildren, not just the shell.

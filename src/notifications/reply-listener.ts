@@ -16,6 +16,7 @@
  * Follows the daemon pattern from src/features/rate-limit-wait/daemon.ts
  */
 
+import { childEnv } from '../utils/windows-search.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -368,7 +369,7 @@ const APPROVAL_DENY_WORDS = new Set([
  * not look like a decision (the message is then left for normal handling).
  */
 export function parseApprovalReply(text: string): 'approved' | 'denied' | null {
-  const firstWord = text.trim().toLowerCase().split(/\s+/)[0] || '';
+  const firstWord = text.trim().toLowerCase().split(/[\s.,!;:。，！；：、]+/)[0] || '';
   if (APPROVAL_APPROVE_WORDS.has(firstWord)) return 'approved';
   if (APPROVAL_DENY_WORDS.has(firstWord)) return 'denied';
   return null;
@@ -1170,7 +1171,7 @@ export function startReplyListener(_config: ReplyListenerDaemonConfig): DaemonRe
       detached: true,
       stdio: 'ignore',
       cwd: process.cwd(),
-      env: createMinimalDaemonEnv(),
+      env: childEnv(createMinimalDaemonEnv()),
     });
 
     child.unref();

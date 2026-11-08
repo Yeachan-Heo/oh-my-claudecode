@@ -1,0 +1,11 @@
+stateDiagram-v2
+  state "Door #lt;a#gt; #35;1" as s0 {
+    s1: x#58; #quot;0#quot;#59; y z
+    s2: a #lt; b #gt; c
+    s3: #35;lt#59; stays (breaks Safe)
+  }
+  [*] --> s1
+  s1 --> s2: Open
+  s2 --> s3: Lock
+  s3 --> s1: Reset
+  class s3 breaks

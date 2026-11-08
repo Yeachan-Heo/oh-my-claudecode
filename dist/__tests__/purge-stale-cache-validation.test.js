@@ -45,15 +45,17 @@ function dirent(name) {
 function fileDirent(name) {
     return { name, isDirectory: () => false, isSymbolicLink: () => false, isFile: () => true };
 }
+let nextIno = 0n;
 /** Return a stat result with mtime N ms ago.
- * Default must exceed STALE_THRESHOLD_MS (24 h) in src/utils/paths.ts. */
+ * Default must exceed STALE_THRESHOLD_MS (24 h) in src/utils/paths.ts.
+ * Each call gets its own bigint identity, so mocked paths never alias each other. */
 function staleStats(ageMs = 25 * 60 * 60 * 1000) {
-    return { mtimeMs: Date.now() - ageMs, size: 1, isDirectory: () => true };
+    return { mtimeMs: Date.now() - ageMs, size: 1, dev: 0n, ino: ++nextIno, isDirectory: () => true };
 }
 describe('purgeStalePluginCacheVersions validation', () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        mockedStatSync.mockReturnValue(staleStats());
+        mockedStatSync.mockImplementation(() => staleStats());
         mockedRenameSync.mockImplementation(() => undefined);
         mockedSymlinkSync.mockImplementation(() => undefined);
         mockedRmSync.mockImplementation(() => undefined);
@@ -120,8 +122,8 @@ describe('purgeStalePluginCacheVersions validation', () => {
         const staleVersion = join(pluginDir, '4.15.6-BETA');
         const sameDirectoryStats = {
             ...staleStats(),
-            dev: 1,
-            ino: 12345,
+            dev: 1n,
+            ino: 12345n,
         };
         const originalPlatform = process.platform;
         Object.defineProperty(process, 'platform', {
@@ -177,12 +179,12 @@ describe('purgeStalePluginCacheVersions validation', () => {
         const registeredActive = join(aliasedPluginDir, '4.15.10');
         const active = join(pluginDir, '4.15.10');
         const stale = join(pluginDir, '4.15.6');
-        const namespaceStats = { ...staleStats(), dev: 1, ino: 101 };
-        const activeStats = { ...staleStats(), dev: 1, ino: 102 };
+        const namespaceStats = { ...staleStats(), dev: 1n, ino: 101n };
+        const activeStats = { ...staleStats(), dev: 1n, ino: 102n };
         const staleVersionStats = {
             ...staleStats(),
-            dev: 1,
-            ino: 103,
+            dev: 1n,
+            ino: 103n,
         };
         const originalPlatform = process.platform;
         Object.defineProperty(process, 'platform', {

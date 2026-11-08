@@ -10,6 +10,10 @@
  *   round-trips are 465-605 ms, so a sub-second default degrades every call)
  * - OMC_JEV_MAX_REQUESTS: per-process request cap (0/absent = unlimited)
  * - OMC_JEV_EXCERPT_CHARS: max excerpt length sent in state, default 200
+ * - OMC_JEV_EXCERPT_CHARS_<POINT>: the same limit for one point (point name
+ *   upper-cased, dashes as underscores, e.g. OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING).
+ *   model-routing defaults to 12000 and ignores OMC_JEV_EXCERPT_CHARS; set its
+ *   own variable to change it.
  * - OMC_JEV_ENDPOINT: base URL overlay (stub servers / tests)
  * - OMC_JEV_LOG_DIR: shadow-log directory override (tests)
  * - OMC_JEV_QUIET=1: silence the env-activation stderr warning (hook
@@ -55,6 +59,8 @@ export interface JevConfig {
   /** 0 = unlimited. */
   maxRequests: number;
   excerptChars: number;
+  /** OMC_JEV_EXCERPT_CHARS_<POINT> overrides, keyed by the upper-cased variable suffix. */
+  pointExcerptChars: Readonly<Record<string, number>>;
   endpoint: string;
   logDir: string;
 }
@@ -82,6 +88,12 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
       }
     }
   }
+  const pointExcerptChars: Record<string, number> = {};
+  for (const [key, value] of Object.entries(env)) {
+    const match = /^OMC_JEV_EXCERPT_CHARS_([A-Z0-9_]+)$/.exec(key);
+    const parsed = match ? positiveInt(value, 0) : 0;
+    if (match && parsed > 0) pointExcerptChars[match[1]] = parsed;
+  }
   return {
     apiKey: env.TYPESAFE_API_KEY || null,
     masterOff,
@@ -92,9 +104,31 @@ export function parseJevConfig(env: NodeJS.ProcessEnv = process.env): JevConfig 
     timeoutMs: positiveInt(env.OMC_JEV_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, MAX_TIMER_DELAY_MS),
     maxRequests: positiveInt(env.OMC_JEV_MAX_REQUESTS, 0),
     excerptChars: positiveInt(env.OMC_JEV_EXCERPT_CHARS, DEFAULT_EXCERPT_CHARS),
+    pointExcerptChars,
     endpoint: env.OMC_JEV_ENDPOINT || JEV_DEFAULT_ENDPOINT,
     logDir: env.OMC_JEV_LOG_DIR || join(getOmcRoot(), 'state', 'jev'),
   };
+}
+
+/**
+ * Points whose state needs more than the global default to be judged at all.
+ * model-routing judges the work behind the task, which 200 characters hide.
+ * Mirror of POINT_DEFAULT_EXCERPT_CHARS in scripts/jev-resolve.mjs.
+ */
+export const POINT_DEFAULT_EXCERPT_CHARS: Readonly<Record<string, number>> = { 'model-routing': 12000 };
+
+/**
+ * Excerpt limit for one point: its own variable, else the point's default
+ * (model-routing only), else OMC_JEV_EXCERPT_CHARS. The global variable does
+ * not apply to a point with its own default.
+ */
+export function excerptCharsFor(point: string, config: JevConfig): number {
+  return (
+    config.pointExcerptChars[point.toUpperCase().replace(/-/g, '_')] ??
+    (Object.hasOwn(POINT_DEFAULT_EXCERPT_CHARS, point)
+      ? POINT_DEFAULT_EXCERPT_CHARS[point]
+      : config.excerptChars)
+  );
 }
 
 /** Master gate: is Jev enabled at all, independent of per-point state? */
@@ -122,8 +156,8 @@ export function pointState(
 
 /**
  * Recursively bound every string value to `max` chars. Applied to the state
- * sent to Jev and to the state recorded in the shadow log; question
- * definitions are bounded too since they can embed user text.
+ * sent to Jev and to the state recorded in the shadow log. Question
+ * definitions are static text and are not bounded.
  */
 export function boundExcerpts(value: unknown, max: number): unknown {
   if (typeof value === 'string') {

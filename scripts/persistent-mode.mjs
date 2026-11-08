@@ -52,12 +52,22 @@ const LEARNER_EXTRACTION_QUESTIONS = {
   },
 };
 
+function boundLastAssistantMessage(text, maxChars = 2000) {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  return trimmed.length > maxChars ? trimmed.substring(0, maxChars) : trimmed;
+}
+
 function recordLoopContinuationShadow(state, heuristic, permissionMode) {
-  recordJevShadow({
+  // Noul question ("Is the task complete?"): blocking the stop is an explicit
+  // "not complete"; a release carries no completion signal, so it is non-comparable.
+  const mappedHeuristic = heuristic.shouldBlock ? false : null;
+  return recordJevShadow({
     point: "loop-continuation",
     state,
     questions: LOOP_CONTINUATION_NOUL_QUESTIONS,
-    heuristic,
+    heuristic: mappedHeuristic,
     permissionMode,
   });
 }
@@ -72,7 +82,8 @@ async function recordLearnerExtractionShadow(data) {
     const detectorPath = join(__dirname, "..", "dist", "hooks", "learner", "detector.js");
     if (!existsSync(detectorPath)) return;
     const { detectExtractableMoment } = await import(pathToFileURL(detectorPath).href);
-    const heuristic = detectExtractableMoment(assistantMessage);
+    const detectionResult = detectExtractableMoment(assistantMessage);
+    const heuristic = detectionResult.detected;
     recordJevShadow({
       point: "learner-extraction",
       state: { assistant_message: assistantMessage, user_message: null },
@@ -165,6 +176,44 @@ function readJsonFile(path) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Check if the state file has been modified since it was last read.
+ * Re-reads the state from disk and verifies that key identifiers
+ * (session_id, iteration, updated_at) haven't changed.
+ * Returns true if the state is safe to write (unchanged), false otherwise.
+ */
+function isStateUnchangedSinceJevRequest(originalState, statePath) {
+  if (!originalState || !statePath) return false;
+  const currentState = readJsonFile(statePath);
+  if (!currentState) return false;
+  
+  // Verify key identifiers haven't changed
+  if (originalState.session_id !== currentState.session_id) return false;
+  if (originalState.iteration !== currentState.iteration) return false;
+  if (originalState.updated_at !== currentState.updated_at) return false;
+  
+  return true;
+}
+
+function jevSaysTaskComplete(result) {
+  const noul = result?.answer?.noul;
+  return result?.mode === "active" &&
+    (noul === true || (typeof noul === "number" && Number.isFinite(noul) && noul >= 0.5));
+}
+
+function completeModeFromJev(state, statePath) {
+  if (!isStateUnchangedSinceJevRequest(state, statePath)) return false;
+
+  state.active = false;
+  state.current_phase = "complete";
+  state.phase = "complete";
+  state.completed_at = new Date().toISOString();
+  if (shouldWriteStateBack(statePath)) {
+    writeJsonFile(statePath, state);
+  }
+  return true;
 }
 
 /**
@@ -1393,7 +1442,7 @@ async function main() {
 
     // Priority 1: Ralph Loop (explicit persistence mode)
     // Skip if state is stale (older than 2 hours) - prevents blocking new sessions
-    if (
+    ralphPriority: if (
       isAuthoritativeModeActive(stateDir, "ralph", ralph, sessionId) && !isAwaitingConfirmation(ralph.state) &&
       !isStaleState(ralph.state) &&
       isStateForCurrentProject(ralph.state, directory, ralph.isGlobal)
@@ -1404,7 +1453,15 @@ async function main() {
       if (sessionMatches) {
         const iteration = ralph.state.iteration || 1;
         const maxIter = ralph.state.max_iterations || 100;
-
+        const autopilotSessionMatches = hasValidSessionId
+          ? autopilot.state?.session_id === sessionId
+          : !autopilot.state?.session_id || autopilot.state.session_id === sessionId;
+        const hasActiveAutopilotForSession = Boolean(
+          autopilot.state?.active && !isAwaitingConfirmation(autopilot.state) &&
+          (!isStaleState(autopilot.state) || autopilot.state.workflow) &&
+          isStateForCurrentProject(autopilot.state, directory, autopilot.isGlobal) &&
+          autopilotSessionMatches
+        );
         // Hard max: check the iteration count directly against the security
         // limit before continuing or extending, so a high max_iterations value
         // cannot bypass it (mirrors src/hooks/persistent-mode/index.ts).
@@ -1457,13 +1514,36 @@ async function main() {
             phase: null,
             should_block: true,
             continuation_excerpt: reason,
+            last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
           };
-          recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+          const jevResult = recordLoopContinuationShadow(judgmentState, heuristic, data.permission_mode);
+
+          const jevCompletionAccepted =
+            jevSaysTaskComplete(jevResult) &&
+            completeModeFromJev(ralph.state, ralph.path);
+
+          if (jevCompletionAccepted) {
+            if (!hasActiveAutopilotForSession) {
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+                }),
+              );
+              return;
+            }
+
+            // Ralph is a child workflow here; let the active autopilot handler
+            // below enforce Stop instead of releasing the turn.
+            break ralphPriority;
+          }
+
+          const shouldBlock = heuristic.shouldBlock;
 
           console.log(
             JSON.stringify({
-              decision: "block",
-              reason,
+              decision: shouldBlock ? "block" : "continue",
+              reason: reason,
             }),
           );
           return;
@@ -1479,26 +1559,47 @@ async function main() {
         writeJsonFile(ralph.path, ralph.state);
 
         const ralphExtendedReason = `[RALPH LOOP - EXTENDED] Max iterations reached; extending to ${ralph.state.max_iterations} and continuing. When FULLY complete (after Architect verification), run /oh-my-claudecode:cancel (or --force).`;
-        recordLoopContinuationShadow({
+        const jevExtendResult = recordLoopContinuationShadow({
           mode_name: "ralph",
           session_id: sessionId || null,
           iteration: ralph.state.iteration,
           phase: null,
           should_block: true,
           continuation_excerpt: ralphExtendedReason,
+          last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
         }, {
           mode: "ralph",
           shouldBlock: true,
           iteration: ralph.state.iteration,
           maxIterations: ralph.state.max_iterations,
         }, data.permission_mode);
-        console.log(
-          JSON.stringify({
-            decision: "block",
-            reason: ralphExtendedReason,
-          }),
-        );
-        return;
+        
+        const jevCompletionAcceptedAtExtend =
+          jevSaysTaskComplete(jevExtendResult) &&
+          completeModeFromJev(ralph.state, ralph.path);
+
+        if (!jevCompletionAcceptedAtExtend) {
+          console.log(
+            JSON.stringify({
+              decision: "block",
+              reason: ralphExtendedReason,
+            }),
+          );
+          return;
+        }
+
+        if (!hasActiveAutopilotForSession) {
+          console.log(
+            JSON.stringify({
+              decision: "continue",
+              reason: '[JEV-COMPLETION] Task complete per Jev answer; ralph mode exited and transitioned to completion.',
+            }),
+          );
+          return;
+        }
+
+        // Continue into the active autopilot handler below.
+        break ralphPriority;
       }
     }
 
@@ -1646,13 +1747,14 @@ async function main() {
               reason = errorGuidance + reason;
             }
 
-            recordLoopContinuationShadow({
+            const jevAutopilotResult = recordLoopContinuationShadow({
               mode_name: "autopilot",
               session_id: sessionId || null,
               iteration: newCount,
               phase,
               should_block: true,
               continuation_excerpt: reason,
+              last_assistant_message: boundLastAssistantMessage(data.last_assistant_message),
             }, {
               mode: "autopilot",
               shouldBlock: true,
@@ -1660,10 +1762,25 @@ async function main() {
               phase,
             }, data.permission_mode);
 
+            if (
+              jevSaysTaskComplete(jevAutopilotResult) &&
+              completeModeFromJev(autopilot.state, autopilot.path)
+            ) {
+              console.log(
+                JSON.stringify({
+                  decision: "continue",
+                  reason: '[JEV-COMPLETION] Task complete per Jev answer; autopilot mode exited and transitioned to completion.',
+                }),
+              );
+              return;
+            }
+
+            const shouldBlockAP = true; // Always block after reaching iteration limit (original behavior)
+
             console.log(
               JSON.stringify({
-                decision: "block",
-                reason,
+                decision: shouldBlockAP ? "block" : "continue",
+                reason: reason,
               }),
             );
             return;

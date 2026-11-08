@@ -124,6 +124,9 @@ jobs:
           src/installer/__tests__/claude-md-transaction.test.ts
           src/team/__tests__/cli-detection.windows.integration.test.ts
           src/team/__tests__/worker-launch-windows-supervisor.test.ts
+          src/utils/__tests__/windows-search.test.ts
+          tests/statechart/native-suite.test.ts
+          tests/statechart/windows-smoke.test.ts
 
       - name: Run Windows legacy state-lock tests
         run: >-
@@ -155,6 +158,32 @@ jobs:
 
       - name: Smoke-test native SQLite on Node 26
         run: node -e "const Database = require('better-sqlite3'); const db = new Database(':memory:'); db.prepare('select 1 as ok').get(); db.close();"
+
+  # The statechart native suite spawns the CLI once per corpus case; each
+  # process pays its type transform. On the 20.x line there is no compile
+  # cache, which puts the 126-case cli.test far past any sane budget, so the
+  # Node 20 test job runs the suite's in-process files and this job runs the
+  # whole suite — cli.test included — on a stripping-native node.
+  test-statechart-node24:
+    name: Statechart suite (Node 24)
+    if: github.event_name != 'push' || github.ref_type != 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run the statechart native suite
+        run: npx vitest run tests/statechart/
 
   test-precompact-restore:
     name: PreCompact restore (${{ matrix.os }})

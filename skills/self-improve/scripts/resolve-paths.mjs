@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
+import { hardenWindowsExeSearch } from '../../../scripts/lib/windows-search.mjs';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveOmcStateRoot } from '../../../scripts/lib/state-root.mjs';
+
+hardenWindowsExeSearch();
 
 const DEFAULT_TOPIC_SLUG = 'default';
 const TOPICS_DIR = 'topics';

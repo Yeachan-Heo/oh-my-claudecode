@@ -1,0 +1,42 @@
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: Path to the QuietWhenStopped bug
+    lg1: Repeats forever, so EventuallyPlays breaks
+  }
+  class lg0 bugPath
+  class lg1 repeats
+  state "At the same time" as all {
+    state "Playback" as r0 {
+      s0: Stopped
+      s1: Buffering
+      s2: Playing
+      s3: Paused
+      [*] --> s0
+      s0 --> s1: you press play
+      s1 --> s0: you press stop
+      s1 --> s2: enough data arrives
+      s2 --> s0: the track ends or you press stop
+      s2 --> s1: the network slows
+      s2 --> s3: a call comes in or you press pause
+      s3 --> s0: you press stop
+      s3 --> s2: you press play
+    }
+    --
+    state "Volume" as r1 {
+      s4: Normal volume
+      s5: Loud
+      s6: Muted
+      [*] --> s4
+      s4 --> s5: you turn it up
+      s4 --> s6: a call comes in or you press mute
+      s5 --> s4: the track ends or you press stop or you turn it down
+      s5 --> s6: a call comes in or you press mute
+      s6 --> s4: the call ends or you press mute
+    }
+  }
+  class s0 bugPath
+  class s0 repeats
+  class s4 bugPath
+  class s4 repeats
+  class s5 bugPath

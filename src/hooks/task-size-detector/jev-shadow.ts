@@ -33,6 +33,7 @@ export function recordTaskSizeShadow(
   return recordJudgment<TaskSizeResult>('task-size', {
     state: { prompt, source: 'user-prompt-submit' },
     twin: () => classifyTaskSize(prompt),
+    mapHeuristic: (result, questionSet) => result.size,
     mapAnswer: (answer: JevAnswer) => {
       // Jev answer is a Choice over { small, medium, large }
       const choice = (answer.choice as string | undefined)?.toLowerCase();

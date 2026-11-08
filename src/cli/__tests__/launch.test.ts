@@ -756,8 +756,9 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
         .slice(shellCommandIndex + shellCommandMarker.length, -1)
         .replace(/""/g, '"');
 
+      // Security: NoDefaultCurrentDirectoryInExePath must be set before where check
       expect(nativeCommand).toMatch(
-        /^\(where claude >nul 2>nul \|\| \(echo \[omc\] Error: claude CLI not found in PATH\. 1>&2 & exit \/b 1\)\) && /,
+        /^set "NoDefaultCurrentDirectoryInExePath=1" && \(where claude >nul 2>nul \|\| \(echo \[omc\] Error: claude CLI not found in PATH\. 1>&2 & exit \/b 1\)\) && /,
       );
       expect(nativeCommand).toContain(
         ')) && exec set "CLAUDE_CONFIG_DIR=/tmp/omc-native-windows-test" && claude',
@@ -766,6 +767,42 @@ describe('buildTmuxClaudeCommand — pane process identity (issue #4005)', () =>
       expect(guardSeparator).toBeGreaterThanOrEqual(0);
       const claudeIndex = nativeCommand.indexOf('claude', guardSeparator + ')) && '.length);
       expect(claudeIndex).toBeGreaterThan(guardSeparator);
+    } finally {
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.assign(process.env, originalEnv);
+      Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+      if (originalNativeWindowsImplementation) {
+        vi.mocked(isNativeWindowsShell).mockImplementation(originalNativeWindowsImplementation);
+      } else {
+        vi.mocked(isNativeWindowsShell).mockReset();
+      }
+    }
+  });
+
+  it('sets NoDefaultCurrentDirectoryInExePath=1 in the Windows launch command before where claude check', () => {
+    const originalPlatform = process.platform;
+    const originalEnv = { ...process.env };
+    const originalNativeWindowsImplementation = vi.mocked(isNativeWindowsShell).getMockImplementation();
+
+    try {
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      vi.mocked(isNativeWindowsShell).mockReturnValue(true);
+
+      const command = buildTmuxClaudeCommand([]);
+      const shellCommandMarker = '/c "';
+      const shellCommandIndex = command.indexOf(shellCommandMarker);
+      expect(shellCommandIndex).toBeGreaterThanOrEqual(0);
+      const nativeCommand = command
+        .slice(shellCommandIndex + shellCommandMarker.length, -1)
+        .replace(/""/g, '"');
+
+      // Security requirement: NoDefaultCurrentDirectoryInExePath=1 must be set
+      // BEFORE the 'where claude' check to prevent execution of planted executables
+      expect(nativeCommand).toContain('set "NoDefaultCurrentDirectoryInExePath=1" && (where claude');
+
+      // Verify it appears at the start of the command
+      expect(nativeCommand).toMatch(/^set "NoDefaultCurrentDirectoryInExePath=1" &&/);
     } finally {
       for (const name of Object.keys(process.env)) delete process.env[name];
       Object.assign(process.env, originalEnv);

@@ -1,0 +1,95 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2401:3 @!@!@
+Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+@!@!@ENDMSG 2401 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 0 and seed 7432729512211909477 with 1 worker on 8 cores with 23888MB heap and 64MB offheap memory [pid: 580596] (Linux 6.12.94+ amd64, Eclipse Adoptium 25.0.5 x86_64, MSBDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /agent/repos/plugins/pstack/skills/statechart/scripts/test/corpus/TwoPhase/TwoPhase.tla
+Semantic processing of module TwoPhase
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2026-10-26 21:46:35)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2190:0 @!@!@
+Finished computing initial states: 1 distinct state generated at 2026-10-26 21:46:35.
+@!@!@ENDMSG 2190 @!@!@
+@!@!@STARTMSG 2110:1 @!@!@
+Invariant TCConsistent is violated.
+@!@!@ENDMSG 2110 @!@!@
+@!@!@STARTMSG 2121:1 @!@!@
+The behavior up to this point is:
+@!@!@ENDMSG 2121 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+1: <Initial predicate>
+/\ msgs = {}
+/\ rmState = (r1 :> "working" @@ r2 :> "working")
+/\ tmState = "init"
+/\ tmPrepared = {}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+2: <RMPrepare line 43, col 3 to line 46, col 38 of module TwoPhase>
+/\ msgs = {[type |-> "Prepared", rm |-> r1]}
+/\ rmState = (r1 :> "prepared" @@ r2 :> "working")
+/\ tmState = "init"
+/\ tmPrepared = {}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+3: <TMRcvPrepared line 24, col 3 to line 27, col 41 of module TwoPhase>
+/\ msgs = {[type |-> "Prepared", rm |-> r1]}
+/\ rmState = (r1 :> "prepared" @@ r2 :> "working")
+/\ tmState = "init"
+/\ tmPrepared = {r1}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+4: <TMCommit line 30, col 3 to line 34, col 38 of module TwoPhase>
+/\ msgs = {[type |-> "Commit"], [type |-> "Prepared", rm |-> r1]}
+/\ rmState = (r1 :> "prepared" @@ r2 :> "working")
+/\ tmState = "done"
+/\ tmPrepared = {r1}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+5: <RMRcvCommitMsg line 54, col 3 to line 56, col 44 of module TwoPhase>
+/\ msgs = {[type |-> "Commit"], [type |-> "Prepared", rm |-> r1]}
+/\ rmState = (r1 :> "committed" @@ r2 :> "working")
+/\ tmState = "done"
+/\ tmPrepared = {r1}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+6: <RMChooseToAbort line 49, col 3 to line 51, col 44 of module TwoPhase>
+/\ msgs = {[type |-> "Commit"], [type |-> "Prepared", rm |-> r1]}
+/\ rmState = (r1 :> "committed" @@ r2 :> "aborted")
+/\ tmState = "done"
+/\ tmPrepared = {r1}
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(6) at 2026-10-26 21:46:35: 117 states generated (19,943 s/min), 52 distinct states found (8,863 ds/min), 16 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+117 states generated, 52 distinct states found, 16 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 6.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2268:0 @!@!@
+The average outdegree of the complete state graph is 1 (minimum is 0, the maximum 5 and the 95th percentile is 4).
+@!@!@ENDMSG 2268 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 356ms at (2026-10-26 21:46:35)
+@!@!@ENDMSG 2186 @!@!@

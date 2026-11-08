@@ -92,13 +92,13 @@ describe('learner-extraction shadow judgment point', () => {
     const entry = JSON.parse(lines[0]!) as {
       point: string;
       mode: string;
-      heuristic: { detected: boolean };
+      heuristic: boolean;
       jev: { type: string } | null;
       state: Record<string, unknown>;
     };
     expect(entry.point).toBe('learner-extraction');
     expect(entry.mode).toBe('shadow');
-    expect(entry.heuristic.detected).toBe(true);
+    expect(entry.heuristic).toBe(true);
     expect(entry.jev?.type).toBe('noul');
     expect(entry.state).toMatchObject({
       assistant_message: EXTRACTABLE,
@@ -172,9 +172,9 @@ describe('learner-extraction shadow judgment point', () => {
     expect(result.source).toBe('twin');
 
     const lines = await waitForLogLines(1);
-    const entry = JSON.parse(lines[0]!) as { mode: string; heuristic: unknown; jev: unknown };
+    const entry = JSON.parse(lines[0]!) as { mode: string; heuristic: boolean; jev: unknown };
     expect(entry.mode).toBe('degraded');
-    expect(entry.heuristic).toEqual(detectExtractableMoment(EXTRACTABLE));
+    expect(entry.heuristic).toBe(detectExtractableMoment(EXTRACTABLE).detected);
     expect(entry.jev).toBeNull();
   });
 });

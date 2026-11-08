@@ -8,6 +8,7 @@
  * long-running-session fallback are repaired, or every hook/skill invocation
  * emits "Plugin directory does not exist" for the old version.
  */
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import {
   existsSync,
   lstatSync,
@@ -24,6 +25,8 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { normalizeHooksDataForPlatform } from './lib/hook-command-normalizer.mjs';
+
+hardenWindowsExeSearch();
 
 function getClaudeConfigDir() {
   const configured = (process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')).replace(/[\\/]+$/, '');

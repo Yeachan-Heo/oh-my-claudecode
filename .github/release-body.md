@@ -1,17 +1,16 @@
-# oh-my-claudecode v5.7.26: Keep project memory and workflow routing current
+# oh-my-claudecode v5.7.30: Fix Windows executable search in project folder
 
 ## Release Notes
 
-This release keeps project-memory hot paths aligned with the files users are working on and stops retired workflow names from being recommended or routed at runtime. Thanks to @iyoda for #4698 and #4699.
+This release fixes a security issue where omc processes on Windows could inadvertently run executables planted in the project folder.
 
 ### Bug Fixes
 
-- **fix(project-memory): make hot paths follow current work** (#4698; @iyoda)
-- **fix(workflows): drop retired ultraqa, omc-teams, and ultrawork names that still route** (#4699; @iyoda)
+- **fix: stop omc processes on Windows from running executables planted in the project folder** (#4768)
 
 ### Stats
 
-- **2 PRs merged** | **0 new features** | **2 bug fixes**
+- **1 PR merged** | **0 new features** | **1 bug fix** | **0 test improvements** | **0 chore**
 
 ### Install / Update
 
@@ -20,7 +19,7 @@ The npm CLI and the Claude Code marketplace/plugin are separate install tracks, 
 **CLI / runtime:**
 
 ```bash
-npm install -g oh-my-claude-sisyphus@5.7.26
+npm install -g oh-my-claude-sisyphus@5.7.30
 ```
 
 **Claude Code plugin:**
@@ -29,10 +28,10 @@ npm install -g oh-my-claude-sisyphus@5.7.26
 /plugin marketplace update omc
 ```
 
-**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.25...v5.7.26
+**Full Changelog**: https://github.com/Yeachan-Heo/oh-my-claudecode/compare/v5.7.29...v5.7.30
 
 ## Contributors
 
 Thank you to all contributors who made this release possible!
 
-@iyoda @Yeachan-Heo
+@RobinNorberg @Yeachan-Heo

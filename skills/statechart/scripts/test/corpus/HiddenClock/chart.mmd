@@ -1,0 +1,13 @@
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: Path to the EndsAtZero bug
+    lg1: Repeats forever, so EndsAtZero breaks
+  }
+  class lg0 bugPath
+  class lg1 repeats
+  s0: x=0 clock=0
+  s1: x=1 clock=1
+  [*] --> s0
+  s0 --> s1: Tick
+  class s0 bugPath
+  class s1 repeats

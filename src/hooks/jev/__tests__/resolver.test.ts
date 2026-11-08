@@ -11,6 +11,7 @@ const ENV_KEYS = [
   'OMC_JEV_TIMEOUT_MS',
   'OMC_JEV_MAX_REQUESTS',
   'OMC_JEV_EXCERPT_CHARS',
+  'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
   'OMC_JEV_LOG_DIR',
   'OMC_JEV_ENDPOINT',
 ] as const;
@@ -19,7 +20,7 @@ const QUESTIONS: JevQuestions = {
   route: { type: 'choice', criteria: { haiku: 'simple', sonnet: 'standard', opus: 'complex' } },
 };
 
-const TWIN = { tier: 'sonnet' };
+const TWIN = 'sonnet';
 
 let logDir = '';
 const savedEnv: Record<string, string | undefined> = {};
@@ -181,6 +182,40 @@ describe('resolveJudgment', () => {
     expect(line.jev).toBeNull();
   });
 
+  it('logs every answer by name and takes jev/confidence from the first question asked', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV = 'model-routing:active';
+    const answers = {
+      effort: { type: 'score', score: 2.1, confidence: 0.6 },
+      'model-tier': { type: 'choice', choice: 'opus', confidence: 0.9 },
+    };
+    const { fetchFn } = captureFetch(() => ({ ok: true, status: 200, json: async () => ({ answers }) }) as unknown as Response);
+    const result = await resolveJudgment({
+      point: 'model-routing',
+      state: { prompt: 'hi' },
+      questions: {
+        'model-tier': QUESTIONS.route,
+        effort: { type: 'score', criteria: { low: 'low', high: 'high' } },
+      },
+      twin: () => TWIN,
+      fetchFn,
+    });
+    expect(result.answer).toEqual(answers['model-tier']);
+    const line = JSON.parse(await readLog());
+    expect(line.jev).toEqual(answers['model-tier']);
+    expect(line.confidence).toBe(0.9);
+    expect(line.answers).toEqual(answers);
+  });
+
+  it('logs answers as null on a degraded comparison', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    const { fetchFn } = captureFetch(httpErrorResponse);
+    await call({ point: 'model-routing', fetchFn });
+    const line = JSON.parse(await readLog());
+    expect(line.mode).toBe('degraded');
+    expect(line.answers).toBeNull();
+  });
+
   it('degrades to the twin on an invalid Jev response', async () => {
     process.env.TYPESAFE_API_KEY = 'test-key';
     const { fetchFn } = captureFetch(() => ({ ok: true, status: 200, json: async () => ({}) }) as unknown as Response);
@@ -242,6 +277,26 @@ describe('resolveJudgment', () => {
     const line = JSON.parse(await readLog());
     expect(line.state.prompt).toHaveLength(50);
     expect(line.state.nested.deep).toHaveLength(50);
+  });
+
+  it('sends question definitions whole, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    process.env.TYPESAFE_API_KEY = 'test-key';
+    process.env.OMC_JEV_EXCERPT_CHARS = '50';
+    const questions = {
+      route: { type: 'choice' as const, instructions: 'i'.repeat(300), criteria: { haiku: 'h'.repeat(300), opus: 'o'.repeat(300) } },
+    };
+    const { fetchFn, calls } = captureFetch(() => jevOk({ choice: 'haiku' }));
+    await resolveJudgment({
+      point: 'intent',
+      state: { prompt: 'a'.repeat(500) },
+      questions,
+      twin: () => 'haiku',
+      fetchFn,
+    });
+    const body = JSON.parse(calls[0].init?.body as string);
+    expect(body.state.prompt).toHaveLength(50);
+    expect(body.questions.route.instructions).toHaveLength(300);
+    expect(body.questions.route.criteria.opus).toHaveLength(300);
   });
 
   it('propagates twin errors instead of masking them', async () => {

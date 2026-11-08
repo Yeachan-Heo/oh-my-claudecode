@@ -7210,6 +7210,19 @@ var require_dist = __commonJS({
   }
 });
 
+// src/utils/windows-search.ts
+var VARIABLE = "NoDefaultCurrentDirectoryInExePath";
+function isVariable(key) {
+  return key.toUpperCase() === VARIABLE.toUpperCase();
+}
+function hardenWindowsExeSearch() {
+  if (process.platform !== "win32") return;
+  for (const key of Object.keys(process.env)) {
+    if (isVariable(key)) delete process.env[key];
+  }
+  process.env[VARIABLE] = "1";
+}
+
 // node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -32456,9 +32469,10 @@ function scanDirectories(projectRoot) {
       return;
     }
     try {
-      const stat = (0, import_node_fs3.statSync)(absDir);
-      if (visitedInodes.has(stat.ino)) return;
-      visitedInodes.add(stat.ino);
+      const stat = (0, import_node_fs3.statSync)(absDir, { bigint: true });
+      const identity = `${stat.dev}:${stat.ino}`;
+      if (visitedInodes.has(identity)) return;
+      visitedInodes.add(identity);
     } catch {
       return;
     }
@@ -34279,6 +34293,7 @@ function buildListToolsResponse(envValue) {
 }
 
 // src/mcp/standalone-server.ts
+hardenWindowsExeSearch();
 var server = new Server(
   {
     name: "t",

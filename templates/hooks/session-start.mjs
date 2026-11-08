@@ -3,11 +3,14 @@
 // Restores persistent mode states when session starts
 // Cross-platform: Windows, macOS, Linux
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, renameSync, unlinkSync, rmSync, statSync, lstatSync } from 'fs';
 import { join, dirname, normalize, resolve } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { spawn } from 'child_process';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

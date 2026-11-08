@@ -2,8 +2,11 @@
 // OMC Stop Continuation Hook (Simplified)
 // Always allows stop - soft enforcement via message injection only.
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import { join, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

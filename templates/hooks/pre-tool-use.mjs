@@ -5,6 +5,7 @@
  * Also activates skill-active state for Stop hook protection (issue #1033).
  */
 
+import { hardenWindowsExeSearch } from './lib/windows-search.mjs';
 import * as path from 'path';
 import { dirname } from 'path';
 import { existsSync, readdirSync, mkdirSync, writeFileSync, renameSync, readFileSync, realpathSync, statSync } from 'fs';
@@ -14,6 +15,8 @@ import { homedir, tmpdir } from 'os';
 import { getClaudeConfigDir } from './lib/config-dir.mjs';
 import { isSkillVisibleToUser } from './lib/skill-entitlements.mjs';
 import { stripLeadingUtf8Bom } from './lib/utf8-bom.mjs';
+
+hardenWindowsExeSearch();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

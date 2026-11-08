@@ -49,7 +49,6 @@ describe('Windows HUD Platform Fixes (#739)', () => {
   describe('P0: Bridge NODE_PATH separator', () => {
     const bridgeFiles = [
       'bridge/mcp-server.cjs',
-      'bridge/team-bridge.cjs',
     ];
 
     for (const file of bridgeFiles) {
@@ -76,7 +75,6 @@ describe('Windows HUD Platform Fixes (#739)', () => {
 
     const buildScripts = [
       'scripts/build-mcp-server.mjs',
-      'scripts/build-bridge-entry.mjs',
     ];
 
     for (const script of buildScripts) {
