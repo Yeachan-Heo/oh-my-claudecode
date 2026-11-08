@@ -172,14 +172,24 @@ Rules:
 - **Invoke the `ai-slop-cleaner` skill via the Skill tool: `Skill("oh-my-claudecode:ai-slop-cleaner")`** — it is a Skill, not an agent. If you mistakenly call it via `Task(subagent_type="oh-my-claudecode:ai-slop-cleaner")`, OMC's PreToolUse hook denies the call with the correct Skill-tool identifier; do not substitute a similarly-named agent. Run in standard mode (not `--review`) on the files changed during the current Ralph session only.
 - Keep the scope bounded to the Ralph changed-file set; do not broaden the cleanup pass to unrelated files.
 - If the reviewer approved the implementation but the deslop pass introduces follow-up edits, keep those edits inside the same changed-file scope before proceeding.
+- **Record the pass — this is the machine-checked part.** Once every story is complete, `omc ralph verify` refuses to pass until a record matching the PRD's criteria revision exists, so whichever way this step ends it has to be stated:
+
+  ```bash
+  omc ralph closeout --deslop completed   # the pass ran
+  omc ralph closeout --deslop skipped     # only when this run started with --no-deslop
+  ```
+
+  The record lands in `.omc/state/sessions/{sessionId}/ralph-closeout.json`, bound to the PRD's governing criteria revision; amending a story's acceptance criteria invalidates it. It states whether the pass ran — it cannot prove the work was good, so the outcome still belongs in the Step 8 notes.
 
   7.6 **Regression Re-verification**:
 
-- After the deslop pass, call `omc ralph verify --session <sessionId>` once more.
+- After the deslop pass and its record, call `omc ralph verify --session <sessionId>` once more.
 - Exit 0 confirms the post-deslop regression state matches the baseline (baseline-only failures are recorded warnings, not a reason to loop here forever). Exit 1 means NEW failures — roll back the cleaner changes or fix the regression, then re-verify until it exits 0.
 - Only proceed to completion after the verify call exits 0 (or `--no-deslop` was explicitly specified).
 
 8. **On approval, terminal closeout and cleanup**: After Step 7.6 passes (with Step 7.5 completed, or skipped via `--no-deslop`), run the closeout below and any applicable Step 10 incident work item before PR creation or `/oh-my-claudecode:cancel` state cleanup. When the user or mode invocation explicitly authorizes publishing and draft-PR creation, draft the body with `/oh-my-claudecode:pr` and create the draft PR. Do not push or open a PR based on completion alone. Mark an authorized draft ready only after the user accepts the completion report. Before any other terminal `/cancel` or state cleanup, including user-requested cancellation, run the same closeout first.
+
+   The deslop record was written in Step 7.5; `omc ralph closeout --check` confirms it still matches the criteria revision.
 
    Append at most three factual lines to `.omc/notepads/ralph/problems.md` — what broke (errors that survived retries, verdicts that came back rejected) and what dragged (missing checks, unreachable information, environment friction); blockers additionally go in `.omc/notepads/ralph/issues.md`. Preserve existing entries: append only and never replace the shared file. If there are no observations, append nothing; an empty closeout is valid, so do not write “no lessons.” These are observations only; landing them on repo surfaces is `refit`'s job, with the user's approval.
 
@@ -318,6 +328,7 @@ Why good: The falsified criterion stops governing, the measurement is preserved 
 - [ ] Selected reviewer verification passed against specific acceptance criteria
 - [ ] ai-slop-cleaner pass completed on changed files (or `--no-deslop` specified)
 - [ ] Post-deslop regression tests pass, or only failures already present in the feedback baseline (same treatment as the test/build lines)
+- [ ] `omc ralph closeout --deslop completed|skipped` recorded, and `omc ralph verify` exits 0 against it
 - [ ] `/oh-my-claudecode:cancel` run for clean state cleanup
 </Final_Checklist>
 
