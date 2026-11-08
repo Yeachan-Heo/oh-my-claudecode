@@ -38929,6 +38929,842 @@
           "previousFilename": null
         }
       ]
+    },
+    {
+      "pullNumber": 4868,
+      "targetRef": "main",
+      "mergeBaseSha": "14f01806a9a51a2626647a88affc33105d8a9079",
+      "headSha": "d6f054c2098c82e33ee2e37b07f6d0b4b19f352e",
+      "owner": "Yeachan-Heo",
+      "expiresAt": "2027-01-08T00:00:00.000Z",
+      "generatedDelta": {
+        "count": 137,
+        "sha256": "611ddc969e96b0a73e806868d3fbeb3e186a9139e793920b2bf728b140f3cfc8"
+      },
+      "generatedFiles": [
+        {
+          "status": "modified",
+          "filename": "bridge/claude-md-coordinator.cjs",
+          "sha": "27645c74a7fa5ca134424d5f2846e26f9fb5401b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/cli.cjs",
+          "sha": "41a624709b2f4f9accd4f50326d5cd8439b1e728",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/runtime-cli.cjs",
+          "sha": "41ca364a1aa3ef51511df905bececd12d07ab611",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team-mcp.cjs",
+          "sha": "4a0f41d56a86ce88a4d35a0269cad1d68c38591b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "bridge/team.js",
+          "sha": "05eaa9e80f3643cc8b1f07c2e1ae7a4c10e4c2e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/cli-config-stop-callback.test.js",
+          "sha": "445b68d9ad06efcb7508a3f788e32afd6f5f7058",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/cli-config-stop-callback.test.js.map",
+          "sha": "bac98d20d9cef92c8158578d0314add00794b6ab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-windows.test.js",
+          "sha": "004603bb6b0ed35e96d7f428121dce56775feb7d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/hud-windows.test.js.map",
+          "sha": "1c62966e06deec8afd839d360ab56b4b51e91554",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/plugin-skill-budget.test.js",
+          "sha": "a6cd2ad43b6cfcb6aa06891406fd776182388029",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/plugin-skill-budget.test.js.map",
+          "sha": "e08bcfb541370e275b8795477a27b53e02696dc3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js",
+          "sha": "1fd44a80810ccc98c695977ba1b5438ab3dfd470",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/preemptive-compaction-hook.test.js.map",
+          "sha": "7f5317a1836f467f5b9b34690899ef1f8ea88d14",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-end-process-exit.test.js",
+          "sha": "535da06c06187c6f73e0d569eb81ce0d3935c636",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/session-end-process-exit.test.js.map",
+          "sha": "216882357728242b4bcfb364f5e56f40a401ac39",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js",
+          "sha": "9d424566627744782d8b65cb3b6d833d32816638",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/__tests__/skills.test.js.map",
+          "sha": "2cd6ad4bc1dcdd2a1faa2fc6bafe53a247be605b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/alias-retirement/__tests__/registry.test.js",
+          "sha": "d57aa3b00be54cc8cc50c590f10ca0b16378498b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/alias-retirement/__tests__/registry.test.js.map",
+          "sha": "c05a5e4799354851e360dc83cfbc8edcdd57c3ed",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/team.test.js",
+          "sha": "97c05efd15854a237063f71d5b57e651b3acb245",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/__tests__/team.test.js.map",
+          "sha": "ae2a0a3d50885f1f77cde612212d075655939131",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.d.ts.map",
+          "sha": "7a71da711575d2f8eff120e7fbb4eb31714e0b99",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js",
+          "sha": "2600624826671ede5c8215b29c10d53476732b20",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/index.js.map",
+          "sha": "d7215ef21bfea981e5d6206b7cb7e5e81ff684d4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.d.ts.map",
+          "sha": "37ec41810e399c430242c4cc813a6ba66a28a850",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.js",
+          "sha": "94494d798e9ba124a8fa38b921f4943126abb204",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/cli/team.js.map",
+          "sha": "3db6672e2e72ad20ef53788dccced350a3b9943b",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js",
+          "sha": "118be4e9f28a4e1b40aa7e694556f83eff2c9aab",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/__tests__/jev-model-routing.test.js.map",
+          "sha": "dab60abb1a9aaf901834895d27cc25129689fbaf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.d.ts",
+          "sha": "5f35ef808eff38866ca27bdd1bee2b466bfa9046",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.d.ts.map",
+          "sha": "6fecfeb61cde52e79b736754c5f80504b456fcd8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.js",
+          "sha": "9c280b4dcf45381cda43d6a6efc1198bf7fec3a3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/index.js.map",
+          "sha": "a0cf920116cb36723bd31c3975f85b3b598a6cac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.d.ts.map",
+          "sha": "2f3aa947d9ec684f2fd9ceedeb73e620b17df30f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.js",
+          "sha": "8582c78899443340131da1fb2fb65717a2f4154a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-model-routing.js.map",
+          "sha": "ddc551bb1582fc92207add375d1aa664f2112864",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-slop-warning.d.ts.map",
+          "sha": "6d1e423f11cbe13617e30f9845ad135221cb9e9c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-slop-warning.js",
+          "sha": "e763589694ce339810c78e28872e49aba4ca53d2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/features/jev-slop-warning.js.map",
+          "sha": "5cd9f125624fcad1ac0a80f7bccdaca917ae05ac",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.d.ts.map",
+          "sha": "f388a0949784210eeda0f980b6616a4fbf584e45",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.js",
+          "sha": "e1619deca3ace57cc7534790523639669fcf5dff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/code-simplifier/jev-shadow.js.map",
+          "sha": "b8108d1aee8cb23ab8d1e462e80c8bec2f781746",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js",
+          "sha": "9caaaeb49fce931bf9b5ad8c1fc5ef91c713e8e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/active-mode.test.js.map",
+          "sha": "f50b6d4b2fdbaafb6251ec667d9b53b69c248a95",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/resolver.test.js",
+          "sha": "f7c14e413e2f705fe87c9c3ec865e305edda0d1e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/__tests__/resolver.test.js.map",
+          "sha": "3df1bf8349da2ee04faa858de8b5e4928c5ceaf5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.d.ts",
+          "sha": "0c5596541b07c0256e83c5ff277f16107a08f202",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.d.ts.map",
+          "sha": "8964ace489aca21eb9f6f2dffc938f2dabc4087c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.js",
+          "sha": "a584067d9f2ba24aed12895368ab8b92950fecad",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/config.js.map",
+          "sha": "47ce94ac2bedbf2359f972fd041b42e837c355cd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts",
+          "sha": "e9e13731a33ea82b498c304a8994eb9676a9d3e7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.d.ts.map",
+          "sha": "0fc395026843ee86384ee7adb1a2974112fec9a4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js",
+          "sha": "2cf89f74040b093d299166b79ed33518c784fe73",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/points.js.map",
+          "sha": "639cd24870957340d97ca38aef9546a0fb8080c2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.d.ts",
+          "sha": "fd9d8e1d069f4712451d4fa6d968d5237e7e87e3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.d.ts.map",
+          "sha": "05e6ef0f92e8a169a424399cc2d0d5428716f93c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js",
+          "sha": "57823f4c728027e4f286da7fd1d65e872e47b633",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/jev/resolver.js.map",
+          "sha": "c2b6a33ad85d77d892b08b94f9014bece858c923",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js",
+          "sha": "85ebe756e5dc772a434daec4a6230b5e26f2ac2e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "be8c0f60baa0ed06339176006d994c9fb14c2918",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts",
+          "sha": "7e70ed271470469ab487aa944cd945f07b2e952f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.d.ts.map",
+          "sha": "d0cd2a5793c3d6f33c22f64cd6b4c899a87c4287",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js",
+          "sha": "72806a0f6ae6e9aba0d4150a123682180361ede7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/index.js.map",
+          "sha": "080f9aa6f551c6e6182924d28790a98b57a9dbd4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.d.ts.map",
+          "sha": "0f2326b907d8f69b08672fb96e9e924444b5d74d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.js",
+          "sha": "10e428f8df20d0fe41ff5db1a1a2c016c6228541",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/keyword-detector/jev-shadow.js.map",
+          "sha": "4b4467ade3d823dffbe5a6306af87ae8362ca917",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js",
+          "sha": "e85a37194cd87c063cda369c8ff7537ee096f642",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/__tests__/jev-extraction-shadow.test.js.map",
+          "sha": "d272e1912e737a9e501949c27f9ae67542a76829",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.d.ts.map",
+          "sha": "b1c5bf318d1c1f4ec28821e55435ab4efcb69820",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.js",
+          "sha": "96c2b333e1c30dfce0f7490a84cd4fc4a654687f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/learner/jev-shadow.js.map",
+          "sha": "86881d1989401d1c46eba584093353bb4f44e33e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js",
+          "sha": "fc0fa760635a56b293620e12df176f938598e516",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/__tests__/jev-loop-continuation-shadow.test.js.map",
+          "sha": "20bfadda16981e989e2ff9c5c868e4033af4fa83",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.d.ts.map",
+          "sha": "3b109cfc74c88fb5d95d688b8164ab5abefc1788",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.js",
+          "sha": "1c7c8ae5b146371a5e6cf45b7e7a6c8be0f794f1",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/persistent-mode/jev-shadow.js.map",
+          "sha": "a3a689651f2b1bb6efb63a1db56ea47f193477b4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/__tests__/jev-shadow.test.js",
+          "sha": "9d6639a06b36561b7a9aa26d0a34688b7b9472e9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/__tests__/jev-shadow.test.js.map",
+          "sha": "22045c37d10bb68dd4b7464ff2a5912c955c55bd",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.d.ts",
+          "sha": "d86f9668d35ab19a4809ec14e75d00a342e9a8c4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.d.ts.map",
+          "sha": "3cd08a7cbc254d8cff76e0ed94bf890f5c877924",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.js",
+          "sha": "a08c0c6ecff2480b532517b47297708755d1944c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/preemptive-compaction/jev-shadow.js.map",
+          "sha": "49965eb76d68c55406e440c357726702647e5aa4",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js",
+          "sha": "56ff1c396ce423c0594e52a818313235eb44a8fa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/__tests__/feedback-baseline.test.js.map",
+          "sha": "73695427bc3d40c2e761a64e5db7314d112b0469",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.d.ts.map",
+          "sha": "e67b41b4dfb1c1e72e68a3e4a9263051db0a0df2",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js",
+          "sha": "a96cfa6b18668645920321750b79ca2edec7c7df",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/feedback-baseline.js.map",
+          "sha": "4642cd936b2cb097a128beb23cc8348ea064c237",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/jev-shadow.d.ts.map",
+          "sha": "61c80635737bd345e48ebf8e23a746d2214bed5c",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/jev-shadow.js",
+          "sha": "18415626c2fa1d3ef8fcdfa7b68385c67af9cd28",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/ralph/jev-shadow.js.map",
+          "sha": "6e5dadc4fcf14c00968fb33b3db77d9b926058ff",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js",
+          "sha": "000d3643eaf692cd6d266168518a108ad4673c88",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/cleanup-manifest.test.js.map",
+          "sha": "215375604dd2994b58622632181c1830793ec3cc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js",
+          "sha": "6e411c09c8627db8b8e3eff220ebbfab04293013",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/__tests__/worker.test.js.map",
+          "sha": "92957707aa740a2b8c5d6c7273a0765c50955044",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.d.ts.map",
+          "sha": "555ffaf8806a7e7f961bef5b241cc77f4451c4e8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js",
+          "sha": "13cc6be9a2eab7fc1f2732d71bcc92da780dfa69",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/cleanup-manifest.js.map",
+          "sha": "c97f010f7b57970af46f31914c737913d5450da0",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.d.ts.map",
+          "sha": "7db756b93b0eeadfc5de51bef2fc9530e88961d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js",
+          "sha": "233c469594c5f702ab5f96256831ab55a8217dd3",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/session-end/worker.js.map",
+          "sha": "38b021ef4b318a9c95945ec9aac97143b090580d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js",
+          "sha": "320227a0b5aa123154cb5d79b77cd4b6788242a8",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/__tests__/jev-shadow.test.js.map",
+          "sha": "1e8cce86ec9df46313bcb624f547e456e89eb1c9",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.d.ts.map",
+          "sha": "8e3d56dc7e7c4777ab067f6f29bb119f4bf45db5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.js",
+          "sha": "1c1c476bc7e5b8e0d713f747edc8ad03a44bec1d",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hooks/task-size-detector/jev-shadow.js.map",
+          "sha": "58eeac075e026f1552ee31725532435034f97aee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.d.ts",
+          "sha": "3f992e9d6da40e75a0fe8636719c292b489e3f41",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.d.ts.map",
+          "sha": "9fa76b76370d980e7560016fa436ea8906478cb5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.js",
+          "sha": "ff64fe0e334a697a24751008ffbd1e755d3e900a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/elements/index.js.map",
+          "sha": "56ce6cdf39c6ae90f760ed8bc35915179ee57786",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.d.ts.map",
+          "sha": "3a138b37ce1872d52011e1ef916ec5acc60df375",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.js",
+          "sha": "e031eabe9846bb70cf2316585f4b2b8365a2e5bf",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/render.js.map",
+          "sha": "49ca60a097f457841fe90f06a2b2f96131782f90",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.d.ts",
+          "sha": "7aa1a3b4cbdc50ab5ea0e262788b23b89c911822",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.d.ts.map",
+          "sha": "ab7f622967083961d027ca2570cec36cb23db234",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.js",
+          "sha": "941ef6c286b46465f24ed3ed4635359b68c5743f",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/hud/types.js.map",
+          "sha": "5a2db2d86d8824a65318ff3a0b88c55a60e24b83",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js",
+          "sha": "4a4ed07d4b0879a5b3008cedb719291b8a4b4b53",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/installer/index.js.map",
+          "sha": "ac4cfecc9abadd5369c8b4dd4387904322946c40",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/git-worktree.test.js",
+          "sha": "34b643d7e9e5c334546af4557414ffbe888ea18a",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/__tests__/git-worktree.test.js.map",
+          "sha": "fcf4cd711668cf52ae7411fe822416a5c41ed668",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.d.ts",
+          "sha": "a2bddb6bc0c14c8573159ec0219c6a4296293e85",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.d.ts.map",
+          "sha": "ce0bda02fc5294db7293e9cd53569bc22d93a847",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.js",
+          "sha": "ca936b42fff0f1a710c84843498d5e21e6fde018",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/git-worktree.js.map",
+          "sha": "fdf3869abc22f9c79066a9f029f827c64a449ca5",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.d.ts.map",
+          "sha": "6cef0ca8c950a7ab6fb313714ddb5c2f80ab2463",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.js",
+          "sha": "2519ce25f6ede2292a749eec66fe954975ace4dc",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/runtime-v2.js.map",
+          "sha": "3a3851ac2de68c67cf1b59c1924ba2a915f26017",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts",
+          "sha": "8e6c17bead89f226ec6837a43e97cb4df646bcaa",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.d.ts.map",
+          "sha": "b07dc7364185b74da0d77cd00e138dceaadc1727",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js",
+          "sha": "f98511fa566865817f1667336c0d59905c733929",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/team/tmux-session.js.map",
+          "sha": "93495f6740bf1ab172b8e1f9051153f0d0b90167",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/projections.test.js",
+          "sha": "b6d7e0b769a1d3e9d32e344d5e1f2d66699721d7",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/__tests__/registry.test.js",
+          "sha": "6348388a7c9aba44a0dce2e515bd99ce752b667e",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.d.ts.map",
+          "sha": "43caeacb2b4a0880418cc021c0de5355993f06ee",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js",
+          "sha": "1866a9daee3ae949a7e58c05fe11bd45961a8fbb",
+          "previousFilename": null
+        },
+        {
+          "status": "modified",
+          "filename": "dist/workflow/registry.js.map",
+          "sha": "52650dcd4047c6fdf51bf84dd2f23929d9869012",
+          "previousFilename": null
+        }
+      ]
     }
   ]
 }
