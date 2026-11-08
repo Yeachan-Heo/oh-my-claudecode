@@ -76,47 +76,12 @@ export declare function resolveFeedbackCommands(directory: string, sessionId?: s
     commands: string[];
     prdError?: string;
 };
-/** Default wall-clock budget for one feedback command (10 minutes). */
-export declare const DEFAULT_FEEDBACK_TIMEOUT_MS = 600000;
-/**
- * Resolve the per-command budget: `--timeout <seconds>`, then
- * OMC_RALPH_VERIFY_TIMEOUT_SECONDS, then the 10-minute default.
- * Returns null for a value that is not a positive number of milliseconds:
- * `spawnSync` treats a 0 timeout as "no deadline", so a budget that rounds to
- * zero (for example `--timeout 0.0001`) must be rejected, not passed through.
- */
-export declare function resolveFeedbackTimeoutMs(raw?: string): number | null;
 /** Run one feedback command on the current tree and fingerprint its failures. */
-export declare function runFeedbackCommand(command: string, directory: string, options?: {
-    timeoutMs?: number;
-}): CommandBaseline;
-/**
- * Closeout state for the session's PRD.
- *
- * Ralph's terminal steps (the Step 7.5 deslop pass and the Step 8 closeout)
- * are prose in the skill; nothing failed when an agent skipped them. Once
- * every story is complete the gate therefore requires a record, bound to the
- * governing criteria revision so a later amendment invalidates it.
- */
-export interface CloseoutGate {
-    required: boolean;
-    satisfied: boolean;
-    criteriaRevision: string | null;
-    deslop: string | null;
-}
-export declare function evaluateCloseoutGate(directory: string, stateRoot: string, sessionId: string): CloseoutGate;
-/** The closeout action: write a revision-bound record, or check the existing one. */
-export declare function ralphCloseout(options: {
-    deslop?: string;
-    check?: boolean;
-    json?: boolean;
-    session?: string;
-}, directory?: string, now?: Date): number;
+export declare function runFeedbackCommand(command: string, directory: string): CommandBaseline;
 /** The verify action, extracted so tests can drive it directly. Exit code is the contract. */
 export declare function ralphVerify(options: {
     json?: boolean;
     session?: string;
     writeBaseline?: boolean;
-    timeoutMs?: number;
 }, directory?: string, now?: Date): number;
 //# sourceMappingURL=ralph.d.ts.map

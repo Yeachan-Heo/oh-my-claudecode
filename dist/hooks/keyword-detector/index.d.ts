@@ -7,7 +7,7 @@
  * Ported from oh-my-opencode's keyword-detector hook.
  */
 import { type TaskSizeResult } from '../task-size-detector/index.js';
-export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'team' | 'ralplan' | 'tdd' | 'code-review' | 'security-review' | 'ultrathink' | 'deepsearch' | 'deep-interview' | 'analyze' | 'ultragoal' | 'ai-slop-cleaner' | 'wiki' | 'codex' | 'gemini' | 'cursor' | 'antigravity';
+export type KeywordType = 'cancel' | 'ralph' | 'autopilot' | 'team' | 'ralplan' | 'tdd' | 'code-review' | 'security-review' | 'ultrathink' | 'deepsearch' | 'deep-interview' | 'analyze' | 'codex' | 'gemini' | 'cursor' | 'antigravity';
 export interface DetectedKeyword {
     type: KeywordType;
     keyword: string;

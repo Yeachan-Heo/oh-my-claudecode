@@ -14,14 +14,7 @@ import { recordModelRoutingShadow } from '../jev-model-routing.js';
 import { processPreToolUse } from '../delegation-enforcer.js';
 import { resetJevResolverState } from '../../hooks/jev/index.js';
 const TEST_KEY = 'test-key-123';
-const JEV_ENV_KEYS = [
-    'TYPESAFE_API_KEY',
-    'OMC_JEV',
-    'OMC_JEV_LOG_DIR',
-    'OMC_JEV_ENDPOINT',
-    'OMC_JEV_EXCERPT_CHARS',
-    'OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING',
-];
+const JEV_ENV_KEYS = ['TYPESAFE_API_KEY', 'OMC_JEV', 'OMC_JEV_LOG_DIR', 'OMC_JEV_ENDPOINT'];
 // Provider-detection env vars that forceInherit keys off (issue #1201) —
 // cleared so the enforcement-identity test runs in a standard Claude
 // environment regardless of the host shell (mirrors delegation-enforcer.test.ts).
@@ -121,24 +114,13 @@ describe('jev-model-routing shadow wiring', () => {
         const entry = JSON.parse(log.trim().split('\n')[0]);
         expect(entry.point).toBe('model-routing');
         expect(entry.mode).toBe('shadow');
-        expect(entry.heuristic).toBe('sonnet');
+        expect(entry.heuristic.model).toBe('sonnet');
         expect(entry.jev?.choice).toBe('opus');
     });
-    it('sends up to 12000 characters of the task by default, whatever OMC_JEV_EXCERPT_CHARS is', async () => {
+    it('bounds the task excerpt sent to Jev to OMC_JEV_EXCERPT_CHARS', async () => {
         process.env.TYPESAFE_API_KEY = TEST_KEY;
         process.env.OMC_JEV = 'model-routing';
         process.env.OMC_JEV_EXCERPT_CHARS = '50';
-        const fetchFn = makeJevFetchStub();
-        const pinned = makePinned();
-        pinned.originalInput.prompt = 'x'.repeat(13000);
-        await recordModelRoutingShadow('Task', pinned, fetchFn);
-        const body = JSON.parse(String(vi.mocked(fetchFn).mock.calls[0][1]?.body));
-        expect(body.state.task).toHaveLength(12000);
-    });
-    it('bounds the task excerpt sent to Jev to OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING', async () => {
-        process.env.TYPESAFE_API_KEY = TEST_KEY;
-        process.env.OMC_JEV = 'model-routing';
-        process.env.OMC_JEV_EXCERPT_CHARS_MODEL_ROUTING = '50';
         const fetchFn = makeJevFetchStub();
         const pinned = makePinned();
         pinned.originalInput.prompt = 'x'.repeat(500);
@@ -183,25 +165,6 @@ describe('jev-model-routing shadow wiring', () => {
         const withJev = processPreToolUse('Task', toolInput);
         expect(withJev).toEqual(withoutJev);
         expect(withJev.modifiedInput.model).toBe('haiku');
-    });
-    it('logs null for inherited model selections (non-comparable)', async () => {
-        process.env.TYPESAFE_API_KEY = TEST_KEY;
-        process.env.OMC_JEV = 'model-routing';
-        const fetchFn = makeJevFetchStub('sonnet');
-        // Create a result with model='inherit' (sentinel value when forceInherit is enabled)
-        const inherited = makePinned();
-        inherited.model = 'inherit';
-        const result = await recordModelRoutingShadow('Task', inherited, fetchFn);
-        // Result should be unchanged
-        expect(result.mode).toBe('shadow');
-        expect(result.answer).toBe(inherited);
-        // Shadow log should have null for heuristic (non-comparable)
-        const log = await waitForShadowLog(logDir);
-        expect(log).not.toBeNull();
-        const entry = JSON.parse(log.trim().split('\n')[0]);
-        expect(entry.point).toBe('model-routing');
-        // Inherited model should be logged as null, not as the string 'inherit'
-        expect(entry.heuristic).toBeNull();
     });
 });
 //# sourceMappingURL=jev-model-routing.test.js.map

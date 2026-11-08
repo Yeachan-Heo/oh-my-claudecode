@@ -13,7 +13,7 @@ import { promises as fsPromises } from "fs";
 import { join } from "path";
 import { getOmcRoot } from '../../lib/worktree-paths.js';
 import { initJobDb, getActiveJobs, getRecentJobs, getJobStats } from '../../lib/job-state-db.js';
-import { findPrdPath, getPrdStatus, readPrdFromPath } from '../ralph/prd.js';
+import { findPrdPath, readPrdFromPath } from '../ralph/prd.js';
 import { readBoulderState, getPlanProgress } from '../../features/boulder-state/index.js';
 // ============================================================================
 // Constants
@@ -229,16 +229,13 @@ export function collectPlanRefs(directory, sessionId) {
             const read = readPrdFromPath(prdPath);
             const prd = read?.prd;
             if (prd) {
-                // Use the same completion predicate as Ralph itself. Counting bare
-                // `passes` here told a resumed session "8/8 done" while every story
-                // still awaited architect approval.
-                const status = getPrdStatus(prd);
+                const stories = Array.isArray(prd.userStories) ? prd.userStories : [];
                 refs.prd = {
                     path: prdPath,
                     title: typeof prd.project === "string" ? prd.project : "untitled",
-                    status: status.allComplete ? "done" : "in_progress",
-                    stories_total: status.total,
-                    stories_completed: status.completed,
+                    status: stories.some((s) => !s.passes) ? "in_progress" : "done",
+                    stories_total: stories.length,
+                    stories_completed: stories.filter((s) => s.passes).length,
                 };
             }
         }

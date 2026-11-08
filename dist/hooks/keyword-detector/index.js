@@ -25,10 +25,6 @@ const KEYWORD_PATTERNS = {
     deepsearch: /\b(deepsearch)\b|\bsearch\s+the\s+codebase\b|\bfind\s+in\s+(the\s+)?codebase\b|(딥\s?서치)|(ディープ\s?サーチ)/i,
     analyze: /\b(deep[\s-]?analyze|deepanalyze)\b|(딥\s?분석)|(ディープ\s?アナライズ)/i,
     'deep-interview': /\b(deep[\s-]interview|ouroboros)\b|(딥인터뷰)|(ディープインタビュー)/i,
-    // Script-only triggers: never-match placeholders (script detects them, TypeScript doesn't)
-    ultragoal: /(?!x)x/, // Script-only detection
-    'ai-slop-cleaner': /(?!x)x/, // Script-only detection
-    wiki: /(?!x)x/, // Script-only detection
     codex: /\b(ask|use|delegate\s+to)\s+(codex|gpt)\b/i,
     gemini: /\b(ask|use|delegate\s+to)\s+gemini\b/i,
     cursor: /\b(ask|use|delegate\s+to)\s+cursor\b/i,
@@ -62,9 +58,7 @@ const KEYWORD_SKIP_PREDICATES = {
 export const KEYWORD_PRIORITY = [
     'cancel', 'ralph', 'autopilot', 'team',
     'ralplan', 'tdd', 'code-review', 'security-review',
-    'ultrathink', 'deepsearch', 'analyze', 'deep-interview',
-    'ultragoal', 'ai-slop-cleaner', 'wiki',
-    'codex', 'gemini', 'cursor', 'antigravity'
+    'ultrathink', 'deepsearch', 'analyze', 'deep-interview', 'codex', 'gemini', 'cursor', 'antigravity'
 ];
 const RETIRED_WORKFLOW_SLASH_PATTERN = /^\s*\/(?:oh-my-claudecode:|omc:)?(?:ultrawork|ulw|uw|울트라워크|ウルトラワーク|ccg|claude-codex-gemini|씨씨지|シーシージー|ultraqa|omc-teams)(?=\s|$|[?!.,;:])/i;
 export function isRetiredWorkflowSlashInvocation(text) {
@@ -761,8 +755,6 @@ export function detectKeywordsWithType(text, _agentName) {
 export function hasKeyword(text) {
     return detectKeywordsWithType(text).length > 0;
 }
-const CODE_EDITING_KEYWORDS = new Set(['autopilot', 'ralph', 'tdd']);
-const NO_IMPLEMENT_PATTERN = /\b(?:do\s+not|don'?t|never|without)\s+(?:begin\s+|start\s+)?implement(?:ing|ation)?\b|\bno\s+(?:code\s+)?(?:changes|edits)\b|\bread[\s-]only\s+(?:review|audit|investigation)\b/i;
 /**
  * Get all detected keywords with conflict resolution applied
  */
@@ -777,11 +769,6 @@ export function getAllKeywords(text) {
     // Mutual exclusion: team beats autopilot
     if (types.includes('team') && types.includes('autopilot')) {
         types = types.filter(t => t !== 'autopilot');
-    }
-    // A prompt that forbids implementation never auto-routes to a code-editing mode
-    // (slash commands are explicit and keep their mode).
-    if (NO_IMPLEMENT_PATTERN.test(removeCodeBlocks(text)) && !/^\s*\//.test(text)) {
-        types = types.filter(t => !CODE_EDITING_KEYWORDS.has(t));
     }
     // Sort by priority order
     return KEYWORD_PRIORITY.filter(k => types.includes(k));

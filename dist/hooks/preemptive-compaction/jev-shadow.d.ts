@@ -1,25 +1,16 @@
 /**
  * Jev shadow judgment: "context-pruning" (judgment point 5).
  *
- * In shadow/off mode the heuristic (analyzeContextUsage -> action) decides;
- * Jev's staleness Score is requested asynchronously (blocking: false) and
- * recorded in the shadow log for later comparison. In active mode the score
- * is mapped to an action (see mapAnswer below). With no key configured this
- * is a no-op: zero HTTP calls, no log.
+ * Shadow-only. The existing heuristic (analyzeContextUsage -> action) still
+ * decides everything; Jev's staleness Score is requested asynchronously
+ * (blocking: false) and recorded in the shadow log for later comparison.
+ * With no key configured this is a no-op: zero HTTP calls, no log.
  *
  * The point declaration (questions, blocking flag) lives in the jev registry
  * (hooks/jev/points.ts); this module keeps the call-specific state shape.
  */
-import type { JevAnswer, ResolveResult } from '../jev/index.js';
+import type { ResolveResult } from '../jev/index.js';
 export declare const CONTEXT_PRUNING_POINT = "context-pruning";
-/**
- * Staleness label from a Jev answer. Only a score answer counts; another
- * answer type yields no label, even when it carries a `choice`. A score answer
- * carries only `score` (0 = fresh ... 3 = stale), so it is rounded to the
- * nearest label; a score outside 0..3 or a non-number yields no label. A
- * string `choice` that names one of the labels (case-insensitively) wins.
- */
-export declare function stalenessLabelOf(answer: JevAnswer): string | undefined;
 /** Metadata-only summary of one pruning candidate (a tool result). */
 export interface PruningCandidate {
     /** Tool that produced the result, e.g. "read". */

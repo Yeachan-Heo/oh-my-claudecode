@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CONTEXT_WARNING_MESSAGE, createPreemptiveCompactionHook, clearRapidFireDebounce, } from '../index.js';
-import { recordContextPruningShadow, stalenessLabelOf } from '../jev-shadow.js';
+import { recordContextPruningShadow } from '../jev-shadow.js';
 import { resetJevResolverState } from '../../jev/index.js';
 const ENV_KEYS = [
     'TYPESAFE_API_KEY',
@@ -68,7 +68,7 @@ async function readLogLine() {
     throw new Error('shadow log line never appeared');
 }
 describe('recordContextPruningShadow', () => {
-    it('with key set, records a shadow comparison: non-comparable action heuristic + Jev Score', async () => {
+    it('with key set, records a shadow comparison: heuristic action + Jev Score', async () => {
         process.env.TYPESAFE_API_KEY = 'test-key-123';
         process.env.OMC_JEV = 'context-pruning';
         const { fetchFn, calls } = captureFetch(3);
@@ -94,7 +94,7 @@ describe('recordContextPruningShadow', () => {
         expect(line).toMatchObject({
             point: 'context-pruning',
             mode: 'shadow',
-            heuristic: null, // the twin's action is not a valid answer to the staleness score question
+            heuristic: 'warn',
             jev: { type: 'score', score: 3 },
             confidence: 0.8,
         });
@@ -168,58 +168,12 @@ describe('hook wiring: createPreemptiveCompactionHook + context-pruning shadow',
         expect(line).toMatchObject({
             point: 'context-pruning',
             mode: 'shadow',
-            heuristic: null,
+            heuristic: 'warn',
         });
         const state = line.state;
         expect(state.candidateCount).toBe(1);
         expect(state.candidates[0].tool).toBe('read');
         expect(state.candidates[0].excerpt.length).toBeLessThanOrEqual(200);
-    });
-});
-describe('context-pruning active mapping of the staleness score', () => {
-    it.each([
-        [0, 'fresh'],
-        [0.49, 'fresh'],
-        [0.5, 'recent'],
-        [1.49, 'recent'],
-        [1.5, 'aging'],
-        [2.49, 'aging'],
-        [2.5, 'stale'],
-        [3, 'stale'],
-    ])('rounds score %s to %s', (score, label) => {
-        expect(stalenessLabelOf({ type: 'score', score, confidence: 0.7 })).toBe(label);
-    });
-    it.each([
-        ['score -1', { type: 'score', score: -1 }],
-        ['score 3.4', { type: 'score', score: 3.4 }],
-        ['score NaN', { type: 'score', score: Number.NaN }],
-        ['a choice-type answer with a score', { type: 'choice', score: 1 }],
-        ['a choice-type answer with a label choice', { type: 'choice', choice: 'fresh' }],
-    ])('yields no label for %s', (_label, answer) => {
-        expect(stalenessLabelOf(answer)).toBeUndefined();
-    });
-    it('uses a string choice that names a label, case-insensitively, and ignores any other choice', () => {
-        expect(stalenessLabelOf({ type: 'score', choice: 'Aging', confidence: 0.9 })).toBe('aging');
-        expect(stalenessLabelOf({ type: 'score', choice: 'x', score: 3 })).toBe('stale');
-        expect(stalenessLabelOf({ type: 'score', choice: 'x' })).toBeUndefined();
-    });
-    it('active mode maps a real score answer to an action and keeps the heuristic for an unusable one', async () => {
-        process.env.TYPESAFE_API_KEY = 'test-key-123';
-        process.env.OMC_JEV = 'context-pruning:active';
-        const aging = await recordContextPruningShadow({
-            action: 'none',
-            totalTokens: 150_000,
-            candidates: CANDIDATES,
-            fetchFn: captureFetch(1.53).fetchFn,
-        });
-        expect(aging).toEqual({ answer: 'warn', source: 'jev', mode: 'active' });
-        const outOfRange = await recordContextPruningShadow({
-            action: 'warn',
-            totalTokens: 150_000,
-            candidates: CANDIDATES,
-            fetchFn: captureFetch(99).fetchFn,
-        });
-        expect(outOfRange).toEqual({ answer: 'warn', source: 'jev', mode: 'active' });
     });
 });
 //# sourceMappingURL=jev-shadow.test.js.map

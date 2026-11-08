@@ -149,13 +149,8 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
         return cwd;
     }
     it.each(SESSION_END_SCRIPTS)('%s exits with no bytes and an open stdin pipe', async (_name, script) => {
-        // Allow the foreground budget to scale with the test ceiling plus startup overhead
-        const ceilingMs = IS_CI ? 2_000 : 1_000;
-        const result = await runUntilClose(script, createProject(), undefined, ceilingMs, {
-            NODE_ENV: 'test',
-            OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(Math.max(450, ceilingMs - 100)),
-        });
-        expectPromptExit(result, ceilingMs);
+        const result = await runUntilClose(script, createProject(), undefined);
+        expectPromptExit(result);
     });
     it.skipIf(!HAS_GENERATED_DIST).each(SESSION_END_SCRIPTS)('%s terminates a live manifest-lock contender within the foreground ceiling', async (_name, script) => {
         const cwd = createProject();
@@ -165,12 +160,7 @@ describe('SessionEnd run.cjs process exit regressions (#3477)', () => {
         writeFileSync(join(jobsDir, `${sessionId}.json.lock`), JSON.stringify({
             pid: process.pid, processStartIdentity: null, nonce: 'live-owner', createdAt: new Date().toISOString(),
         }));
-        // Allow the foreground budget to scale with the test ceiling plus startup overhead
-        const ceilingMs = IS_CI ? 2_000 : 1_000;
-        expectPromptExit(await runUntilClose(script, cwd, validSessionEndInput(cwd, sessionId), ceilingMs, {
-            NODE_ENV: 'test',
-            OMC_SESSION_END_TEST_FOREGROUND_TIMEOUT_MS: String(Math.max(450, ceilingMs - 100)),
-        }), ceilingMs);
+        expectPromptExit(await runUntilClose(script, cwd, validSessionEndInput(cwd, sessionId)));
     });
     it.skipIf(!HAS_GENERATED_DIST).each(SESSION_END_SCRIPTS)('%s exits after promptly closed valid SessionEnd JSON with configured adapters', async (_name, script) => {
         const cwd = createProject();

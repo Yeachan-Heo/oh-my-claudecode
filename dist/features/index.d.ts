@@ -18,6 +18,4 @@ export { decomposeTask, analyzeTask, identifyComponents, generateSubtasks, assig
 export { searchSessionHistory, parseSinceSpec, type SessionHistoryMatch, type SessionHistorySearchOptions, type SessionHistorySearchReport, } from './session-history-search/index.js';
 export { shortId, hasExplicitName, hasDescription, addressFor, listingLabel, notificationReference, resolveAgent, formatAgentList, SHORT_ID_LENGTH, type AgentStatus, type AddressableAgent, type MatchKind, type ResolveResult, type FormatAgentListOptions, } from './agent-addressability/index.js';
 export { LookoutError, resolveBriefArg, scanLookout, type LookoutConfidence, type LookoutFinding, type LookoutReport, type LookoutSeverity, type LookoutVerdict, type ScanLookoutOptions, } from './lookout/index.js';
-export { decideWatchVerdict, NO_CHECKS_FIRST_SIGHTING_REASON, type WatchCheckRun, type WatchCheckState, type WatchMergeability, type WatchMergeStateStatus, type WatchOptions, type WatchPrFacts, type WatchReviewDecision, type WatchVerdict, type WatchVerdictKind, } from './watch-pr/index.js';
-export { appendLedgerEntry, defaultLedgerPath, isVerificationVerdict, LEDGER_HEADER, LEDGER_STATE_RELATIVE_PATH, readLedger, renderLedgerCell, renderLedgerRow, VERIFICATION_VERDICTS, type LedgerEntry, type VerificationVerdict, } from './verification-ledger/index.js';
 //# sourceMappingURL=index.d.ts.map

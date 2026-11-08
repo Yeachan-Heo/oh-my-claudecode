@@ -31,12 +31,6 @@ export function recordModelRoutingShadow(toolName, pinned, fetchFn) {
             task: pinned.originalInput.prompt,
         },
         twin: () => pinned,
-        mapHeuristic: (result, questionSet) => {
-            // Only haiku, sonnet, opus are valid choices in MODEL_ROUTING_QUESTIONS.
-            // Return null for anything else (inherit, fable, provider-specific IDs).
-            const validChoices = ['haiku', 'sonnet', 'opus'];
-            return validChoices.includes(result.model) ? result.model : null;
-        },
         fetchFn,
     });
 }

@@ -30,19 +30,6 @@ export interface ResolveJudgmentArgs<T> {
      */
     mapAnswer?: (answer: JevAnswer) => T;
     /**
-     * Extracts the comparison-relevant heuristic value from the twin result for shadow logging.
-     * When not provided, the full twin result is logged as the heuristic.
-     * For judgment points with non-primitive twins, this should return the comparable primitive
-     * (boolean for noul, string for choice, number for score).
-     * The optional questionSet parameter is provided when the point has multiple question sets.
-     */
-    mapHeuristic?: (twinResult: T, questionSet?: number) => unknown;
-    /**
-     * Index into the point's question sets (loop-continuation's Score call uses 1).
-     * Provided to mapHeuristic to allow conditional extraction of the right field.
-     */
-    questionSet?: number;
-    /**
      * Force "shadow" or "active" for this call, overriding code activation.
      * Config-off still wins.
      */
@@ -56,12 +43,5 @@ export interface ResolveJudgmentArgs<T> {
     /** Test hook: injected transport. */
     fetchFn?: typeof fetch;
 }
-/** Extract the loggable heuristic value, applying mapHeuristic if provided. */
-/**
- * A logged heuristic is comparable with the logged Jev answer only when it is
- * a valid answer to the same question: the first declared question, whose
- * answer is the one logged. Anything else is logged as null (non-comparable).
- */
-export declare function comparableHeuristic(value: unknown, questions: JevQuestions): string | number | boolean | null;
 export declare function resolveJudgment<T>(resolveJudgmentArgs: ResolveJudgmentArgs<T>): Promise<ResolveResult<T>>;
 //# sourceMappingURL=resolver.d.ts.map

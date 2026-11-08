@@ -14,14 +14,6 @@ export declare function readRalphStateForHud(directory: string, sessionId?: stri
 /**
  * Read PRD state for HUD display.
  * Checks both root prd.json and .omc/prd.json.
- *
- * Completion is judged with the same predicate Ralph uses (`getPrdStatus`):
- * a story counts only when its `passes` claim is revision-bound and the
- * architect has approved it. Otherwise the HUD shows a run as finished while
- * the loop is still waiting for reviewer sign-off.
- *
- * PRDs that do not satisfy the Ralph schema still render through the tolerant
- * read below, so display-only usage (a hand-written task list) keeps working.
  */
 export declare function readPrdStateForHud(directory: string): PrdStateForHud | null;
 /**

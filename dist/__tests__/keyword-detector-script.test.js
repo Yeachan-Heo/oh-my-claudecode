@@ -241,27 +241,6 @@ describe('keyword-detector.mjs mode-message dispatch', () => {
         expect(context).toContain('Preferred invocation: /oh-my-claudecode:ralplan');
         expect(context).not.toContain('name: ralplan');
     });
-    it('routes ai-slop-cleaner only when cleanup action and smell share a sentence, never on no-implement prompts', () => {
-        const slop = (p) => runKeywordDetector(p).hookSpecificOutput?.additionalContext ?? '';
-        // Long review prompt: smell and action words far apart, implementation forbidden.
-        const review = [
-            'INDEPENDENT ARCHITECTURE CHALLENGE',
-            'Failure modes to cover:',
-            '* Duplicate execution',
-            ...Array(40).fill('* Another requirement line'),
-            'Identify opportunities to simplify the architecture.',
-            'Do not implement anything until the architecture review is complete.',
-        ].join('\n');
-        expect(slop(review)).not.toContain('AI-SLOP-CLEANER');
-        expect(slop('Clean up the duplicated code in utils. Do not implement anything new.')).not.toContain('AI-SLOP-CLEANER');
-        expect(slop('clean up the duplicated code in utils')).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
-        expect(slop('deslop this file')).toContain('[MAGIC KEYWORD: AI-SLOP-CLEANER]');
-    });
-    it('drops code-editing modes when the prompt forbids implementation, unless it is a slash command', () => {
-        const ctx = (p) => runKeywordDetector(p).hookSpecificOutput?.additionalContext ?? '';
-        expect(ctx('ralph: review the auth module. Read-only review, no code changes.')).not.toContain('RALPH');
-        expect(ctx('/oh-my-claudecode:ralph review auth, no code changes')).toContain('RALPH');
-    });
     it.each([
         ['ralph: fix the cron.\nRead the workflow docs first.', 'RALPH'],
         ['/oh-my-claudecode:ralph fix the cron.\nRead the workflow docs first.', 'RALPH'],
@@ -1232,45 +1211,6 @@ describe('keyword-detector.mjs #4551 regression tests', () => {
         const result3 = runKeywordDetector('autopilot: คืออะไร ใช้งานยังไง', process.cwd(), 'test-4551-th');
         expect(result3.continue).toBe(true);
         expect(result3.hookSpecificOutput).toBeUndefined();
-    });
-    describe('ralph activation confirmation', () => {
-        function readRalphState(cwd, sessionId) {
-            const statePath = join(cwd, '.omc', 'state', 'sessions', sessionId, 'ralph-state.json');
-            return existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf-8')) : null;
-        }
-        it('treats a typed /ralph invocation as confirmed so the Stop hook keeps enforcing the loop', () => {
-            const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-slash-'));
-            const sessionId = 'session-ralph-slash-confirmed';
-            try {
-                execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'pipe' });
-                const output = runKeywordDetector('/oh-my-claudecode:ralph 按 REQUIREMENTS.md 完成第 4 阶段', cwd, sessionId);
-                expect(output.hookSpecificOutput?.additionalContext).toContain('[MAGIC KEYWORD: RALPH]');
-                const state = readRalphState(cwd, sessionId);
-                expect(state).not.toBeNull();
-                expect(state.active).toBe(true);
-                expect(state.awaiting_confirmation).toBeUndefined();
-                expect(state.invocation_source).toBe('slash');
-            }
-            finally {
-                rmSync(cwd, { recursive: true, force: true });
-            }
-        });
-        it('keeps prose activation awaiting confirmation', () => {
-            // An accidental mention ("use ralph for this") must not commit the
-            // session to a blocking loop on the strength of one word.
-            const cwd = mkdtempSync(join(tmpdir(), 'keyword-detector-ralph-prose-'));
-            const sessionId = 'session-ralph-prose-confirmation';
-            try {
-                execFileSync('git', ['init', '--quiet'], { cwd, stdio: 'pipe' });
-                runKeywordDetector('ralph this task', cwd, sessionId);
-                const state = readRalphState(cwd, sessionId);
-                expect(state).not.toBeNull();
-                expect(state.awaiting_confirmation).toBe(true);
-            }
-            finally {
-                rmSync(cwd, { recursive: true, force: true });
-            }
-        });
     });
 });
 //# sourceMappingURL=keyword-detector-script.test.js.map
