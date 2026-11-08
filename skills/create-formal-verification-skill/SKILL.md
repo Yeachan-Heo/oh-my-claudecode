@@ -47,10 +47,12 @@ verify it, and leave the verification behind as structure.
      all inputs a function can receive.
    If none fits, say so and stop rather than forcing one.
 3. **Model honestly.** Write the spec next to the code it models, citing file
-   and line. List every assumption the model makes that the code does not
-   guarantee (pid reuse, atomic filesystem steps, integer widths). The
-   assumption list is part of the deliverable — an unlisted assumption is an
-   unearned theorem.
+   and line. Open the spec with an "Assumptions the model makes" register:
+   every assumption numbered, each citing the source lines it abstracts, and
+   each marked `(!)` when the code does not actually guarantee it (pid reuse,
+   atomic filesystem steps, integer widths, an honest clock). The register is
+   part of the deliverable — an unlisted assumption is an unearned theorem,
+   and a `(!)` the code later starts guaranteeing is a model owed an update.
 4. **Verify.** Run the tool (`apalache`/`TLC`, `lake build`, `cargo kani`).
    A violated property is a finding: minimize the counterexample, check
    whether the code shares the flaw, and report before adjusting the model.
