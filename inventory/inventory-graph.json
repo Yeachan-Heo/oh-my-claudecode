@@ -5,22 +5,22 @@
   "provenance": {
     "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
     "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-    "head": "14f01806a9a51a2626647a88affc33105d8a9079",
-    "sourceSha256": "7700d73537f36a921ed58e1d7bf93e2aac3ea00c667e105f2ad41a17f58a73e6",
+    "head": "066b43fdbfa3079f261ed9e327b848a8ab42795e",
+    "sourceSha256": "523c50507483de4cdf3ce2d1d88f272864557a5c29b7b951e14b37226b05c8ab",
     "generatedAt": null,
     "generator": "scripts/generate-inventory-graph.mjs"
   },
   "base": "05c800f40d1ad53b42a78609d2667ef4f726808b",
   "planningHead": "0a91273e61dbbd47eb0af4c02844409251e08398",
-  "head": "14f01806a9a51a2626647a88affc33105d8a9079",
-  "sourceSha256": "7700d73537f36a921ed58e1d7bf93e2aac3ea00c667e105f2ad41a17f58a73e6",
+  "head": "066b43fdbfa3079f261ed9e327b848a8ab42795e",
+  "sourceSha256": "523c50507483de4cdf3ce2d1d88f272864557a5c29b7b951e14b37226b05c8ab",
   "counts": {
     "public": {
-      "skills": 83,
+      "skills": 84,
       "commands": 21,
       "workflows": 8,
       "agents": 20,
-      "total": 132
+      "total": 133
     },
     "internal": {
       "hookFiles": 333,
@@ -39,7 +39,7 @@
     "prompt": {
       "promptLikeFiles": 63
     },
-    "skills": 83,
+    "skills": 84,
     "commands": 21,
     "hookFiles": 333,
     "workflows": 8,
@@ -111,6 +111,7 @@
       "remember",
       "research",
       "review",
+      "sdd",
       "self-improve",
       "session-flow",
       "sharpen",
@@ -37364,6 +37365,41 @@
         "path": "skills/review/SKILL.md"
       },
       {
+        "id": "skills/sdd/SKILL.md",
+        "kind": "skill",
+        "path": "skills/sdd/SKILL.md"
+      },
+      {
+        "id": "skills/sdd/phases/criteria.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/criteria.md"
+      },
+      {
+        "id": "skills/sdd/phases/execute.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/execute.md"
+      },
+      {
+        "id": "skills/sdd/phases/review.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/review.md"
+      },
+      {
+        "id": "skills/sdd/phases/rules.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/rules.md"
+      },
+      {
+        "id": "skills/sdd/phases/spec.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/spec.md"
+      },
+      {
+        "id": "skills/sdd/phases/tasks.md",
+        "kind": "other",
+        "path": "skills/sdd/phases/tasks.md"
+      },
+      {
         "id": "skills/self-improve/SKILL.md",
         "kind": "skill",
         "path": "skills/self-improve/SKILL.md"
@@ -50377,6 +50413,11 @@
       },
       {
         "from": "skills/review/SKILL.md",
+        "to": "src/features/builtin-skills/skills.ts",
+        "kind": "registers"
+      },
+      {
+        "from": "skills/sdd/SKILL.md",
         "to": "src/features/builtin-skills/skills.ts",
         "kind": "registers"
       },
@@ -90657,12 +90698,12 @@
       }
     ],
     "stats": {
-      "nodeCount": 8054,
-      "edgeCount": 8672,
+      "nodeCount": 8061,
+      "edgeCount": 8673,
       "importEdgeCount": 7231,
-      "registerEdgeCount": 104
+      "registerEdgeCount": 105
     }
   },
-  "inventorySha256": "42233718e3a692b51157c3b5ec4b88e1cf8e1465e1d077b9b48982ede697ae85",
-  "manifestSha256": "568d38e883c8727a6c119309b44be2b182aca383992600c14aed55b3ae7fcdbc"
+  "inventorySha256": "3302b79aa903a9af878c3b5f7cb81b36b09d5bd37f115d7e21d63eadfea445d2",
+  "manifestSha256": "b3828a1e9e0a66c240fe9ba2d35caf76f941e14f9446e8ae5df6b06737eeed61"
 }

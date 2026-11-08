@@ -67,6 +67,7 @@ Skills are reusable workflow templates that can be invoked via `/oh-my-claudecod
 | `session-flow/SKILL.md` | session-flow | Reorient in the current session with an evidence-backed flow map |
 | `minimal-code-discipline/SKILL.md` | minimal-code-discipline | YAGNI-ladder writing-time discipline: existence-first, reuse before writing, shortest correct diff |
 | `minimal-prose-discipline/SKILL.md` | minimal-prose-discipline | Writing-time discipline for the agent's own prose: protected core, no filler, close on the action |
+| `sdd/SKILL.md` | sdd | Spec-driven development: interview, spec with acceptance criteria, plan, test-first execution; `full` runs `phases/` |
 | `tdd/SKILL.md` | tdd | Test-first discipline at pre-agreed seams: tracer-bullet red/green, independent expected values, boundary-class-only substitution |
 | `map/SKILL.md` | map | The yard's skill map: which skill owns which job, in delivery-loop order; routes, never executes |
 | `skillify/SKILL.md` | skillify | Extract reusable skill from session |
